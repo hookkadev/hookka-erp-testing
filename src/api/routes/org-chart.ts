@@ -19,6 +19,7 @@
 import { Hono } from "hono";
 import type { Env } from "../worker";
 import { requirePermission } from "../lib/rbac";
+import { buildAuditStatement } from "../lib/audit";
 import {
   personKey,
   parsePersonKey,
@@ -318,15 +319,31 @@ app.post("/auto-wire-production", async (c) => {
   }
 
   const now = new Date().toISOString();
+  // One audit row PER PERSON, not one for the run. The question an audit
+  // trail has to answer is "who put THIS person under THAT manager, and
+  // when" — a single summary row cannot answer it for any individual. The
+  // shared `runId` groups a whole auto-wire back together when you do want
+  // to see the run as one action.
+  const runId = `wire-${crypto.randomUUID().slice(0, 8)}`;
   for (const p of planned) {
-    await c.var.DB.batch([
+    const stmts = [
       c.var.DB.prepare("DELETE FROM org_reporting WHERE person_key = ?").bind(p.personKey),
       c.var.DB
         .prepare(
           "INSERT INTO org_reporting (person_key, manager_key, updated_at) VALUES (?, ?, ?)",
         )
         .bind(p.personKey, p.managerKey, now),
-    ]);
+    ];
+    const audit = await buildAuditStatement(c, {
+      resource: "org-chart",
+      resourceId: p.personKey,
+      action: "auto-wire",
+      before: { managerKey: byKey.get(p.personKey)?.managerKey ?? null },
+      after: { managerKey: p.managerKey, why: p.why, runId },
+      source: "api",
+    });
+    if (audit) stmts.push(audit);
+    await c.var.DB.batch(stmts);
   }
   return c.json({ success: true, dryRun: false, wired: planned.length, data: planned });
 });
@@ -368,14 +385,34 @@ app.put("/reporting", async (c) => {
   }
 
   const now = new Date().toISOString();
-  await c.var.DB.batch([
+  // `managerOf` was built from loadPeople() above, BEFORE this write — so it
+  // still holds the previous manager. Read the before-state from there rather
+  // than re-querying: a second read could race another edit and journal a
+  // before-state that was never true.
+  const previousManagerKey = managerOf.get(pk) ?? null;
+  const nameOf = (k: string | null) => (k ? (byKey.get(k)?.name ?? null) : null);
+
+  const stmts = [
     c.var.DB.prepare("DELETE FROM org_reporting WHERE person_key = ?").bind(pk),
     c.var.DB
       .prepare(
         "INSERT INTO org_reporting (person_key, manager_key, updated_at) VALUES (?, ?, ?)",
       )
       .bind(pk, mk, now),
-  ]);
+  ];
+  // Audit inside the SAME batch (see lib/audit.ts) so the reporting line and
+  // its journal row commit together or not at all. Names are snapshotted
+  // alongside the keys so the journal still reads correctly after someone is
+  // renamed or removed.
+  const audit = await buildAuditStatement(c, {
+    resource: "org-chart",
+    resourceId: pk,
+    action: "update",
+    before: { managerKey: previousManagerKey, managerName: nameOf(previousManagerKey) },
+    after: { managerKey: mk, managerName: nameOf(mk) },
+  });
+  if (audit) stmts.push(audit);
+  await c.var.DB.batch(stmts);
 
   return c.json({ success: true, data: { personKey: pk, managerKey: mk } });
 });
