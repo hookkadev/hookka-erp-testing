@@ -46,6 +46,13 @@ measured 2026-08-14; this line said "~1,600"). Use the map's file:line +
    on `main` on 2026-08-14**, and the committed copy carried four duplicated mount rows with
    two different line sets for the same handlers. Run `--check` before trusting it.
 
+6. **RBAC / permissions work** → [`docs/RBAC-REMEDIATION.md`](docs/RBAC-REMEDIATION.md)
+   — the read-authorisation gap, what is already fixed, the per-batch loop, and the two
+   fail-open paths in `rbac.ts` that must be closed before any further gate is added.
+   Scanner: `node audit-rbac.mjs` (repo root, read-only). **`getOrgId(c)` is multi-tenancy,
+   NOT authorisation** — a handler that only calls `getOrgId` is readable by every logged-in
+   account of every role.
+
 Doc map: [`docs/DOCS-INDEX.md`](docs/DOCS-INDEX.md). The big picture: [`docs/DEV-EFFICIENCY-SYSTEM.md`](docs/DEV-EFFICIENCY-SYSTEM.md).
 
 ## Non-negotiable rules (the ones that bite hardest)
@@ -68,6 +75,25 @@ Doc map: [`docs/DOCS-INDEX.md`](docs/DOCS-INDEX.md). The big picture: [`docs/DEV
 - **Verify live on prod after every deploy** — read AND write path. Log every bug to
   `docs/BUG-HISTORY.md` and add a regression test.
 - **UI is 100% English.** Bug fixes merge straight to `main`; features go to `staging`.
+
+## Environment — sandbox / staging / production
+
+**Say which environment every command or query touches, before running it. Every time.**
+
+| | Supabase project | Use |
+|---|---|---|
+| Sandbox | `cjnewpxxmiucwirlcqpj` | Where development happens. Seed it; never mind that it is fake. |
+| Staging | `zaxygxwadidiqcphibma` | A **production clone**. Read-only confirmation of a finished fix. Never the surface a fix is developed against. |
+| Production | `vpwdqtsxexpiqxzweivd` | Never written to from development work. |
+
+- **Fixes are finished and verified locally first.** Pushing is never a way to get something
+  testable — if the only way to try a change is to deploy it, the change is not ready.
+- `.dev.vars` holds live credentials. **Never print it, cat it, echo it, paste it into a
+  commit, or read it back into a conversation.** Check which project it points at by asking,
+  not by dumping the file.
+- The repo was **public** until 2026-09-10 and database passwords are in its git history.
+  Treat any credential found in history as burned; see
+  `docs/` and the project notes for the rotation checklist.
 
 ## NEVER STATE PROD STATE YOU DID NOT MEASURE
 
