@@ -42,6 +42,30 @@ the `??`-blank-overwrite bug at the PUT merge block — NOT fixed, only the new 
 it), R9 export fields (`price1`, sofa tier prices, `skuCode`, pricing-permission banner), R11-R13
 (grid "export all" / invoice 200 cap / mobile placeholder), R1/R2 (shared `src/lib/import-export/`
 client lib), R15 doc updates beyond products.md.
+## 2026-09-14 — 🔵 PRD T-006 · Transfer/Convert foundation (R1-R10 all implemented, pending merge)
+
+Requested by Mr Lim, PRD dated 2026-09-07, priority **Low (to be raised later)**. Full PRD:
+`T-006-Hookka-transfer-convert - wei siang.pdf` (user's local Downloads). Branch
+`fix/transfer-convert-duplicate-guard`, off `origin/main`. Plan:
+[T-006-TRANSFER-CONVERT-FIX-PLAN.md](T-006-TRANSFER-CONVERT-FIX-PLAN.md).
+
+**All 10 requirements (R1-R10) implemented and independently re-verified against the actual diff**
+(not just commit messages) — R1 SO→DO server-side refusal when `productionOrderIds` is empty, R2 GRN
+over-receipt now cumulative against `receivedQty`, R3 GRN create folded into one atomic `db.batch()`,
+R4 CN-invoice void now releases via a new `status_before_conversion` column, R5 DB `CHECK` constraint
+on `grn_items.invoiced_qty` (`NOT VALID`, self-applied, race translated to 409), R6 purchase-return
+writeback + cap, R7 delivery-return qty cap + cancel-after-restock refusal, R8 PO ceiling matched by
+`po_item_id` instead of the PRD's literal (and previously-rejected, BUG-2026-08-13-052)
+`material_code` fill, R9 line-level-only PO id ceiling gap closed, R10 idempotency wrapped on all 6
+create/convert routes. Verified 2026-09-14: `npx tsc --noEmit` clean, 49/49 new `tests/t006-*.test.mjs`
+pass, full `npm test` 4621/4624 pass (3 pre-existing skips, 0 fail).
+
+**Known open follow-up, not fixed here (flagged in the plan itself):** Consignment page's own
+"Transfer to Delivery Order" button (`consignment/index.tsx` ~line 1094) has the identical
+hand-built-items bug: R1's new server-side refusal means this button now fails on every click
+instead of silently succeeding wrong (it could never have legitimately succeeded — CO-linked POs are
+already blocked from DOs elsewhere). Needs a follow-up: redirect to `/consignment/note`, disable with
+a message, or remove if provably dead.
 
 ---
 
