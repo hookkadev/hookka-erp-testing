@@ -529,10 +529,10 @@ app.get("/me/permissions", async (c) => {
 
   // Defensive wrap (2026-04-26 prod 500 dogfood report): if the roles /
   // role_permissions tables are missing or the JOIN throws, degrade to a
-  // legacy lookup against users.role TEXT and surface a permissive
-  // ["*:read"] set so the UI keeps gating reads sensibly. SUPER_ADMIN /
-  // ADMIN still get the wildcard. Mutations stay forbidden until the
-  // operator re-applies migrations.
+  // legacy lookup against users.role TEXT. SUPER_ADMIN / ADMIN still get the
+  // wildcard, an explicit READ_ONLY role keeps `*:read`, and every other role
+  // gets NO permissions — the same answer the gate gives on a failed lookup.
+  // (Until the RBAC audit of 2026-09-11 this returned `*:read` for everyone.)
   try {
     // Look up the user's role (id + name). Empty roleId -> READ_ONLY fallback,
     // mirroring rbac.ts's role resolution.
@@ -621,7 +621,7 @@ app.get("/me/permissions", async (c) => {
     );
     // Fallback: legacy users.role TEXT lookup. Same query the
     // auth-middleware already runs to stamp userRole on the context.
-    let legacyRole = "READ_ONLY";
+    let legacyRole: string | null = null;
     try {
       const r = await c.var.DB.prepare(
         "SELECT role FROM users WHERE id = ? LIMIT 1",
@@ -630,15 +630,19 @@ app.get("/me/permissions", async (c) => {
         .first<{ role: string | null }>();
       if (r?.role) legacyRole = r.role.toUpperCase();
     } catch {
-      // Even the legacy lookup failed — return read-only against unknown role.
+      // Even the legacy lookup failed — the role is unknown, so it gets nothing.
     }
     if (legacyRole === "SUPER_ADMIN" || legacyRole === "ADMIN") {
       return c.json({ success: true, role: legacyRole, permissions: ["*"] });
     }
+    // The menu mirrors the GATE's failure path (rbac.ts requirePermission
+    // catch): an explicit READ_ONLY role keeps its legacy `*:read`, every other
+    // role gets nothing. This used to hand `*:read` to every role, which put
+    // links in the menu for pages the gate refuses. RBAC audit 2026-09-11.
     return c.json({
       success: true,
-      role: legacyRole,
-      permissions: ["*:read"],
+      role: legacyRole ?? "READ_ONLY",
+      permissions: legacyRole === "READ_ONLY" ? ["*:read"] : [],
     });
   }
 });
