@@ -14,6 +14,37 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
+## 2026-09-10 — 🔵 PRD T-004 · Import / Export across the whole system (P0/R3-R5 done, rest open)
+
+Requested by Mr Lim, PRD dated 2026-09-07, priority **Low (to be raised later)**. Full PRD:
+`T-004-Hookka-import-export - wei siang.pdf` (not in repo — user's local Downloads). Branch
+`fix/batch-import`.
+
+**Done (R3, R4, R5 — the P0):** `POST /api/products/bulk-import` (`products.ts:729`) — upserts by
+`code`, one D1 transaction (rows + audit row together via `buildAuditStatement`), ≤5,000 rows,
+`{created, updated, rejected:[{row,reason}]}`. Blank-safe shaping lives in new
+`src/api/lib/product-bulk-import.ts` (`shapeProductBulkRow`, pure/unit-tested) — a blank optional
+cell is OMITTED from the shaped row, never coerced to `""`/`0`, so `shaped.field !== undefined ?
+... : existing` never overwrites with a blank (this is R7's fix too, done early since the new
+endpoint needed it correctly from the start). `handleImportFG`/`handleImportRM`
+(`inventory/index.tsx`) now actually POST to `/api/products/bulk-import` and the existing
+`/api/raw-materials/bulk-import` respectively, then re-fetch the lists — no more "toasts Imported,
+saves nothing." `BatchImportDialog` (`batch-import-dialog.tsx`) fixed at the shared-component level:
+an empty optional cell now becomes `undefined` (omitted from the JSON body), not `0`; the "done"
+screen shows server-side `rejected` reasons too. Follow-up same branch: rename detection (id-anchored
+match, code-collision rejection), no-op rows dropped from preview, before/after diff on update rows,
+and the id column hidden from the template/preview UI while still driving the match internally.
+14+ new tests in `tests/products-bulk-import.test.mjs`. `docs/modules/products.md` anchors restamped.
+Full `npm test` and `build:strict` both pass as of commit `b021275e`.
+
+**Not started:** R6/R8-R10 (Products page's own "Import SKUs" still hand-rolls CSV + per-row PUT +
+the `??`-blank-overwrite bug at the PUT merge block — NOT fixed, only the new bulk endpoint avoids
+it), R9 export fields (`price1`, sofa tier prices, `skuCode`, pricing-permission banner), R11-R13
+(grid "export all" / invoice 200 cap / mobile placeholder), R1/R2 (shared `src/lib/import-export/`
+client lib), R15 doc updates beyond products.md.
+
+---
+
 ## 2026-09-07 — ✅ 对账两升级：付款明细可见 + 组合配对（owner 挂图两问 →「做」）
 
 Owner：「1. 没有show payment detail 2. Bank Statement 可能是几笔，book ledger 可能一笔…没有办法
