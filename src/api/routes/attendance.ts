@@ -218,6 +218,11 @@ function genId(): string {
 // GET /api/attendance                            → all records
 // ---------------------------------------------------------------------------
 app.get("/", async (c) => {
+  // Permission gate. getOrgId() below answers WHICH COMPANY, not whether
+  // this person may see it — every logged-in account of every role could
+  // read this until now. RBAC audit 2026-09-11.
+  const denied = await requirePermission(c, "attendance", "read");
+  if (denied) return denied;
   const orgId = getOrgId(c);
   const date = c.req.query("date");
   const from = c.req.query("from");
@@ -350,6 +355,11 @@ app.delete("/:id", async (c) => {
 // Fetched on demand. Scoped by org — no cross-tenant read.
 // ---------------------------------------------------------------------------
 app.get("/:id/photo", async (c) => {
+  // Permission gate. getOrgId() below answers WHICH COMPANY, not whether
+  // this person may see it — every logged-in account of every role could
+  // read this until now. RBAC audit 2026-09-11.
+  const denied = await requirePermission(c, "attendance", "read");
+  if (denied) return denied;
   const orgId = getOrgId(c);
   const id = c.req.param("id");
   const which = c.req.query("which") === "out" ? "out" : "in";
