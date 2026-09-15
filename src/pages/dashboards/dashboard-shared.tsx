@@ -154,12 +154,10 @@ function DateTrigger({
   const presets = useMemo(() => {
     if (!latest) return [];
     const d = (n: number) => new Date(latest.getTime() - n * 86400000);
-    const monthStart = new Date(latest.getFullYear(), latest.getMonth(), 1);
     return [
       { label: "Today", from: ymd(latest), to: ymd(latest) },
       { label: "Yesterday", from: ymd(d(1)), to: ymd(d(1)) },
       { label: "Last 7 Days", from: ymd(d(6)), to: ymd(latest) },
-      { label: "This Month", from: ymd(monthStart), to: ymd(latest) },
     ];
   }, [latest]);
 
@@ -209,22 +207,30 @@ function DateTrigger({
             </p>
             {presets.map((p) => {
               const on =
-                period.mode === "range" && period.from === p.from && period.to === p.to;
+                p.from === p.to
+                  ? period.day === p.from
+                  : period.mode === "range" && period.from === p.from && period.to === p.to;
               return (
                 <button
                   key={p.label}
                   type="button"
                   onClick={() => {
-                    onChange({
-                      mode: "range",
-                      month: p.from.slice(0, 7),
-                      from: p.from,
-                      to: p.to,
-                      label: p.label,
-                      // A preset IS the window; a leftover day highlight would
-                      // silently narrow the KPIs inside it.
-                      day: p.from === p.to ? p.from : undefined,
-                    });
+                    onChange(
+                      p.from === p.to
+                        ? // One day: stay on that day's MONTH and highlight it,
+                          // so the trend still draws the whole month and
+                          // clearing the highlight returns to it.
+                          { mode: "monthly", month: p.from.slice(0, 7), day: p.from }
+                        : // A real multi-day window genuinely re-scopes the
+                          // chart, and carries no day highlight of its own.
+                          {
+                            mode: "range",
+                            month: p.from.slice(0, 7),
+                            from: p.from,
+                            to: p.to,
+                            label: p.label,
+                          },
+                    );
                     setOpen(false);
                   }}
                   className={
