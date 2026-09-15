@@ -53,6 +53,7 @@ import {
   Box,
   Receipt,
   List,
+  FlaskConical,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -78,6 +79,7 @@ const navigationGroups: NavGroup[] = [
   {
     label: "OVERVIEW",
     items: [
+      { name: "Dashboard Experimental", href: "/dashboard-experimental", icon: FlaskConical },
       { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
       { name: "Hookka Report", href: "/daily-report", icon: ClipboardCheck },
       { name: "Notifications", href: "/notifications", icon: Bell },

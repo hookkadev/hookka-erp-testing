@@ -5,6 +5,7 @@
 
 const PATH_TITLES: Array<[RegExp, (m: RegExpExecArray) => string]> = [
   [/^\/dashboard\/?$/, () => "Dashboard"],
+  [/^\/dashboard-experimental\/?$/, () => "Dashboard Experimental"],
   [/^\/notifications\/?$/, () => "Notifications"],
   [/^\/analytics\/forecast\/?$/, () => "Forecasting"],
   [/^\/sales\/create\/?$/, () => "New Sales Order"],
