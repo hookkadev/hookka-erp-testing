@@ -910,6 +910,47 @@ that proves those locks can actually go red.
 | | | `purchase_orders` / `purchase_order_items` / `grns` | |
 | | | `products` / `raw_materials` / `workers` / `kv_config` (snapshot/cache storage) | |
 
+### Experimental dashboard (`/dashboard-experimental`) — added 2026-09-15
+
+Separate from the Command Center above: its own page, its own route, its own
+feed. Nothing here touches `dashboard-overview.ts`.
+
+| Frontend page | API route | Primary tables | Tests |
+|---|---|---|---|
+| `src/pages/dashboards/dashboard-prototype.tsx` — page shell: tab strip + the GLOBAL period control (Monthly / YTD / datepicker) that every dated panel reads. Ships **two** tabs; the other five are built on `laphii/feature/dashboard` | `src/api/routes/dashboard-prototype.ts` — single `GET /` (1657), mounted at `/api/dashboard/prototype` (`src/api/worker.ts:1307`), auth-gated. Returns all six sections in one payload | `sales_orders` / `sales_order_items` | none yet — see gap below |
+| `src/pages/dashboards/AllOverviewView.tsx` — landing tab: 4 hero KPIs + 5 domain summary cards | ↳ same feed, `sales` / `production` / `delivery` / `inventory` / `employee` slices | `production_orders` / `job_cards` / `delivery_orders` | |
+| `src/pages/dashboards/SalesOrdersView.tsx` (1279) — KPIs w/ deltas, revenue trend (bars = revenue, line = orders, click-to-drill), attribution by customer, 3-month rolling forecast, state/category donut, Top SKUs | ↳ same feed, `sales` slice only | `raw_materials` / `rm_batches` / `purchase_orders` | |
+| `src/pages/dashboards/dashboard-shared.tsx` — `PeriodPicker` (+ its calendar popover), `Kpi`, `LiveBadge`, `MissingNote`, `SnapshotNote` | | `attendance_records` / `working_hour_entries` / `workers` | |
+| `src/pages/dashboards/dashboard-shared-lib.ts` — chart theme tokens + the `Period` model (`inPeriod` / `previousPeriod` / `periodLabel`). Split from the `.tsx` so Fast Refresh keeps working | | | |
+
+**Read this before touching it**
+
+- **Rows come back camelCase, not snake_case.** `getSql` sets
+  `transform.column.from` (`src/api/lib/db-pg.ts:105,118`), so `total_sen`
+  arrives as `totalSen`. Reading snake_case yields `undefined` silently — that
+  is what made revenue render as RM 0 here (BUG-2026-09-15-001). Take the
+  casing from `column-rename-map.json`, never by hand: it holds the acronym
+  cases (`company_so` → `companySO`, `hookka_expected_dd` → `hookkaExpectedDD`,
+  `supplier_sku` → `supplierSKU`).
+- **The period picker does not filter every tab.** Inventory and Production are
+  point-in-time snapshots with no date column; they render `SnapshotNote`
+  saying so rather than ignoring the picker silently.
+- **The period picker is driven by `meta.monthsWithSales`, not `meta.months`.**
+  `meta.months` is the UNION of sales and attendance coverage, and this org
+  carries three attendance-only months (`2025-08`, `2025-12`, `2026-02`) of one
+  row each — test rows, confirmed by the owner 2026-09-15, not a real 2025 book.
+  A picker on the union offers months whose views are empty and lets the year
+  stepper land on a year with no trading. The Employees tab keeps this same
+  sales-driven list when it lands.
+- **`availability.<section>.missing`** lists fields with no live source
+  (delivery `returns`, inventory `minStock`/`reorderPoint`, purchase
+  `supplierScorecards`). The design reference drew those from invented sample
+  data — do not build a card that needs them without adding the source first.
+
+**GAP — no tests.** The Command Center rows above each name a test; this module
+has none. The camelCase read bug would have been caught by one assertion that
+the payload's `sales.orders[0].totalSen` is non-zero.
+
 **Big-file section index**
 - `src/pages/dashboard-b/index.tsx`
   - Header comment + lazy chart imports (RevenueChart, CustomerPieChart) — L1-28

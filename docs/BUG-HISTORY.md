@@ -26,11 +26,65 @@ Entries themselves stay newest-first.
 - `delivery-orders` (11) — [BUG-2026-04-29-003](#bug-2026-04-29-003--updateconsignmentnotebyid-silently-dropped-sentdate-and-items-on-put)
 - `sales-orders` (7) — [BUG-2026-04-26-021](#bug-2026-04-26-021-fixsales-drop-wrong-mattress-label-on-sofa-category-option)
 - `pricing-products` (6) — [BUG-2026-04-24-029](#bug-2026-04-24-029-fixcustomers-sofa-seat-prices-now-render-in-customer-products-panel)
-- `data-migration` (9) — [BUG-2026-06-10-001](#bug-2026-06-10-001--punch-selfie-photo-endpoint-500d-an-explicit-camelcase-select-projection-isnt-translated-by-the-d1-compat-adapter) · camelCase/rename-map class recurs — see BUG-2026-06-18-001/-002, BUG-2026-06-30-001 (read-side, P&L historical), BUG-2026-07-01-003 (supplier payments list + PI outstanding)
+- `data-migration` (10) — [BUG-2026-06-10-001](#bug-2026-06-10-001--punch-selfie-photo-endpoint-500d-an-explicit-camelcase-select-projection-isnt-translated-by-the-d1-compat-adapter) · camelCase/rename-map class recurs — see BUG-2026-06-18-001/-002, BUG-2026-06-30-001 (read-side, P&L historical), BUG-2026-07-01-003 (supplier payments list + PI outstanding), BUG-2026-09-15-181 (whole dashboard-prototype route). **Now classed: [C23](BUG-CLASSES.md#c23--sql-says-snake_case-the-row-comes-back-camelcase)**
 - `data-integrity` (4) — [BUG-2026-04-25-008](#bug-2026-04-25-008-stability-add-timeout-abort-propagation-to-fetchjson)
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-09-15-181 — the experimental dashboard read every column in the wrong case, and rendered the misses as real figures `data-migration` `ui-frontend` `dashboard` 🟢
+
+🟢 Fixed. The owner compared the new `/dashboard-experimental` Sales tab
+against the house Sales page and reported two things: *"the value is slightly
+incorrect"* and *"the revenue is not displayed"* — the house page showed
+**1713 orders / RM 1,976,985.41**, the new page showed a different count and
+**RM 0**.
+
+**Root cause — one bug, every symptom.** `src/api/routes/dashboard-prototype.ts`
+read its result rows in snake_case (`r.total_sen`, `r.is_service_order`,
+`r.created_at`). `getSql` sets `transform: { column: { from: columnFrom } }` on
+both connection branches (`src/api/lib/db-pg.ts:105,118`), which rewrites every
+column through `column-rename-map.json` — so the rows actually carry `totalSen`,
+`isServiceOrder`, `createdAt`. Every snake_case read returned `undefined`, and
+each one was then coerced into a value that looks like data:
+
+| read | value | shown as |
+|---|---|---|
+| `r.total_sen` | `undefined` → `num()` → `0` | Revenue **RM 0** |
+| `r.is_service_order` | `undefined` → `!!` → `false` | no service order filtered → **1804** orders vs 1713 |
+| `r.created_at` | `undefined` → `dayKey()` → `null` | `byDay` empty → **revenue trend blank** |
+
+**The 500 was the same bug.** `/api/dashboard/prototype` had been returning
+`TypeError: Cannot read properties of null (reading 'created')` at `:754` —
+`touchDay(dayKey(r.created_at))!.created++`, where the `!` asserted a value
+`touchDay` returns `null` for. This was first read as "a delivery order with a
+NULL `created_at`" and patched with a null guard matching the two guarded lines
+below it. The guard is correct and stays, but the diagnosis was wrong: there was
+no NULL in the data, only the wrong key. Fixing the casing made `withCreatedAt`
+go from **0 → 1713**.
+
+**Fix.** All 260 reads across 74 identifiers converted to camelCase, driven by
+`column-rename-map.json` rather than by hand — which matters, because
+`postgres.toCamel` is lossy on acronyms and four of them would have been wrong:
+`company_so`→`companySO`, `company_so_id`→`companySOId`,
+`hookka_expected_dd`→`hookkaExpectedDD`, `supplier_sku`→`supplierSKU`. The row
+TYPE declarations were renamed first so `tsc` flagged every remaining read —
+that is what surfaced the 12 inline `.all<{…}>()` generics a regex pass missed.
+SQL strings were left untouched (verified: all 15 `WHERE org_id = ?` intact).
+
+**Verified.** Payload now reconciles exactly with the house Sales page:
+`revenueRM "1976985.41"`, `rows 1713`, `byDay` 95 days, `withCreatedAt` 1713.
+`npm run build:strict` clean.
+
+**Class.** [C23](BUG-CLASSES.md#c23--sql-says-snake_case-the-row-comes-back-camelcase)
+— fifth instance. Every one of the five was found by a person noticing a wrong
+number on a screen, never by a test.
+
+**Gap left open.** No test covers this route, and no test anywhere asserts that
+a money field in a payload is non-zero for a book that has sales. That single
+assertion would have caught all five instances of this class. Logged as C23 row 7.
 
 ---
 
