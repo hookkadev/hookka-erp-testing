@@ -53,10 +53,24 @@ export default function DashboardPrototypePage() {
   // exist in the book, which bound the stepper. Every tab below calls the same
   // cached URL, so this costs no extra request.
   const { data } = useCachedJson<{
-    meta?: { months?: string[] };
+    meta?: { months?: string[]; monthsWithSales?: string[] };
     sales?: { byDay?: { date: string }[] };
   }>("/api/dashboard/prototype");
-  const months = useMemo(() => data?.meta?.months ?? [], [data]);
+
+  // Driven by the months that actually HAVE SALES, not `meta.months` — that is
+  // a union with attendance, and this org has three months holding one
+  // attendance row and no sales at all. Offering them made YTD look broken:
+  // stepping to Apr 2026 and pressing YTD showed only April, because the
+  // Jan-Apr window genuinely contains no other sales month, while the picker
+  // implied Feb was there to be found.
+  //
+  // Both tabs on this branch are sales-scoped. When the Employees tab lands it
+  // reads attendance, and this list has to widen to the union or become
+  // per-tab — a picker cannot serve two different coverage sets silently.
+  const months = useMemo(
+    () => data?.meta?.monthsWithSales ?? data?.meta?.months ?? [],
+    [data],
+  );
 
   // The newest day that actually carries data — the datepicker presets anchor
   // to this rather than to today or to the end of the newest month, either of

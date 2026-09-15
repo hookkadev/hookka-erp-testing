@@ -1392,7 +1392,15 @@ app.get("/", async (c) => {
     meta: {
       orgId,
       generatedAt: new Date().toISOString(),
+      // The UNION — every month the book holds anything at all. Kept as the
+      // broad answer, but it is the wrong list to build a month picker from:
+      // this org has three months (2025-08, 2025-12, 2026-02) carrying a single
+      // attendance row and zero sales, so a picker driven by the union offers
+      // months whose sales views are necessarily empty. A caller that scopes
+      // one section should read that section's own list below.
       months: [...new Set([...monthsWithSales, ...monthsWithAttendance])].sort(),
+      monthsWithSales: [...monthsWithSales].sort(),
+      monthsWithAttendance: [...monthsWithAttendance].sort(),
       config,
       efficiencyCoverage: [...coverageByMonth.values()].sort((a, b) =>
         a.month < b.month ? -1 : 1,

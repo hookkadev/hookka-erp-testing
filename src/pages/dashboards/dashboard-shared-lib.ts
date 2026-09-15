@@ -59,7 +59,8 @@ export const CHART_SERIES = [
 ];
 
 // ---------------------------------------------------------------------------
-// Period — the dashboard's global Monthly/YTD selector.
+// Period — the dashboard's global Monthly/YTD selector. "YTD" is the toggle's
+// label; the window it selects is the whole calendar year.
 //
 // Lives here (not in a view) because the control sits ABOVE the tabs and every
 // tab that has a date column reads the same selection. `meta.months` from the
@@ -105,7 +106,9 @@ export function periodLabel(p: Period): string {
     return p.from === p.to ? dayLabel(p.from) : `${dayLabel(p.from)} – ${dayLabel(p.to)}`;
   }
   if (!p.month) return "—";
-  return p.mode === "monthly" ? monthLabel(p.month) : `${p.month.slice(0, 4)} YTD`;
+  // The year alone — the window IS the year, so "2026 YTD" would claim a
+  // cut-off that no longer exists.
+  return p.mode === "monthly" ? monthLabel(p.month) : p.month.slice(0, 4);
 }
 
 export function dayLabel(d: string): string {
@@ -118,7 +121,7 @@ export function ymd(d: Date): string {
 }
 
 // True when an ISO-ish date string falls inside the selected period. YTD means
-// January of the selected month's year through the selected month inclusive.
+// the whole calendar year the selected month belongs to.
 export function inPeriod(p: Period, date: string | null | undefined): boolean {
   if (!date) return false;
   const d = String(date).slice(0, 10);
@@ -128,11 +131,15 @@ export function inPeriod(p: Period, date: string | null | undefined): boolean {
   }
   if (!p.month) return false;
   if (p.mode === "monthly") return d.startsWith(p.month);
-  return d.slice(0, 4) === p.month.slice(0, 4) && d.slice(0, 7) <= p.month;
+  // YTD here means the WHOLE year the selected month sits in (owner
+  // 2026-09-15), NOT Jan-through-that-month. Pressing YTD while on April used
+  // to cut the window at April and hide May onward, which read as the toggle
+  // losing data rather than widening to the year.
+  return d.slice(0, 4) === p.month.slice(0, 4);
 }
 
-// The comparable previous period: the month before in Monthly, the same
-// Jan-to-here window a year earlier in YTD.
+// The comparable previous period: the month before in Monthly, the whole
+// previous year in YTD, an equal-length window before a range.
 export function previousPeriod(p: Period, months: string[]): Period | null {
   // A range compares against the window of equal length immediately before it,
   // so "last 7 days" is measured against the 7 days before that — not against
@@ -151,9 +158,9 @@ export function previousPeriod(p: Period, months: string[]): Period | null {
     const i = months.indexOf(p.month);
     return i > 0 ? { mode: "monthly", month: months[i - 1] } : null;
   }
+  // Whole previous year against whole current year — a part-year comparison
+  // would not match what the window now covers.
   const prevYear = String(Number(p.month.slice(0, 4)) - 1);
-  const candidate = `${prevYear}-${p.month.slice(5, 7)}`;
-  return months.some((m) => m.slice(0, 4) === prevYear)
-    ? { mode: "ytd", month: candidate }
-    : null;
+  const lastOfPrev = [...months].filter((m) => m.slice(0, 4) === prevYear).pop();
+  return lastOfPrev ? { mode: "ytd", month: lastOfPrev } : null;
 }
