@@ -10,6 +10,15 @@ export const GREEN = "#4F7C3A";
 export const AMBER = "#9C6F1E";
 export const RED = "#9A3A2D";
 
+// Mirrors the route's own predicate (dashboard-prototype.ts) and the house
+// Command Center's `status NOT IN ('DRAFT','CANCELLED','ON_HOLD')`. A DRAFT is
+// not a sale yet; a cancelled or held order is not one any more. Kept in one
+// place so the KPI count and the KPI money cannot drift apart.
+const NON_REVENUE_STATUSES = new Set(["DRAFT", "CANCELLED", "ON_HOLD"]);
+export function isConfirmedOrder(status: string | null | undefined): boolean {
+  return !NON_REVENUE_STATUSES.has((status ?? "").toUpperCase());
+}
+
 export function fmtN(n: number): string {
   return n.toLocaleString("en-MY");
 }
