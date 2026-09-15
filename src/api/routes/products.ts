@@ -724,7 +724,10 @@ app.post("/", async (c) => {
 
 // POST /api/products/bulk-import — upserts by `code`, one D1 transaction.
 app.post("/bulk-import", async (c) => {
-  const denied = await requirePermission(c, "products", "create");
+  // Upsert: it inserts AND overwrites/renames existing rows, so it needs both.
+  const denied =
+    (await requirePermission(c, "products", "create")) ??
+    (await requirePermission(c, "products", "update"));
   if (denied) return denied;
   let body: { rows?: ProductBulkImportInput[] };
   try {

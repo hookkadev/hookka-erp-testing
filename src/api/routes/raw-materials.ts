@@ -618,7 +618,10 @@ app.delete("/:id", async (c) => {
 // Qty` gets stale the moment a GRN posts). On INSERT balanceQty defaults
 // to 0; the first GRN against the new code will bring it up to level.
 app.post("/bulk-import", async (c) => {
-  const denied = await requirePermission(c, "raw-materials", "create");
+  // Upsert: it inserts AND overwrites/renames existing rows, so it needs both.
+  const denied =
+    (await requirePermission(c, "raw-materials", "create")) ??
+    (await requirePermission(c, "raw-materials", "update"));
   if (denied) return denied;
   await ensureDupCodesUnlocked(c.var.DB);
   let body: { rows?: RawMaterialBody[] };
