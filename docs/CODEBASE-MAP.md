@@ -935,6 +935,13 @@ feed. Nothing here touches `dashboard-overview.ts`.
 - **The period picker does not filter every tab.** Inventory and Production are
   point-in-time snapshots with no date column; they render `SnapshotNote`
   saying so rather than ignoring the picker silently.
+- **The period picker is driven by `meta.monthsWithSales`, not `meta.months`.**
+  `meta.months` is the UNION of sales and attendance coverage, and this org
+  carries three attendance-only months (`2025-08`, `2025-12`, `2026-02`) of one
+  row each — test rows, confirmed by the owner 2026-09-15, not a real 2025 book.
+  A picker on the union offers months whose views are empty and lets the year
+  stepper land on a year with no trading. The Employees tab keeps this same
+  sales-driven list when it lands.
 - **`availability.<section>.missing`** lists fields with no live source
   (delivery `returns`, inventory `minStock`/`reorderPoint`, purchase
   `supplierScorecards`). The design reference drew those from invented sample

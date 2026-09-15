@@ -64,9 +64,12 @@ export default function DashboardPrototypePage() {
   // Jan-Apr window genuinely contains no other sales month, while the picker
   // implied Feb was there to be found.
   //
-  // Both tabs on this branch are sales-scoped. When the Employees tab lands it
-  // reads attendance, and this list has to widen to the union or become
-  // per-tab — a picker cannot serve two different coverage sets silently.
+  // This list stays sales-driven when the Employees tab lands too. Attendance
+  // covers three extra months (2025-08, 2025-12, 2026-02) holding ONE row each;
+  // owner 2026-09-15 confirmed those are test rows, not a real 2025 book, so
+  // widening to the union would offer a year the factory never traded in. If a
+  // genuine earlier book ever arrives, this becomes a per-tab list rather than
+  // a wider shared one — a picker cannot serve two coverage sets silently.
   const months = useMemo(
     () => data?.meta?.monthsWithSales ?? data?.meta?.months ?? [],
     [data],
