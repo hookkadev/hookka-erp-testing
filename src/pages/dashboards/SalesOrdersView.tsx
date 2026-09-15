@@ -711,7 +711,15 @@ export function SalesOrdersView({
                       fill={CHART_INK}
                       radius={[4, 4, 0, 0]}
                       maxBarSize={28}
-                      activeBar={{ fillOpacity: 1 }}
+                      // activeBar MUST stay off. On hover Recharts lifts the
+                      // hovered bar out of the bar layer (zIndex 300) and
+                      // redraws it in an active-bar layer at zIndex 1000 —
+                      // above the line at 400 — so the line vanished behind
+                      // whichever bar the pointer was over. Styling the active
+                      // bar to match does not help: the layer is the problem,
+                      // not the colour. Selection is already shown via Cell
+                      // fill, so nothing is lost by removing it.
+                      activeBar={false}
                       isAnimationActive={false}
                       // The bar shapes render into Recharts' `inactive-bar`
                       // layer, which swallows the click without invoking any

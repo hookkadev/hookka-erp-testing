@@ -52,7 +52,7 @@ type Feed = {
   };
   sales?: {
     byDay: { date: string; orders: number; revenueSen: number; cancelled: number }[];
-    orders: { customer: string | null; totalSen: number; createdAt: string | null }[];
+    orders: { customer: string | null; totalSen: number; createdAt: string | null; status: string }[];
     byStateCategory: { state: string | null; category: string | null; revenueSen: number }[];
   };
   delivery?: { statusBreakdown?: { key: string; label: string; count: number; valueSen: number }[] };
@@ -183,6 +183,35 @@ export function AllOverviewView({
     };
   }, [data, period, months]);
 
+  // Whole-book reconciliation. Deliberately ignores the period picker: its job
+  // is to be compared against the house Sales page, which shows the book.
+  //
+  // It also CHECKS itself rather than just printing a number. The order rows
+  // and the day buckets are built from the same query but aggregated
+  // differently, so if period slicing ever drops or double-counts a row the
+  // two stop agreeing — and a reconciliation panel that cannot disagree with
+  // itself is decoration.
+  const book = useMemo(() => {
+    const orders = data?.sales?.orders ?? [];
+    const byDay = data?.sales?.byDay ?? [];
+    const notCancelled = orders.filter((o) => o.status !== "CANCELLED");
+    const rowRevenueSen = notCancelled.reduce((t, o) => t + o.totalSen, 0);
+    const dayRevenueSen = byDay.reduce((t, d) => t + d.revenueSen, 0);
+    const dayOrders = byDay.reduce((t, d) => t + d.orders, 0);
+    return {
+      orders: orders.length,
+      cancelled: orders.length - notCancelled.length,
+      revenueSen: rowRevenueSen,
+      feedRows: data?.availability?.sales?.rows ?? 0,
+      months: months.length,
+      days: byDay.length,
+      ordersAgree: orders.length === dayOrders,
+      revenueAgree: rowRevenueSen === dayRevenueSen,
+      dayOrders,
+      dayRevenueSen,
+    };
+  }, [data, months]);
+
   const deltaPct =
     totals.prevRevenueSen > 0
       ? ((totals.revenueSen - totals.prevRevenueSen) / totals.prevRevenueSen) * 100
@@ -291,6 +320,90 @@ export function AllOverviewView({
           </p>
         </Hero>
       </div>
+
+      {/* Whole-book reconciliation — the panel to compare against the house
+          Sales page. Ignores the period picker on purpose. */}
+      <Card className="bg-white border-[#E5E0D8]">
+        <CardContent className="p-4 space-y-3">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <p className="text-sm font-semibold text-[#1F1D1B]">Book totals</p>
+            <p className="text-xs" style={{ color: MUTED }}>
+              Whole book, all {fmtN(book.months)} months · not filtered by the period above
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div>
+              <p className="text-2xl font-bold tabular-nums text-[#1F1D1B]">{fmtN(book.orders)}</p>
+              <p className="text-xs" style={{ color: MUTED }}>
+                Total sales orders
+              </p>
+              <p className="text-[11px]" style={{ color: MUTED }}>
+                incl. {fmtN(book.cancelled)} cancelled · service orders excluded
+              </p>
+            </div>
+            <div>
+              <p className="text-2xl font-bold tabular-nums text-[#1F1D1B]">
+                {formatCurrency(book.revenueSen)}
+              </p>
+              <p className="text-xs" style={{ color: MUTED }}>
+                Total revenue
+              </p>
+              <p className="text-[11px]" style={{ color: MUTED }}>
+                cancelled excluded from revenue
+              </p>
+            </div>
+            <div>
+              <p className="text-2xl font-bold tabular-nums text-[#1F1D1B]">{fmtN(book.days)}</p>
+              <p className="text-xs" style={{ color: MUTED }}>
+                Days with orders
+              </p>
+            </div>
+            <div>
+              <p className="text-2xl font-bold tabular-nums text-[#1F1D1B]">{fmtN(book.feedRows)}</p>
+              <p className="text-xs" style={{ color: MUTED }}>
+                Rows the feed reports
+              </p>
+            </div>
+          </div>
+
+          {/* Self-check. Order rows and day buckets come from one query but are
+              aggregated separately, so a mismatch means the slicing lost or
+              duplicated rows — worth seeing rather than trusting. */}
+          <div className="border-t border-[#E5E0D8] pt-2.5 space-y-1">
+            {[
+              {
+                label: "Order rows = sum of day buckets",
+                ok: book.ordersAgree,
+                detail: `${fmtN(book.orders)} vs ${fmtN(book.dayOrders)}`,
+              },
+              {
+                label: "Row revenue = sum of day buckets",
+                ok: book.revenueAgree,
+                detail: `${formatCurrency(book.revenueSen)} vs ${formatCurrency(book.dayRevenueSen)}`,
+              },
+              {
+                label: "Feed row count = orders returned",
+                ok: book.feedRows === book.orders,
+                detail: `${fmtN(book.feedRows)} vs ${fmtN(book.orders)}`,
+              },
+            ].map((c) => (
+              <p key={c.label} className="flex flex-wrap items-center gap-1.5 text-[11.5px]">
+                <span
+                  className="font-semibold shrink-0"
+                  style={{ color: c.ok ? GREEN : RED }}
+                >
+                  {c.ok ? "✓" : "✗"}
+                </span>
+                <span className="text-[#1F1D1B]">{c.label}</span>
+                <span className="tabular-nums" style={{ color: c.ok ? MUTED : RED }}>
+                  — {c.detail}
+                </span>
+              </p>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <DomainCard
