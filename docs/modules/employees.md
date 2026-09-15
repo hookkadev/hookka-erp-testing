@@ -47,7 +47,7 @@ Owns the whole workforce lifecycle: the **employee master** (workers + effective
 3. **Payslip generation (the engine)** — `payslips.ts` `POST /` **:1012** calls `computeMonthlyLabor` (`labor-engine.ts:557`) once per worker (`:1264`); `GET /projected` **:722** runs the IDENTICAL engine for all ACTIVE workers (`:867`). Salary resolved via `effectiveSalarySenForMonth` (`labor-engine.ts:408`); statutory via `calcStatutory` (`payslips.ts:303`); per-day absence/OT detail via `buildDayDetailForPeriod` (`:488`). **`payroll.ts POST /` (**:125**) is NOT a run-header guard — it is DISABLED.** After the `payroll:create` RBAC check it returns **501** unconditionally (`payroll.ts:125-139`), because it used to invent overtime hours with a random number generator instead of reading attendance; its own header calls it "a legacy duplicate" and says refusing is the fix. Payroll is generated only by `POST /api/payslips`. `GET`/`PUT` on `/api/payroll` are left working so existing rows stay readable.
 4. **Day-typed OT** — inside `computeMonthlyLabor` (`labor-engine.ts:557`), OT hours split into weekday(1.5×)/Sunday(2×)/holiday(3×) buckets; payslips persist `otWeekday/Sunday/HolidayPaySen`. Holidays from `kv_config['public_holidays']`.
 5. **Short-hour dock** — `payroll-hour-deductions.ts` `POST /auto-from-punch` **:149** derives docks from punches; `POST /settle-period` **:211** folds them into the period.
-6. **Effective-dated salary** — `workers.ts` `GET /salary/effective` **:1232** returns each worker's day-weighted rate for a period; `resyncCurrentSalary` (`:1155`) keeps `workers.basicSalarySen` in sync with the latest history row.
+6. **Effective-dated salary** — `workers.ts` `GET /salary/effective` **:1242** returns each worker's day-weighted rate for a period; `resyncCurrentSalary` (`:1165`) keeps `workers.basicSalarySen` in sync with the latest history row.
 
 ## Key functions / sections (locate-to-function)
 | Symbol / section | file:line | Role |
@@ -72,7 +72,7 @@ Owns the whole workforce lifecycle: the **employee master** (workers + effective
 | `POST /login` / `resolveWorkerToken` | `src/api/routes/worker-auth.ts:124 / 337` | PIN login + token resolution |
 | `getWorker` (token gate) | `src/api/routes/worker.ts:160` | X-Worker-Token → ACTIVE worker or 401/403 |
 | `POST /clock` / `POST /dept-scan` | `src/api/routes/worker.ts:1067 / 1324` | Clock in/out + department scan |
-| `GET /salary/effective` | `src/api/routes/workers.ts:1232` | Day-weighted salary per period |
+| `GET /salary/effective` | `src/api/routes/workers.ts:1242` | Day-weighted salary per period |
 | `POST /auto-from-punch` / `settle-period` | `src/api/routes/payroll-hour-deductions.ts:149 / 211` | Short-hour docks |
 
 ## Gotchas
