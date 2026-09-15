@@ -899,28 +899,24 @@ app.get("/projected", async (c) => {
       employmentStartDay: joinedDay,
       employmentEndDay: resignedDay,
     });
-    // Pro-rated by days actually worked — the same absentDays that produces
-    // the salary deduction two lines below, so the payslip cannot show one
-    // absence count against the salary and a different one against the bonus.
-    const attendanceForAllowances = {
+    // Combined non-statutory allowance bucket (efficiency + leadership). Both
+    // are pro-rated by the SAME attendance figure — the same absentDays that
+    // produces the salary deduction two lines below, so the payslip cannot
+    // show one absence count against the salary and a different one against
+    // the bonus — and folded into one amount: the payslip / PDF / reports
+    // show a single "Allowance" line, exactly as they did before leadership
+    // allowance existed.
+    const efficiencyAllowance = resolveEfficiencyAllowanceSen(
+      effByWorker.get(worker.id),
+      worker.efficiencyAllowanceSen,
+      worker.efficiencyThresholdPct,
+      { workingDays: worker.workingDaysPerMonth, absentDays: labor.payroll.absentDays },
+    );
+    const leadershipAllowance = resolveLeadershipAllowanceSen(worker.leadershipAllowanceSen, {
       workingDays: worker.workingDaysPerMonth,
       absentDays: labor.payroll.absentDays,
-    };
-    // Combined non-statutory allowance bucket (efficiency + leadership). Both
-    // are pro-rated by the SAME attendance figure and folded into one amount —
-    // the payslip / PDF / reports show a single "Allowance" line, exactly as
-    // they did before leadership allowance existed.
-    const allowances =
-      resolveEfficiencyAllowanceSen(
-        effByWorker.get(worker.id),
-        worker.efficiencyAllowanceSen,
-        worker.efficiencyThresholdPct,
-        attendanceForAllowances,
-      ) +
-      resolveLeadershipAllowanceSen(
-        worker.leadershipAllowanceSen,
-        attendanceForAllowances,
-      );
+    });
+    const allowances = efficiencyAllowance + leadershipAllowance;
     const ytd = ytdPcbInputs.get(worker.id) ?? NO_YTD;
     const stat = calcStatutory(
       effectiveSalarySen,
@@ -1290,24 +1286,20 @@ app.post("/", async (c) => {
       payRuleVersions,
       });
 
-      const attendanceForAllowances = {
-        workingDays: worker.workingDaysPerMonth,
-        absentDays: labor.payroll.absentDays,
-      };
       // Combined non-statutory allowance bucket (efficiency + leadership) —
       // see the projected path above for why these are summed rather than
       // kept as separate payslip lines.
-      const allowances =
-        resolveEfficiencyAllowanceSen(
-          effByWorker.get(worker.id),
-          worker.efficiencyAllowanceSen,
-          worker.efficiencyThresholdPct,
-          attendanceForAllowances,
-        ) +
-        resolveLeadershipAllowanceSen(
-          worker.leadershipAllowanceSen,
-          attendanceForAllowances,
-        );
+      const efficiencyAllowance = resolveEfficiencyAllowanceSen(
+        effByWorker.get(worker.id),
+        worker.efficiencyAllowanceSen,
+        worker.efficiencyThresholdPct,
+        { workingDays: worker.workingDaysPerMonth, absentDays: labor.payroll.absentDays },
+      );
+      const leadershipAllowance = resolveLeadershipAllowanceSen(worker.leadershipAllowanceSen, {
+        workingDays: worker.workingDaysPerMonth,
+        absentDays: labor.payroll.absentDays,
+      });
+      const allowances = efficiencyAllowance + leadershipAllowance;
       // Statutory deductions computed on the month's effective monthly salary
       // (= the worker's salary, day-weighted if it changed mid-month).
       const ytd = ytdPcbInputs.get(worker.id) ?? NO_YTD;
