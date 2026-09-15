@@ -1,6 +1,6 @@
 # RBAC Remediation — current state and the way through
 
-> **Last verified: 2026-09-14** against `src/api/routes/{attendance,leaves,files,working-hour-entries,cash-flow,stock-value,forecasts,sessions}.ts`,
+> **Last verified: 2026-09-15** against `src/api/lib/rbac.ts` (fail-opens closed) and `src/api/routes/{attendance,leaves,files,working-hour-entries,cash-flow,stock-value,forecasts,sessions}.ts`,
 > `src/api/lib/{rbac,nav-permissions}.ts`, `src/dashboard-routes.tsx`. Every claim below was
 > read out of the source on that date, not inferred from a plan or a migration.
 
@@ -16,18 +16,34 @@ did not.
 Audit of 2026-09-11 (`audit-rbac.mjs`, repo root): **1,012 handlers — 817 gated, 60
 deliberately public, 135 with no gate (9 write, 126 read).**
 
-## Two fail-open paths — fix these before adding any gate
+## Two fail-open paths — CLOSED 2026-09-15 (commit 138b636d)
 
-`src/api/lib/rbac.ts`
+`src/api/lib/rbac.ts`. Both defaults used to be `["*:read"]`, which made any unrecognised
+role text — and any transient failure of the permission lookup — a read-the-whole-ERP
+account, and let every gate elsewhere be walked around. Verified closed by reading the file:
 
-| Line | Code | Effect |
-|---|---|---|
-| 126–127 | `if (set.size === 0) { set.add("*:read"); }` | An unrecognised role text gets read-everything. |
-| 228 | `set = new Set(LEGACY_ROLE_DEFAULTS[role] ?? ["*:read"])` (in the `catch`) | A thrown permission lookup gets read-everything. |
+| Site | Now |
+|---|---|
+| L133 | No rows and no legacy default → warns and returns an **empty** set. Denies everything. |
+| L240 | `set = new Set(LEGACY_ROLE_DEFAULTS[role] ?? [])` in the `catch`. Denies everything. |
 
-Both must deny. Until they do, every gate added elsewhere can be walked around by one
-unknown role name or one transient DB error. This is the highest-value change in the whole
-piece of work and it is about ten lines.
+`/me/permissions` returns `[]` for this case too, so the menu and the gate now agree. The fix
+for a role that holds nothing is to seed its grants — never to widen these two lines again.
+
+**One thing this changes that the tests cannot see.** In the sandbox no account rides the old
+fallback, so the suite passes either way. On staging or production an account on an
+unrecognised role text was silently getting read-everything and now gets nothing. Before this
+reaches real users, run against staging:
+
+```sql
+select u.role, count(*) as accounts
+from users u
+where u.role not in (select name from roles)
+group by u.role;
+```
+
+Any row returned is an account that will lose access the moment this deploys. That is the
+correct outcome, but it should be a decision, not a surprise.
 
 ## What is already done (2026-09-14, uncommitted)
 
@@ -47,6 +63,28 @@ Verified live in a local session: QA receives 403 with
 `/settings`. It has **no `/settings/users`** (so user management inherits the `settings`
 permission) and **no `/admin/health`** (which needs a SUPER_ADMIN-only resource, and that
 resource must then be added to OFFICE's `allExcept` exclusion list or OFFICE gets it free).
+
+**The route guard only covers what the nav map names.** `DASHBOARD_ROUTE_ELEMENTS` wraps a
+route only when `resourceForNav(path)` resolves, and that function walks `NAV_RESOURCE` — 48
+prefixes. Measured 2026-09-15: of **118 dashboard routes, 103 are guarded and 15 are not**,
+because no prefix matches them:
+
+```
+/admin/health          /analytics/forecast    /dashboard-b
+/delivery-test         /delivery-test/:id     /production-test
+/production-test/:id   /production-test/department/:code
+/production-test/fg-scan  /production-test/scan
+/reports               /service-orders        /service-orders/:id
+/setup-2fa             /suppliers/:id
+```
+
+`/reports` and `/service-orders` are real pages with real data. The `*-test` routes and
+`/dashboard-b` look like leftovers and may simply want deleting — check before mapping them.
+`/setup-2fa` is correctly unguarded: a user must reach it before holding anything.
+
+Note also there is **no `/attendance` route** — the attendance data is fetched by the
+`/employees` page, which maps to `workers`. Testing `/attendance` in the address bar renders
+the app shell for a path that does not exist and proves nothing; use `/employees`.
 
 **Ungated handlers, by file**
 
@@ -156,8 +194,10 @@ R_AND_D through the app if needed.
 
 ## Order of work
 
-0. Commit what is already verified → `.dev.vars` to the sandbox → seed the sandbox →
-   close the two fail-opens in `rbac.ts` → fill the two nav-map gaps.
+0. ~~Commit the verified fix~~ done · ~~`.dev.vars` to the sandbox~~ done ·
+   ~~seed the sandbox~~ done · ~~close the two fail-opens in `rbac.ts`~~ done (138b636d) ·
+   **remaining: the nav-map gaps — `/settings/users`, `/admin/health`, and the 15 dashboard
+   routes with no mapping at all (see below).**
 1. `files.ts` — needs the `resourceType` design first.
 2. `working-hour-entries.ts` ×4, `rd-projects/:id/labour-hours`.
 3. `cash-flow`, `stock-value` ×2, `forecasts`, `purchase-invoices` ×2.
