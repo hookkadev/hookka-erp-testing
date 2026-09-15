@@ -308,7 +308,31 @@ export function PeriodPicker({
   onChange: (p: Period) => void;
 }) {
   const idx = months.indexOf(period.month);
-  const atNewest = idx === months.length - 1;
+
+  // The steppers move by whatever the current mode MEASURES. In YTD that is a
+  // year: stepping by month there looked broken, because "2026 YTD" reads the
+  // same after a month-sized step and only changes once it happens to cross a
+  // year boundary. Each target is resolved against the months the book actually
+  // has, so a direction with no data is dead rather than landing on an empty
+  // window (this book holds 2025 and 2026 only — forward from 2026 is dead).
+  const step = (dir: -1 | 1): Period | null => {
+    if (period.mode === "ytd") {
+      const years = [...new Set(months.map((m) => m.slice(0, 4)))].sort();
+      const yi = years.indexOf(period.month.slice(0, 4));
+      const target = years[yi + dir];
+      if (yi < 0 || !target) return null;
+      // Land on the newest month that year has, so YTD covers all of it.
+      const last = [...months].filter((m) => m.startsWith(target)).pop();
+      return last ? { mode: "ytd", month: last } : null;
+    }
+    // Monthly — and a range, which steps back out to a plain month rather than
+    // sliding a window whose length nobody asked to keep.
+    const next = months[idx + dir];
+    return next ? { mode: "monthly", month: next } : null;
+  };
+
+  const prev = step(-1);
+  const next = step(1);
   return (
     <div className="flex flex-wrap items-center gap-2">
       {/* Segmented control: the ACTIVE half carries its own border + white
@@ -336,9 +360,9 @@ export function PeriodPicker({
       <div className="flex items-center gap-1">
         <button
           type="button"
-          aria-label="Previous month"
-          disabled={idx <= 0}
-          onClick={() => onChange({ mode: period.mode, month: months[idx - 1] })}
+          aria-label={period.mode === "ytd" ? "Previous year" : "Previous month"}
+          disabled={!prev}
+          onClick={() => prev && onChange(prev)}
           className="h-7 w-7 grid place-items-center rounded-md border border-[#E2DDD8] text-[#6B7280] disabled:opacity-40 hover:bg-[#F7F5F3]"
         >
           <ChevronLeft className="h-4 w-4" />
@@ -346,9 +370,9 @@ export function PeriodPicker({
         <DateTrigger period={period} months={months} latestDay={latestDay} onChange={onChange} />
         <button
           type="button"
-          aria-label="Next month"
-          disabled={idx < 0 || atNewest}
-          onClick={() => onChange({ mode: period.mode, month: months[idx + 1] })}
+          aria-label={period.mode === "ytd" ? "Next year" : "Next month"}
+          disabled={!next}
+          onClick={() => next && onChange(next)}
           className="h-7 w-7 grid place-items-center rounded-md border border-[#E2DDD8] text-[#6B7280] disabled:opacity-40 hover:bg-[#F7F5F3]"
         >
           <ChevronRight className="h-4 w-4" />
