@@ -449,8 +449,11 @@ app.post("/", async (c) => {
       after: rowToWorker(created),
     });
     return c.json({ success: true, data: rowToWorker(created) }, 201);
-  } catch {
-    return c.json({ success: false, error: "Invalid request body" }, 400);
+  } catch (e) {
+    return c.json(
+      { success: false, error: e instanceof Error ? e.message : "Invalid request body" },
+      400,
+    );
   }
 });
 
@@ -844,8 +847,15 @@ app.put("/:id", async (c) => {
       after: rowToWorker(updated),
     });
     return c.json({ success: true, data: rowToWorker(updated) });
-  } catch {
-    return c.json({ success: false, error: "Invalid request body" }, 400);
+  } catch (e) {
+    // Was a bare "Invalid request body" with the real cause thrown away —
+    // matched the DB error to nothing and cost a diagnosis round-trip on
+    // canary (DEV-06, 2026-09-15). Other routes (e.g. packing-lists.ts)
+    // already surface e.message; do the same here.
+    return c.json(
+      { success: false, error: e instanceof Error ? e.message : "Invalid request body" },
+      400,
+    );
   }
 });
 
