@@ -1,12 +1,8 @@
 # RBAC Remediation — current state and the way through
 
-> **Last verified: 2026-09-14 (second pass)** against `src/api/lib/rbac.ts` and
-> `src/api/routes/auth.ts` after closing both fail-open paths, `npm test` (4,558 pass / 0 fail),
-> and a sandbox (`cjnewpxxmiucwirlcqpj`) count of `role_permissions` per role. First pass, same
-> day, against `src/api/routes/{attendance,leaves,files,working-hour-entries,cash-flow,stock-value,forecasts,sessions}.ts`,
+> **Last verified: 2026-09-14** against `src/api/routes/{attendance,leaves,files,working-hour-entries,cash-flow,stock-value,forecasts,sessions}.ts`,
 > `src/api/lib/{rbac,nav-permissions}.ts`, `src/dashboard-routes.tsx`. Every claim below was
-> read out of the source or measured on that date, not inferred from a plan or a migration.
-> Production state is UNMEASURED throughout.
+> read out of the source on that date, not inferred from a plan or a migration.
 
 ## The problem in one paragraph
 
@@ -20,43 +16,20 @@ did not.
 Audit of 2026-09-11 (`audit-rbac.mjs`, repo root): **1,012 handlers — 817 gated, 60
 deliberately public, 135 with no gate (9 write, 126 read).**
 
-## Two fail-open paths — CLOSED 2026-09-14 (uncommitted)
+## Two fail-open paths — fix these before adding any gate
 
-`src/api/lib/rbac.ts` used to grant `*:read` in two places:
+`src/api/lib/rbac.ts`
 
-| Was | Effect | Now |
+| Line | Code | Effect |
 |---|---|---|
-| `if (set.size === 0) { set.add("*:read"); }` in `loadRolePermissions` | An unrecognised role text got read-everything. | Empty set → **deny-all**, with a warn log naming the role. |
-| `LEGACY_ROLE_DEFAULTS[role] ?? ["*:read"]` in the `requirePermission` catch | A thrown permission lookup got read-everything. | `?? []` → **deny**, unless the role has an explicit legacy default (only `READ_ONLY` does). |
+| 126–127 | `if (set.size === 0) { set.add("*:read"); }` | An unrecognised role text gets read-everything. |
+| 228 | `set = new Set(LEGACY_ROLE_DEFAULTS[role] ?? ["*:read"])` (in the `catch`) | A thrown permission lookup gets read-everything. |
 
-Two related changes in the same batch:
+Both must deny. Until they do, every gate added elsewhere can be walked around by one
+unknown role name or one transient DB error. This is the highest-value change in the whole
+piece of work and it is about ten lines.
 
-- **A failed `role_permissions` JOIN now throws instead of returning a set.** Returning one
-  let `getRolePermissions` cache it in KV for 300 s, so one transient DB error became five
-  minutes of wrong answers. Throwing costs one refused request.
-- **`GET /api/auth/me/permissions` error fallback** returned `*:read` for every role, so the
-  menu advertised pages the gate now refuses. It now returns `*:read` only for an explicit
-  `READ_ONLY` role, and `[]` otherwise. `hasPermission()` already failed closed.
-
-Who this can lock out: a DB-defined role (FINANCE, PROCUREMENT, PRODUCTION, WAREHOUSE,
-WORKER) with **zero** rows in `role_permissions`. **Sandbox, measured 2026-09-14:** every role
-has a `roles` row and grants (FINANCE 53, PROCUREMENT 53, PRODUCTION 46, WAREHOUSE 44,
-WORKER 12, READ_ONLY 73), and the gate's own JOIN returns them. **Production: UNMEASURED** —
-run the same count against prod before deploying:
-
-```sql
-SELECT upper(r.name) AS role, count(rp.role_id) AS grants
-FROM roles r LEFT JOIN role_permissions rp ON rp.role_id = r.id
-GROUP BY 1 ORDER BY 1;
-```
-
-Any role with users and 0 grants will be refused everything after deploy.
-
-Tests: `tests/rbac-fail-closed.test.mjs` (behavioural + source guards). Three existing tests
-reached their gates only through the fallback and now pass an env object instead:
-`attendance-list-no-photo-blobs`, `leaves-read-permission`, `consignment-tenant-scope`.
-
-## What is already done (2026-09-14, commit `e355cdfe`, not pushed)
+## What is already done (2026-09-14, uncommitted)
 
 | File | State |
 |---|---|
@@ -115,6 +88,54 @@ sort_order INTEGER` **on every request** — any logged-in account of any role c
 DDL on a request path. Gate it with the rest of `files.ts` and move the ALTER into a
 migration.
 
+## Where a role's permissions actually come from — check this before editing any grant
+
+`rbac.ts:86` short-circuits **before** the `role_permissions` query:
+
+```ts
+const coded = permissionsForRole(role);
+if (coded) return coded;
+```
+
+So there are two populations, and they behave differently:
+
+| | Roles | Source of truth |
+|---|---|---|
+| Code-defined | `SALES`, `OFFICE`, `QA`, `R_AND_D`, `HR` | `role-policy.ts` — `CODE_ROLE_POLICIES` |
+| Table-defined | `SUPER_ADMIN`, `ADMIN`, `FINANCE`, `PROCUREMENT`, `PRODUCTION`, `WAREHOUSE`, `WORKER`, `READ_ONLY` | `role_permissions` |
+
+**Rows in `role_permissions` for a code-defined role are dead data — never read.** Measured in
+the sandbox 2026-09-15: HR, QA, OFFICE and R_AND_D each carry 8 rows there (`mail-center` ×4,
+`settings` ×4) and not one of them affects a request. Granting HR something by inserting a row
+will appear to work and will do nothing. Edit `role-policy.ts` instead.
+
+This was checked because HR's table rows contain **no** `attendance:read` and **no**
+`leaves:read`, which would have meant yesterday's gates locked HR out of the two screens HR
+exists to use. They do not: `role-policy.ts:359-370` gives HR `attendance: OPEN` and
+`leaves: OPEN`, and the code path wins. QA has neither, which is why QA correctly receives the
+403. The fix is safe. Confirm it against the seeded data rather than taking this paragraph's
+word for it.
+
+## Sandbox seed — done 2026-09-15
+
+`scripts/seed-sandbox-rbac.sql`, applied to `cjnewpxxmiucwirlcqpj` (hookka-sandbox):
+
+| Table | Rows |
+|---|---|
+| `workers` | 8 (7 active, 1 resigned) |
+| `attendance_records` | 350 over 2026-07-07 → 2026-09-14 — 302 PRESENT, 33 LATE, 15 ABSENT, 88 carrying a `clockinphoto` path |
+| `working_hour_entries` | 240 |
+| `leaves` | 12 across ANNUAL / MEDICAL / UNPAID / EMERGENCY and all three statuses |
+
+Every row's id is prefixed `seed-`; the script deletes its own rows before re-inserting, and
+refuses to run against a database holding more than 100 attendance rows or 50 users. All
+names, IC numbers, phone numbers and coordinates are invented. `clockinphoto` holds a path
+only — there is no object behind it, which is enough to exercise the `GET /:id/photo` gate.
+
+Logins were **not** seeded; password hashes belong to the app. The sandbox has SUPER_ADMIN,
+FINANCE, SALES, HR and QA accounts, which covers the gates being built. Add OFFICE and
+R_AND_D through the app if needed.
+
 ## The loop — run once per batch, never skip step 3 or 6
 
 1. Pick a batch — one resource group, not one endpoint.
@@ -135,9 +156,8 @@ migration.
 
 ## Order of work
 
-0. ~~Commit what is already verified~~ (`e355cdfe`) → ~~`.dev.vars` to the sandbox~~ (owner
-   confirmed 2026-09-14) → seed the sandbox → ~~close the two fail-opens in `rbac.ts`~~
-   (2026-09-14; **run the prod grant count above before deploying**) → fill the two nav-map gaps.
+0. Commit what is already verified → `.dev.vars` to the sandbox → seed the sandbox →
+   close the two fail-opens in `rbac.ts` → fill the two nav-map gaps.
 1. `files.ts` — needs the `resourceType` design first.
 2. `working-hour-entries.ts` ×4, `rd-projects/:id/labour-hours`.
 3. `cash-flow`, `stock-value` ×2, `forecasts`, `purchase-invoices` ×2.
