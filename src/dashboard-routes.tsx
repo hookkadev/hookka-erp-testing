@@ -19,6 +19,10 @@ import { PageSkeleton } from './components/ui/skeleton'
 // is now the one and only dashboard, served at /dashboard.
 const DashboardB = lazy(() => import('./pages/dashboard-b'))
 
+// Test — design prototypes. Native React, reads the same real endpoints
+// the Command Center uses (no dedicated backend route of its own).
+const DashboardPrototype = lazy(() => import('./pages/test/dashboard-prototype'))
+
 // Sales
 const Sales = lazy(() => import('./pages/sales'))
 const SalesCreate = lazy(() => import('./pages/sales/create'))
@@ -231,6 +235,9 @@ export const DASHBOARD_ROUTES: RouteObject[] = [
     ),
   },
   { path: '/dashboard-b', element: <Navigate to="/dashboard" replace /> },
+
+  // Test — design prototypes.
+  { path: '/test/dashboard-prototype', element: <S><DashboardPrototype /></S> },
 
   // Sales
   { path: '/sales', element: <S><Sales /></S> },
@@ -570,6 +577,7 @@ export const DASHBOARD_ROUTE_ELEMENTS = DASHBOARD_ROUTES.map((r) => (
 // (safe no-op).
 const ROUTE_CHUNK_LOADERS: Record<string, () => Promise<unknown>> = {
   '/dashboard': () => import('./pages/dashboard-b'),
+  '/test/dashboard-prototype': () => import('./pages/test/dashboard-prototype'),
   '/daily-report': () => import('./pages/daily-report'),
   '/notifications': () => import('./pages/notifications'),
   '/announcements': () => import('./pages/announcements'),
