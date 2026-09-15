@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import {
   MUTED, GREEN, RED, AMBER, fmtN,
-  inPeriod, previousPeriod, periodLabel, type Period,
+  inPeriod, previousPeriod, periodLabel, isConfirmedOrder, type Period,
 } from "./dashboard-shared-lib";
 import { LiveBadge } from "./dashboard-shared";
 
@@ -194,18 +194,24 @@ export function AllOverviewView({
   const book = useMemo(() => {
     const orders = data?.sales?.orders ?? [];
     const byDay = data?.sales?.byDay ?? [];
-    const notCancelled = orders.filter((o) => o.status !== "CANCELLED");
-    const rowRevenueSen = notCancelled.reduce((t, o) => t + o.totalSen, 0);
+    // Same confirmed-order definition the Sales tab and the route use, so the
+    // book total cannot disagree with the tab that breaks it down.
+    const confirmed = orders.filter((o) => isConfirmedOrder(o.status));
+    const rowRevenueSen = confirmed.reduce((t, o) => t + o.totalSen, 0);
     const dayRevenueSen = byDay.reduce((t, d) => t + d.revenueSen, 0);
     const dayOrders = byDay.reduce((t, d) => t + d.orders, 0);
     return {
-      orders: orders.length,
-      cancelled: orders.length - notCancelled.length,
+      orders: confirmed.length,
+      excluded: orders.length - confirmed.length,
       revenueSen: rowRevenueSen,
       feedRows: data?.availability?.sales?.rows ?? 0,
       months: months.length,
       days: byDay.length,
-      ordersAgree: orders.length === dayOrders,
+      // Compare CONFIRMED against the day buckets, which now also count only
+      // confirmed orders. This read `orders.length` (every row, excluded ones
+      // included) while the line beside it printed the confirmed count, so the
+      // check failed against a number it was not showing.
+      ordersAgree: confirmed.length === dayOrders,
       revenueAgree: rowRevenueSen === dayRevenueSen,
       dayOrders,
       dayRevenueSen,
@@ -339,7 +345,7 @@ export function AllOverviewView({
                 Total sales orders
               </p>
               <p className="text-[11px]" style={{ color: MUTED }}>
-                incl. {fmtN(book.cancelled)} cancelled · service orders excluded
+                {fmtN(book.excluded)} draft/cancelled/on-hold excluded · service orders included
               </p>
             </div>
             <div>
@@ -350,7 +356,7 @@ export function AllOverviewView({
                 Total revenue
               </p>
               <p className="text-[11px]" style={{ color: MUTED }}>
-                cancelled excluded from revenue
+                draft, cancelled and on-hold excluded
               </p>
             </div>
             <div>
@@ -383,9 +389,9 @@ export function AllOverviewView({
                 detail: `${formatCurrency(book.revenueSen)} vs ${formatCurrency(book.dayRevenueSen)}`,
               },
               {
-                label: "Feed row count = orders returned",
-                ok: book.feedRows === book.orders,
-                detail: `${fmtN(book.feedRows)} vs ${fmtN(book.orders)}`,
+                label: "Feed rows = confirmed + excluded",
+                ok: book.feedRows === book.orders + book.excluded,
+                detail: `${fmtN(book.feedRows)} vs ${fmtN(book.orders)} confirmed + ${fmtN(book.excluded)} excluded`,
               },
             ].map((c) => (
               <p key={c.label} className="flex flex-wrap items-center gap-1.5 text-[11.5px]">

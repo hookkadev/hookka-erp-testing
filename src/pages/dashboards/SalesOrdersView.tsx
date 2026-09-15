@@ -27,7 +27,7 @@ import { ShoppingCart, DollarSign, Truck, CheckCircle, CalendarX2 } from "lucide
 import {
   TAUPE, GREEN, AMBER, TEAL, fmtN, fmtRMAxis, ymd, dayLabel,
   CHART_INK, CHART_GOLD, CHART_AXIS, CARD_BORDER, CARD_BG, CHART_SERIES,
-  inPeriod, previousPeriod, periodLabel, type Period,
+  inPeriod, previousPeriod, periodLabel, isConfirmedOrder, type Period,
 } from "./dashboard-shared-lib";
 import { Kpi, LiveBadge } from "./dashboard-shared";
 
@@ -262,12 +262,13 @@ export function SalesOrdersView({
     if (selectedDetail) return null;
     const prev = previousPeriod(period, months);
     if (!prev) return null;
-    const rows = allOrders.filter((o) => inPeriod(prev, o.createdAt));
-    const notCancelled = rows.filter((o) => o.status !== "CANCELLED");
+    const rows = allOrders
+      .filter((o) => inPeriod(prev, o.createdAt))
+      .filter((o) => isConfirmedOrder(o.status));
     return {
       label: periodLabel(prev),
       count: rows.length,
-      revenueSen: notCancelled.reduce((s, o) => s + o.totalSen, 0),
+      revenueSen: rows.reduce((s, o) => s + o.totalSen, 0),
     };
   }, [allOrders, period, months, selectedDetail]);
 
@@ -284,16 +285,17 @@ export function SalesOrdersView({
   );
 
   const kpis = useMemo(() => {
-    const live = scopedOrders.filter((o) => o.status !== "CANCELLED");
+    const live = scopedOrders.filter((o) => isConfirmedOrder(o.status));
     const outstanding = scopedOrders.filter((o) => isOutstanding(o.status));
     const pending = scopedOrders.filter((o) => isPendingDelivery(o.status));
     const completed = scopedOrders.filter((o) => isCompleted(o.status));
     return {
-      // Counts every order in the period, CANCELLED included — this is what
-      // the house Sales page does (MEASURED book-wide: 1713 there against 1691
-      // when cancelled are dropped). Revenue below still excludes them, which
-      // the house page also does.
-      soCount: scopedOrders.length,
+      // Count and money share ONE definition — confirmed orders only (owner
+      // 2026-09-15). Counting drafts in the headline while excluding them from
+      // revenue is how a card ends up disagreeing with itself. This tracks the
+      // house Command Center rather than the Sales LIST page, which counts
+      // every row; the two house surfaces genuinely differ.
+      soCount: live.length,
       revenueSen: live.reduce((s, o) => s + o.totalSen, 0),
       outstandingCount: outstanding.length,
       outstandingSen: outstanding.reduce((s, o) => s + o.totalSen, 0),
@@ -315,7 +317,7 @@ export function SalesOrdersView({
 
     const totalByCustomer = new Map<string, number>();
     for (const o of allOrders) {
-      if (o.status === "CANCELLED" || !o.createdAt) continue;
+      if (!isConfirmedOrder(o.status) || !o.createdAt) continue;
       totalByCustomer.set(o.customer ?? "Unnamed", (totalByCustomer.get(o.customer ?? "Unnamed") ?? 0) + o.totalSen);
     }
     const grand = [...totalByCustomer.values()].reduce((s, v) => s + v, 0);
@@ -324,7 +326,7 @@ export function SalesOrdersView({
 
     const buckets = new Map<string, Record<string, number>>();
     for (const o of allOrders) {
-      if (o.status === "CANCELLED" || !o.createdAt) continue;
+      if (!isConfirmedOrder(o.status) || !o.createdAt) continue;
       const b = bucketOf(o.createdAt);
       const row = buckets.get(b) ?? {};
       const key = names.includes(o.customer ?? "Unnamed") ? (o.customer ?? "Unnamed") : "Other";
