@@ -26,6 +26,7 @@ import { computeMonthlyLabor, computeAttendanceDayDetail, absenceCutoffDay, effe
 import { jcMinutesTotal } from "../../lib/job-card-minutes";
 import { deriveBarcodeToken, deptOfBarcodeToken, isBarcodeToken } from "../../lib/job-card-id";
 import { computeMonthlyEfficiencyByWorker, resolveEfficiencyAllowanceSen, monthBounds } from "../lib/efficiency-allowance";
+import { resolveLeadershipAllowanceSen } from "../lib/leadership-allowance";
 import { ensureLeaveEntitlementColumns } from "../lib/ensure-leave-columns";
 import {
   calendarLeaveDays,
@@ -2224,17 +2225,25 @@ app.get("/payslips", async (c) => {
     effEnd,
   );
   const effCfg = await c.var.DB.prepare(
-    "SELECT efficiencyAllowanceSen, efficiencyThresholdPct FROM workers WHERE id = ?",
+    "SELECT efficiencyAllowanceSen, efficiencyThresholdPct, leadershipAllowanceSen FROM workers WHERE id = ?",
   )
     .bind(workerId)
     .first<{
       efficiencyAllowanceSen: number | null;
       efficiencyThresholdPct: number | null;
+      leadershipAllowanceSen: number | null;
     }>();
   const efficiencyAllowanceSen = resolveEfficiencyAllowanceSen(
     effByWorker.get(workerId),
     effCfg?.efficiencyAllowanceSen,
     effCfg?.efficiencyThresholdPct,
+  );
+  // Leadership allowance — no threshold, so no attendance passed here either:
+  // this is the in-progress-month ESTIMATE (mirrors the efficiency call above,
+  // which also omits attendance and returns the un-prorated figure until the
+  // office finalises the payslip).
+  const leadershipAllowanceSen = resolveLeadershipAllowanceSen(
+    effCfg?.leadershipAllowanceSen,
   );
 
   // The stored payslip for this period, if the office has generated one.
@@ -2265,7 +2274,9 @@ app.get("/payslips", async (c) => {
           basicEarnedSen: labor.payroll.basicEarnedSen,
           otSen: labor.payroll.otPaySen,
           efficiencyAllowanceSen,
-          estimatedGrossSen: labor.payroll.grossSen + efficiencyAllowanceSen,
+          leadershipAllowanceSen,
+          estimatedGrossSen:
+            labor.payroll.grossSen + efficiencyAllowanceSen + leadershipAllowanceSen,
           // Per-day detail so My Pay can show WHICH days were absent / had OT /
           // were late-or-short (each docked day + the hours docked).
           absentDates: dayDetail.absentDates,

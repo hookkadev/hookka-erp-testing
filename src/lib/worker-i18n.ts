@@ -654,6 +654,17 @@ const dict: Dict = {
     zh: '效率津贴',
     my: 'ထိရောက်မှုကြေး',
   },
+  // Leadership allowance (migration 0233, DEV-06) — flat bonus, no threshold.
+  'pay.leadershipAllowance': {
+    en: 'Leadership allowance',
+    ms: 'Elaun kepimpinan',
+    zh: '领导津贴',
+    my: 'ခေါင်းဆောင်မှုကြေး',
+  },
+  // Generic label for the combined allowance bucket on a FINALISED payslip
+  // (efficiency + leadership summed into one allowancesSen figure) — see
+  // generate-payslip-pdf.ts's matching generic "Allowance" fallback.
+  'pay.allowance': { en: 'Allowance', ms: 'Elaun', zh: '津贴', my: 'ကြေး' },
   // Late clock-in (>10 min) + owner-flagged short/under-recorded hours docked
   // this month. Shown as a deduction line so the worker sees why Basic dropped.
   'pay.lateShortDeduction': {

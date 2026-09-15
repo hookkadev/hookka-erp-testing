@@ -76,6 +76,10 @@ type WorkerRow = {
   // amount. The Payroll entitlement engine (Phase 2) consumes these.
   efficiencyAllowanceSen: number;
   efficiencyThresholdPct: number | null;
+  // Per-worker leadership allowance (migration 0233, DEV-06). Flat bonus (sen)
+  // pro-rated by attendance — NO threshold/performance gate (owner decision:
+  // "不设门槛,只按出勤比例"). Default 0 on existing rows ⇒ no bonus until set.
+  leadershipAllowanceSen: number;
   // How this worker is paid — the DEFAULT the payroll run copies each month.
   paymentMethod: string | null;
   bankName: string | null;
@@ -232,6 +236,7 @@ function rowToWorker(row: WorkerRow) {
     resignedAt: row.resignedAt ?? "",
     efficiencyAllowanceSen: row.efficiencyAllowanceSen ?? 0,
     efficiencyThresholdPct: row.efficiencyThresholdPct ?? 0,
+    leadershipAllowanceSen: row.leadershipAllowanceSen ?? 0,
     paymentMethod: normalizePaymentMethod(row.paymentMethod),
     bankName: row.bankName ?? "",
     bankAccount: row.bankAccount ?? "",
@@ -298,6 +303,7 @@ app.post("/", async (c) => {
       pcbEnabled,
       efficiencyAllowanceSen,
       efficiencyThresholdPct,
+      leadershipAllowanceSen,
       paymentMethod,
       bankName,
       bankAccount,
@@ -326,6 +332,17 @@ app.post("/", async (c) => {
     if (!Number.isFinite(effThresholdPct) || effThresholdPct < 0 || effThresholdPct > 100) {
       return c.json(
         { success: false, error: "Efficiency threshold must be between 0 and 100." },
+        400,
+      );
+    }
+
+    // Leadership allowance config — same guard shape as efficiency, minus the
+    // threshold (no performance gate). Undefined → default 0.
+    const leadAllowanceSen =
+      leadershipAllowanceSen == null ? 0 : Math.round(Number(leadershipAllowanceSen));
+    if (!Number.isFinite(leadAllowanceSen) || leadAllowanceSen < 0) {
+      return c.json(
+        { success: false, error: "Leadership allowance must be 0 or more." },
         400,
       );
     }
@@ -369,9 +386,9 @@ app.post("/", async (c) => {
          phone, status, basicSalarySen, workingHoursPerDay, workingDaysPerMonth, otMultiplier,
          epfEnabled, socsoEnabled, eisEnabled, pcbEnabled,
          joinDate, icNumber, passportNumber, nationality,
-         efficiencyAllowanceSen, efficiencyThresholdPct,
+         efficiencyAllowanceSen, efficiencyThresholdPct, leadershipAllowanceSen,
          paymentMethod, bankName, bankAccount)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
       .bind(
         id,
@@ -401,6 +418,7 @@ app.post("/", async (c) => {
         "",
         effAllowanceSen,
         effThresholdPct,
+        leadAllowanceSen,
         // Cash needs no bank; storing them anyway leaves a stale account behind
         // the moment someone is switched to cash.
         normalizePaymentMethod(paymentMethod),
@@ -595,6 +613,19 @@ app.put("/:id", async (c) => {
       );
     }
 
+    // Leadership allowance config — same partial-update-friendly shape, no
+    // threshold to validate.
+    const nextLeadAllowanceSen =
+      body.leadershipAllowanceSen == null
+        ? existing.leadershipAllowanceSen ?? 0
+        : Math.round(Number(body.leadershipAllowanceSen));
+    if (!Number.isFinite(nextLeadAllowanceSen) || nextLeadAllowanceSen < 0) {
+      return c.json(
+        { success: false, error: "Leadership allowance must be 0 or more." },
+        400,
+      );
+    }
+
     const merged = {
       // Payment defaults — an omitted field keeps what is already stored, so a
       // partial PUT from another screen can't silently blank someone's bank.
@@ -659,6 +690,7 @@ app.put("/:id", async (c) => {
       resignedAt: nextResignedAt,
       efficiencyAllowanceSen: nextEffAllowanceSen,
       efficiencyThresholdPct: nextEffThresholdPct,
+      leadershipAllowanceSen: nextLeadAllowanceSen,
       // Per-worker leave entitlement overrides. NULL means "no override — use
       // the system default" (8 annual / 14 medical), which is what every row
       // holds today, so leaving these alone changes nobody's balance.
@@ -685,7 +717,7 @@ app.put("/:id", async (c) => {
          epfEnabled = ?, socsoEnabled = ?, eisEnabled = ?, pcbEnabled = ?,
          taxResidency = ?, taxCategory = ?, taxChildReliefSen = ?,
          joinDate = ?, icNumber = ?, passportNumber = ?, nationality = ?, resignedAt = ?,
-         efficiencyAllowanceSen = ?, efficiencyThresholdPct = ?,
+         efficiencyAllowanceSen = ?, efficiencyThresholdPct = ?, leadershipAllowanceSen = ?,
          paymentMethod = ?, bankName = ?, bankAccount = ?,
          isOutsource = ?, payMode = ?, dailyRateSen = ?,
          annual_leave_entitlement_days = ?, medical_leave_entitlement_days = ?
@@ -719,6 +751,7 @@ app.put("/:id", async (c) => {
         merged.resignedAt,
         merged.efficiencyAllowanceSen,
         merged.efficiencyThresholdPct,
+        merged.leadershipAllowanceSen,
         normalizePaymentMethod(merged.paymentMethod),
         normalizePaymentMethod(merged.paymentMethod) === "CASH" ? null : (merged.bankName || null),
         normalizePaymentMethod(merged.paymentMethod) === "CASH" ? null : (merged.bankAccount || null),
