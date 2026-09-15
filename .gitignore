@@ -36,6 +36,9 @@ tsc-out.txt
 .dev.vars
 .dev.vars.*
 !.dev.vars.example
+.env
+.env.local
+.env.*.local
 
 # Derived from seed.sql via scripts/chunk-seed.ts
 migrations/seed-chunks/
