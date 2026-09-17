@@ -1699,6 +1699,18 @@ export default function InventoryPage() {
     return data;
   }, [liveRawMaterials, rmSearch, rmCategoryFilter]);
 
+  // Mirrors of the FG/RM DataGrid's OWN internal search + column filters
+  // (separate from fgSearch/fgCategoryFilter above, which only narrow
+  // filteredFG/filteredRM — the grid applies a SECOND filter pass on top of
+  // that data, invisible to the parent unless reported back via
+  // onFilteredDataChange). Export must read these, not filteredFG/filteredRM,
+  // or it silently ignores whatever filter the grid's own search box or
+  // column filters currently have active. Initialised to filteredFG/filteredRM
+  // so Export shows a correct count immediately, before the grid's own effect
+  // fires on mount.
+  const [visibleFGRows, setVisibleFGRows] = useState<FGItem[]>(filteredFG);
+  const [visibleRMRows, setVisibleRMRows] = useState<RawMaterial[]>(filteredRM);
+
   // ---- KPIs ----
   const fgBedframeCount = fgItems.filter(p => p.category === "BEDFRAME").length;
   const fgSofaCount = fgItems.filter(p => p.category === "SOFA").length;
@@ -2138,7 +2150,7 @@ export default function InventoryPage() {
               onClick={() =>
                 exportImportRows(
                   fgImportColumns,
-                  filteredFG.map((p) => ({
+                  visibleFGRows.map((p) => ({
                     id: p.id,
                     code: p.code,
                     name: p.name,
@@ -2154,7 +2166,7 @@ export default function InventoryPage() {
                 )
               }
             >
-              <Download className="h-4 w-4" /> Export ({filteredFG.length})
+              <Download className="h-4 w-4" /> Export ({visibleFGRows.length})
             </Button>
             <Button variant="primary" size="sm" onClick={() => setShowCreateFG(true)}>
               <Plus className="h-4 w-4" /> Add FG
@@ -2472,6 +2484,7 @@ export default function InventoryPage() {
                 contextMenuItems={fgContextMenu}
                 onRowClick={(row) => openBreakdown(fgBreakdownTarget(row))}
                 onDoubleClick={(row) => { cancelPendingBreakdown(); handleDoubleClickFG(row); }}
+                onFilteredDataChange={setVisibleFGRows}
               />
             </CardContent>
           </Card>
@@ -2598,7 +2611,7 @@ export default function InventoryPage() {
               onClick={() =>
                 exportImportRows(
                   rmImportColumns,
-                  filteredRM.map((r) => ({
+                  visibleRMRows.map((r) => ({
                     id: r.id,
                     itemCode: r.itemCode,
                     description: r.description,
@@ -2611,7 +2624,7 @@ export default function InventoryPage() {
                 )
               }
             >
-              <Download className="h-4 w-4" /> Export ({filteredRM.length})
+              <Download className="h-4 w-4" /> Export ({visibleRMRows.length})
             </Button>
             <Button variant="outline" size="sm" onClick={() => { setMatCatSel(matCatSel || RM_ITEM_GROUPS[0]); setShowMaterialCats(true); }}>
               <Layers className="h-4 w-4" /> Categories
@@ -2857,6 +2870,7 @@ export default function InventoryPage() {
                 contextMenuItems={rmContextMenu}
                 onRowClick={(row) => openBreakdown(rmBreakdownTarget(row))}
                 onDoubleClick={(row) => { cancelPendingBreakdown(); void handleDoubleClickRM(row); }}
+                onFilteredDataChange={setVisibleRMRows}
               />
             </CardContent>
           </Card>

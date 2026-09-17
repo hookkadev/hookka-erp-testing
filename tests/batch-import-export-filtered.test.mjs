@@ -26,18 +26,37 @@ test('Products page Export button uses the filtered/sorted rows, not the raw lis
   assert.match(src, /currentRows=\{products\.map\(\(p\) => \(\{/);
 });
 
-test('Inventory FG Export button uses filteredFG, RM Export button uses filteredRM', () => {
+test('Inventory FG/RM DataGrids report their internal filter state back to the page', () => {
+  const src = readFileSync('src/pages/inventory/index.tsx', 'utf8');
+  // The DataGrid component applies its OWN search + column filters on top of
+  // whatever `data` it's given — filteredFG/filteredRM only capture the
+  // toolbar-level search/category filter above the grid, not the grid's own
+  // internal one. Without onFilteredDataChange, Export silently ignores the
+  // grid's active filter (BUG: "Export (495)" while the grid showed "3 of 495").
+  assert.match(
+    src,
+    /gridId="inventory-fg"[\s\S]{0,500}onFilteredDataChange=\{setVisibleFGRows\}/,
+    'FG grid must report its internal filtered rows back via onFilteredDataChange',
+  );
+  assert.match(
+    src,
+    /gridId="inventory-rm"[\s\S]{0,500}onFilteredDataChange=\{setVisibleRMRows\}/,
+    'RM grid must report its internal filtered rows back via onFilteredDataChange',
+  );
+});
+
+test('Inventory FG Export button uses visibleFGRows, RM Export button uses visibleRMRows', () => {
   const src = readFileSync('src/pages/inventory/index.tsx', 'utf8');
   assert.match(src, /import \{ exportImportRows \} from "@\/components\/ui\/batch-import-dialog";/);
   assert.match(
     src,
-    /exportImportRows\(\s*fgImportColumns,\s*filteredFG\.map/,
-    'FG export must read from filteredFG (category + search applied), not the raw products array',
+    /exportImportRows\(\s*fgImportColumns,\s*visibleFGRows\.map/,
+    'FG export must read from visibleFGRows (the grid\'s own filter applied), not filteredFG or the raw products array',
   );
   assert.match(
     src,
-    /exportImportRows\(\s*rmImportColumns,\s*filteredRM\.map/,
-    'RM export must read from filteredRM, not the raw liveRawMaterials array',
+    /exportImportRows\(\s*rmImportColumns,\s*visibleRMRows\.map/,
+    'RM export must read from visibleRMRows, not filteredRM or the raw liveRawMaterials array',
   );
   // Import-side matching must still see the FULL dataset for both — untouched.
   assert.match(src, /currentRows=\{products\.map\(\(p\) => \(\{/);
