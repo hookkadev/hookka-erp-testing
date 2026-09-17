@@ -42,7 +42,10 @@ type Feed = {
       withBothDates: number;
       completedTotal: number;
     };
-    productionCost: {
+    // Optional, not just possibly-missing-in-theory: this key was added after
+    // dashboard:prototype:* was already cached at a 60s TTL, so the first
+    // request after deploy can genuinely serve an old payload without it.
+    productionCost?: {
       byDay: { date: string; materialSen: number; laborSen: number; overheadSen: number; totalSen: number; batches: number }[];
       totalBatches: number;
       batchesWithCost: number;
@@ -72,18 +75,18 @@ export function SitiOpsView() {
   );
 
   const costChartData = useMemo(
-    () => (production?.productionCost.byDay ?? []).map((d) => ({
+    () => (production?.productionCost?.byDay ?? []).map((d) => ({
       date: d.date.slice(5),
       Material: Math.round(d.materialSen / 100),
       Labor: Math.round(d.laborSen / 100),
       Overhead: Math.round(d.overheadSen / 100),
     })),
-    [production?.productionCost.byDay],
+    [production?.productionCost?.byDay],
   );
 
   const totalCostSen = useMemo(
-    () => (production?.productionCost.byDay ?? []).reduce((a, d) => a + d.totalSen, 0),
-    [production?.productionCost.byDay],
+    () => (production?.productionCost?.byDay ?? []).reduce((a, d) => a + d.totalSen, 0),
+    [production?.productionCost?.byDay],
   );
 
   if (loading) {
@@ -150,7 +153,7 @@ export function SitiOpsView() {
           label="Production Cost"
           value={formatCurrency(totalCostSen)}
           sub={
-            production
+            production?.productionCost
               ? `${production.productionCost.batchesWithCost} / ${production.productionCost.totalBatches} batches costed`
               : undefined
           }
@@ -319,7 +322,7 @@ export function SitiOpsView() {
             Material + labor cost of finished-goods batches, by completion date — whole book, not scoped to the
             period picker. Reads <span className="font-mono">fg_batches</span>; a batch is only costed once{" "}
             <span className="font-mono">po-cost-cascade.ts</span> settles its material side, so{" "}
-            {production ? `${production.productionCost.batchesWithCost} of ${production.productionCost.totalBatches}` : "some"}{" "}
+            {production?.productionCost ? `${production.productionCost.batchesWithCost} of ${production.productionCost.totalBatches}` : "some"}{" "}
             batches carry a real number — the rest are RM 0.00 by construction, not a real zero cost.
           </p>
         </CardContent>

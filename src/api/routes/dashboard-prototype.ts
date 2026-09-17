@@ -313,7 +313,11 @@ app.get("/", async (c) => {
   // 60s SWR cache is safe: no write path needs to invalidate it, and it's
   // the same TTL/mechanism dashboard-overview.ts already uses for the same
   // "many sequential queries on every page load" problem.
-  const rawPayload = await cached(c, `dashboard:prototype:${orgId}:v1`, 60, async () => {
+  // v2 (2026-09-17): payload gained production.productionCost. A pre-bump
+  // body has no such key — exactly what crashed SitiOpsView.tsx on a stale
+  // cache hit — bumping makes that window zero instead of waiting out the
+  // 60s TTL.
+  const rawPayload = await cached(c, `dashboard:prototype:${orgId}:v2`, 60, async () => {
   // ---- Sales ------------------------------------------------------------
   // Whole book, not a window: the prototype owns the month picker, so it
   // needs every month that exists. ~1,500 rows of seven columns is small
