@@ -31,6 +31,8 @@ const {
   buildAllocationStatement,
   loadAvailability,
   loadOpenAllocationsForOrder,
+  planAutoAllocation,
+  SYSTEM_ALLOCATION_ACTOR,
 } = await import(
   pathToFileURL(resolve(process.cwd(), "src/api/lib/stock-allocations.ts")).href
 );
@@ -230,6 +232,139 @@ test("an order's holding is NET of releases; a fully released line is absent", a
     ),
     "lines that net to zero are dropped, not shown as a zero to release again",
   );
+});
+
+// ── auto-allocation on confirm, and the rails on it ────────────────────────
+//
+// The owner removed an automatic cross-order redirect on 2026-06-08 because
+// scanning a sticker silently completed a DIFFERENT order's card. Automatic
+// allocation is the same shape of idea, so each rail it is allowed under is
+// pinned here rather than left to a comment.
+
+const autoDb = ({ onHand = 0, allocated = 0, held = [] }) =>
+  fakeDb((q) => {
+    if (/FROM production_orders/i.test(q)) {
+      return [{ product_code: "A100", on_hand_qty: onHand, in_production_qty: 0 }];
+    }
+    if (/net_qty/i.test(q) || /HAVING/i.test(q)) return held;
+    if (/FROM stock_allocations/i.test(q)) {
+      return [{ product_code: "A100", allocated_qty: allocated }];
+    }
+    return [];
+  });
+
+const ORDER = { id: "so-1", companySOId: "SO-2609-018", isStock: false };
+const AT = "2026-09-17T00:00:00.000Z";
+
+test("a stock order never allocates to itself", async () => {
+  const plan = await planAutoAllocation(
+    autoDb({ onHand: 10 }),
+    "hookka",
+    { id: "so-stock", companySOId: "SOH-2609-001", isStock: true },
+    [{ productCode: "A100", quantity: 5, soItemId: "i1", soLineNo: 1 }],
+    SYSTEM_ALLOCATION_ACTOR,
+    AT,
+  );
+  assert.equal(plan.statements.length, 0, "the stock order IS the stock");
+});
+
+test("a line a human already allocated is left ALONE, not topped up", async () => {
+  const plan = await planAutoAllocation(
+    autoDb({
+      onHand: 10,
+      allocated: 2,
+      held: [
+        {
+          product_code: "A100",
+          sales_order_id: "so-1",
+          sales_order_no: "SO-2609-018",
+          so_item_id: "i1",
+          so_line_no: 1,
+          net_qty: 2,
+        },
+      ],
+    }),
+    "hookka",
+    ORDER,
+    [{ productCode: "A100", quantity: 10, soItemId: "i1", soLineNo: 1 }],
+    SYSTEM_ALLOCATION_ACTOR,
+    AT,
+  );
+  assert.equal(
+    plan.statements.length,
+    0,
+    "a manual decision wins — nothing moves behind the operator's back",
+  );
+});
+
+test("two lines of the same product cannot both claim the same pieces", async () => {
+  const db = autoDb({ onHand: 5 });
+  const plan = await planAutoAllocation(
+    db,
+    "hookka",
+    ORDER,
+    [
+      { productCode: "A100", quantity: 4, soItemId: "i1", soLineNo: 1 },
+      { productCode: "A100", quantity: 4, soItemId: "i2", soLineNo: 2 },
+    ],
+    SYSTEM_ALLOCATION_ACTOR,
+    AT,
+  );
+  await db.batch(plan.statements);
+  const taken = db.written.map((w) => Number(bindsOf(w).quantity));
+  assert.deepEqual(taken, [4, 1], "the second line gets only what is left");
+  assert.equal(
+    taken.reduce((a, b) => a + b, 0),
+    5,
+    "never more than exists",
+  );
+});
+
+test("partial allocation says out loud how many still have to be made", async () => {
+  const plan = await planAutoAllocation(
+    autoDb({ onHand: 4 }),
+    "hookka",
+    ORDER,
+    [{ productCode: "A100", quantity: 10, soItemId: "i1", soLineNo: 1 }],
+    SYSTEM_ALLOCATION_ACTOR,
+    AT,
+  );
+  assert.equal(plan.statements.length, 1);
+  assert.match(plan.notes[0], /Allocated 4 x A100 from stock/);
+  assert.match(plan.notes[0], /6 to be produced/);
+});
+
+test("nothing on the shop floor is touched — ledger rows only", async () => {
+  const db = autoDb({ onHand: 10 });
+  const plan = await planAutoAllocation(
+    db,
+    "hookka",
+    ORDER,
+    [{ productCode: "A100", quantity: 3, soItemId: "i1", soLineNo: 1 }],
+    SYSTEM_ALLOCATION_ACTOR,
+    AT,
+  );
+  await db.batch(plan.statements);
+  for (const w of db.written) {
+    assert.match(
+      w.sql,
+      /^INSERT INTO stock_allocations/i,
+      "the 2026-06-08 removal is the precedent: allocation must not move production",
+    );
+  }
+});
+
+test("no stock, no allocation — and no empty row to explain later", async () => {
+  const plan = await planAutoAllocation(
+    autoDb({ onHand: 0 }),
+    "hookka",
+    ORDER,
+    [{ productCode: "A100", quantity: 6, soItemId: "i1", soLineNo: 1 }],
+    SYSTEM_ALLOCATION_ACTOR,
+    AT,
+  );
+  assert.equal(plan.statements.length, 0);
+  assert.equal(plan.notes.length, 0);
 });
 
 // ── the append-only discipline ─────────────────────────────────────────────

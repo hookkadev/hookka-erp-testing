@@ -42,6 +42,11 @@ import {
 } from "./_shared/item-catalog-snap";
 import { withOrgScope, getOrgId } from "../lib/tenant";
 import {
+  ensureStockAllocationSchema,
+  planAutoAllocation,
+  SYSTEM_ALLOCATION_ACTOR,
+} from "../lib/stock-allocations";
+import {
   resolveCompanyCode,
   readCompanyCode,
   classifyBatchReassign,
@@ -2699,6 +2704,45 @@ app.post("/:id/confirm", async (c) => {
     ? ["Production orders already exist for this SO — skipped duplicate creation."]
     : productionOrders.map((po) => `Created PO ${po.poNo}`);
 
+  // DEV-05 — hand already-built stock to this order (owner 2026-09-07:
+  // allocation is automatic on confirm). The statements ride the SAME batch as
+  // the confirm below, so an allocation can never land without the confirm that
+  // caused it. Best-effort: a factory must still be able to confirm an order
+  // when the ledger is unreachable, but the failure is LOUD rather than a
+  // silent "nothing was available" — those two read identically on screen and
+  // that is how a planner's "0 items" came to mean "cannot see".
+  let allocationStmts: D1PreparedStatement[] = [];
+  try {
+    await ensureStockAllocationSchema(c.var.DB);
+    const userId = (c as unknown as { get: (k: string) => unknown }).get("userId");
+    const plan = await planAutoAllocation(
+      c.var.DB,
+      getOrgId(c),
+      existing,
+      items.map((it) => ({
+        productCode: it.productCode ?? "",
+        soItemId: it.id ?? null,
+        soLineNo: it.lineNo ?? null,
+        quantity: Number(it.quantity) || 0,
+      })),
+      typeof userId === "string" && userId
+        ? { type: "USER", id: userId, name: null }
+        : SYSTEM_ALLOCATION_ACTOR,
+      now,
+    );
+    allocationStmts = plan.statements;
+    autoActions.push(...plan.notes);
+  } catch (err) {
+    console.error(
+      `[dev-05] auto-allocation failed for SO ${id} — order confirmed WITHOUT stock allocation. err=${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    autoActions.push(
+      "Stock allocation could not be checked — allocate from the order detail page.",
+    );
+  }
+
   // 2026-04-28: confirm lands at IN_PRODUCTION directly. The PO cascade
   // below kicks off lead-time scheduling, so the SO IS in production the
   // moment confirm completes — there is no meaningful CONFIRMED steady
@@ -2722,6 +2766,7 @@ app.post("/:id/confirm", async (c) => {
       JSON.stringify(autoActions),
     ),
     ...poStmts,
+    ...allocationStmts,
   ]);
 
   const order = await fetchSOWithItems(c.var.DB, id);

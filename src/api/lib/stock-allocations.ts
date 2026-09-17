@@ -260,6 +260,98 @@ export async function loadAvailability(
   return out;
 }
 
+export type AutoAllocationLine = {
+  productCode: string;
+  soItemId?: string | null;
+  soLineNo?: number | null;
+  quantity: number;
+};
+
+export type AutoAllocationPlan = {
+  statements: D1PreparedStatement[];
+  /** One human sentence per allocation, for so_status_changes.autoActions. */
+  notes: string[];
+};
+
+/**
+ * Owner decision 2026-09-07: allocation is AUTOMATIC when a sales order is
+ * confirmed. The rails that keep this from repeating the 2026-06-08 removal
+ * ("your scan silently completes someone else's job") are all here:
+ *
+ *   • it touches UNALLOCATED stock only — availability is already net of every
+ *     open claim, so nothing is ever taken from another order;
+ *   • a MANUAL decision always wins — a line that already holds an allocation
+ *     is skipped entirely rather than topped up, so no operator's number is
+ *     changed behind their back;
+ *   • NOTHING on the shop floor changes — this writes ledger rows and not one
+ *     job card, production order or piece;
+ *   • it is VISIBLE and REVERSIBLE — every row is named in autoActions on the
+ *     order's own history, and POST /release gives it back.
+ *
+ * Returns statements so the caller can carry them in the SAME batch as the
+ * confirm. An allocation that could land without its confirm (or the reverse)
+ * is exactly the drift this ledger exists to prevent.
+ */
+export async function planAutoAllocation(
+  db: D1Database,
+  orgId: string,
+  order: { id: string; companySOId?: string | null; isStock?: boolean | null },
+  lines: AutoAllocationLine[],
+  actor: AllocationActor,
+  occurredAt: string,
+): Promise<AutoAllocationPlan> {
+  // A stock order IS the stock. Allocating to it would be the placeholder
+  // problem all over again.
+  if (order.isStock === true) return { statements: [], notes: [] };
+
+  const wanted = lines.filter((l) => l.productCode && l.quantity > 0);
+  if (wanted.length === 0) return { statements: [], notes: [] };
+
+  const alreadyHeld = await loadOpenAllocationsForOrder(db, order.id);
+  const heldLineKeys = new Set(
+    alreadyHeld.map((a) => `${a.productCode}::${a.soItemId ?? ""}`),
+  );
+
+  const codes = [...new Set(wanted.map((l) => l.productCode))];
+  const avail = await loadAvailability(db, orgId, codes);
+  // Spend down a LOCAL copy so two lines of the same product cannot both claim
+  // the same pieces.
+  const remaining = new Map(
+    [...avail.entries()].map(([code, a]) => [code, a.availableQty]),
+  );
+
+  const statements: D1PreparedStatement[] = [];
+  const notes: string[] = [];
+  for (const line of wanted) {
+    if (heldLineKeys.has(`${line.productCode}::${line.soItemId ?? ""}`)) continue;
+    const free = remaining.get(line.productCode) ?? 0;
+    const take = Math.min(line.quantity, free);
+    if (take < 1) continue;
+    remaining.set(line.productCode, free - take);
+    statements.push(
+      buildAllocationStatement(db, "ALLOCATE", {
+        productCode: line.productCode,
+        quantity: take,
+        salesOrderId: order.id,
+        salesOrderNo: order.companySOId ?? null,
+        soItemId: line.soItemId ?? null,
+        soLineNo: line.soLineNo ?? null,
+        actor,
+        occurredAt,
+        reason: "Auto-allocated on order confirmation",
+        orgId,
+      }),
+    );
+    notes.push(
+      `Allocated ${take} x ${line.productCode} from stock` +
+        (line.quantity > take
+          ? ` (${line.quantity - take} to be produced)`
+          : ""),
+    );
+  }
+  return { statements, notes };
+}
+
 export type OpenAllocation = {
   productCode: string;
   salesOrderId: string;
