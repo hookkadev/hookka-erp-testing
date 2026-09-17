@@ -77,6 +77,12 @@ const SO_PIPELINE_ORDER = [
 
 type SoRow = {
   id: string;
+  // The OFFICIAL SO date. The house Command Center buckets its monthly revenue
+  // on this, while created_at is when the row was entered — the two disagree
+  // whenever an order is back-dated, which is why the two surfaces can report
+  // different months for the same order. Carried so the difference can be
+  // measured rather than argued about.
+  companySODate: string | null;
   companySO: string | null;
   // See the DoRow comment above — same drift, same table family. Read this,
   // not company_so, for anything shown as "the SO number."
@@ -230,6 +236,15 @@ const PO_TIERS: Array<{ key: string; label: string; test: (d: number) => boolean
   { key: "critical", label: "15+ days late", test: (d) => d >= 15 },
 ];
 
+// What the house Command Center counts as revenue-bearing: every SO except
+// DRAFT / CANCELLED / ON_HOLD (dashboard-overview.ts:516 —
+// `status NOT IN ('DRAFT','CANCELLED','ON_HOLD')`). Kept as one predicate so
+// the count and the money can never drift apart, and so the next person can
+// see WHY these three are out rather than inferring it from a filter.
+const NON_REVENUE_STATUSES = new Set(["DRAFT", "CANCELLED", "ON_HOLD"]);
+const isConfirmed = (status: string | null | undefined): boolean =>
+  !NON_REVENUE_STATUSES.has((status ?? "").toUpperCase());
+
 const num = (v: unknown): number => {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
@@ -309,8 +324,8 @@ app.get("/", async (c) => {
   const salesSec = await section("sales", () =>
     c.var.DB.prepare(
       `SELECT id, company_so, company_so_id, customer_name, status, total_sen,
-              created_at, customer_delivery_date, hookka_expected_dd,
-              is_service_order, customer_state
+              created_at, company_so_date, customer_delivery_date,
+              hookka_expected_dd, is_service_order, customer_state
          FROM sales_orders
         WHERE org_id = ?
         ORDER BY created_at ASC`,
@@ -324,7 +339,27 @@ app.get("/", async (c) => {
   // Sales tab's own figures (count, revenue, pipeline) use ONLY this subset —
   // `soRows` above stays whole-book because the OTIF join further down needs
   // every order, service or not.
-  const salesTabRows = soRows.filter((r) => !r.isServiceOrder);
+  // Service orders are INCLUDED (owner 2026-09-15). They were excluded here
+  // while the house Command Center's monthly revenue has never filtered them,
+  // which put this page RM 5,900 below it for Sep 2026 across 11 SV- orders.
+  // `isServiceOrder` still rides on every row, so a consumer that wants them
+  // split can still split them.
+  const salesTabRows = soRows;
+
+  // What the line above THROWS AWAY, published so the exclusion is auditable.
+  // The house Command Center's monthly revenue does NOT filter service orders,
+  // so a figure here will sit below its figure by exactly this much for the
+  // same month — and without this, that difference can only be guessed at.
+  const excludedServiceOrders = soRows
+    .filter((r) => r.isServiceOrder)
+    .map((r) => ({
+      no: r.companySOId ?? r.companySO,
+      customer: r.customerName,
+      status: r.status,
+      totalSen: num(r.totalSen),
+      createdAt: dayKey(r.createdAt),
+      soDate: dayKey(r.companySODate),
+    }));
 
   // Sales Orders view: State x Category x SKU breakdown (Sales Attribution's
   // neighbour, owner 2026-08-28). item_category/product_code/line_total_sen
@@ -388,9 +423,15 @@ app.get("/", async (c) => {
     if (!k) continue;
     let e = salesByDay.get(k);
     if (!e) salesByDay.set(k, (e = { date: k, orders: 0, revenueSen: 0, cancelled: 0 }));
-    e.orders++;
-    if (r.status === "CANCELLED") e.cancelled++;
-    else e.revenueSen += num(r.totalSen);
+    // Only confirmed orders reach the count OR the money — a DRAFT is not a
+    // sale yet, and counting it in one place but not the other is how the two
+    // figures on a card start disagreeing.
+    if (isConfirmed(r.status)) {
+      e.orders++;
+      e.revenueSen += num(r.totalSen);
+    } else if ((r.status ?? "").toUpperCase() === "CANCELLED") {
+      e.cancelled++;
+    }
   }
 
   // Pipeline. Known statuses keep their pipeline order; anything the data
@@ -1474,10 +1515,12 @@ app.get("/", async (c) => {
         status: r.status,
         totalSen: num(r.totalSen),
         createdAt: dayKey(r.createdAt),
+        soDate: dayKey(r.companySODate),
         deliveryDate: dayKey(r.customerDeliveryDate),
         isServiceOrder: !!r.isServiceOrder,
       })),
       byStateCategory: [...stateCategorySkuMap.values()],
+      excludedServiceOrders,
     },
     delivery: {
       otif,
