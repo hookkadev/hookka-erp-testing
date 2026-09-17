@@ -262,10 +262,42 @@ app.post("/release", async (c) => {
     return c.json({ success: false, error: "quantity must be >= 1" }, 400);
   }
 
-  const held = (await loadAllocatedPOsForOrder(db, salesOrderId)).filter(
+  const allHeld = (await loadAllocatedPOsForOrder(db, salesOrderId)).filter(
     (p) => p.productCode === productCode,
   );
+
+  // Q5, owner 2026-09-07: reversible UNTIL THE DELIVERY NOTE IS ISSUED. A piece
+  // already named on a live delivery order has left the reversible window —
+  // giving it back to the pool while a driver is loading it is exactly the
+  // "moved behind an operator's back" this feature must never do. Same
+  // predicate the Delivery page uses to decide what is already spoken for.
+  const onDo = new Set<string>();
+  if (allHeld.length > 0) {
+    const ph = allHeld.map(() => "?").join(",");
+    const res = await db
+      .prepare(
+        `SELECT DISTINCT doi.productionOrderId AS poId
+           FROM delivery_order_items doi
+           JOIN delivery_orders d ON d.id = doi.deliveryOrderId
+          WHERE doi.productionOrderId IN (${ph})
+            AND d.status <> 'CANCELLED'`,
+      )
+      .bind(...allHeld.map((p) => p.id))
+      .all<{ poId: string | null }>();
+    for (const r of res.results ?? []) if (r.poId) onDo.add(r.poId);
+  }
+  const held = allHeld.filter((p) => !onDo.has(p.id));
   const heldQty = held.reduce((n, p) => n + p.quantity, 0);
+  if (heldQty === 0 && onDo.size > 0) {
+    return c.json(
+      {
+        success: false,
+        code: "ON_DELIVERY_NOTE",
+        error: `The ${productCode} this order holds is already on a delivery note and can no longer be released.`,
+      },
+      422,
+    );
+  }
   if (heldQty === 0) {
     return c.json(
       {

@@ -91,6 +91,72 @@ correctness bug in the key, and mixing them into one change would have made the
 
 ---
 
+## BUG-2026-09-17-183 — a finished stock order walked into Pending Delivery and could ride a customer's delivery note at price zero `production` `delivery` `invoicing` 🟢
+
+🟢 Fixed (DEV-05, PRD T-014 findings 14 + 15). Two halves of one hole.
+
+**The gate had no case for it.** `poReadyForDelivery` (`src/lib/delivery-pipeline.ts`)
+excluded CANCELLED, ON_HOLD and consignment orders, but not a stock order — so
+the moment its upholstery cards completed, a stock PO appeared in Pending
+Delivery beside real customers' pieces, with no check that its order had ever
+been confirmed (it never is; it sits in DRAFT).
+
+**The one-customer check could not see it.** The delivery order's
+customer-consistency guard (`delivery-orders/_helpers.ts:2168`) builds its set
+with `if (r.customerId) custMap.set(...)`. A stock order's `customerId` was the
+empty string — falsy — so it was never added, never conflicted, and passed
+silently. The invoice then resolved back through the production order to the
+placeholder order at price zero (`invoice-so-item-link.ts` walks
+`production_order_id` → SO line; the placeholder's lines were all RM 0).
+
+**Fix.** (1) The gate now blocks a stock PO while it still belongs to its stock
+order (`is_stock AND sales_order_id = stock_origin_so_id`), and lets it through
+once allocated — allocation moves `sales_order_id` to the customer, so from then
+on it is that order's piece with no special case anywhere downstream
+(`delivery-pipeline.ts poReadyForDelivery`). (2) The stock order is now booked
+against a real row, `cust-factory-stock`, so a truthy `customerId` makes the
+existing one-customer check see it — no change to that check.
+
+**Verified**: `tests/delivery-pipeline.test.mjs` — unallocated stock → not
+deliverable; the same order after allocation → deliverable. Prod exposure
+before the fix: UNMEASURED by this session; owner-reported zero stock orders on
+2026-09-07, so the path had never been exercised.
+
+## BUG-2026-09-17-182 — Create Stock PO bound the empty string into a foreign-key column `production` `schema` 🟢
+
+🟢 Fixed (DEV-05, PRD T-014 finding 13). `POST /production-orders/stock` wrote
+`customerId = ""` into `sales_orders`, under a comment reading *"NOT NULL but
+empty string OK"*. The column is `TEXT NOT NULL REFERENCES customers(id)`
+(`0001_init.sql:382,400`). The empty string only ever survived because D1 does
+not enforce foreign keys by default; Supabase Postgres does, so on the current
+engine every call was an FK violation and the button could not have worked.
+
+**Why nobody noticed.** Owner measured 2026-09-07: 1,617 sales orders, 3,354
+production orders, **zero** stock orders. The button had never once run to
+completion, so there was no failure to see — only an absence, which reads as
+"nobody used it".
+
+**Fix**: the stock order is booked against a real internal customer,
+`cust-factory-stock` ("Factory Stock", `is_active = 0` so it stays out of the
+pickers), seeded by `ensureStockOrderSchema` (`src/api/lib/stock-orders.ts`)
+before the first write. Migration 0235 is the record copy.
+
+**Verified** by type + column-existence tests only; the INSERT has not been run
+against Postgres by this session — first exercise is on the preview deploy.
+
+## BUG-2026-09-17-181 — the "Reserved" column never meant reserved `inventory` `naming` 🟢
+
+🟢 Fixed (DEV-05, PRD T-014 finding 6 / R17). The Finished Products grid, its
+KPI tile and the breakdown drawer all called a number "Reserved" that only ever
+counted pieces named on a **DRAFT delivery note** (`src/lib/fg-stock.ts`
+`deriveFGStock`, `poStatusByDO` DRAFT → `reservedQty`). That is downstream of
+production and says nothing about an order commitment; the word sent people
+looking for a reservation mechanism that existed nowhere in the system — there
+was no way to reserve anything for a sales order at all. Renamed "On draft DO"
+on all three surfaces (`tests/stock-breakdown.test.mjs` pins the parity and
+that neither screen calls it a reservation again). An order commitment is now a
+`stock_allocations` row, and is a different number.
+
 ## BUG-2026-09-07-179 — the unlock audit wrote to a column that rejects its own code `production` `audit` 🟢
 
 🟢 Fixed. `scan_override_audit.override_code` carries a CHECK from migration

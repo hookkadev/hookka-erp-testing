@@ -4332,3 +4332,53 @@ unapplied advances 0.00.
 **Next:** Houzs and The Conts openings (the Carress playbook, written into the
 checkpoint); the 18 Carress ghosts await a void ruling; the 10 CN/DN invoices;
 SUNMAT K26050470; May labour unposted.
+
+## 2026-09-17 — DEV-05 / PRD T-014: build for stock, then hand the goods to the order that arrives
+
+Ticket: DEV-05 (tracker row "Samuel · On Going · Low"), PRD `T-014-Hookka-make-to-stock-allocation`.
+Branch `feature/dev-05-make-to-stock-allocation` off `origin/staging` @ `ac9c3a6b`. Not pushed.
+
+**The ask, in one line:** the factory can build for stock, but nothing could
+hand those goods to a sales order when one arrived, and an unallocated stock
+order could ride a customer's delivery note at price zero.
+
+**Verified against source before building** (every PRD file:line citation
+re-read; only drift was `production/index.tsx:7148` → the button is at ~7045):
+the placeholder SO, the `""` customer into an FK column, `isStock` declared in
+`src/types` but in no migration and never written or read, the one-customer
+check blind to a blank id, the June 2026 WYSIWYG removal (`production-orders.ts:2011`).
+
+**Owner decisions applied** (tracker, 2026-09-07 + 2026-09-17): never used
+(1,617 SO / 3,354 PO / 0 stock — free to redesign); automatic on confirm with
+the four rails; earliest order wins; one internal customer; reversible until
+the delivery note; sofa sets go out whole. PRD §9 Q3/Q6/Q8 were already
+answered by R13/A5/A7; Q9 by the zero count.
+
+**Built** (7 commits, 4700 tests / 0 fail, all on fake DBs):
+- R4/R5 `is_stock` + `stock_origin_so_id` + `cust-factory-stock`; `POST /stock`
+  no longer writes an FK violation (BUG-182).
+- R2/R3 stock gated out of Pending Delivery until allocated; real customer id
+  makes the DO one-customer check see it (BUG-183).
+- R6 SO list + `/stats` exclude stock by default; both list reads now await the
+  self-apply (fresh-DB column race, BUG-2026-06-20-002 class).
+- R8–R13 `stock_allocations` append-only ledger, availability RECOMPUTED from
+  production_orders, allocate/release endpoints, auto-allocation in the confirm
+  batch, whole-order ownership transfer (never bare). `POST /stock` now builds
+  one order per piece like `production-builder.ts:518` — the only place that
+  had created a single order carrying the whole quantity.
+- R7 button gated on `production-orders:create`; R14 create screen shows
+  available/being-made per line; R15 detail-page allocate/release card; R16
+  STOCK chip on the production grid; R17 "Reserved" → "On draft DO" on all
+  three surfaces (BUG-181).
+- Q5: release refused once the piece is on a live delivery order.
+
+**NOT done / UNMEASURED:** nothing has touched a real Postgres — every
+`ALTER`/`CREATE` and every new SQL statement is unexecuted. No UI has been
+opened in a browser. A2–A8 unverified; verification is on the preview deploy
+(`pickDbUrl` routes preview hosts to `HYPERDRIVE_STAGING`). Flagged for infra,
+out of scope: the local `CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING*` values
+for prod and staging carry the SAME Supabase project ref.
+
+**Docs:** `API.md` regenerated (141 mounts / 962 handlers); `CODEBASE-MAP.md`
+Sales row + gotcha; `modules/sales.md` + `modules/inventory.md` restamped with
+re-derived anchors; BUG-181/182/183 logged.
