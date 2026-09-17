@@ -2353,6 +2353,7 @@
     "special_order",
     "start_date",
     "status",
+    "stock_origin_so_id",
     "stocked_in",
     "target_end_date",
     "updated_at"
@@ -2374,6 +2375,7 @@
     "fabric_code",
     "gap_inches",
     "id",
+    "is_stock",
     "item_category",
     "leg_height_inches",
     "line_no",
@@ -2395,6 +2397,7 @@
     "special_order",
     "start_date",
     "status",
+    "stock_origin_so_id",
     "stocked_in",
     "target_end_date",
     "updated_at"

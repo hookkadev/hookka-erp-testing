@@ -46,6 +46,7 @@ import {
   planAutoAllocation,
   SYSTEM_ALLOCATION_ACTOR,
 } from "../lib/stock-allocations";
+import { ensureStockOrderSchema } from "../lib/stock-orders";
 import {
   resolveCompanyCode,
   readCompanyCode,
@@ -2713,6 +2714,7 @@ app.post("/:id/confirm", async (c) => {
   // that is how a planner's "0 items" came to mean "cannot see".
   let allocationStmts: D1PreparedStatement[] = [];
   try {
+    await ensureStockOrderSchema(c.var.DB);
     await ensureStockAllocationSchema(c.var.DB);
     const userId = (c as unknown as { get: (k: string) => unknown }).get("userId");
     const plan = await planAutoAllocation(

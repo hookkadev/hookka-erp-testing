@@ -49,6 +49,7 @@
 // ---------------------------------------------------------------------------
 import type { D1Database, D1PreparedStatement } from "@cloudflare/workers-types";
 import { runSelfApply, memoizeSelfApply } from "./self-apply";
+import { STOCK_CUSTOMER_NAME } from "./stock-orders";
 
 let _mig: Promise<void> | null = null;
 
@@ -185,12 +186,20 @@ export type ProductAvailability = {
 };
 
 /**
- * R11 — the availability figure that did not exist. Only STOCK production
- * orders count as supply: a normal made-to-order PO is already somebody's.
+ * R11 — the availability figure that did not exist.
  *
- * CANCELLED and ON_HOLD are excluded from both buckets. Cancelled goods are
- * not coming, and held work is paused — promising a delivery date off either
- * is how a salesperson ends up apologising.
+ * RECOMPUTED, NOT STORED. Every number here is derived from the production
+ * orders themselves, never from summing the ledger. A stock order is still
+ * unallocated exactly while `sales_order_id = stock_origin_so_id`; allocating
+ * it moves sales_order_id to the customer, which removes it from supply in the
+ * same stroke. There is therefore only ONE source of truth for "is this piece
+ * spoken for", and no possibility of the pool and the ledger disagreeing —
+ * which is the failure mode a stored counter always eventually finds.
+ *
+ * Only STOCK production orders count as supply: a normal made-to-order PO is
+ * already somebody's. CANCELLED and ON_HOLD are excluded from both buckets —
+ * cancelled goods are not coming and held work is paused, and promising a
+ * delivery date off either is how a salesperson ends up apologising.
  */
 export async function loadAvailability(
   db: D1Database,
@@ -202,13 +211,22 @@ export async function loadAvailability(
     ? ` AND product_code IN (${codes.map(() => "?").join(",")})`
     : "";
 
-  const supplyRes = await db
+  const res = await db
     .prepare(
       `SELECT product_code,
-              SUM(CASE WHEN status = 'COMPLETED' THEN quantity ELSE 0 END) AS on_hand_qty,
-              SUM(CASE WHEN status = 'COMPLETED' THEN 0 ELSE quantity END) AS in_production_qty
+              SUM(CASE WHEN status = 'COMPLETED'
+                        AND sales_order_id = stock_origin_so_id
+                       THEN quantity ELSE 0 END) AS available_qty,
+              SUM(CASE WHEN status = 'COMPLETED'
+                       THEN quantity ELSE 0 END) AS on_hand_qty,
+              SUM(CASE WHEN status <> 'COMPLETED'
+                        AND sales_order_id = stock_origin_so_id
+                       THEN quantity ELSE 0 END) AS in_production_qty,
+              SUM(CASE WHEN sales_order_id <> stock_origin_so_id
+                       THEN quantity ELSE 0 END) AS allocated_qty
          FROM production_orders
         WHERE is_stock = TRUE
+          AND stock_origin_so_id IS NOT NULL
           AND status NOT IN ('CANCELLED', 'ON_HOLD')
           AND product_code IS NOT NULL${filter}
         GROUP BY product_code`,
@@ -216,48 +234,182 @@ export async function loadAvailability(
     .bind(...codes)
     .all<{
       product_code: string;
+      available_qty: number | null;
       on_hand_qty: number | null;
       in_production_qty: number | null;
+      allocated_qty: number | null;
     }>();
 
-  const allocRes = await db
-    .prepare(
-      `SELECT product_code, SUM(direction * quantity) AS allocated_qty
-         FROM stock_allocations
-        WHERE org_id = ?${filter}
-        GROUP BY product_code`,
-    )
-    .bind(orgId, ...codes)
-    .all<{ product_code: string; allocated_qty: number | null }>();
-
   const out = new Map<string, ProductAvailability>();
-  const row = (code: string): ProductAvailability => {
-    let r = out.get(code);
-    if (!r) {
-      r = {
-        productCode: code,
-        onHandQty: 0,
-        inProductionQty: 0,
-        allocatedQty: 0,
-        availableQty: 0,
-      };
-      out.set(code, r);
-    }
-    return r;
-  };
-
-  for (const s of supplyRes.results ?? []) {
-    const r = row(s.product_code);
-    r.onHandQty = Number(s.on_hand_qty ?? 0);
-    r.inProductionQty = Number(s.in_production_qty ?? 0);
-  }
-  for (const a of allocRes.results ?? []) {
-    row(a.product_code).allocatedQty = Number(a.allocated_qty ?? 0);
-  }
-  for (const r of out.values()) {
-    r.availableQty = Math.max(0, r.onHandQty - r.allocatedQty);
+  for (const r of res.results ?? []) {
+    out.set(r.product_code, {
+      productCode: r.product_code,
+      onHandQty: Number(r.on_hand_qty ?? 0),
+      inProductionQty: Number(r.in_production_qty ?? 0),
+      allocatedQty: Number(r.allocated_qty ?? 0),
+      availableQty: Number(r.available_qty ?? 0),
+    });
   }
   return out;
+}
+
+export type AllocatablePO = {
+  id: string;
+  poNo: string | null;
+  productCode: string;
+  quantity: number;
+  stockOriginSoId: string;
+};
+
+/**
+ * The stock production orders that can be handed over, oldest first.
+ *
+ * Oldest first is the owner's tie-break ("earliest sales order date wins")
+ * applied to supply: the piece that has been waiting longest goes first, so
+ * stock cannot quietly age while newer output ships.
+ *
+ * Only FINISHED orders are offered. Promising a customer a piece that is still
+ * on the floor is a different decision from handing them one that exists, and
+ * this feature only claims to do the second.
+ */
+export async function loadAllocatablePOs(
+  db: D1Database,
+  productCode: string,
+): Promise<AllocatablePO[]> {
+  const res = await db
+    .prepare(
+      `SELECT id, poNo, product_code, quantity, stock_origin_so_id
+         FROM production_orders
+        WHERE is_stock = TRUE
+          AND stock_origin_so_id IS NOT NULL
+          AND sales_order_id = stock_origin_so_id
+          AND status = 'COMPLETED'
+          AND product_code = ?
+        ORDER BY created_at ASC, poNo ASC`,
+    )
+    .bind(productCode)
+    .all<{
+      id: string;
+      poNo: string | null;
+      product_code: string;
+      quantity: number | null;
+      stock_origin_so_id: string;
+    }>();
+  return (res.results ?? []).map((r) => ({
+    id: r.id,
+    poNo: r.poNo,
+    productCode: r.product_code,
+    quantity: Number(r.quantity ?? 0),
+    stockOriginSoId: r.stock_origin_so_id,
+  }));
+}
+
+export type OwnerTarget = {
+  salesOrderId: string;
+  salesOrderNo: string | null;
+  customerName: string | null;
+  customerState: string | null;
+};
+
+/**
+ * R12 — the ownership change itself, and it is NEVER BARE: the caller is
+ * expected to carry these statements in the same batch as the ledger rows that
+ * explain them, so a piece can never change hands without a record of why.
+ *
+ * `is_stock` is deliberately NOT cleared. It records how the piece was BORN,
+ * which stays true forever and is what tells an invoice this came from stock
+ * rather than from the customer's own production run. What changes is who owns
+ * it, and that is `sales_order_id` — the one link every downstream reader
+ * (delivery, the one-customer check, invoice-so-item-link) already trusts.
+ */
+export function buildOwnershipTransferStatements(
+  db: D1Database,
+  poIds: string[],
+  to: OwnerTarget,
+  updatedAt: string,
+): D1PreparedStatement[] {
+  return poIds.map((id) =>
+    db
+      .prepare(
+        `UPDATE production_orders
+            SET salesOrderId = ?, salesOrderNo = ?, companySOId = ?,
+                customerName = ?, customerState = ?, updated_at = ?
+          WHERE id = ?`,
+      )
+      .bind(
+        to.salesOrderId,
+        to.salesOrderNo,
+        to.salesOrderNo,
+        to.customerName,
+        to.customerState,
+        updatedAt,
+        id,
+      ),
+  );
+}
+
+/**
+ * The mirror of the transfer: hand the piece back to the stock order it was
+ * born against. `stock_origin_so_id` is what makes this exact rather than a
+ * guess — without it there would be no way to know where a released piece
+ * belongs.
+ */
+export function buildOwnershipReleaseStatements(
+  db: D1Database,
+  pos: Array<{ id: string; stockOriginSoId: string }>,
+  stockOrderNo: string | null,
+  updatedAt: string,
+): D1PreparedStatement[] {
+  return pos.map((po) =>
+    db
+      .prepare(
+        `UPDATE production_orders
+            SET salesOrderId = ?, salesOrderNo = ?, companySOId = ?,
+                customerName = ?, customerState = ?, updated_at = ?
+          WHERE id = ?`,
+      )
+      .bind(
+        po.stockOriginSoId,
+        stockOrderNo,
+        stockOrderNo,
+        STOCK_CUSTOMER_NAME,
+        "",
+        updatedAt,
+        po.id,
+      ),
+  );
+}
+
+/** The production orders this sales order currently holds FROM STOCK. */
+export async function loadAllocatedPOsForOrder(
+  db: D1Database,
+  salesOrderId: string,
+): Promise<AllocatablePO[]> {
+  const res = await db
+    .prepare(
+      `SELECT id, poNo, product_code, quantity, stock_origin_so_id
+         FROM production_orders
+        WHERE is_stock = TRUE
+          AND stock_origin_so_id IS NOT NULL
+          AND sales_order_id = ?
+          AND sales_order_id <> stock_origin_so_id
+        ORDER BY created_at ASC`,
+    )
+    .bind(salesOrderId)
+    .all<{
+      id: string;
+      poNo: string | null;
+      product_code: string;
+      quantity: number | null;
+      stock_origin_so_id: string;
+    }>();
+  return (res.results ?? []).map((r) => ({
+    id: r.id,
+    poNo: r.poNo,
+    productCode: r.product_code,
+    quantity: Number(r.quantity ?? 0),
+    stockOriginSoId: r.stock_origin_so_id,
+  }));
 }
 
 export type AutoAllocationLine = {
@@ -295,7 +447,13 @@ export type AutoAllocationPlan = {
 export async function planAutoAllocation(
   db: D1Database,
   orgId: string,
-  order: { id: string; companySOId?: string | null; isStock?: boolean | null },
+  order: {
+    id: string;
+    companySOId?: string | null;
+    isStock?: boolean | null;
+    customerName?: string | null;
+    customerState?: string | null;
+  },
   lines: AutoAllocationLine[],
   actor: AllocationActor,
   occurredAt: string,
@@ -307,46 +465,71 @@ export async function planAutoAllocation(
   const wanted = lines.filter((l) => l.productCode && l.quantity > 0);
   if (wanted.length === 0) return { statements: [], notes: [] };
 
-  const alreadyHeld = await loadOpenAllocationsForOrder(db, order.id);
-  const heldLineKeys = new Set(
-    alreadyHeld.map((a) => `${a.productCode}::${a.soItemId ?? ""}`),
-  );
+  const alreadyHeld = await loadAllocatedPOsForOrder(db, order.id);
+  const heldCodes = new Set(alreadyHeld.map((p) => p.productCode));
 
-  const codes = [...new Set(wanted.map((l) => l.productCode))];
-  const avail = await loadAvailability(db, orgId, codes);
-  // Spend down a LOCAL copy so two lines of the same product cannot both claim
-  // the same pieces.
-  const remaining = new Map(
-    [...avail.entries()].map(([code, a]) => [code, a.availableQty]),
-  );
+  // Candidates are fetched ONCE per product and spent down locally, so two
+  // lines of the same product cannot both claim the same production orders.
+  const pool = new Map<string, AllocatablePO[]>();
+  for (const code of new Set(wanted.map((l) => l.productCode))) {
+    pool.set(code, await loadAllocatablePOs(db, code));
+  }
 
   const statements: D1PreparedStatement[] = [];
   const notes: string[] = [];
   for (const line of wanted) {
-    if (heldLineKeys.has(`${line.productCode}::${line.soItemId ?? ""}`)) continue;
-    const free = remaining.get(line.productCode) ?? 0;
-    const take = Math.min(line.quantity, free);
-    if (take < 1) continue;
-    remaining.set(line.productCode, free - take);
+    // A manual decision wins: a product this order already holds from stock is
+    // left exactly as the operator set it.
+    if (heldCodes.has(line.productCode)) continue;
+
+    const candidates = pool.get(line.productCode) ?? [];
+    const taken: AllocatablePO[] = [];
+    let got = 0;
+    while (candidates.length > 0 && got < line.quantity) {
+      const next = candidates[0];
+      // Whole orders only — never split one to top up a line. Taking a set of
+      // 3 to satisfy a line that wants 1 would hand the customer two pieces
+      // nobody ordered.
+      if (got + next.quantity > line.quantity) break;
+      candidates.shift();
+      taken.push(next);
+      got += next.quantity;
+    }
+    if (taken.length === 0) continue;
+
     statements.push(
-      buildAllocationStatement(db, "ALLOCATE", {
-        productCode: line.productCode,
-        quantity: take,
-        salesOrderId: order.id,
-        salesOrderNo: order.companySOId ?? null,
-        soItemId: line.soItemId ?? null,
-        soLineNo: line.soLineNo ?? null,
-        actor,
+      ...buildOwnershipTransferStatements(
+        db,
+        taken.map((p) => p.id),
+        {
+          salesOrderId: order.id,
+          salesOrderNo: order.companySOId ?? null,
+          customerName: order.customerName ?? null,
+          customerState: order.customerState ?? null,
+        },
         occurredAt,
-        reason: "Auto-allocated on order confirmation",
-        orgId,
-      }),
+      ),
     );
+    for (const po of taken) {
+      statements.push(
+        buildAllocationStatement(db, "ALLOCATE", {
+          productCode: line.productCode,
+          quantity: po.quantity,
+          salesOrderId: order.id,
+          salesOrderNo: order.companySOId ?? null,
+          soItemId: line.soItemId ?? null,
+          soLineNo: line.soLineNo ?? null,
+          sourcePoId: po.id,
+          actor,
+          occurredAt,
+          reason: "Auto-allocated on order confirmation",
+          orgId,
+        }),
+      );
+    }
     notes.push(
-      `Allocated ${take} x ${line.productCode} from stock` +
-        (line.quantity > take
-          ? ` (${line.quantity - take} to be produced)`
-          : ""),
+      `Allocated ${got} x ${line.productCode} from stock` +
+        (line.quantity > got ? ` (${line.quantity - got} to be produced)` : ""),
     );
   }
   return { statements, notes };

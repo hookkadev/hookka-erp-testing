@@ -802,6 +802,7 @@
   "statementType": "statement_type",
   "stockControl": "stock_control",
   "stockMovementId": "stock_movement_id",
+  "stockOriginSoId": "stock_origin_so_id",
   "stockQty": "stock_qty",
   "stockedIn": "stocked_in",
   "stockedInDate": "stocked_in_date",

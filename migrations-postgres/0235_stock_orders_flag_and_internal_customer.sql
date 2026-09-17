@@ -42,6 +42,27 @@ ALTER TABLE sales_orders
 ALTER TABLE production_orders
   ADD COLUMN IF NOT EXISTS is_stock BOOLEAN NOT NULL DEFAULT FALSE;
 
+-- The stock order this production order was BORN against, kept for life.
+-- sales_order_id is then free to move to whoever is allocated the goods, and
+-- "still unallocated" is simply `sales_order_id = stock_origin_so_id` — one
+-- column, with no second state flag that could drift out of step with the
+-- first. It also preserves the provenance an invoice needs: this piece came
+-- from stock, and here is the order it was built under.
+ALTER TABLE production_orders
+  ADD COLUMN IF NOT EXISTS stock_origin_so_id TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_production_orders_stock_origin
+  ON production_orders (stock_origin_so_id);
+
+-- The archive twin, for the same reason sales_orders_archive gets one:
+-- fetchFilteredPOs reads `SELECT *, '' AS archivedAt FROM production_orders
+-- UNION ALL SELECT * FROM production_orders_archive`, and a UNION's two sides
+-- must have the same column count.
+ALTER TABLE production_orders_archive
+  ADD COLUMN IF NOT EXISTS is_stock BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE production_orders_archive
+  ADD COLUMN IF NOT EXISTS stock_origin_so_id TEXT;
+
 -- The archive twin gets it too. `?includeArchive=true` unions sales_orders with
 -- sales_orders_archive and the sales-order list filters on is_stock, so the
 -- column has to exist on BOTH sides or that branch throws. The archive table was

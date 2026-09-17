@@ -51,6 +51,20 @@ export function ensureStockOrderSchema(db: D1Database): Promise<void> {
       runSelfApply(db, "stock-orders", [
         "ALTER TABLE sales_orders ADD COLUMN IF NOT EXISTS is_stock BOOLEAN NOT NULL DEFAULT FALSE",
         "ALTER TABLE production_orders ADD COLUMN IF NOT EXISTS is_stock BOOLEAN NOT NULL DEFAULT FALSE",
+        // 0237 — the stock order this production order was BORN against, kept
+        // for life. salesOrderId is then free to move to the customer who is
+        // allocated the goods, and "still unallocated" is simply
+        // `sales_order_id = stock_origin_so_id` — one column, no second state
+        // flag to drift out of step with the first. It also keeps the
+        // provenance an invoice needs: this piece came from stock.
+        "ALTER TABLE production_orders ADD COLUMN IF NOT EXISTS stock_origin_so_id TEXT",
+        // The archive twins. fetchFilteredPOs reads
+        // `SELECT *, '' AS archivedAt FROM production_orders UNION ALL
+        //  SELECT * FROM production_orders_archive` — a UNION whose two sides
+        // must have the same column count, so a column added to one side only
+        // breaks the archive branch outright.
+        "ALTER TABLE production_orders_archive ADD COLUMN IF NOT EXISTS is_stock BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE production_orders_archive ADD COLUMN IF NOT EXISTS stock_origin_so_id TEXT",
         `INSERT INTO customers (id, code, name, is_active, credit_limit_sen, outstanding_sen)
            VALUES ('${STOCK_CUSTOMER_ID}', 'FACTORY-STOCK', '${STOCK_CUSTOMER_NAME}', 0, 0, 0)
            ON CONFLICT (id) DO NOTHING`,

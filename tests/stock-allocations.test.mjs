@@ -123,24 +123,29 @@ test("a caller passing a negative quantity cannot flip the sign", async () => {
 
 // ── availability ───────────────────────────────────────────────────────────
 
-const availabilityDb = ({ onHand = 0, inProduction = 0, allocated = 0 }) =>
-  fakeDb((q) => {
-    if (/FROM production_orders/i.test(q)) {
-      return [
-        {
-          product_code: "A100",
-          on_hand_qty: onHand,
-          in_production_qty: inProduction,
-        },
-      ];
-    }
-    if (/FROM stock_allocations/i.test(q)) {
-      return [{ product_code: "A100", allocated_qty: allocated }];
-    }
-    return [];
-  });
+// Availability is RECOMPUTED from the production orders themselves, never from
+// summing the ledger, so the fake returns what that one aggregate returns.
+const availabilityDb = ({
+  onHand = 0,
+  inProduction = 0,
+  allocated = 0,
+  available = null,
+}) =>
+  fakeDb((q) =>
+    /FROM production_orders/i.test(q)
+      ? [
+          {
+            product_code: "A100",
+            available_qty: available ?? onHand - allocated,
+            on_hand_qty: onHand,
+            in_production_qty: inProduction,
+            allocated_qty: allocated,
+          },
+        ]
+      : [],
+  );
 
-test("available = on hand minus what is spoken for", async () => {
+test("available is what is finished AND still owned by the stock order", async () => {
   const map = await loadAvailability(
     availabilityDb({ onHand: 10, allocated: 4 }),
     "hookka",
@@ -152,23 +157,26 @@ test("available = on hand minus what is spoken for", async () => {
   assert.equal(a.availableQty, 6);
 });
 
-test("an over-allocated product reads as ZERO available, never negative", async () => {
-  const map = await loadAvailability(
-    availabilityDb({ onHand: 4, allocated: 6 }),
-    "hookka",
-    ["A100"],
+test("availability comes off the production orders, not off the ledger", async () => {
+  // The whole point of deriving it: there is ONE source of truth for "is this
+  // piece spoken for", so the pool and the ledger cannot drift apart. If this
+  // query ever starts summing stock_allocations, that guarantee is gone.
+  const src = read("src/api/lib/stock-allocations.ts");
+  const fn = src.slice(
+    src.indexOf("export async function loadAvailability"),
+    src.indexOf("export type AllocatablePO"),
   );
-  assert.equal(map.get("A100").availableQty, 0);
-  assert.equal(
-    map.get("A100").allocatedQty,
-    6,
-    "the overshoot is still VISIBLE — it is reported, not hidden",
+  assert.match(fn, /FROM production_orders/);
+  assert.doesNotMatch(
+    fn,
+    /FROM stock_allocations/,
+    "availability must be recomputed from the orders, never summed from the ledger",
   );
 });
 
 test("work in production is reported apart from goods on hand", async () => {
   const map = await loadAvailability(
-    availabilityDb({ onHand: 2, inProduction: 8 }),
+    availabilityDb({ onHand: 2, inProduction: 8, available: 2 }),
     "hookka",
     ["A100"],
   );
@@ -180,27 +188,6 @@ test("work in production is reported apart from goods on hand", async () => {
     2,
     "a delivery date is promised against what EXISTS, not against what is planned",
   );
-});
-
-test("A5: order ten, allocate four from stock, produce the remaining six", async () => {
-  const before = await loadAvailability(
-    availabilityDb({ onHand: 4, allocated: 0 }),
-    "hookka",
-    ["A100"],
-  );
-  assert.equal(before.get("A100").availableQty, 4, "only four exist");
-
-  const ordered = 10;
-  const takeFromStock = Math.min(ordered, before.get("A100").availableQty);
-  assert.equal(takeFromStock, 4);
-  assert.equal(ordered - takeFromStock, 6, "six still have to be made");
-
-  const after = await loadAvailability(
-    availabilityDb({ onHand: 4, allocated: takeFromStock }),
-    "hookka",
-    ["A100"],
-  );
-  assert.equal(after.get("A100").availableQty, 0, "nothing left for the next order");
 });
 
 // ── netting ────────────────────────────────────────────────────────────────
@@ -241,15 +228,26 @@ test("an order's holding is NET of releases; a fully released line is absent", a
 // allocation is the same shape of idea, so each rail it is allowed under is
 // pinned here rather than left to a comment.
 
-const autoDb = ({ onHand = 0, allocated = 0, held = [] }) =>
+// One row per FINISHED stock production order that is still owned by the stock
+// order it was born against. Whole orders are what move, so the fake hands back
+// orders, not a quantity.
+const stockPOs = (n, qtyEach = 1) =>
+  Array.from({ length: n }, (_, i) => ({
+    id: `pord-stock-${i + 1}`,
+    poNo: `SOH-2609-001-0${i + 1}`,
+    product_code: "A100",
+    quantity: qtyEach,
+    stock_origin_so_id: "so-stock",
+  }));
+
+const autoDb = ({ pool = [], held = [] }) =>
   fakeDb((q) => {
-    if (/FROM production_orders/i.test(q)) {
-      return [{ product_code: "A100", on_hand_qty: onHand, in_production_qty: 0 }];
+    // already-held: the orders this SO has taken from stock
+    if (/sales_order_id = \?/i.test(q) && /sales_order_id <> stock_origin_so_id/i.test(q)) {
+      return held;
     }
-    if (/net_qty/i.test(q) || /HAVING/i.test(q)) return held;
-    if (/FROM stock_allocations/i.test(q)) {
-      return [{ product_code: "A100", allocated_qty: allocated }];
-    }
+    // allocatable: finished, still the stock order's
+    if (/sales_order_id = stock_origin_so_id/i.test(q)) return pool;
     return [];
   });
 
@@ -258,7 +256,7 @@ const AT = "2026-09-17T00:00:00.000Z";
 
 test("a stock order never allocates to itself", async () => {
   const plan = await planAutoAllocation(
-    autoDb({ onHand: 10 }),
+    autoDb({ pool: stockPOs(10) }),
     "hookka",
     { id: "so-stock", companySOId: "SOH-2609-001", isStock: true },
     [{ productCode: "A100", quantity: 5, soItemId: "i1", soLineNo: 1 }],
@@ -268,22 +266,9 @@ test("a stock order never allocates to itself", async () => {
   assert.equal(plan.statements.length, 0, "the stock order IS the stock");
 });
 
-test("a line a human already allocated is left ALONE, not topped up", async () => {
+test("a product a human already allocated is left ALONE, not topped up", async () => {
   const plan = await planAutoAllocation(
-    autoDb({
-      onHand: 10,
-      allocated: 2,
-      held: [
-        {
-          product_code: "A100",
-          sales_order_id: "so-1",
-          sales_order_no: "SO-2609-018",
-          so_item_id: "i1",
-          so_line_no: 1,
-          net_qty: 2,
-        },
-      ],
-    }),
+    autoDb({ pool: stockPOs(10), held: stockPOs(2) }),
     "hookka",
     ORDER,
     [{ productCode: "A100", quantity: 10, soItemId: "i1", soLineNo: 1 }],
@@ -297,8 +282,8 @@ test("a line a human already allocated is left ALONE, not topped up", async () =
   );
 });
 
-test("two lines of the same product cannot both claim the same pieces", async () => {
-  const db = autoDb({ onHand: 5 });
+test("two lines of the same product cannot both claim the same orders", async () => {
+  const db = autoDb({ pool: stockPOs(5) });
   const plan = await planAutoAllocation(
     db,
     "hookka",
@@ -311,52 +296,87 @@ test("two lines of the same product cannot both claim the same pieces", async ()
     AT,
   );
   await db.batch(plan.statements);
-  const taken = db.written.map((w) => Number(bindsOf(w).quantity));
-  assert.deepEqual(taken, [4, 1], "the second line gets only what is left");
-  assert.equal(
-    taken.reduce((a, b) => a + b, 0),
-    5,
-    "never more than exists",
-  );
+  const moved = db.written.filter((w) => /^UPDATE production_orders/i.test(w.sql));
+  const poIds = moved.map((w) => w.args[w.args.length - 1]);
+  assert.equal(moved.length, 5, "all five orders move, none twice");
+  assert.equal(new Set(poIds).size, 5, "no production order is claimed twice");
 });
 
-test("partial allocation says out loud how many still have to be made", async () => {
+test("A5: order ten, take the four that exist, produce the other six", async () => {
+  const db = autoDb({ pool: stockPOs(4) });
   const plan = await planAutoAllocation(
-    autoDb({ onHand: 4 }),
+    db,
     "hookka",
     ORDER,
     [{ productCode: "A100", quantity: 10, soItemId: "i1", soLineNo: 1 }],
     SYSTEM_ALLOCATION_ACTOR,
     AT,
   );
-  assert.equal(plan.statements.length, 1);
+  await db.batch(plan.statements);
+  const moved = db.written.filter((w) => /^UPDATE production_orders/i.test(w.sql));
+  assert.equal(moved.length, 4, "four whole orders change hands");
   assert.match(plan.notes[0], /Allocated 4 x A100 from stock/);
   assert.match(plan.notes[0], /6 to be produced/);
 });
 
-test("nothing on the shop floor is touched — ledger rows only", async () => {
-  const db = autoDb({ onHand: 10 });
+test("a set that overshoots the line is NOT taken", async () => {
+  // A stock sofa set of 3 cannot satisfy a line that wants 1 — taking it would
+  // hand the customer two pieces nobody ordered. Sets go out whole or not at
+  // all (owner 2026-09-17).
+  const db = autoDb({ pool: stockPOs(1, 3) });
   const plan = await planAutoAllocation(
     db,
     "hookka",
     ORDER,
-    [{ productCode: "A100", quantity: 3, soItemId: "i1", soLineNo: 1 }],
+    [{ productCode: "A100", quantity: 1, soItemId: "i1", soLineNo: 1 }],
+    SYSTEM_ALLOCATION_ACTOR,
+    AT,
+  );
+  assert.equal(plan.statements.length, 0);
+  assert.equal(plan.notes.length, 0);
+});
+
+test("ownership moves and the reason moves with it — never bare", async () => {
+  const db = autoDb({ pool: stockPOs(2) });
+  const plan = await planAutoAllocation(
+    db,
+    "hookka",
+    ORDER,
+    [{ productCode: "A100", quantity: 2, soItemId: "i1", soLineNo: 1 }],
     SYSTEM_ALLOCATION_ACTOR,
     AT,
   );
   await db.batch(plan.statements);
+  const updates = db.written.filter((w) => /^UPDATE production_orders/i.test(w.sql));
+  const ledger = db.written.filter((w) => /^INSERT INTO stock_allocations/i.test(w.sql));
+  assert.equal(updates.length, 2);
+  assert.equal(
+    ledger.length,
+    2,
+    "every ownership change carries its own ledger row in the same batch",
+  );
+  // and nothing on the shop floor is touched — the 2026-06-08 removal is the
+  // precedent: allocation must not move production.
   for (const w of db.written) {
-    assert.match(
-      w.sql,
-      /^INSERT INTO stock_allocations/i,
-      "the 2026-06-08 removal is the precedent: allocation must not move production",
-    );
+    assert.doesNotMatch(w.sql, /job_cards|fg_units/i);
   }
+});
+
+test("is_stock is NOT cleared when ownership moves", () => {
+  // It records how the piece was BORN, which stays true forever and is what
+  // tells an invoice this came from stock rather than the customer's own run.
+  const src = read("src/api/lib/stock-allocations.ts");
+  const fn = src.slice(
+    src.indexOf("export function buildOwnershipTransferStatements"),
+    src.indexOf("export function buildOwnershipReleaseStatements"),
+  );
+  assert.doesNotMatch(fn, /is_stock|isStock/);
+  assert.match(fn, /SET salesOrderId = \?/);
 });
 
 test("no stock, no allocation — and no empty row to explain later", async () => {
   const plan = await planAutoAllocation(
-    autoDb({ onHand: 0 }),
+    autoDb({ pool: [] }),
     "hookka",
     ORDER,
     [{ productCode: "A100", quantity: 6, soItemId: "i1", soLineNo: 1 }],

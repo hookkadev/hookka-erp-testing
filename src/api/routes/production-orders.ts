@@ -1334,9 +1334,21 @@ app.post("/stock", async (c) => {
     jcsToCopy[0].sequence,
   );
 
-  const newJcIds = jcsToCopy.map(() => genJcId());
-  const newPoId = genPoId();
-  const newPoNo = `${sohNo}-01`;
+  // One production order PER PIECE, exactly as a customer order is built
+  // (_shared/production-builder.ts:518-520). This endpoint used to create ONE
+  // order carrying the whole quantity, which was the only place in the system
+  // that did — and it is what made allocation hard: a customer taking 4 of 10
+  // would have had to SPLIT a production order, dragging its job cards, its
+  // stickered fg_units and its cost rows along. Built per piece, allocation is
+  // always a whole order changing hands and nothing is ever split.
+  //
+  // A SOFA is the exception here for the same reason it is there: a set is one
+  // thing. Owner 2026-09-17 — a stock sofa set goes out whole, never broken up.
+  const isSofaSet = (sourcePO.itemCategory ?? "").toUpperCase() === "SOFA";
+  const pieceCount = isSofaSet ? 1 : quantity;
+  const perPoQty = isSofaSet ? quantity : 1;
+
+  const poIds = Array.from({ length: pieceCount }, () => genPoId());
 
   const statements: D1PreparedStatement[] = [];
 
@@ -1430,6 +1442,11 @@ app.post("/stock", async (c) => {
   const firstDept = [...jcsToCopy].sort((a, b) => a.sequence - b.sequence)[0]
     ?.departmentCode || "WOOD_CUT";
 
+  for (let pieceIdx = 0; pieceIdx < pieceCount; pieceIdx++) {
+  const newPoId = poIds[pieceIdx];
+  const newPoNo = `${sohNo}-${String(pieceIdx + 1).padStart(2, "0")}`;
+  const newJcIds = jcsToCopy.map(() => genJcId());
+
   // Insert PO.
   statements.push(
     db
@@ -1440,15 +1457,15 @@ app.post("/stock", async (c) => {
            fabricCode, quantity, gapInches, divanHeightInches, legHeightInches,
            specialOrder, notes, status, currentDepartment, progress, startDate,
            targetEndDate, completedDate, rackingNumber, stockedIn, isStock,
-           created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           stockOriginSoId, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         newPoId,
         newPoNo,
         soId,
         sohNo,
-        1,
+        pieceIdx + 1,
         "",
         type === "WIP" ? `Stock WIP (${selectedWipLabel})` : "Stock FG",
         STOCK_CUSTOMER_NAME,
@@ -1461,7 +1478,7 @@ app.post("/stock", async (c) => {
         sourcePO.sizeCode,
         sourcePO.sizeLabel,
         sourcePO.fabricCode,
-        quantity,
+        perPoQty,
         sourcePO.gapInches,
         sourcePO.divanHeightInches,
         sourcePO.legHeightInches,
@@ -1478,6 +1495,7 @@ app.post("/stock", async (c) => {
         "",
         0,
         true,
+        soId,
         nowIso,
         nowIso,
       ),
@@ -1488,7 +1506,7 @@ app.post("/stock", async (c) => {
     const jc = jcsToCopy[i];
     const newId = newJcIds[i];
     const perUnit = (jc.wipQty ?? sourceQty) / sourceQty;
-    const newWipQty = Math.max(1, Math.round(perUnit * quantity));
+    const newWipQty = Math.max(1, Math.round(perUnit * perPoQty));
     statements.push(
       db
         .prepare(
@@ -1531,11 +1549,13 @@ app.post("/stock", async (c) => {
         ),
     );
   }
+  }
 
   await db.batch(statements);
 
-  const fresh = await fetchPO(db, newPoId);
-  return c.json({ success: true, data: fresh });
+  // The first order, for callers that expect one; `created` is the real count.
+  const fresh = await fetchPO(db, poIds[0]);
+  return c.json({ success: true, data: fresh, created: poIds.length });
 });
 
 // ---------------------------------------------------------------------------

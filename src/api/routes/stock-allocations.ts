@@ -28,10 +28,15 @@ import { getOrgId } from "../lib/tenant";
 import {
   ensureStockAllocationSchema,
   buildAllocationStatement,
+  buildOwnershipTransferStatements,
+  buildOwnershipReleaseStatements,
+  loadAllocatablePOs,
+  loadAllocatedPOsForOrder,
   loadAvailability,
   loadOpenAllocationsForOrder,
   type AllocationActor,
 } from "../lib/stock-allocations";
+import { ensureStockOrderSchema } from "../lib/stock-orders";
 
 const app = new Hono<Env>();
 
@@ -52,6 +57,9 @@ function actorFrom(c: Context<Env>): AllocationActor {
 app.get("/availability", async (c) => {
   const denied = await requirePermission(c, "sales-orders", "read");
   if (denied) return denied;
+  // Both: the ledger table, and the is_stock / stock_origin_so_id columns every
+  // query below reads off production_orders.
+  await ensureStockOrderSchema(c.var.DB);
   await ensureStockAllocationSchema(c.var.DB);
 
   const raw = c.req.query("productCodes") ?? "";
@@ -76,6 +84,9 @@ app.get("/", async (c) => {
   if (!salesOrderId) {
     return c.json({ success: false, error: "salesOrderId is required" }, 400);
   }
+  // Both: the ledger table, and the is_stock / stock_origin_so_id columns every
+  // query below reads off production_orders.
+  await ensureStockOrderSchema(c.var.DB);
   await ensureStockAllocationSchema(c.var.DB);
   const rows = await loadOpenAllocationsForOrder(c.var.DB, salesOrderId);
   return c.json({ success: true, data: rows });
@@ -89,6 +100,9 @@ app.post("/", async (c) => {
   const denied = await requirePermission(c, "sales-orders", "edit");
   if (denied) return denied;
   const db = c.var.DB;
+  // Both: the ledger table, and the is_stock / stock_origin_so_id columns every
+  // query below reads off production_orders.
+  await ensureStockOrderSchema(db);
   await ensureStockAllocationSchema(db);
 
   const body = await c.req.json().catch(() => ({}));
@@ -115,7 +129,8 @@ app.post("/", async (c) => {
   // a stock order would be the placeholder problem all over again.
   const so = await db
     .prepare(
-      "SELECT id, companySOId, isStock, status FROM sales_orders WHERE id = ?",
+      `SELECT id, companySOId, isStock, status, customerName, customerState
+         FROM sales_orders WHERE id = ?`,
     )
     .bind(salesOrderId)
     .first<{
@@ -123,6 +138,8 @@ app.post("/", async (c) => {
       companySOId: string | null;
       isStock: boolean | null;
       status: string | null;
+      customerName: string | null;
+      customerState: string | null;
     }>();
   if (!so) {
     return c.json({ success: false, error: "Sales order not found" }, 404);
@@ -143,41 +160,74 @@ app.post("/", async (c) => {
     );
   }
 
-  const avail = await loadAvailability(db, getOrgId(c), [productCode]);
-  const row = avail.get(productCode);
-  const available = row?.availableQty ?? 0;
-  if (quantity > available) {
+  // Whole production orders only — one is never split to top up a line. Taking
+  // a 3-piece sofa set to satisfy a line that wants 1 would hand the customer
+  // two pieces nobody ordered, so a set that overshoots is simply not taken.
+  const candidates = await loadAllocatablePOs(db, productCode);
+  const taken: typeof candidates = [];
+  let got = 0;
+  for (const po of candidates) {
+    if (got >= quantity) break;
+    if (got + po.quantity > quantity) continue;
+    taken.push(po);
+    got += po.quantity;
+  }
+  if (got < quantity) {
+    const row = (await loadAvailability(db, getOrgId(c), [productCode])).get(
+      productCode,
+    );
     return c.json(
       {
         success: false,
         code: "INSUFFICIENT_STOCK",
         error:
-          `Only ${available} of ${productCode} is available to allocate ` +
-          `(${row?.onHandQty ?? 0} on hand, ${row?.allocatedQty ?? 0} already spoken for).`,
+          got === 0
+            ? `No finished ${productCode} is available to allocate.`
+            : `Only ${got} of ${productCode} can be allocated as whole production orders.`,
         data: row ?? null,
       },
       422,
     );
   }
 
+  const now = new Date().toISOString();
   await db.batch([
-    buildAllocationStatement(db, "ALLOCATE", {
-      productCode,
-      quantity,
-      salesOrderId,
-      salesOrderNo: so.companySOId,
-      soItemId,
-      soLineNo,
-      sourcePoId: body?.sourcePoId ? String(body.sourcePoId) : null,
-      actor: actorFrom(c),
-      occurredAt: new Date().toISOString(),
-      reason: body?.reason ? String(body.reason) : null,
-      orgId: getOrgId(c),
-    }),
+    // R12 — the ownership change and the record of WHY it happened land
+    // together or not at all. Never bare.
+    ...buildOwnershipTransferStatements(
+      db,
+      taken.map((p) => p.id),
+      {
+        salesOrderId,
+        salesOrderNo: so.companySOId,
+        customerName: so.customerName,
+        customerState: so.customerState,
+      },
+      now,
+    ),
+    ...taken.map((po) =>
+      buildAllocationStatement(db, "ALLOCATE", {
+        productCode,
+        quantity: po.quantity,
+        salesOrderId,
+        salesOrderNo: so.companySOId,
+        soItemId,
+        soLineNo,
+        sourcePoId: po.id,
+        actor: actorFrom(c),
+        occurredAt: now,
+        reason: body?.reason ? String(body.reason) : null,
+        orgId: getOrgId(c),
+      }),
+    ),
   ]);
 
   const after = await loadAvailability(db, getOrgId(c), [productCode]);
-  return c.json({ success: true, data: after.get(productCode) ?? null });
+  return c.json({
+    success: true,
+    data: after.get(productCode) ?? null,
+    allocated: taken.map((p) => p.poNo ?? p.id),
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -191,6 +241,9 @@ app.post("/release", async (c) => {
   const denied = await requirePermission(c, "sales-orders", "edit");
   if (denied) return denied;
   const db = c.var.DB;
+  // Both: the ledger table, and the is_stock / stock_origin_so_id columns every
+  // query below reads off production_orders.
+  await ensureStockOrderSchema(db);
   await ensureStockAllocationSchema(db);
 
   const body = await c.req.json().catch(() => ({}));
@@ -209,48 +262,80 @@ app.post("/release", async (c) => {
     return c.json({ success: false, error: "quantity must be >= 1" }, 400);
   }
 
-  const open = await loadOpenAllocationsForOrder(db, salesOrderId);
-  const held = open
-    .filter(
-      (a) =>
-        a.productCode === productCode &&
-        (soItemId === null || a.soItemId === soItemId),
-    )
-    .reduce((n, a) => n + a.quantity, 0);
-  if (quantity > held) {
+  const held = (await loadAllocatedPOsForOrder(db, salesOrderId)).filter(
+    (p) => p.productCode === productCode,
+  );
+  const heldQty = held.reduce((n, p) => n + p.quantity, 0);
+  if (heldQty === 0) {
     return c.json(
       {
         success: false,
         code: "NOTHING_TO_RELEASE",
-        error: `This order holds ${held} of ${productCode}; cannot release ${quantity}.`,
+        error: `This order holds no ${productCode} from stock.`,
       },
       422,
     );
   }
 
-  const target = open.find(
-    (a) =>
-      a.productCode === productCode &&
-      (soItemId === null || a.soItemId === soItemId),
-  );
+  // Newest first, so releasing part of a holding gives back what was taken
+  // last and leaves the oldest stock where it was — the same first-in-first-out
+  // intent the allocation side follows.
+  const giveBack: typeof held = [];
+  let back = 0;
+  for (const po of [...held].reverse()) {
+    if (back >= quantity) break;
+    if (back + po.quantity > quantity) continue;
+    giveBack.push(po);
+    back += po.quantity;
+  }
+  if (back === 0) {
+    return c.json(
+      {
+        success: false,
+        code: "NOTHING_TO_RELEASE",
+        error: `This order holds ${heldQty} of ${productCode} as whole production orders; ${quantity} cannot be given back without splitting one.`,
+      },
+      422,
+    );
+  }
 
+  // The stock order each piece goes home to is recorded on the piece itself
+  // (stock_origin_so_id), so the number it carries after a release is exact
+  // rather than reconstructed.
+  const originNo = await db
+    .prepare("SELECT companySOId FROM sales_orders WHERE id = ?")
+    .bind(giveBack[0].stockOriginSoId)
+    .first<{ companySOId: string | null }>();
+
+  const now = new Date().toISOString();
   await db.batch([
-    buildAllocationStatement(db, "RELEASE", {
-      productCode,
-      quantity,
-      salesOrderId,
-      salesOrderNo: target?.salesOrderNo ?? null,
-      soItemId: soItemId ?? target?.soItemId ?? null,
-      soLineNo: target?.soLineNo ?? null,
-      actor: actorFrom(c),
-      occurredAt: new Date().toISOString(),
-      reason: body?.reason ? String(body.reason) : null,
-      orgId: getOrgId(c),
-    }),
+    ...buildOwnershipReleaseStatements(
+      db,
+      giveBack.map((p) => ({ id: p.id, stockOriginSoId: p.stockOriginSoId })),
+      originNo?.companySOId ?? null,
+      now,
+    ),
+    ...giveBack.map((po) =>
+      buildAllocationStatement(db, "RELEASE", {
+        productCode,
+        quantity: po.quantity,
+        salesOrderId,
+        soItemId,
+        sourcePoId: po.id,
+        actor: actorFrom(c),
+        occurredAt: now,
+        reason: body?.reason ? String(body.reason) : null,
+        orgId: getOrgId(c),
+      }),
+    ),
   ]);
 
   const after = await loadAvailability(db, getOrgId(c), [productCode]);
-  return c.json({ success: true, data: after.get(productCode) ?? null });
+  return c.json({
+    success: true,
+    data: after.get(productCode) ?? null,
+    released: giveBack.map((p) => p.poNo ?? p.id),
+  });
 });
 
 export default app;
