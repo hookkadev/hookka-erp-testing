@@ -702,7 +702,13 @@ const fgColumns: Column<FGItem>[] = [
   },
   {
     key: "reservedQty",
-    label: "Reserved",
+    // R17 — this column never meant "reserved". It counts pieces named on a
+    // DRAFT delivery note, which is downstream of production and says nothing
+    // about an order commitment; the word sent people looking for a
+    // reservation mechanism that did not exist anywhere in the system. An
+    // order commitment is a stock_allocations row, and it is a different
+    // number. Named for what it actually counts.
+    label: "On draft DO",
     align: "right",
     render: (_v, row) => (
       <span
@@ -711,7 +717,7 @@ const fgColumns: Column<FGItem>[] = [
             ? "font-medium text-[#A86A1A]"
             : "text-[#9CA3AF]"
         }
-        title="In a DRAFT delivery order — still our stock, not yet dispatched/invoiced"
+        title="Named on a DRAFT delivery order — still our stock, not yet dispatched or invoiced. This is NOT an order allocation."
       >
         {row.reservedQty}
       </span>
@@ -2084,7 +2090,9 @@ export default function InventoryPage() {
               <p className="text-xl font-bold text-[#1F1D1B]">{fgItems.length}</p>
             </CardContent></Card>
             <Card><CardContent className="p-2.5">
-              <p className="text-xs text-[#6B7280]">Available · Reserved</p>
+              {/* R17 — the second figure counts pieces on a DRAFT delivery
+                  note, not pieces promised to an order. */}
+              <p className="text-xs text-[#6B7280]">Available · On draft DO</p>
               <p className="text-xl font-bold text-[#1F1D1B] tabular-nums">
                 {fgTotalStock.toLocaleString()}
                 <span className="text-[#A86A1A]"> · {fgTotalReserved.toLocaleString()}</span>

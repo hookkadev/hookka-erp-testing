@@ -418,6 +418,30 @@ function CreateSalesOrderPage() {
   const [notes, setNotes] = useState("");
   const [items, setItems] = useState<LineItem[]>([makeEmptyLine()]);
 
+  // R14 — what is already built, per line. This screen fetched no stock, no
+  // work-in-progress and no availability of any kind, so a salesperson
+  // promised a delivery date with no way to see that the thing being sold was
+  // already finished and sitting in the yard. Short TTL: the number moves as
+  // other orders are confirmed, and a stale "4 available" is worse than none.
+  const stockCodes = useMemo(
+    () =>
+      [...new Set(items.map((i) => i.productCode).filter(Boolean))].sort(),
+    [items],
+  );
+  const { data: stockResp } = useCachedJson<{ data?: StockAvailability[] }>(
+    stockCodes.length
+      ? `/api/stock-allocations/availability?productCodes=${encodeURIComponent(stockCodes.join(","))}`
+      : null,
+    30,
+  );
+  const stockByCode = useMemo(
+    () =>
+      Object.fromEntries(
+        (stockResp?.data ?? []).map((r) => [r.productCode, r]),
+      ) as Record<string, StockAvailability>,
+    [stockResp],
+  );
+
   // Multi-Company Phase 2 — active companies for the Company dropdown.
   const activeOrgs = useMemo(
     () => (orgsResp?.organisations ?? []).filter((o) => o.isActive !== false),
@@ -2249,6 +2273,7 @@ function CreateSalesOrderPage() {
               key={item._uid}
               item={item}
               idx={idx}
+              stock={stockByCode[item.productCode]}
               // Filter the catalogue down to what's actually assigned to
               // this customer. When no customer is selected, fall through
               // to the full master list — stays compatible with workflows
@@ -2988,6 +3013,15 @@ function CopyFromSourceModal({
 
 // ─── Line Item Card ──────────────────────────────────────────
 
+// R14 — the shape GET /api/stock-allocations/availability returns per product.
+type StockAvailability = {
+  productCode: string;
+  onHandQty: number;
+  inProductionQty: number;
+  allocatedQty: number;
+  availableQty: number;
+};
+
 type LineItemCardProps = {
   item: LineItem;
   idx: number;
@@ -3009,6 +3043,8 @@ type LineItemCardProps = {
   canRemove: boolean;
   getUnitPrice: (item: LineItem) => number;
   getLineTotal: (item: LineItem) => number;
+  /** R14 — availability for this line's product code, when there is any. */
+  stock?: StockAvailability;
   getTotalHeight: (item: LineItem) => number;
   maintenanceConfig: Record<string, MaintenanceConfigValue[]> | null;
   // 0134 — Service Order mode lets the operator type Base Price directly
@@ -3027,6 +3063,7 @@ function LineItemCard({
   onAddSofaModules, onUpdate, onRemove, canRemove,
   getUnitPrice, getLineTotal, getTotalHeight, maintenanceConfig,
   isServiceOrderMode,
+  stock,
 }: LineItemCardProps) {
   const [showSpecialOrders, setShowSpecialOrders] = useState(false);
   const [showModuleDropdown, setShowModuleDropdown] = useState(false);
@@ -3344,6 +3381,31 @@ function LineItemCard({
           </div>
         );
       })()}
+
+      {/* R14 — what already exists, before a delivery date is promised. This
+          screen fetched no stock of any kind: a salesperson could sell a thing
+          sitting finished in the yard and start it again from scratch. Only
+          shown when there IS something; an "0 available" line on every order
+          would be noise. */}
+      {stock && (stock.availableQty > 0 || stock.inProductionQty > 0) && (
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+          {stock.availableQty > 0 && (
+            <span className="rounded px-2 py-0.5 font-medium bg-[#E8F0E0] text-[#3F6B2A]">
+              {stock.availableQty} available from stock
+            </span>
+          )}
+          {stock.inProductionQty > 0 && (
+            <span className="rounded px-2 py-0.5 bg-[#F0ECE9] text-[#6B7280]">
+              {stock.inProductionQty} being made
+            </span>
+          )}
+          {item.quantity > stock.availableQty && stock.availableQty > 0 && (
+            <span className="text-[#6B7280]">
+              {item.quantity - stock.availableQty} of this line would be produced
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Qty / Configuration (category-dependent) */}
       {item.itemCategory === "ACCESSORY" ? (

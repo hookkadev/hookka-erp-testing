@@ -1081,13 +1081,16 @@ function StockBreakdownPanel({
                   sub={header.uom || undefined}
                   title={header.qtyNote ?? undefined}
                 />
-                {/* The Finished Products grid above this drawer already calls
-                    these two numbers "Available · Reserved". One thing must not
-                    have two names on two screens, so the panel follows the
-                    grid — free stock first, then what a customer document has
-                    already claimed. */}
+                {/* The Finished Products grid above this drawer calls these two
+                    numbers "Available · On draft DO". One thing must not have
+                    two names on two screens, so the panel follows the grid —
+                    free stock first, then what a DRAFT delivery note has already
+                    named. R17: the second figure was called "Reserved", which
+                    sent people looking for a reservation mechanism that did not
+                    exist; an order commitment is a stock_allocations row and is
+                    a different number. */}
                 <Stat
-                  label="Available · Reserved"
+                  label="Available · On draft DO"
                   value={
                     header.assignedQty === null || header.freeQty === null ? (
                       <Dash />
