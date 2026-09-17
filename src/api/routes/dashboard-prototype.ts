@@ -207,6 +207,7 @@ type ProdOrdRow = {
   currentDepartment: string | null;
   progress: number | string | null;
   targetEndDate: string | null;
+  completedDate: string | null;
   // Free text ("HB Fully Cover, Divan Bottom Fully Cover") or "" — NOT a
   // boolean column. `specialOrder: !!r.specialOrder` below only cares
   // whether it's non-empty; the pipeline predicates below need the actual
@@ -990,8 +991,8 @@ app.get("/", async (c) => {
     c.var.DB.prepare(
       `SELECT id, po_no, sales_order_id, customer_name, product_code,
               product_name, item_category, size_label, quantity, status,
-              current_department, progress, target_end_date, special_order,
-              consignment_order_id, repairscope
+              current_department, progress, target_end_date, completed_date,
+              special_order, consignment_order_id, repairscope
          FROM production_orders
         WHERE org_id = ?`,
     )
@@ -1131,6 +1132,89 @@ app.get("/", async (c) => {
     (m, x) => (x.cards > (m?.cards ?? -1) ? x : m),
     null as { dept: string; seq: number; cards: number; orders: Set<string> } | null,
   );
+
+  // ---- Siti's list (draft, 2026-09-17) -----------------------------------
+  // Owner's next-up report checklist, handed over on paper. Derived entirely
+  // from data already loaded above — no new queries except the one extra
+  // column (completed_date) added to prodOrdSec's SELECT. Draft-quality by
+  // request: covers what's cheaply and honestly derivable now; Production
+  // Cost needs cost_ledger, which nothing in this route touches yet, so it's
+  // left as an explicit gap below rather than a guessed number.
+
+  // "全部 department 的 overdue" — every OPEN order already past the
+  // customer's promised date (risk === critical, same predicate the
+  // Production tab's risk banding uses), grouped by its current department.
+  const overdueByDept = (() => {
+    const m = new Map<string, number>();
+    for (const o of prodOrdersRisked) {
+      if (o.risk !== "critical") continue;
+      const k = o.currentDept || "(no dept)";
+      m.set(k, (m.get(k) ?? 0) + 1);
+    }
+    return [...m.entries()]
+      .map(([department, count]) => ({ department, count }))
+      .sort((a, b) => b.count - a.count);
+  })();
+
+  // "要 overdue 的 - 3 天前" — early warning: not yet overdue, but the
+  // customer date is within the next 3 days and most stages are still open
+  // (same "at risk" shape riskOf() already uses, narrowed to a 3-day window
+  // instead of 7).
+  const dueSoon3Days = prodOrdersRisked
+    .filter((o) => o.daysToDD != null && o.daysToDD >= 0 && o.daysToDD <= 3)
+    .sort((a, b) => (a.daysToDD ?? 0) - (b.daysToDD ?? 0));
+
+  // "Daily Production Output" — units and orders that finished each day.
+  // Reads the WHOLE prodOrdSec.rows (not openProdOrders, which excludes
+  // anything COMPLETED by definition), so this is the one place in the file
+  // that looks at completed orders' own rows rather than their job cards.
+  const dailyOutput = (() => {
+    const m = new Map<string, { date: string; orders: number; units: number }>();
+    for (const r of prodOrdSec.rows) {
+      if ((r.status ?? "").toUpperCase() !== "COMPLETED") continue;
+      const d = dayKey(r.completedDate);
+      if (!d) continue;
+      let e = m.get(d);
+      if (!e) m.set(d, (e = { date: d, orders: 0, units: 0 }));
+      e.orders++;
+      e.units += num(r.quantity);
+    }
+    return [...m.values()].sort((a, b) => (a.date < b.date ? -1 : 1));
+  })();
+
+  // "Production Plan vs Actual" — for completed orders that carry both
+  // dates: targetEndDate (plan) vs completedDate (actual). Positive
+  // varianceDays = finished late. Orders missing either date are excluded
+  // rather than silently counted as on-time.
+  const planVsActual = (() => {
+    const rows = prodOrdSec.rows
+      .filter((r) => (r.status ?? "").toUpperCase() === "COMPLETED")
+      .map((r) => {
+        const plan = dayKey(r.targetEndDate);
+        const actual = dayKey(r.completedDate);
+        if (!plan || !actual) return null;
+        const varianceDays = Math.round(
+          (Date.parse(actual + "T00:00:00Z") - Date.parse(plan + "T00:00:00Z")) / 86400000,
+        );
+        return {
+          poNo: r.poNo,
+          productName: r.productName,
+          plan,
+          actual,
+          varianceDays,
+        };
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null);
+    return {
+      rows,
+      onTime: rows.filter((r) => r.varianceDays <= 0).length,
+      late: rows.filter((r) => r.varianceDays > 0).length,
+      withBothDates: rows.length,
+      // So the caller can render "N of M completed orders carry both dates"
+      // instead of implying every completed order was judged.
+      completedTotal: prodOrdSec.rows.filter((r) => (r.status ?? "").toUpperCase() === "COMPLETED").length,
+    };
+  })();
 
   // ---- Delivery: "Where DOs are sitting" status strip --------------------
   // The real Delivery page's SIX buckets (src/pages/delivery/index.tsx
@@ -1605,6 +1689,11 @@ app.get("/", async (c) => {
       // On-time delivery for the header KPI reuses the SAME house figure the
       // Delivery view shows — one number, one definition, two screens.
       onTime: otif,
+      // Siti's list (draft) — see the comment above prodOrdersRisked/bottleneck.
+      overdueByDept,
+      dueSoon3Days,
+      dailyOutput,
+      planVsActual,
     },
     inventory: {
       groups: [...groups.values()].sort((a, b) => b.items - a.items),
@@ -1616,6 +1705,14 @@ app.get("/", async (c) => {
         stockValueSen: Math.round(stockValueSen),
         batchesWithStock,
       },
+      // Siti's list (draft): "Material Shortage". `min_stock` is 0 on every
+      // row (MEASURED, see the file header), so there is no real reorder
+      // point to compare against — this is a cheaper proxy, active raw
+      // materials sitting at zero or negative balance right now. Once a
+      // genuine reorder point exists somewhere, replace this with that.
+      materialShortage: rmRows
+        .filter((r) => !!r.isActive && num(r.balanceQty) <= 0)
+        .map((r) => ({ code: r.itemCode, description: r.description, group: r.itemGroup, balanceQty: num(r.balanceQty) })),
       ageing,
       // The WHOLE book, ordered by the value actually sitting on the floor.
       // It was capped at 50, which made the item list disagree with the

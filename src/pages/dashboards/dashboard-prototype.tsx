@@ -4,6 +4,7 @@ import { PeriodPicker } from "./dashboard-shared";
 import type { Period } from "./dashboard-shared-lib";
 import { AllOverviewView } from "./AllOverviewView";
 import { SalesOrdersView } from "./SalesOrdersView";
+import { SitiOpsView } from "./SitiOpsView";
 import { PageHeader } from "@/components/ui/page-header";
 import { Tabs, type TabItem } from "@/components/ui/tabs";
 
@@ -15,11 +16,13 @@ import { Tabs, type TabItem } from "@/components/ui/tabs";
 // and — the real reason — it was a dead end for a REAL page: nothing in an
 // injected srcdoc document can be a real, navigable, testable React screen.
 //
-// This branch carries TWO tabs — All Overview (the landing tab) and Sales
-// Orders — so the first merge to main is small enough to review properly. Both
-// read the same cached GET /api/dashboard/prototype payload; no tab has an
-// endpoint of its own. The other five domain tabs live on
-// laphii/feature/dashboard and land in a follow-up.
+// This branch carries THREE tabs — All Overview (the landing tab), Sales
+// Orders, and a draft "Operations (Siti)" tab tracking the owner's report
+// checklist handed over on paper. All read the same cached
+// GET /api/dashboard/prototype payload; no tab has an endpoint of its own.
+// The remaining domain tabs (Delivery, Inventory, Purchase, Employees,
+// Production) live on laphii/feature/dashboard / other branches and land in
+// follow-ups.
 //
 // PERIOD: the Monthly/YTD picker below the tab strip is global. Tabs with a
 // date column filter by it; Inventory and Production are point-in-time
@@ -36,13 +39,12 @@ import { Tabs, type TabItem } from "@/components/ui/tabs";
 // font is loaded — the app's default font-sans (system-ui) applies here too.
 // ---------------------------------------------------------------------------
 
-// Only the two tabs being trialled on main. The remaining five (Delivery,
-// Inventory, Purchase, Employees, Production) are built and live on
-// laphii/feature/dashboard — they are held back from this branch so the first
-// merge carries the smallest reviewable surface.
-const TABS: TabItem<"overview" | "sales">[] = [
+// The three tabs being trialled on main. Operations (Siti) is a draft — see
+// SitiOpsView.tsx's own header comment for what's real vs. stubbed.
+const TABS: TabItem<"overview" | "sales" | "siti">[] = [
   { key: "overview", label: "All Overview" },
   { key: "sales", label: "Sales Orders" },
+  { key: "siti", label: "Operations (Siti)" },
 ];
 
 export default function DashboardPrototypePage() {
@@ -135,6 +137,7 @@ export default function DashboardPrototypePage() {
       {tab === "sales" && (
         <SalesOrdersView period={effectivePeriod} months={months} onPeriodChange={setPeriod} />
       )}
+      {tab === "siti" && <SitiOpsView />}
     </div>
   );
 }
