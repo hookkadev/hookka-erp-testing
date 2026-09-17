@@ -14,6 +14,50 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
+## 2026-09-17 — 🔵 PRD T-013 · Production stages can still be skipped (BUG-09, sequence lock)
+
+Requested by Mr Lim, PRD dated 2026-09-07, tracker id **BUG-09**, priority **Low (to be raised
+later)**. Full PRD: `T-013-Hookka-production-sequence-lock - wei siang.pdf` (user's local
+Downloads, not in repo). Branch `feat/t013-sequence-lock` off `main` 728a1ac5, worktree
+`hookka-erp-testing-t013`. Related: `docs/plans/2026-09-06-production-sequence-lock.md`,
+BUG-2026-09-07-179, PR #427 (`feat/production-sequence-lock`, never merged).
+
+Asks, in PRD order — each row flips to done as it lands:
+
+- 🔵 R1 **done on branch** — `origin/feat/production-sequence-lock` merged (`e7dd01a4`, clean, no
+  conflicts against `main` 728a1ac5); `tests/sequence-rule-unit.test.mjs` deleted (its 5 tests are a
+  strict subset of the 26 in `tests/sequence-lock.test.mjs`, and its own header said it existed only
+  until the gate landed). Rule now has callers: `_helpers.ts:4472`, `production-orders.ts:2040`, `:2554`
+- 🔵 R2 **done on branch** — verified, no code change needed: `applyPoUpdate` gates on
+  `transitionConsumesUpstream(body.status)` (IN_PROGRESS / COMPLETED / TRANSFERRED); the three scan
+  endpoints gate every scan unconditionally before the WAITING→IN_PROGRESS write at
+  `production-orders.ts:2335 / 2787 / 3265`
+- ⚪ R3 Google Sheets webhook (`sheets-sync.ts`) runs the same check before it writes
+- ⚪ R4 the 7 `import-completion/*` endpoints: run the check or require an admin permission
+- ⚪ R5 one shared completion write helper; no side doors
+- ⚪ R6 "complete the earlier step too" runs the batch in order, upstream first
+- ⚪ R7 a behavioural test for R6 (observes order, not source text)
+- ⚪ R8 unlock permission = one server check, not `true` hardcoded in 3 places
+- ⚪ R9 unlock reason required + validated on the server
+- ⚪ R10 audit records the real person on the shop floor (not "unknown")
+- ⚪ R11 phone offers the same reason choices as desktop
+- ⚪ R12 weekly unlock report (who / which step / real skip vs recording gap)
+- ⚪ R13 gate + write in one transaction, or re-check inside the write
+- ⚪ R14 re-scan of a finished department says "already done"
+- 🔵 R15 **done on branch** — `docs/modules/production.md` flow 7 + gotcha + two key-function rows,
+  restamped 2026-09-17; `docs/CODEBASE-MAP.md:559` no longer says "refuses nothing today"
+- 🟡 R16 **UNMEASURED** — needs `HOOKKA_PROD_DB_URL`, which this session does not have. Shipped
+  read-only `scripts/measure-sequence-lock-no-branch.mjs` (groups by (order, wipKey), splits
+  no-branch vs branched, counts open cards the lock refuses now, names the dept pairs, flags any
+  wood-waits-for-fabric pair). **Run it before merging PR-A**; if the no-branch bucket shows wrong
+  pairs, the fix is stamping `branch_key` on those cards, not changing the rule
+
+Plan: PR-A = R1-R2 (switch the rule on in shadow mode, fast to merge); PR-B = the rest.
+Constraints kept: rule untouched, no fixed dept list, `prerequisiteMet` never read, shadow mode.
+
+
+---
+
 ## 2026-09-10 — 🔵 PRD T-004 · Import / Export across the whole system (P0/R3-R5 done, rest open)
 
 Requested by Mr Lim, PRD dated 2026-09-07, priority **Low (to be raised later)**. Full PRD:

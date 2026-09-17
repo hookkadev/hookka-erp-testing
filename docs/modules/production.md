@@ -1,5 +1,12 @@
 # Production & BOM — Module Guide
 
+> **Last verified: 2026-09-17** (branch `feat/t013-sequence-lock`, PRD T-013) against
+> `src/api/lib/sequence-lock.ts`, `src/api/routes/production-orders/_helpers.ts:4472-4495` and
+> `:6003`, `src/api/routes/production-orders.ts:2040-2073` and `:2554`, `src/lib/sequence-unlock.ts`,
+> `src/components/sequence-unlock-dialog.tsx`, `tests/sequence-lock.test.mjs` — only the
+> **Upstream sequence lock** flow, the matching gotcha, and the two new key-function rows were
+> added or re-verified; every other claim keeps its earlier stamp.
+
 > **Last verified: 2026-08-14** (branch `docs/docs-vs-code-audit`) — corrected against the
 > source by the prose audit; the row(s) touched here are itemised in
 > [`docs/DOCS-VS-CODE-AUDIT.md`](../DOCS-VS-CODE-AUDIT.md). Only the claims listed there were
@@ -45,6 +52,7 @@ Owns the shop floor: a **dept-tabbed WIP board** (one production_order per confi
 4. **Cost cascade** — on scan/completion: `consumeRawMaterialsForPO` (`po-cost-cascade.ts:803`, RM_ISSUE), `postJobCardLabor` (`:953`, LABOR_POSTED — idempotent via a `cost_ledger` check in the scan handler), `backfillFGBatchCost` (`:1153`), `postWIPCompletionMarker` (`:1276`). All append-only to `cost_ledger`.
 5. **Stock PO create** — `app.post("/stock")` (`production-orders.ts:1187`) builds make-to-stock POs (no SO). Board list read is `app.get("/")` (`:726`) via `fetchFilteredPOs` (`_helpers.ts:1444`); board summary `app.get("/board")` (`:3301`).
 6. **BOM edit** — `bom.tsx` `EditBOMDialog` (`:2963`) → `PUT /templates/:id` (`bom.ts:484`); master templates via `MasterTemplatesDialog` (`bom.tsx:3893`). Per-dept minute rates are edited on `src/pages/production/wip-times.tsx` (backed by `wip-times.ts`) and land in `bom_templates.wipComponents`.
+7. **Upstream sequence lock** (owner 2026-09-06, switched on 2026-09-17 by PRD T-013) — a job card may not move to `IN_PROGRESS` / `COMPLETED` / `TRANSFERRED` while the step it depends on is still open. The rule is `sequenceBlockers(card, allCards)` in `src/api/lib/sequence-lock.ts:112` and it is **derived from the BOM at run time**: a card waits for every lower-`sequence` card in its own `(wipKey, branchKey)`, and a card with an EMPTY `branchKey` (the BOM's mark for a convergence step such as UPHOLSTERY / PACKING) also waits for the highest-`sequence` card of every other branch in that `wipKey`. Same-`sequence` cards never block each other; `CANCELLED` upstream never blocks; `TRANSFERRED` counts as done. It reads `job_cards` only — no department list, no settings table, and **never `job_cards.prerequisiteMet`** (stale on 2,611+ of 4,680 rows, measured 2026-09-06). Gate points: `applyPoUpdate` (`_helpers.ts:4472`, only when `transitionConsumesUpstream(body.status)`, so a pure date edit is never blocked — this also covers `/bulk-patch`, which loops back into it), `POST /:id/scan-complete` (`production-orders.ts:2040`), and both fan-out scans via `gateFanOutSequence` (`:2554`). Refusal is `409 { code: "UPSTREAM_INCOMPLETE", error, blockedBy: [{id, departmentCode, status}], canSelfUnlock }`. **Shadow mode:** `canSelfUnlock` is `true` for everyone today (server-decided, never inferred by the client); the same request re-sent with `unlock: { reason }` writes a `scan_override_audit` row (`recordSequenceUnlock`, `_helpers.ts:6003`, `overrideCode = 'UPSTREAM_LOCKED'` — the only code mig 0022's CHECK accepts, BUG-2026-09-07-179) and then applies the change. Client side: `asSequenceLockRefusal` / `UNLOCK_REASONS` in `src/lib/sequence-unlock.ts`, the three-action `SequenceUnlockDialog` (cancel / unlock and complete / complete the earlier step too) on the grid and folder detail, and the worker scan re-posts the same scan with `unlock`. Tests: `tests/sequence-lock.test.mjs`.
 
 ## Key functions / sections (locate-to-function)
 | Symbol / section | file:line | Role |
@@ -58,6 +66,8 @@ Owns the shop floor: a **dept-tabbed WIP board** (one production_order per confi
 | `applyWipInventoryChange` | `production-orders/_helpers.ts:2574` | WIP inventory change; idempotent ONLY when `orgId` passed |
 | `recomputePoStatusAndProgress` | `production-orders/_helpers.ts:4133` | Single source of truth for PO status/progress |
 | `applyPoUpdate` | `production-orders/_helpers.ts:4274` | Shared PO mutation body (PATCH/PUT) |
+| `sequenceBlockers` / `transitionConsumesUpstream` | `src/api/lib/sequence-lock.ts:112 / 172` | THE upstream-order rule (BOM-derived, pure) / which status transitions it gates |
+| `recordSequenceUnlock` / `gateFanOutSequence` | `production-orders/_helpers.ts:6003` / `production-orders.ts:2554` | Shadow-unlock audit row / fan-out scan gate |
 | `fetchFilteredPOs` | `production-orders/_helpers.ts:1444` | Board list query |
 | `ensurePendingMigrations` | `production-orders/_helpers.ts:98` | Runtime column self-apply |
 | `app.post("/:id/scan-complete[-dept/-shared]")` | `production-orders.ts:1862 / 2460 / 2787` | Dept scan complete (3 dept/auth variants) |
@@ -76,6 +86,7 @@ Owns the shop floor: a **dept-tabbed WIP board** (one production_order per confi
 - **wipKey has one owner.** `deriveTopLevelWipKey` (`bom-wip-breakdown.ts:125`) is shared by `breakBomIntoWips`, `po-cost-cascade`, and `repair-scope`. Never re-derive inline — a stale pick throws at confirm.
 - **Repair scope drops lines.** `production_orders.repairscope` stamps partial repairs (FULL=null=byte-identical). Component-scope picks DROP unowned material lines via `filterWipsByRepairScope` (`src/lib/repair-scope.ts:410`) — not cosmetic.
 - **Production locks are inviolate.** COMPLETED job_cards / non-PENDING fg_units must not be overridden for cosmetic edits; suggest a UI fix instead.
+- **The sequence lock is on, and it has ONE rule.** Every completion / start must go through a gated path (`applyPoUpdate`, `scan-complete`, `gateFanOutSequence`) — a new write path that sets a card `IN_PROGRESS` / `COMPLETED` without calling `sequenceBlockers` is a side door, not a shortcut. Never re-derive the order from `DEPT_ORDER` / `PRODUCTION_ORDER_BY_WIP_TYPE` (build-time only; a test forbids the import) and never read `prerequisiteMet`. Known side doors still open as of 2026-09-17 (PRD T-013 R3-R5, tracked in `docs/WORK-TRACKER.md`): the Google Sheets sync webhook (`src/api/routes/sheets-sync.ts`) and the seven `import-completion/*` repair endpoints.
 - **Snapshot must stay in sync.** `production_orders_list_snapshot` is a denormalized fast-read cache (serve-stale + background refresh) — every write to `production_orders` must keep it current, else the list serves the pre-write row for the rebuild window.
 - **Migrations are inert** unless runtime self-applied — new columns reach prod only via `ALTER TABLE … ADD COLUMN IF NOT EXISTS` in `ensurePendingMigrations` (`production-orders/_helpers.ts:98`), awaited before the first write.
 - **Minute rates land in `bom_templates.wipComponents`** via `wip-times.tsx` + `wip-times.ts`; they feed `productionCostRatePerMinuteSen` in the cost cascade. (An earlier version of this doc named a `ProductionTimesDialog` in `bom.tsx` — no such component exists in the tree as of 2026-08-13.)
