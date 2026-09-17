@@ -306,7 +306,13 @@ app.get("/", async (c) => {
   ]);
 
   const orgId = getOrgId(c);
+  const { cached } = await import("../lib/kv-cache");
 
+  // Whole route is read-only (no mutating handler in this file), so a plain
+  // 60s SWR cache is safe: no write path needs to invalidate it, and it's
+  // the same TTL/mechanism dashboard-overview.ts already uses for the same
+  // "many sequential queries on every page load" problem.
+  const rawPayload = await cached(c, `dashboard:prototype:${orgId}:v1`, 60, async () => {
   // ---- Sales ------------------------------------------------------------
   // Whole book, not a window: the prototype owns the month picker, so it
   // needs every month that exists. ~1,500 rows of seven columns is small
@@ -1428,7 +1434,7 @@ app.get("/", async (c) => {
     workingHoursPerDay: modeOf(workerRows.map((w) => num(w.workingHoursPerDay)), 9),
   };
 
-  const rawPayload = {
+  return {
     success: true,
     meta: {
       orgId,
@@ -1663,6 +1669,7 @@ app.get("/", async (c) => {
       },
     },
   };
+  });
 
   // Redact at the response boundary, not by skipping the queries above — the
   // sections cross-reference each other too much to gate mid-computation
