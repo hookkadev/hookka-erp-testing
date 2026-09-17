@@ -1216,6 +1216,65 @@ app.get("/", async (c) => {
     };
   })();
 
+  // "Production Cost" — the one genuinely new query for Siti's list. Reads
+  // fg_batches, which carries the real cost basis of what was produced
+  // (materialCostSen/laborCostSen/overheadCostSen, filled in by
+  // po-cost-cascade.ts once the material side settles — see that file's own
+  // "UPDATE fg_batches SET ... costSen" writes). No org_id filter: fg_batches
+  // and cost_ledger carry none anywhere else in this codebase either (see
+  // src/api/routes/cost-ledger.ts), so this follows the same convention
+  // rather than inventing a column that doesn't exist.
+  const fgBatchSec = await section("fg batch cost", () =>
+    c.var.DB.prepare(
+      `SELECT productionOrderId, completedDate, originalQty,
+              unitCostSen, materialCostSen, laborCostSen, overheadCostSen
+         FROM fg_batches
+        WHERE completedDate IS NOT NULL AND completedDate <> ''`,
+    )
+      .all<{
+        productionOrderId: string | null;
+        completedDate: string | null;
+        originalQty: number | string | null;
+        unitCostSen: number | string | null;
+        materialCostSen: number | string | null;
+        laborCostSen: number | string | null;
+        overheadCostSen: number | string | null;
+      }>()
+      .then((r) => r.results ?? []),
+  );
+  const productionCost = (() => {
+    const m = new Map<
+      string,
+      { date: string; materialSen: number; laborSen: number; overheadSen: number; totalSen: number; batches: number }
+    >();
+    let batchesWithCost = 0;
+    for (const b of fgBatchSec.rows) {
+      const d = dayKey(b.completedDate);
+      if (!d) continue;
+      const material = num(b.materialCostSen);
+      const labor = num(b.laborCostSen);
+      const overhead = num(b.overheadCostSen);
+      const total = material + labor + overhead;
+      if (total > 0) batchesWithCost++;
+      let e = m.get(d);
+      if (!e) m.set(d, (e = { date: d, materialSen: 0, laborSen: 0, overheadSen: 0, totalSen: 0, batches: 0 }));
+      e.materialSen += material;
+      e.laborSen += labor;
+      e.overheadSen += overhead;
+      e.totalSen += total;
+      e.batches++;
+    }
+    return {
+      byDay: [...m.values()].sort((a, b) => (a.date < b.date ? -1 : 1)),
+      totalBatches: fgBatchSec.rows.length,
+      // fg_batches are created with every cost column at 0 (fg-completion.ts)
+      // and only gain a real figure once po-cost-cascade.ts settles the
+      // material side. This is published so the UI can say "N of M batches
+      // costed" instead of implying every batch has a real number.
+      batchesWithCost,
+    };
+  })();
+
   // ---- Delivery: "Where DOs are sitting" status strip --------------------
   // The real Delivery page's SIX buckets (src/pages/delivery/index.tsx
   // ALL_TABS): Planning + Pending Delivery are PRODUCTION-ORDER-based (no DO
@@ -1585,6 +1644,11 @@ app.get("/", async (c) => {
         live: !prodOrdSec.error && !jcAllSec.error,
         reason: prodOrdSec.error ?? jcAllSec.error ?? undefined,
         rows: openProdOrders.length,
+        // Separate from `live` above on purpose: a failed fg_batches query
+        // should not mark the whole Production tab dead, only Production
+        // Cost within it (which degrades to empty, not fabricated, on error —
+        // see the `section()` helper).
+        costError: fgBatchSec.error ?? undefined,
       },
       inventory: {
         live: !inventorySec.error,
@@ -1694,6 +1758,7 @@ app.get("/", async (c) => {
       dueSoon3Days,
       dailyOutput,
       planVsActual,
+      productionCost,
     },
     inventory: {
       groups: [...groups.values()].sort((a, b) => b.items - a.items),

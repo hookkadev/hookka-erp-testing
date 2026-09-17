@@ -1,10 +1,11 @@
 import { useMemo } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { useCachedJson } from "@/lib/cached-fetch";
+import { formatCurrency } from "@/lib/utils";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { AlertTriangle, Clock, Factory, CalendarClock, PackageX, DollarSign } from "lucide-react";
-import { TAUPE, MUTED, BORDER, fmtN } from "./dashboard-shared-lib";
+import { TAUPE, TEAL, MUTED, BORDER, fmtN, fmtRMAxis } from "./dashboard-shared-lib";
 import { Kpi, LiveBadge } from "./dashboard-shared";
 
 // Siti's report checklist (handed over on paper, 2026-09-17) — a draft tab so
@@ -13,9 +14,8 @@ import { Kpi, LiveBadge } from "./dashboard-shared";
 // GET /api/dashboard/prototype feed every other tab reads; the `production`
 // and `inventory` slices below carry a few new fields added specifically for
 // this list (see dashboard-prototype.ts's "Siti's list" section) — no new
-// endpoint. Production Cost is the one item on her list with no wired data
-// source yet (needs cost_ledger); it renders as an explicit gap, not a
-// guessed number.
+// endpoint except Production Cost, which reads fg_batches (one extra query,
+// no org_id filter — see that route's own comment on why).
 type OverdueOrDueSoon = {
   poNo: string | null;
   customer: string | null;
@@ -27,7 +27,7 @@ type OverdueOrDueSoon = {
 type Feed = {
   success?: boolean;
   availability?: {
-    production?: { live: boolean; reason?: string };
+    production?: { live: boolean; reason?: string; costError?: string };
     inventory?: { live: boolean; reason?: string };
   };
   production?: {
@@ -41,6 +41,11 @@ type Feed = {
       late: number;
       withBothDates: number;
       completedTotal: number;
+    };
+    productionCost: {
+      byDay: { date: string; materialSen: number; laborSen: number; overheadSen: number; totalSen: number; batches: number }[];
+      totalBatches: number;
+      batchesWithCost: number;
     };
   };
   inventory?: {
@@ -66,6 +71,21 @@ export function SitiOpsView() {
     [production?.dailyOutput],
   );
 
+  const costChartData = useMemo(
+    () => (production?.productionCost.byDay ?? []).map((d) => ({
+      date: d.date.slice(5),
+      Material: Math.round(d.materialSen / 100),
+      Labor: Math.round(d.laborSen / 100),
+      Overhead: Math.round(d.overheadSen / 100),
+    })),
+    [production?.productionCost.byDay],
+  );
+
+  const totalCostSen = useMemo(
+    () => (production?.productionCost.byDay ?? []).reduce((a, d) => a + d.totalSen, 0),
+    [production?.productionCost.byDay],
+  );
+
   if (loading) {
     return <div className="py-16 text-center text-sm text-[#6B7280]">Loading…</div>;
   }
@@ -88,11 +108,10 @@ export function SitiOpsView() {
         <LiveBadge live={prodLive && invLive} />
       </div>
       <p className="text-xs text-[#6B7280]">
-        Draft — tracking the report checklist handed over on paper. Real data below is wired up;
-        the last card (Production Cost) is not built yet, flagged rather than guessed.
+        Draft — tracking the report checklist handed over on paper, all real data now.
       </p>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
         <Kpi
           label="Overdue (all depts)"
           value={fmtN(totalOverdue)}
@@ -126,6 +145,20 @@ export function SitiOpsView() {
           icon={PackageX}
           iconBgClass="bg-[#F0ECE9]"
           iconColorClass="text-[#6B5C32]"
+        />
+        <Kpi
+          label="Production Cost"
+          value={formatCurrency(totalCostSen)}
+          sub={
+            production
+              ? `${production.productionCost.batchesWithCost} / ${production.productionCost.totalBatches} batches costed`
+              : undefined
+          }
+          icon={DollarSign}
+          iconBgClass="bg-[#E6F0F3]"
+          iconColorClass="text-[#3E6570]"
+          valueColorClass="text-[#3E6570]"
+          valueSizeClass="text-xl"
         />
       </div>
 
@@ -259,6 +292,41 @@ export function SitiOpsView() {
 
       <Card>
         <CardHeader className="pb-3">
+          <CardTitle>Production Cost</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div style={{ width: "100%", height: 220 }}>
+            {costChartData.length === 0 ? (
+              <div className="flex items-center justify-center h-full text-xs text-[#6B7280]">
+                No costed batches in range.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={costChartData} margin={{ top: 6, right: 6, bottom: 0, left: 0 }} stackOffset="none">
+                  <XAxis dataKey="date" tick={{ fontSize: 10, fill: MUTED }} axisLine={{ stroke: BORDER }} tickLine={false} />
+                  <YAxis tick={{ fontSize: 10, fill: MUTED }} axisLine={false} tickLine={false} width={44} tickFormatter={(v) => fmtRMAxis(Number(v) * 100)} />
+                  <Tooltip
+                    formatter={(v) => formatCurrency(Math.round(Number(v) * 100))}
+                    contentStyle={{ background: "#FFFFFF", border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: 12 }}
+                  />
+                  <Bar dataKey="Material" stackId="cost" fill={TAUPE} />
+                  <Bar dataKey="Labor" stackId="cost" fill={TEAL} radius={[3, 3, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+          <p className="mt-2 text-xs text-[#6B7280]">
+            Material + labor cost of finished-goods batches, by completion date — whole book, not scoped to the
+            period picker. Reads <span className="font-mono">fg_batches</span>; a batch is only costed once{" "}
+            <span className="font-mono">po-cost-cascade.ts</span> settles its material side, so{" "}
+            {production ? `${production.productionCost.batchesWithCost} of ${production.productionCost.totalBatches}` : "some"}{" "}
+            batches carry a real number — the rest are RM 0.00 by construction, not a real zero cost.
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
           <CardTitle>Material Shortage</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
@@ -289,21 +357,6 @@ export function SitiOpsView() {
           <p className="px-4 pb-3 pt-2 text-xs text-[#6B7280]">
             Proxy, not a real reorder-point check: <span className="font-mono">min_stock</span> is 0 on every raw
             material row, so this lists active items sitting at zero/negative balance instead.
-          </p>
-        </CardContent>
-      </Card>
-
-      <Card className="border-[#E5E0D8] bg-[#F7F5F3]">
-        <CardHeader className="pb-2">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <DollarSign className="h-4 w-4 text-[#6B7280]" /> Production Cost
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-xs text-[#6B7280]">
-            Not built yet. This needs <span className="font-mono">cost_ledger</span> data, which nothing in this
-            route reads today — everything above comes from data the page already loads. Flagged here rather than
-            filled with a guessed number.
           </p>
         </CardContent>
       </Card>
