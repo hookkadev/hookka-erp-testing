@@ -14,6 +14,7 @@ import { useNavGuard } from "@/lib/use-nav-guard";
 import { familyOf } from "@/lib/product-family";
 import { MasterPriceHistoryDialog } from "./MasterPriceHistoryDialog";
 import { BatchImportDialog, type ImportColumn } from "@/components/ui/batch-import-dialog";
+import { exportImportRows } from "@/components/ui/batch-import-dialog";
 import {
   EffectiveDateConfirmModal,
   MaintenanceConfigHistoryDialog,
@@ -3616,7 +3617,34 @@ export default function ProductsPage() {
             onClick={() => setShowBatchImport(true)}
             className="px-3 py-1.5 rounded-md text-xs font-medium bg-white text-[#6B7280] border border-[#E5E7EB] hover:bg-[#F3F4F6] transition-colors"
           >
-            Batch Import / Export
+            Batch Import
+          </button>
+          <button
+            onClick={() =>
+              exportImportRows(
+                productImportColumns,
+                filtered.map((p) => ({
+                  id: p.id,
+                  code: p.code,
+                  name: p.name,
+                  category: p.category,
+                  description: p.description,
+                  baseModel: p.baseModel,
+                  sizeCode: p.sizeCode,
+                  sizeLabel: p.sizeLabel,
+                  fabricUsage: p.fabricUsage,
+                  unitM3: p.unitM3,
+                  status: p.status,
+                  costPriceSen: (p.costPriceSen ?? 0) / 100,
+                  basePriceSen: (p.basePriceSen ?? 0) / 100,
+                })),
+                `products-${new Date().toISOString().slice(0, 10)}.xlsx`,
+              )
+            }
+            className="px-3 py-1.5 rounded-md text-xs font-medium bg-white text-[#6B7280] border border-[#E5E7EB] hover:bg-[#F3F4F6] transition-colors"
+            title="Export the currently filtered/sorted rows"
+          >
+            Export ({filtered.length})
           </button>
           <div className="w-px h-5 bg-[#E5E7EB] mx-1" />
           {/* Edit / Save / Cancel — every inline edit on this page goes
@@ -5122,10 +5150,9 @@ export default function ProductsPage() {
       <BatchImportDialog
         open={showBatchImport}
         onClose={() => setShowBatchImport(false)}
-        title="Batch Import / Export Products"
+        title="Batch Import Products"
         description="Upload an Excel or CSV file to create or update multiple products at once. Rows are matched by Product Code."
         templateFilename="products-import-template.xlsx"
-        exportFilename={`products-${new Date().toISOString().slice(0, 10)}.xlsx`}
         columns={productImportColumns}
         keyColumn="code"
         onImport={handleProductBulkImport}

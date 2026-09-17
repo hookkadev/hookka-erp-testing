@@ -59,6 +59,55 @@ export type ImportColumn = {
 
 export type ImportRow = Record<string, unknown>;
 
+// Standalone export — deliberately NOT part of BatchImportDialog. Import
+// needs the FULL dataset (currentRows) to correctly detect new/update/rename
+// against ANY existing record, even ones the grid's current filter hides.
+// Export needs the OPPOSITE: only what's currently visible/filtered. Pages
+// call this directly with their own filtered row set, wired to a separate
+// "Export" button — a page passing the unfiltered array here is the caller's
+// bug, not this function's.
+export async function exportImportRows(
+  columns: ImportColumn[],
+  rows: ImportRow[],
+  filename: string,
+): Promise<void> {
+  if (rows.length === 0) return;
+  const XLSX: XLSXModule = await import("xlsx");
+
+  const headerRow = columns.map((c) => (c.required ? `${c.label} *` : c.label));
+
+  const dataRows: (string | number | boolean)[][] = rows.map((row) =>
+    columns.map((c) => {
+      const v = row[c.key];
+      if (v === null || v === undefined) return "";
+      if (c.type === "boolean") return v ? "TRUE" : "FALSE";
+      if (c.type === "number") {
+        const n = Number(v);
+        return Number.isFinite(n) ? n : "";
+      }
+      return String(v);
+    }),
+  );
+
+  const aoa: (string | number | boolean)[][] = [headerRow, ...dataRows];
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+
+  // Widen columns to fit the longest value actually present (cap at 50)
+  ws["!cols"] = columns.map((c, colIdx) => {
+    let maxLen = c.label.length + 4;
+    for (const row of dataRows) {
+      const cell = row[colIdx];
+      const len = String(cell ?? "").length;
+      if (len > maxLen) maxLen = len;
+    }
+    return { wch: Math.min(Math.max(maxLen, 12), 50), hidden: c.hidden || undefined };
+  });
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Data");
+  XLSX.writeFile(wb, filename);
+}
+
 // A blank/omitted incoming cell asserts nothing, so it never counts as a
 // change — matches the "blank never overwrites" merge semantics used
 // server-side (see shapeProductBulkRow and its raw-materials equivalent).
@@ -100,16 +149,15 @@ export interface BatchImportDialogProps {
   ) =>
     | Promise<{ created: number; updated: number; rejected?: { row: number; reason: string }[] }>
     | { created: number; updated: number; rejected?: { row: number; reason: string }[] };
-  /** Current rows, each including `id`, to enable "Export Current Data"
-   *  round-trip and new/update/renamed/unchanged detection. A row whose
-   *  `id` matches an existing row but whose `keyColumn` value differs is a
-   *  RENAME, not a new row; a row identical to its match is dropped from
-   *  the preview entirely (nothing to import). Without `id` on the rows,
-   *  matching falls back to `keyColumn` only and renames can't be detected. */
+  /** The FULL current dataset (not the grid's filtered view — see
+   *  exportImportRows above for why), each row including `id`, used for
+   *  new/update/renamed/unchanged detection during upload preview. A row
+   *  whose `id` matches an existing row but whose `keyColumn` value differs
+   *  is a RENAME, not a new row; a row identical to its match is dropped
+   *  from the preview entirely (nothing to import). Without `id` on the
+   *  rows, matching falls back to `keyColumn` only and renames can't be
+   *  detected. */
   currentRows?: ImportRow[];
-  /** Filename for the exported data file. Defaults to
-   *  templateFilename with "-template" replaced by "-export". */
-  exportFilename?: string;
 }
 
 type Step = "intro" | "preview" | "done";
@@ -124,7 +172,6 @@ export const BatchImportDialog: React.FC<BatchImportDialogProps> = ({
   keyColumn,
   onImport,
   currentRows,
-  exportFilename,
 }) => {
   const [step, setStep] = React.useState<Step>("intro");
   const [parsed, setParsed] = React.useState<ParsedRow[]>([]);
@@ -172,55 +219,6 @@ export const BatchImportDialog: React.FC<BatchImportDialogProps> = ({
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Template");
     XLSX.writeFile(wb, templateFilename);
-  };
-
-  // -- Export current data ---------------------------------------------------
-  // Produces an Excel file with the exact same schema as the template, but
-  // pre-filled with the current rows. Users edit in Excel and re-upload to
-  // update in bulk — the key column matches rows back to existing records.
-  const handleExportCurrent = async () => {
-    if (!currentRows || currentRows.length === 0) return;
-    const XLSX: XLSXModule = await import("xlsx");
-
-    const headerRow = columns.map((c) =>
-      c.required ? `${c.label} *` : c.label,
-    );
-
-    const dataRows: (string | number | boolean)[][] = currentRows.map((row) =>
-      columns.map((c) => {
-        const v = row[c.key];
-        if (v === null || v === undefined) return "";
-        if (c.type === "boolean") return v ? "TRUE" : "FALSE";
-        if (c.type === "number") {
-          const n = Number(v);
-          return Number.isFinite(n) ? n : "";
-        }
-        return String(v);
-      }),
-    );
-
-    const aoa: (string | number | boolean)[][] = [headerRow, ...dataRows];
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
-
-    // Widen columns to fit the longest value actually present (cap at 50)
-    ws["!cols"] = columns.map((c, colIdx) => {
-      let maxLen = c.label.length + 4;
-      for (const row of dataRows) {
-        const cell = row[colIdx];
-        const len = String(cell ?? "").length;
-        if (len > maxLen) maxLen = len;
-      }
-      return { wch: Math.min(Math.max(maxLen, 12), 50), hidden: c.hidden || undefined };
-    });
-
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Data");
-
-    const fallback = templateFilename.replace(/template/gi, "export");
-    const outName =
-      exportFilename ||
-      (fallback !== templateFilename ? fallback : `export-${templateFilename}`);
-    XLSX.writeFile(wb, outName);
   };
 
   // -- Upload + parse --------------------------------------------------------
@@ -488,7 +486,7 @@ export const BatchImportDialog: React.FC<BatchImportDialogProps> = ({
                     {currentRows && currentRows.length > 0 && (
                       <>
                         <br />
-                        <span className="font-semibold">Edit existing rows:</span> export the current data, change what you need in Excel, then re-upload.
+                        <span className="font-semibold">Edit existing rows:</span> use the separate Export button to download current data, change what you need in Excel, then upload it here.
                       </>
                     )}
                   </li>
@@ -534,12 +532,6 @@ export const BatchImportDialog: React.FC<BatchImportDialogProps> = ({
                   <Download className="h-4 w-4" />
                   Download Template
                 </Button>
-                {currentRows && currentRows.length > 0 && (
-                  <Button variant="outline" onClick={handleExportCurrent}>
-                    <Download className="h-4 w-4" />
-                    Export Current Data ({currentRows.length})
-                  </Button>
-                )}
                 <Button
                   variant="primary"
                   onClick={() => inputRef.current?.click()}
