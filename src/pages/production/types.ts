@@ -56,6 +56,8 @@ export type ProductionOrder = {
   // rows from a CO display CO-YYMM-NNN instead of a blank cell.
   consignmentOrderId?: string;
   companyCOId?: string;
+  /** 0235 — built for stock, no customer behind it until it is allocated. */
+  isStock?: boolean;
   productId: string; productCode: string; productName: string; itemCategory: "SOFA"|"BEDFRAME"|"ACCESSORY";
   sizeCode: string; sizeLabel: string; fabricCode: string; quantity: number;
   gapInches: number|null; divanHeightInches: number|null; legHeightInches: number|null;

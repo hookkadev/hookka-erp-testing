@@ -299,9 +299,14 @@ export type SalesOrder = {
   preCancelStatus?: SOStatus;
   overdue: string;
   notes: string;
-  /** Make-to-stock flag — set when the SO was generated as a placeholder for
-   *  future customer demand (companySOId uses "SOH-" prefix). When a real
-   *  customer order lands, this SO is renamed in-place. Optional for legacy. */
+  /** 0235 — make-to-stock order: goods built with no customer behind them,
+   *  booked against the internal Factory Stock customer (companySOId uses the
+   *  "SOH-" prefix). Hidden from the sales order list by default.
+   *
+   *  This used to say the row would be "renamed in-place when a real customer
+   *  order lands". That renaming was never written and is NOT the design: the
+   *  goods are handed over by a stock_allocations record, and this order stays
+   *  what it is. Optional for legacy rows. */
   isStock?: boolean;
   /** Base64 PNG of the original customer PO page(s) when the SO was created
    *  via the Scan PO flow. Used by the SO detail page's "View original PO"
@@ -363,6 +368,8 @@ export type ProductionOrder = {
   // salesOrderId/companySOId empty and carry these instead.
   consignmentOrderId?: string;
   companyCOId?: string;
+  /** 0235 — built for stock, with no customer behind it until it is allocated. */
+  isStock?: boolean;
   productId: string;
   productCode: string;
   productName: string;
