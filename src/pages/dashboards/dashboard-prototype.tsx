@@ -4,6 +4,7 @@ import { PeriodPicker } from "./dashboard-shared";
 import type { Period } from "./dashboard-shared-lib";
 import { AllOverviewView } from "./AllOverviewView";
 import { SalesOrdersView } from "./SalesOrdersView";
+import { EmployeesView } from "./EmployeesView";
 import { PageHeader } from "@/components/ui/page-header";
 import { Tabs, type TabItem } from "@/components/ui/tabs";
 
@@ -15,11 +16,11 @@ import { Tabs, type TabItem } from "@/components/ui/tabs";
 // and — the real reason — it was a dead end for a REAL page: nothing in an
 // injected srcdoc document can be a real, navigable, testable React screen.
 //
-// This branch carries TWO tabs — All Overview (the landing tab) and Sales
-// Orders — so the first merge to main is small enough to review properly. Both
-// read the same cached GET /api/dashboard/prototype payload; no tab has an
-// endpoint of its own. The other five domain tabs live on
-// laphii/feature/dashboard and land in a follow-up.
+// This branch carries THREE tabs — All Overview (the landing tab), Sales
+// Orders and Employees. All read the same cached GET /api/dashboard/prototype
+// payload; no tab has an endpoint of its own. The remaining four domain tabs
+// (Delivery, Inventory, Purchase, Production) live on laphii/feature/dashboard
+// and land in a follow-up.
 //
 // PERIOD: the Monthly/YTD picker below the tab strip is global. Tabs with a
 // date column filter by it; Inventory and Production are point-in-time
@@ -36,13 +37,14 @@ import { Tabs, type TabItem } from "@/components/ui/tabs";
 // font is loaded — the app's default font-sans (system-ui) applies here too.
 // ---------------------------------------------------------------------------
 
-// Only the two tabs being trialled on main. The remaining five (Delivery,
-// Inventory, Purchase, Employees, Production) are built and live on
-// laphii/feature/dashboard — they are held back from this branch so the first
-// merge carries the smallest reviewable surface.
-const TABS: TabItem<"overview" | "sales">[] = [
+// The three tabs being trialled on main. The remaining four (Delivery,
+// Inventory, Purchase, Production) are built and live on
+// laphii/feature/dashboard — they are held back from this branch so each
+// merge carries a small, reviewable surface.
+const TABS: TabItem<"overview" | "sales" | "employee">[] = [
   { key: "overview", label: "All Overview" },
   { key: "sales", label: "Sales Orders" },
+  { key: "employee", label: "Employees" },
 ];
 
 export default function DashboardPrototypePage() {
@@ -64,7 +66,7 @@ export default function DashboardPrototypePage() {
   // Jan-Apr window genuinely contains no other sales month, while the picker
   // implied Feb was there to be found.
   //
-  // This list stays sales-driven when the Employees tab lands too. Attendance
+  // Stays sales-driven now that the Employees tab has landed too. Attendance
   // covers three extra months (2025-08, 2025-12, 2026-02) holding ONE row each;
   // owner 2026-09-15 confirmed those are test rows, not a real 2025 book, so
   // widening to the union would offer a year the factory never traded in. If a
@@ -135,6 +137,7 @@ export default function DashboardPrototypePage() {
       {tab === "sales" && (
         <SalesOrdersView period={effectivePeriod} months={months} onPeriodChange={setPeriod} />
       )}
+      {tab === "employee" && <EmployeesView period={effectivePeriod} />}
     </div>
   );
 }
