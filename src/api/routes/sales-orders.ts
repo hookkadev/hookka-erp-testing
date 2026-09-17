@@ -164,6 +164,10 @@ const app = new Hono<Env>();
 // the moment a second tenant is seeded.
 app.get("/", async (c) => {
   const db = c.var.DB;
+  // This list filters on is_stock, which a fresh DB may not have yet — no SO
+  // write need ever have run here. Memoized per isolate, so only the first
+  // request pays for it.
+  await ensurePendingMigrations(db);
   const pageParam = c.req.query("page");
   const limitParam = c.req.query("limit");
   const paginate = pageParam !== undefined || limitParam !== undefined;
@@ -209,12 +213,22 @@ app.get("/", async (c) => {
   // Tenant scope — first bind param on every query against soSourceSql.
   // Items are scoped transitively via salesOrderId IN (...) so they don't
   // need their own orgId filter (the archive table doesn't have orgId yet).
-  const extraWhere =
+  // 0235 — make-to-stock orders are booked against the internal Factory Stock
+  // customer and are not what a salesperson is looking for here. Excluded by
+  // default, the way service orders are; ?isStock=all brings them back for
+  // admin/reporting. There is deliberately no "stock only" mode — the stock
+  // orders' own surface is the Production page.
+  const stockWhere =
+    c.req.query("isStock") === "all"
+      ? ""
+      : "(is_stock = FALSE OR is_stock IS NULL)";
+  const serviceWhere =
     serviceOrderFilter === "true"
       ? "is_service_order = TRUE"
       : serviceOrderFilter === "false"
         ? "(is_service_order = FALSE OR is_service_order IS NULL)"
         : "";
+  const extraWhere = [serviceWhere, stockWhere].filter(Boolean).join(" AND ");
   const { whereSql: orgWhere, params: orgParams } = withOrgScope(
     c,
     "sales_orders",
@@ -983,6 +997,8 @@ app.get("/status-changes", async (c) => {
 
 app.get("/stats", async (c) => {
   const orgId = getOrgId(c);
+  // Reads is_stock — ensure it exists on this DB first, same as GET / above.
+  await ensurePendingMigrations(c.var.DB);
   // 0134 — Service Order vs Sales Order scope. Same semantics as the GET
   // list above so /service-order's tab badges + dashboard cards read off
   // a SV-only aggregate instead of the combined ~570-row total.
@@ -996,12 +1012,20 @@ app.get("/stats", async (c) => {
       : isServiceOrderParam === "all"
         ? "all"
         : "false";
-  const extraWhere =
+  // Stock orders are excluded from the list above, so they are excluded from
+  // its tile cards too — a card that counts rows the grid below cannot show is
+  // exactly the "No confirmed orders / 1,229 orders" mismatch noted below.
+  const stockWhere =
+    c.req.query("isStock") === "all"
+      ? ""
+      : "(is_stock = FALSE OR is_stock IS NULL)";
+  const serviceWhere =
     serviceOrderFilter === "true"
       ? "is_service_order = TRUE"
       : serviceOrderFilter === "false"
         ? "(is_service_order = FALSE OR is_service_order IS NULL)"
         : "";
+  const extraWhere = [serviceWhere, stockWhere].filter(Boolean).join(" AND ");
 
   // A salesperson's totals must come from a NARROWED aggregate — there is no
   // row here for the response filter to drop, which is how the grid could read

@@ -18,6 +18,9 @@ export type PipelinePO = {
   id: string;
   status: string;
   consignmentOrderId?: string;
+  // 0235 — TRUE when this PO was built for stock rather than for a customer
+  // order. Gates Pending Delivery below; see poReadyForDelivery.
+  isStock?: boolean;
   itemCategory?: string;
   specialOrder?: string;
   // Service-order Repair Scope snapshot (0160, JSON string or null).
@@ -86,6 +89,14 @@ export function poReadyForDelivery(po: PipelinePO, linkedPOIds: Set<string>): bo
   // even if its upholstery cards happened to complete before it was put on hold.
   if (po.status === "ON_HOLD") return false;
   if (po.consignmentOrderId) return false;
+  // A stock PO has no customer behind it — its order is booked against the
+  // internal Factory Stock customer. Before this gate a finished stock PO
+  // walked into Pending Delivery and could be picked onto a real customer's
+  // delivery note, where the invoice then resolved back to a placeholder at
+  // price zero. It becomes deliverable only once it has been ALLOCATED to a
+  // customer order, at which point it is that order's piece and this flag no
+  // longer decides anything.
+  if (po.isStock) return false;
   if (linkedPOIds.has(po.id)) return false;
   const uphCards = pickRelevantUphCards(po);
   if (uphCards.length === 0) {

@@ -83,9 +83,9 @@ Owns the customer-facing order lifecycle: **Sales Orders** (SO) and their line i
 | `CopyFromSourceModal` | `src/pages/sales/create.tsx:2395` | 2-step copy-draft picker |
 | `LineItemCard` | `src/pages/sales/create.tsx:3021` | Per-line item editor |
 | `SalesOrderDetailPage` | `src/pages/sales/detail.tsx:338` | SO detail; linked POs/JCs/DOs/invoices |
-| `app.post("/")` (create) | `src/api/routes/sales-orders.ts:1713` | SO create + combo pass + snapshot invalidation |
-| `app.put("/:id")` (edit) | `src/api/routes/sales-orders.ts:3096` | SO edit + re-run combo pass |
-| `app.post("/:id/confirm")` | `src/api/routes/sales-orders.ts:2494` | DRAFT/PENDING → IN_PRODUCTION, cascade to POs |
+| `app.post("/")` (create) | `src/api/routes/sales-orders.ts:1742` | SO create + combo pass + snapshot invalidation |
+| `app.put("/:id")` (edit) | `src/api/routes/sales-orders.ts:3125` | SO edit + re-run combo pass |
+| `app.post("/:id/confirm")` | `src/api/routes/sales-orders.ts:2523` | DRAFT/PENDING → IN_PRODUCTION, cascade to POs |
 | `createProductionOrdersForSO` | `sales-orders/_helpers.ts:576` | One production_orders row per SO item |
 | `cascadeSOStatusToPOs` | `sales-orders/_helpers.ts:773` | Propagate SO status change to POs/JCs |
 | `rowToSO` / `rowToSOList` | `sales-orders/_helpers.ts:243 / 307` | Row → API shape (dual-keyed) |

@@ -41,6 +41,11 @@ import {
 } from "../lib/sequence-lock";
 import { salesOrderScopeSql, isCustomerScoped } from "../lib/customer-scope";
 import {
+  ensureStockOrderSchema,
+  STOCK_CUSTOMER_ID,
+  STOCK_CUSTOMER_NAME,
+} from "../lib/stock-orders";
+import {
   ensureJobCardQrTokenColumn,
   getOrCreateJobCardQrToken,
 } from "../lib/jobcard-qr-token";
@@ -1206,6 +1211,10 @@ app.post("/stock", async (c) => {
   const denied = await requirePermission(c, "production-orders", "create");
   if (denied) return denied;
   const db = c.var.DB;
+  // is_stock and the cust-factory-stock row reach prod ONLY through this —
+  // migration 0235 is inert on deploy. Awaited before the first write below,
+  // which binds both.
+  await ensureStockOrderSchema(db);
   const body = await c.req.json().catch(() => ({}));
   const type = body?.type as "WIP" | "FG" | undefined;
   const sourcePoId = body?.sourcePoId as string | undefined;
@@ -1339,8 +1348,8 @@ app.post("/stock", async (c) => {
             customerSO, customerSOId, reference, customerId, customerName,
             customerState, hubId, hubName, companySO, companySOId, companySODate,
             customerDeliveryDate, hookkaExpectedDD, hookkaDeliveryOrder,
-            subtotalSen, totalSen, status, overdue, notes, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            subtotalSen, totalSen, status, overdue, isStock, notes, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         soId,
@@ -1350,8 +1359,11 @@ app.post("/stock", async (c) => {
         "",
         "",
         type === "WIP" ? `Stock WIP (${selectedWipLabel})` : "Stock FG",
-        "", // customerId — stock SO has no customer; NOT NULL but empty string OK
-        "— Stock —",
+        // customer_id is NOT NULL REFERENCES customers(id). The empty string this
+        // used to bind only survived because D1 did not enforce foreign keys;
+        // Postgres does. cust-factory-stock is created by the self-apply above.
+        STOCK_CUSTOMER_ID,
+        STOCK_CUSTOMER_NAME,
         "",
         null,
         null,
@@ -1365,7 +1377,12 @@ app.post("/stock", async (c) => {
         0,
         "DRAFT",
         "PENDING",
-        "Stock placeholder — will be renamed to the customer SO when a real order lands.",
+        true,
+        // The old note promised this row would be "renamed to the customer SO
+        // when a real order lands". That renaming was never written, and is not
+        // the design: the goods are handed over by an allocation record, and
+        // this order stays what it is.
+        "Make-to-stock order. Goods are handed to a customer order by allocation.",
         nowIso,
         nowIso,
       ),
@@ -1422,8 +1439,9 @@ app.post("/stock", async (c) => {
            productId, productCode, productName, itemCategory, sizeCode, sizeLabel,
            fabricCode, quantity, gapInches, divanHeightInches, legHeightInches,
            specialOrder, notes, status, currentDepartment, progress, startDate,
-           targetEndDate, completedDate, rackingNumber, stockedIn, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           targetEndDate, completedDate, rackingNumber, stockedIn, isStock,
+           created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         newPoId,
@@ -1433,7 +1451,7 @@ app.post("/stock", async (c) => {
         1,
         "",
         type === "WIP" ? `Stock WIP (${selectedWipLabel})` : "Stock FG",
-        "— Stock —",
+        STOCK_CUSTOMER_NAME,
         "",
         sohNo,
         sourcePO.productId,
@@ -1459,6 +1477,7 @@ app.post("/stock", async (c) => {
         null,
         "",
         0,
+        true,
         nowIso,
         nowIso,
       ),
