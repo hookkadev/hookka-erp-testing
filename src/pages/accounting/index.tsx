@@ -4186,6 +4186,7 @@ function SupplierDiscountTab() {
   const [netRm, setNetRm] = useState("");
   const [sstRm, setSstRm] = useState("");
   const [reason, setReason] = useState("");
+  const [cnDate, setCnDate] = useState(() => new Date().toISOString().slice(0, 10));
 
   // Open PIs for the picked supplier + per-PI allocation rows (keyed by PI id).
   const [openPIs, setOpenPIs] = useState<SDOpenPI[]>([]);
@@ -4277,6 +4278,7 @@ function SupplierDiscountTab() {
     setNetRm("");
     setSstRm("");
     setReason("");
+    setCnDate(new Date().toISOString().slice(0, 10));
     setOpenPIs([]);
     setAllocRows({});
   };
@@ -4315,7 +4317,7 @@ function SupplierDiscountTab() {
       const createRes = await fetch("/api/accounting/purchase-credit-notes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ supplierId, reason, items }),
+        body: JSON.stringify({ supplierId, date: cnDate, reason, items }),
       });
       const createJson = (await createRes.json()) as { success?: boolean; error?: string; data?: { id?: string } };
       if (!createRes.ok || !createJson.success || !createJson.data?.id) {
@@ -4419,15 +4421,26 @@ function SupplierDiscountTab() {
               />
             </div>
           </div>
-          <div>
-            <label className="text-xs font-medium text-[#6B7280] mb-1 block">Reason</label>
-            <input
-              type="text"
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder="e.g. damaged fabric returned"
-              className="w-full rounded-md border border-[#E2DDD8] px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#6B5C32]"
-            />
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label className="text-xs font-medium text-[#6B7280] mb-1 block">Date</label>
+              <input
+                type="date"
+                value={cnDate}
+                onChange={(e) => setCnDate(e.target.value)}
+                className="w-full rounded-md border border-[#E2DDD8] px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#6B5C32]"
+              />
+            </div>
+            <div className="sm:col-span-2">
+              <label className="text-xs font-medium text-[#6B7280] mb-1 block">Reason</label>
+              <input
+                type="text"
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="e.g. damaged fabric returned"
+                className="w-full rounded-md border border-[#E2DDD8] px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#6B5C32]"
+              />
+            </div>
           </div>
 
           {/* Allocation table — only once a supplier is picked. */}
