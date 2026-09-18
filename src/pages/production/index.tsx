@@ -7154,6 +7154,7 @@ export default function ProductionPage({
             Create Stock PO
           </Button>
           <Button variant="outline" onClick={() => navigate("/planning?tab=tracker")}>Master Tracker</Button>
+          <Button variant="outline" onClick={() => navigate("/production/sequence-unlocks")}>Unlock report</Button>
           {/* Print Schedule mode picker. Detailed = one row per PO/JC
               (handlePrintSchedule). Total Listing = rows merged by
               model+spec for the floor (handlePrintTotalListing). Both

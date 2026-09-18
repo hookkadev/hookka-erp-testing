@@ -11,7 +11,12 @@ import {
   transitionConsumesUpstream,
   blockerMessage,
   type SequenceBlocker,
+  type SequenceCard,
 } from "../../lib/sequence-lock";
+import {
+  validateUnlockReason,
+  type UnlockReasonCode,
+} from "../../lib/sequence-unlock-reasons";
 import type { Env } from "../../worker";
 import { postProductionOrderCompletion } from "../../lib/fg-completion";
 import { archiveUnionSource } from "../../lib/archive-union";
@@ -116,6 +121,14 @@ export function ensurePendingMigrations(db: D1Database): Promise<void> {
   pendingMigrations = (async () => {
     const stmts = [
       "ALTER TABLE job_cards ADD COLUMN IF NOT EXISTS distributedAt TEXT",
+      // Sequence-unlock audit (PRD T-013 R10/R12, 2026-09-17). The weekly
+      // review groups by these; `reason` stays the human sentence. Mirrored in
+      // migrations-postgres/0233_scan_override_audit_reason_code.sql for the record
+      // — this ensure is what reaches prod.
+      "ALTER TABLE scan_override_audit ADD COLUMN IF NOT EXISTS reason_code TEXT",
+      "ALTER TABLE scan_override_audit ADD COLUMN IF NOT EXISTS department_code TEXT",
+      "ALTER TABLE scan_override_audit ADD COLUMN IF NOT EXISTS blocked_by TEXT",
+      "ALTER TABLE scan_override_audit ADD COLUMN IF NOT EXISTS actor_kind TEXT",
       // ON HOLD reason columns (BUG-2026-06-24-008). The production list READ
       // joins sales_orders / consignment_orders and SELECTs
       // hold_reason/held_by/held_at (attachCustomerSO). Those columns are added
@@ -4465,34 +4478,21 @@ export async function applyPoUpdate(
     //     thing that waits for all of them.
     //   · 2026-06-08 — `prerequisiteMet` was stale. It is not read at all.
     //
-    // Two further things the earlier version got wrong and this does not:
-    // a PURE DATE EDIT is never blocked (only a transition that actually
-    // consumes upstream WIP is), and the block is escapable — see the unlock
-    // below. A lock with no way out is one the floor routes around.
+    // A PURE DATE EDIT is never blocked (only a transition that actually
+    // consumes upstream WIP is), and the block is escapable — see
+    // gateJobCardSequence. A lock with no way out is one the floor routes
+    // around. One helper for every path (PRD T-013 R5), not a copy per screen.
+    let sequenceGuardIds: string[] = [];
     if (transitionConsumesUpstream(body.status)) {
-      const blockers = sequenceBlockers(jcRow, allJcRows);
-      if (blockers.length > 0) {
-        const unlock = (body as { unlock?: { reason?: string } }).unlock;
-        if (!unlock) {
-          return c.json(
-            {
-              success: false,
-              code: "UPSTREAM_INCOMPLETE",
-              error: blockerMessage(blockers),
-              blockedBy: blockers,
-              // Shadow-unlock (owner 2026-09-06): the lock is real and visible
-              // from day one, but anyone may release it themselves so nobody is
-              // stopped while the floor learns the rule. Tighten to supervisors
-              // by making this a permission check — the client must never
-              // decide it, or changing the policy means changing three screens
-              // and a worker can bypass it by calling the API directly.
-              canSelfUnlock: true,
-            },
-            409,
-          );
-        }
-        await recordSequenceUnlock(db, c, jcRow, blockers, unlock.reason);
-      }
+      const gate = await gateJobCardSequence(db, c, {
+        productionOrderId: id,
+        cards: [jcRow],
+        siblings: allJcRows,
+        body,
+        actor: await resolveSequenceActor(db, c),
+      });
+      if (gate.response) return gate.response;
+      sequenceGuardIds = gate.guardIds;
     }
 
     // Mutate a shallow copy — final UPDATE statement below writes it.
@@ -4649,7 +4649,7 @@ export async function applyPoUpdate(
       updated.distributedAt = body.distributedAt;
     }
 
-    await db
+    const jcWrite = await db
       .prepare(
         // 2026-05-25: explicit `updated_at = NOW()` on every JC mutation
         // so the Phase 6 snapshot cache's MAX(job_cards.updated_at)
@@ -4664,12 +4664,18 @@ export async function applyPoUpdate(
         // the date — the two must never be able to disagree. See
         // tests/job-card-completed-at.test.mjs, which fails a completedDate
         // write that leaves completedAt out of the same statement.
+        // The sequence gate above read the upstream cards a moment ago; this
+        // re-checks them INSIDE the write (PRD T-013 R13). If QC reopened an
+        // upstream card in between, the predicate is false, no row changes, and
+        // the 409 below is returned instead of a card that passed a lock that
+        // no longer holds. Empty guard = nothing to re-check (not a consuming
+        // transition, or the operator released the lock and that is audited).
         `UPDATE job_cards SET
            status = ?, completedDate = ?, completedAt = ?, pic1Id = ?, pic1Name = ?,
            pic2Id = ?, pic2Name = ?, actualMinutes = ?, dueDate = ?,
            rackingNumber = ?, overdue = ?, distributedAt = ?,
            updated_at = NOW()
-         WHERE id = ?`,
+         WHERE id = ?${sequenceGuardSql(sequenceGuardIds)}`,
       )
       .bind(
         // Coerce every nullable column to `null` because the Postgres
@@ -4694,8 +4700,12 @@ export async function applyPoUpdate(
         updated.overdue ?? null,
         updated.distributedAt ?? null,
         updated.id,
+        ...sequenceGuardIds,
       )
       .run();
+    if (sequenceGuardIds.length > 0 && (jcWrite.meta?.changes ?? 1) === 0) {
+      return sequenceRaceRefusal(db, c, jcRow);
+    }
 
     // Mirror the rack assignment through the shared writer so the Warehouse
     // rack_items occupancy is populated — the office dropdown now shows the
@@ -5988,26 +5998,280 @@ export async function applyPoStatusChange(
   });
 }
 
+// ---------------------------------------------------------------------------
+// Upstream sequence lock — the ONE gate every everyday completion path calls.
+//
+// PRD T-013 (2026-09-17). Before this there were three copies of the check
+// (the grid PATCH, the sticker scan, the fan-out scans) and each had its own
+// `canSelfUnlock: true`, its own optional reason, and its own idea of who the
+// actor was. Now: one permission check (R8), one reason validation (R9), one
+// audit writer that records the real person (R10), and one place a future
+// endpoint can be made to call (R5). tests/sequence-lock-side-doors.test.mjs
+// enumerates every job_cards status write and fails the build for a new one
+// that does not come through here.
+// ---------------------------------------------------------------------------
+
+export type SequenceActor = {
+  kind: "USER" | "WORKER" | "SYSTEM";
+  id: string;
+  name: string | null;
+};
+
+/**
+ * Who is acting. Desktop = the signed-in user (name looked up so the review
+ * does not read a uuid); shop floor = the worker whose token signed the scan;
+ * SYSTEM is passed explicitly by automated paths and never inferred.
+ */
+export async function resolveSequenceActor(
+  db: D1Database,
+  c: Context<Env>,
+  worker?: { id: string; name?: string | null } | null,
+): Promise<SequenceActor> {
+  const userId = (c as unknown as { get: (k: string) => string | undefined }).get("userId");
+  if (userId) {
+    let name: string | null = null;
+    try {
+      const u = await db
+        .prepare("SELECT displayName, email FROM users WHERE id = ? LIMIT 1")
+        .bind(userId)
+        .first<{ displayName?: string | null; display_name?: string | null; email?: string | null }>();
+      name = u?.displayName ?? u?.display_name ?? u?.email ?? null;
+    } catch {
+      // The id is the record; the name is a courtesy to whoever reads it.
+    }
+    return { kind: "USER", id: userId, name };
+  }
+  if (worker?.id) {
+    return { kind: "WORKER", id: worker.id, name: worker.name ?? null };
+  }
+  return { kind: "SYSTEM", id: "unknown", name: null };
+}
+
+/**
+ * Shadow mode (owner 2026-09-06): the lock is real and visible from day one and
+ * anyone may release it. This is the ONE place that decides so (R8). When the
+ * weekly report is quiet, flip the policy here and nothing else changes — no
+ * client infers it, every refusal carries the server's answer.
+ */
+const SEQUENCE_UNLOCK_POLICY: "ANYONE" | "SUPERVISORS" = "ANYONE";
+const SUPERVISOR_ROLES: ReadonlySet<string> = new Set([
+  "SUPER_ADMIN",
+  "ADMIN",
+  "SUPERVISOR",
+  "MANAGER",
+]);
+
+export function canSequenceUnlock(c: Context<Env>, actor: SequenceActor): boolean {
+  if (actor.kind === "SYSTEM") return false;
+  if ((SEQUENCE_UNLOCK_POLICY as string) === "ANYONE") return true;
+  const role = (c as unknown as { get: (k: string) => string | undefined })
+    .get("userRole")
+    ?.toUpperCase();
+  return actor.kind === "USER" && !!role && SUPERVISOR_ROLES.has(role);
+}
+
+const SEQUENCE_DONE: ReadonlySet<string> = new Set(["COMPLETED", "TRANSFERRED"]);
+
+type SequenceGateInput = {
+  productionOrderId: string;
+  /** The cards about to move. Cards already COMPLETED/TRANSFERRED are skipped:
+   *  they are not moving, so a re-scan of a finished department is never
+   *  "not your turn" (R14). */
+  cards: SequenceCard[];
+  /** Every card on the order, if the caller already has them; else fetched. */
+  siblings?: SequenceCard[];
+  /** The request body — `unlock: { reason }` is read from it. */
+  body: unknown;
+  actor: SequenceActor;
+  /** An automated path that may not ask anyone: release and record it as such
+   *  (the Google Sheets sync, R3). */
+  autoUnlock?: { reason: string; code: UnlockReasonCode };
+};
+
+export type SequenceGateResult = {
+  /** A 409 / 400 / 403 to return, or null to proceed. */
+  response: Response | null;
+  /** Ids of the structurally-upstream cards of the first gated card, for the
+   *  caller to re-check inside its own UPDATE (R13). Empty when the lock was
+   *  released (audited) or nothing was gated. */
+  guardIds: string[];
+};
+
+export async function gateJobCardSequence(
+  db: D1Database,
+  c: Context<Env>,
+  input: SequenceGateInput,
+): Promise<SequenceGateResult> {
+  const { productionOrderId, body, actor } = input;
+  const moving = input.cards.filter(
+    (jc) => !SEQUENCE_DONE.has(String(jc.status ?? "").toUpperCase()),
+  );
+  if (moving.length === 0) return { response: null, guardIds: [] };
+
+  let all = input.siblings;
+  if (!all) {
+    const res = await db
+      .prepare(
+        "SELECT id, departmentCode, status, sequence, wipKey, branchKey FROM job_cards WHERE productionOrderId = ?",
+      )
+      .bind(productionOrderId)
+      .all<SequenceCard>();
+    all = res.results ?? [];
+  }
+
+  const blocked = moving
+    .map((jc) => ({ jc, blockers: sequenceBlockers(jc, all as SequenceCard[]) }))
+    .filter((x) => x.blockers.length > 0);
+  if (blocked.length === 0) {
+    return { response: null, guardIds: sequenceGuardIdsFor(moving[0], all) };
+  }
+
+  const canUnlock = canSequenceUnlock(c, actor);
+  const unlock = (body as { unlock?: { reason?: unknown } } | null | undefined)?.unlock;
+
+  if (!unlock && !input.autoUnlock) {
+    const merged = [
+      ...new Map(blocked.flatMap((b) => b.blockers).map((b) => [b.id, b])).values(),
+    ];
+    return {
+      response: c.json(
+        {
+          success: false,
+          code: "UPSTREAM_INCOMPLETE",
+          error: blockerMessage(merged),
+          blockedBy: merged,
+          blockedCards: blocked.map((b) => b.jc.id),
+          canSelfUnlock: canUnlock,
+        },
+        409,
+      ),
+      guardIds: [],
+    };
+  }
+
+  let reason: string;
+  let code: UnlockReasonCode;
+  if (input.autoUnlock && !unlock) {
+    reason = input.autoUnlock.reason;
+    code = input.autoUnlock.code;
+  } else {
+    if (!canUnlock) {
+      return {
+        response: c.json(
+          {
+            success: false,
+            code: "UNLOCK_FORBIDDEN",
+            error: "A supervisor has to release this sequence lock.",
+          },
+          403,
+        ),
+        guardIds: [],
+      };
+    }
+    const check = validateUnlockReason(unlock?.reason);
+    if (!check.ok) {
+      return {
+        response: c.json(
+          { success: false, code: "UNLOCK_REASON_REQUIRED", error: check.error },
+          400,
+        ),
+        guardIds: [],
+      };
+    }
+    reason = check.reason;
+    code = check.code;
+  }
+
+  for (const b of blocked) {
+    await recordSequenceUnlock(db, {
+      jobCard: {
+        id: b.jc.id,
+        productionOrderId,
+        departmentCode: b.jc.departmentCode ?? null,
+      },
+      blockers: b.blockers,
+      reason,
+      code,
+      actor,
+    });
+  }
+  return { response: null, guardIds: [] };
+}
+
+/**
+ * The cards structurally upstream of `card` — the ones whose status the write
+ * must re-check — computed by the SAME rule with every status treated as open,
+ * so nothing here re-derives the order (R13 without a second rule).
+ */
+export function sequenceGuardIdsFor(card: SequenceCard, all: SequenceCard[]): string[] {
+  const asOpen = all.map((x) => ({ ...x, status: "WAITING" }));
+  return sequenceBlockers({ ...card, status: "WAITING" }, asOpen).map((b) => b.id);
+}
+
+/** `AND NOT EXISTS (...)` for the guard ids, bound after the statement's own
+ *  parameters. Empty ids = empty string. */
+export function sequenceGuardSql(guardIds: string[]): string {
+  if (guardIds.length === 0) return "";
+  const marks = guardIds.map(() => "?").join(", ");
+  return ` AND NOT EXISTS (SELECT 1 FROM job_cards b WHERE b.id IN (${marks}) AND b.status NOT IN ('COMPLETED','TRANSFERRED','CANCELLED'))`;
+}
+
+/** The write's guard held it back: the upstream moved between check and
+ *  write. Re-read so the refusal names what is open NOW. */
+export async function sequenceRaceRefusal(
+  db: D1Database,
+  c: Context<Env>,
+  jc: SequenceCard & { productionOrderId?: string | null },
+): Promise<Response> {
+  const res = await db
+    .prepare(
+      "SELECT id, departmentCode, status, sequence, wipKey, branchKey FROM job_cards WHERE productionOrderId = ?",
+    )
+    .bind(jc.productionOrderId ?? "")
+    .all<SequenceCard>();
+  const blockers = sequenceBlockers(jc, res.results ?? []);
+  return c.json(
+    {
+      success: false,
+      code: "UPSTREAM_INCOMPLETE",
+      error: blockers.length
+        ? `${blockerMessage(blockers)} (an earlier step was reopened while you saved)`
+        : "An earlier step was reopened while you saved. Reload and try again.",
+      blockedBy: blockers,
+      blockedCards: [jc.id],
+      canSelfUnlock: false,
+    },
+    409,
+  );
+}
+
 /**
  * Record that someone released a sequence lock, and against what.
  *
  * Reuses `scan_override_audit` — the table the 2026-06-08 force-scan path
  * already wrote to — rather than adding one. The point of the shadow phase is
  * this row: a skip stops being invisible and becomes a question somebody can
- * ask on Monday.
+ * ask on Monday. `workerId`/`workerName` carry whoever acted — a worker on the
+ * floor or a user at a desk (R10) — and `actor_kind` says which.
  *
  * Deliberately non-fatal. If the audit INSERT fails the work still goes
  * through: refusing a completion because a log line could not be written would
- * stop the factory for the sake of the record.
+ * stop the factory for the sake of the record. One real execution proved the
+ * insert (BUG-2026-09-07-179); the columns below are self-applied in
+ * ensurePendingMigrations, awaited here before the INSERT that names them.
  */
 export async function recordSequenceUnlock(
   db: D1Database,
-  c: Context<Env>,
-  jcRow: JobCardRow,
-  blockers: SequenceBlocker[],
-  reason: string | null | undefined,
+  entry: {
+    jobCard: { id: string; productionOrderId: string; departmentCode: string | null };
+    blockers: SequenceBlocker[];
+    reason: string;
+    code: UnlockReasonCode;
+    actor: SequenceActor;
+  },
 ): Promise<void> {
   try {
+    await ensurePendingMigrations(db);
     // 'UPSTREAM_LOCKED', not the refusal code the client sees. The column
     // carries a CHECK from migration 0022 that allows exactly
     // PREREQUISITE_NOT_MET / UPSTREAM_LOCKED, so 'UPSTREAM_INCOMPLETE' throws —
@@ -6015,24 +6279,25 @@ export async function recordSequenceUnlock(
     // SILENTLY on every unlock and left the weekly review permanently empty.
     // Measured on production 2026-09-07 by an insert that actually ran
     // (BUG-2026-09-07-179). The reason text below says which override it was.
-    const actor =
-      (c as unknown as { get: (k: string) => string | undefined }).get("userId") ??
-      "unknown";
-    const waiting = [...new Set(blockers.map((b) => b.departmentCode))].join(", ");
+    const waiting = [...new Set(entry.blockers.map((b) => b.departmentCode))].join(", ");
     await db
       .prepare(
         `INSERT INTO scan_override_audit
            (id, workerId, workerName, jobCardId, productionOrderId,
-            overrideCode, reason, created_at)
-         VALUES (?, ?, ?, ?, ?, 'UPSTREAM_LOCKED', ?, ?)`,
+            overrideCode, reason, reason_code, department_code, blocked_by, actor_kind, created_at)
+         VALUES (?, ?, ?, ?, ?, 'UPSTREAM_LOCKED', ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         `soa-${crypto.randomUUID().slice(0, 8)}`,
-        actor,
-        actor,
-        jcRow.id,
-        jcRow.productionOrderId,
-        `${jcRow.departmentCode ?? ""} unlocked past ${waiting}${reason ? ` — ${reason}` : ""}`,
+        entry.actor.id,
+        entry.actor.name ?? entry.actor.id,
+        entry.jobCard.id,
+        entry.jobCard.productionOrderId,
+        `${entry.jobCard.departmentCode ?? ""} unlocked past ${waiting} — ${entry.reason}`,
+        entry.code,
+        entry.jobCard.departmentCode ?? null,
+        waiting,
+        entry.actor.kind,
         new Date().toISOString(),
       )
       .run();

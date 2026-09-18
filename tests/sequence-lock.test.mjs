@@ -207,30 +207,19 @@ test("no hardcoded department order lives here", () => {
 });
 
 // --- every way in is gated -------------------------------------------------
-test("all FOUR completion paths are gated, and the count is pinned", () => {
-  // A gate on three of four surfaces just moves the skipping to the fourth.
-  // This repo's documented failure mode is fixing the instance in front of you
-  // and missing its twins, so the sites are COUNTED, not spot-checked.
+test("every completion path goes through ONE gate — counted in its own test file", () => {
+  // This used to read two files and assert "all FOUR paths are gated". It was
+  // true and it was worthless: the Google Sheets webhook and eight repair
+  // endpoints completed cards with no check at all, and this test could not
+  // see them (PRD T-013 finding 10). The count now lives in
+  // tests/sequence-lock-side-doors.test.mjs, which walks src/api for EVERY
+  // job_cards status write and refuses an unlisted one. Here, only the shape:
+  // one gate definition, and the route file no longer runs the rule itself.
   const po = readFileSync("src/api/routes/production-orders.ts", "utf8");
   const helpers = readFileSync("src/api/routes/production-orders/_helpers.ts", "utf8");
-
-  // Desktop: bulk-patch loops back into PATCH /:id -> applyPoUpdate, so gating
-  // applyPoUpdate covers the grid AND the batch date stamp in one place.
+  assert.equal((helpers.match(/export async function gateJobCardSequence\(/g) ?? []).length, 1);
+  assert.equal(/sequenceBlockers\(/.test(po), false);
   assert.match(helpers, /transitionConsumesUpstream\(body\.status\)/);
-  assert.match(helpers, /sequenceBlockers\(jcRow, allJcRows\)/);
-
-  // Shop floor: the single-card scan inline, plus both fan-outs through one
-  // shared helper.
-  assert.match(po, /sequenceBlockers\(scannedJc, siblings\.results \?\? \[\]\)/);
-  assert.equal(
-    (po.match(/gateFanOutSequence\(db, c, poId, cards, body\)/g) ?? []).length,
-    2,
-    "scan-complete-dept AND scan-complete-shared",
-  );
-
-  // And every refusal carries the same contract the UI keys off.
-  assert.equal((po.match(/code: "UPSTREAM_INCOMPLETE"/g) ?? []).length, 2);
-  assert.match(helpers, /code: "UPSTREAM_INCOMPLETE"/);
 });
 
 test("a pure date edit is never blocked", () => {

@@ -23,6 +23,8 @@ import { Button } from "@/components/ui/button";
 import { Lock } from "lucide-react";
 import {
   UNLOCK_REASONS,
+  OTHER_PREFIX,
+  UNLOCK_REASON_MIN,
   blockingDepartments,
   type SequenceLockRefusal,
 } from "@/lib/sequence-unlock";
@@ -46,8 +48,14 @@ export function SequenceUnlockDialog({
   busy?: boolean;
 }) {
   const [reason, setReason] = useState<string>(UNLOCK_REASONS[0]);
+  const [otherText, setOtherText] = useState("");
   if (!refusal) return null;
   const depts = blockingDepartments(refusal);
+  // "Other" on its own explains nothing and the server refuses it (R9); the
+  // text is sent behind the same prefix the server classifies by.
+  const isOther = reason === "Other";
+  const finalReason = isOther ? `${OTHER_PREFIX}${otherText.trim()}` : reason;
+  const reasonOk = !isOther || otherText.trim().length >= UNLOCK_REASON_MIN;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
@@ -102,6 +110,17 @@ export function SequenceUnlockDialog({
                     </option>
                   ))}
                 </select>
+                {isOther ? (
+                  <input
+                    type="text"
+                    autoFocus
+                    maxLength={200}
+                    placeholder="Say what happened"
+                    className="mt-2 h-8 w-full rounded border border-[#E2DDD8] bg-white px-2 text-xs"
+                    value={otherText}
+                    onChange={(e) => setOtherText(e.target.value)}
+                  />
+                ) : null}
               </div>
             </>
           ) : (
@@ -118,16 +137,16 @@ export function SequenceUnlockDialog({
                   fixes the cause rather than stepping over it. */}
               <Button
                 className="w-full"
-                disabled={busy}
-                onClick={() => onChoose({ action: "completeUpstream", reason })}
+                disabled={busy || !reasonOk}
+                onClick={() => onChoose({ action: "completeUpstream", reason: finalReason })}
               >
                 Complete {depts.join(" + ")} too, then this
               </Button>
               <Button
                 variant="outline"
                 className="w-full"
-                disabled={busy}
-                onClick={() => onChoose({ action: "unlock", reason })}
+                disabled={busy || !reasonOk}
+                onClick={() => onChoose({ action: "unlock", reason: finalReason })}
               >
                 Unlock and complete this only
               </Button>

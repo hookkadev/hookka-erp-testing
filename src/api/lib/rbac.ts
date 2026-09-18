@@ -329,6 +329,32 @@ export function requireFinance(c: Context<Env>): Response | null {
 }
 
 /**
+ * Gate an action to an administrator (PRD T-013 R4, 2026-09-17).
+ *
+ * The data-repair endpoints under import-completion/* write job-card
+ * completion in bulk with no sequence check — they are the way OUT when the
+ * lock refuses history that really happened. That is fine for an admin
+ * repairing data and not fine as a side door for anyone who can tick the
+ * schedule grid, which is exactly who held `production-orders:update`.
+ * ADMIN rides along with SUPER_ADMIN as everywhere else in this file.
+ */
+export function requireAdmin(c: Context<Env>): Response | null {
+  const role = (
+    c as unknown as { get: (k: string) => string | undefined }
+  ).get("userRole")?.toUpperCase();
+  if (!role) {
+    return c.json({ success: false, error: "Unauthorized" }, 401);
+  }
+  if (role !== "SUPER_ADMIN" && role !== "ADMIN") {
+    return c.json(
+      { success: false, error: "Only an Admin can run a data-repair endpoint.", role },
+      403,
+    );
+  }
+  return null;
+}
+
+/**
  * Invalidate the cached permission set for a role.  Call after admin edits
  * role_permissions for that role so the change is visible within seconds
  * instead of waiting out the 5-minute TTL.

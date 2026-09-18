@@ -32,18 +32,35 @@ Asks, in PRD order — each row flips to done as it lands:
   `transitionConsumesUpstream(body.status)` (IN_PROGRESS / COMPLETED / TRANSFERRED); the three scan
   endpoints gate every scan unconditionally before the WAITING→IN_PROGRESS write at
   `production-orders.ts:2335 / 2787 / 3265`
-- ⚪ R3 Google Sheets webhook (`sheets-sync.ts`) runs the same check before it writes
-- ⚪ R4 the 7 `import-completion/*` endpoints: run the check or require an admin permission
-- ⚪ R5 one shared completion write helper; no side doors
-- ⚪ R6 "complete the earlier step too" runs the batch in order, upstream first
-- ⚪ R7 a behavioural test for R6 (observes order, not source text)
-- ⚪ R8 unlock permission = one server check, not `true` hardcoded in 3 places
-- ⚪ R9 unlock reason required + validated on the server
-- ⚪ R10 audit records the real person on the shop floor (not "unknown")
-- ⚪ R11 phone offers the same reason choices as desktop
-- ⚪ R12 weekly unlock report (who / which step / real skip vs recording gap)
-- ⚪ R13 gate + write in one transaction, or re-check inside the write
-- ⚪ R14 re-scan of a finished department says "already done"
+- 🔵 R3 **done on branch** — `sheets-sync.ts` runs `gateJobCardSequence` with `autoUnlock` (SHEETS_SYNC,
+  actor SYSTEM) before its UPDATE, and the UPDATE carries the R13 guard
+- 🔵 R4 **done on branch** — new `requireAdmin` (rbac.ts, SUPER_ADMIN/ADMIN) on the PRD's seven PLUS two
+  the side-door test found: `/backfill-fab-cut-merge` (fg-fabric.ts) and `/clear-future-completions`
+- 🔵 R5 **done on branch** — `gateJobCardSequence` in `_helpers.ts` is the one gate (grid, scan, both
+  fan-outs, sheets); `tests/sequence-lock-side-doors.test.mjs` walks src/api for every job_cards status
+  write and fails an unlisted one
+- 🔵 R6 **done on branch** — `src/api/lib/ordered-batch.ts` `runGroupedInOrder`; bulk-patch runs
+  sequentially per production order, orders concurrently
+- 🔵 R7 **done on branch** — `tests/ordered-batch.test.mjs` runs a slow upstream + fast downstream and
+  observes the event order (and reproduces the old Promise.all bug)
+- 🔵 R8 **done on branch** — `canSequenceUnlock(c, actor)` in `_helpers.ts`, policy constant `ANYONE`
+  (shadow) → `SUPERVISORS` is a one-line flip; every refusal carries its answer
+- 🔵 R9 **done on branch** — `validateUnlockReason` (`src/api/lib/sequence-unlock-reasons.ts`) inside the
+  gate: required, 3–300 chars, bare "Other" refused → 400 `UNLOCK_REASON_REQUIRED`
+- 🔵 R10 **done on branch** — `resolveSequenceActor`: USER (displayName/email looked up), WORKER (the
+  token's worker), SYSTEM only when passed; `actor_kind` column
+- 🔵 R11 **done on branch** — `worker/scan.tsx` reason picker from the shared `UNLOCK_REASONS` + Other
+  text; fixed string "Released on the shop floor" gone
+- 🔵 R12 **done on branch** — `GET /api/production-orders/sequence-unlocks?days=7` + page
+  `/production/sequence-unlocks` (button "Unlock report" on the production header); `reason_code`,
+  `department_code`, `blocked_by`, `actor_kind` self-applied on `scan_override_audit`
+  (migrations-postgres/0233)
+- 🔵 R13 **done on branch, partially** — applyPoUpdate and the sheets webhook re-check the upstream
+  cards INSIDE the UPDATE (`sequenceGuardSql`, 0 rows → 409 race refusal). The three scan endpoints
+  write piece_pics rows between gate and UPDATE, so a guarded UPDATE there would leave partial state;
+  the window stays and is documented in production.md
+- 🔵 R14 **done on branch** — the shared gate skips cards already COMPLETED/TRANSFERRED, so
+  scan-complete-dept's kept-COMPLETED cards no longer trip "not your turn"
 - 🔵 R15 **done on branch** — `docs/modules/production.md` flow 7 + gotcha + two key-function rows,
   restamped 2026-09-17; `docs/CODEBASE-MAP.md:559` no longer says "refuses nothing today"
 - 🟡 R16 **UNMEASURED** — needs `HOOKKA_PROD_DB_URL`, which this session does not have. Shipped
@@ -53,6 +70,10 @@ Asks, in PRD order — each row flips to done as it lands:
   pairs, the fix is stamping `branch_key` on those cards, not changing the rule
 
 Plan: PR-A = R1-R2 (switch the rule on in shadow mode, fast to merge); PR-B = the rest.
+**2026-09-17 checkpoint (end of day):** all of R1–R15 are on the branch, uncommitted work = none after
+commit; STILL TO DO tomorrow: full `npm test` run, docs (production.md flow 7 + CODEBASE-MAP + API.md
+regen + BUG-HISTORY entry), browser check of the dialog / phone picker / report page, R16 run by the
+user, then push + PR.
 Constraints kept: rule untouched, no fixed dept list, `prerequisiteMet` never read, shadow mode.
 
 

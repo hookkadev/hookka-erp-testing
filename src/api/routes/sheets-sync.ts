@@ -39,6 +39,12 @@ import {
 } from "../lib/job-card-completed-at";
 import { tryGetOrgId, DEFAULT_ORG_ID } from "../lib/tenant";
 import { DEPT_ORDER } from "../lib/lead-times";
+import { transitionConsumesUpstream } from "../lib/sequence-lock";
+import {
+  gateJobCardSequence,
+  sequenceGuardSql,
+  sequenceRaceRefusal,
+} from "./production-orders/_helpers";
 import {
   backfillAllJobCards,
   buildWebhookHmacPayload,
@@ -218,13 +224,39 @@ app.post("/apps-script-webhook", async (c) => {
     return c.json({ success: true, applied: false, reason: "no change" });
   }
 
-  await db
+  // ---- Upstream sequence lock (PRD T-013 R3) ------------------------------
+  // A date keyed into the sheet completes the card exactly as a scan does, so
+  // it goes through the SAME gate. Nobody is at this keyboard to answer a
+  // dialog, and the sheet is an everyday path that must not fail silently on
+  // a refusal — so in shadow mode it completes and records an AUTOMATIC
+  // unlock, attributed to the sync, so the weekly review shows how much of the
+  // skipping arrives through the spreadsheet. When the lock tightens, this
+  // becomes a refusal like any other (canSequenceUnlock decides; SYSTEM never
+  // self-unlocks there).
+  let sequenceGuardIds: string[] = [];
+  if (newStatus !== jc.status && transitionConsumesUpstream(newStatus)) {
+    const gate = await gateJobCardSequence(db, c, {
+      productionOrderId: jc.productionOrderId,
+      cards: [{ id: jc.id, status: jc.status }],
+      body: null,
+      actor: { kind: "SYSTEM", id: "google-sheets-sync", name: "Google Sheets sync" },
+      autoUnlock: {
+        reason: "Completion date keyed into the Google Sheet",
+        code: "SHEETS_SYNC",
+      },
+    });
+    if (gate.response) return gate.response;
+    sequenceGuardIds = gate.guardIds;
+  }
+
+  const jcWrite = await db
     .prepare(
       // completedAt travels with completedDate in every statement that writes
-      // the date — the two must never be able to disagree.
+      // the date — the two must never be able to disagree. The guard re-checks
+      // the upstream cards inside the write (R13); see applyPoUpdate.
       `UPDATE job_cards SET completedDate = ?, completedAt = ?, pic1Name = ?, pic2Name = ?,
                             status = ?, overdue = ?
-         WHERE id = ?`,
+         WHERE id = ?${sequenceGuardSql(sequenceGuardIds)}`,
     )
     .bind(
       newCompletionDate,
@@ -234,8 +266,12 @@ app.post("/apps-script-webhook", async (c) => {
       newStatus,
       newOverdue,
       jobCardId,
+      ...sequenceGuardIds,
     )
     .run();
+  if (sequenceGuardIds.length > 0 && (jcWrite.meta?.changes ?? 1) === 0) {
+    return sequenceRaceRefusal(db, c, { id: jc.id, productionOrderId: jc.productionOrderId });
+  }
 
   // Recompute PO progress from the freshly-updated JC set.  Mirrors the
   // minimal slice of applyPoUpdate's progress block (reading every JC for

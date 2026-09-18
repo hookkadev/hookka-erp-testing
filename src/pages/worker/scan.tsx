@@ -59,6 +59,9 @@ import { z } from "zod";
 import {
   asSequenceLockRefusal,
   blockingDepartments,
+  UNLOCK_REASONS,
+  OTHER_PREFIX,
+  UNLOCK_REASON_MIN,
   type SequenceLockRefusal,
 } from "@/lib/sequence-unlock";
 
@@ -249,7 +252,8 @@ type Result =
   | {
       kind: "blocked";
       refusal: SequenceLockRefusal;
-      retry: () => void;
+      /** Re-posts the same scan with the worker's chosen reason attached. */
+      retry: (reason: string) => void;
     }
   // Department QR (owner 2026-06-11): "I am now working in <dept>" — the
   // day's hours re-route to this department (and, for per-line QRs, this
@@ -360,6 +364,11 @@ export default function WorkerScanPage() {
   const [params] = useSearchParams();
   const [input, setInput] = useState("");
   const [result, setResult] = useState<Result>({ kind: "idle" });
+  // The reason picker on the blocked card — the same list the desktop offers
+  // (PRD T-013 R11), so the weekly review can tell a real skip from a
+  // recording gap whichever screen released the lock.
+  const [unlockReason, setUnlockReason] = useState<string>(UNLOCK_REASONS[0]);
+  const [unlockOther, setUnlockOther] = useState("");
   const [loading, setLoading] = useState(false);
 
   // Live camera path — opens a fullscreen overlay with a <video> element
@@ -2231,10 +2240,10 @@ export default function WorkerScanPage() {
         setResult({
           kind: "blocked",
           refusal,
-          retry: () =>
+          retry: (reason: string) =>
             void handleConfirmScan({
               ...(opts ?? {}),
-              unlock: { reason: "Released on the shop floor" },
+              unlock: { reason },
             }),
         });
         return;
@@ -2896,24 +2905,55 @@ export default function WorkerScanPage() {
             </div>
           </div>
           {result.refusal.canSelfUnlock && (
-            <button
-              type="button"
-              // Two taps on purpose: the first opens the confirm, the second
-              // commits. A single big button next to a camera view is a
-              // mis-tap waiting to happen, and every release is audited.
-              onClick={() => {
-                if (
-                  window.confirm(
-                    "Unlock and complete this step anyway? This will be recorded.",
-                  )
-                ) {
-                  result.retry();
+            <>
+              <label className="mt-4 block text-sm">Why?</label>
+              <select
+                className="mt-1 h-12 w-full rounded-lg border border-[#E8D9A8] bg-white px-3 text-base text-[#1F1D1B]"
+                value={unlockReason}
+                onChange={(e) => setUnlockReason(e.target.value)}
+              >
+                {UNLOCK_REASONS.map((r) => (
+                  <option key={r} value={r}>
+                    {r}
+                  </option>
+                ))}
+              </select>
+              {unlockReason === "Other" ? (
+                <input
+                  type="text"
+                  maxLength={200}
+                  placeholder="Say what happened"
+                  className="mt-2 h-12 w-full rounded-lg border border-[#E8D9A8] bg-white px-3 text-base text-[#1F1D1B]"
+                  value={unlockOther}
+                  onChange={(e) => setUnlockOther(e.target.value)}
+                />
+              ) : null}
+              <button
+                type="button"
+                // Two taps on purpose: the first opens the confirm, the second
+                // commits. A single big button next to a camera view is a
+                // mis-tap waiting to happen, and every release is audited.
+                disabled={
+                  unlockReason === "Other" && unlockOther.trim().length < UNLOCK_REASON_MIN
                 }
-              }}
-              className="mt-4 w-full rounded-lg bg-[#7A5610] px-4 py-3 text-base font-semibold text-white active:bg-[#5E420C]"
-            >
-              Unlock and complete
-            </button>
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      "Unlock and complete this step anyway? This will be recorded.",
+                    )
+                  ) {
+                    result.retry(
+                      unlockReason === "Other"
+                        ? `${OTHER_PREFIX}${unlockOther.trim()}`
+                        : unlockReason,
+                    );
+                  }
+                }}
+                className="mt-3 w-full rounded-lg bg-[#7A5610] px-4 py-3 text-base font-semibold text-white active:bg-[#5E420C] disabled:opacity-50"
+              >
+                Unlock and complete
+              </button>
+            </>
           )}
           <p className="mt-2 text-center text-[11px] text-[#7A5610]/70">
             Later this will need a supervisor.

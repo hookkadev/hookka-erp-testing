@@ -81,16 +81,15 @@ export function blockingDepartments(refusal: SequenceLockRefusal): string[] {
 }
 
 /**
- * The reasons offered when releasing a lock. Free text is also accepted, but a
- * short list is what makes the weekly review readable: "upstream was actually
- * finished" and "this step does not apply" are different problems with
- * different fixes, and typed prose collapses them into noise.
- *
- * English — the UI is 100% English (CLAUDE.md).
+ * The reasons offered when releasing a lock live in ONE shared module with the
+ * server (validation + the audit's reason_code) — see
+ * src/api/lib/sequence-unlock-reasons.ts. Re-exported so every screen keeps
+ * importing from here.
  */
-export const UNLOCK_REASONS = [
-  "Earlier step was finished but not recorded",
-  "Earlier step does not apply to this order",
-  "Urgent — will record the earlier step later",
-  "Other",
-] as const;
+export {
+  UNLOCK_REASONS,
+  UNLOCK_REASON_OPTIONS,
+  OTHER_PREFIX,
+  UNLOCK_REASON_MIN,
+  UNLOCK_REASON_MAX,
+} from "@/api/lib/sequence-unlock-reasons";
