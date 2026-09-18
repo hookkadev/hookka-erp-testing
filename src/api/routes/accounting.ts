@@ -2073,7 +2073,6 @@ app.post("/purchase-credit-notes", async (c) => {
     const body = (await c.req.json()) as {
       supplierId?: string;
       purchaseInvoiceId?: string;
-      date?: string;
       reason?: string;
       reasonDetail?: string;
       items?: Array<{
@@ -2154,9 +2153,6 @@ app.post("/purchase-credit-notes", async (c) => {
     const id = `pcn-${crypto.randomUUID().slice(0, 8)}`;
     const noteNumber = await nextPcnNo(c.var.DB);
     const now = new Date().toISOString();
-    const cnDate = /^\d{4}-\d{2}-\d{2}$/.test(body.date ?? "")
-      ? (body.date as string)
-      : now.slice(0, 10);
     await c.var.DB.prepare(
       `INSERT INTO purchase_credit_notes
          (id, noteNumber, supplierId, supplierName, purchaseInvoiceId, piNo,
@@ -2170,7 +2166,7 @@ app.post("/purchase-credit-notes", async (c) => {
         supplier.name,
         body.purchaseInvoiceId ?? null,
         piNo,
-        cnDate,
+        now.slice(0, 10),
         body.reason ?? "",
         body.reasonDetail ?? "",
         JSON.stringify(items),
@@ -2391,27 +2387,6 @@ app.put("/purchase-credit-notes/:id", async (c) => {
   }
 });
 
-// 0088/0156 created purchase_credit_notes.status CHECK (status IN
-// ('DRAFT','POSTED')) — void writes 'CANCELLED', which that CHECK has always
-// rejected (same class as BUG-2026-06-25-001's purchase_invoices.status
-// CHECK): every void 500s with a raw constraint-violation error.
-let _pendingPcnStatusMigration: Promise<void> | null = null;
-function ensurePcnCancellable(db: D1Database): Promise<void> {
-  if (_pendingPcnStatusMigration) return _pendingPcnStatusMigration;
-  _pendingPcnStatusMigration = (async () => {
-    await runSelfApply(db, "accounting", [
-      "ALTER TABLE purchase_credit_notes DROP CONSTRAINT IF EXISTS purchase_credit_notes_status_check",
-      "ALTER TABLE purchase_credit_notes DROP CONSTRAINT IF EXISTS purchase_credit_notes_status_chk",
-      "ALTER TABLE purchase_credit_notes ADD CONSTRAINT purchase_credit_notes_status_chk " +
-        "CHECK (status IN ('DRAFT','POSTED','CANCELLED'))",
-    ]);
-  })().catch((err) => {
-    _pendingPcnStatusMigration = null;
-    throw err;
-  });
-  return _pendingPcnStatusMigration;
-}
-
 // POST /purchase-credit-notes/:id/void — reverse a posted supplier discount:
 // mirror its GL legs, undo the supplier AP counter, and unwind any PI
 // allocations (add the credited amount back to each PI's outstanding + drop the
@@ -2419,7 +2394,6 @@ function ensurePcnCancellable(db: D1Database): Promise<void> {
 app.post("/purchase-credit-notes/:id/void", async (c) => {
   const denied = await requirePermission(c, "accounting", "update");
   if (denied) return denied;
-  await ensurePcnCancellable(c.var.DB);
   const id = c.req.param("id");
   const existing = await c.var.DB.prepare(
     "SELECT * FROM purchase_credit_notes WHERE id = ?",
