@@ -1,6 +1,6 @@
 # Hookka ERP — Work Tracker
 
-> **Last verified: 2026-08-14** — branch `fix/on-time-delivery-and-decisions` added below (open, not merged, its entry is the newest; its bug ids were renumbered 130-133 → 140-143 because `feat/leave-entitlement` claimed 130-133 and merged to `main` first). Previously: branch `feat/leave-entitlement` (MERGED as #326). Previously: branch `feat/job-card-completed-at` added below (open, not merged). Previously: branch `fix/security-posture` added below (open, not merged). Previously: PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
+> **Last verified: 2026-09-18** — branch `feat/t013-sequence-lock` (PRD T-013 / BUG-09) is the newest entry below, open, not pushed. Previously: branch `fix/on-time-delivery-and-decisions` added below (open, not merged, its entry is the newest; its bug ids were renumbered 130-133 → 140-143 because `feat/leave-entitlement` claimed 130-133 and merged to `main` first). Previously: branch `feat/leave-entitlement` (MERGED as #326). Previously: branch `feat/job-card-completed-at` added below (open, not merged). Previously: branch `fix/security-posture` added below (open, not merged). Previously: PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
 > **Last verified: 2026-08-14** — branch `feat/pcb-calculation` added below (open, not merged, its entry is the newest). Previously: branch `feat/job-card-completed-at` added below (open, not merged). Previously: branch `fix/security-posture` added below (open, not merged). Previously: PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
 > **Last verified: 2026-08-14** — restamped on branch `fix/money-input-parsing` (its entry is the newest below, not yet deployed). PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
 > deployed; zero PRs open, one worktree. Previously verified against the merged PRs on `main` (#266-#300) plus the open PRs #304 (branch `fix/stock-grn-org-filter`) and the accounting-audit branch `fix/accounting-audit`, whose entry is the newest below. This file is a live queue — restamp it whenever you add or close an item.
@@ -70,10 +70,11 @@ Asks, in PRD order — each row flips to done as it lands:
   pairs, the fix is stamping `branch_key` on those cards, not changing the rule
 
 Plan: PR-A = R1-R2 (switch the rule on in shadow mode, fast to merge); PR-B = the rest.
-**2026-09-17 checkpoint (end of day):** all of R1–R15 are on the branch, uncommitted work = none after
-commit; STILL TO DO tomorrow: full `npm test` run, docs (production.md flow 7 + CODEBASE-MAP + API.md
-regen + BUG-HISTORY entry), browser check of the dialog / phone picker / report page, R16 run by the
-user, then push + PR.
+**2026-09-18:** R1–R15 on the branch (`9539c0dc` + docs commit). `docs/API.md` regenerated,
+`docs/modules/production.md` flow 7 rewritten for the one-gate design and restamped, CODEBASE-MAP rows
+for the gate / reasons / ordered-batch / report page, BUG-2026-09-17-182 logged. Full suite 4,649 / 0
+failing; `tsc` strict clean. **Left:** browser pass (dialog, phone picker, report page), R16 run by the
+user with `HOOKKA_PROD_DB_URL`, then push + PR to `main` and live verification of A1–A7.
 Constraints kept: rule untouched, no fixed dept list, `prerequisiteMet` never read, shadow mode.
 
 
