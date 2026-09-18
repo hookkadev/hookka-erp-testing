@@ -34,6 +34,54 @@ Entries themselves stay newest-first.
 
 ---
 
+## BUG-2026-09-18-001 — Supplier Discount void 500'd: the status CHECK never allowed CANCELLED `accounting` `data-integrity` 🟢
+
+🟢 **Fixed** · owner-reported (`erp.hookka.com/accounting?tab=supplier-discount`, void → `POST .../purchase-credit-notes/pcn-85c380af/void 500 (Internal Server Error)`).
+
+**Root cause.** `purchase_credit_notes` was created in `migrations/0088_purchase_credit_notes.sql`
+/ `migrations-postgres/0156_purchase_credit_notes.sql` with an inline
+`status TEXT NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT','POSTED'))`. `POST
+/purchase-credit-notes/:id/void` (`accounting.ts`) has always written
+`status = 'CANCELLED'` to reverse a posted CN — a value that CHECK has never permitted, so
+every void on prod raised a constraint violation and the request 500'd. This is the exact
+same bug class as **BUG-2026-06-25-001** (`purchase_invoices.status` missing
+`PARTIAL_PAID`/`CANCELLED`): an inline `CHECK` written once at table-creation time, never
+widened as the app grew new lifecycle states, and migrations don't auto-apply on deploy
+(see CLAUDE.md) so a migration file fixing it would not reach prod on its own.
+
+**Fix.** `ensurePcnCancellable` (`accounting.ts`, defined immediately above the void route) —
+a memoized runtime self-apply, same shape as `ensurePartialPaymentColumns` /
+`PI_STATUS_CHECK_SQL` in `ensure-partial-payment.ts` — drops the constraint under both
+possible names (`purchase_credit_notes_status_check`, the Postgres auto-generated inline
+name; `purchase_credit_notes_status_chk`, this fix's own name on a re-run) and re-adds it as
+`CHECK (status IN ('DRAFT','POSTED','CANCELLED'))`. Runs at the top of the void handler,
+before the `UPDATE ... SET status = 'CANCELLED'` is queued.
+
+**Same batch:** the Supplier Discount entry form gained a native `<input type="date">` — the
+CN's `date` was previously hardcoded to `new Date().toISOString().slice(0,10)` (today) with
+no way to back-date a discount. `POST /purchase-credit-notes` now accepts an optional `date`
+body field (validated `/^\d{4}-\d{2}-\d{2}$/`, falls back to today on anything else).
+
+**Verified:** `npx tsc -p tsconfig.app.json --noEmit` clean; full suite 4607 pass / 0 fail /
+3 skipped. **Prod void-path effect is UNMEASURED** — no DB credentials in this session, so
+the live 500 was diagnosed from the schema/migration files and the route code, not by
+querying prod. Verify live after deploy: void a POSTED supplier discount, confirm 200 (not
+500) and that the GL reversal + PI outstanding restore actually land. Regression test:
+`tests/pcn-void-status-check.test.mjs` (static source-inspection, same style as
+`tests/pi-status-check-single-source.test.mjs` — asserts the self-apply exists, drops both
+legacy constraint names, re-adds with `CANCELLED`, and runs before the write).
+
+**Process note, logged for CODEBASE-MAP/BUG-HISTORY hygiene:** the fix first landed on `main`
+directly, was reverted on request, and reopened as a PR (#445) from the same branch — but
+because `git revert` leaves the original commit in `main`'s ancestry, GitHub's PR diff saw
+only the regression test as "new" and silently dropped the code change from the merge. `main`
+briefly carried a failing test for code that was never actually there. Re-fixed via a fresh
+branch (`fix/pcn-void-status-check-v2`) cut from current `main`, carrying only the real diff.
+Lesson: reverting a commit that is about to be re-proposed via PR from the *same* branch
+un-counts it from that PR's diff — cut a fresh branch instead.
+
+---
+
 ## BUG-2026-09-15-181 — the experimental dashboard read every column in the wrong case, and rendered the misses as real figures `data-migration` `ui-frontend` `dashboard` 🟢
 
 🟢 Fixed. The owner compared the new `/dashboard-experimental` Sales tab
