@@ -14,6 +14,41 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
+## 2026-09-22 — 🔵 Houzs 财务模块对照采纳计划（owner「开工直接做到完」,五 phase 顺序执行中）
+
+**进度**:Phase 1 ②四层审批后端 = PR 1.1(`ensurePvApprovalCols` 8 列 self-apply+legacy 回填
+APPROVED、0233/0214 记录、POST 支持 saveAs:"draft"(不铸号不过账)、PUT /:id 草稿编辑(CHECK 后锁)、
+POST /:id/approval + /approval-batch(prepare/withdraw/reject(要 reason)/check(铸正式号)/approve
+(此刻才过账,复用唯一 pvPostingStatements)、权限键 accounting:check/approve、lifecycle 未过账=
+纯状态翻转、restate 拒未过账;守卫 tests/pv-approval.test.mjs 9 断言)。旧立即过账路径原样保留,
+新页上线前零破坏。
+
+背景:Houzs(trading)ERP 的 Claude 写了 `Houzs-Finance-Module-User-Guide.md` +
+`Houzs-Trading-Finance-Module-Spec.md`(在 Desktop\Claude\Hookka\,不在 repo),指定用途=
+Hookka 逐页对照采纳。Owner 裁决:**不做** Deposit Invoice(客户无此 deposit 模式)、Merchant
+Recon(无卡机);**月锁做但默认关**(「可以做,但是别启动先」);**要做** PV 检查层级(推翻我
+初判)、AP/Other Payable 同页、AP payment 与 PV 统一、PV 打印对照 Houzs、「还有很多功能补全
+和优化」。现状盘点:Hookka 已有 PAYMENT/EXPENSE(payment_vouchers 表,status 无审批层)、
+OFFICIAL RECEIPT、FUND TRANSFER、OTHER DEBTORS/CREDITORS 各自独立 tab + invoices/supplier-
+payments 独立页——碎片化正是他要统一的点。
+
+**Phase 1 — Money out 统一(最大件)**:①统一 Payment Vouchers 页,三种 purpose(AP Payment
+勾 PI/OCB、Expense/Petty、Transfer/bank-in)一张表一个入口(现 supplier-payments/PV tab/
+Fund Transfer tab 三处;**Customer Refund owner 裁「暂时不需要」**,以后要再加);②四层 Draft→Prepare→Check→Approve(+Reject/
+Withdraw/批量,keys 先全给 owner,approve 才入账+knock off);③打印对照 Houzs(凭证版式+附件
+合订 print-bundle);④Daily Cash Position 的 pending 接「Checked 未 Approve」正式化。
+**Phase 2 — AP 同页**:OCB(非货品账单)+采购发票**只读镜像**一张表(Kind 列;owner 确认
+「只是多一份出来」——**Procurement 的 Purchase Invoice 页原封保留**,采购流程不动,镜像行
+点开跳原单),Record payment 直通统一 PV 页。
+**Phase 3 — 对账升级**:①月锁严格版(无未决+文件覆盖头尾+tally 才可锁;解锁需 reason 留痕)
+——**建好默认 OFF**;②对账单串链检查(断链点名缺哪天);③Book as receipt/expense(银行行
+就地记账);④反向组合(一条银行行↔几张账面单)。
+**Phase 4 — 检查与留痕**:①Self-check 页(控制科目差异点名/未入账付款/取消单挂钱,带一键修)
+;②Corrections 报表(改动链:谁/何时/reason/旧→冲→新);③改过期数据统一要 reason。
+**Phase 5 — 效率件**:①Scan bills 批量;②OR 收据簿升级(每收款自动一张、钱确认才铸正式号)
+;③打印页脚付款资料设置;④清单批量打印 PDF。
+顺序 1→2→3→4→5,每 phase 完成 prod 验收才动下一个。
+
 ## 2026-09-21 — 🔵 Dashboard: tabs named by function, not by staff member
 
 Branch `feat/dashboard-prototype-siti-ops-tab`. Asks: (1) no staff names in the dashboard
