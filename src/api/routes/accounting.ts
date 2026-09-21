@@ -9245,10 +9245,34 @@ app.get("/payment-vouchers", async (c) => {
       ).all(),
     ]);
     const lines = (lineRes.results ?? []) as { voucherId: string }[];
-    const data = (pvRes.results ?? []).map((v) => ({
-      ...(v as object),
-      lines: lines.filter((l) => l.voucherId === (v as { id: string }).id),
-    }));
+    // Resolve the ladder actors to display names so the printed voucher can
+    // carry "Prepared by / Checked by / Approved by" with real names.
+    const actorIds = new Set<string>();
+    for (const v of pvRes.results ?? []) {
+      const r = v as Record<string, unknown>;
+      for (const k of ["preparedBy", "prepared_by", "checkedBy", "checked_by", "approvedBy", "approved_by", "createdBy", "created_by"]) {
+        const id = r[k]; if (typeof id === "string" && id) actorIds.add(id);
+      }
+    }
+    const nameById = new Map<string, string>();
+    if (actorIds.size) {
+      const ids = [...actorIds];
+      const uRes = await c.var.DB.prepare(`SELECT id, displayName FROM users WHERE id IN (${ids.map(() => "?").join(",")})`)
+        .bind(...ids).all<Record<string, unknown>>().catch(() => ({ results: [] as Record<string, unknown>[] }));
+      for (const u of uRes.results ?? []) nameById.set(String(u.id), String(u.displayName ?? u.display_name ?? ""));
+    }
+    const nm = (r: Record<string, unknown>, a: string, b: string) => { const id = (r[a] ?? r[b]); return typeof id === "string" ? (nameById.get(id) ?? null) : null; };
+    const data = (pvRes.results ?? []).map((v) => {
+      const r = v as Record<string, unknown>;
+      return {
+        ...(v as object),
+        lines: lines.filter((l) => l.voucherId === (v as { id: string }).id),
+        preparedByName: nm(r, "preparedBy", "prepared_by"),
+        checkedByName: nm(r, "checkedBy", "checked_by"),
+        approvedByName: nm(r, "approvedBy", "approved_by"),
+        createdByName: nm(r, "createdBy", "created_by"),
+      };
+    });
     return c.json({ success: true, data });
   } catch {
     return c.json({ success: true, data: [], migrationMissing: true });

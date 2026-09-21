@@ -151,6 +151,7 @@ function todayDMY(): string {
 function buildPvVoucher(
   pv: PvRow,
   accounts: ChartOfAccount[],
+  detail?: { supplierName: string; piNo: string | null; opening: boolean; method: string; bookedSen: number }[],
 ): VoucherSpec {
   const lines: VoucherLine[] = pv.lines.map((l) => ({
     cells: [accountLabel(accounts, l.accountCode), l.description ?? "", formatCurrency(l.amountSen)],
@@ -158,6 +159,14 @@ function buildPvVoucher(
   const paidFrom = pv.accrued === 1 && !pv.settledAt
     ? `Accrued to: ${pv.accrualAccount ? accountLabel(accounts, pv.accrualAccount) : "—"}`
     : `Paid from: ${pv.payFrom ? accountLabel(accounts, pv.payFrom) : "—"}`;
+  // Houzs-style voucher (owner 2026-09-22): the ladder's real signatories and
+  // dates print under the signature lines; an unposted voucher carries a
+  // watermark so it can never pass as a paid document; a supplier payment
+  // lists the bills it settled.
+  const st = (pv.approvalState ?? pv.approval_state) ?? "APPROVED";
+  const dmy = (iso?: string | null) => (iso ? formatDateDMY(String(iso).slice(0, 10)) : undefined);
+  const watermark = pv.status === "VOID" ? "CANCELLED" : st === "DRAFT" ? "DRAFT" : st !== "APPROVED" ? "NOT YET APPROVED" : undefined;
+  const pvx = pv as PvRow & { preparedByName?: string | null; checkedByName?: string | null; approvedByName?: string | null; createdByName?: string | null };
   return {
     // A voided voucher must never print as a clean/valid document.
     title: pv.status === "VOID" ? "PAYMENT VOUCHER — VOID" : "PAYMENT VOUCHER",
@@ -172,8 +181,23 @@ function buildPvVoucher(
     totalCells: ["", "Total", formatCurrency(pv.totalSen)],
     amountWords: amountInWords(pv.totalSen),
     remarks: pv.description ?? undefined,
-    signatures: [{ label: "Prepared by" }, { label: "Approved by" }, { label: "Received by" }],
+    signatures: [
+      { label: "Prepared by", name: pvx.preparedByName ?? pvx.createdByName ?? undefined, on: dmy(pv.preparedAt ?? pv.prepared_at) ?? (pvx.preparedByName ? undefined : formatDateDMY(pv.date)) },
+      { label: "Checked by", name: pvx.checkedByName ?? undefined, on: dmy(pv.checkedAt ?? pv.checked_at) },
+      { label: "Approved by", name: pvx.approvedByName ?? undefined, on: dmy(pv.approvedAt ?? pv.approved_at) },
+      { label: "Received by" },
+    ],
     printedOn: todayDMY(),
+    watermark,
+    detail: detail && detail.length
+      ? {
+          heading: "Bills settled by this payment",
+          columns: [{ label: "Supplier" }, { label: "Bill" }, { label: "Amount", align: "right" }],
+          lines: detail.map((d) => ({
+            cells: [d.supplierName, d.piNo ? `${d.piNo}${d.opening ? " (opening)" : ""}` : d.method === "TF_REPAYMENT" ? "Trade finance repayment" : "Advance / unallocated", formatCurrency(d.bookedSen)],
+          })),
+        }
+      : undefined,
   };
 }
 
@@ -8299,6 +8323,19 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
     } finally { setLadderBusy(false); }
   };
 
+  // Print with the settled-bills detail when the voucher is a supplier payment
+  // (its lines hit the AP control) — fetched on demand so the list stays light.
+  const printPvWithDetail = async (r: PvRow) => {
+    let detail: { supplierName: string; piNo: string | null; opening: boolean; method: string; bookedSen: number }[] | undefined;
+    if (r.lines.some((l) => l.accountCode.startsWith("400") || l.accountCode.startsWith("405"))) {
+      try {
+        const res = await fetch(`/api/accounting/bank-reco/payment-detail?paymentNo=${encodeURIComponent(r.pvNo)}`);
+        const j = await res.json() as { success?: boolean; data?: { rows: typeof detail } };
+        if (j?.success && j.data?.rows?.length) detail = j.data.rows;
+      } catch { /* print without detail */ }
+    }
+    printVoucher(buildPvVoucher(r, accounts, detail));
+  };
   const handleSettle = async (row: PvRow) => {
     const payFrom = window.prompt(
       `Settle ${row.pvNo} (${formatCurrency(row.totalSen)}) — pay from which account?\n\n${bankCash.map((a) => `${a.code}  ${a.name}`).join("\n")}\n\nEnter account code:`,
@@ -8653,7 +8690,7 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
                           <button disabled={ladderBusy} onClick={() => void handleLadder(r, "approve")} className="rounded bg-[#6B5C32] text-white px-2 py-0.5 text-xs font-semibold cursor-pointer mr-3">Approve &amp; post</button>
                         </>
                       )}
-                      <button onClick={() => printVoucher(buildPvVoucher(r, accounts))} title="Print payment voucher" className="inline-flex items-center gap-1 text-[#6B5C32] hover:text-[#1F1D1B] text-xs underline decoration-dotted cursor-pointer mr-3"><Printer className="h-3 w-3" />print</button>
+                      <button onClick={() => void printPvWithDetail(r)} title="Print payment voucher" className="inline-flex items-center gap-1 text-[#6B5C32] hover:text-[#1F1D1B] text-xs underline decoration-dotted cursor-pointer mr-3"><Printer className="h-3 w-3" />print</button>
                       {isPosted(r) && (
                         <button onClick={() => startEdit(r)} className="text-[#6B5C32] hover:text-[#1F1D1B] text-xs underline decoration-dotted cursor-pointer mr-3">edit</button>
                       )}
