@@ -33,6 +33,7 @@ const app = new Hono<Env>();
 const MAX_FILE_BYTES = 32 * 1024 * 1024;
 
 type RawLine = {
+  supplierCode?: string | null;
   description?: string | null;
   qty?: number | null;
   unitPrice?: number | null;
@@ -105,7 +106,8 @@ app.post("/extract", async (c) => {
   const docs = Array.isArray(env.docs) ? env.docs : [];
   const d = docs[0] ?? {};
   const lines = (Array.isArray(d.lines) ? d.lines : [])
-    .map((l) => ({
+    .map((l, srcIdx) => ({
+      srcIdx,
       description: String(l.description ?? "").trim(),
       amountSen: toSen(l.amount) ?? (toSen(l.unitPrice) !== null && Number(l.qty) ? Math.round((Number(l.unitPrice) || 0) * (Number(l.qty) || 0) * 100) : null),
     }))
@@ -124,6 +126,15 @@ app.post("/extract", async (c) => {
       totalSen: toSen(d.total),
       extraDocs: docs.length > 1 ? docs.length - 1 : 0,
       lowConfidence: (d as { lowConfidence?: string[] }).lowConfidence ?? [],
+      // R10: the client echoes these back on confirm so only the fields the
+      // operator really edited count as corrections (the form has no qty / unit price).
+      sampleId: result.sampleId ?? null,
+      rawLines: (Array.isArray(d.lines) ? d.lines : []).map((l) => ({
+        supplierCode: l.supplierCode ?? null,
+        description: l.description ?? null,
+        qty: l.qty ?? null,
+        unitPrice: l.unitPrice ?? null,
+      })),
     },
     sampleId: result.sampleId ?? null,
   });

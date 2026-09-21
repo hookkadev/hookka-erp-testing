@@ -5919,7 +5919,27 @@ type ScanFinanceResult = {
   taxSen: number | null;
   totalSen: number | null;
   extraDocs: number;
+  // R10 — set when the scan recorded a sample the confirm call can learn from.
+  sampleId?: string | null;
+  rawLines?: { supplierCode: string | null; description: string | null; qty: number | null; unitPrice: number | null }[];
 };
+
+// R10 — after the operator SAVES a scan-prefilled form, tell the server what they ended
+// with so the diff becomes correction rows + aliases. Fire-and-forget: never blocks a save.
+// ponytail: lines map by position (srcIdx = raw index); rows the operator added/removed
+// shift the mapping. Amount edits are not sent — the form has no unit price to compare.
+function confirmFinanceScan(scan: ScanFinanceResult | null, docNo: string | null, supplierName: string | null, descriptions: string[]) {
+  if (!scan?.sampleId) return;
+  const lines = (scan.rawLines ?? []).map((rl, i) => {
+    const at = scan.lines.findIndex((l) => (l as { srcIdx?: number }).srcIdx === i);
+    return { ...rl, description: at >= 0 && descriptions[at] != null ? descriptions[at] : rl.description };
+  });
+  void fetch(`/api/scan-finance/samples/${encodeURIComponent(scan.sampleId)}/confirm`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ correctedJson: { docNo, supplierName, lines } }),
+  }).catch(() => { /* learning is best-effort */ });
+}
 function ScanPrefillButton({ label, onResult }: { label: string; onResult: (d: ScanFinanceResult) => void | Promise<void> }) {
   const { toast } = useToast();
   const [busy, setBusy] = useState(false);
@@ -6164,6 +6184,10 @@ function OtherPartyBillsManager({ parties, accounts, side }: { parties: OtherPar
           knownMap: partyAliases,
         });
       }
+      if (scanRef.current) {
+        confirmFinanceScan(scanRef.current, form.referenceNo || null, allSideParties.find((p) => p.id === form.partyId)?.name ?? scannedPartyName, postableBillLines.map((l) => l.description ?? ""));
+        scanRef.current = null;
+      }
       setScannedPartyName(null);
       setShowForm(false);
       setEditingBillNo(null);
@@ -6243,6 +6267,9 @@ function OtherPartyBillsManager({ parties, accounts, side }: { parties: OtherPar
   // The letterhead OCR read for the bill currently in the form — null when the
   // operator keyed it by hand (nothing to learn from a manual entry).
   const [scannedPartyName, setScannedPartyName] = useState<string | null>(null);
+  const scanRef = useRef<ScanFinanceResult | null>(null);
+  // A closed / cancelled form must not leak its scan into the next hand-keyed save.
+  useEffect(() => { if (!showForm) scanRef.current = null; }, [showForm]);
   const allSideParties = [...sideParties, ...extraParties.filter((p) => p.type === side)];
   // Unknown scanned party → a small NEW-PARTY dialog: name prefilled from the
   // letterhead, every other field OPTIONAL and left to the operator (owner
@@ -6274,6 +6301,7 @@ function OtherPartyBillsManager({ parties, accounts, side }: { parties: OtherPar
     }
   };
   const applyScan = (d: ScanFinanceResult) => {
+    scanRef.current = d;
     setEditingBillNo(null); // a scan always drafts a NEW bill, never overwrites an edit
     setScannedPartyName(d.partyName ?? null);
     const hit = scanNameMatch(allSideParties, d.partyName, partyAliases);
@@ -8002,6 +8030,10 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
       const j = asMutationResponse(await res.json());
       if (j?.success) {
         toast.success(editingId ? "Payment updated" : "Payment posted");
+        if (scanRef.current) {
+          confirmFinanceScan(scanRef.current, scanRef.current.docNo, form.payee || null, postableLines.map((l) => l.description));
+          scanRef.current = null;
+        }
         setShowForm(false);
         setEditingId(null);
         setForm({ date: new Date().toISOString().slice(0, 10), payee: "", description: "", accrued: false, payFrom: "", accrualAccount: "", productLine: "" });
@@ -8065,7 +8097,11 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
   // (same payee almost always books to the same expense account) — blank when
   // the payee is new. Amount = the printed line amounts; single-total docs
   // (petrol slip) prefill one line with the total.
+  const scanRef = useRef<ScanFinanceResult | null>(null);
+  // A closed / cancelled form must not leak its scan into the next hand-keyed save.
+  useEffect(() => { if (!showForm) scanRef.current = null; }, [showForm]);
   const applyScan = (d: ScanFinanceResult) => {
+    scanRef.current = d;
     setEditingId(null);
     const normName = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, "");
     const prior = d.partyName
