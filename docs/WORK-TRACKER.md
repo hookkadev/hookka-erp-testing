@@ -21,7 +21,13 @@ APPROVED、0233/0214 记录、POST 支持 saveAs:"draft"(不铸号不过账)、P
 POST /:id/approval + /approval-batch(prepare/withdraw/reject(要 reason)/check(铸正式号)/approve
 (此刻才过账,复用唯一 pvPostingStatements)、权限键 accounting:check/approve、lifecycle 未过账=
 纯状态翻转、restate 拒未过账;守卫 tests/pv-approval.test.mjs 9 断言)。旧立即过账路径原样保留,
-新页上线前零破坏。
+新页上线前零破坏。**PR 1.2**(UI):PaymentsTab 就地升级=「Payment Vouchers」页(tab+侧栏改名):
+表单双按钮 Save as draft / Post now(编辑草稿走 PUT、编辑已过账走 restate);行内梯子按钮
+(Draft: edit/Prepare→;Prepared: edit/withdraw/reject/Check→;Checked: reject/Approve & post)、
+四态芯片+reject 理由显示、Pending approval 过滤、勾选批量 Prepare/Check/Approve 琥珀条;
+**Cash Position 板新增「AWAITING APPROVAL」卡**(/cash-position 回 awaitingApproval[] +
+awaitingCheckedSen;Checked=硬承诺金额、Draft/Prepared 软显示)= owner 09-03 说的「老板还没
+approve」正式落地。Repo 已迁 hookkadev 组织(remote+gh default 已更新)。
 
 背景:Houzs(trading)ERP 的 Claude 写了 `Houzs-Finance-Module-User-Guide.md` +
 `Houzs-Trading-Finance-Module-Spec.md`(在 Desktop\Claude\Hookka\,不在 repo),指定用途=

@@ -221,7 +221,7 @@ const navigationGroups: NavGroup[] = [
       },
       {
         name: "Daily Operation", href: "/accounting?tab=payments", icon: Wallet, children: [
-          { name: "Expense Payment", href: "/accounting?tab=payments", icon: Wallet },
+          { name: "Payment Vouchers", href: "/accounting?tab=payments", icon: Wallet },
           { name: "Receipts", href: "/accounting?tab=receipts", icon: Receipt },
           { name: "Fund Transfer", href: "/accounting?tab=transfer", icon: Wallet },
           { name: "Cash Position", href: "/accounting?tab=dailycash", icon: Wallet },

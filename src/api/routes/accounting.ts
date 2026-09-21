@@ -13938,9 +13938,31 @@ app.get("/cash-position", async (c) => {
     amountSen: Math.round(Number(p.amountSen ?? p.amount_sen) || 0),
   }));
   const openingMonth = (obDateCp ?? "").slice(0, 7) || null;
+  // Vouchers on the approval ladder that are not posted yet (owner 2026-09-03:
+  // 「我开pv了，银行还么付款或老板还没有approve」) — the formal "committed but
+  // not yet in the books" queue. Checked ones are the firm commitments;
+  // Draft/Prepared ride along flagged so the board can show them softer.
+  await ensurePvApprovalCols(c.var.DB);
+  const awaitingRes = await c.var.DB.prepare(
+    `SELECT id, pvNo, date, payee, description, payFrom, totalSen, approval_state
+       FROM payment_vouchers
+      WHERE status <> 'VOID' AND approval_state IN ('DRAFT','PREPARED','CHECKED') AND accrued = 0
+      ORDER BY date ASC, pvNo ASC`,
+  ).all<Record<string, unknown>>().catch(() => ({ results: [] as Record<string, unknown>[] }));
+  const awaitingApproval = (awaitingRes.results ?? []).map((v) => ({
+    id: String(v.id),
+    pvNo: String(v.pvNo ?? v.pv_no ?? ""),
+    date: String(v.date ?? "").slice(0, 10),
+    payee: String(v.payee ?? ""),
+    description: String(v.description ?? ""),
+    payFrom: String(v.payFrom ?? v.pay_from ?? ""),
+    amountSen: Math.round(Number(v.totalSen ?? v.total_sen) || 0),
+    state: String(v.approvalState ?? v.approval_state ?? "DRAFT") as "DRAFT" | "PREPARED" | "CHECKED",
+  }));
+  const awaitingCheckedSen = awaitingApproval.filter((v) => v.state === "CHECKED").reduce((s, v) => s + v.amountSen, 0);
   return c.json({
     success: true,
-    data: { date, accounts, totalBankEstSen, totalAvailableSen, repay, receive, planned, tickWarnings, openingMonth },
+    data: { date, accounts, totalBankEstSen, totalAvailableSen, repay, receive, planned, tickWarnings, openingMonth, awaitingApproval, awaitingCheckedSen },
   });
 });
 
