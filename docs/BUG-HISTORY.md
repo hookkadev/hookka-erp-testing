@@ -340,6 +340,24 @@ damage — and only on the owner's word.
 
 Regression: `tests/wip-settle-once.test.mjs`.
 
+## BUG-2026-09-22-177 — "Save as draft" refused by the payment_vouchers status CHECK `accounting` `payment-voucher` 🟢
+
+First prod smoke of the four-tier ladder (#452/#453): every draft create
+returned 400 "Failed to save the payment — is migration 0159 applied?"
+while the legacy Post-now road succeeded. Migration 0159 created
+`status TEXT … CHECK (status IN ('POSTED','VOID'))`; the draft road inserts
+`status='DRAFT'`, so Postgres rejected the row — the same class as
+BUG-2026-09-18-001 (PCN void writing `CANCELLED` into a two-value check).
+The generic catch text pointed at a migration that WAS applied and hid the
+constraint name, which cost a debugging round.
+
+Fix ([accounting.ts](../src/api/routes/accounting.ts)): `ensurePvApprovalCols`
+now drops and re-creates `payment_vouchers_status_check` with `DRAFT`
+admitted (record: migrations-postgres/0233 tail); the create path returns the
+database's own message (`Failed to save the payment: <cause>`) instead of a
+canned guess. Guards: `tests/pv-approval.test.mjs` (+2). Verified on prod:
+draft → prepare → check (formal No. minted) → approve (legs posted) → void.
+
 ## BUG-2026-09-04-176 — a cross-month match cleared an item for a month it hadn't reached the bank in `accounting` `bank-reco` 🟢
 
 June's reconciliation showed "Out by RM 600.00 · book below bank" with every
