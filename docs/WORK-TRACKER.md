@@ -14,7 +14,7 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
-## 2026-09-22 — 🔵 Houzs 财务模块对照采纳计划（owner「开工直接做到完」,五 phase 顺序执行中）
+## 2026-09-22 — ✅ Houzs 财务模块对照采纳计划（owner「开工直接做到完」,五 phase 全部上线 #452-#456）
 
 **进度**:Phase 1 ②四层审批后端 = PR 1.1(`ensurePvApprovalCols` 8 列 self-apply+legacy 回填
 APPROVED、0233/0214 记录、POST 支持 saveAs:"draft"(不铸号不过账)、PUT /:id 草稿编辑(CHECK 后锁)、
@@ -22,7 +22,7 @@ POST /:id/approval + /approval-batch(prepare/withdraw/reject(要 reason)/check(�
 (此刻才过账,复用唯一 pvPostingStatements)、权限键 accounting:check/approve、lifecycle 未过账=
 纯状态翻转、restate 拒未过账;守卫 tests/pv-approval.test.mjs 9 断言)。旧立即过账路径原样保留,
 <<<<<<< HEAD
-新页上线前零破坏。**PR 1.2**(UI):PaymentsTab 就地升级=「Payment Vouchers」页(tab+侧栏改名):
+新页上线前零破坏。**BUG-2026-09-22-177（#456 热修）**:0159 的 status CHECK 只许 POSTED|VOID → 草稿 DRAFT 被拒;self-apply 放宽 + create 报 DB 原话。**prod 全梯子实测**:draft 0 分录→prepare→reject 无理由被挡→check 铸 HPV-2609-045 仍 0 分录→Checked 锁编辑→板子 AWAITING 出现→approve 过账 CR 1 sen→void 归零 ✓。**Self-check 首跑抓到**:AP 控制高 72,196.03、AR 控制低 168,790(待向 owner 解读)。**PR 1.2**(UI):PaymentsTab 就地升级=「Payment Vouchers」页(tab+侧栏改名):
 表单双按钮 Save as draft / Post now(编辑草稿走 PUT、编辑已过账走 restate);行内梯子按钮
 (Draft: edit/Prepare→;Prepared: edit/withdraw/reject/Check→;Checked: reject/Approve & post)、
 四态芯片+reject 理由显示、Pending approval 过滤、勾选批量 Prepare/Check/Approve 琥珀条;
