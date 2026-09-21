@@ -23,7 +23,10 @@ const lateMin = (t: string | null) => {
   return m ? Math.max(0, Number(m[1]) * 60 + Number(m[2]) - 480) : 0;
 };
 
-export function AttendanceLogCard({ employee, period }: { employee: EmployeeSlice; period: Period }) {
+// perDay is an explicit prop (set when the filter bar has ONE employee picked) rather than
+// derived from "one distinct employee in the slice": a department that happens to have a
+// single active worker should still read as the department view.
+export function AttendanceLogCard({ employee, period, perDay = false }: { employee: EmployeeSlice; period: Period; perDay?: boolean }) {
   const log = useMemo(() => {
     const byId = new Set(employee.workers.map((w) => w.id));
     const byName = new Map(employee.workers.map((w) => [(w.name ?? "").trim().toLowerCase(), w.id]));
@@ -40,7 +43,7 @@ export function AttendanceLogCard({ employee, period }: { employee: EmployeeSlic
       const workerId = r.employeeId && byId.has(r.employeeId)
         ? r.employeeId
         : (byName.get((r.employeeName ?? "").trim().toLowerCase()) ?? null);
-      const k = workerId ?? r.employeeId ?? r.employeeName ?? "";
+      const k = (workerId ?? r.employeeId ?? r.employeeName ?? "") + (perDay ? `|${r.date}` : "");
       const cur = byEmp.get(k);
       byEmp.set(k, { last: !cur || r.date >= (cur.last.date ?? "") ? r : cur.last, workerId, days: (cur?.days ?? 0) + 1 });
     }
@@ -56,15 +59,19 @@ export function AttendanceLogCard({ employee, period }: { employee: EmployeeSlic
           eff: p && p.working > 0 ? (p.prod / p.working) * 100 : null,
         };
       })
-      .sort((a, b) => (a.last.employeeName ?? "").localeCompare(b.last.employeeName ?? ""));
+      .sort((a, b) => perDay
+        ? (b.last.date ?? "").localeCompare(a.last.date ?? "")
+        : (a.last.employeeName ?? "").localeCompare(b.last.employeeName ?? ""));
 
     const sum = (f: (r: (typeof rows)[number]) => number | null) => rows.reduce((a, r) => a + (f(r) ?? 0), 0);
     const working = sum((r) => r.working);
     const prod = sum((r) => r.prod);
     return { rows, working, prod, nonProd: sum((r) => r.nonProd), days: sum((r) => r.days), eff: working > 0 ? (prod / working) * 100 : null };
-  }, [employee, period]);
+  }, [employee, period, perDay]);
 
-  const H = ["Employee", "Date", "Clock in", "Clock out", "Production time", "Prod hours", "Non-prod hours", "Efficiency", "Total days", "Status"];
+  const H = ["Employee", "Date", "Clock in", "Clock out", "Production time", "Prod hours", "Non-prod hours", "Efficiency", ...(perDay ? [] : ["Total days"]), "Status"];
+  const ncol = H.length;
+  const who = log.rows[0]?.last.employeeName ?? "";
   const h = (v: number | null) => (v == null ? "—" : hrs(v));
 
   return (
@@ -73,7 +80,9 @@ export function AttendanceLogCard({ employee, period }: { employee: EmployeeSlic
         <CardTitle>
           Attendance log{" "}
           <span className="ml-2 text-[11px] font-normal text-[#6B7280]">
-            {log.rows.length} employees · latest recorded day each · {periodLabel(period)}
+            {perDay
+              ? `${log.days} days · ${who} · ${periodLabel(period)}`
+              : `${log.rows.length} employees · latest recorded day each · ${periodLabel(period)}`}
           </span>
         </CardTitle>
       </CardHeader>
@@ -83,7 +92,7 @@ export function AttendanceLogCard({ employee, period }: { employee: EmployeeSlic
             <thead>
               <tr className="border-t border-b border-[#E2DDD8] sticky top-0 bg-white">
                 {H.map((t, i) => (
-                  <th key={t} className={`px-3 py-2 font-semibold uppercase text-[10.5px] tracking-wide text-[#6B7280] whitespace-nowrap ${i >= 4 && i <= 8 ? "text-right" : "text-left"}`}>{t}</th>
+                  <th key={t} className={`px-3 py-2 font-semibold uppercase text-[10.5px] tracking-wide text-[#6B7280] whitespace-nowrap ${i >= 4 && i <= 7 + (perDay ? 0 : 1) ? "text-right" : "text-left"}`}>{t}</th>
                 ))}
               </tr>
             </thead>
@@ -104,7 +113,7 @@ export function AttendanceLogCard({ employee, period }: { employee: EmployeeSlic
                     <td className="px-3 py-2 text-right font-mono font-semibold" style={{ color: r.eff == null ? MUTED : r.eff >= 90 ? "#4F7C3A" : "#B5701A" }}>
                       {r.eff == null ? "—" : `${r.eff.toFixed(1)}%`}
                     </td>
-                    <td className="px-3 py-2 text-right font-mono">{r.days}</td>
+                    {!perDay && <td className="px-3 py-2 text-right font-mono">{r.days}</td>}
                     <td className="px-3 py-2">
                       <span
                         className="inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold"
@@ -117,18 +126,18 @@ export function AttendanceLogCard({ employee, period }: { employee: EmployeeSlic
                 );
               })}
               {log.rows.length === 0 && (
-                <tr><td colSpan={10} className="px-4 py-6 text-center text-[#6B7280]">No attendance recorded in this period.</td></tr>
+                <tr><td colSpan={ncol} className="px-4 py-6 text-center text-[#6B7280]">No attendance recorded in this period.</td></tr>
               )}
             </tbody>
             {log.rows.length > 0 && (
               <tfoot>
                 <tr className="border-t-2 border-[#E2DDD8] font-mono font-semibold">
-                  <td className="px-3 py-2" colSpan={4}>Listed rows</td>
+                  <td className="px-3 py-2" colSpan={4}>{perDay ? `Total (${log.days} days)` : "Listed rows"}</td>
                   <td className="px-3 py-2 text-right">{hrs(log.working)}</td>
                   <td className="px-3 py-2 text-right">{hrs(log.prod)}</td>
                   <td className="px-3 py-2 text-right">{hrs(log.nonProd)}</td>
                   <td className="px-3 py-2 text-right">{log.eff == null ? "—" : `${log.eff.toFixed(1)}%`}</td>
-                  <td className="px-3 py-2 text-right">{log.days}</td>
+                  {!perDay && <td className="px-3 py-2 text-right">{log.days}</td>}
                   <td />
                 </tr>
               </tfoot>

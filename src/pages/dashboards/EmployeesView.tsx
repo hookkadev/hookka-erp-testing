@@ -269,7 +269,7 @@ export function EmployeesView({
           {filterBar}
           <TimeAttendancePanels employee={filtered} period={period} onPeriodChange={onPeriodChange} target={config?.efficiencyTargetPct ?? 100} />
 
-      <AttendanceLogCard employee={filtered ?? employee} period={period} />
+      <AttendanceLogCard employee={filtered ?? employee} period={period} perDay={!!emp} />
         </>
       )}
 
