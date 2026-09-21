@@ -38,6 +38,7 @@ import {
   type ThreadMessageLite,
 } from "../lib/mail-threading";
 import { emitAudit } from "../lib/audit";
+import { loadStoredAttachmentBytes } from "../lib/email-outbox";
 import {
   ackDueAt,
   acknowledgeMessage,
@@ -1554,27 +1555,37 @@ app.get("/outbox/:id/attachments/:idx/download", async (c) => {
     const att = parsed[idx] as {
       filename?: string;
       contentBase64?: string;
+      storagePath?: string;
     };
     const filename = String(att?.filename || "attachment").replace(
       /[^A-Za-z0-9._-]/g,
       "_",
     );
-    const b64 = String(att?.contentBase64 || "");
-    if (!b64) return c.json({ error: "not found" }, 404);
-    // Decode base64 to bytes. atob is built-in in Workers; chunk to stay
-    // within the arg limit of String.fromCharCode for big PDFs.
-    const bin = atob(b64);
-    const bytes = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    const ext = filename.toLowerCase().split(".").pop();
-    const mime =
-      ext === "pdf"
-        ? "application/pdf"
-        : ext === "png"
-        ? "image/png"
-        : ext === "jpg" || ext === "jpeg"
-        ? "image/jpeg"
-        : "application/octet-stream";
+    const mime = mimeFromFilename(filename);
+    // R14: a Storage reference is read back from the bucket; a legacy row
+    // still carries the bytes inline as base64.
+    let bytes: Uint8Array<ArrayBuffer>;
+    if (att?.storagePath) {
+      const loaded = await loadStoredAttachmentBytes(
+        c.env as unknown as StorageEnv,
+        {
+          filename,
+          storagePath: att.storagePath,
+          contentType: mime,
+          sizeBytes: 0,
+        },
+      );
+      if (!loaded) return c.json({ error: "not found" }, 404);
+      bytes = loaded;
+    } else {
+      const b64 = String(att?.contentBase64 || "");
+      if (!b64) return c.json({ error: "not found" }, 404);
+      // Decode base64 to bytes. atob is built-in in Workers; chunk to stay
+      // within the arg limit of String.fromCharCode for big PDFs.
+      const bin = atob(b64);
+      bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    }
     return new Response(bytes, {
       status: 200,
       headers: {

@@ -14,6 +14,162 @@ import type { Context } from "hono";
 import type { Env } from "../worker";
 import { sendMail, type EmailAttachment } from "./email";
 import { tryGetOrgId } from "./tenant";
+import { DEFAULT_BUCKET, getFile, putFile } from "./supabase-storage";
+
+// ---------------------------------------------------------------------------
+// T-012 R14: attachments are FILES, not base64 text in the row.
+//
+// attachments_json used to carry the whole PDF as base64, so every drain
+// pick and every "Auto-sent" read dragged megabytes through Postgres. Now
+// enqueue uploads each file to Supabase Storage (outbox/<id>/<n>-<name>) and
+// the column holds only the index: [{ filename, storagePath, contentType,
+// sizeBytes }]. The drain fetches the bytes back at send time. Rows written
+// before this change (inline contentBase64) still parse and still send —
+// parseStoredAttachments understands both shapes — and when Storage is not
+// configured (local dev) enqueue falls back to the inline shape.
+// ---------------------------------------------------------------------------
+export type StoredAttachmentRef = {
+  filename: string;
+  storagePath: string;
+  contentType: string;
+  sizeBytes: number;
+};
+type StoredAttachment = StoredAttachmentRef | EmailAttachment;
+
+export type OutboxStorageEnv = {
+  SUPABASE_PROJECT_REF?: string;
+  SUPABASE_SERVICE_KEY?: string;
+};
+
+export function isStoredRef(a: StoredAttachment): a is StoredAttachmentRef {
+  return typeof (a as StoredAttachmentRef).storagePath === "string" &&
+    (a as StoredAttachmentRef).storagePath.length > 0;
+}
+
+function safeName(name: string): string {
+  const base = name.replace(/[\\/]+/g, "_").replace(/[^A-Za-z0-9._-]+/g, "_");
+  return base.slice(0, 120) || "file";
+}
+
+function mimeFromName(name: string): string {
+  const ext = name.toLowerCase().split(".").pop();
+  switch (ext) {
+    case "pdf":
+      return "application/pdf";
+    case "png":
+      return "image/png";
+    case "jpg":
+    case "jpeg":
+      return "image/jpeg";
+    case "gif":
+      return "image/gif";
+    case "webp":
+      return "image/webp";
+    default:
+      return "application/octet-stream";
+  }
+}
+
+function base64ToBytes(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  // Chunked so a multi-MB PDF never blows String.fromCharCode's arg limit.
+  let bin = "";
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(bin);
+}
+
+/**
+ * Upload the sanitised attachments and return the index to store. Any
+ * upload failure falls back to the inline shape for THAT file so the mail
+ * still goes out with its attachment (the old behaviour), never without.
+ */
+export async function storeOutboxAttachments(
+  env: OutboxStorageEnv,
+  outboxId: string,
+  attachments: EmailAttachment[],
+): Promise<StoredAttachment[]> {
+  if (!env.SUPABASE_PROJECT_REF || !env.SUPABASE_SERVICE_KEY) {
+    return attachments;
+  }
+  const out: StoredAttachment[] = [];
+  let n = 0;
+  for (const a of attachments) {
+    n++;
+    const storagePath = `outbox/${outboxId}/${n}-${safeName(a.filename)}`;
+    const contentType = mimeFromName(a.filename);
+    try {
+      const bytes = base64ToBytes(a.contentBase64);
+      await putFile(env, DEFAULT_BUCKET, storagePath, bytes, contentType);
+      out.push({
+        filename: a.filename,
+        storagePath,
+        contentType,
+        sizeBytes: bytes.length,
+      });
+    } catch (e) {
+      console.warn(
+        `[email-outbox] attachment upload failed for ${outboxId}/${a.filename} — storing inline:`,
+        e instanceof Error ? e.message : String(e),
+      );
+      out.push(a);
+    }
+  }
+  return out;
+}
+
+/** Read one stored attachment back as bytes (null when it is gone). */
+export async function loadStoredAttachmentBytes(
+  env: OutboxStorageEnv,
+  ref: StoredAttachmentRef,
+): Promise<Uint8Array<ArrayBuffer> | null> {
+  const obj = await getFile(env, DEFAULT_BUCKET, ref.storagePath);
+  if (!obj) return null;
+  const buf = await new Response(obj.body).arrayBuffer();
+  return new Uint8Array(buf);
+}
+
+/**
+ * Resolve stored attachments (either shape) to the provider-neutral base64
+ * shape the sender wants. A file that cannot be fetched is skipped with a
+ * warning rather than failing the whole send.
+ */
+export async function resolveStoredAttachments(
+  env: OutboxStorageEnv,
+  raw: string | null,
+): Promise<EmailAttachment[] | undefined> {
+  const list = parseStoredAttachments(raw);
+  if (!list) return undefined;
+  const out: EmailAttachment[] = [];
+  for (const a of list) {
+    if (!isStoredRef(a)) {
+      out.push(a);
+      continue;
+    }
+    try {
+      const bytes = await loadStoredAttachmentBytes(env, a);
+      if (!bytes) {
+        console.warn(`[email-outbox] stored attachment missing: ${a.storagePath}`);
+        continue;
+      }
+      out.push({ filename: a.filename, contentBase64: bytesToBase64(bytes) });
+    } catch (e) {
+      console.warn(
+        `[email-outbox] stored attachment fetch failed: ${a.storagePath}`,
+        e instanceof Error ? e.message : String(e),
+      );
+    }
+  }
+  return out.length > 0 ? out : undefined;
+}
 
 export interface EnqueueEmailArgs {
   to: string;
@@ -156,7 +312,16 @@ export async function enqueueEmail<E extends Env>(
   // Make sure the attachments_json column exists before the INSERT names it
   // (runtime self-apply of migration 0161; no-op after the first call).
   await ensureOutboxMigrations(c.var.DB);
-  const attachments = sanitizeAttachments(args.attachments);
+  const sanitized = sanitizeAttachments(args.attachments);
+  // R14: bytes go to Storage; the row keeps the index (inline fallback when
+  // Storage is not configured or an upload fails).
+  const attachments = sanitized
+    ? await storeOutboxAttachments(
+        c.env as unknown as OutboxStorageEnv,
+        id,
+        sanitized,
+      )
+    : null;
   // NB: column identifiers are spelled in snake_case to match the migration
   // (0081_email_outbox.sql). The translateSql() identifier rewriter in
   // supabase-compat.ts only rewrites camelCase identifiers that appear in
@@ -234,24 +399,35 @@ interface OutboxRow {
   lastAttemptAt: string | null;
 }
 
-// Parse the stored attachments_json back into the provider-neutral shape.
-// Bad/legacy values (NULL, truncated JSON, wrong shape) degrade to "no
-// attachment" — never fail the send over the attachment.
-function parseStoredAttachments(
+// Parse the stored attachments_json back into either shape: a Storage
+// reference (R14) or the legacy inline base64. Bad/legacy values (NULL,
+// truncated JSON, wrong shape) degrade to "no attachment" — never fail the
+// send over the attachment.
+export function parseStoredAttachments(
   raw: string | null,
-): EmailAttachment[] | undefined {
+): StoredAttachment[] | undefined {
   if (!raw) return undefined;
   try {
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return undefined;
-    const list = parsed
-      .map((a) => ({
-        filename: String((a as EmailAttachment)?.filename || "").trim(),
-        contentBase64: String(
-          (a as EmailAttachment)?.contentBase64 || "",
-        ).trim(),
-      }))
-      .filter((a) => a.filename && a.contentBase64);
+    const list: StoredAttachment[] = [];
+    for (const item of parsed) {
+      const a = (item ?? {}) as Record<string, unknown>;
+      const filename = String(a.filename || "").trim();
+      if (!filename) continue;
+      const storagePath = String(a.storagePath || "").trim();
+      if (storagePath) {
+        list.push({
+          filename,
+          storagePath,
+          contentType: String(a.contentType || "application/octet-stream"),
+          sizeBytes: Number(a.sizeBytes ?? 0),
+        });
+        continue;
+      }
+      const contentBase64 = String(a.contentBase64 || "").trim();
+      if (contentBase64) list.push({ filename, contentBase64 });
+    }
     return list.length > 0 ? list : undefined;
   } catch {
     return undefined;
@@ -291,7 +467,7 @@ export async function processOutbox(
     RESEND_API_KEY?: string;
     BREVO_API_KEY?: string;
     RESEND_FROM_EMAIL?: string;
-  },
+  } & OutboxStorageEnv,
 ): Promise<ProcessOutboxResult> {
   const result: ProcessOutboxResult = {
     picked: 0,
@@ -423,7 +599,11 @@ export async function processOutbox(
         text: full?.bodyText ?? undefined,
         // Stored attachments ride along to the provider (Resend `attachments`
         // / Brevo `attachment`); rows without a value behave exactly as before.
-        attachments: parseStoredAttachments(full?.attachmentsJson ?? null),
+        // Storage references are fetched back to bytes here, at send time.
+        attachments: await resolveStoredAttachments(
+          env,
+          full?.attachmentsJson ?? null,
+        ),
       });
 
       if (send.ok) {
