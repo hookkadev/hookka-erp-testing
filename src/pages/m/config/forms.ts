@@ -805,25 +805,145 @@ export function newMailSpec(): FormSpec {
           };
         },
       },
+      // T-012 R2: copies. Comma-separated; the API parses the list.
+      { name: "cc", label: "Cc", kind: "text" as const, full: true, placeholder: "a@x.com, b@y.com", hint: "Optional, comma-separated" },
       { name: "subject", label: "Subject", kind: "text" as const, required: true, full: true },
       { name: "text", label: "Message", kind: "textarea" as const, required: true, full: true },
     ],
-    initial: { fromAddress: "", to: "", subject: "", text: "" },
+    initial: { fromAddress: "", to: "", cc: "", subject: "", text: "" },
     validate: (v) => {
       const to = s(v.to).trim();
       if (to && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
         return "Enter a valid recipient email address.";
       }
-      return null;
+      return ccError(s(v.cc));
     },
     submit: async (v) => {
       const body = {
         fromAddress: s(v.fromAddress),
         to: s(v.to).trim(),
+        cc: s(v.cc).trim(),
         subject: s(v.subject),
         text: s(v.text),
       };
       const res = await mutateJson("/api/mail-center/compose", "POST", body);
+      if (!res.ok) return { ok: false, error: res.error };
+      refreshList("/api/mail-center/threads");
+      const id = newIdOf(res.body);
+      return {
+        ok: true,
+        navigateTo: id ? `/m/mail-center/${encodeURIComponent(id)}` : undefined,
+      };
+    },
+  };
+}
+
+// Every comma-separated address must look like one (mirrors the API's rule).
+function ccError(raw: string): string | null {
+  const bad = raw
+    .split(/[,;]+/)
+    .map((a) => a.trim())
+    .filter(Boolean)
+    .find((a) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(a));
+  return bad ? `"${bad}" is not a valid email address.` : null;
+}
+
+// ---------------------------------------------------------------------------
+// MAIL — reply inside a thread (T-012 R16). The API addresses the reply by
+// mode: "reply" → whoever wrote last; "reply_all" → everyone on that message.
+// POST /api/mail-center/threads/:id/reply.
+// ---------------------------------------------------------------------------
+export function replyMailSpec(threadId: string, counterparty: string): FormSpec {
+  return {
+    title: "Reply",
+    submitLabel: "Send reply",
+    fields: [
+      {
+        name: "mode",
+        label: "Reply to",
+        kind: "select" as const,
+        required: true,
+        full: true,
+        options: [
+          { value: "reply", label: counterparty ? `${counterparty} (whoever wrote last)` : "Whoever wrote last" },
+          { value: "reply_all", label: "Everyone on the latest message" },
+        ],
+      },
+      { name: "cc", label: "Extra Cc", kind: "text" as const, full: true, placeholder: "a@x.com, b@y.com", hint: "Optional, comma-separated" },
+      { name: "text", label: "Message", kind: "textarea" as const, required: true, full: true },
+    ],
+    initial: { mode: "reply", cc: "", text: "" },
+    validate: (v) => ccError(s(v.cc)),
+    submit: async (v) => {
+      const body: Record<string, unknown> = {
+        mode: s(v.mode) === "reply_all" ? "reply_all" : "reply",
+        text: s(v.text),
+      };
+      // Only send cc when typed: an absent cc lets the API derive it from
+      // the mode (reply-all), a present one replaces the derived set.
+      if (s(v.cc).trim()) body.cc = s(v.cc).trim();
+      const res = await mutateJson(
+        `/api/mail-center/threads/${encodeURIComponent(threadId)}/reply`,
+        "POST",
+        body,
+      );
+      if (!res.ok) return { ok: false, error: res.error };
+      refreshOne(`/api/mail-center/threads/${encodeURIComponent(threadId)}`);
+      refreshList("/api/mail-center/threads");
+      return { ok: true };
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// MAIL — forward a thread as a new email (T-012 R16). Prefilled subject +
+// quoted body; the operator types the recipient. POST /api/mail-center/compose
+// with forwardOf so the audit row reads "forward".
+// ---------------------------------------------------------------------------
+export function forwardMailSpec(args: {
+  threadId: string;
+  fromAddress: string;
+  subject: string;
+  body: string;
+}): FormSpec {
+  const subject = /^fwd?:/i.test(args.subject.trim())
+    ? args.subject.trim()
+    : `Fwd: ${args.subject.trim() || "(no subject)"}`;
+  return {
+    title: "Forward",
+    submitLabel: "Send",
+    fields: [
+      {
+        name: "fromAddress",
+        label: "From",
+        kind: "select" as const,
+        required: true,
+        full: true,
+        placeholder: "Select mailbox…",
+        optionsUrl: "/api/mail-center/addresses",
+        optionsSelect: (resp: unknown): unknown[] => (Array.isArray(resp) ? resp : []),
+        optionsMap: (r: unknown): SelectOption => {
+          const o = (r ?? {}) as Record<string, unknown>;
+          const addr = s(o.address);
+          return { value: addr, label: s(o.label) ? `${s(o.label)} <${addr}>` : addr };
+        },
+      },
+      { name: "to", label: "To", kind: "text" as const, required: true, full: true, placeholder: "name@example.com" },
+      { name: "cc", label: "Cc", kind: "text" as const, full: true, placeholder: "a@x.com, b@y.com", hint: "Optional, comma-separated" },
+      { name: "subject", label: "Subject", kind: "text" as const, required: true, full: true },
+      { name: "text", label: "Message", kind: "textarea" as const, required: true, full: true },
+    ],
+    initial: { fromAddress: args.fromAddress, to: "", cc: "", subject, text: args.body },
+    validate: (v) => ccError(s(v.to)) ?? ccError(s(v.cc)),
+    submit: async (v) => {
+      const res = await mutateJson("/api/mail-center/compose", "POST", {
+        fromAddress: s(v.fromAddress),
+        to: s(v.to).trim(),
+        cc: s(v.cc).trim(),
+        subject: s(v.subject),
+        text: s(v.text),
+        forwardOf: args.threadId,
+      });
       if (!res.ok) return { ok: false, error: res.error };
       refreshList("/api/mail-center/threads");
       const id = newIdOf(res.body);

@@ -6,7 +6,10 @@
 //     Inbox / Sent folders.
 //   • THREAD: message bubbles (inbound left / outbound dark-gold right) + Reply.
 // Rebuilt with REAL data (mailConfig source + GET /threads/:id → {thread,
-// messages}). Compose / Reply reuse the existing newMailSpec form.
+// messages}). Compose uses newMailSpec; T-012 R16 gave the thread a REAL
+// Reply (replyMailSpec → POST .../reply, addressed by the API) and a Forward
+// (forwardMailSpec → POST /compose with the conversation quoted), and
+// "Sign receipt" confirms an acknowledgement when one was asked of me.
 //
 // ADDITIVE: list = CUSTOM_L1['mail-center']; thread = CUSTOM_L2['mail-center'].
 // ===========================================================================
@@ -17,7 +20,8 @@ import { useCachedJson, invalidateCachePrefix } from "@/lib/cached-fetch";
 import { MobileHeader, FormSheet } from "../components";
 import { M, M_ACCENT } from "../theme";
 import { mailConfig } from "../config/modules";
-import { newMailSpec } from "../config/forms";
+import { newMailSpec, replyMailSpec, forwardMailSpec } from "../config/forms";
+import { getCurrentUser } from "@/lib/auth";
 import { type FormSpec } from "../config/form-types";
 import { str, num, dateOnly, shortDate } from "../config/helpers";
 import { useDebounced } from "../lib/use-debounced";
@@ -166,19 +170,41 @@ export function MailThreadScreen() {
   const thread = data?.thread ?? null;
   const messages = Array.isArray(data?.messages) ? (data!.messages as Record<string, unknown>[]) : [];
 
-  // "Sign receipt" (design, inbound mail) = acknowledge = mark the thread read +
-  // closed via the real PATCH /api/mail-center/threads/:id. Forward (the design's
-  // sent-side action) has no backend endpoint, so it's intentionally absent.
-  // window.fetch is globally CSRF-patched, so a raw fetch is fine.
+  // An acknowledgement asked of ME that is still open (R8): the newest such
+  // message. "Sign receipt" confirms it; otherwise it archives as before.
+  const me = getCurrentUser();
+  type Ack = { userId?: string | null; address?: string; ackedAt?: string | null };
+  const pendingAckMessageId = (() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const acks = (messages[i].acks as Ack[] | undefined) ?? [];
+      const mine = acks.find(
+        (a) =>
+          !a.ackedAt &&
+          ((!!me?.id && a.userId === me.id) ||
+            (!!me?.email && (a.address ?? "").toLowerCase() === me.email.toLowerCase())),
+      );
+      if (mine) return str(messages[i], "id");
+    }
+    return "";
+  })();
+
+  // "Sign receipt": confirm the acknowledgement when one is pending for me
+  // (POST .../messages/:mid/acknowledge); otherwise mark the thread read +
+  // closed via PATCH, as before. window.fetch is globally CSRF-patched.
   const signReceipt = async () => {
     if (signing) return;
     setSigning(true);
     try {
-      const r = await fetch(`/api/mail-center/threads/${encodeURIComponent(id)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "closed", unread: false }),
-      });
+      const r = pendingAckMessageId
+        ? await fetch(
+            `/api/mail-center/threads/${encodeURIComponent(id)}/messages/${encodeURIComponent(pendingAckMessageId)}/acknowledge`,
+            { method: "POST", headers: { "Content-Type": "application/json" } },
+          )
+        : await fetch(`/api/mail-center/threads/${encodeURIComponent(id)}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: "closed", unread: false }),
+          });
       if (r.ok) {
         setSigned(true);
         // Broadcast so the mail lists (mobile + desktop Mail Center) drop the
@@ -190,6 +216,22 @@ export function MailThreadScreen() {
     } finally {
       setSigning(false);
     }
+  };
+
+  // Quoted conversation for a forward — newest first, plain text only.
+  const forwardBody = () => {
+    const lines: string[] = ["", "---------- Forwarded message ----------"];
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const g = messages[i];
+      lines.push(
+        `From: ${str(g, "fromName", "fromAddress")} <${str(g, "fromAddress")}>`,
+        `Date: ${str(g, "sentAt", "receivedAt", "createdAt")}`,
+        "",
+        str(g, "textBody", "body", "snippet"),
+        "",
+      );
+    }
+    return lines.join("\n");
   };
 
   if (loading && !thread) return <Center text="Loading…" />;
@@ -243,9 +285,9 @@ export function MailThreadScreen() {
       </div>
 
       <div style={{ position: "sticky", bottom: 0, background: M.card, borderTop: `1px solid ${M.divider}`, padding: "12px 16px calc(12px + env(safe-area-inset-bottom))", display: "flex", gap: 9 }}>
-        {signed || str(thread, "status") === "closed" ? (
+        {signed || (!pendingAckMessageId && str(thread, "status") === "closed") ? (
           <div style={{ flex: 1, height: 48, display: "flex", alignItems: "center", justifyContent: "center", border: `1px solid ${M.border}`, borderRadius: 12, background: M.card, color: "#4F7C3A", fontSize: 13.5, fontWeight: 700 }}>
-            Receipt signed ✓
+            {pendingAckMessageId || signed ? "Acknowledged" : "Receipt signed"}
           </div>
         ) : (
           <button
@@ -253,18 +295,46 @@ export function MailThreadScreen() {
             disabled={signing}
             style={{ flex: 1, height: 48, border: `1px solid ${M.taupe}`, borderRadius: 12, background: M.card, color: M.taupe, fontFamily: "inherit", fontSize: 14, fontWeight: 700, cursor: signing ? "default" : "pointer" }}
           >
-            {signing ? "Signing…" : "Sign receipt"}
+            {signing ? "Signing…" : pendingAckMessageId ? "Acknowledge" : "Sign receipt"}
           </button>
         )}
         <button
-          onClick={() => setComposeSpec(newMailSpec())}
+          onClick={() =>
+            setComposeSpec(
+              forwardMailSpec({
+                threadId: id,
+                fromAddress: str(thread, "mailboxAddress"),
+                subject: str(thread, "subject"),
+                body: forwardBody(),
+              }),
+            )
+          }
+          style={{ flex: 1, height: 48, border: `1px solid ${M.taupe}`, borderRadius: 12, background: M.card, color: M.taupe, fontFamily: "inherit", fontSize: 14, fontWeight: 700, cursor: "pointer" }}
+        >
+          Forward
+        </button>
+        <button
+          onClick={() =>
+            setComposeSpec(
+              replyMailSpec(id, str(thread, "counterpartyName", "counterpartyEmail")),
+            )
+          }
           style={{ flex: 1, height: 48, border: "none", borderRadius: 12, background: M.taupe, color: "#fff", fontFamily: "inherit", fontSize: 14, fontWeight: 700, cursor: "pointer" }}
         >
           Reply
         </button>
       </div>
 
-      <FormSheet open={composeSpec != null} onClose={() => setComposeSpec(null)} spec={composeSpec} onSaved={() => setComposeSpec(null)} />
+      <FormSheet
+        open={composeSpec != null}
+        onClose={() => setComposeSpec(null)}
+        spec={composeSpec}
+        onSaved={() => {
+          setComposeSpec(null);
+          // A reply landed on this thread — refetch so it shows at once.
+          invalidateCachePrefix("/api/mail-center");
+        }}
+      />
     </div>
   );
 }
