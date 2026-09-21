@@ -9,7 +9,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Tabs, type TabItem } from "@/components/ui/tabs";
 import { AlertTriangle, Clock, CalendarClock, PackageX, DollarSign, UserCheck, Gauge, Search } from "lucide-react";
-import { TAUPE, TEAL, RED, AMBER, GREEN, MUTED, BORDER, fmtN, fmtRMAxis } from "./dashboard-shared-lib";
+import { TAUPE, TEAL, RED, AMBER, MUTED, BORDER, fmtN, fmtRMAxis, inPeriod, periodLabel, type Period } from "./dashboard-shared-lib";
 import { Kpi, LiveBadge } from "./dashboard-shared";
 
 // Siti's report checklist (handed over on paper, 2026-09-17), redesigned
@@ -61,10 +61,39 @@ type Feed = {
   };
   employee?: {
     workers: { id: string; countsToHeadcount: boolean }[];
-    attendance: { employeeId: string | null; date: string | null }[];
+    attendance: {
+      employeeId: string | null;
+      employeeName: string | null;
+      date: string | null;
+      clockIn: string | null;
+      clockOut: string | null;
+      workingMinutes: number;
+      productionMinutes: number;
+      efficiencyPct: number | null;
+    }[];
     performance: { byDay: { date: string; workingMinutes: number; productionMinutes: number }[] };
   };
 };
+
+const hrs = (min: number) => `${Math.round(min / 6) / 10}h`;
+const hhmm = (t: string | null) => t?.match(/\d{2}:\d{2}/)?.[0] ?? "—";
+// Minutes after the 08:00 shift start; 0 when on time or unparseable.
+const lateMin = (t: string | null) => {
+  const m = t?.match(/(\d{2}):(\d{2})/);
+  return m ? Math.max(0, Number(m[1]) * 60 + Number(m[2]) - 480) : 0;
+};
+
+// Monthly -> one bar per day in the month; YTD/range -> one bar per month.
+function bucket<T extends { date: string }>(rows: T[], p: Period, add: (a: T, b: T) => T) {
+  if (p.mode === "monthly") return rows.map((r) => ({ ...r, key: r.date.slice(5) }));
+  const m = new Map<string, T & { key: string }>();
+  for (const r of rows) {
+    const key = r.date.slice(0, 7);
+    const cur = m.get(key);
+    m.set(key, cur ? { ...add(cur, r), key } : { ...r, key });
+  }
+  return [...m.values()];
+}
 
 const DEPT_ALL_TAB: TabItem<string>[] = [{ key: "ALL", label: "All" }];
 
@@ -74,7 +103,7 @@ function urgencyPill(daysLeft: number | null) {
   return { label: `${daysLeft} Days`, bg: "#FAEFCB", fg: "#9C6F1E" };
 }
 
-export function SitiOpsView() {
+export function SitiOpsView({ period }: { period: Period }) {
   const { data, loading, error } = useCachedJson<Feed>("/api/dashboard/prototype");
   const [deptFilter, setDeptFilter] = useState("ALL");
   const [search, setSearch] = useState("");
@@ -105,11 +134,14 @@ export function SitiOpsView() {
     [production?.overdueByDept],
   );
 
-  // Last 30 days — a full book-wide series would dwarf the chart with mostly
-  // zero/none-completed history; 30 days is enough to see a trend.
+  // Follows the global period picker (top right): Monthly = that month by day,
+  // YTD = the year by month.
   const outputChartData = useMemo(
-    () => (production?.dailyOutput ?? []).slice(-30).map((d) => ({ date: d.date.slice(5), Units: d.units })),
-    [production?.dailyOutput],
+    () =>
+      bucket((production?.dailyOutput ?? []).filter((d) => inPeriod(period, d.date)), period,
+        (a, b) => ({ ...a, units: a.units + b.units }))
+        .map((d) => ({ date: d.key, Units: d.units })),
+    [production?.dailyOutput, period],
   );
   const outputAvg = useMemo(
     () => (outputChartData.length ? outputChartData.reduce((a, d) => a + d.Units, 0) / outputChartData.length : 0),
@@ -117,16 +149,15 @@ export function SitiOpsView() {
   );
 
   const costChartData = useMemo(
-    () => (production?.productionCost?.byDay ?? []).map((d) => ({
-      date: d.date.slice(5),
-      Material: Math.round(d.materialSen / 100),
-      Labor: Math.round(d.laborSen / 100),
-    })),
-    [production?.productionCost?.byDay],
+    () =>
+      bucket((production?.productionCost?.byDay ?? []).filter((d) => inPeriod(period, d.date)), period,
+        (a, b) => ({ ...a, materialSen: a.materialSen + b.materialSen, laborSen: a.laborSen + b.laborSen }))
+        .map((d) => ({ date: d.key, Material: Math.round(d.materialSen / 100), Labor: Math.round(d.laborSen / 100) })),
+    [production?.productionCost?.byDay, period],
   );
   const totalCostSen = useMemo(
-    () => (production?.productionCost?.byDay ?? []).reduce((a, d) => a + d.totalSen, 0),
-    [production?.productionCost?.byDay],
+    () => (production?.productionCost?.byDay ?? []).filter((d) => inPeriod(period, d.date)).reduce((a, d) => a + d.totalSen, 0),
+    [production?.productionCost?.byDay, period],
   );
 
   // Attendance — the table only ever records a PRESENT row (no absence rows
@@ -146,7 +177,7 @@ export function SitiOpsView() {
   // 7-day sparkline. Same house metric the Employees tab uses (working_hour_
   // entries clocked ÷ completed job_cards earned), not attendance_records.
   const efficiencyStat = useMemo(() => {
-    const days = employee?.performance.byDay ?? [];
+    const days = (employee?.performance.byDay ?? []).filter((d) => inPeriod(period, d.date));
     const totalWorking = days.reduce((a, d) => a + d.workingMinutes, 0);
     const totalProduction = days.reduce((a, d) => a + d.productionMinutes, 0);
     const last7 = [...days].sort((a, b) => (a.date < b.date ? -1 : 1)).slice(-7).map((d) => ({
@@ -157,7 +188,31 @@ export function SitiOpsView() {
       pct: totalWorking > 0 ? (totalProduction / totalWorking) * 100 : null,
       sparkline: last7,
     };
-  }, [employee]);
+  }, [employee, period]);
+
+  // Attendance log: latest recorded day per employee inside the period, plus
+  // that employee's day count in the period.
+  const attendanceLog = useMemo(() => {
+    const byEmp = new Map<string, { last: NonNullable<Feed["employee"]>["attendance"][number]; days: number }>();
+    for (const r of employee?.attendance ?? []) {
+      if (!r.date || !inPeriod(period, r.date)) continue;
+      const k = r.employeeId ?? r.employeeName ?? "";
+      const cur = byEmp.get(k);
+      byEmp.set(k, { last: !cur || r.date >= (cur.last.date ?? "") ? r : cur.last, days: (cur?.days ?? 0) + 1 });
+    }
+    const rows = [...byEmp.values()]
+      .map(({ last, days }) => ({ ...last, days, nonProd: Math.max(0, last.workingMinutes - last.productionMinutes) }))
+      .sort((a, b) => (a.employeeName ?? "").localeCompare(b.employeeName ?? ""));
+    const effs = rows.map((r) => r.efficiencyPct).filter((v): v is number => v != null);
+    return {
+      rows,
+      working: rows.reduce((a, r) => a + r.workingMinutes, 0),
+      prod: rows.reduce((a, r) => a + r.productionMinutes, 0),
+      nonProd: rows.reduce((a, r) => a + r.nonProd, 0),
+      days: rows.reduce((a, r) => a + r.days, 0),
+      eff: effs.length ? effs.reduce((a, v) => a + v, 0) / effs.length : null,
+    };
+  }, [employee?.attendance, period]);
 
   // Bottom worklist — the due-within-3-days early warning list, filterable
   // by department and free-text search over PO/customer/product.
@@ -336,7 +391,7 @@ export function SitiOpsView() {
 
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle>Daily Production Output</CardTitle>
+            <CardTitle>{period.mode === "monthly" ? "Daily" : "Monthly"} Production Output</CardTitle>
           </CardHeader>
           <CardContent>
             <div style={{ width: "100%", height: 260 }}>
@@ -355,13 +410,83 @@ export function SitiOpsView() {
               )}
             </div>
             <p className="mt-2 text-xs text-[#6B7280]">
-              Last 30 days with completions, by completion date. Dashed line is the {fmtN(Math.round(outputAvg))}-unit
-              average over that window — there's no configured daily target anywhere in the data, so this is a
+              {periodLabel(period)}, by completion date. Dashed line is the {fmtN(Math.round(outputAvg))}-unit
+              average per bar — there's no configured target anywhere in the data, so this is a
               baseline to compare against, not an owner-set target.
             </p>
           </CardContent>
         </Card>
       </div>
+
+      {/* ---- Attendance log: latest recorded day per employee -------------- */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle>
+            Attendance log{" "}
+            <span className="ml-2 text-[11px] font-normal text-[#6B7280]">
+              {attendanceLog.rows.length} employees · latest recorded day each · {periodLabel(period)}
+            </span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="overflow-x-auto" style={{ maxHeight: 460, overflowY: "auto" }}>
+            <table className="w-full text-[12.5px]">
+              <thead>
+                <tr className="border-t border-b border-[#E2DDD8] sticky top-0 bg-white">
+                  {["Employee", "Date", "Clock in", "Clock out", "Production time", "Prod hours", "Non-prod hours", "Efficiency", "Total days", "Status"].map((h, i) => (
+                    <th key={h} className={`px-3 py-2 font-semibold uppercase text-[10.5px] tracking-wide text-[#6B7280] whitespace-nowrap ${i >= 4 && i <= 8 ? "text-right" : "text-left"}`}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {attendanceLog.rows.map((r, i) => {
+                  const late = lateMin(r.clockIn);
+                  const eff = r.efficiencyPct;
+                  return (
+                    <tr key={r.employeeId ?? i} className="border-b border-[#E2DDD8]">
+                      <td className="px-3 py-2 text-[#1F1D1B]">{r.employeeName ?? "—"}</td>
+                      <td className="px-3 py-2 text-[#6B7280] whitespace-nowrap">{r.date ? `${Number(r.date.slice(8))} ${new Date(r.date).toLocaleString("en", { month: "short" })}` : "—"}</td>
+                      <td className="px-3 py-2 font-mono">{hhmm(r.clockIn)}</td>
+                      <td className="px-3 py-2 font-mono">{hhmm(r.clockOut)}</td>
+                      <td className="px-3 py-2 text-right font-mono">{hrs(r.workingMinutes)}</td>
+                      <td className="px-3 py-2 text-right font-mono">{hrs(r.productionMinutes)}</td>
+                      <td className={`px-3 py-2 text-right font-mono ${r.nonProd > 90 ? "text-[#B5701A]" : "text-[#6B7280]"}`}>{hrs(r.nonProd)}</td>
+                      <td className="px-3 py-2 text-right font-mono font-semibold" style={{ color: eff == null ? MUTED : eff >= 90 ? "#4F7C3A" : "#B5701A" }}>
+                        {eff == null ? "—" : `${eff.toFixed(1)}%`}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono">{r.days}</td>
+                      <td className="px-3 py-2">
+                        <span
+                          className="inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                          style={late ? { background: "#F0ECE9", color: "#6B5C32" } : { background: "#EEF3E4", color: "#4F7C3A" }}
+                        >
+                          {late ? `Late ${late}m` : "On time"}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {attendanceLog.rows.length === 0 && (
+                  <tr><td colSpan={10} className="px-4 py-6 text-center text-[#6B7280]">No attendance recorded in this period.</td></tr>
+                )}
+              </tbody>
+              {attendanceLog.rows.length > 0 && (
+                <tfoot>
+                  <tr className="border-t-2 border-[#E2DDD8] font-mono font-semibold">
+                    <td className="px-3 py-2" colSpan={4}>Listed rows</td>
+                    <td className="px-3 py-2 text-right">{hrs(attendanceLog.working)}</td>
+                    <td className="px-3 py-2 text-right">{hrs(attendanceLog.prod)}</td>
+                    <td className="px-3 py-2 text-right">{hrs(attendanceLog.nonProd)}</td>
+                    <td className="px-3 py-2 text-right">{attendanceLog.eff == null ? "—" : `${attendanceLog.eff.toFixed(1)}%`}</td>
+                    <td className="px-3 py-2 text-right">{attendanceLog.days}</td>
+                    <td />
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* ---- Bottom: due-within-3-days worklist ---------------------------- */}
       <Card>
@@ -462,7 +587,7 @@ export function SitiOpsView() {
 
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle>Production Cost trend</CardTitle>
+            <CardTitle>Production Cost trend · {periodLabel(period)}</CardTitle>
           </CardHeader>
           <CardContent>
             <div style={{ width: "100%", height: 200 }}>

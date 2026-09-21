@@ -137,7 +137,7 @@ export default function DashboardPrototypePage() {
       {tab === "sales" && (
         <SalesOrdersView period={effectivePeriod} months={months} onPeriodChange={setPeriod} />
       )}
-      {tab === "siti" && <SitiOpsView />}
+      {tab === "siti" && <SitiOpsView period={effectivePeriod} />}
     </div>
   );
 }
