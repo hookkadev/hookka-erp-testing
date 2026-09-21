@@ -29,7 +29,8 @@ export type EmployeeSlice = {
       date: string;
       workingMinutes: number;
       productionMinutes: number;
-      workers?: { workerId: string; workingMinutes: number; productionMinutes: number }[];
+      allDeptMinutes?: number;
+      workers?: { workerId: string; workingMinutes: number; productionMinutes: number; allDeptMinutes?: number }[];
     }[];
   };
 };
@@ -45,7 +46,11 @@ const WARN_HIGH = 110;
 // A person clocking under an hour in the window has no meaningful ratio.
 const MIN_RANK_MINUTES = 60;
 
-type Common = { employee: EmployeeSlice; period: Period; target: number; onPeriodChange: (p: Period) => void };
+type Common = {
+  employee: EmployeeSlice; period: Period; target: number;
+  onPeriodChange: (p: Period) => void;
+  onPickEmployee?: (workerId: string) => void;
+};
 
 // "Showing: 12 Aug — click to go back", same affordance as the Sales Orders tab.
 function DayChip({ period, onPeriodChange }: { period: Period; onPeriodChange: (p: Period) => void }) {
@@ -65,11 +70,20 @@ export function TimeAttendancePanels({ employee, period, target, onPeriodChange 
   const att = useMemo(() => employee.attendance.filter((r) => inFocus(period, r.date)), [employee.attendance, period]);
   const t = useMemo(() => {
     const working = att.reduce((a, r) => a + r.workingMinutes, 0);
-    const prod = att.reduce((a, r) => a + r.productionMinutes, 0);
     const ot = att.reduce((a, r) => a + Math.min(r.overtimeMinutes, r.workingMinutes), 0);
-    const nonProd = att.reduce((a, r) => a + Math.max(0, r.workingMinutes - r.productionMinutes), 0);
-    return { working, prod, ot, regular: working - ot, nonProd, days: att.length, people: new Set(att.map((r) => r.employeeId ?? r.employeeName)).size };
+    return { working, ot, regular: working - ot, days: att.length, people: new Set(att.map((r) => r.employeeId ?? r.employeeName)).size };
   }, [att]);
+
+  // Tiles read the HOUSE metric (performance.byDay), not attendance_records'
+  // own production_time_minutes, which is not what the office reads and comes
+  // through as 0h for everyone.
+  const house = useMemo(() => {
+    const days = employee.performance.byDay.filter((d) => inFocus(period, d.date));
+    const w = days.reduce((a, d) => a + d.workingMinutes, 0);
+    const p = days.reduce((a, d) => a + d.productionMinutes, 0);
+    const all = days.reduce((a, d) => a + (d.allDeptMinutes ?? d.workingMinutes), 0);
+    return { w, p, nonProd: Math.max(0, all - w) };
+  }, [employee.performance.byDay, period]);
 
   const daily = useMemo(
     () => employee.performance.byDay
@@ -85,9 +99,9 @@ export function TimeAttendancePanels({ employee, period, target, onPeriodChange 
     { name: "Overtime", value: t.ot, color: AMBER },
   ];
   const tiles: [string, string][] = [
-    ["Production time", hrs(t.working)],
-    ["Prod hours", hrs(t.prod)],
-    ["Non-prod hours", hrs(t.nonProd)],
+    ["Production time", hrs(house.w)],
+    ["Prod hours", hrs(house.p)],
+    ["Non-prod hours", hrs(house.nonProd)],
     ["Total days worked", fmtN(t.days)],
   ];
 
@@ -183,8 +197,9 @@ export function TimeAttendancePanels({ employee, period, target, onPeriodChange 
 
 type RankRow = { key: string; name: string; sub: string; avg: number };
 
-function RankCard({ title, hint, rows, total, fromTop, color }: {
+function RankCard({ title, hint, rows, total, fromTop, color, onPick }: {
   title: string; hint: string; rows: RankRow[]; total: number; fromTop: boolean; color: string;
+  onPick?: (key: string) => void;
 }) {
   return (
     <Card>
@@ -194,7 +209,11 @@ function RankCard({ title, hint, rows, total, fromTop, color }: {
       </CardHeader>
       <CardContent className="space-y-3.5">
         {rows.map((r, i) => (
-          <div key={r.key} className="flex items-center gap-3">
+          <div
+            key={r.key}
+            className={`flex items-center gap-3 ${onPick ? "cursor-pointer rounded-md hover:bg-[#F7F5F3]" : ""}`}
+            onClick={() => onPick?.(r.key)}
+          >
             <span className="w-5 font-mono text-xs text-[#6B7280]">{fromTop ? i + 1 : total - i}</span>
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium text-[#1F1D1B]">{r.name}</p>
@@ -212,7 +231,7 @@ function RankCard({ title, hint, rows, total, fromTop, color }: {
   );
 }
 
-export function EfficiencyPanels({ employee, period, target, onPeriodChange }: Common) {
+export function EfficiencyPanels({ employee, period, target, onPeriodChange, onPickEmployee }: Common) {
   // The HOUSE metric, per person: earned production minutes ÷ clocked working
   // minutes (performance.byDay[].workers) — the same numbers the Employees
   // KPI and the pool line use, so the ranking reconciles with them. NOT
@@ -254,8 +273,8 @@ export function EfficiencyPanels({ employee, period, target, onPeriodChange }: C
         <DayChip period={period} onPeriodChange={onPeriodChange} />
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <RankCard title="Top 5 performers" hint="Highest efficiency (production ÷ working) in the period" rows={top} total={people.length} fromTop color={GREEN} />
-        <RankCard title="Bottom 5 · needs attention" hint="Lowest efficiency (production ÷ working) in the period" rows={bottom} total={people.length} fromTop={false} color={AMBER} />
+        <RankCard title="Top 5 performers" hint="Highest efficiency in the period · click a row to filter to that person" rows={top} total={people.length} fromTop color={GREEN} onPick={onPickEmployee} />
+        <RankCard title="Bottom 5 · needs attention" hint="Lowest efficiency (production ÷ working) in the period" rows={bottom} total={people.length} fromTop={false} color={AMBER} onPick={onPickEmployee} />
       </div>
 
       <div className="flex items-center gap-2">
@@ -266,7 +285,7 @@ export function EfficiencyPanels({ employee, period, target, onPeriodChange }: C
         <CardHeader className="pb-3">
           <CardTitle>Employee efficiency warning audit</CardTitle>
           <p className="text-xs text-[#6B7280]">
-            Period average vs the {target}% baseline · flags under {WARN_LOW}% (under-performance) and over {WARN_HIGH}% (over-reporting)
+            Efficiency vs the {target}% baseline · flags under {WARN_LOW}% (under-performance) and over {WARN_HIGH}% (over-reporting)
           </p>
         </CardHeader>
         <CardContent className="p-0">
@@ -283,7 +302,11 @@ export function EfficiencyPanels({ employee, period, target, onPeriodChange }: C
                 {flagged.map((p) => {
                   const over = p.avg > WARN_HIGH;
                   return (
-                    <tr key={p.key} className="border-b border-[#E2DDD8]">
+                    <tr
+                      key={p.key}
+                      className={`border-b border-[#E2DDD8] ${onPickEmployee ? "cursor-pointer hover:bg-[#F7F5F3]" : ""}`}
+                      onClick={() => onPickEmployee?.(p.key)}
+                    >
                       <td className="px-4 py-2.5 font-medium text-[#1F1D1B]">{p.name}</td>
                       <td className="px-4 py-2.5 text-[#6B7280]">{p.sub || "—"}</td>
                       <td className="px-4 py-2.5 text-right font-mono">{pct1(p.avg)}</td>

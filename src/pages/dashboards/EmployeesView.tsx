@@ -1,11 +1,13 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { ComposedChart, Area, Line, XAxis, YAxis, Tooltip, Legend, ReferenceLine, ResponsiveContainer } from "recharts";
 import { useCachedJson } from "@/lib/cached-fetch";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { TimeAttendancePanels, EfficiencyPanels, type EmployeeSlice } from "./EmployeesInsights";
+import { AttendanceLogCard } from "./AttendanceLogCard";
+import { filterSlice } from "./employee-filter";
 import { Users, Target, Clock, Gauge } from "lucide-react";
-import { TAUPE, TEAL, MUTED, BORDER, fmtN, inPeriod, inFocus, periodLabel, type Period, type EmpSub } from "./dashboard-shared-lib";
+import { TAUPE, TEAL, MUTED, BORDER, fmtN, inPeriod, type Period, type EmpSub } from "./dashboard-shared-lib";
 import { Kpi, LiveBadge, MissingNote } from "./dashboard-shared";
 
 // Real data from GET /api/dashboard/prototype — the `employee` +
@@ -30,14 +32,6 @@ type Feed = {
       measuredCards: number;
     };
   };
-};
-
-const hrs = (min: number) => `${Math.round(min / 6) / 10}h`;
-const hhmm = (t: string | null) => t?.match(/\d{2}:\d{2}/)?.[0] ?? "—";
-// Minutes after the 08:00 shift start; 0 when on time or unparseable.
-const lateMin = (t: string | null) => {
-  const m = t?.match(/(\d{2}):(\d{2})/);
-  return m ? Math.max(0, Number(m[1]) * 60 + Number(m[2]) - 480) : 0;
 };
 
 export function EmployeesView({
@@ -82,29 +76,19 @@ export function EmployeesView({
 
   const efficiencyPct = workingHours > 0 ? (productionHours / workingHours) * 100 : null;
 
-  // Attendance log: latest recorded day per employee inside the period, plus
-  // that employee's day count in the period.
-  const attendanceLog = useMemo(() => {
-    const byEmp = new Map<string, { last: NonNullable<Feed["employee"]>["attendance"][number]; days: number }>();
-    for (const r of employee?.attendance ?? []) {
-      if (!r.date || !inFocus(period, r.date)) continue;
-      const k = r.employeeId ?? r.employeeName ?? "";
-      const cur = byEmp.get(k);
-      byEmp.set(k, { last: !cur || r.date >= (cur.last.date ?? "") ? r : cur.last, days: (cur?.days ?? 0) + 1 });
-    }
-    const rows = [...byEmp.values()]
-      .map(({ last, days }) => ({ ...last, days, nonProd: Math.max(0, last.workingMinutes - last.productionMinutes) }))
-      .sort((a, b) => (a.employeeName ?? "").localeCompare(b.employeeName ?? ""));
-    const effs = rows.map((r) => r.efficiencyPct).filter((v): v is number => v != null);
-    return {
-      rows,
-      working: rows.reduce((a, r) => a + r.workingMinutes, 0),
-      prod: rows.reduce((a, r) => a + r.productionMinutes, 0),
-      nonProd: rows.reduce((a, r) => a + r.nonProd, 0),
-      days: rows.reduce((a, r) => a + r.days, 0),
-      eff: effs.length ? effs.reduce((a, v) => a + v, 0) / effs.length : null,
-    };
-  }, [employee?.attendance, period]);
+  // Department / employee filter (Time & attendance and Efficiency tabs). Every
+  // panel downstream reads the filtered slice, so picking a person re-derives
+  // the tiles, pool line, ranking and log for just them.
+  const [dept, setDept] = useState("");
+  const [emp, setEmp] = useState("");
+  const headcountWorkers = useMemo(
+    () => (employee?.workers ?? []).filter((w) => w.countsToHeadcount).sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "")),
+    [employee?.workers],
+  );
+  const depts = useMemo(() => [...new Set(headcountWorkers.map((w) => w.dept).filter((d): d is string => !!d))].sort(), [headcountWorkers]);
+  const empOptions = useMemo(() => headcountWorkers.filter((w) => !dept || w.dept === dept), [headcountWorkers, dept]);
+  const filtered = useMemo(() => (employee ? filterSlice(employee, dept, emp) : undefined), [employee, dept, emp]);
+  const shownCount = emp ? 1 : empOptions.length;
 
   if (loading) {
     return <div className="py-16 text-center text-sm text-[#6B7280]">Loading…</div>;
@@ -118,6 +102,38 @@ export function EmployeesView({
       </Card>
     );
   }
+
+  const selectCls = "h-9 rounded-md border border-[#E2DDD8] bg-[#E8E1D6] px-3 text-sm text-[#1F1D1B] focus:outline-none";
+  const filterBar = (
+    <Card>
+      <CardContent className="p-3 flex flex-wrap items-end gap-3">
+        <label className="text-[11px] text-[#6B7280] space-y-1 block">
+          Department
+          <select className={`${selectCls} block min-w-[180px]`} value={dept} onChange={(e) => { setDept(e.target.value); setEmp(""); }}>
+            <option value="">All departments</option>
+            {depts.map((d) => <option key={d} value={d}>{d}</option>)}
+          </select>
+        </label>
+        <label className="text-[11px] text-[#6B7280] space-y-1 block">
+          Employee
+          <select className={`${selectCls} block min-w-[200px]`} value={emp} onChange={(e) => setEmp(e.target.value)}>
+            <option value="">All employees</option>
+            {empOptions.map((w) => <option key={w.id} value={w.id}>{w.name ?? w.empNo ?? w.id}</option>)}
+          </select>
+        </label>
+        <button
+          type="button"
+          onClick={() => { setDept(""); setEmp(""); }}
+          className="h-9 rounded-md border border-[#E2DDD8] bg-[#E8E1D6] px-3 text-sm font-medium text-[#1F1D1B] hover:bg-[#DDD5C7]"
+        >
+          Reset
+        </button>
+        <span className="ml-auto text-xs text-[#6B7280]">
+          {shownCount} employee{shownCount === 1 ? "" : "s"} · {dept || "all departments"}
+        </span>
+      </CardContent>
+    </Card>
+  );
 
   return (
     <div className="space-y-6 max-md:space-y-4">
@@ -248,84 +264,20 @@ export function EmployeesView({
         </>
       )}
 
-      {sub === "time" && employee && (
+      {sub === "time" && employee && filtered && (
         <>
-          <TimeAttendancePanels employee={employee} period={period} onPeriodChange={onPeriodChange} target={config?.efficiencyTargetPct ?? 100} />
+          {filterBar}
+          <TimeAttendancePanels employee={filtered} period={period} onPeriodChange={onPeriodChange} target={config?.efficiencyTargetPct ?? 100} />
 
-      {/* ---- Attendance log: latest recorded day per employee -------------- */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle>
-            Attendance log{" "}
-            <span className="ml-2 text-[11px] font-normal text-[#6B7280]">
-              {attendanceLog.rows.length} employees · latest recorded day each · {periodLabel(period)}
-            </span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          <div className="overflow-x-auto" style={{ maxHeight: 460, overflowY: "auto" }}>
-            <table className="w-full text-[12.5px]">
-              <thead>
-                <tr className="border-t border-b border-[#E2DDD8] sticky top-0 bg-white">
-                  {["Employee", "Date", "Clock in", "Clock out", "Production time", "Prod hours", "Non-prod hours", "Efficiency", "Total days", "Status"].map((h, i) => (
-                    <th key={h} className={`px-3 py-2 font-semibold uppercase text-[10.5px] tracking-wide text-[#6B7280] whitespace-nowrap ${i >= 4 && i <= 8 ? "text-right" : "text-left"}`}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {attendanceLog.rows.map((r, i) => {
-                  const late = lateMin(r.clockIn);
-                  const eff = r.efficiencyPct;
-                  return (
-                    <tr key={r.employeeId ?? i} className="border-b border-[#E2DDD8]">
-                      <td className="px-3 py-2 text-[#1F1D1B]">{r.employeeName ?? "—"}</td>
-                      <td className="px-3 py-2 text-[#6B7280] whitespace-nowrap">{r.date ? `${Number(r.date.slice(8))} ${new Date(r.date).toLocaleString("en", { month: "short" })}` : "—"}</td>
-                      <td className="px-3 py-2 font-mono">{hhmm(r.clockIn)}</td>
-                      <td className="px-3 py-2 font-mono">{hhmm(r.clockOut)}</td>
-                      <td className="px-3 py-2 text-right font-mono">{hrs(r.workingMinutes)}</td>
-                      <td className="px-3 py-2 text-right font-mono">{hrs(r.productionMinutes)}</td>
-                      <td className={`px-3 py-2 text-right font-mono ${r.nonProd > 90 ? "text-[#B5701A]" : "text-[#6B7280]"}`}>{hrs(r.nonProd)}</td>
-                      <td className="px-3 py-2 text-right font-mono font-semibold" style={{ color: eff == null ? MUTED : eff >= 90 ? "#4F7C3A" : "#B5701A" }}>
-                        {eff == null ? "—" : `${eff.toFixed(1)}%`}
-                      </td>
-                      <td className="px-3 py-2 text-right font-mono">{r.days}</td>
-                      <td className="px-3 py-2">
-                        <span
-                          className="inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold"
-                          style={late ? { background: "#F0ECE9", color: "#6B5C32" } : { background: "#EEF3E4", color: "#4F7C3A" }}
-                        >
-                          {late ? `Late ${late}m` : "On time"}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-                {attendanceLog.rows.length === 0 && (
-                  <tr><td colSpan={10} className="px-4 py-6 text-center text-[#6B7280]">No attendance recorded in this period.</td></tr>
-                )}
-              </tbody>
-              {attendanceLog.rows.length > 0 && (
-                <tfoot>
-                  <tr className="border-t-2 border-[#E2DDD8] font-mono font-semibold">
-                    <td className="px-3 py-2" colSpan={4}>Listed rows</td>
-                    <td className="px-3 py-2 text-right">{hrs(attendanceLog.working)}</td>
-                    <td className="px-3 py-2 text-right">{hrs(attendanceLog.prod)}</td>
-                    <td className="px-3 py-2 text-right">{hrs(attendanceLog.nonProd)}</td>
-                    <td className="px-3 py-2 text-right">{attendanceLog.eff == null ? "—" : `${attendanceLog.eff.toFixed(1)}%`}</td>
-                    <td className="px-3 py-2 text-right">{attendanceLog.days}</td>
-                    <td />
-                  </tr>
-                </tfoot>
-              )}
-            </table>
-          </div>
-        </CardContent>
-      </Card>
+      <AttendanceLogCard employee={filtered ?? employee} period={period} />
         </>
       )}
 
-      {sub === "efficiency" && employee && (
-        <EfficiencyPanels employee={employee} period={period} onPeriodChange={onPeriodChange} target={config?.efficiencyTargetPct ?? 100} />
+      {sub === "efficiency" && employee && filtered && (
+        <>
+          {filterBar}
+          <EfficiencyPanels employee={filtered} period={period} onPeriodChange={onPeriodChange} onPickEmployee={(id) => setEmp(id)} target={config?.efficiencyTargetPct ?? 100} />
+        </>
       )}
     </div>
   );
