@@ -196,3 +196,15 @@ Traps met while building this, none of them obvious from the code:
   the synchronous routes pass 0 because the browser already retries three times behind a 90 s abort.
 - Python/PowerShell patch scripts on this Windows checkout: files are CRLF in the working tree and LF
   in the index (`core.autocrlf=true`). Writing LF is fine; git normalises.
+
+### R18 — scoping notes (2026-09-21, nothing changed yet)
+
+Attendance is the smallest module to start with. Write path: `worker.ts` `stampPunchPhoto` (600 KB cap,
+inline data URL in `attendance_records.clockInPhoto` / `clockOutPhoto`); read paths: the list's
+`(clockInPhoto IS NOT NULL) AS hasclockinphoto` flag and `GET /api/attendance/:id/photo`
+(`attendance.ts`). Traps before touching it: those two columns are RUNTIME-added and **fold to
+lower-case** on prod (`clockinphoto`), so every read is dual-keyed; a new `*_file_id` column must be
+snake_case and self-applied before the first write; the has-flag must keep working for un-migrated
+rows (`clockInPhoto IS NOT NULL OR clock_in_photo_key IS NOT NULL`); `/photo` must fall back to the
+data URL. Payroll-adjacent, so deep review, and it needs a browser punch on staging — not done from
+a session with no DB or login.
