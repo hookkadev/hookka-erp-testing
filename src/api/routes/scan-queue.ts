@@ -1066,6 +1066,34 @@ app.get("/stats", async (c) => {
   }
 });
 
+// GET /api/scan-queue/review — T-010 R11 review queue: finished, not-yet-consumed
+// scans (last 14 days, this tenant) where the model flagged fields it was unsure of.
+// Registered before `/:id`. Columns are aliased to camelCase so the adapter's
+// underscore re-camelCasing cannot surprise the reader.
+app.get("/review", async (c) => {
+  const denied = await requirePermission(c, "purchase-orders", "create");
+  if (denied) return denied;
+  await ensureScanQueueTable(c.var.DB);
+  const since = new Date(Date.now() - 14 * 86_400_000).toISOString();
+  try {
+    const rows = await c.var.DB.prepare(
+      `SELECT id, batch_id AS "batchId", kind, file_name AS "fileName",
+              low_confidence AS "lowConfidence", completed_at AS "completedAt",
+              created_by AS "createdBy"
+         FROM scan_queue
+        WHERE org_id = ? AND status IN ('done', 'cached') AND consumed_at IS NULL
+          AND low_confidence > 0 AND created_at >= ?
+        ORDER BY low_confidence DESC, created_at DESC
+        LIMIT 100`,
+    )
+      .bind(getOrgId(c), since)
+      .all<Record<string, unknown>>();
+    return c.json({ success: true, data: rows.results ?? [] });
+  } catch (e) {
+    return c.json({ success: false, error: `Review query failed: ${(e as Error).message}` }, 500);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // GET /api/scan-queue/pending?kind=po|supplier
 // Returns the user's MOST RECENT batch (within the last 7 days) that still

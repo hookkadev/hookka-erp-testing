@@ -225,8 +225,15 @@ type ClaudeExtractedPO = {
   // LHF/RHF. Internal diagnostic — no UI; operator overrides via the
   // productCode dropdown if the auto-flip is wrong.
   tvPosition: "top" | "bottom" | "left" | "right" | "none";
+  // T-010 R11 — field paths the model was unsure of ("customerPO",
+  // "items[0].fabricCode"). Points the reviewer's eye; never gates a save.
+  lowConfidence?: string[];
   items: ClaudeExtractedItem[];
 };
+
+/** True when the model flagged `path` — or, for a line prefix like "items[2].", any field on it. */
+const isFlagged = (po: ClaudeExtractedPO, path: string) =>
+  (po.lowConfidence ?? []).some((f) => (path.endsWith(".") ? f.startsWith(path) : f === path));
 
 type ClaudeWarning = {
   field: string;
@@ -2283,12 +2290,18 @@ function ClaudePOCard({
             className="mt-1 h-4 w-4 rounded border-[#D1D5DB] text-[#6B5C32] focus:ring-[#6B5C32]"
           />
           <div className="flex-1 min-w-0 space-y-2">
+            {(po.lowConfidence?.length ?? 0) > 0 && (
+              <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                {po.lowConfidence!.length} field{po.lowConfidence!.length === 1 ? "" : "s"} the scan was unsure of — highlighted below.
+              </div>
+            )}
             {/* Editable header fields */}
             <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 text-sm">
               <div>
                 <label className="block text-xs text-[#9CA3AF]">Customer PO</label>
                 <input
-                  className="w-full px-2 py-1 border border-[#E2DDD8] rounded"
+                  className={`w-full px-2 py-1 border rounded ${isFlagged(po, "customerPO") ? "border-amber-400 bg-amber-50" : "border-[#E2DDD8]"}`}
+                  title={isFlagged(po, "customerPO") ? "Low confidence — check against the scan" : undefined}
                   value={po.customerPO}
                   onChange={e => onUpdate({ customerPO: e.target.value })}
                 />
@@ -2540,7 +2553,11 @@ function ClaudePOCard({
                       const isFirst = i === 0;
                       const isLast = i === po.items.length - 1;
                       return (
-                        <tr key={`${row.sampleId}-${i}`} className="border-t border-[#E2DDD8] align-top">
+                        <tr
+                          key={`${row.sampleId}-${i}`}
+                          className={`border-t border-[#E2DDD8] align-top ${isFlagged(po, `items[${i}].`) ? "bg-amber-50" : ""}`}
+                          title={isFlagged(po, `items[${i}].`) ? `Low confidence: ${(po.lowConfidence ?? []).filter((f) => f.startsWith(`items[${i}].`)).map((f) => f.slice(f.indexOf(".") + 1)).join(", ")}` : undefined}
+                        >
                           <td className="px-1.5 py-1 text-[#9CA3AF]">
                             <div className="flex items-center gap-0.5">
                               <span className="text-xs">{i + 1}</span>

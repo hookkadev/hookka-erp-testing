@@ -75,6 +75,7 @@ const GRN = lazy(() => import('./pages/procurement/grn'))
 const GRNCreate = lazy(() => import('./pages/procurement/grn/create'))
 const GRNDetail = lazy(() => import('./pages/procurement/grn-detail'))
 const ProcurementMaintenance = lazy(() => import('./pages/procurement/maintenance'))
+const ScanReview = lazy(() => import('./pages/procurement/scan-review'))
 const PI = lazy(() => import('./pages/procurement/pi'))
 const PICreate = lazy(() => import('./pages/procurement/pi/create'))
 const PIDetail = lazy(() => import('./pages/procurement/PurchaseInvoiceDetail'))
@@ -384,6 +385,7 @@ export const DASHBOARD_ROUTES: RouteObject[] = [
   { path: '/procurement/grn/:id', element: <S><GRNDetail /></S> },
   { path: '/procurement/in-transit', element: <Navigate to="/procurement/grn" replace /> },
   { path: '/procurement/maintenance', element: <S><ProcurementMaintenance /></S> },
+  { path: '/procurement/scan-review', element: <S><ScanReview /></S> },
   { path: '/procurement/pi', element: <S><PI /></S> },
   // /procurement/pi/create must come before /procurement/pi/:id so React
   // Router matches the literal "create" path first (same pattern as /procurement/create).

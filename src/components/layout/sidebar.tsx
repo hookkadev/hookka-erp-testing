@@ -169,6 +169,7 @@ const navigationGroups: NavGroup[] = [
       { name: "Purchase Return", href: "/purchase-returns", icon: Undo2 },
       { name: "MRP", href: "/planning/mrp", icon: Layers },
       { name: "Suppliers", href: "/procurement/maintenance", icon: Building2 },
+      { name: "Scan Review", href: "/procurement/scan-review", icon: ClipboardCheck },
     ],
   },
   {
