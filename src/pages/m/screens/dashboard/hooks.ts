@@ -3,6 +3,7 @@ import { useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useCachedJson } from "@/lib/cached-fetch";
 import type { Period } from "../../../dashboards/dashboard-shared-lib";
+import { TAB_SUBS } from "../../../dashboards/dashboard-url-state-lib";
 import { readPeriod, resolvePeriod, writePeriod } from "./dashboard-m-lib";
 import { DASHBOARD_FEED_URL, type DashboardFeed } from "./types";
 
@@ -37,4 +38,21 @@ export function useDashboardPeriod(months: string[]) {
     [setParams],
   );
   return { period, setPeriod };
+}
+
+/**
+ * The current tab's sub-tab, held in `?sub=` — the same param and the same
+ * keys (TAB_SUBS) as the desktop page, so a link means the same on both. An
+ * unknown or missing value resolves to the tab's first sub-tab. `setSub`
+ * pushes history (Back walks sub-tabs).
+ */
+export function useDashboardSub(tab: string) {
+  const [params, setParams] = useSearchParams();
+  const subs = TAB_SUBS[tab] ?? [];
+  const sub = subs.find((s) => s.key === params.get("sub"))?.key ?? subs[0]?.key ?? "";
+  const setSub = useCallback(
+    (key: string) => setParams((prev) => { const n = new URLSearchParams(prev); n.set("sub", key); return n; }),
+    [setParams],
+  );
+  return { sub, setSub, subs };
 }

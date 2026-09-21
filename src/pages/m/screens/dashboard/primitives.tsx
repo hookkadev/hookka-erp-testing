@@ -10,6 +10,39 @@ import { TrendingDown, TrendingUp, X } from "lucide-react";
 import { MobileCard, ListRow } from "../../components";
 import { M, M_DELTA } from "../../theme";
 
+// ---- Sub-tab pills ------------------------------------------------------
+
+/** Second-level strip under the tab strip (NOT sticky — SubTabs owns that row). */
+export function MSubPills({ subs, active, onChange }: {
+  subs: readonly { key: string; label: string }[];
+  active: string;
+  onChange: (key: string) => void;
+}) {
+  return (
+    <div role="tablist" style={{ display: "flex", gap: 6, overflowX: "auto", padding: "12px 12px 0", scrollbarWidth: "none", WebkitOverflowScrolling: "touch" }}>
+      {subs.map((t) => {
+        const on = t.key === active;
+        return (
+          <button
+            key={t.key}
+            role="tab"
+            aria-selected={on}
+            onClick={() => onChange(t.key)}
+            style={{
+              flexShrink: 0, minHeight: 36, padding: "6px 12px", borderRadius: 9999, whiteSpace: "nowrap",
+              border: `1px solid ${on ? M.taupe : M.hairline}`, backgroundColor: on ? M.card : "transparent",
+              color: on ? M.raisin : M.muted, fontSize: 12, fontWeight: 600, cursor: "pointer",
+              WebkitTapHighlightColor: "transparent",
+            }}
+          >
+            {t.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // ---- KPI tiles ----------------------------------------------------------
 
 export function MKpiGrid({ children }: { children: ReactNode }) {

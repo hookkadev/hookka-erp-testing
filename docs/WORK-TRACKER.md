@@ -24,6 +24,12 @@ stay in ONE queue (Service › Approvals) and Overview gets a "Needs action" str
 same keys the `/m` dashboard already uses (`daily` dropped there too). Old `?tab=siti|lim|
 employee|department` links are aliased in `parseDashboardUrl`. NOT done: the feed key `lim` in
 `/api/dashboard/prototype` and the backend comments still carry the name (internal, no UI).
+Follow-up same day: the four `/m` dashboard tabs that were "next phase" placeholders are now
+phone-native (`tabs/OperationsTab|PeopleTab|ServiceTab|FinanceTab.tsx`, sub-tabs via
+`useDashboardSub` + `MSubPills`, same `?sub=` keys as desktop). Service > Approvals on the phone
+uses the desktop panel's exact endpoints / confirm / reject-needs-a-reason. Also fixed: the
+Operations cost and production-revenue chart axes read 100x too high (`fmtRMAxis` takes RM, was
+handed RM x 100). NOT browser-verified by the agent (dev proxy needs a production login).
 
 ## 2026-09-10 — 🔵 PRD T-004 · Import / Export across the whole system (P0/R3-R5 done, rest open)
 

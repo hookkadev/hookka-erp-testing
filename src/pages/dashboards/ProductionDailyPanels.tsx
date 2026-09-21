@@ -347,7 +347,7 @@ export function ProductionDailyPanels({
             <CardContent>
               {barChart(revChart, (
                 <Bar dataKey="Revenue" fill={TAUPE} radius={[3, 3, 0, 0]} />
-              ), 48, (v) => fmtRMAxis(v * 100))}
+              ), 48, fmtRMAxis)}
               <p className="mt-2 text-[11px] text-[#6B7280]">Click a bar to focus that {unit === "month" ? "month" : "day"}.</p>
             </CardContent>
           </Card>

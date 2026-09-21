@@ -400,7 +400,7 @@ export function OperationsView({
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={costChartData} margin={{ top: 6, right: 6, bottom: 0, left: 0 }} style={{ cursor: "pointer" }} onClick={pick(costChartData)}>
                           <XAxis dataKey="date" tick={{ fontSize: 10, fill: MUTED }} axisLine={{ stroke: BORDER }} tickLine={false} />
-                          <YAxis tick={{ fontSize: 10, fill: MUTED }} axisLine={false} tickLine={false} width={44} tickFormatter={(v) => fmtRMAxis(Number(v) * 100)} />
+                          <YAxis tick={{ fontSize: 10, fill: MUTED }} axisLine={false} tickLine={false} width={44} tickFormatter={(v) => fmtRMAxis(Number(v))} />
                           <Tooltip
                             formatter={(v) => formatCurrency(Math.round(Number(v) * 100))}
                             contentStyle={{ background: "#FFFFFF", border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: 12 }}
