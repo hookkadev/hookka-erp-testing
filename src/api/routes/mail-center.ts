@@ -956,7 +956,18 @@ function dedupeLower(addrs: string[]): string[] {
 // mailbox; SUPER_ADMIN reads all. (No requireSuperAdmin gate on reads/reply.)
 // ---------------------------------------------------------------------------
 
-// GET /api/mail-center/threads?mailbox=&status=&q=
+// The list is capped per page; the client asks for the next page with
+// `offset`. 300 was the old hard cap, kept as the default page so existing
+// callers see no change.
+const THREADS_DEFAULT_LIMIT = 300;
+const THREADS_MAX_LIMIT = 500;
+
+// GET /api/mail-center/threads?mailbox=&status=&q=&starred=1
+//   &sent=1        → only threads with an outbound message (the Sent folder)
+//   &sentBy=me     → only threads the CALLER sent a message on (R6 "sent by me")
+//   &label=<name>  → only threads carrying that label
+//   &limit=&offset= → server-side paging (R11); the response carries
+//                     X-Has-More: 1 when another page exists.
 app.get("/threads", async (c) => {
   const denied = await requirePermission(c, "mail-center", "read");
   if (denied) return denied;
@@ -970,36 +981,68 @@ app.get("/threads", async (c) => {
   const status = c.req.query("status");
   const q = c.req.query("q");
   const starredOnly = c.req.query("starred") === "1";
+  const sentOnly = c.req.query("sent") === "1";
+  const sentByMe = c.req.query("sentBy") === "me";
+  const label = (c.req.query("label") ?? "").trim();
+  const limitRaw = Number.parseInt(c.req.query("limit") ?? "", 10);
+  const offsetRaw = Number.parseInt(c.req.query("offset") ?? "", 10);
+  const limit =
+    Number.isFinite(limitRaw) && limitRaw > 0
+      ? Math.min(limitRaw, THREADS_MAX_LIMIT)
+      : THREADS_DEFAULT_LIMIT;
+  const offset = Number.isFinite(offsetRaw) && offsetRaw > 0 ? offsetRaw : 0;
 
-  const where: string[] = ["org_id = ?"];
+  const where: string[] = ["t.org_id = ?"];
   const binds: (string | number)[] = [orgId];
   // Per-user scope: non-admins only see threads on their own address(es).
   if (!scope.isAdmin) {
     const ph = scope.addresses.map(() => "?").join(", ");
-    where.push(`LOWER(mailbox_address) IN (${ph})`);
+    where.push(`LOWER(t.mailbox_address) IN (${ph})`);
     binds.push(...scope.addresses);
   }
   if (mailbox) {
-    where.push("mailbox_address = ?");
-    binds.push(mailbox);
+    where.push("LOWER(t.mailbox_address) = ?");
+    binds.push(mailbox.toLowerCase());
+  }
+  if (sentOnly) {
+    where.push(
+      `EXISTS (SELECT 1 FROM email_messages m
+                WHERE m.thread_id = t.id AND m.direction = 'outbound')`,
+    );
+  }
+  if (sentByMe) {
+    // "Sent by me" is per PERSON, not per mailbox: the outbound row records
+    // who pressed Send (sent_by_user_id), whichever shared box it went from.
+    where.push(
+      `EXISTS (SELECT 1 FROM email_messages m
+                WHERE m.thread_id = t.id AND m.direction = 'outbound'
+                  AND m.sent_by_user_id = ?)`,
+    );
+    binds.push(scope.userId);
+  }
+  if (label) {
+    // labels is a JSON array string ('["Urgent","VIP"]'); match the quoted
+    // name so "VIP" never matches "VIP2". Case-insensitive like the sidebar.
+    where.push(`LOWER(COALESCE(t.labels, '')) LIKE ?`);
+    binds.push(`%"${label.toLowerCase().replace(/[%_]/g, "")}"%`);
   }
   // Trash is its own folder: status=trashed returns ONLY soft-deleted rows;
   // every other view (open/closed/all/inbox) EXCLUDES them.
   if (status === "trashed") {
-    where.push("trashed_at IS NOT NULL");
+    where.push("t.trashed_at IS NOT NULL");
   } else {
-    where.push("trashed_at IS NULL");
-    if (status) {
-      where.push("status = ?");
+    where.push("t.trashed_at IS NULL");
+    if (status && status !== "all") {
+      where.push("t.status = ?");
       binds.push(status);
     }
   }
   if (starredOnly) {
-    where.push("starred = 1");
+    where.push("t.starred = 1");
   }
   if (q) {
     where.push(
-      "(LOWER(subject) LIKE ? OR LOWER(counterparty_email) LIKE ? OR LOWER(last_snippet) LIKE ?)",
+      "(LOWER(t.subject) LIKE ? OR LOWER(t.counterparty_email) LIKE ? OR LOWER(t.last_snippet) LIKE ?)",
     );
     const like = `%${q.toLowerCase()}%`;
     binds.push(like, like, like);
@@ -1015,11 +1058,16 @@ app.get("/threads", async (c) => {
           WHERE m.thread_id = t.id AND m.direction = 'outbound'
        ) AS has_outbound
        FROM email_threads t WHERE ${where.join(" AND ")}` +
-    " ORDER BY t.last_message_at DESC NULLS LAST LIMIT 300";
+    // One row past the page tells us whether a next page exists without a
+    // second COUNT(*) round-trip.
+    ` ORDER BY t.last_message_at DESC NULLS LAST LIMIT ${limit + 1} OFFSET ${offset}`;
   const res = await c.var.DB.prepare(sql)
     .bind(...binds)
     .all<ThreadRow>();
-  return c.json((res.results ?? []).map(rowToThread));
+  const rows = res.results ?? [];
+  const page = rows.length > limit ? rows.slice(0, limit) : rows;
+  c.header("X-Has-More", rows.length > limit ? "1" : "0");
+  return c.json(page.map(rowToThread));
 });
 
 // GET /api/mail-center/threads/:id — thread + its messages (marks read).

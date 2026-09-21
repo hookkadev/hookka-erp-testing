@@ -32,6 +32,7 @@ import {
   clientIp,
 } from "../lib/rate-limit";
 import { emitAudit } from "../lib/audit";
+import { provisionPersonalMailbox } from "../lib/mail-provision";
 import { issuePendingTotpToken } from "../lib/totp-pending";
 import {
   SESSION_COOKIE,
@@ -1259,6 +1260,20 @@ app.post("/accept-invite", async (c) => {
       "INSERT INTO user_sessions (token, userId, createdAt, expiresAt) VALUES (?, ?, ?, ?)",
     ).bind(sessionToken, userId, nowIso, sessionExpires),
   ]);
+
+  // T-012 R5: link (or create) the personal mailbox the invite reserved.
+  // Best-effort — the account and session above are already committed.
+  try {
+    await provisionPersonalMailbox(c.var.DB, {
+      orgId: "hookka",
+      userId,
+      email: invite.email,
+      displayName: resolvedDisplayName,
+      createdBy: null,
+    });
+  } catch (e) {
+    console.error("[auth] mailbox provisioning failed for", userId, e);
+  }
 
   // Sprint 7: set both auth cookies; body returns user + csrfToken only.
   issueSessionCookies(c, sessionToken, csrfToken);

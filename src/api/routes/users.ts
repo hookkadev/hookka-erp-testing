@@ -24,6 +24,11 @@ import { hashPassword } from "../lib/password";
 import { inviteEmailTemplate, sendMail } from "../lib/email";
 import { enqueueEmail } from "../lib/email-outbox";
 import { emitAudit } from "../lib/audit";
+import {
+  provisionPersonalMailbox,
+  preProvisionInviteMailbox,
+} from "../lib/mail-provision";
+import { tryGetOrgId } from "../lib/tenant";
 
 const app = new Hono<Env>();
 
@@ -328,6 +333,25 @@ app.post("/", async (c) => {
       .first<UserRow>();
     if (!created) {
       return c.json({ success: false, error: "Failed to create user" }, 500);
+    }
+    // T-012 R5: the person gets their @hookka.com mailbox NOW, not when an
+    // admin remembers the Mailbox dialog. Best-effort — a provisioning
+    // failure must never undo the account that was just created.
+    try {
+      await provisionPersonalMailbox(c.var.DB, {
+        orgId: tryGetOrgId(c) ?? "hookka",
+        userId: id,
+        email: email.trim(),
+        displayName: displayName ?? "",
+        department,
+        position,
+        createdBy:
+          (c as unknown as { get: (k: string) => string | undefined }).get(
+            "userId",
+          ) ?? null,
+      });
+    } catch (e) {
+      console.error("[users] mailbox provisioning failed for", id, e);
     }
     // Minting an account — including the role it starts with — was unaudited
     // even though the subsequent role-CHANGE was logged, so an account created
@@ -862,6 +886,20 @@ app.post("/invite", async (c) => {
         expiresAt,
       )
       .run();
+
+    // T-012 R5: reserve the newcomer's @hookka.com address at invite time so
+    // mail sent to them before they accept is already captured under their
+    // name; accept-invite links the row to the account. Best-effort.
+    try {
+      await preProvisionInviteMailbox(c.var.DB, {
+        orgId: tryGetOrgId(c) ?? "hookka",
+        email: trimmedEmail,
+        displayName: displayName ?? "",
+        createdBy: userId,
+      });
+    } catch (e) {
+      console.error("[users] invite mailbox pre-provisioning failed:", e);
+    }
 
     // Pull the inviter's displayName for the email greeting.
     const inviter = await c.var.DB.prepare(
