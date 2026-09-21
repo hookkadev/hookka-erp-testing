@@ -3836,5 +3836,11 @@
     "supplier_name",
     "total_sen",
     "updated_at"
+  ],
+  "bank_line_leg_splits": [
+    "amount_sen",
+    "created_at",
+    "leg_id",
+    "line_id"
   ]
 }

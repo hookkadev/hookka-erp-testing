@@ -235,6 +235,8 @@ const navigationGroups: NavGroup[] = [
         name: "Monthly Operation", href: "/accounting?tab=journals", icon: Calculator, children: [
           { name: "Journal Entries", href: "/accounting?tab=journals", icon: BookOpen },
           { name: "Cash Book", href: "/accounting?tab=cashbook", icon: Wallet },
+          { name: "Self-check", href: "/accounting?tab=selfcheck", icon: Calculator },
+          { name: "Corrections", href: "/accounting?tab=corrections", icon: BookOpen },
           { name: "Fixed Assets", href: "/accounting?tab=assets", icon: Building2 },
         ],
       },
