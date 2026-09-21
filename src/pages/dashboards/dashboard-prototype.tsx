@@ -5,6 +5,7 @@ import type { Period } from "./dashboard-shared-lib";
 import { AllOverviewView } from "./AllOverviewView";
 import { SalesOrdersView } from "./SalesOrdersView";
 import { EmployeesView } from "./EmployeesView";
+import { DepartmentsView } from "./DepartmentsView";
 import { PageHeader } from "@/components/ui/page-header";
 import { Tabs, type TabItem } from "@/components/ui/tabs";
 
@@ -41,10 +42,11 @@ import { Tabs, type TabItem } from "@/components/ui/tabs";
 // Inventory, Purchase, Production) are built and live on
 // laphii/feature/dashboard — they are held back from this branch so each
 // merge carries a small, reviewable surface.
-const TABS: TabItem<"overview" | "sales" | "employee">[] = [
+const TABS: TabItem<"overview" | "sales" | "employee" | "department">[] = [
   { key: "overview", label: "All Overview" },
   { key: "sales", label: "Sales Orders" },
   { key: "employee", label: "Employees" },
+  { key: "department", label: "Departments" },
 ];
 
 export default function DashboardPrototypePage() {
@@ -138,6 +140,7 @@ export default function DashboardPrototypePage() {
         <SalesOrdersView period={effectivePeriod} months={months} onPeriodChange={setPeriod} />
       )}
       {tab === "employee" && <EmployeesView period={effectivePeriod} />}
+      {tab === "department" && <DepartmentsView period={effectivePeriod} />}
     </div>
   );
 }

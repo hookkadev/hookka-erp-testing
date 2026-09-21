@@ -1,8 +1,10 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { ComposedChart, Area, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { useCachedJson } from "@/lib/cached-fetch";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, type TabItem } from "@/components/ui/tabs";
+import { TimeAttendancePanels, EfficiencyPanels, type EmployeeSlice } from "./EmployeesInsights";
 import { Users, Target, Clock, Gauge } from "lucide-react";
 import { TAUPE, TEAL, MUTED, BORDER, fmtN, inPeriod, periodLabel, type Period } from "./dashboard-shared-lib";
 import { Kpi, LiveBadge, MissingNote } from "./dashboard-shared";
@@ -22,16 +24,7 @@ type Feed = {
       id: string; empNo: string | null; name: string | null; dept: string | null; role: string | null;
       status: string | null; targetPct: number | null; hoursPerDay: number | null; countsToHeadcount: boolean;
     }[];
-    attendance: {
-      employeeId: string | null;
-      employeeName: string | null;
-      date: string | null;
-      clockIn: string | null;
-      clockOut: string | null;
-      workingMinutes: number;
-      productionMinutes: number;
-      efficiencyPct: number | null;
-    }[];
+    attendance: EmployeeSlice["attendance"];
     performance: {
       byDay: { date: string; workingMinutes: number; productionMinutes: number; allDeptMinutes: number }[];
       cards: number;
@@ -48,7 +41,14 @@ const lateMin = (t: string | null) => {
   return m ? Math.max(0, Number(m[1]) * 60 + Number(m[2]) - 480) : 0;
 };
 
+const SUB_TABS: TabItem<"overview" | "time" | "efficiency">[] = [
+  { key: "overview", label: "Overview" },
+  { key: "time", label: "Time & attendance" },
+  { key: "efficiency", label: "Efficiency" },
+];
+
 export function EmployeesView({ period }: { period: Period }) {
+  const [sub, setSub] = useState<(typeof SUB_TABS)[number]["key"]>("overview");
   const { data, loading, error } = useCachedJson<Feed>("/api/dashboard/prototype");
 
   const employee = data?.employee;
@@ -132,6 +132,10 @@ export function EmployeesView({ period }: { period: Period }) {
         <LiveBadge live={live} />
       </div>
       <MissingNote fields={missing} />
+      <Tabs tabs={SUB_TABS} value={sub} onChange={setSub} variant="pill" />
+
+      {sub === "overview" && (
+        <>
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
         <Kpi
@@ -200,6 +204,51 @@ export function EmployeesView({ period }: { period: Period }) {
           </div>
         </CardContent>
       </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle>Workers</CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="overflow-x-auto" style={{ maxHeight: 440, overflowY: "auto" }}>
+            <table className="w-full text-[12.5px]">
+              <thead>
+                <tr className="border-t border-b border-[#E2DDD8] sticky top-0 bg-white">
+                  {["Emp No", "Name", "Department", "Role", "Status", "Target %", "Hours/Day"].map((h) => (
+                    <th key={h} className="text-left px-4 py-2 font-semibold uppercase text-[10.5px] tracking-wide text-[#6B7280]">
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {workers.map((w) => (
+                  <tr key={w.id} className="border-b border-[#E2DDD8]">
+                    <td className="px-4 py-2 font-mono text-[#1F1D1B]">{w.empNo ?? "—"}</td>
+                    <td className="px-4 py-2 text-[#1F1D1B]">{w.name ?? "—"}</td>
+                    <td className="px-4 py-2 text-[#6B7280]">{w.dept ?? "—"}</td>
+                    <td className="px-4 py-2 text-[#6B7280]">{w.role ?? "—"}</td>
+                    <td className="px-4 py-2">
+                      {w.status && <Badge variant="status" status={w.status} />}
+                    </td>
+                    <td className="px-4 py-2 tabular-nums text-[#1F1D1B]">{w.targetPct ?? "—"}</td>
+                    <td className="px-4 py-2 tabular-nums text-[#1F1D1B]">{w.hoursPerDay ?? "—"}</td>
+                  </tr>
+                ))}
+                {workers.length === 0 && (
+                  <tr><td colSpan={7} className="px-4 py-6 text-center text-[#6B7280]">No workers.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+        </>
+      )}
+
+      {sub === "time" && employee && (
+        <>
+          <TimeAttendancePanels employee={employee} period={period} target={config?.efficiencyTargetPct ?? 100} />
 
       {/* ---- Attendance log: latest recorded day per employee -------------- */}
       <Card>
@@ -270,45 +319,12 @@ export function EmployeesView({ period }: { period: Period }) {
           </div>
         </CardContent>
       </Card>
+        </>
+      )}
 
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle>Workers</CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          <div className="overflow-x-auto" style={{ maxHeight: 440, overflowY: "auto" }}>
-            <table className="w-full text-[12.5px]">
-              <thead>
-                <tr className="border-t border-b border-[#E2DDD8] sticky top-0 bg-white">
-                  {["Emp No", "Name", "Department", "Role", "Status", "Target %", "Hours/Day"].map((h) => (
-                    <th key={h} className="text-left px-4 py-2 font-semibold uppercase text-[10.5px] tracking-wide text-[#6B7280]">
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {workers.map((w) => (
-                  <tr key={w.id} className="border-b border-[#E2DDD8]">
-                    <td className="px-4 py-2 font-mono text-[#1F1D1B]">{w.empNo ?? "—"}</td>
-                    <td className="px-4 py-2 text-[#1F1D1B]">{w.name ?? "—"}</td>
-                    <td className="px-4 py-2 text-[#6B7280]">{w.dept ?? "—"}</td>
-                    <td className="px-4 py-2 text-[#6B7280]">{w.role ?? "—"}</td>
-                    <td className="px-4 py-2">
-                      {w.status && <Badge variant="status" status={w.status} />}
-                    </td>
-                    <td className="px-4 py-2 tabular-nums text-[#1F1D1B]">{w.targetPct ?? "—"}</td>
-                    <td className="px-4 py-2 tabular-nums text-[#1F1D1B]">{w.hoursPerDay ?? "—"}</td>
-                  </tr>
-                ))}
-                {workers.length === 0 && (
-                  <tr><td colSpan={7} className="px-4 py-6 text-center text-[#6B7280]">No workers.</td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </CardContent>
-      </Card>
+      {sub === "efficiency" && employee && (
+        <EfficiencyPanels employee={employee} period={period} target={config?.efficiencyTargetPct ?? 100} />
+      )}
     </div>
   );
 }
