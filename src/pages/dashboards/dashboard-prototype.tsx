@@ -1,12 +1,13 @@
 import { useMemo, useState } from "react";
 import { useCachedJson } from "@/lib/cached-fetch";
 import { PeriodPicker } from "./dashboard-shared";
-import { EMP_SUBS, SITI_SUBS, type EmpSub, type Period, type SitiSub } from "./dashboard-shared-lib";
+import { EMP_SUBS, SITI_SUBS, LIM_SUBS, type EmpSub, type Period, type SitiSub, type LimSub } from "./dashboard-shared-lib";
 import { AllOverviewView } from "./AllOverviewView";
 import { SalesOrdersView } from "./SalesOrdersView";
 import { SitiOpsView } from "./SitiOpsView";
 import { EmployeesView } from "./EmployeesView";
 import { DepartmentsView } from "./DepartmentsView";
+import { LimDailyView } from "./LimDailyView";
 import { PageHeader } from "@/components/ui/page-header";
 import { Tabs, type TabItem } from "@/components/ui/tabs";
 
@@ -42,12 +43,13 @@ import { Tabs, type TabItem } from "@/components/ui/tabs";
 
 // The tabs being trialled on main. Operations (Siti) is a draft - see
 // SitiOpsView.tsx's own header comment for what's real vs. stubbed.
-const TABS: TabItem<"overview" | "sales" | "siti" | "employee" | "department">[] = [
+const TABS: TabItem<"overview" | "sales" | "siti" | "employee" | "department" | "lim">[] = [
   { key: "overview", label: "All Overview" },
   { key: "sales", label: "Sales Orders" },
   { key: "siti", label: "Operations (Siti)" },
   { key: "employee", label: "Employees" },
   { key: "department", label: "Departments" },
+  { key: "lim", label: "Daily (Lim)" },
 ];
 
 export default function DashboardPrototypePage() {
@@ -55,6 +57,7 @@ export default function DashboardPrototypePage() {
   const [period, setPeriod] = useState<Period>({ mode: "monthly", month: "" });
   const [empSub, setEmpSub] = useState<EmpSub>("overview");
   const [sitiSub, setSitiSub] = useState<SitiSub>("overview");
+  const [limSub, setLimSub] = useState<LimSub>("efficiency");
 
   // The page reads the feed only for `meta.months` — the months that actually
   // exist in the book, which bound the stepper. Every tab below calls the same
@@ -126,6 +129,7 @@ export default function DashboardPrototypePage() {
           <div>
             {tab === "employee" && <Tabs tabs={[...EMP_SUBS]} value={empSub} onChange={setEmpSub} variant="pill" />}
             {tab === "siti" && <Tabs tabs={[...SITI_SUBS]} value={sitiSub} onChange={setSitiSub} variant="pill" />}
+            {tab === "lim" && <Tabs tabs={[...LIM_SUBS]} value={limSub} onChange={setLimSub} variant="pill" />}
           </div>
           {months.length > 0 && (
             <PeriodPicker
@@ -151,6 +155,7 @@ export default function DashboardPrototypePage() {
       {tab === "siti" && <SitiOpsView period={effectivePeriod} sub={sitiSub} onPeriodChange={setPeriod} />}
       {tab === "employee" && <EmployeesView period={effectivePeriod} sub={empSub} onPeriodChange={setPeriod} />}
       {tab === "department" && <DepartmentsView period={effectivePeriod} />}
+      {tab === "lim" && <LimDailyView period={effectivePeriod} sub={limSub} onPeriodChange={setPeriod} />}
     </div>
   );
 }

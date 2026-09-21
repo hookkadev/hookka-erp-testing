@@ -195,5 +195,13 @@ export const SITI_SUBS = [
   { key: "cost", label: "Cost" },
   { key: "materials", label: "Materials" },
 ] as const;
+export const LIM_SUBS = [
+  { key: "efficiency", label: "Efficiency" },
+  { key: "plan", label: "Plan vs Actual" },
+  { key: "attendance", label: "Attendance" },
+  { key: "revenue", label: "Production revenue" },
+  { key: "overdue", label: "Overdue" },
+] as const;
+export type LimSub = (typeof LIM_SUBS)[number]["key"];
 export type EmpSub = (typeof EMP_SUBS)[number]["key"];
 export type SitiSub = (typeof SITI_SUBS)[number]["key"];
