@@ -25,7 +25,6 @@ import {
   HardHat,
   Wallet,
   FlaskConical,
-  LayoutDashboard,
   type LucideIcon,
 } from "lucide-react";
 import { DASHBOARD_NAV_HREF } from "./screens/dashboard/dashboard-m-lib";
@@ -92,7 +91,7 @@ export const MORE_GROUPS: ModuleGroup[] = [
   {
     title: "Overview",
     items: [
-      { label: "Dashboard", icon: LayoutDashboard, path: "/m/dashboard", navGate: DASHBOARD_NAV_HREF },
+      { label: "Dashboard Prototype", icon: FlaskConical, path: "/m/dashboard", navGate: DASHBOARD_NAV_HREF },
       { label: "Announcements", icon: Megaphone, path: "/m/announcements" },
       { label: "Mail Center", icon: Mail, path: "/m/mail-center" },
     ],
