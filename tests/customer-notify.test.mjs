@@ -525,9 +525,12 @@ test("outbox: attachments_json stored on enqueue and read back by the drain", ()
   // attachments are fetched PER ROW (`full`), NOT in the batch pick, so a queue
   // of PDF-bearing invoices can't OOM the drain (2026-06-24 strand bug: 50
   // customer notices stuck PENDING because the 25-row pick of PDF base64 threw).
+  // Since T-012 R14 the row holds a Storage reference (or a legacy inline
+  // base64), and resolveStoredAttachments turns either into the bytes the
+  // provider wants — still from the per-row `full` fetch.
   assert.match(
     outboxSrc,
-    /attachments: parseStoredAttachments\(full\?\.attachmentsJson/,
+    /attachments: await resolveStoredAttachments\(\s*env,\s*full\?\.attachmentsJson/,
     "drain sendMail call must pass the stored attachments (per-row fetch)",
   );
   assert.match(
