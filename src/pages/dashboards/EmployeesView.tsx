@@ -4,7 +4,7 @@ import { useCachedJson } from "@/lib/cached-fetch";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Users, Target, Clock, Gauge } from "lucide-react";
-import { TAUPE, TEAL, MUTED, BORDER, fmtN, inPeriod, type Period } from "./dashboard-shared-lib";
+import { TAUPE, TEAL, MUTED, BORDER, fmtN, inPeriod, periodLabel, type Period } from "./dashboard-shared-lib";
 import { Kpi, LiveBadge, MissingNote } from "./dashboard-shared";
 
 // Real data from GET /api/dashboard/prototype — the `employee` +
@@ -22,12 +22,30 @@ type Feed = {
       id: string; empNo: string | null; name: string | null; dept: string | null; role: string | null;
       status: string | null; targetPct: number | null; hoursPerDay: number | null; countsToHeadcount: boolean;
     }[];
+    attendance: {
+      employeeId: string | null;
+      employeeName: string | null;
+      date: string | null;
+      clockIn: string | null;
+      clockOut: string | null;
+      workingMinutes: number;
+      productionMinutes: number;
+      efficiencyPct: number | null;
+    }[];
     performance: {
       byDay: { date: string; workingMinutes: number; productionMinutes: number; allDeptMinutes: number }[];
       cards: number;
       measuredCards: number;
     };
   };
+};
+
+const hrs = (min: number) => `${Math.round(min / 6) / 10}h`;
+const hhmm = (t: string | null) => t?.match(/\d{2}:\d{2}/)?.[0] ?? "—";
+// Minutes after the 08:00 shift start; 0 when on time or unparseable.
+const lateMin = (t: string | null) => {
+  const m = t?.match(/(\d{2}):(\d{2})/);
+  return m ? Math.max(0, Number(m[1]) * 60 + Number(m[2]) - 480) : 0;
 };
 
 export function EmployeesView({ period }: { period: Period }) {
@@ -69,6 +87,30 @@ export function EmployeesView({ period }: { period: Period }) {
   }, [employee?.performance.byDay, period]);
 
   const efficiencyPct = workingHours > 0 ? (productionHours / workingHours) * 100 : null;
+
+  // Attendance log: latest recorded day per employee inside the period, plus
+  // that employee's day count in the period.
+  const attendanceLog = useMemo(() => {
+    const byEmp = new Map<string, { last: NonNullable<Feed["employee"]>["attendance"][number]; days: number }>();
+    for (const r of employee?.attendance ?? []) {
+      if (!r.date || !inPeriod(period, r.date)) continue;
+      const k = r.employeeId ?? r.employeeName ?? "";
+      const cur = byEmp.get(k);
+      byEmp.set(k, { last: !cur || r.date >= (cur.last.date ?? "") ? r : cur.last, days: (cur?.days ?? 0) + 1 });
+    }
+    const rows = [...byEmp.values()]
+      .map(({ last, days }) => ({ ...last, days, nonProd: Math.max(0, last.workingMinutes - last.productionMinutes) }))
+      .sort((a, b) => (a.employeeName ?? "").localeCompare(b.employeeName ?? ""));
+    const effs = rows.map((r) => r.efficiencyPct).filter((v): v is number => v != null);
+    return {
+      rows,
+      working: rows.reduce((a, r) => a + r.workingMinutes, 0),
+      prod: rows.reduce((a, r) => a + r.productionMinutes, 0),
+      nonProd: rows.reduce((a, r) => a + r.nonProd, 0),
+      days: rows.reduce((a, r) => a + r.days, 0),
+      eff: effs.length ? effs.reduce((a, v) => a + v, 0) / effs.length : null,
+    };
+  }, [employee?.attendance, period]);
 
   if (loading) {
     return <div className="py-16 text-center text-sm text-[#6B7280]">Loading…</div>;
@@ -155,6 +197,76 @@ export function EmployeesView({ period }: { period: Period }) {
                 </ComposedChart>
               </ResponsiveContainer>
             )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* ---- Attendance log: latest recorded day per employee -------------- */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle>
+            Attendance log{" "}
+            <span className="ml-2 text-[11px] font-normal text-[#6B7280]">
+              {attendanceLog.rows.length} employees · latest recorded day each · {periodLabel(period)}
+            </span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="overflow-x-auto" style={{ maxHeight: 460, overflowY: "auto" }}>
+            <table className="w-full text-[12.5px]">
+              <thead>
+                <tr className="border-t border-b border-[#E2DDD8] sticky top-0 bg-white">
+                  {["Employee", "Date", "Clock in", "Clock out", "Production time", "Prod hours", "Non-prod hours", "Efficiency", "Total days", "Status"].map((h, i) => (
+                    <th key={h} className={`px-3 py-2 font-semibold uppercase text-[10.5px] tracking-wide text-[#6B7280] whitespace-nowrap ${i >= 4 && i <= 8 ? "text-right" : "text-left"}`}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {attendanceLog.rows.map((r, i) => {
+                  const late = lateMin(r.clockIn);
+                  const eff = r.efficiencyPct;
+                  return (
+                    <tr key={r.employeeId ?? i} className="border-b border-[#E2DDD8]">
+                      <td className="px-3 py-2 text-[#1F1D1B]">{r.employeeName ?? "—"}</td>
+                      <td className="px-3 py-2 text-[#6B7280] whitespace-nowrap">{r.date ? `${Number(r.date.slice(8))} ${new Date(r.date).toLocaleString("en", { month: "short" })}` : "—"}</td>
+                      <td className="px-3 py-2 font-mono">{hhmm(r.clockIn)}</td>
+                      <td className="px-3 py-2 font-mono">{hhmm(r.clockOut)}</td>
+                      <td className="px-3 py-2 text-right font-mono">{hrs(r.workingMinutes)}</td>
+                      <td className="px-3 py-2 text-right font-mono">{hrs(r.productionMinutes)}</td>
+                      <td className={`px-3 py-2 text-right font-mono ${r.nonProd > 90 ? "text-[#B5701A]" : "text-[#6B7280]"}`}>{hrs(r.nonProd)}</td>
+                      <td className="px-3 py-2 text-right font-mono font-semibold" style={{ color: eff == null ? MUTED : eff >= 90 ? "#4F7C3A" : "#B5701A" }}>
+                        {eff == null ? "—" : `${eff.toFixed(1)}%`}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono">{r.days}</td>
+                      <td className="px-3 py-2">
+                        <span
+                          className="inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                          style={late ? { background: "#F0ECE9", color: "#6B5C32" } : { background: "#EEF3E4", color: "#4F7C3A" }}
+                        >
+                          {late ? `Late ${late}m` : "On time"}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {attendanceLog.rows.length === 0 && (
+                  <tr><td colSpan={10} className="px-4 py-6 text-center text-[#6B7280]">No attendance recorded in this period.</td></tr>
+                )}
+              </tbody>
+              {attendanceLog.rows.length > 0 && (
+                <tfoot>
+                  <tr className="border-t-2 border-[#E2DDD8] font-mono font-semibold">
+                    <td className="px-3 py-2" colSpan={4}>Listed rows</td>
+                    <td className="px-3 py-2 text-right">{hrs(attendanceLog.working)}</td>
+                    <td className="px-3 py-2 text-right">{hrs(attendanceLog.prod)}</td>
+                    <td className="px-3 py-2 text-right">{hrs(attendanceLog.nonProd)}</td>
+                    <td className="px-3 py-2 text-right">{attendanceLog.eff == null ? "—" : `${attendanceLog.eff.toFixed(1)}%`}</td>
+                    <td className="px-3 py-2 text-right">{attendanceLog.days}</td>
+                    <td />
+                  </tr>
+                </tfoot>
+              )}
+            </table>
           </div>
         </CardContent>
       </Card>
