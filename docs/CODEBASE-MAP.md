@@ -1,5 +1,11 @@
 # Hookka ERP — Codebase Map (the single authoritative map)
 
+> **Restamped 2026-09-21 on branch `fix/t006-transfer-convert-guards`:** added the
+> idempotency-is-OPT-IN trap beside the CSRF-is-global one (they are opposites, and the
+> difference is what left T-006 R10 inert), and corrected the `consignment/index.tsx` size
+> (1197 → 1069 lines, after its dead Transfer-to-DO dialog was deleted). Rest of the map not
+> re-verified in this pass.
+>
 > **Restamped 2026-09-18 on branch `fix/pcn-void-status-check-v2`:** Supplier Discount
 > (purchase CN) void was 500ing on prod — `purchase_credit_notes.status` never allowed
 > `CANCELLED` (BUG-2026-09-18-001). Fixed + the entry rewritten in place; the Supplier
@@ -118,7 +124,7 @@ authoritative current detail.** New here? Start with [ONBOARDING-PATH.md](ONBOAR
 | `src/pages/sales/create.tsx` — Create SO (3710); OCR/scan-PO lands here | `src/api/routes/consignment-orders.ts` — CO CRUD + co_status_changes (2815) | `consignment_orders` / `consignment_order_items` / `co_status_changes` | `tests/so-category.test.mjs` |
 | `src/pages/sales/detail.tsx` — SO detail (1637); linked POs/JCs/DOs/invoices | `src/api/routes/consignment-notes.ts` — CN (DO-equiv) dispatch/delivered (2152) | `consignment_notes` / `consignment_items` | |
 | `src/pages/sales/edit.tsx` — Edit SO (1634); re-runs sofa-combo on save; unit price + build-up via `@/lib/pricing` | `src/api/routes/consignments.ts` — legacy/shared reads (536) | `sofa_combo_rules` / `customer_products` / `price_overrides` | |
-| `src/pages/consignment/index.tsx` — CO list (1197) | `src/api/routes/sofa-combos.ts` — sofa_combo_rules CRUD (650) | `cost_ledger` / `production_orders` / `job_cards` / `fg_units` | |
+| `src/pages/consignment/index.tsx` — CO list (1069) | `src/api/routes/sofa-combos.ts` — sofa_combo_rules CRUD (650) | `cost_ledger` / `production_orders` / `job_cards` / `fg_units` | |
 | `src/pages/consignment/create.tsx` — Create CO (1782) | `src/api/routes/historical-sales.ts` — read-only history (128) | `delivery_orders` / `delivery_order_items` / `invoices` / `invoice_items` | |
 | `src/pages/consignment/edit.tsx` — Edit CO (1142); unit price + build-up via `@/lib/pricing` | | `sales_orders_archive` / `sales_order_items_archive` / `sales_orders_list_snapshot` | |
 | `src/pages/consignment/detail.tsx` — CO detail (1568); DO-parity P2 | | | |

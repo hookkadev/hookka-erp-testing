@@ -1,5 +1,13 @@
 # Sales — Module Guide
 
+> **Last verified: 2026-09-21** (branch `fix/t006-transfer-convert-guards`) — every table
+> anchor re-derived to its exact definition line (several were 1-5 lines off after the T-006
+> and `main` merges, inside the anchor test's ±8 window so it never failed). The SO→DO
+> transfer now also sends an `Idempotency-Key` via `useIdempotencyKey`
+> (`src/lib/idempotency-key.ts`) — the server's `withIdempotency` wrapper is a no-op without
+> it. **Corrects the 2026-09-11 stamp below:** the Consignment page's identical Transfer-to-DO
+> bug IS now fixed — the button is replaced by "Create Consignment Note" → `/consignment/note`.
+>
 > **Last verified: 2026-09-11** — T-006 R1: "Transfer to Delivery Order" now
 > sends `productionOrderIds` (sourced from `/api/delivery-orders/ready-planning`),
 > not hand-built `items` — the old body bypassed the once-only-delivery guard
@@ -38,7 +46,7 @@ Owns the customer-facing order lifecycle: **Sales Orders** (SO) and their line i
 
 ## Entry points
 - Pages
-  - `/sales` → `src/pages/sales/index.tsx:172` (`SalesPage` — SO list, dual-mode SO vs service-order)
+  - `/sales` → `src/pages/sales/index.tsx:196` (`SalesPage` — SO list, dual-mode SO vs service-order)
   - `/sales/create` → `src/pages/sales/create.tsx:214` (`CreateSalesOrderPage`; OCR/scan-PO lands here)
   - `/sales/:id` → `src/pages/sales/detail.tsx:338` (`SalesOrderDetailPage`; linked POs/JCs/DOs/invoices)
   - `/sales/:id/edit` → `src/pages/sales/edit.tsx` (Edit SO; re-runs sofa-combo on save)
@@ -75,17 +83,17 @@ Owns the customer-facing order lifecycle: **Sales Orders** (SO) and their line i
 ## Key functions / sections (locate-to-function)
 | Symbol / section | file:line | Role |
 |---|---|---|
-| `SalesPage` | `src/pages/sales/index.tsx:195` | SO list main; service-order-mode flag, filters, tabs |
-| `aggregateServiceOrderProgress` | `src/pages/sales/index.tsx:98` | Rolls linked-PO progress into a service-order stage |
-| `soStageLabel` | `src/pages/sales/index.tsx:165` | Maps SO status → display stage label |
+| `SalesPage` | `src/pages/sales/index.tsx:196` | SO list main; service-order-mode flag, filters, tabs |
+| `aggregateServiceOrderProgress` | `src/pages/sales/index.tsx:99` | Rolls linked-PO progress into a service-order stage |
+| `soStageLabel` | `src/pages/sales/index.tsx:166` | Maps SO status → display stage label |
 | `CreateSalesOrderPageWrapper` | `src/pages/sales/create.tsx:206` | Default export; providers shell |
 | `CreateSalesOrderPage` | `src/pages/sales/create.tsx:214` | Main create form (parties, items, totals) |
 | `CopyFromSourceModal` | `src/pages/sales/create.tsx:2395` | 2-step copy-draft picker |
 | `LineItemCard` | `src/pages/sales/create.tsx:3021` | Per-line item editor |
 | `SalesOrderDetailPage` | `src/pages/sales/detail.tsx:338` | SO detail; linked POs/JCs/DOs/invoices |
-| `app.post("/")` (create) | `src/api/routes/sales-orders.ts:1713` | SO create + combo pass + snapshot invalidation |
-| `app.put("/:id")` (edit) | `src/api/routes/sales-orders.ts:3096` | SO edit + re-run combo pass |
-| `app.post("/:id/confirm")` | `src/api/routes/sales-orders.ts:2494` | DRAFT/PENDING → IN_PRODUCTION, cascade to POs |
+| `app.post("/")` (create) | `src/api/routes/sales-orders.ts:1718` | SO create + combo pass + snapshot invalidation |
+| `app.put("/:id")` (edit) | `src/api/routes/sales-orders.ts:3101` | SO edit + re-run combo pass |
+| `app.post("/:id/confirm")` | `src/api/routes/sales-orders.ts:2499` | DRAFT/PENDING → IN_PRODUCTION, cascade to POs |
 | `createProductionOrdersForSO` | `sales-orders/_helpers.ts:576` | One production_orders row per SO item |
 | `cascadeSOStatusToPOs` | `sales-orders/_helpers.ts:773` | Propagate SO status change to POs/JCs |
 | `rowToSO` / `rowToSOList` | `sales-orders/_helpers.ts:243 / 307` | Row → API shape (dual-keyed) |
@@ -96,7 +104,7 @@ Owns the customer-facing order lifecycle: **Sales Orders** (SO) and their line i
 | `findComboSubset` | `src/api/lib/sofa-combo.ts:98` | Subset-match lines against a combo rule (module-private) |
 | `app.post("/")` (CO create) | `src/api/routes/consignment-orders.ts:653` | Consignment Order create |
 | `app.get("/status-changes")` (CO) | `src/api/routes/consignment-orders.ts:1133` | co_status_changes read |
-| `ConsignmentNotePage` | `src/pages/consignment/note.tsx:454` | CN workspace, all 3 tabs inline |
+| `ConsignmentNotePage` | `src/pages/consignment/note.tsx:455` | CN workspace, all 3 tabs inline |
 
 ## Gotchas
 - **Combo pricing is backend-unified.** Never re-implement it in the frontend. Note the map's `applySofaCombos`-in-sales-orders wiring is now **indirect**: sales-orders imports `runSofaComboPass` (`sofa-combo-pass.ts`, moved 2026-06-11), which calls `applySofaCombos`. Piece code = productCode (stored sizeCode is the SEAT size); a null tier disqualifies the group; `discount <= 0` is an idempotent no-op. Old full-price combo SOs re-price down on next edit.
