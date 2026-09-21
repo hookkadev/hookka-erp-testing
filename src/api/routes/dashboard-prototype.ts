@@ -54,6 +54,8 @@ import { Hono } from "hono";
 import type { Env } from "../worker";
 import { getOrgId } from "../lib/tenant";
 import { requirePermission, hasPermission } from "../lib/rbac";
+import { buildServiceSlice } from "../lib/dashboard-service-slice";
+import { isCustomerScoped } from "../lib/customer-scope";
 import { collectOnTimeDelivery, EMPTY_ON_TIME } from "../lib/on-time-delivery";
 import { poInPlanning, poReadyForDelivery, type PipelinePO } from "../../lib/delivery-pipeline";
 import { loadPoValueMap, loadDoValueMap } from "../lib/do-value";
@@ -306,6 +308,11 @@ app.get("/", async (c) => {
     hasPermission(c, "production-orders", "read"),
   ]);
 
+  // Customer-scoped roles (SALES) must not see the whole case book through a
+  // shared, org-wide cached feed, so the slice is dropped for them.
+  const canService =
+    (await hasPermission(c, "service-cases", "read")) && !isCustomerScoped(c);
+
   const orgId = getOrgId(c);
   const { cached } = await import("../lib/kv-cache");
 
@@ -470,6 +477,9 @@ app.get("/", async (c) => {
         ORDER BY name ASC`,
     ).all<WorkerRow>().then((r) => r.results ?? []),
   );
+
+  // Service (Zamri) tab — own file, see dashboard-service-slice.ts.
+  const serviceSec = await section("service", async () => [await buildServiceSlice(c.var.DB)]);
 
   const attSec = await section("attendance", () =>
     c.var.DB.prepare(
@@ -1611,6 +1621,7 @@ app.get("/", async (c) => {
         rows: salesTabRows.length,
         reason: salesSec.error ?? soItemCatSec.error ?? undefined,
       },
+      service: { live: !serviceSec.error, reason: serviceSec.error ?? undefined },
       employee: {
         live: !attSec.error && !workersSec.error && !wheSec.error && !jcSec.error,
         reason: attSec.error ?? workersSec.error ?? wheSec.error ?? jcSec.error
@@ -1803,6 +1814,7 @@ app.get("/", async (c) => {
         .sort((a, b) => b.valueSen - a.valueSen),
       finishedGoods: finishedGoods.sort((a, b) => (b.available + b.reserved) - (a.available + a.reserved)),
     },
+    service: serviceSec.rows[0] ?? null,
     employee: {
       workers: workerRows.map((w) => ({
         id: w.id,
@@ -1851,6 +1863,7 @@ app.get("/", async (c) => {
     purchase: canPurchase ? rawPayload.purchase : null,
     inventory: canInventory ? rawPayload.inventory : null,
     employee: canWorkers ? rawPayload.employee : null,
+    service: canService ? rawPayload.service : null,
     production: canProduction ? rawPayload.production : null,
     availability: {
       ...rawPayload.availability,
@@ -1866,6 +1879,9 @@ app.get("/", async (c) => {
       inventory: canInventory
         ? rawPayload.availability.inventory
         : { live: false, rows: 0, reason: "insufficient permission: inventory:read" },
+      service: canService
+        ? rawPayload.availability.service
+        : { live: false, reason: "insufficient permission: service-cases:read" },
       employee: canWorkers
         ? rawPayload.availability.employee
         : { live: false, workers: 0, attendanceRows: 0, reason: "insufficient permission: workers:read" },
