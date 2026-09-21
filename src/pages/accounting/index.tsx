@@ -115,7 +115,7 @@ function CompanySelect({
 
 // =============== TYPES ===============
 
-type TabKey = "overview" | "coa" | "journals" | "tb" | "gl" | "ar" | "ap" | "supplier-discount" | "debtorledger" | "creditorledger" | "odebtor" | "ocreditor" | "odebtorbills" | "odebtorpay" | "ocreditorbills" | "ocreditorpay" | "pl" | "trend" | "plmonthly" | "ceclass" | "coststruct" | "cashflow" | "bs" | "payments" | "receipts" | "transfer" | "dailycash" | "cashbook" | "assets" | "labor" | "stock" | "stockmap" | "openstock" | "stocktake" | "opening" | "audit" | "maint";
+type TabKey = "overview" | "coa" | "journals" | "tb" | "gl" | "ar" | "ap" | "supplier-discount" | "debtorledger" | "creditorledger" | "odebtor" | "ocreditor" | "odebtorbills" | "odebtorpay" | "ocreditorbills" | "ocreditorpay" | "apinvoices" | "pl" | "trend" | "plmonthly" | "ceclass" | "coststruct" | "cashflow" | "bs" | "payments" | "receipts" | "transfer" | "dailycash" | "cashbook" | "assets" | "labor" | "stock" | "stockmap" | "openstock" | "stocktake" | "opening" | "audit" | "maint";
 
 // =============== VOUCHER PRINTING (PV / OR / JV) ===============
 //
@@ -496,6 +496,7 @@ const TABS: { key: TabKey; label: string; icon: React.ReactNode; group: string }
   // Debtor / Creditor
   { key: "ar", label: "Debtor Aging", icon: <Users className="h-4 w-4" />, group: "Debtor / Creditor" },
   { key: "ap", label: "Creditor Aging", icon: <Building2 className="h-4 w-4" />, group: "Debtor / Creditor" },
+  { key: "apinvoices", label: "AP Invoices", icon: <BookOpen className="h-4 w-4" />, group: "Debtor / Creditor" },
   { key: "supplier-discount", label: "Supplier Discount", icon: <CreditCard className="h-4 w-4" />, group: "Debtor / Creditor" },
   { key: "odebtor", label: "Other Debtor", icon: <Users className="h-4 w-4" />, group: "Debtor / Creditor" },
   { key: "odebtorbills", label: "Other Debtor Bills", icon: <BookOpen className="h-4 w-4" />, group: "Debtor / Creditor" },
@@ -599,6 +600,7 @@ export default function AccountingPage() {
           {tab === "odebtorpay" && <OtherPartyPaymentsTab accounts={accounts} side="DEBTOR" />}
           {tab === "ocreditor" && <OtherPartiesTab side="CREDITOR" />}
           {tab === "ocreditorbills" && <OtherPartyBillsTab accounts={accounts} side="CREDITOR" />}
+          {tab === "apinvoices" && <ApInvoicesTab />}
           {tab === "ocreditorpay" && <OtherPartyPaymentsTab accounts={accounts} side="CREDITOR" />}
           {tab === "payments" && <PaymentsTab accounts={accounts} />}
           {tab === "receipts" && <ReceiptsTab accounts={accounts} />}
@@ -6152,6 +6154,113 @@ function scanNameMatch<T extends { id: string; name: string }>(
   // ranking rather than taking whichever happened to be first.
   if (contained.length === 1) return contained[0];
   return bestMatch(list, name)?.party ?? undefined;
+}
+
+// =============== TAB: AP INVOICES (Houzs adoption Phase 2, 2026-09-22) ===============
+//
+// One list of everything owed on paper: other-creditor bills (kind AP) beside
+// a READ-ONLY mirror of purchase invoices (kind PI). Owner ruling: 「只是多一份
+// 出来罢了…purchase invoice 那边要保留」— Procurement's PI page is untouched and
+// stays the only place to create/edit/post a PI; the PI rows here link back.
+type ApInvRow = {
+  kind: "AP" | "PI"; id: string; no: string; supplier: string; supplierRef: string; date: string; dueDate: string | null;
+  description: string; totalSen: number; paidSen: number; outstandingSen: number; status: "OPEN" | "PAID" | "CANCELLED"; opening: boolean;
+};
+function ApInvoicesTab() {
+  const [data, setData] = useState<{ rows: ApInvRow[]; totals: { openSen: number; openCount: number; apOpenSen: number; piOpenSen: number } } | null>(null);
+  const [kind, setKind] = useState<"ALL" | "AP" | "PI">("ALL");
+  const [status, setStatus] = useState<"OPEN" | "PAID" | "CANCELLED" | "ALL">("OPEN");
+  const [q, setQ] = useState("");
+  useEffect(() => {
+    let dead = false;
+    fetch(`/api/accounting/ap-invoices${status === "ALL" ? "" : `?status=${status}`}`)
+      .then((r) => r.json() as Promise<{ success?: boolean; data?: typeof data }>)
+      .then((j) => { if (!dead && j?.success && j.data) setData(j.data); })
+      .catch(() => {});
+    return () => { dead = true; };
+  }, [status]);
+  const rows = (data?.rows ?? []).filter((r) => {
+    if (kind !== "ALL" && r.kind !== kind) return false;
+    if (q.trim()) { const kw = q.toLowerCase(); if (![r.no, r.supplier, r.supplierRef, r.description].some((s) => s.toLowerCase().includes(kw))) return false; }
+    return true;
+  });
+  const shownSen = rows.reduce((s, r) => s + r.outstandingSen, 0);
+  const chip = (r: ApInvRow) =>
+    r.status === "PAID" ? "bg-[#EAF3DE] text-[#27500A]" : r.status === "CANCELLED" ? "bg-[#F0ECE9] text-[#9CA3AF]" : "bg-[#FBF3E4] text-[#7A5B12]";
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-between items-start flex-wrap gap-2">
+        <div>
+          <h2 className="text-lg font-semibold text-[#1F1D1B]">AP Invoices</h2>
+          <p className="text-[11px] text-[#9CA3AF]">Everything owed on paper in one list. <b>AP</b> = other-creditor bills (raise / edit them on Other Creditor Bills); <b>PI</b> = purchase invoices, read-only mirror — Procurement's page is where they are created and posted.</p>
+        </div>
+        <div className="flex gap-2">
+          <Link to="/accounting?tab=ocreditorbills"><Button variant="outline" size="sm">New AP bill</Button></Link>
+          <Link to="/accounting?tab=payments"><Button variant="primary" size="sm">Pay (Payment Vouchers)</Button></Link>
+        </div>
+      </div>
+      {data && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <Card><CardContent className="p-3"><div className="text-[11px] text-[#6B7280]">Open · all</div><div className="text-lg font-semibold tabular-nums">{formatCurrency(data.totals.openSen)}</div><div className="text-[11px] text-[#9CA3AF]">{data.totals.openCount} invoice{data.totals.openCount === 1 ? "" : "s"}</div></CardContent></Card>
+          <Card><CardContent className="p-3"><div className="text-[11px] text-[#6B7280]">Open · AP bills</div><div className="text-lg font-semibold tabular-nums">{formatCurrency(data.totals.apOpenSen)}</div></CardContent></Card>
+          <Card><CardContent className="p-3"><div className="text-[11px] text-[#6B7280]">Open · purchase invoices</div><div className="text-lg font-semibold tabular-nums">{formatCurrency(data.totals.piOpenSen)}</div></CardContent></Card>
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-2">
+        <input type="text" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search no / supplier / ref" className="rounded-md border border-[#E2DDD8] px-3 py-1.5 text-sm w-64" />
+        <select value={kind} onChange={(e) => setKind(e.target.value as typeof kind)} className="rounded-md border border-[#E2DDD8] px-2 py-1.5 text-sm">
+          <option value="ALL">AP + PI</option><option value="AP">AP bills only</option><option value="PI">Purchase invoices only</option>
+        </select>
+        <select value={status} onChange={(e) => setStatus(e.target.value as typeof status)} className="rounded-md border border-[#E2DDD8] px-2 py-1.5 text-sm">
+          <option value="OPEN">Open</option><option value="PAID">Paid</option><option value="CANCELLED">Cancelled</option><option value="ALL">All</option>
+        </select>
+        <span className="ml-auto text-xs text-[#6B7280]">Shown outstanding <span className="font-semibold tabular-nums text-[#1F1D1B]">{formatCurrency(shownSen)}</span></span>
+      </div>
+      <Card>
+        <CardContent className="p-0 overflow-x-auto">
+          {data === null ? (
+            <div className="py-12 text-center text-[#6B7280] text-sm">Loading…</div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-[#E2DDD8] text-xs text-[#6B7280]">
+                  <th className="px-3 py-2 text-left">Kind</th>
+                  <th className="px-3 py-2 text-left">No.</th>
+                  <th className="px-3 py-2 text-left">Supplier</th>
+                  <th className="px-3 py-2 text-left">Supplier ref</th>
+                  <th className="px-3 py-2 text-left">Date</th>
+                  <th className="px-3 py-2 text-left">Due</th>
+                  <th className="px-3 py-2 text-right">Total</th>
+                  <th className="px-3 py-2 text-right">Paid</th>
+                  <th className="px-3 py-2 text-right">Outstanding</th>
+                  <th className="px-3 py-2 text-left">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={`${r.kind}-${r.id}`} className={`border-b border-[#F0ECE9] hover:bg-[#FAF8F5] ${r.status === "CANCELLED" ? "opacity-50" : ""}`}>
+                    <td className="px-3 py-1.5"><span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${r.kind === "PI" ? "bg-[#EEF2FB] text-[#2C4170]" : "bg-[#F6F1E7] text-[#6B5C32]"}`}>{r.kind}</span>{r.opening && <span className="ml-1 text-[10px] text-[#9CA3AF]">opening</span>}</td>
+                    <td className="px-3 py-1.5 tabular-nums text-xs whitespace-nowrap">
+                      {r.kind === "PI" ? <Link to="/procurement/pi" className="underline decoration-dotted text-[#6B5C32]" title="Open on Procurement › Purchase Invoices">{r.no}</Link> : <Link to="/accounting?tab=ocreditorbills" className="underline decoration-dotted text-[#6B5C32]">{r.no}</Link>}
+                    </td>
+                    <td className="px-3 py-1.5">{r.supplier}</td>
+                    <td className="px-3 py-1.5 text-xs text-[#6B7280]">{r.supplierRef}</td>
+                    <td className="px-3 py-1.5 text-xs text-[#6B7280] whitespace-nowrap">{r.date}</td>
+                    <td className="px-3 py-1.5 text-xs text-[#6B7280] whitespace-nowrap">{r.dueDate ?? "—"}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(r.totalSen)}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums text-[#6B7280]">{r.paidSen ? formatCurrency(r.paidSen) : "—"}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums font-medium">{r.outstandingSen ? formatCurrency(r.outstandingSen) : "—"}</td>
+                    <td className="px-3 py-1.5"><span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${chip(r)}`}>{r.status}</span></td>
+                  </tr>
+                ))}
+                {rows.length === 0 && <tr><td colSpan={10} className="px-3 py-8 text-center text-sm text-[#9CA3AF]">Nothing matches</td></tr>}
+              </tbody>
+            </table>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
 }
 
 function OtherPartyBillsTab({ accounts, side }: { accounts: ChartOfAccount[]; side: "DEBTOR" | "CREDITOR" }) {

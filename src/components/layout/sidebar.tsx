@@ -249,6 +249,7 @@ const navigationGroups: NavGroup[] = [
       {
         name: "Creditor / Other Creditor", href: "/accounting?tab=ap", icon: Building2, children: [
           { name: "Creditor Aging", href: "/accounting?tab=ap", icon: Building2 },
+          { name: "AP Invoices", href: "/accounting?tab=apinvoices", icon: BookOpen },
           { name: "Supplier Discount", href: "/accounting?tab=supplier-discount", icon: CreditCard },
           { name: "Other Creditor", href: "/accounting?tab=ocreditor", icon: Building2 },
           { name: "Other Creditor Bills", href: "/accounting?tab=ocreditorbills", icon: BookOpen },

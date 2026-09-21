@@ -27,7 +27,7 @@ POST /:id/approval + /approval-batch(prepare/withdraw/reject(要 reason)/check(�
 四态芯片+reject 理由显示、Pending approval 过滤、勾选批量 Prepare/Check/Approve 琥珀条;
 **Cash Position 板新增「AWAITING APPROVAL」卡**(/cash-position 回 awaitingApproval[] +
 awaitingCheckedSen;Checked=硬承诺金额、Draft/Prepared 软显示)= owner 09-03 说的「老板还没
-approve」正式落地。Repo 已迁 hookkadev 组织(remote+gh default 已更新)。
+approve」正式落地。Repo 已迁 hookkadev 组织(remote+gh default 已更新)。**Phase 2 ✅(同 PR)**:新 GET /ap-invoices(OCB CREDITOR 全量 kind=AP + purchase_invoices 非 DRAFT 只读镜像 kind=PI,状态归一 OPEN/PAID/CANCELLED,totals 分 AP/PI)+ 新 tab「AP Invoices」(Debtor / Creditor 组,侧栏同名):三张合计卡、Kind/Status/搜索过滤、PI 行链回 /procurement/pi、AP 行链回 OCB tab、New AP bill / Pay 两按钮直通。**Procurement PI 页零改动**(owner「本身purchase invoice 那边要保留」)。
 
 背景:Houzs(trading)ERP 的 Claude 写了 `Houzs-Finance-Module-User-Guide.md` +
 `Houzs-Trading-Finance-Module-Spec.md`(在 Desktop\Claude\Hookka\,不在 repo),指定用途=

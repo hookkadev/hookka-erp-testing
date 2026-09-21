@@ -4367,6 +4367,72 @@ app.get("/other-party-bills", async (c) => {
   return c.json({ success: true, data, total: data.length });
 });
 
+// AP Invoices — ONE list of everything the company owes on paper (owner
+// 2026-09-22, Houzs adoption Phase 2): other-creditor bills (kind AP, editable
+// on their own tab) beside a READ-ONLY mirror of purchase invoices (kind PI —
+// Procurement's page stays the place to create/edit/post them). Nothing here
+// writes; the mirror is a view, the PI row links back to its origin.
+app.get("/ap-invoices", async (c) => {
+  const denied = await requirePermission(c, "accounting", "read");
+  if (denied) return denied;
+  const orgId = getOrgId(c);
+  const status = c.req.query("status") || ""; // "", "OPEN", "PAID", "CANCELLED"
+  const [ocbRes, piRes] = await Promise.all([
+    c.var.DB.prepare(
+      `SELECT b.id, b.billNo, b.partyName, b.billDate, b.referenceNo, b.description, b.totalSen, b.paidAmountSen, b.status,
+              dl.state AS lifecycleState
+         FROM other_party_bills b
+         LEFT JOIN document_lifecycle dl ON dl.orgId = b.orgId AND dl.sourceType = 'other_party_bill' AND dl.sourceId = b.billNo
+        WHERE b.orgId = ? AND b.partyType = 'CREDITOR' AND (dl.state IS NULL OR dl.state <> 'DELETED')`,
+    ).bind(orgId).all<Record<string, unknown>>(),
+    c.var.DB.prepare(
+      `SELECT id, pi_no, supplier_name, supplier_invoice_no, invoice_date, due_date, amount_sen, paid_amount_sen, status, is_opening
+         FROM purchase_invoices
+        WHERE status <> 'DRAFT'`,
+    ).all<Record<string, unknown>>().catch(() => ({ results: [] as Record<string, unknown>[] })),
+  ]);
+  type ApRow = {
+    kind: "AP" | "PI"; id: string; no: string; supplier: string; supplierRef: string; date: string; dueDate: string | null;
+    description: string; totalSen: number; paidSen: number; outstandingSen: number; status: string; opening: boolean;
+  };
+  const rows: ApRow[] = [];
+  for (const b of ocbRes.results ?? []) {
+    const total = Math.round(Number(b.totalSen ?? b.total_sen) || 0);
+    const paid = Math.round(Number(b.paidAmountSen ?? b.paid_amount_sen) || 0);
+    const lc = String(b.lifecycleState ?? b.lifecycle_state ?? "ACTIVE");
+    const st = String(b.status ?? "");
+    rows.push({
+      kind: "AP", id: String(b.id), no: String(b.billNo ?? b.bill_no ?? ""), supplier: String(b.partyName ?? b.party_name ?? ""),
+      supplierRef: String(b.referenceNo ?? b.reference_no ?? ""), date: String(b.billDate ?? b.bill_date ?? "").slice(0, 10), dueDate: null,
+      description: String(b.description ?? ""), totalSen: total, paidSen: paid, outstandingSen: total - paid,
+      status: lc !== "ACTIVE" ? "CANCELLED" : st === "CANCELLED" || st === "VOID" ? "CANCELLED" : total - paid <= 0 ? "PAID" : "OPEN",
+      opening: false,
+    });
+  }
+  for (const p of piRes.results ?? []) {
+    const total = Math.round(Number(p.amountSen ?? p.amount_sen) || 0);
+    const paid = Math.round(Number(p.paidAmountSen ?? p.paid_amount_sen) || 0);
+    const st = String(p.status ?? "");
+    rows.push({
+      kind: "PI", id: String(p.id), no: String(p.piNo ?? p.pi_no ?? ""), supplier: String(p.supplierName ?? p.supplier_name ?? ""),
+      supplierRef: String(p.supplierInvoiceNo ?? p.supplier_invoice_no ?? ""), date: String(p.invoiceDate ?? p.invoice_date ?? "").slice(0, 10),
+      dueDate: (p.dueDate ?? p.due_date) ? String(p.dueDate ?? p.due_date).slice(0, 10) : null,
+      description: "", totalSen: total, paidSen: paid, outstandingSen: total - paid,
+      status: st === "CANCELLED" || st === "VOID" ? "CANCELLED" : st === "PAID" || total - paid <= 0 ? "PAID" : "OPEN",
+      opening: !!Number(p.isOpening ?? p.is_opening ?? 0),
+    });
+  }
+  const filtered = status ? rows.filter((r) => r.status === status) : rows;
+  filtered.sort((a, b) => b.date.localeCompare(a.date) || b.no.localeCompare(a.no));
+  const totals = {
+    openSen: rows.filter((r) => r.status === "OPEN").reduce((s, r) => s + r.outstandingSen, 0),
+    openCount: rows.filter((r) => r.status === "OPEN").length,
+    apOpenSen: rows.filter((r) => r.status === "OPEN" && r.kind === "AP").reduce((s, r) => s + r.outstandingSen, 0),
+    piOpenSen: rows.filter((r) => r.status === "OPEN" && r.kind === "PI").reduce((s, r) => s + r.outstandingSen, 0),
+  };
+  return c.json({ success: true, data: { rows: filtered, totals } });
+});
+
 app.delete("/other-party-bills/:billNo", async (c) => {
   const denied = await requirePermission(c, "accounting", "delete");
   if (denied) return denied;
