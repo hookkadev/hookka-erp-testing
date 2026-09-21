@@ -605,6 +605,7 @@ authoritative current detail.** New here? Start with [ONBOARDING-PATH.md](ONBOAR
 
 **Gotchas**
 - products.ts returns DENORMALIZED nested arrays: bomComponents + deptWorkingTimes JOINed from child tables, JSON columns subAssemblies/pieces/seatHeightPrices parsed back to objects on read — keep read+write shape symmetric.
+- Products Batch Import (`POST /api/products/bulk-import`) also writes `bom_components`: the 9 material-usage columns (Pin, Screw, Leg, Non-Woven…) are listed ONCE in `PRODUCT_BULK_MATERIALS` (`src/api/lib/product-bulk-import.ts`); each non-blank cell replaces that product's component by `materialName` (0 removes, blank keeps). `BatchImportDialog` matches headers by label OR key, case/space-insensitive. (verified 2026-09-21)
 - customer_products price-override semantics: NULL in basePriceSen/price1Sen/seatHeightPrices means INHERIT global product price; a non-null value WINS. Don't write 0 when you mean 'inherit'.
 - maintenance-config.ts is APPEND-ONLY effective-dated: edits create NEW rows, resolver picks newest WHERE effective_from <= today. Never UPDATE-in-place; same pattern in MasterPriceHistoryDialog.
 - Catalog/Modular tiles are AUTO-DERIVED from each distinct baseModel in Products (no dedicated table); photos go through `/api/files` resourceType=modular, not a products column. baseProductCode splits on first dash.

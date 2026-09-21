@@ -244,11 +244,16 @@ export const BatchImportDialog: React.FC<BatchImportDialogProps> = ({
 
       // Map Excel headers ("Product Code *") back to field keys ("code").
       // Users may remove the "*" from required headers, so we match by
-      // prefix after stripping the marker.
+      // prefix after stripping the marker. Case and whitespace are ignored
+      // ("Bracket Usage (Pcs )"), and the raw field key ("fabricUsage") is
+      // accepted too, so a sheet exported with key headers still imports.
+      const normHeader = (h: string) => h.toLowerCase().replace(/\s+/g, "").replace(/\*$/, "");
       const headerToKey = new Map<string, string>();
       for (const col of columns) {
-        headerToKey.set(col.label.toLowerCase(), col.key);
-        headerToKey.set(`${col.label} *`.toLowerCase(), col.key);
+        headerToKey.set(normHeader(col.key), col.key);
+      }
+      for (const col of columns) {
+        headerToKey.set(normHeader(col.label), col.key);
       }
 
       const byKey = new Map<string, ImportRow>();
@@ -272,7 +277,7 @@ export const BatchImportDialog: React.FC<BatchImportDialogProps> = ({
         // Remap row keys from "Label *" to "key"
         const remapped: Record<string, unknown> = {};
         for (const [header, v] of Object.entries(row)) {
-          const k = headerToKey.get(header.trim().toLowerCase());
+          const k = headerToKey.get(normHeader(header));
           if (k) remapped[k] = v;
         }
 
