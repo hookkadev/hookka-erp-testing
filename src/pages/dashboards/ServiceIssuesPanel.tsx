@@ -7,7 +7,7 @@ import {
   type IssueCase, type TallyRow,
 } from "../../api/lib/service-issue-stats";
 
-// "Top issues" sub-tab of the Service (Zamri) tab: which root cause / unit /
+// "Top issues" sub-tab of the Service tab: which root cause / unit /
 // product is most common. Cases arrive already filtered to the period picker.
 // Definitions live in api/lib/service-issue-stats.ts (shared with the tests).
 // Every field is optional on old cached feeds — a case without them is simply

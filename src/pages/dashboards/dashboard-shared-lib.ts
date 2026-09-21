@@ -184,30 +184,26 @@ export function inFocus(p: Period, date: string | null | undefined): boolean {
 
 // Sub-tab strips live in the page's sticky row (next to the period picker), so
 // the keys are shared between the shell and the views.
-export const EMP_SUBS = [
+// Tabs and sub-tabs are named after the FUNCTION, never the person who reads
+// them: a chart has one home, and whoever holds the role opens that home.
+export const PEOPLE_SUBS = [
   { key: "overview", label: "Overview" },
   { key: "time", label: "Time & attendance" },
   { key: "efficiency", label: "Efficiency" },
+  { key: "departments", label: "Departments" },
 ] as const;
-export const SITI_SUBS = [
+export const OPS_SUBS = [
   { key: "overview", label: "Overview" },
-  { key: "production", label: "Production" },
-  { key: "cost", label: "Cost" },
+  { key: "production", label: "Output" },
+  { key: "plan", label: "Plan vs Actual" },
+  { key: "cost", label: "Revenue & Cost" },
   { key: "materials", label: "Materials" },
 ] as const;
-export const LIM_SUBS = [
-  { key: "efficiency", label: "Efficiency" },
-  { key: "plan", label: "Plan vs Actual" },
-  { key: "attendance", label: "Attendance" },
-  { key: "revenue", label: "Production revenue" },
-  { key: "overdue", label: "Overdue" },
-  { key: "service", label: "Service" },
-] as const;
-export type LimSub = (typeof LIM_SUBS)[number]["key"];
-export type EmpSub = (typeof EMP_SUBS)[number]["key"];
-export type SitiSub = (typeof SITI_SUBS)[number]["key"];
+export type PeopleSub = (typeof PEOPLE_SUBS)[number]["key"];
+export type OpsSub = (typeof OPS_SUBS)[number]["key"];
 export const SERVICE_SUBS = [
   { key: "overview", label: "Report" },
+  { key: "performance", label: "Performance" },
   { key: "overdue", label: "Overdue" },
   { key: "approvals", label: "Approvals" },
   { key: "issues", label: "Top issues" },

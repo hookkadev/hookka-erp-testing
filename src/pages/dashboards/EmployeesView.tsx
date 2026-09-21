@@ -4,10 +4,11 @@ import { useCachedJson } from "@/lib/cached-fetch";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { TimeAttendancePanels, EfficiencyPanels, type EmployeeSlice } from "./EmployeesInsights";
+import { DeptEfficiencyCard } from "./ProductionDailyPanels";
 import { AttendanceLogCard } from "./AttendanceLogCard";
 import { filterSlice } from "./employee-filter";
 import { Users, Target, Clock, Gauge } from "lucide-react";
-import { TAUPE, TEAL, MUTED, BORDER, fmtN, inPeriod, type Period, type EmpSub } from "./dashboard-shared-lib";
+import { TAUPE, TEAL, MUTED, BORDER, fmtN, inPeriod, type Period, type PeopleSub } from "./dashboard-shared-lib";
 import { Kpi, LiveBadge, MissingNote } from "./dashboard-shared";
 
 // Real data from GET /api/dashboard/prototype — the `employee` +
@@ -36,7 +37,7 @@ type Feed = {
 
 export function EmployeesView({
   period, sub, onPeriodChange,
-}: { period: Period; sub: EmpSub; onPeriodChange: (p: Period) => void }) {
+}: { period: Period; sub: Exclude<PeopleSub, "departments">; onPeriodChange: (p: Period) => void }) {
   const { data, loading, error } = useCachedJson<Feed>("/api/dashboard/prototype");
 
   const employee = data?.employee;
@@ -97,7 +98,7 @@ export function EmployeesView({
     return (
       <Card className="border-[#F0D9AE] bg-[#FDF3E4]">
         <CardContent className="p-4 text-sm text-[#B5701A]">
-          Couldn't load Employees: {error ?? "unknown error"}
+          Couldn't load People: {error ?? "unknown error"}
         </CardContent>
       </Card>
     );
@@ -138,7 +139,7 @@ export function EmployeesView({
   return (
     <div className="space-y-6 max-md:space-y-4">
       <div className="flex flex-wrap items-center gap-2">
-        <h2 className="text-lg font-semibold text-[#1F1D1B]">Employees</h2>
+        <h2 className="text-lg font-semibold text-[#1F1D1B]">People</h2>
         <LiveBadge live={live} />
       </div>
       <MissingNote fields={missing} />
@@ -276,6 +277,7 @@ export function EmployeesView({
       {sub === "efficiency" && employee && filtered && (
         <>
           {filterBar}
+          <DeptEfficiencyCard employee={filtered} period={period} target={config?.efficiencyTargetPct ?? 100} />
           <EfficiencyPanels employee={filtered} period={period} onPeriodChange={onPeriodChange} onPickEmployee={(id) => setEmp(id)} target={config?.efficiencyTargetPct ?? 100} />
         </>
       )}

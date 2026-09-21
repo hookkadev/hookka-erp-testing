@@ -13,12 +13,12 @@ import {
   type IssueCase,
 } from "../../api/lib/service-issue-stats";
 
-// "Service" sub-tab of Lim's daily tab. Reads the `service` slice of the shared
+// Service > Performance sub-tab. Reads the `service` slice of the shared
 // dashboard feed (api/lib/dashboard-service-slice.ts); maths lives in
 // api/lib/service-issue-stats.ts (avgClose, closeTrend, openedVsClosed,
 // agingSplit, preventionNotDone) and is unit-tested there.
 // Every new field is optional so a feed cached before it shipped still renders.
-export type LimServiceCase = IssueCase & {
+export type ServicePerformanceCase = IssueCase & {
   id: string;
   caseNo: string | null;
   customer: string | null;
@@ -27,7 +27,7 @@ export type LimServiceCase = IssueCase & {
   preventionOwner?: string | null;
   preventionAction?: string;
 };
-export type LimServiceSlice = { overdueAfterDays: number; cases: LimServiceCase[] };
+export type ServicePerformanceSlice = { overdueAfterDays: number; cases: ServicePerformanceCase[] };
 
 const TOOLTIP = { background: "#FFFFFF", border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: 12 };
 const CHART_WRAP = "select-none [&_*]:outline-none [&_.recharts-wrapper]:outline-none";
@@ -40,9 +40,9 @@ function delta(cur: number | null, prev: number | null, lowerIsBetter: boolean) 
   return { text: `${d > 0 ? "+" : ""}${d} d vs previous period (${prev} d)`, good: d === 0 ? null : (d < 0) === lowerIsBetter };
 }
 
-export function LimServicePanel({
+export function ServicePerformancePanel({
   slice, period, onPeriodChange,
-}: { slice: LimServiceSlice | null | undefined; period: Period; onPeriodChange: (p: Period) => void }) {
+}: { slice: ServicePerformanceSlice | null | undefined; period: Period; onPeriodChange: (p: Period) => void }) {
   const cases = useMemo(() => slice?.cases ?? [], [slice]);
   const threshold = slice?.overdueAfterDays ?? 0;
   const ytd = period.mode === "ytd";

@@ -31,9 +31,12 @@ import { overviewTotals, overviewSalesSnapshot, overviewWorkforce } from "./dash
 // its "Whole book, not a window" comment). Monthly reads one month; YTD reads
 // every month of the selected month's year up to and including it.
 //
-// Only the Sales card links onward on this branch: the other four domain tabs
-// are not mounted here, so their cards show their figures without a dead
-// "Open" button rather than routing somewhere that does not exist.
+// A domain card links onward only when its tab is mounted (Sales, Operations,
+// People); the others show their figures without a dead "Open" button.
+//
+// "Needs action" is the reviewer's entry point — there is no per-person tab.
+// Each tile is a count plus a link to the sub-tab that owns the list; the
+// approval queue itself lives once, in Service > Approvals.
 //
 // HONESTY RULE followed here: a figure whose source has no date column is NOT
 // relabelled as if it were period-scoped. Top state / dominant category come
@@ -58,6 +61,8 @@ type Feed = {
   };
   delivery?: { statusBreakdown?: { key: string; label: string; count: number; valueSen: number }[] };
   production?: {
+    overdueByDept?: { department: string; count: number }[];
+    dueSoon3Days?: unknown[];
     totals?: { active: number; critical: number; atRisk: number; backlogCards: number };
     bottleneck?: { dept: string | null; cards: number; orders: number };
   };
@@ -66,7 +71,28 @@ type Feed = {
     attendance?: { employeeName: string | null; date: string | null; status: string | null; efficiencyPct: number | null }[];
   };
   purchase?: { totals?: { active: number; all: number } };
+  // Absent without service-cases:read, or on a feed cached before it shipped.
+  service?: { cases: { approvalStatus: string | null; daysOverdue: number }[] } | null;
 };
+
+function ActionTile({ label, value, hint, onOpen }: { label: string; value: number | null; hint: string; onOpen: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="text-left rounded-lg border border-[#E2DDD8] bg-white shadow-sm p-4 max-md:p-3 min-h-11 hover:bg-[#F7F5F3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#6B5C32]"
+    >
+      <p className="text-2xl max-md:text-xl font-bold tabular-nums" style={{ color: value ? RED : value === 0 ? GREEN : MUTED }}>
+        {value == null ? "—" : fmtN(value)}
+      </p>
+      <p className="text-xs font-medium text-[#1F1D1B] flex items-center gap-1">
+        {label}
+        <ArrowRight className="h-3 w-3 shrink-0" />
+      </p>
+      <p className="text-xs" style={{ color: MUTED }}>{hint}</p>
+    </button>
+  );
+}
 
 function Delta({ pct, vs }: { pct: number | null; vs: string }) {
   if (pct === null) {
@@ -167,7 +193,7 @@ export function AllOverviewView({
 }: {
   period: Period;
   months: string[];
-  onOpenTab: (tab: string) => void;
+  onOpenTab: (tab: string, sub: string | undefined) => void;
 }) {
   const { data, loading, error } = useCachedJson<Feed>("/api/dashboard/prototype");
 
@@ -243,11 +269,13 @@ export function AllOverviewView({
     /outstand|pending|open/i.test(s.key + s.label),
   );
   const periodName = periodLabel(period);
+  const svc = data.service?.cases;
+  const overdueByDept = data.production?.overdueByDept;
 
   return (
     <div className="space-y-6 max-md:space-y-4">
       <div className="flex flex-wrap items-center gap-2">
-        <h2 className="text-lg font-semibold text-[#1F1D1B]">All Overview</h2>
+        <h2 className="text-lg font-semibold text-[#1F1D1B]">Overview</h2>
         <LiveBadge live={!!data.availability?.sales?.live} />
       </div>
 
@@ -279,6 +307,36 @@ export function AllOverviewView({
           </p>
         </Hero>
       </div>
+
+      <section aria-label="Needs action" className="space-y-2">
+        <h3 className="text-sm font-semibold text-[#1F1D1B]">Needs action</h3>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 max-md:gap-3">
+          <ActionTile
+            label="Pending approvals"
+            value={svc ? svc.filter((c) => c.approvalStatus === "PENDING").length : null}
+            hint={svc ? "service cases and 1-to-1 exchanges" : "no service access"}
+            onOpen={() => onOpenTab("service", "approvals")}
+          />
+          <ActionTile
+            label="Service cases overdue"
+            value={svc ? svc.filter((c) => c.daysOverdue > 0).length : null}
+            hint={svc ? "open past the service deadline" : "no service access"}
+            onOpen={() => onOpenTab("service", "overdue")}
+          />
+          <ActionTile
+            label="Production orders overdue"
+            value={overdueByDept ? overdueByDept.reduce((a, d) => a + d.count, 0) : null}
+            hint={overdueByDept ? "open, past customer date" : "no production feed"}
+            onOpen={() => onOpenTab("operations", undefined)}
+          />
+          <ActionTile
+            label="Due within 3 days"
+            value={data.production?.dueSoon3Days?.length ?? null}
+            hint="production early warning"
+            onOpen={() => onOpenTab("operations", undefined)}
+          />
+        </div>
+      </section>
 
       {/* Whole-book reconciliation — the panel to compare against the house
           Sales page. Ignores the period picker on purpose. */}
@@ -374,8 +432,8 @@ export function AllOverviewView({
             { label: "Top state (all time)", value: sales.topState },
             { label: "Dominant category (all time)", value: sales.topCategory },
           ]}
-          cta="Open Sales Orders"
-          onOpen={() => onOpenTab("sales")}
+          cta="Open Sales"
+          onOpen={() => onOpenTab("sales", undefined)}
         />
 
         <DomainCard
@@ -387,6 +445,8 @@ export function AllOverviewView({
             { label: "Backlog cards", value: prod ? fmtN(prod.backlogCards) : "—" },
             { label: "Critical", value: prod ? fmtN(prod.critical) : "—" },
           ]}
+          cta="Open Operations"
+          onOpen={() => onOpenTab("operations", undefined)}
         />
 
         <DomainCard
@@ -411,6 +471,8 @@ export function AllOverviewView({
           ]}
           note={workforce.avg == null ? "No efficiency recorded in this period — not shown as 0%." : undefined}
           noteTone={AMBER}
+          cta="Open People"
+          onOpen={() => onOpenTab("people", "efficiency")}
         />
 
         <DomainCard

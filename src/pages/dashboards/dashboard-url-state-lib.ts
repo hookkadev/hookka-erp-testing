@@ -1,5 +1,5 @@
 import {
-  EMP_SUBS, SITI_SUBS, SERVICE_SUBS, LIM_SUBS, FIN_SUBS,
+  PEOPLE_SUBS, OPS_SUBS, SERVICE_SUBS, FIN_SUBS,
   type Period,
 } from "./dashboard-shared-lib";
 
@@ -24,11 +24,25 @@ import {
  * no sub-tabs are simply absent.
  */
 export const TAB_SUBS: Record<string, readonly { key: string; label: string }[]> = {
-  employee: EMP_SUBS,
-  siti: SITI_SUBS,
+  operations: OPS_SUBS,
+  people: PEOPLE_SUBS,
   service: SERVICE_SUBS,
-  lim: LIM_SUBS,
   finance: FIN_SUBS,
+};
+
+// Links saved while tabs were named after staff (and Employees / Departments
+// were separate tabs) still open the chart they pointed at. Keyed "tab:sub",
+// then "tab"; a missing sub in the value keeps the sub from the URL.
+const LEGACY: Record<string, [tab: string, sub?: string]> = {
+  siti: ["operations"],
+  employee: ["people"],
+  department: ["people", "departments"],
+  lim: ["people", "efficiency"],
+  "lim:plan": ["operations", "plan"],
+  "lim:revenue": ["operations", "cost"],
+  "lim:overdue": ["operations", "overview"],
+  "lim:attendance": ["people", "time"],
+  "lim:service": ["service", "performance"],
 };
 
 export const DEFAULT_TAB = "overview";
@@ -45,9 +59,10 @@ export const defaultSub = (tab: string): string => TAB_SUBS[tab]?.[0]?.key ?? ""
 export type DashboardUrlState = { tab: string; sub: string; period: Period };
 
 export function parseDashboardUrl(params: URLSearchParams, tabKeys: readonly string[]): DashboardUrlState {
-  const t = params.get("tab");
+  const legacy = LEGACY[`${params.get("tab")}:${params.get("sub")}`] ?? LEGACY[params.get("tab") ?? ""];
+  const t = legacy?.[0] ?? params.get("tab");
   const tab = t && tabKeys.includes(t) ? t : DEFAULT_TAB;
-  const s = params.get("sub");
+  const s = legacy?.[1] ?? params.get("sub");
   const sub = s && TAB_SUBS[tab]?.some((x) => x.key === s) ? s : defaultSub(tab);
 
   const m = params.get("month");

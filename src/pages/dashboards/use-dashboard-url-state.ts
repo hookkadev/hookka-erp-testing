@@ -25,7 +25,7 @@ export function useDashboardUrlState<T extends string>(tabKeys: readonly T[]) {
     [setParams, tabKeys],
   );
 
-  const setTab = useCallback((tab: T) => write(() => ({ tab, sub: defaultSub(tab) }), false), [write]);
+  const setTab = useCallback((tab: T, sub?: string) => write(() => ({ tab, sub: sub ?? defaultSub(tab) }), false), [write]);
   const setSub = useCallback((sub: string) => write(() => ({ sub }), false), [write]);
   const setPeriod = useCallback((period: Period) => write(() => ({ period }), true), [write]);
 

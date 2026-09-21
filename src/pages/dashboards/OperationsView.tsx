@@ -7,14 +7,15 @@ import { useCachedJson } from "@/lib/cached-fetch";
 import { formatCurrency } from "@/lib/utils";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { AlertTriangle, Clock, CalendarClock, PackageX, DollarSign, UserCheck, Gauge } from "lucide-react";
-import { TAUPE, TEAL, AMBER, MUTED, BORDER, fmtN, fmtRMAxis, inPeriod, inFocus, dayLabel, periodLabel, type Period, type SitiSub } from "./dashboard-shared-lib";
+import { TAUPE, TEAL, AMBER, MUTED, BORDER, fmtN, fmtRMAxis, inPeriod, inFocus, dayLabel, periodLabel, type Period, type OpsSub } from "./dashboard-shared-lib";
 import { Kpi, LiveBadge } from "./dashboard-shared";
 import { AttendanceLogCard } from "./AttendanceLogCard";
 import { OverdueByDeptCard, DueSoonWorklist, type ProdOrderSummary } from "./OverdueCards";
 import type { EmployeeSlice } from "./EmployeesInsights";
+import { ProductionDailyPanels } from "./ProductionDailyPanels";
 
-// Siti's report checklist (handed over on paper, 2026-09-17), redesigned
-// 2026-09-18 for density: a single KPI strip, a 2-column chart split
+// Operations tab: the shop-floor report checklist (handed over on paper,
+// 2026-09-17), redesigned 2026-09-18 for density: a single KPI strip, a 2-column chart split
 // (overdue-by-dept / daily output), and a full-width filterable worklist for
 // the due-soon early-warning list — instead of stacked, mostly-empty cards.
 // Everything still reads the SAME cached GET /api/dashboard/prototype feed
@@ -66,9 +67,9 @@ function bucket<T extends { date: string }>(rows: T[], p: Period, add: (a: T, b:
   return [...m.values()];
 }
 
-export function SitiOpsView({
+export function OperationsView({
   period, sub, onPeriodChange,
-}: { period: Period; sub: SitiSub; onPeriodChange: (p: Period) => void }) {
+}: { period: Period; sub: OpsSub; onPeriodChange: (p: Period) => void }) {
   const { data, loading, error } = useCachedJson<Feed>("/api/dashboard/prototype");
 
   const production = data?.production;
@@ -177,7 +178,7 @@ export function SitiOpsView({
   return (
     <div className="space-y-5 max-md:space-y-4">
       <div className="flex flex-wrap items-center gap-2">
-        <h2 className="text-lg font-semibold text-[#1F1D1B]">Operations (Siti's list)</h2>
+        <h2 className="text-lg font-semibold text-[#1F1D1B]">Operations</h2>
         <LiveBadge live={prodLive && invLive} />
         {period.day && (
           <button
@@ -337,9 +338,15 @@ export function SitiOpsView({
                 </CardContent>
               </Card>
 
+        </>
+      )}
+
+      {sub === "plan" && (
+        <>
+          <ProductionDailyPanels period={period} sub="plan" onPeriodChange={onPeriodChange} />
               <Card>
                 <CardHeader className="pb-3">
-                  <CardTitle>On-Time Completion (Plan vs Actual detail)</CardTitle>
+                  <CardTitle>On-time completion · by order</CardTitle>
                 </CardHeader>
                 <CardContent className="p-0">
                   <div className="overflow-x-auto" style={{ maxHeight: 300, overflowY: "auto" }}>
@@ -380,6 +387,7 @@ export function SitiOpsView({
 
       {sub === "cost" && (
         <>
+          <ProductionDailyPanels period={period} sub="revenue" onPeriodChange={onPeriodChange} />
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle>Production Cost trend · {periodLabel(period)}</CardTitle>

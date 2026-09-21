@@ -14,6 +14,17 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
+## 2026-09-21 — 🔵 Dashboard: tabs named by function, not by staff member
+
+Branch `feat/dashboard-prototype-siti-ops-tab`. Asks: (1) no staff names in the dashboard
+navigation — `Operations (Siti)` / `Service (Zamri)` / `Daily (Lim)` become functional tabs with
+sub-tabs; (2) the reviewer's daily set is dissolved into the tab that owns each chart, approvals
+stay in ONE queue (Service › Approvals) and Overview gets a "Needs action" strip linking to it;
+(3) mobile friendly. Tabs now: Overview · Sales · Operations · People · Service · Finance — the
+same keys the `/m` dashboard already uses (`daily` dropped there too). Old `?tab=siti|lim|
+employee|department` links are aliased in `parseDashboardUrl`. NOT done: the feed key `lim` in
+`/api/dashboard/prototype` and the backend comments still carry the name (internal, no UI).
+
 ## 2026-09-10 — 🔵 PRD T-004 · Import / Export across the whole system (P0/R3-R5 done, rest open)
 
 Requested by Mr Lim, PRD dated 2026-09-07, priority **Low (to be raised later)**. Full PRD:

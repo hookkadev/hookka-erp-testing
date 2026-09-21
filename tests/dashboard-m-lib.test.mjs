@@ -12,7 +12,7 @@ import {
 const months = ["2026-06", "2026-07", "2026-08"];
 
 test("tabs are in the agreed order", () => {
-  assert.deepEqual(MOBILE_TABS.map((t) => t.key), ["overview", "sales", "operations", "people", "service", "daily", "finance"]);
+  assert.deepEqual(MOBILE_TABS.map((t) => t.key), ["overview", "sales", "operations", "people", "service", "finance"]);
 });
 
 test("period round-trips through the URL and keeps sub + unrelated params", () => {

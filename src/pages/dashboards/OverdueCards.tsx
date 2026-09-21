@@ -6,8 +6,7 @@ import { Tabs, type TabItem } from "@/components/ui/tabs";
 import { Search } from "lucide-react";
 import { TAUPE, RED, AMBER, MUTED, BORDER } from "./dashboard-shared-lib";
 
-// Overdue / due-soon cards, extracted from SitiOpsView so the Daily (Lim) tab
-// shows the identical cards rather than a second derivation. Both read
+// Overdue / due-soon cards (Operations > Overview). Both read
 // production.overdueByDept / production.dueSoon3Days from the shared feed.
 export type ProdOrderSummary = {
   poNo: string | null;

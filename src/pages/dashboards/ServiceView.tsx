@@ -11,9 +11,10 @@ import {
 import { Kpi, LiveBadge } from "./dashboard-shared";
 import { ServiceApprovalsPanel } from "./ServiceApprovalsPanel";
 import { ServiceIssuesPanel } from "./ServiceIssuesPanel";
+import { ServicePerformancePanel } from "./ServicePerformancePanel";
 import { causeKeys, causeLabel } from "../../api/lib/service-issue-stats";
 
-// "Service (Zamri)" tab: service-case report, overdue tracking, and the
+// Service tab: service-case report, overdue tracking, and the
 // approvals queue. Reads the `service` slice of the same cached
 // GET /api/dashboard/prototype feed (built in api/lib/dashboard-service-slice.ts).
 // The slice is OPTIONAL: a feed cached before this tab shipped, or a caller
@@ -141,7 +142,7 @@ export function ServiceView({
   return (
     <div className="space-y-5 max-md:space-y-4">
       <div className="flex items-center gap-2 flex-wrap">
-        <h2 className="text-lg font-semibold text-[#1F1D1B]">Service (Zamri)</h2>
+        <h2 className="text-lg font-semibold text-[#1F1D1B]">Service</h2>
         <LiveBadge live={data.availability?.service?.live ?? false} />
         {period.day && (
           <button
@@ -239,6 +240,8 @@ export function ServiceView({
           </Card>
         </>
       )}
+
+      {sub === "performance" && <ServicePerformancePanel slice={slice} period={period} onPeriodChange={onPeriodChange} />}
 
       {sub === "overdue" && (
         <>

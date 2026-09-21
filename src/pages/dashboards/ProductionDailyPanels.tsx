@@ -1,33 +1,27 @@
 import { useMemo, useState } from "react";
-import { ServiceApprovalsPanel } from "./ServiceApprovalsPanel";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, ReferenceLine } from "recharts";
 import { useCachedJson } from "@/lib/cached-fetch";
 import { formatCurrency } from "@/lib/utils";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Tabs } from "@/components/ui/tabs";
-import { ClipboardList, Target, TrendingUp, Banknote, PackageCheck, AlertTriangle, Clock } from "lucide-react";
+import { ClipboardList, Target, TrendingUp, Banknote, PackageCheck, AlertTriangle } from "lucide-react";
 import {
   TAUPE, MUTED, BORDER, GREEN, AMBER, RED, CHART_GOLD, fmtN, fmtRMAxis, inPeriod, inFocus,
-  dayLabel, periodLabel, type Period, type LimSub,
+  dayLabel, periodLabel, type Period,
 } from "./dashboard-shared-lib";
-import { Kpi, LiveBadge, SnapshotNote } from "./dashboard-shared";
-import { LimServicePanel, type LimServiceSlice } from "./LimServicePanel";
-import { AttendanceLogCard } from "./AttendanceLogCard";
-import { OverdueByDeptCard, DueSoonWorklist, type ProdOrderSummary } from "./OverdueCards";
-import { TimeAttendancePanels, EfficiencyPanels, type EmployeeSlice } from "./EmployeesInsights";
+import { Kpi } from "./dashboard-shared";
+import type { EmployeeSlice } from "./EmployeesInsights";
 
-// "Daily (Lim)" — the owner's daily report set for Lim, on ONE tab:
-//   Efficiency       daily pool line + ranking (REUSED from Employees) plus a
-//                    per-department breakdown for the focused day (new)
-//   Plan vs Actual   NEW — definitions are stated in the card subtitles and
-//                    mirrored in src/api/lib/dashboard-daily-slice.ts
-//   Attendance       AttendanceLogCard, REUSED as is
-//   Production revenue  NEW — value of production orders completed per day
-//   Overdue          the Siti overdue cards, REUSED (OverdueCards.tsx)
-// Everything reads the same cached GET /api/dashboard/prototype feed.
-// `lim` is optional: a 60s-cached payload from before this slice existed has
-// no such key and must render an explanation, not crash.
-type LimSlice = {
+// The day-by-day production panels, mounted by the tab that owns each one:
+//   plan      Operations > Plan vs Actual   (definitions are in the card
+//             subtitles and mirrored in src/api/lib/dashboard-daily-slice.ts)
+//   revenue   Operations > Revenue & Cost   (value of orders completed per day)
+//   DeptEfficiencyCard   People > Efficiency
+// Everything reads the same cached GET /api/dashboard/prototype feed. The
+// slice is optional: a 60s-cached payload from before it existed has no such
+// key and must render an explanation, not crash. `lim` is the feed's key for
+// the daily slice (backend name, not shown anywhere).
+type DailySlice = {
   orders: {
     byDay: { date: string; planOrders: number; planUnits: number; actualOrders: number; actualUnits: number }[];
     withoutTarget: number;
@@ -42,23 +36,15 @@ type LimSlice = {
 };
 type Feed = {
   success?: boolean;
-  availability?: {
-    lim?: { live: boolean; reason?: string };
-    employee?: { live: boolean; reason?: string };
-    production?: { live: boolean; reason?: string };
-  };
-  meta?: { config?: { efficiencyTargetPct?: number } };
-  production?: { overdueByDept: { department: string; count: number }[]; dueSoon3Days: ProdOrderSummary[] };
-  employee?: EmployeeSlice;
-  lim?: LimSlice | null;
-  service?: LimServiceSlice | null;
+  availability?: { lim?: { live: boolean; reason?: string } };
+  lim?: DailySlice | null;
 };
 
 const TOOLTIP = { background: "#FFFFFF", border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: 12 };
 const hrs = (min: number) => `${(min / 60).toLocaleString("en-MY", { maximumFractionDigits: 1 })}h`;
 const CHART_WRAP = "select-none [&_*]:outline-none [&_.recharts-wrapper]:outline-none";
 
-// Monthly/range -> one bar per day; YTD -> one bar per month (SitiOpsView's rule).
+// Monthly/range -> one bar per day; YTD -> one bar per month (OperationsView's rule).
 function bucket<T extends { date: string }>(rows: T[], p: Period, add: (a: T, b: T) => T) {
   if (p.mode !== "ytd") return rows.map((r) => ({ ...r, key: r.date.slice(5), iso: r.date }));
   const m = new Map<string, T & { key: string; iso: string }>();
@@ -70,19 +56,6 @@ function bucket<T extends { date: string }>(rows: T[], p: Period, add: (a: T, b:
   return [...m.values()];
 }
 
-function DayChip({ period, onPeriodChange }: { period: Period; onPeriodChange: (p: Period) => void }) {
-  if (!period.day) return null;
-  return (
-    <button
-      type="button"
-      onClick={() => onPeriodChange({ ...period, day: undefined })}
-      className="text-xs rounded-md border border-[#E5E0D8] bg-[#F7F5F3] px-2 py-0.5 text-[#6B5C32] hover:bg-white max-md:min-h-10 max-md:px-3 max-md:text-left"
-    >
-      Showing: {dayLabel(period.day)} — click to go back
-    </button>
-  );
-}
-
 const th = (label: string, right: boolean) => (
   <th key={label} className={`px-4 py-2 font-semibold uppercase text-[10.5px] tracking-wide text-[#6B7280] whitespace-nowrap ${right ? "text-right" : "text-left"}`}>{label}</th>
 );
@@ -90,7 +63,7 @@ const th = (label: string, right: boolean) => (
 // ---- Efficiency: per-department breakdown for one day ---------------------
 // Same maths as DepartmentsView (performance.byDay[].workers joined to the
 // worker's department): production ÷ working minutes.
-function DeptEfficiencyCard({ employee, period, target }: { employee: EmployeeSlice; period: Period; target: number }) {
+export function DeptEfficiencyCard({ employee, period, target }: { employee: EmployeeSlice; period: Period; target: number }) {
   // The focused day, else the latest day inside the period that has clocked hours.
   const { day, isLatest, rows } = useMemo(() => {
     const days = employee.performance.byDay.filter((d) => d.workingMinutes > 0);
@@ -169,18 +142,16 @@ function DeptEfficiencyCard({ employee, period, target }: { employee: EmployeeSl
   );
 }
 
-export function LimDailyView({
+export function ProductionDailyPanels({
   period, sub, onPeriodChange,
-}: { period: Period; sub: LimSub; onPeriodChange: (p: Period) => void }) {
+}: { period: Period; sub: "plan" | "revenue"; onPeriodChange: (p: Period) => void }) {
   const { data, loading, error } = useCachedJson<Feed>("/api/dashboard/prototype");
   const [metric, setMetric] = useState<"units" | "orders">("units");
 
   const lim = data?.lim ?? null;
-  const employee = data?.employee;
-  const target = data?.meta?.config?.efficiencyTargetPct ?? 100;
 
   // Click a bar: a month in YTD opens that month, a day anywhere else is
-  // highlighted (period.day) — the same rule SitiOpsView uses.
+  // highlighted (period.day) — the same rule OperationsView uses.
   const pick = (rows: { date: string; iso: string }[]) => (e: { activeLabel?: unknown } | null) => {
     const hit = rows.find((d) => d.date === e?.activeLabel);
     if (!hit) return;
@@ -241,7 +212,7 @@ export function LimDailyView({
   if (error || !data?.success) {
     return (
       <Card className="border-[#F0D9AE] bg-[#FDF3E4]">
-        <CardContent className="p-4 text-sm text-[#B5701A]">Couldn't load Daily (Lim): {error ?? "unknown error"}</CardContent>
+        <CardContent className="p-4 text-sm text-[#B5701A]">Couldn't load daily production: {error ?? "unknown error"}</CardContent>
       </Card>
     );
   }
@@ -285,29 +256,7 @@ export function LimDailyView({
   const unit = period.mode === "ytd" ? "month" : "day";
 
   return (
-    <div className="space-y-5 max-md:space-y-4">
-      <div className="flex items-center gap-2 flex-wrap">
-        <h2 className="text-lg font-semibold text-[#1F1D1B]">Daily (Lim)</h2>
-        <LiveBadge live={(data.availability?.employee?.live ?? false) && (data.availability?.production?.live ?? false)} />
-        <DayChip period={period} onPeriodChange={onPeriodChange} />
-      </div>
-
-      {sub === "efficiency" && (
-        employee ? (
-          <>
-            <DeptEfficiencyCard employee={employee} period={period} target={target} />
-            <TimeAttendancePanels employee={employee} period={period} target={target} onPeriodChange={onPeriodChange} />
-            <EfficiencyPanels employee={employee} period={period} target={target} onPeriodChange={onPeriodChange} />
-          </>
-        ) : (
-          <Card className="border-[#F0D9AE] bg-[#FDF3E4]">
-            <CardContent className="p-4 text-sm text-[#B5701A]">
-              Efficiency isn't available: {data.availability?.employee?.reason ?? "no workforce data (workers:read is required)"}.
-            </CardContent>
-          </Card>
-        )
-      )}
-
+    <>
       {sub === "plan" && (!lim ? missingSlice("Plan vs Actual") : (
         <>
           <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
@@ -375,14 +324,6 @@ export function LimDailyView({
         </>
       ))}
 
-      {sub === "attendance" && (employee ? (
-        <AttendanceLogCard employee={employee} period={period} />
-      ) : (
-        <Card className="border-[#F0D9AE] bg-[#FDF3E4]">
-          <CardContent className="p-4 text-sm text-[#B5701A]">Attendance isn't available: {data.availability?.employee?.reason ?? "workers:read is required"}.</CardContent>
-        </Card>
-      ))}
-
       {sub === "revenue" && (!lim ? missingSlice("Production revenue") : !lim.revenue ? (
         <Card className="border-[#F0D9AE] bg-[#FDF3E4]">
           <CardContent className="p-4 text-sm text-[#B5701A]">Production revenue isn't available: order values could not be loaded ({lim.revenueError ?? "unknown error"}).</CardContent>
@@ -413,28 +354,6 @@ export function LimDailyView({
         </>
       ))}
 
-      {sub === "service" && <LimServicePanel slice={data.service} period={period} onPeriodChange={onPeriodChange} />}
-
-      {sub === "overdue" && (
-        <>
-          <SnapshotNote what="Overdue" />
-          <div className="grid grid-cols-2 gap-3">
-            <Kpi label="Overdue orders" value={fmtN((data.production?.overdueByDept ?? []).reduce((a, d) => a + d.count, 0))} sub="open, past customer date" icon={AlertTriangle} iconBgClass="bg-[#FBE7E3]" iconColorClass="text-[#9A3A2D]" valueColorClass="text-[#9A3A2D]" />
-            <Kpi label="Due within 3 days" value={fmtN((data.production?.dueSoon3Days ?? []).length)} sub="early warning" icon={Clock} iconBgClass="bg-[#FAEFCB]" iconColorClass="text-[#9C6F1E]" valueColorClass="text-[#9C6F1E]" />
-          </div>
-          {data.production ? (
-            <>
-              <OverdueByDeptCard overdueByDept={data.production.overdueByDept} />
-              <DueSoonWorklist orders={data.production.dueSoon3Days} />
-            </>
-          ) : (
-            <Card className="border-[#F0D9AE] bg-[#FDF3E4]">
-              <CardContent className="p-4 text-sm text-[#B5701A]">Overdue isn't available: {data.availability?.production?.reason ?? "production-orders:read is required"}.</CardContent>
-            </Card>
-          )}
-          <ServiceApprovalsPanel title="Service case approvals" />
-        </>
-      )}
-    </div>
+    </>
   );
 }

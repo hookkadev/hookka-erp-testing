@@ -1,17 +1,16 @@
 import { useMemo } from "react";
 import { useCachedJson } from "@/lib/cached-fetch";
 import { PeriodPicker } from "./dashboard-shared";
-import type { Period, EmpSub, SitiSub, ServiceSub, LimSub, FinSub } from "./dashboard-shared-lib";
+import type { Period, PeopleSub, OpsSub, ServiceSub, FinSub } from "./dashboard-shared-lib";
 import { TAB_SUBS } from "./dashboard-url-state-lib";
 import { useDashboardUrlState } from "./use-dashboard-url-state";
 import { FinanceView } from "./FinanceView";
 import { AllOverviewView } from "./AllOverviewView";
 import { SalesOrdersView } from "./SalesOrdersView";
-import { SitiOpsView } from "./SitiOpsView";
+import { OperationsView } from "./OperationsView";
 import { EmployeesView } from "./EmployeesView";
 import { DepartmentsView } from "./DepartmentsView";
 import { ServiceView } from "./ServiceView";
-import { LimDailyView } from "./LimDailyView";
 import { PageHeader } from "@/components/ui/page-header";
 import { Tabs, type TabItem } from "@/components/ui/tabs";
 
@@ -23,10 +22,13 @@ import { Tabs, type TabItem } from "@/components/ui/tabs";
 // and — the real reason — it was a dead end for a REAL page: nothing in an
 // injected srcdoc document can be a real, navigable, testable React screen.
 //
-// This branch carries THREE tabs — All Overview (the landing tab), Sales
-// Orders, Employees, Departments, and a draft "Operations (Siti)" tab tracking
-// the owner's report checklist handed over on paper. All read the same cached
-// GET /api/dashboard/prototype payload; no tab has an endpoint of its own.
+// Tabs are named after the FUNCTION, never after the person who reads them:
+// Overview, Sales, Operations, People, Service, Finance — the same keys the
+// /m dashboard uses (m/screens/dashboard/dashboard-m-lib.ts). A reviewer has
+// no tab of their own: each chart lives in the tab that owns it, approvals
+// live in Service > Approvals, and Overview's "Needs action" strip links
+// there. All read the same cached GET /api/dashboard/prototype payload; no
+// tab has an endpoint of its own.
 // The remaining domain tabs (Delivery, Inventory, Purchase, Production) live
 // on laphii/feature/dashboard / other branches and land in follow-ups.
 //
@@ -45,16 +47,14 @@ import { Tabs, type TabItem } from "@/components/ui/tabs";
 // font is loaded — the app's default font-sans (system-ui) applies here too.
 // ---------------------------------------------------------------------------
 
-// The tabs being trialled on main. Operations (Siti) is a draft - see
-// SitiOpsView.tsx's own header comment for what's real vs. stubbed.
-const TABS: TabItem<"overview" | "sales" | "siti" | "employee" | "department" | "service" | "lim" | "finance">[] = [
-  { key: "overview", label: "All Overview" },
-  { key: "sales", label: "Sales Orders" },
-  { key: "siti", label: "Operations (Siti)" },
-  { key: "employee", label: "Employees" },
-  { key: "department", label: "Departments" },
-  { key: "service", label: "Service (Zamri)" },
-  { key: "lim", label: "Daily (Lim)" },
+// Old keys (siti / lim / employee / department) still resolve: see LEGACY in
+// dashboard-url-state-lib.ts.
+const TABS: TabItem<"overview" | "sales" | "operations" | "people" | "service" | "finance">[] = [
+  { key: "overview", label: "Overview" },
+  { key: "sales", label: "Sales" },
+  { key: "operations", label: "Operations" },
+  { key: "people", label: "People" },
+  { key: "service", label: "Service" },
   { key: "finance", label: "Finance" },
 ];
 
@@ -126,11 +126,11 @@ export default function DashboardPrototypePage() {
       <div className="sticky top-0 z-30 -mx-4 px-4 md:-mx-6 md:px-6 pt-1 pb-3 max-md:pb-2 bg-[#F7F5F3]/95 backdrop-blur border-b border-[#E2DDD8] space-y-3 max-md:space-y-2">
         {/* Phones: no big title (keeps the sticky block short); the tab strip is
             one scrollable row. md+: the original PageHeader, unchanged. */}
-        <h1 className="sr-only md:hidden">Overview</h1>
+        <h1 className="sr-only md:hidden">Dashboard</h1>
         <PageHeader
           className="max-md:[&>div:first-child]:hidden"
-          title="Overview"
-          subtitle="Operations · live where noted"
+          title="Dashboard"
+          subtitle="Live where noted"
           actions={
             <Tabs tabs={TABS} value={tab} onChange={setTab} variant="pill" scrollable className="max-md:w-full" />
           }
@@ -161,17 +161,17 @@ export default function DashboardPrototypePage() {
         <AllOverviewView
           period={effectivePeriod}
           months={months}
-          onOpenTab={(t) => setTab(t as TabKey)}
+          onOpenTab={(t, s) => setTab(t as TabKey, s)}
         />
       )}
       {tab === "sales" && (
         <SalesOrdersView period={effectivePeriod} months={months} onPeriodChange={setPeriod} />
       )}
-      {tab === "siti" && <SitiOpsView period={effectivePeriod} sub={sub as SitiSub} onPeriodChange={setPeriod} />}
-      {tab === "employee" && <EmployeesView period={effectivePeriod} sub={sub as EmpSub} onPeriodChange={setPeriod} />}
-      {tab === "department" && <DepartmentsView period={effectivePeriod} />}
+      {tab === "operations" && <OperationsView period={effectivePeriod} sub={sub as OpsSub} onPeriodChange={setPeriod} />}
+      {tab === "people" && ((sub as PeopleSub) === "departments"
+        ? <DepartmentsView period={effectivePeriod} />
+        : <EmployeesView period={effectivePeriod} sub={sub as Exclude<PeopleSub, "departments">} onPeriodChange={setPeriod} />)}
       {tab === "service" && <ServiceView period={effectivePeriod} sub={sub as ServiceSub} onPeriodChange={setPeriod} onSubChange={(x) => setSub(x)} />}
-      {tab === "lim" && <LimDailyView period={effectivePeriod} sub={sub as LimSub} onPeriodChange={setPeriod} />}
       {tab === "finance" && <FinanceView period={effectivePeriod} sub={sub as FinSub} months={months} onPeriodChange={setPeriod} />}
     </div>
   );
