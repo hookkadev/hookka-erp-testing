@@ -10,6 +10,8 @@ import {
 } from "./dashboard-shared-lib";
 import { Kpi, LiveBadge } from "./dashboard-shared";
 import { ServiceApprovalsPanel } from "./ServiceApprovalsPanel";
+import { ServiceIssuesPanel } from "./ServiceIssuesPanel";
+import { causeKeys, causeLabel } from "../../api/lib/service-issue-stats";
 
 // "Service (Zamri)" tab: service-case report, overdue tracking, and the
 // approvals queue. Reads the `service` slice of the same cached
@@ -28,6 +30,11 @@ type ServiceCase = {
   approvalStatus: string | null;
   ageDays: number | null;
   daysOverdue: number;
+  // Added with the Top issues sub-tab — absent on a feed cached before it shipped.
+  causes?: string[];
+  unit?: string | null;
+  prevention?: string | null;
+  products?: string[];
 };
 type Feed = {
   success?: boolean;
@@ -55,10 +62,12 @@ function StatusPill({ status }: { status: string }) {
 const APPROVAL_STYLE: Record<string, string> = { PENDING: "#9C6F1E", APPROVED: "#4F7C3A", REJECTED: "#9A3A2D" };
 
 export function ServiceView({
-  period, sub, onPeriodChange,
-}: { period: Period; sub: ServiceSub; onPeriodChange: (p: Period) => void }) {
+  period, sub, onPeriodChange, onSubChange,
+}: { period: Period; sub: ServiceSub; onPeriodChange: (p: Period) => void; onSubChange: (s: ServiceSub) => void }) {
   const { data, loading, error } = useCachedJson<Feed>("/api/dashboard/prototype");
   const [search, setSearch] = useState("");
+  // Root-cause key clicked on Top issues; narrows the Report's case list only.
+  const [causeFilter, setCauseFilter] = useState<string | null>(null);
 
   const slice = data?.service ?? null;
   const cases = useMemo(() => slice?.cases ?? [], [slice]);
@@ -96,9 +105,10 @@ export function ServiceView({
   const listRows = useMemo(() => {
     const q = search.trim().toLowerCase();
     return logged
+      .filter((c) => !causeFilter || causeKeys(c).includes(causeFilter))
       .filter((c) => !q || [c.caseNo, c.customer, c.issue].some((v) => (v ?? "").toLowerCase().includes(q)))
       .sort((a, b) => (a.createdDate < b.createdDate ? 1 : -1));
-  }, [logged, search]);
+  }, [logged, search, causeFilter]);
 
   // Overdue is a live backlog, not a period slice: a case stuck for 20 days is
   // overdue whichever month is selected.
@@ -182,6 +192,15 @@ export function ServiceView({
           <Card>
             <CardHeader className="pb-3 flex flex-row items-center justify-between gap-3 flex-wrap">
               <CardTitle>Service cases logged ({fmtN(listRows.length)})</CardTitle>
+              {causeFilter && (
+                <button
+                  type="button"
+                  onClick={() => setCauseFilter(null)}
+                  className="text-xs rounded-md border border-[#E5E0D8] bg-[#F7F5F3] px-2 py-0.5 text-[#6B5C32] hover:bg-white"
+                >
+                  Showing: {causeLabel(causeFilter)} — click to go back
+                </button>
+              )}
               <div className="relative w-full max-w-[220px]">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[#9CA3AF]" />
                 <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search case, customer, issue…" className="h-8 pl-8 text-xs" />
@@ -269,6 +288,14 @@ export function ServiceView({
       )}
 
       {sub === "approvals" && <ServiceApprovalsPanel />}
+
+      {sub === "issues" && (
+        <ServiceIssuesPanel
+          cases={logged}
+          period={period}
+          onPickCause={(k) => { setCauseFilter(k); onSubChange("overview"); }}
+        />
+      )}
     </div>
   );
 }

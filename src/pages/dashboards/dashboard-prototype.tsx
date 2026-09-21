@@ -160,7 +160,7 @@ export default function DashboardPrototypePage() {
       {tab === "siti" && <SitiOpsView period={effectivePeriod} sub={sub as SitiSub} onPeriodChange={setPeriod} />}
       {tab === "employee" && <EmployeesView period={effectivePeriod} sub={sub as EmpSub} onPeriodChange={setPeriod} />}
       {tab === "department" && <DepartmentsView period={effectivePeriod} />}
-      {tab === "service" && <ServiceView period={effectivePeriod} sub={sub as ServiceSub} onPeriodChange={setPeriod} />}
+      {tab === "service" && <ServiceView period={effectivePeriod} sub={sub as ServiceSub} onPeriodChange={setPeriod} onSubChange={(x) => setSub(x)} />}
       {tab === "lim" && <LimDailyView period={effectivePeriod} sub={sub as LimSub} onPeriodChange={setPeriod} />}
     </div>
   );

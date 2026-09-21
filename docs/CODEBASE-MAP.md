@@ -1003,6 +1003,7 @@ the payload's `sales.orders[0].totalSen` is non-zero.
 | `src/lib/service-order-modes.ts` — **per-mode line requirements + tolerant catalogue lookup; shared by the Spawn dialog AND the route** (380) | | `products` / `fg_batches` | `tests/service-order-spawn-product.test.mjs` |
 | `src/pages/service-order/index.tsx` — thin re-export of @/pages/sales in SV mode (18) | | `consignment_orders` / `products` | |
 | `src/pages/service-order/create.tsx` / `detail.tsx` / `edit.tsx` — re-exports of @/pages/sales/* in SV mode | | | |
+| `src/pages/dashboards/ServiceView.tsx` + `ServiceIssuesPanel.tsx` — dashboard Service (Zamri) tab; **Top issues** sub-tab = root cause / responsible unit / prevention / top products, click a cause to filter the Report list | `src/api/lib/dashboard-service-slice.ts` (feed slice: reads `rootcauses` dual-keyed, `responsibleunit`, `prevention_status`, `affected_product_ids`) + `src/api/lib/service-issue-stats.ts` (pure aggregation, shared with the browser) | `service_cases` | `tests/service-issue-stats.test.mjs` |
 
 **Big-file section index**
 - `src/pages/service-cases/detail.tsx`
