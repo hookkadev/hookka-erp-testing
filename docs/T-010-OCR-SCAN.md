@@ -165,3 +165,24 @@ Fixture for A3: `TO DO PI-.pdf` (22 pages of Hookka DOs / invoices for Houzs Cen
 - One-off script to move existing `file_bytes_b64` rows into storage.
 - `tests/db-schema.json` was extended **by hand** from migration 0233 (no DB access from this
   session). Re-run `node scripts/refresh-db-schema-fixture.mjs` after the first deploy.
+
+## 8. Handoff notes (for whoever continues this branch)
+
+Suggested order for §7: R11 UI → R10 UI → R17 → the legacy-bytes move script → R18 (one module
+per change, deep review) → PR to `staging`.
+
+Traps met while building this, none of them obvious from the code:
+
+- The Supabase adapter **re-camelCases any result key containing an underscore**. A `SELECT raw_value`
+  comes back as `rawValue`. Read new snake_case columns dual-keyed (`r.raw_value ?? r.rawValue`).
+  A fake DB in a test returns whatever you hand it, so a test will NOT catch this.
+- `supplier_scan_samples` has **lower-cased physical columns** (`rawjson`, `supplierhint`,
+  `docidentifier`) — they have no rename-map entry. Un-aliased they read back lower-cased; write
+  `rawJson AS "rawJson"`.
+- `GET /api/scan-queue/:id/bytes` streams by default **on purpose**; `?redirect=1` is opt-in. Do not
+  "finish" R2 by making the redirect the default without first proving the storage host's CORS
+  headers against both `fetch()` callers (`so-original.ts`, `scan-queue-client.ts`).
+- Model retries are budgeted per caller (`ExtractOpts.aiRetries`): the queue uses the default 2,
+  the synchronous routes pass 0 because the browser already retries three times behind a 90 s abort.
+- Python/PowerShell patch scripts on this Windows checkout: files are CRLF in the working tree and LF
+  in the index (`core.autocrlf=true`). Writing LF is fine; git normalises.
