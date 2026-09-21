@@ -26,11 +26,170 @@ Entries themselves stay newest-first.
 - `delivery-orders` (11) — [BUG-2026-04-29-003](#bug-2026-04-29-003--updateconsignmentnotebyid-silently-dropped-sentdate-and-items-on-put)
 - `sales-orders` (7) — [BUG-2026-04-26-021](#bug-2026-04-26-021-fixsales-drop-wrong-mattress-label-on-sofa-category-option)
 - `pricing-products` (6) — [BUG-2026-04-24-029](#bug-2026-04-24-029-fixcustomers-sofa-seat-prices-now-render-in-customer-products-panel)
-- `data-migration` (9) — [BUG-2026-06-10-001](#bug-2026-06-10-001--punch-selfie-photo-endpoint-500d-an-explicit-camelcase-select-projection-isnt-translated-by-the-d1-compat-adapter) · camelCase/rename-map class recurs — see BUG-2026-06-18-001/-002, BUG-2026-06-30-001 (read-side, P&L historical), BUG-2026-07-01-003 (supplier payments list + PI outstanding)
+- `data-migration` (10) — [BUG-2026-06-10-001](#bug-2026-06-10-001--punch-selfie-photo-endpoint-500d-an-explicit-camelcase-select-projection-isnt-translated-by-the-d1-compat-adapter) · camelCase/rename-map class recurs — see BUG-2026-06-18-001/-002, BUG-2026-06-30-001 (read-side, P&L historical), BUG-2026-07-01-003 (supplier payments list + PI outstanding), BUG-2026-09-15-181 (whole dashboard-prototype route). **Now classed: [C23](BUG-CLASSES.md#c23--sql-says-snake_case-the-row-comes-back-camelcase)**
 - `data-integrity` (4) — [BUG-2026-04-25-008](#bug-2026-04-25-008-stability-add-timeout-abort-propagation-to-fetchjson)
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-09-18-001 — Supplier Discount void 500'd: the status CHECK never allowed CANCELLED `accounting` `data-integrity` 🟢
+
+🟢 **Fixed** · owner-reported (`erp.hookka.com/accounting?tab=supplier-discount`, void → `POST .../purchase-credit-notes/pcn-85c380af/void 500 (Internal Server Error)`).
+
+**Root cause.** `purchase_credit_notes` was created in `migrations/0088_purchase_credit_notes.sql`
+/ `migrations-postgres/0156_purchase_credit_notes.sql` with an inline
+`status TEXT NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT','POSTED'))`. `POST
+/purchase-credit-notes/:id/void` (`accounting.ts`) has always written
+`status = 'CANCELLED'` to reverse a posted CN — a value that CHECK has never permitted, so
+every void on prod raised a constraint violation and the request 500'd. This is the exact
+same bug class as **BUG-2026-06-25-001** (`purchase_invoices.status` missing
+`PARTIAL_PAID`/`CANCELLED`): an inline `CHECK` written once at table-creation time, never
+widened as the app grew new lifecycle states, and migrations don't auto-apply on deploy
+(see CLAUDE.md) so a migration file fixing it would not reach prod on its own.
+
+**Fix.** `ensurePcnCancellable` (`accounting.ts`, defined immediately above the void route) —
+a memoized runtime self-apply, same shape as `ensurePartialPaymentColumns` /
+`PI_STATUS_CHECK_SQL` in `ensure-partial-payment.ts` — drops the constraint under both
+possible names (`purchase_credit_notes_status_check`, the Postgres auto-generated inline
+name; `purchase_credit_notes_status_chk`, this fix's own name on a re-run) and re-adds it as
+`CHECK (status IN ('DRAFT','POSTED','CANCELLED'))`. Runs at the top of the void handler,
+before the `UPDATE ... SET status = 'CANCELLED'` is queued.
+
+**Same batch:** the Supplier Discount entry form gained a native `<input type="date">` — the
+CN's `date` was previously hardcoded to `new Date().toISOString().slice(0,10)` (today) with
+no way to back-date a discount. `POST /purchase-credit-notes` now accepts an optional `date`
+body field (validated `/^\d{4}-\d{2}-\d{2}$/`, falls back to today on anything else).
+
+**Verified:** `npx tsc -p tsconfig.app.json --noEmit` clean; full suite 4607 pass / 0 fail /
+3 skipped. **Prod void-path effect is UNMEASURED** — no DB credentials in this session, so
+the live 500 was diagnosed from the schema/migration files and the route code, not by
+querying prod. Verify live after deploy: void a POSTED supplier discount, confirm 200 (not
+500) and that the GL reversal + PI outstanding restore actually land. Regression test:
+`tests/pcn-void-status-check.test.mjs` (static source-inspection, same style as
+`tests/pi-status-check-single-source.test.mjs` — asserts the self-apply exists, drops both
+legacy constraint names, re-adds with `CANCELLED`, and runs before the write).
+
+**Process note, logged for CODEBASE-MAP/BUG-HISTORY hygiene:** the fix first landed on `main`
+directly, was reverted on request, and reopened as a PR (#445) from the same branch — but
+because `git revert` leaves the original commit in `main`'s ancestry, GitHub's PR diff saw
+only the regression test as "new" and silently dropped the code change from the merge. `main`
+briefly carried a failing test for code that was never actually there. Re-fixed via a fresh
+branch (`fix/pcn-void-status-check-v2`) cut from current `main`, carrying only the real diff.
+Lesson: reverting a commit that is about to be re-proposed via PR from the *same* branch
+un-counts it from that PR's diff — cut a fresh branch instead.
+
+---
+
+## BUG-2026-09-15-181 — the experimental dashboard read every column in the wrong case, and rendered the misses as real figures `data-migration` `ui-frontend` `dashboard` 🟢
+
+🟢 Fixed. The owner compared the new `/dashboard-experimental` Sales tab
+against the house Sales page and reported two things: *"the value is slightly
+incorrect"* and *"the revenue is not displayed"* — the house page showed
+**1713 orders / RM 1,976,985.41**, the new page showed a different count and
+**RM 0**.
+
+**Root cause — one bug, every symptom.** `src/api/routes/dashboard-prototype.ts`
+read its result rows in snake_case (`r.total_sen`, `r.is_service_order`,
+`r.created_at`). `getSql` sets `transform: { column: { from: columnFrom } }` on
+both connection branches (`src/api/lib/db-pg.ts:105,118`), which rewrites every
+column through `column-rename-map.json` — so the rows actually carry `totalSen`,
+`isServiceOrder`, `createdAt`. Every snake_case read returned `undefined`, and
+each one was then coerced into a value that looks like data:
+
+| read | value | shown as |
+|---|---|---|
+| `r.total_sen` | `undefined` → `num()` → `0` | Revenue **RM 0** |
+| `r.is_service_order` | `undefined` → `!!` → `false` | no service order filtered → **1804** orders vs 1713 |
+| `r.created_at` | `undefined` → `dayKey()` → `null` | `byDay` empty → **revenue trend blank** |
+
+**The 500 was the same bug.** `/api/dashboard/prototype` had been returning
+`TypeError: Cannot read properties of null (reading 'created')` at `:754` —
+`touchDay(dayKey(r.created_at))!.created++`, where the `!` asserted a value
+`touchDay` returns `null` for. This was first read as "a delivery order with a
+NULL `created_at`" and patched with a null guard matching the two guarded lines
+below it. The guard is correct and stays, but the diagnosis was wrong: there was
+no NULL in the data, only the wrong key. Fixing the casing made `withCreatedAt`
+go from **0 → 1713**.
+
+**Fix.** All 260 reads across 74 identifiers converted to camelCase, driven by
+`column-rename-map.json` rather than by hand — which matters, because
+`postgres.toCamel` is lossy on acronyms and four of them would have been wrong:
+`company_so`→`companySO`, `company_so_id`→`companySOId`,
+`hookka_expected_dd`→`hookkaExpectedDD`, `supplier_sku`→`supplierSKU`. The row
+TYPE declarations were renamed first so `tsc` flagged every remaining read —
+that is what surfaced the 12 inline `.all<{…}>()` generics a regex pass missed.
+SQL strings were left untouched (verified: all 15 `WHERE org_id = ?` intact).
+
+**Verified.** Payload now reconciles exactly with the house Sales page:
+`revenueRM "1976985.41"`, `rows 1713`, `byDay` 95 days, `withCreatedAt` 1713.
+`npm run build:strict` clean.
+
+**Class.** [C23](BUG-CLASSES.md#c23--sql-says-snake_case-the-row-comes-back-camelcase)
+— fifth instance. Every one of the five was found by a person noticing a wrong
+number on a screen, never by a test.
+
+**Gap left open.** No test covers this route, and no test anywhere asserts that
+a money field in a payload is non-zero for a book that has sales. That single
+assertion would have caught all five instances of this class. Logged as C23 row 7.
+
+---
+
+## BUG-2026-09-11-180 — the Production Overview was served another page's payload, and rendered its emptiness as fact `production` `infrastructure` `caching` 🟢
+
+🟢 Fixed. Violet reported that `SO-2608-202` showed **blank department cells**
+and `0/0 cells complete` in the Production Overview, while the per-dept sheets
+showed Fab Cut and Fab Sew completed. Intermittent — some operators saw it, some
+did not, at the same minute.
+
+**Root cause.** `buildPoListBodyKey` / `buildPoListCacheKey`
+(`src/api/routes/production-orders/_helpers.ts`) canonicalised the query string
+with `.filter(([, v]) => v !== "")` — *"drop empty values to be conservative"*.
+But `GET /api/production-orders` **distinguishes** the two cases
+(`production-orders.ts:750-761`): `include` absent → `includeJobCards = true`;
+`include=` present-but-empty → `[""]` → `includeJobCards = false`. Sales /
+Consignment / Warehouse send the empty form **deliberately**, to drop the ~12MB
+job-card tree they never read.
+
+The Overview, while a search is active, drops `excludeCompleted` and the date
+window (`src/pages/production/index.tsx:1028-1035`) and requests the bare
+`?fields=minimal`. After the empty-value filter both URLs canonicalised to the
+**same** KV body key. Whichever page loaded first won, and for the 300s
+`PO_LIST_BODY_TTL_S` the other was served its body. The Overview then held POs
+with `jobCards: []`, and `cellFor()` (`src/pages/production/utils.ts:82`)
+correctly reported every cell empty — it was told there was no work.
+
+The snapshot layer was never wrong: its key (`production-orders.ts:879`) keeps
+`include=`. But KV sits **in front** of it (`production-orders.ts:946-993`
+returns before the snapshot path is reached), so a correct snapshot could not be
+reached. **A cache key must never be coarser than the handler whose output it
+names** — see `docs/BUG-CLASSES.md` C22.
+
+**Fix**: keep every param in both keys, empty values included. Two lines
+removed. Every key that contained no empty-valued param is byte-identical, so
+existing entries keep hitting; only `?fields=minimal&include=` gets a new key,
+and its snapshot already existed.
+
+**Verified on prod (2026-09-11), not inferred.** Overview + search `2608-202`
+rendered Fab Cut ✓ 20 Aug / Fab Sew ✓ 21 Aug. Opening the Sales page and
+returning to the Overview turned **every** cell blank with `0/0 cells complete`;
+that request carried `X-Cache: HIT` and was **128 kB for 3,460 POs** — far too
+small to contain job cards. The rows themselves were confirmed intact by direct
+SQL: 39 job cards across the two POs, Fab Cut COMPLETED 2026-08-20, Fab Sew
+COMPLETED 2026-08-21.
+
+Regression test: `tests/po-list-cache-key-collision.test.mjs` — the three
+`fields=minimal` variants must be three distinct keys, and the KV body key must
+agree with the snapshot key's canonicalisation.
+
+**Open, deliberately not in that fix.** (1) The three callers still express
+"no job cards" as an empty value; `include=none` would stop the key depending on
+how emptiness is handled at all. (2) The Overview's search drops **all**
+server-side narrowing, making it a whole-org fetch that can hit the 30s abort —
+it needs a `q` parameter on `GET /api/production-orders`. Neither is a
+correctness bug in the key, and mixing them into one change would have made the
+2-line fix unreviewable.
 
 ---
 

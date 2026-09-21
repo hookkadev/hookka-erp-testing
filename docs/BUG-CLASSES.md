@@ -1,5 +1,13 @@
 # Recurring bug classes — the index that makes P5 executable
 
+> **Last verified: 2026-09-11** — restamped on branch `fix/po-list-cache-key-collision`,
+> which **adds C22 — a cache key coarser than the handler it names** (BUG-2026-09-11-180:
+> the Production Overview served another page's job-card-less payload and rendered its
+> emptiness as fact). Row 1 closed and enforced by
+> `tests/po-list-cache-key-collision.test.mjs`; rows 2 and 3 left OPEN with the reason.
+> Reproduced on prod before the fix and measured (`X-Cache: HIT`, 128 kB for 3,460 POs),
+> not inferred. Suite at that point: 4,573 tests / 0 fail.
+
 > **Last verified: 2026-08-14** — restamped on branch `fix/dashboard-tiles`, which
 > **closes C15 row 33 and adds rows 42–44** (BUG-2026-08-13-150/-145/-146/-147: the MRP
 > shortage that ignored every open PO plus its invented MOQ / lead time, `/production`
@@ -1494,6 +1502,53 @@ and 105 mispriced lines.
 
 ---
 
+## C22 — a cache key coarser than the handler it names
+
+**Shape.** A handler's output depends on an input. The cache key that names that
+output does **not** carry the input. Two requests whose responses differ then
+share one entry, and whichever runs first decides what everybody reads until the
+entry expires.
+
+**The instance that named it.** `buildPoListBodyKey` / `buildPoListCacheKey`
+canonicalised the query string with `.filter(([, v]) => v !== "")` — *"drop empty
+values to be conservative"*. But `GET /api/production-orders` reads `include`
+**absent** as `includeJobCards = true` and `include=` **present-but-empty** as
+`false` (`production-orders.ts:750-761`), and three pages send the empty form
+deliberately to drop a ~12MB tree. So `?fields=minimal&include=` (no job cards)
+and the Overview-while-searching `?fields=minimal` (job cards) named one KV
+entry. The Production Overview rendered blank department cells for a PO whose
+work was finished (BUG-2026-09-11-180).
+
+**Why it is hard to see.** Every layer is individually correct. The handler
+branches correctly on `include`. `cellFor()` correctly reports "no cards" for a
+PO with no cards. The snapshot layer's own key **did** keep `include=`. Only the
+pairing is wrong, and it is wrong in a place nobody reads while debugging a blank
+screen. It also presents as *intermittent and user-specific* — it is neither; it
+is whoever-loaded-first, for 300 seconds.
+
+**The rule.** *An empty parameter value is a claim, not a blank.* A cache key may
+normalise (sort, case-fold, encode) but must never DROP an input the handler
+reads. If the handler can tell two requests apart, the key must too. Corollary
+for layered caches: **the front layer's key must be at least as fine as the back
+layer's** — a correct snapshot key cannot save a request that a coarser KV key
+answers first.
+
+Same family as C15 (*"`0` is a claim, not a blank"*): in both, a value that
+*means* something is mistaken for the absence of a value.
+
+**Instances**
+
+| # | surface | state |
+|---|---|---|
+| 1 | `GET /api/production-orders` — `buildPoListBodyKey` + `buildPoListCacheKey` dropped empty-valued params; `?fields=minimal` and `?fields=minimal&include=` collided | ✅ 2026-09-11 (BUG-2026-09-11-180) — filter removed from both; `tests/po-list-cache-key-collision.test.mjs` |
+| 2 | **every other cache key in the repo** | ⬜ unswept. The pattern to look for is a key builder that filters, defaults or omits any part of the request. At the time of the fix `.filter(([, v]) => v !== "")` appeared in exactly these two functions, but no test forbids a third — a new key builder can reintroduce it silently |
+| 3 | **callers that express a choice as an empty value** | ⬜ open. `src/pages/sales/index.tsx`, `src/pages/consignment/index.tsx` and `src/pages/warehouse.tsx` still send `include=` to mean "no job cards". `include=none` says the same thing without depending on how emptiness is handled anywhere downstream |
+
+Row 2 is why this is a class and not a line in the bug entry: the fix repaired
+the two builders that existed, and nothing stops the third.
+
+---
+
 ## When you fix something here
 
 1. Find its class above. If there isn't one, add it.
@@ -1505,3 +1560,77 @@ and 105 mispriced lines.
 
 *Sources: `BUG-HISTORY.md` (chronological detail), `WORK-TRACKER.md` (2026-07-22/23 audit),
 `PLAYBOOKS.md` P5.*
+
+---
+
+## C23 — SQL says snake_case, the row comes back camelCase
+
+**Shape.** The SQL selects `total_sen`. The driver rewrites the column on the
+way out, so the row carries `totalSen`. Code that reads `r.total_sen` gets
+`undefined` — not an error, not a null, just a silent miss. `num(undefined)`
+is `0`, `!!undefined` is `false`, and a date helper handed `undefined` returns
+`null`. Every one of those is a plausible-looking value, so the screen renders
+a confident wrong answer instead of failing.
+
+**Where the rewrite lives.** `getSql` sets `transform: { column: { from:
+columnFrom } }` on BOTH connection branches (`src/api/lib/db-pg.ts:105,118`).
+`columnFrom` maps through `src/api/lib/column-rename-map.json`, falling back to
+`postgres.toCamel` for anything not in the map. There is no opt-out: if you
+query through `getSql`, your rows are camelCase.
+
+**The instance that named it.** `dashboard-prototype.ts` was written reading
+snake_case throughout — 260 reads across 74 identifiers. Live effect:
+
+| read | got | rendered as |
+|---|---|---|
+| `r.total_sen` | `undefined` | Revenue **RM 0** |
+| `r.is_service_order` | `undefined` → `!!` → `false` | no service order ever filtered; **1804 orders** where the house page shows 1713 |
+| `r.created_at` | `undefined` → `dayKey()` → `null` | revenue trend **empty**, and a `TypeError` at `:754` on a non-null-asserted map lookup |
+
+The crash was read as "a delivery order with a NULL `created_at`" and patched
+with a null guard. The guard was correct but the diagnosis was not — there was
+no NULL in the data, only the wrong key. **A null guard over a mis-keyed read
+silences the one symptom that was loud enough to notice.**
+
+**Why it is hard to see.** The SQL is right. The column exists. The query
+returns the correct number of rows. Nothing throws at the boundary. A reviewer
+comparing the `SELECT` list against the property reads sees them match —
+because they match in the source, and diverge only inside the driver. The
+failure surfaces a long way downstream as a zero, a `false`, or a blank chart,
+all of which look like "this org has no data".
+
+**The rule.** *Take the casing from `column-rename-map.json`, never from the
+SQL and never by hand.* The map is the only authority, because `toCamel` is
+lossy on acronyms and the map preserves the original identifier:
+
+| column | map says | `toCamel` would give |
+|---|---|---|
+| `company_so` | `companySO` | `companySo` ❌ |
+| `company_so_id` | `companySOId` | `companySoId` ❌ |
+| `hookka_expected_dd` | `hookkaExpectedDD` | `hookkaExpectedDd` ❌ |
+| `supplier_sku` | `supplierSKU` | `supplierSku` ❌ |
+
+Practical method: type the row shape in camelCase FIRST, then let `tsc` find
+every read. Renaming the type declarations turns a silent runtime `undefined`
+into a compile error at every call site — that is what caught the 12 inline
+generic types the first regex pass missed.
+
+CLAUDE.md's standing advice is the defensive form: read dual-keyed,
+`r.camelCase ?? r.snake_case`. That is right for a column you are not sure is
+in the map. For one that IS in the map, prefer the single camelCase read — a
+dual read hides the mistake rather than preventing it.
+
+Same family as C16 (*a field the projection drops and a consumer still reads*):
+in both, a read that cannot succeed returns a value that looks like data.
+
+**Instances**
+
+| # | surface | state |
+|---|---|---|
+| 1 | punch selfie endpoint — explicit camelCase SELECT projection not translated by the D1-compat adapter | ✅ 2026-06-10 (BUG-2026-06-10-001) |
+| 2 | BUG-2026-06-18-001 / -002 | ✅ |
+| 3 | P&L historical, read side | ✅ 2026-06-30 (BUG-2026-06-30-001) |
+| 4 | supplier payments list + PI outstanding | ✅ 2026-07-01 (BUG-2026-07-01-003) |
+| 5 | `dashboard-prototype.ts` — 260 reads, whole route | ✅ 2026-09-15 (BUG-2026-09-15-181) — converted from the rename map |
+| 6 | **every other route reading rows from `getSql`** | ⬜ unswept. No test forbids a sixth. The cheap sweep is `grep -oE "\br\.[a-z]+_[a-z_]+" src/api/routes/*.ts` — a hit is not automatically a bug (some are bound params or SQL fragments) but every hit deserves a look |
+| 7 | **no test asserts a payload's money field is non-zero** | ⬜ open. This class has now recurred five times and every instance was found by a human noticing a wrong number on a screen. One assertion per money-bearing endpoint — "this field is not 0 for a book with sales" — would have caught all five |
