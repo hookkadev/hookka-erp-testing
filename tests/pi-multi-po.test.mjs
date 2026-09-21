@@ -68,8 +68,19 @@ test("the ceiling matches by po_item_id, not material_code (T-006 R8)", () => {
   );
   assert.match(SRC, /gi\.po_item_id AS "poItemId"/);
   const fn = SRC.slice(SRC.indexOf("async function checkPoRemaining("));
-  assert.match(fn, /const orderedByItemId = new Map/);
-  assert.match(fn, /const itemIdByMaterialCode = new Map/, "material_code stays as the legacy/manual-row fallback, not the primary key");
+  // The ceiling is keyed by bucket: po_item_id resolves first (that is R8 —
+  // it survives the blank code), material_code second, and every PO line
+  // sharing a code lands in ONE bucket so a PO listing the same material
+  // twice is still billable for its full quantity. The behavioural cases
+  // live in tests/purchasing-convert-flow.test.mjs; this only pins that the
+  // po_item_id lookup comes first.
+  assert.match(fn, /const bucketKeyForItemId = new Map/);
+  assert.match(fn, /const bucketKeyForCode = new Map/, "material_code stays as the fallback, not the primary key");
+  assert.match(
+    fn,
+    /bucketKeyForItemId\.get\(String\(poItemId\)\)[\s\S]{0,40}\?\?[\s\S]{0,40}bucketKeyForCode\.get/,
+    "po_item_id must be tried BEFORE material_code",
+  );
 });
 
 test("ONE ceiling serves both invoice paths (BUG-2026-08-07-003)", () => {

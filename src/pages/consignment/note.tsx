@@ -34,6 +34,7 @@ import { Button } from "@/components/ui/button";
 import { DataGrid, type Column, type ContextMenuItem } from "@/components/ui/data-grid";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { useCachedJson, invalidateCachePrefix } from "@/lib/cached-fetch";
+import { useIdempotencyKey } from "@/lib/idempotency-key";
 import { MALAYSIA_STATES, resolveStateCode } from "@/lib/malaysia-states";
 import {
   Package,
@@ -489,6 +490,10 @@ export default function ConsignmentNotePage() {
   const [crSelectedItems, setCrSelectedItems] = useState<Record<string, boolean>>({});
   const [transferSIRow, setTransferSIRow] = useState<ConsignmentNoteRow | null>(null);
   const [transferSILoading, setTransferSILoading] = useState(false);
+  // T-006 R10 — convert-to-invoice is wrapped in withIdempotency server-side;
+  // a retry after a lost response must replay the first invoice, not mint a
+  // second one off the same consignment note.
+  const convertSiIdem = useIdempotencyKey();
 
   // ----- Selection (Pending CN list) -----
   const [selectedReadyPOs, setSelectedReadyPOs] = useState<Set<string>>(new Set());
@@ -2967,13 +2972,12 @@ export default function ConsignmentNotePage() {
     if (!transferSIRow) return;
     setTransferSILoading(true);
     try {
-      const res = await fetch(
-        `/api/consignment-notes/${transferSIRow.id}/convert-to-invoice`,
-        {
+      const res = await convertSiIdem.withKey((key) =>
+        fetch(`/api/consignment-notes/${transferSIRow.id}/convert-to-invoice`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", "Idempotency-Key": key },
           body: JSON.stringify({}),
-        },
+        }),
       );
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
