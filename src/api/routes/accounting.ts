@@ -9058,6 +9058,108 @@ function validateDocLines(
   return { ok: true, lines, totalSen };
 }
 
+// ---------------------------------------------------------------------------
+// PV four-tier approval (owner 2026-09-22, adopted from the Houzs trading
+// ERP): Draft → Prepared → Checked → Approved. A voucher born as a draft
+// carries NO ledger legs until APPROVE; its formal number is minted at CHECK
+// (so the formal sequence = the order money was checked, and a torn-up draft
+// never burns a number). Vouchers created through the legacy immediate path
+// keep posting at birth and are backfilled as APPROVED.
+// ⚠ Migration files 0233/0214 are the record; THIS self-apply is the
+// mechanism.
+let _pendingPvApprovalCols: Promise<void> | null = null;
+function ensurePvApprovalCols(db: Env["Variables"]["DB"]): Promise<void> {
+  if (!_pendingPvApprovalCols) {
+    _pendingPvApprovalCols = (async () => {
+      for (const col of [
+        "approval_state TEXT", "prepared_at TEXT", "prepared_by TEXT",
+        "checked_at TEXT", "checked_by TEXT", "approved_at TEXT",
+        "approved_by TEXT", "reject_reason TEXT",
+      ]) {
+        await db.prepare(`ALTER TABLE payment_vouchers ADD COLUMN IF NOT EXISTS ${col}`).run().catch(() => {});
+      }
+      await db.prepare(
+        "UPDATE payment_vouchers SET approval_state = 'APPROVED' WHERE approval_state IS NULL",
+      ).run().catch(() => {});
+    })().catch((e) => {
+      _pendingPvApprovalCols = null;
+      throw e;
+    });
+  }
+  return _pendingPvApprovalCols;
+}
+
+const PV_DRAFT_PREFIX = "DRAFT-";
+
+type PvHeaderForPost = {
+  id: string; pvNo: string; payee: string | null; description: string | null;
+  accrued: number; accrualAccount: string | null; payFrom: string | null; totalSen: number;
+};
+// The ONE place a voucher's ledger legs are built — used by the legacy
+// immediate-post path and by APPROVE, so the two can never drift.
+async function pvPostingStatements(
+  db: Env["Variables"]["DB"],
+  orgId: string,
+  actorUserId: string | null,
+  pv: PvHeaderForPost,
+  lines: { accountCode: string; description: string; amountSen: number }[],
+): Promise<D1PreparedStatement[]> {
+  const creditAccount = pv.accrued === 1 ? pv.accrualAccount! : pv.payFrom!;
+  const legs: LedgerEntryInput[] = lines.map((l, idx) => ({
+    id: `lje-${crypto.randomUUID().slice(0, 12)}`,
+    sourceType: "payment_voucher",
+    sourceId: pv.id,
+    legNo: idx + 1,
+    accountCode: l.accountCode,
+    debitSen: l.amountSen,
+    creditSen: 0,
+    description: `${pv.pvNo} · ${l.description || pv.description || "Payment"}${pv.accrued === 1 ? " (accrued)" : ""}`,
+    actorUserId,
+    orgId,
+  }));
+  legs.push({
+    id: `lje-${crypto.randomUUID().slice(0, 12)}`,
+    sourceType: "payment_voucher",
+    sourceId: pv.id,
+    legNo: legs.length + 1,
+    accountCode: creditAccount,
+    debitSen: 0,
+    creditSen: pv.totalSen,
+    description: `${pv.pvNo} · ${pv.payee ? `to ${pv.payee}` : "Payment"}${pv.accrued === 1 ? " (accrued)" : ""}`,
+    actorUserId,
+    orgId,
+  });
+  const { statements } = await buildJournalEntryStatements(db, orgId, legs);
+  return statements;
+}
+
+// Shared header validation for create AND draft-edit (same rules as the
+// legacy create path — accrual target must be a postable 410-x liability,
+// otherwise Paid From must be a bank/cash account).
+function validatePvHeader(
+  coa: Map<string, { type: CoaRow["type"]; specialAccountType: string | null; isPostable: number | null }>,
+  body: { accrued?: unknown; accrualAccount?: unknown; payFrom?: unknown },
+): { ok: true; accrued: boolean; accrualAccount: string | null; payFrom: string | null } | { ok: false; error: string } {
+  const accrued = body.accrued === true || body.accrued === 1;
+  if (accrued) {
+    const accrualAccount = String(body.accrualAccount || "");
+    if (accrualAccount.startsWith("405")) {
+      return { ok: false, error: "Expense accrual must use a 410-x accrued-expense account, not 405 Other Creditors. To owe a creditor, raise an Other Creditor bill." };
+    }
+    const acct = coa.get(accrualAccount);
+    if (!acct || acct.type !== "LIABILITY" || (acct.isPostable ?? 1) !== 1) {
+      return { ok: false, error: "Pick a postable LIABILITY accrual account (410-x)" };
+    }
+    return { ok: true, accrued: true, accrualAccount, payFrom: null };
+  }
+  const payFrom = String(body.payFrom || "");
+  const acct = coa.get(payFrom);
+  if (!acct || (acct.specialAccountType !== "SBK" && acct.specialAccountType !== "SCH")) {
+    return { ok: false, error: "Pay From must be a bank (SBK) or cash (SCH) account" };
+  }
+  return { ok: true, accrued: false, accrualAccount: null, payFrom };
+}
+
 app.get("/payment-vouchers", async (c) => {
   const denied = await requirePermission(c, "accounting", "read");
   if (denied) return denied;
@@ -9096,7 +9198,6 @@ app.post("/payment-vouchers", async (c) => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return c.json({ success: false, error: "date must be YYYY-MM-DD" }, 400);
     }
-    const accrued = body.accrued === true || body.accrued === 1;
     const productLine =
       body.productLine === "SOFA" || body.productLine === "BEDFRAME"
         ? body.productLine
@@ -9107,88 +9208,42 @@ app.post("/payment-vouchers", async (c) => {
     const coa = new Map((coaRes.results ?? []).map((a) => [a.code, a] as const));
     const v = validateDocLines(coa, body.lines);
     if (!v.ok) return c.json({ success: false, error: v.error }, 400);
+    const h = validatePvHeader(coa, body);
+    if (!h.ok) return c.json({ success: false, error: h.error }, 400);
+    const { accrued, accrualAccount, payFrom } = h;
 
-    let payFrom: string | null = null;
-    let accrualAccount: string | null = null;
-    if (accrued) {
-      accrualAccount = String(body.accrualAccount || "");
-      // 405-x (Other Creditors) is not a valid expense-accrual target — record
-      // creditor liabilities via an Other Creditor bill instead (F4 #5).
-      if (accrualAccount.startsWith("405")) {
-        return c.json(
-          { success: false, error: "Expense accrual must use a 410-x accrued-expense account, not 405 Other Creditors. To owe a creditor, raise an Other Creditor bill." },
-          400,
-        );
-      }
-      const acct = coa.get(accrualAccount);
-      if (!acct || acct.type !== "LIABILITY" || (acct.isPostable ?? 1) !== 1) {
-        return c.json(
-          { success: false, error: "Pick a postable LIABILITY accrual account (410-x)" },
-          400,
-        );
-      }
-    } else {
-      payFrom = String(body.payFrom || "");
-      const acct = coa.get(payFrom);
-      if (!acct || (acct.specialAccountType !== "SBK" && acct.specialAccountType !== "SCH")) {
-        return c.json(
-          { success: false, error: "Pay From must be a bank (SBK) or cash (SCH) account" },
-          400,
-        );
-      }
-    }
+    await ensurePvApprovalCols(c.var.DB);
     const id = `pv-${crypto.randomUUID().slice(0, 8)}`;
-    const pvNo = await issueDocNumber(c.var.DB, {
-      bankAccountCode: payFrom ?? "",
-      direction: "out",
-      dateIso: date,
-    });
     const now = new Date().toISOString();
     const orgId = getOrgId(c);
     const actorUserId =
       (c as unknown as { get: (k: string) => string | undefined }).get("userId") ?? null;
-    const creditAccount = accrued ? accrualAccount! : payFrom!;
-    const legs: LedgerEntryInput[] = v.lines.map((l, idx) => ({
-      id: `lje-${crypto.randomUUID().slice(0, 12)}`,
-      sourceType: "payment_voucher",
-      sourceId: id,
-      legNo: idx + 1,
-      accountCode: l.accountCode,
-      debitSen: l.amountSen,
-      creditSen: 0,
-      description: `${pvNo} · ${l.description || body.description || "Payment"}${accrued ? " (accrued)" : ""}`,
-      actorUserId,
-      orgId,
-    }));
-    legs.push({
-      id: `lje-${crypto.randomUUID().slice(0, 12)}`,
-      sourceType: "payment_voucher",
-      sourceId: id,
-      legNo: legs.length + 1,
-      accountCode: creditAccount,
-      debitSen: 0,
-      creditSen: v.totalSen,
-      description: `${pvNo} · ${body.payee ? `to ${body.payee}` : "Payment"}${accrued ? " (accrued)" : ""}`,
-      actorUserId,
-      orgId,
-    });
-    const { statements: ledgerStmts } = await buildJournalEntryStatements(
-      c.var.DB,
-      orgId,
-      legs,
-    );
+    // saveAs "draft" = the four-tier road: no number burned, no ledger legs —
+    // the formal number arrives at CHECK, the posting at APPROVE.
+    const asDraft = body.saveAs === "draft";
+    const pvNo = asDraft
+      ? `${PV_DRAFT_PREFIX}${id.slice(3)}`
+      : await issueDocNumber(c.var.DB, {
+          bankAccountCode: payFrom ?? "",
+          direction: "out",
+          dateIso: date,
+        });
     const statements: D1PreparedStatement[] = [
       c.var.DB.prepare(
         `INSERT INTO payment_vouchers (
            id, pvNo, date, payee, description, payFrom, accrued,
            accrualAccount, settledAt, productLine, totalSen, status,
+           approval_state, approved_at, approved_by,
            createdBy, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 'POSTED', ?, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).bind(
         id, pvNo, date,
         String(body.payee ?? ""), String(body.description ?? ""),
         payFrom, accrued ? 1 : 0, accrualAccount, productLine,
-        v.totalSen, actorUserId, now, now,
+        v.totalSen, asDraft ? "DRAFT" : "POSTED",
+        asDraft ? "DRAFT" : "APPROVED",
+        asDraft ? null : now, asDraft ? null : actorUserId,
+        actorUserId, now, now,
       ),
       ...v.lines.map((l, idx) =>
         c.var.DB.prepare(
@@ -9196,8 +9251,13 @@ app.post("/payment-vouchers", async (c) => {
            VALUES (?, ?, ?, ?, ?, ?)`,
         ).bind(`pvl-${crypto.randomUUID().slice(0, 8)}`, id, l.accountCode, l.description, l.amountSen, idx),
       ),
-      ...ledgerStmts,
     ];
+    if (!asDraft) {
+      statements.push(...await pvPostingStatements(c.var.DB, orgId, actorUserId, {
+        id, pvNo, payee: String(body.payee ?? ""), description: String(body.description ?? ""),
+        accrued: accrued ? 1 : 0, accrualAccount, payFrom, totalSen: v.totalSen,
+      }, v.lines));
+    }
     await c.var.DB.batch(statements);
     return c.json({ success: true, data: { id, pvNo } }, 201);
   } catch (e) {
@@ -9207,6 +9267,203 @@ app.post("/payment-vouchers", async (c) => {
       400,
     );
   }
+});
+
+// Edit a voucher that has NOT been checked yet (Draft / Prepared) — header
+// and lines replaced in place, no GL involved. After CHECK the voucher is
+// locked; after APPROVE corrections go through /restate.
+app.put("/payment-vouchers/:id", async (c) => {
+  const denied = await requirePermission(c, "accounting", "update");
+  if (denied) return denied;
+  try {
+    await ensurePvApprovalCols(c.var.DB);
+    const id = c.req.param("id");
+    const body = await c.req.json();
+    const pv = await c.var.DB.prepare(
+      "SELECT id, status, approval_state FROM payment_vouchers WHERE id = ?",
+    ).bind(id).first<{ id: string; status: string; approval_state?: string | null; approvalState?: string | null }>();
+    if (!pv) return c.json({ success: false, error: "Voucher not found" }, 404);
+    const state = (pv.approvalState ?? pv.approval_state) ?? "APPROVED";
+    if (pv.status === "VOID") return c.json({ success: false, error: "This voucher is cancelled" }, 400);
+    if (state !== "DRAFT" && state !== "PREPARED") {
+      return c.json({ success: false, error: state === "CHECKED" ? "Checked vouchers are locked — Reject it back to draft to change anything." : "Already posted — use Edit (restate) on the posted voucher instead." }, 400);
+    }
+    const date = String(body.date || "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return c.json({ success: false, error: "date must be YYYY-MM-DD" }, 400);
+    const coaRes = await c.var.DB.prepare(
+      "SELECT code, type, specialAccountType, isPostable FROM chart_of_accounts",
+    ).all<{ code: string; type: CoaRow["type"]; specialAccountType: string | null; isPostable: number | null }>();
+    const coa = new Map((coaRes.results ?? []).map((a) => [a.code, a] as const));
+    const v = validateDocLines(coa, body.lines);
+    if (!v.ok) return c.json({ success: false, error: v.error }, 400);
+    const h = validatePvHeader(coa, body);
+    if (!h.ok) return c.json({ success: false, error: h.error }, 400);
+    const now = new Date().toISOString();
+    await c.var.DB.batch([
+      c.var.DB.prepare(
+        `UPDATE payment_vouchers SET date = ?, payee = ?, description = ?, payFrom = ?, accrued = ?,
+                accrualAccount = ?, totalSen = ?, updated_at = ? WHERE id = ?`,
+      ).bind(date, String(body.payee ?? ""), String(body.description ?? ""), h.payFrom, h.accrued ? 1 : 0, h.accrualAccount, v.totalSen, now, id),
+      c.var.DB.prepare("DELETE FROM payment_voucher_lines WHERE voucherId = ?").bind(id),
+      ...v.lines.map((l, idx) =>
+        c.var.DB.prepare(
+          `INSERT INTO payment_voucher_lines (id, voucherId, accountCode, description, amountSen, lineOrder)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        ).bind(`pvl-${crypto.randomUUID().slice(0, 8)}`, id, l.accountCode, l.description, l.amountSen, idx),
+      ),
+    ]);
+    return c.json({ success: true });
+  } catch {
+    return c.json({ success: false, error: "Invalid request body" }, 400);
+  }
+});
+
+// The four-tier ladder. Each rung is its own permission key so the owner can
+// hand Check and Approve to different people later; SUPER_ADMIN passes all.
+//   prepare  DRAFT → PREPARED          (accounting:update)
+//   withdraw PREPARED → DRAFT          (accounting:update)
+//   reject   PREPARED|CHECKED → DRAFT  (accounting:check, reason REQUIRED)
+//   check    PREPARED → CHECKED        (accounting:check, formal No. minted)
+//   approve  CHECKED → APPROVED        (accounting:approve, GL posted HERE)
+const PV_APPROVAL_ACTIONS = ["prepare", "withdraw", "reject", "check", "approve"] as const;
+type PvApprovalAction = (typeof PV_APPROVAL_ACTIONS)[number];
+const PV_APPROVAL_PERM: Record<PvApprovalAction, string> = {
+  prepare: "update", withdraw: "update", reject: "check", check: "check", approve: "approve",
+};
+
+async function pvApprovalCore(
+  db: Env["Variables"]["DB"],
+  orgId: string,
+  actorUserId: string | null,
+  id: string,
+  action: PvApprovalAction,
+  reason: string,
+): Promise<{ ok: true; pvNo: string; state: string } | { ok: false; error: string }> {
+  const pv = await db.prepare("SELECT * FROM payment_vouchers WHERE id = ?").bind(id)
+    .first<Record<string, unknown>>();
+  if (!pv) return { ok: false, error: "Voucher not found" };
+  if (String(pv.status) === "VOID") return { ok: false, error: "This voucher is cancelled" };
+  const state = String((pv.approvalState ?? pv.approval_state) ?? "APPROVED");
+  const pvNo = String(pv.pvNo ?? pv.pv_no ?? "");
+  const now = new Date().toISOString();
+  const fail = (error: string) => ({ ok: false as const, error });
+
+  if (action === "prepare") {
+    if (state !== "DRAFT") return fail(`Only a draft can be prepared (this one is ${state})`);
+    await db.prepare(
+      "UPDATE payment_vouchers SET approval_state = 'PREPARED', prepared_at = ?, prepared_by = ?, reject_reason = NULL, updated_at = ? WHERE id = ?",
+    ).bind(now, actorUserId, now, id).run();
+    return { ok: true, pvNo, state: "PREPARED" };
+  }
+  if (action === "withdraw") {
+    if (state !== "PREPARED") return fail(`Only a prepared voucher can be withdrawn (this one is ${state})`);
+    await db.prepare(
+      "UPDATE payment_vouchers SET approval_state = 'DRAFT', prepared_at = NULL, prepared_by = NULL, updated_at = ? WHERE id = ?",
+    ).bind(now, id).run();
+    return { ok: true, pvNo, state: "DRAFT" };
+  }
+  if (action === "reject") {
+    if (state !== "PREPARED" && state !== "CHECKED") return fail(`Only a prepared or checked voucher can be rejected (this one is ${state})`);
+    if (!reason.trim()) return fail("A reject needs a reason");
+    await db.prepare(
+      "UPDATE payment_vouchers SET approval_state = 'DRAFT', prepared_at = NULL, prepared_by = NULL, checked_at = NULL, checked_by = NULL, reject_reason = ?, updated_at = ? WHERE id = ?",
+    ).bind(reason.trim(), now, id).run();
+    return { ok: true, pvNo, state: "DRAFT" };
+  }
+  if (action === "check") {
+    if (state !== "PREPARED") return fail(`Only a prepared voucher can be checked (this one is ${state})`);
+    // The formal number is minted HERE — the sequence is the order money was
+    // checked, and a torn-up draft never burnt a number.
+    let formalNo = pvNo;
+    if (formalNo.startsWith(PV_DRAFT_PREFIX)) {
+      formalNo = await issueDocNumber(db, {
+        bankAccountCode: String(pv.payFrom ?? pv.pay_from ?? "") || "",
+        direction: "out",
+        dateIso: String(pv.date ?? "").slice(0, 10),
+      });
+    }
+    await db.prepare(
+      "UPDATE payment_vouchers SET approval_state = 'CHECKED', pvNo = ?, checked_at = ?, checked_by = ?, updated_at = ? WHERE id = ?",
+    ).bind(formalNo, now, actorUserId, now, id).run();
+    return { ok: true, pvNo: formalNo, state: "CHECKED" };
+  }
+  // approve — the posting moment.
+  if (state !== "CHECKED") return fail(`Only a checked voucher can be approved (this one is ${state})`);
+  const lineRes = await db.prepare(
+    "SELECT accountCode, description, amountSen FROM payment_voucher_lines WHERE voucherId = ? ORDER BY lineOrder",
+  ).bind(id).all<{ accountCode: string; description: string | null; amountSen: number }>();
+  const lines = (lineRes.results ?? []).map((l) => ({
+    accountCode: l.accountCode, description: String(l.description ?? ""), amountSen: Math.round(Number(l.amountSen) || 0),
+  }));
+  if (!lines.length) return fail("This voucher has no lines");
+  const totalSen = lines.reduce((s, l) => s + l.amountSen, 0);
+  const posting = await pvPostingStatements(db, orgId, actorUserId, {
+    id, pvNo, payee: String(pv.payee ?? ""), description: String(pv.description ?? ""),
+    accrued: Number(pv.accrued) === 1 ? 1 : 0,
+    accrualAccount: (pv.accrualAccount ?? pv.accrual_account) as string | null,
+    payFrom: (pv.payFrom ?? pv.pay_from) as string | null,
+    totalSen,
+  }, lines);
+  await db.batch([
+    db.prepare(
+      "UPDATE payment_vouchers SET approval_state = 'APPROVED', status = 'POSTED', totalSen = ?, approved_at = ?, approved_by = ?, reject_reason = NULL, updated_at = ? WHERE id = ?",
+    ).bind(totalSen, now, actorUserId, now, id),
+    ...posting,
+  ]);
+  return { ok: true, pvNo, state: "APPROVED" };
+}
+
+app.post("/payment-vouchers/:id/approval", async (c) => {
+  let action: PvApprovalAction, reason = "";
+  try {
+    const body = (await c.req.json()) as { action?: string; reason?: string };
+    if (!PV_APPROVAL_ACTIONS.includes(body.action as PvApprovalAction)) {
+      return c.json({ success: false, error: "action must be prepare|withdraw|reject|check|approve" }, 400);
+    }
+    action = body.action as PvApprovalAction;
+    reason = String(body.reason ?? "");
+  } catch { return c.json({ success: false, error: "Invalid body" }, 400); }
+  const denied = await requirePermission(c, "accounting", PV_APPROVAL_PERM[action]);
+  if (denied) return denied;
+  await ensurePvApprovalCols(c.var.DB);
+  const actorUserId = (c as unknown as { get: (k: string) => string | undefined }).get("userId") ?? null;
+  const r = await pvApprovalCore(c.var.DB, getOrgId(c), actorUserId, c.req.param("id"), action, reason);
+  if (!r.ok) return c.json({ success: false, error: r.error }, 400);
+  return c.json({ success: true, data: { pvNo: r.pvNo, state: r.state } });
+});
+
+// Batch rungs (owner ticks a stack → Prepare / Check / Approve in one go),
+// executed in voucher-date order like Houzs does. Per-voucher results — one
+// bad voucher never blocks the rest.
+app.post("/payment-vouchers/approval-batch", async (c) => {
+  let action: PvApprovalAction, reason = "", ids: string[] = [];
+  try {
+    const body = (await c.req.json()) as { action?: string; reason?: string; ids?: unknown };
+    if (!PV_APPROVAL_ACTIONS.includes(body.action as PvApprovalAction)) {
+      return c.json({ success: false, error: "action must be prepare|withdraw|reject|check|approve" }, 400);
+    }
+    action = body.action as PvApprovalAction;
+    reason = String(body.reason ?? "");
+    ids = Array.isArray(body.ids) ? [...new Set(body.ids.map((x) => String(x)))] : [];
+    if (ids.length === 0 || ids.length > 100) return c.json({ success: false, error: "Pick 1–100 vouchers" }, 400);
+  } catch { return c.json({ success: false, error: "Invalid body" }, 400); }
+  const denied = await requirePermission(c, "accounting", PV_APPROVAL_PERM[action]);
+  if (denied) return denied;
+  await ensurePvApprovalCols(c.var.DB);
+  const marks = ids.map(() => "?").join(",");
+  const orderRes = await c.var.DB.prepare(
+    `SELECT id FROM payment_vouchers WHERE id IN (${marks}) ORDER BY date ASC, pvNo ASC`,
+  ).bind(...ids).all<{ id: string }>();
+  const ordered = (orderRes.results ?? []).map((r) => r.id);
+  for (const id of ids) if (!ordered.includes(id)) ordered.push(id); // unknown ids still get a per-id error
+  const actorUserId = (c as unknown as { get: (k: string) => string | undefined }).get("userId") ?? null;
+  const orgId = getOrgId(c);
+  const results: { id: string; ok: boolean; pvNo?: string; error?: string }[] = [];
+  for (const id of ordered) {
+    const r = await pvApprovalCore(c.var.DB, orgId, actorUserId, id, action, reason);
+    results.push(r.ok ? { id, ok: true, pvNo: r.pvNo } : { id, ok: false, error: r.error });
+  }
+  return c.json({ success: true, data: { results, done: results.filter((r) => r.ok).length } });
 });
 
 // Clear an accrued voucher against the bank: DR accrual, CR bank/cash.
@@ -9295,8 +9552,25 @@ app.post("/payment-vouchers/:id/lifecycle", async (c) => {
   try { action = ((await c.req.json()) as { action: string }).action as typeof action; } catch { return c.json({ success: false, error: "Invalid body" }, 400); }
   if (!["void", "delete", "unvoid"].includes(action)) return c.json({ success: false, error: "action must be void|delete|unvoid" }, 400);
 
-  const pv = await c.var.DB.prepare("SELECT id, pvNo, status FROM payment_vouchers WHERE id = ?").bind(id).first<{ id: string; pvNo: string; status: string }>();
+  await ensurePvApprovalCols(c.var.DB);
+  const pv = await c.var.DB.prepare("SELECT id, pvNo, status, approval_state FROM payment_vouchers WHERE id = ?").bind(id).first<{ id: string; pvNo: string; status: string; approval_state?: string | null; approvalState?: string | null }>();
   if (!pv) return c.json({ success: false, error: "Voucher not found" }, 404);
+
+  // A draft-road voucher that never reached APPROVE has no ledger legs —
+  // void/delete is a plain status flip, nothing to reverse; unvoid restores
+  // it as a draft.
+  const pvApState = String((pv.approvalState ?? pv.approval_state) ?? "APPROVED");
+  if (pvApState !== "APPROVED") {
+    const now = new Date().toISOString();
+    if (action === "unvoid") {
+      if (pv.status !== "VOID") return c.json({ success: false, error: "This voucher is not cancelled" }, 400);
+      await c.var.DB.prepare("UPDATE payment_vouchers SET status = 'DRAFT', updated_at = ? WHERE id = ?").bind(now, id).run();
+      return c.json({ success: true, data: { state: "ACTIVE" } });
+    }
+    if (pv.status === "VOID") return c.json({ success: false, error: "Already cancelled" }, 400);
+    await c.var.DB.prepare("UPDATE payment_vouchers SET status = 'VOID', updated_at = ? WHERE id = ?").bind(now, id).run();
+    return c.json({ success: true, data: { state: "VOID" } });
+  }
 
   const actorUserId =
     (c as unknown as { get: (k: string) => string | undefined }).get("userId") ?? null;
@@ -9332,8 +9606,12 @@ app.post("/payment-vouchers/:id/restate", async (c) => {
   const orgId = getOrgId(c);
   const id = c.req.param("id");
   try {
-    const pv = await c.var.DB.prepare("SELECT id, pvNo FROM payment_vouchers WHERE id = ?").bind(id).first<{ id: string; pvNo: string }>();
+    await ensurePvApprovalCols(c.var.DB);
+    const pv = await c.var.DB.prepare("SELECT id, pvNo, approval_state FROM payment_vouchers WHERE id = ?").bind(id).first<{ id: string; pvNo: string; approval_state?: string | null; approvalState?: string | null }>();
     if (!pv) return c.json({ success: false, error: "Voucher not found" }, 404);
+    if (String((pv.approvalState ?? pv.approval_state) ?? "APPROVED") !== "APPROVED") {
+      return c.json({ success: false, error: "Not posted yet — edit the draft directly, no restate needed." }, 400);
+    }
     const body = await c.req.json();
     const date = String(body.date || "");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return c.json({ success: false, error: "date must be YYYY-MM-DD" }, 400);
