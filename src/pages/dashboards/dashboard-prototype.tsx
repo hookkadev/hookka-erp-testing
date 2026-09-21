@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { useCachedJson } from "@/lib/cached-fetch";
 import { PeriodPicker } from "./dashboard-shared";
-import { EMP_SUBS, SITI_SUBS, SERVICE_SUBS, LIM_SUBS, type EmpSub, type Period, type SitiSub, type ServiceSub, type LimSub } from "./dashboard-shared-lib";
+import { EMP_SUBS, SITI_SUBS, SERVICE_SUBS, LIM_SUBS, FIN_SUBS, type EmpSub, type Period, type SitiSub, type ServiceSub, type LimSub, type FinSub } from "./dashboard-shared-lib";
+import { FinanceView } from "./FinanceView";
 import { AllOverviewView } from "./AllOverviewView";
 import { SalesOrdersView } from "./SalesOrdersView";
 import { SitiOpsView } from "./SitiOpsView";
@@ -44,7 +45,7 @@ import { Tabs, type TabItem } from "@/components/ui/tabs";
 
 // The tabs being trialled on main. Operations (Siti) is a draft - see
 // SitiOpsView.tsx's own header comment for what's real vs. stubbed.
-const TABS: TabItem<"overview" | "sales" | "siti" | "employee" | "department" | "service" | "lim">[] = [
+const TABS: TabItem<"overview" | "sales" | "siti" | "employee" | "department" | "service" | "lim" | "finance">[] = [
   { key: "overview", label: "All Overview" },
   { key: "sales", label: "Sales Orders" },
   { key: "siti", label: "Operations (Siti)" },
@@ -52,6 +53,7 @@ const TABS: TabItem<"overview" | "sales" | "siti" | "employee" | "department" | 
   { key: "department", label: "Departments" },
   { key: "service", label: "Service (Zamri)" },
   { key: "lim", label: "Daily (Lim)" },
+  { key: "finance", label: "Finance" },
 ];
 
 export default function DashboardPrototypePage() {
@@ -61,6 +63,7 @@ export default function DashboardPrototypePage() {
   const [sitiSub, setSitiSub] = useState<SitiSub>("overview");
   const [serviceSub, setServiceSub] = useState<ServiceSub>("overview");
   const [limSub, setLimSub] = useState<LimSub>("efficiency");
+  const [finSub, setFinSub] = useState<FinSub>("perhead");
 
   // The page reads the feed only for `meta.months` — the months that actually
   // exist in the book, which bound the stepper. Every tab below calls the same
@@ -134,6 +137,7 @@ export default function DashboardPrototypePage() {
             {tab === "siti" && <Tabs tabs={[...SITI_SUBS]} value={sitiSub} onChange={setSitiSub} variant="pill" />}
             {tab === "service" && <Tabs tabs={[...SERVICE_SUBS]} value={serviceSub} onChange={setServiceSub} variant="pill" />}
             {tab === "lim" && <Tabs tabs={[...LIM_SUBS]} value={limSub} onChange={setLimSub} variant="pill" />}
+            {tab === "finance" && <Tabs tabs={[...FIN_SUBS]} value={finSub} onChange={setFinSub} variant="pill" />}
           </div>
           {months.length > 0 && (
             <PeriodPicker
@@ -161,6 +165,7 @@ export default function DashboardPrototypePage() {
       {tab === "department" && <DepartmentsView period={effectivePeriod} />}
       {tab === "service" && <ServiceView period={effectivePeriod} sub={serviceSub} onPeriodChange={setPeriod} />}
       {tab === "lim" && <LimDailyView period={effectivePeriod} sub={limSub} onPeriodChange={setPeriod} />}
+      {tab === "finance" && <FinanceView period={effectivePeriod} sub={finSub} months={months} onPeriodChange={setPeriod} />}
     </div>
   );
 }

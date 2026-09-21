@@ -60,6 +60,7 @@ import { collectOnTimeDelivery, EMPTY_ON_TIME } from "../lib/on-time-delivery";
 import { poInPlanning, poReadyForDelivery, type PipelinePO } from "../../lib/delivery-pipeline";
 import { loadPoValueMap, loadDoValueMap } from "../lib/do-value";
 import { buildDailySlice } from "../lib/dashboard-daily-slice";
+import { countsToHeadcount } from "../lib/headcount-rule";
 
 const app = new Hono<Env>();
 
@@ -1835,8 +1836,7 @@ app.get("/", async (c) => {
         // Headcount rule copied from the real Employees page: ACTIVE only,
         // and TEST* accounts excluded (owner 2026-07-11, same rule Payroll
         // uses so headcount tallies system-wide).
-        countsToHeadcount:
-          w.status === "ACTIVE" && !/^TEST/i.test(w.empNo ?? ""),
+        countsToHeadcount: countsToHeadcount(w.status, w.empNo),
       })),
       attendance,
       // The house workforce metric. `attendance` above is kept for clock-in /

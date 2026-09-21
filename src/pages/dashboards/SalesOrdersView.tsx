@@ -30,6 +30,7 @@ import {
   inPeriod, previousPeriod, periodLabel, isConfirmedOrder, type Period,
 } from "./dashboard-shared-lib";
 import { Kpi, LiveBadge } from "./dashboard-shared";
+import { rollingForecast } from "@/lib/revenue-forecast";
 
 // Today, in the app's own local date. Used to cap the zero-fill: a future day
 // has no rows because it has not happened, which is not the same as a day that
@@ -391,43 +392,25 @@ export function SalesOrdersView({
       const m = d.date.slice(0, 7);
       byMonth.set(m, (byMonth.get(m) ?? 0) + d.revenueSen);
     }
-    const rows = [...byMonth.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1));
-    const WINDOW = 3;
-    const PROJECT = 6;
-
-    const out = rows.map(([month, sen], i) => {
-      const prior = rows.slice(Math.max(0, i - WINDOW), i);
-      const target =
-        prior.length === WINDOW
-          ? prior.reduce((t, [, v]) => t + v, 0) / WINDOW
-          : null;
-      return {
-        month: `${month.slice(5)} ${month.slice(2, 4)}`,
-        iso: month,
-        actualSen: sen,
-        Actual: Math.round(sen / 100),
-        Target: target === null ? null : Math.round(target / 100),
-        hit: target === null ? null : sen >= target,
-        projected: false,
-      };
-    });
-
+    const { actual, projected } = rollingForecast([...byMonth.entries()], 6);
+    const out = actual.map((r) => ({
+      month: `${r.ym.slice(5)} ${r.ym.slice(2, 4)}`,
+      iso: r.ym,
+      actualSen: r.sen,
+      Actual: Math.round(r.sen / 100),
+      Target: r.targetSen === null ? null : Math.round(r.targetSen / 100),
+      hit: r.hit,
+      projected: false,
+    }));
     // Carry the trend forward: each projected month's target is the rolling
     // average of the last three known actuals.
-    const tail = rows.slice(-WINDOW).map(([, v]) => v);
-    const avg = tail.length ? tail.reduce((t, v) => t + v, 0) / tail.length : 0;
-    let cursor = rows.length ? rows[rows.length - 1][0] : "";
-    for (let k = 0; k < PROJECT && cursor; k++) {
-      let [y, m] = cursor.split("-").map(Number);
-      m += 1;
-      if (m > 12) { m = 1; y += 1; }
-      cursor = `${y}-${String(m).padStart(2, "0")}`;
+    for (const p of projected) {
       out.push({
-        month: `${String(m).padStart(2, "0")} ${String(y).slice(2)}`,
-        iso: cursor,
+        month: `${p.ym.slice(5)} ${p.ym.slice(2, 4)}`,
+        iso: p.ym,
         actualSen: 0,
         Actual: null as unknown as number,
-        Target: Math.round(avg / 100),
+        Target: Math.round(p.sen / 100),
         hit: null,
         projected: true,
       });
