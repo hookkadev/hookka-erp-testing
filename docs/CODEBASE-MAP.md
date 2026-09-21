@@ -1,5 +1,10 @@
 # Hookka ERP — Codebase Map (the single authoritative map)
 
+> **Restamped 2026-09-21 on branch `feat/t012-mail-center`:** Mail Center rows, the
+> `mail-center.ts` handler index and the permission gotcha rewritten for PRD T-012
+> (multi-recipient send path, personal mailboxes, per-person read + acknowledgement,
+> org-chart picker, one visibility rule, `mail-sync/` retired, outbox attachments as files).
+
 > **Restamped 2026-09-18 on branch `fix/pcn-void-status-check-v2`:** Supplier Discount
 > (purchase CN) void was 500ing on prod — `purchase_credit_notes.status` never allowed
 > `CANCELLED` (BUG-2026-09-18-001). Fixed + the entry rewritten in place; the Supplier
@@ -716,9 +721,10 @@ that proves those locks can actually go red.
 | `src/pages/maintenance.tsx` — master variant config editor | `src/api/routes/customer-quotation.ts` — quotation pricing (259) | `users` / `user_invites` / `user_sessions` / `password_reset_tokens` | `tests/worker-auth.test.mjs` |
 | `src/pages/maintenance/sofa-combos.tsx` — master combo grid | `src/api/routes/users.ts` — accounts, requireSuperAdmin gate (1037) | `role_permissions` / `kv_config` | `tests/worker-auth-default-protect.test.mjs` |
 | `src/pages/maintenance/SofaComboHistoryDialog.tsx` — combo history | `src/api/routes/auth.ts` — login/session/reset (1096) | `email_threads` / `email_messages` / `email_addresses` | |
-| `src/pages/mail-center/index.tsx` — Mail Center shell (3389) | `src/api/routes/auth-oauth.ts` (239) / `auth-totp.ts` (549) | `email_attachments` / `email_labels` / `email_address_access` | |
-| `src/pages/mail-center/detail.tsx` — thread detail | `src/api/routes/worker-auth.ts` — factory-worker auth (349) | `mail_user_scope` / `audit_events` | |
-| `src/pages/mail-center/compose.tsx` — compose | `src/api/routes/mail-center.ts` — email engine (2476) | | |
+| `src/pages/mail-center/index.tsx` — Mail Center shell (3566) | `src/api/routes/auth-oauth.ts` (239) / `auth-totp.ts` (549) | `email_attachments` / `email_labels` / `email_address_access` | |
+| `src/pages/mail-center/detail.tsx` — thread detail, reply / reply-all, acknowledge (1576) | `src/api/routes/worker-auth.ts` — factory-worker auth (349) | `mail_user_scope` / `audit_events` | |
+| `src/pages/mail-center/compose.tsx` — compose with To/Cc/Bcc chips (677) | `src/api/routes/mail-center.ts` — email engine (3174) | `mail_thread_reads` / `mail_acknowledgements` (mig 0233) | `tests/mail-threading.test.mjs`, `mail-send-path`, `mail-provision`, `mail-reads-acks`, `email-outbox-attachments`, `mobile-mail-center` |
+| `src/pages/mail-center/recipients-input.tsx` (162) / `recipient-picker.tsx` (252) / `ack-request-row.tsx` (65) / `visibility-panel.tsx` (89) — T-012 pieces | `src/api/lib/mail-threading.ts` (203, pure: recipients + RFC headers) / `mail-provision.ts` (263) / `mail-acks.ts` (454) | | |
 | | `src/api/routes/files.ts` — generic upload/download (571) | | |
 | | `src/api/routes/kv-config.ts` — KV config store (93) | | |
 
@@ -738,7 +744,8 @@ that proves those locks can actually go red.
   - Org tab (departments + positions) — L2198-2608
   - Mailbox tab (mailbox scope, canManageUsers gated) — L2609-3235
   - Th/Td table cell helpers — L3236-3263
-- `src/pages/mail-center/index.tsx` (~2470 lines after the Gmail-view redesign)
+- `src/api/routes/mail-center.ts` (3174) — handler index (2026-09-21): GET /threads L1048 (filters: mailbox / status / q / starred / sent=1 / sentBy=me / label / limit+offset → `X-Has-More`; per-caller `my_unread` via `myUnreadSql()`), GET /threads/:id L1156 (marks read for the CALLER, returns `readBy` / `audience` / per-message `acks`), POST /threads/:id/messages/:mid/acknowledge L1278, outbox reads L1375-1524, GET /addresses L1607 (`?all=1` = SUPER_ADMIN management read), labels L1689-1832, config L1899-2152 (`requireSuperAdmin`), GET /directory L2206 + GET /visibility L2333 (T-012 R9/R10), scope-levels L2379-2408, POST /threads/:id/reply L2577, POST /compose L2821, PATCH /threads/:id L3017 (per-person unread; audits assign / archive / reopen / delete / restore).
+- `src/pages/mail-center/index.tsx` (3566 lines; ~2470 after the Gmail-view redesign, +T-012 "My mailbox" section, server-side Sent / label / paging, `VisibilityPanel`)
   - Dept/mailbox constants (canonical dept mailboxes, panes) + useMailPrefs hook — L180-280
   - ThreadList (density router) + CompactRow / ComfortableRow / RowLead / RowActions — L255-590
   - DraftsList — after the rows
@@ -766,9 +773,14 @@ that proves those locks can actually go red.
   — which MAILBOXES you see: `personal` (own alias + `email_address_access` grants) /
   `department` / `company`, defaulting to `personal` when the user has no row. **The table is
   empty on prod and should stay that way** unless someone genuinely must cover a shared box;
-  widen one user at a time, never the default. Both layers are bypassed by SUPER_ADMIN by
-  design — there are seven of them on prod (owner's decision, 2026-08-19), so neither layer
-  constrains that group. Every read handler calls BOTH `requirePermission` and `getMailScope`:
+  widen one user at a time, never the default. **Since 2026-09-21 (PRD T-012 R12) SUPER_ADMIN
+  does NOT bypass layer (2)** — one rule for everyone, matching the other system's ruling;
+  `company` is the level that sees every thread (incl. catch-all mail on an address with no
+  row). Layer (1) is still bypassed by SUPER_ADMIN, and configuration (`/addresses`, `/access`,
+  `/scope-level`, `/test-inject`, `GET /addresses?all=1`) stays `requireSuperAdmin`. **Deploy
+  note: the seven super admins on prod (2026-08-19) drop to `personal` until someone sets them
+  to `company` in the Mailbox tab — UNMEASURED which of them rely on seeing every box.**
+  Every read handler calls BOTH `requirePermission` and `getMailScope`:
   a permission grant alone must never widen which mailboxes someone sees, and
   `tests/mail-center-rbac.test.mjs` pins that. Configuration (`/addresses`, `/access`,
   `/scope-level`, `/test-inject`) is `requireSuperAdmin`, never permission-gated.
@@ -784,6 +796,26 @@ that proves those locks can actually go red.
   Sales user that Finance had no mailbox while `finance@hookka.com` held 1,039 threads.
   Inbound mail has been LIVE since the MX cutover (prod received on 2026-08-19); any copy
   claiming otherwise is stale.
+- **T-012 (2026-09-21) shape, in one paragraph.** `sendMail` takes `to: string | string[]` +
+  `cc` / `bcc` / `replyTo` / `headers` on BOTH providers. Every outgoing mail carries our own
+  `Message-ID` (`newMessageId()` → `<uuid@hookka.com>`); replies add `In-Reply-To` +
+  `References` (`referencesChain`). Brevo REWRITES the header with its own id, so an outbound
+  row stores both `message_id` (ours) and `provider_message_id` (theirs) and the inbound
+  resolver matches either. A reply is addressed by `replyRecipients()` (newest INBOUND
+  message's From; reply-all adds its To+Cc minus our own boxes), never by
+  `counterparty_email` — and ingestion moves `counterparty_email` to whoever wrote last.
+  `email_messages.bcc_addresses` is set only on outbound rows. Read state is per PERSON
+  (`mail_thread_reads`; `myUnreadSql()` falls back to the legacy shared `unread` flag when a
+  person has no row, so nothing lit up unread on deploy); the shared flag is still SET to 1 on
+  inbound but no longer cleared on open. Acknowledgement (`mail_acknowledgements`): only STAFF
+  recipients (rows in `email_addresses`) get one; the outbox cron
+  (`/api/internal/process-email-outbox`) chases overdue rows via `chaseOverdueAcknowledgements`
+  (24 h throttle, 50/run). Personal mailboxes are provisioned at `POST /users`, `POST
+  /users/invite` (reserved, `created_by = invite:<email>`) and `accept-invite`
+  (`lib/mail-provision.ts`, `first.last@hookka.com`, `first.last2@` on a clash). Outbox
+  attachments are Storage files (`outbox/<id>/<n>-<name>`; `attachments_json` holds the index;
+  legacy inline base64 rows still send). `mail-sync/` (Hostinger IMAP poller) is GONE — the
+  routing worker is the one inbound channel.
 - Mail Center is GMAIL-STYLE with 3 localStorage view toggles (mail-prefs.ts, surfaced via the header "View" gear): density (compact single-line default ↔ comfortable old multi-line cards), reading-pane (split 3-pane default ↔ full-width list that opens /mail-center/:id), category-tabs (All/Primary/Notifications strip, default on). These ARE the owner's "可以开关" — we did NOT fork two full layouts. The category split is a CLIENT-SIDE heuristic (`classifyCategory` over counterpartyEmail: no-reply/system/alert/eservices/statement local-parts + known bank/payment domains → Notifications, else Primary) — NO backend columns, the threads API is unchanged (still GET /threads, 300-row cap). Both row densities share RowLead+RowActions so star/select/hover-actions can't drift. Don't re-add the old single-layout ThreadList; don't move the category heuristic server-side.
 
 **Start here:** For a customer-facing task open `src/pages/customers.tsx`; for users/RBAC/org/mailbox-scope open `src/pages/settings/Users.tsx`; for internal email open `src/pages/mail-center/index.tsx`.
