@@ -209,5 +209,6 @@ export const SERVICE_SUBS = [
   { key: "overview", label: "Report" },
   { key: "overdue", label: "Overdue" },
   { key: "approvals", label: "Approvals" },
+  { key: "issues", label: "Top issues" },
 ] as const;
 export type ServiceSub = (typeof SERVICE_SUBS)[number]["key"];

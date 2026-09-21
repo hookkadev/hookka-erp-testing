@@ -9,6 +9,7 @@
 // tests/db-schema.json), so "overdue" = age > SERVICE_OVERDUE_DAYS.
 // ---------------------------------------------------------------------------
 import { ensureApprovalColumns } from "./service-approval";
+import { parseCauses, parseProductLabels } from "./service-issue-stats";
 
 /** Open/in-progress cases older than this many days are flagged overdue. */
 export const SERVICE_OVERDUE_DAYS = 3;
@@ -26,6 +27,10 @@ export type ServiceCaseLite = {
   issue: string;
   approvalKind: string | null;
   approvalStatus: string | null;
+  causes: string[]; // distinct root-cause categories; [] = not yet analysed
+  unit: string | null; // responsibleunit
+  prevention: string | null; // prevention_status
+  products: string[]; // affected product labels (max 10)
   ageDays: number | null; // only for OPEN / IN_PROGRESS
   daysOverdue: number; // 0 unless open past the threshold
 };
@@ -57,15 +62,34 @@ const str = (r: Row, snake: string, camel: string): string | null => {
   return v == null ? null : String(v);
 };
 
+// rootcauses (0169) / responsibleunit (0166) are runtime-added: the SELECT below
+// would throw on a DB where service-cases.ts never ran, so ensure them the same
+// way that route does (idempotent, failure swallowed, once per isolate).
+let issueColumns = false;
+async function ensureIssueColumns(db: D1Database): Promise<void> {
+  if (issueColumns) return;
+  for (const col of ["responsibleunit", "rootcauses"]) {
+    try {
+      await db.prepare(`ALTER TABLE service_cases ADD COLUMN IF NOT EXISTS ${col} TEXT`).run();
+    } catch {
+      // ignore — column may already exist or DDL transiently rejected
+    }
+  }
+  issueColumns = true;
+}
+
 export async function buildServiceSlice(
   db: D1Database,
   now: Date = new Date(),
 ): Promise<ServiceSlice> {
   await ensureApprovalColumns(db);
+  await ensureIssueColumns(db);
   const res = await db
     .prepare(
       `SELECT id, case_no, customer_name, status, created_at, closed_at,
-              issue_description, approval_kind, approval_status
+              issue_description, approval_kind, approval_status,
+              root_cause_category, rootcauses, responsibleunit,
+              prevention_status, affected_product_ids
          FROM service_cases
         ORDER BY created_at DESC
         LIMIT 3000`,
@@ -86,6 +110,11 @@ export async function buildServiceSlice(
       issue: (str(r, "issue_description", "issueDescription") ?? "").slice(0, 160),
       approvalKind: str(r, "approval_kind", "approvalKind"),
       approvalStatus: str(r, "approval_status", "approvalStatus"),
+      // rootcauses / responsibleunit are runtime-added lowercase columns: read dual-keyed.
+      causes: parseCauses(r.rootcauses ?? r.rootCauses, r.root_cause_category ?? r.rootCauseCategory),
+      unit: str(r, "responsibleunit", "responsibleUnit"),
+      prevention: str(r, "prevention_status", "preventionStatus"),
+      products: parseProductLabels(r.affected_product_ids ?? r.affectedProductIds),
       ...caseAging(status, createdRaw, now),
     }];
   });
