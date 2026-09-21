@@ -173,3 +173,27 @@ export function previousPeriod(p: Period, months: string[]): Period | null {
   const lastOfPrev = [...months].filter((m) => m.slice(0, 4) === prevYear).pop();
   return lastOfPrev ? { mode: "ytd", month: lastOfPrev } : null;
 }
+
+// The rows a "focused" panel should read: the single highlighted day when one
+// is picked (chart click or datepicker), otherwise the whole period. Charts
+// keep using inPeriod so they still draw the whole month around the highlight.
+export function inFocus(p: Period, date: string | null | undefined): boolean {
+  if (p.day) return String(date ?? "").slice(0, 10) === p.day;
+  return inPeriod(p, date);
+}
+
+// Sub-tab strips live in the page's sticky row (next to the period picker), so
+// the keys are shared between the shell and the views.
+export const EMP_SUBS = [
+  { key: "overview", label: "Overview" },
+  { key: "time", label: "Time & attendance" },
+  { key: "efficiency", label: "Efficiency" },
+] as const;
+export const SITI_SUBS = [
+  { key: "overview", label: "Overview" },
+  { key: "production", label: "Production" },
+  { key: "cost", label: "Cost" },
+  { key: "materials", label: "Materials" },
+] as const;
+export type EmpSub = (typeof EMP_SUBS)[number]["key"];
+export type SitiSub = (typeof SITI_SUBS)[number]["key"];

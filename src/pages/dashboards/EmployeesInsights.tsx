@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, Tooltip, ReferenceLine, ResponsiveContainer } from "recharts";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { TAUPE, TEAL, MUTED, BORDER, AMBER, GREEN, fmtN, inPeriod, periodLabel, type Period } from "./dashboard-shared-lib";
+import { TAUPE, TEAL, MUTED, BORDER, AMBER, GREEN, fmtN, inPeriod, inFocus, dayLabel, periodLabel, type Period } from "./dashboard-shared-lib";
 
 // The Employees tab's time/efficiency panels. Everything here is derived from
 // the SAME cached /api/dashboard/prototype `employee` slice the rest of the
@@ -24,7 +24,14 @@ export type EmployeeSlice = {
     overtimeMinutes: number;
     efficiencyPct: number | null;
   }[];
-  performance: { byDay: { date: string; workingMinutes: number; productionMinutes: number }[] };
+  performance: {
+    byDay: {
+      date: string;
+      workingMinutes: number;
+      productionMinutes: number;
+      workers?: { workerId: string; workingMinutes: number; productionMinutes: number }[];
+    }[];
+  };
 };
 
 const hrs = (min: number) => `${(min / 60).toLocaleString("en-MY", { maximumFractionDigits: 1 })}h`;
@@ -35,11 +42,27 @@ const TOOLTIP = { background: "#FFFFFF", border: `1px solid ${BORDER}`, borderRa
 // threshold, so these are display choices, not policy.
 const WARN_LOW = 90;
 const WARN_HIGH = 110;
+// A person clocking under an hour in the window has no meaningful ratio.
+const MIN_RANK_MINUTES = 60;
 
-export function TimeAttendancePanels({
-  employee, period, target,
-}: { employee: EmployeeSlice; period: Period; target: number }) {
-  const att = useMemo(() => employee.attendance.filter((r) => inPeriod(period, r.date)), [employee.attendance, period]);
+type Common = { employee: EmployeeSlice; period: Period; target: number; onPeriodChange: (p: Period) => void };
+
+// "Showing: 12 Aug — click to go back", same affordance as the Sales Orders tab.
+function DayChip({ period, onPeriodChange }: { period: Period; onPeriodChange: (p: Period) => void }) {
+  if (!period.day) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => onPeriodChange({ ...period, day: undefined })}
+      className="text-xs rounded-md border border-[#E5E0D8] bg-[#F7F5F3] px-2 py-0.5 text-[#6B5C32] hover:bg-white"
+    >
+      Showing: {dayLabel(period.day)} — click to go back
+    </button>
+  );
+}
+
+export function TimeAttendancePanels({ employee, period, target, onPeriodChange }: Common) {
+  const att = useMemo(() => employee.attendance.filter((r) => inFocus(period, r.date)), [employee.attendance, period]);
   const t = useMemo(() => {
     const working = att.reduce((a, r) => a + r.workingMinutes, 0);
     const prod = att.reduce((a, r) => a + r.productionMinutes, 0);
@@ -52,7 +75,7 @@ export function TimeAttendancePanels({
     () => employee.performance.byDay
       .filter((d) => inPeriod(period, d.date) && d.workingMinutes > 0)
       .sort((a, b) => (a.date < b.date ? -1 : 1))
-      .map((d) => ({ date: d.date.slice(5), Efficiency: Math.round((d.productionMinutes / d.workingMinutes) * 1000) / 10 })),
+      .map((d) => ({ iso: d.date, date: d.date.slice(5), Efficiency: Math.round((d.productionMinutes / d.workingMinutes) * 1000) / 10 })),
     [employee.performance.byDay, period],
   );
   const below = daily.filter((d) => d.Efficiency < target).length;
@@ -74,8 +97,9 @@ export function TimeAttendancePanels({
         <CardHeader className="pb-3">
           <CardTitle>Time &amp; attendance</CardTitle>
           <p className="text-xs text-[#6B7280]">
-            {hrs(t.working)} clocked across {periodLabel(period)} · {t.people} employees combined
+            {hrs(t.working)} clocked across {period.day ? dayLabel(period.day) : periodLabel(period)} · {t.people} employees combined
           </p>
+          <DayChip period={period} onPeriodChange={onPeriodChange} />
         </CardHeader>
         <CardContent>
           <div className="flex items-center gap-6 flex-wrap">
@@ -123,21 +147,30 @@ export function TimeAttendancePanels({
         <CardHeader className="pb-3">
           <CardTitle>Daily efficiency</CardTitle>
           <p className="text-xs text-[#6B7280]">
-            Pool (production ÷ working) per day against the {target}% target · {below} of {daily.length} days below
+            Pool (production ÷ working) per day against the {target}% target · {below} of {daily.length} days below · click a point to focus that day
           </p>
         </CardHeader>
         <CardContent>
-          <div style={{ width: "100%", height: 260 }}>
+          <div className="select-none [&_*]:outline-none [&_.recharts-wrapper]:outline-none" style={{ width: "100%", height: 260 }}>
             {daily.length === 0 ? (
               <div className="flex items-center justify-center h-full text-xs text-[#6B7280]">No clocked hours in range.</div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={daily} margin={{ top: 6, right: 8, bottom: 0, left: 0 }}>
+                <LineChart
+                  data={daily}
+                  margin={{ top: 6, right: 8, bottom: 0, left: 0 }}
+                  style={{ cursor: "pointer" }}
+                  onClick={(e) => {
+                    const hit = daily.find((d) => d.date === e?.activeLabel);
+                    if (hit) onPeriodChange({ ...period, day: period.day === hit.iso ? undefined : hit.iso });
+                  }}
+                >
                   <XAxis dataKey="date" tick={{ fontSize: 10, fill: MUTED }} axisLine={{ stroke: BORDER }} tickLine={false} />
                   <YAxis tick={{ fontSize: 10, fill: MUTED }} axisLine={false} tickLine={false} width={38} unit="%" domain={[0, "auto"]} />
-                  <Tooltip contentStyle={TOOLTIP} formatter={(v) => `${v}%`} />
+                  <Tooltip cursor={{ stroke: BORDER }} contentStyle={TOOLTIP} formatter={(v) => `${v}%`} />
+                  {period.day && <ReferenceLine x={period.day.slice(5)} stroke={TAUPE} strokeDasharray="3 3" />}
                   <ReferenceLine y={target} stroke={MUTED} strokeDasharray="4 3" label={{ value: `${target}% target`, fontSize: 10, fill: MUTED, position: "insideTopRight" }} />
-                  <Line type="monotone" dataKey="Efficiency" stroke={TEAL} strokeWidth={1.75} dot={{ r: 2.5 }} />
+                  <Line type="monotone" dataKey="Efficiency" stroke={TEAL} strokeWidth={1.75} dot={{ r: 2.5 }} activeDot={{ r: 5.5, fill: "#FFFFFF", stroke: TEAL, strokeWidth: 2 }} />
                 </LineChart>
               </ResponsiveContainer>
             )}
@@ -173,34 +206,38 @@ function RankCard({ title, hint, rows, total, fromTop, color }: {
             <span className="w-14 text-right font-mono text-sm font-semibold" style={{ color }}>{pct1(r.avg)}</span>
           </div>
         ))}
-        {rows.length === 0 && <p className="py-4 text-center text-xs text-[#6B7280]">No efficiency readings in range.</p>}
+        {rows.length === 0 && <p className="py-4 text-center text-xs text-[#6B7280]">Nobody clocked enough hours in range.</p>}
       </CardContent>
     </Card>
   );
 }
 
-export function EfficiencyPanels({
-  employee, period, target,
-}: { employee: EmployeeSlice; period: Period; target: number }) {
-  // Average of the RECORDED efficiency readings per person (attendance_records
-  // carries one on only ~half of rows) — a missing reading is skipped, not
-  // counted as 0.
+export function EfficiencyPanels({ employee, period, target, onPeriodChange }: Common) {
+  // The HOUSE metric, per person: earned production minutes ÷ clocked working
+  // minutes (performance.byDay[].workers) — the same numbers the Employees
+  // KPI and the pool line use, so the ranking reconciles with them. NOT
+  // attendance_records.efficiency_pct, a looser number the route's own header
+  // says reads ~94% where the office reads ~84%. Headcount workers only.
   const people = useMemo(() => {
     const byId = new Map(employee.workers.map((w) => [w.id, w]));
-    const m = new Map<string, { name: string; dept: string | null; role: string | null; sum: number; n: number }>();
-    for (const r of employee.attendance) {
-      if (r.efficiencyPct == null || !inPeriod(period, r.date)) continue;
-      const k = r.employeeId ?? r.employeeName ?? "";
-      const w = r.employeeId ? byId.get(r.employeeId) : undefined;
-      const cur = m.get(k) ?? { name: w?.name ?? r.employeeName ?? "—", dept: w?.dept ?? r.dept, role: w?.role ?? null, sum: 0, n: 0 };
-      cur.sum += r.efficiencyPct;
-      cur.n += 1;
-      m.set(k, cur);
+    const m = new Map<string, { w: number; p: number }>();
+    for (const d of employee.performance.byDay) {
+      if (!inFocus(period, d.date)) continue;
+      for (const x of d.workers ?? []) {
+        const cur = m.get(x.workerId) ?? { w: 0, p: 0 };
+        cur.w += x.workingMinutes;
+        cur.p += x.productionMinutes;
+        m.set(x.workerId, cur);
+      }
     }
     return [...m.entries()]
-      .map(([key, v]) => ({ key, name: v.name, sub: [v.role, v.dept].filter(Boolean).join(" · "), avg: v.sum / v.n }))
+      .flatMap(([id, v]) => {
+        const w = byId.get(id);
+        if (!w || !w.countsToHeadcount || v.w < MIN_RANK_MINUTES) return [];
+        return [{ key: id, name: w.name ?? "—", sub: [w.role, w.dept].filter(Boolean).join(" · "), avg: (v.p / v.w) * 100 }];
+      })
       .sort((a, b) => b.avg - a.avg);
-  }, [employee.attendance, employee.workers, period]);
+  }, [employee.performance.byDay, employee.workers, period]);
 
   const top = people.slice(0, 5);
   const bottom = people.slice(-5).reverse();
@@ -213,11 +250,12 @@ export function EfficiencyPanels({
     <div className="space-y-5 max-md:space-y-4">
       <div className="flex items-center gap-2">
         <h3 className="text-base font-semibold text-[#1F1D1B]">Efficiency ranking</h3>
-        <span className="rounded-full bg-[#F0ECE9] px-2 py-0.5 text-[11px] text-[#6B7280]">{people.length} ranked · {periodLabel(period)}</span>
+        <span className="rounded-full bg-[#F0ECE9] px-2 py-0.5 text-[11px] text-[#6B7280]">{people.length} ranked · {period.day ? dayLabel(period.day) : periodLabel(period)}</span>
+        <DayChip period={period} onPeriodChange={onPeriodChange} />
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <RankCard title="Top 5 performers" hint="Highest average efficiency in the period" rows={top} total={people.length} fromTop color={GREEN} />
-        <RankCard title="Bottom 5 · needs attention" hint="Lowest average efficiency in the period" rows={bottom} total={people.length} fromTop={false} color={AMBER} />
+        <RankCard title="Top 5 performers" hint="Highest efficiency (production ÷ working) in the period" rows={top} total={people.length} fromTop color={GREEN} />
+        <RankCard title="Bottom 5 · needs attention" hint="Lowest efficiency (production ÷ working) in the period" rows={bottom} total={people.length} fromTop={false} color={AMBER} />
       </div>
 
       <div className="flex items-center gap-2">

@@ -1,12 +1,11 @@
-import { useMemo, useState } from "react";
-import { ComposedChart, Area, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import { useMemo } from "react";
+import { ComposedChart, Area, Line, XAxis, YAxis, Tooltip, Legend, ReferenceLine, ResponsiveContainer } from "recharts";
 import { useCachedJson } from "@/lib/cached-fetch";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, type TabItem } from "@/components/ui/tabs";
 import { TimeAttendancePanels, EfficiencyPanels, type EmployeeSlice } from "./EmployeesInsights";
 import { Users, Target, Clock, Gauge } from "lucide-react";
-import { TAUPE, TEAL, MUTED, BORDER, fmtN, inPeriod, periodLabel, type Period } from "./dashboard-shared-lib";
+import { TAUPE, TEAL, MUTED, BORDER, fmtN, inPeriod, inFocus, periodLabel, type Period, type EmpSub } from "./dashboard-shared-lib";
 import { Kpi, LiveBadge, MissingNote } from "./dashboard-shared";
 
 // Real data from GET /api/dashboard/prototype — the `employee` +
@@ -41,14 +40,9 @@ const lateMin = (t: string | null) => {
   return m ? Math.max(0, Number(m[1]) * 60 + Number(m[2]) - 480) : 0;
 };
 
-const SUB_TABS: TabItem<"overview" | "time" | "efficiency">[] = [
-  { key: "overview", label: "Overview" },
-  { key: "time", label: "Time & attendance" },
-  { key: "efficiency", label: "Efficiency" },
-];
-
-export function EmployeesView({ period }: { period: Period }) {
-  const [sub, setSub] = useState<(typeof SUB_TABS)[number]["key"]>("overview");
+export function EmployeesView({
+  period, sub, onPeriodChange,
+}: { period: Period; sub: EmpSub; onPeriodChange: (p: Period) => void }) {
   const { data, loading, error } = useCachedJson<Feed>("/api/dashboard/prototype");
 
   const employee = data?.employee;
@@ -73,11 +67,11 @@ export function EmployeesView({ period }: { period: Period }) {
     const days = (employee?.performance.byDay ?? [])
       .filter((d) => inPeriod(period, d.date))
       .sort((a, b) => (a.date < b.date ? -1 : 1));
-    let w = 0, p = 0;
+    const w = days.reduce((a, d) => a + d.workingMinutes, 0);
+    const p = days.reduce((a, d) => a + d.productionMinutes, 0);
     const rows = days.map((d) => {
-      w += d.workingMinutes;
-      p += d.productionMinutes;
       return {
+        iso: d.date,
         date: d.date.slice(5),
         "Working Hours": Math.round((d.workingMinutes / 60) * 10) / 10,
         "Production Hours": Math.round((d.productionMinutes / 60) * 10) / 10,
@@ -93,7 +87,7 @@ export function EmployeesView({ period }: { period: Period }) {
   const attendanceLog = useMemo(() => {
     const byEmp = new Map<string, { last: NonNullable<Feed["employee"]>["attendance"][number]; days: number }>();
     for (const r of employee?.attendance ?? []) {
-      if (!r.date || !inPeriod(period, r.date)) continue;
+      if (!r.date || !inFocus(period, r.date)) continue;
       const k = r.employeeId ?? r.employeeName ?? "";
       const cur = byEmp.get(k);
       byEmp.set(k, { last: !cur || r.date >= (cur.last.date ?? "") ? r : cur.last, days: (cur?.days ?? 0) + 1 });
@@ -132,7 +126,6 @@ export function EmployeesView({ period }: { period: Period }) {
         <LiveBadge live={live} />
       </div>
       <MissingNote fields={missing} />
-      <Tabs tabs={SUB_TABS} value={sub} onChange={setSub} variant="pill" />
 
       {sub === "overview" && (
         <>
@@ -178,14 +171,22 @@ export function EmployeesView({ period }: { period: Period }) {
           <CardTitle>Working vs production hours</CardTitle>
         </CardHeader>
         <CardContent>
-          <div style={{ width: "100%", height: 220 }}>
+          <div className="select-none [&_*]:outline-none [&_.recharts-wrapper]:outline-none" style={{ width: "100%", height: 220 }}>
             {chartData.length === 0 ? (
               <div className="flex items-center justify-center h-full text-xs text-[#6B7280]">
                 No clocked hours in range.
               </div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={chartData} margin={{ top: 6, right: 6, bottom: 0, left: 0 }}>
+                <ComposedChart
+                  data={chartData}
+                  margin={{ top: 6, right: 6, bottom: 0, left: 0 }}
+                  style={{ cursor: "pointer" }}
+                  onClick={(e) => {
+                    const hit = chartData.find((d) => d.date === e?.activeLabel);
+                    if (hit) onPeriodChange({ ...period, day: period.day === hit.iso ? undefined : hit.iso });
+                  }}
+                >
                   <defs>
                     <linearGradient id="empWorkGrad" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="0%" stopColor={TAUPE} stopOpacity={0.22} />
@@ -194,7 +195,8 @@ export function EmployeesView({ period }: { period: Period }) {
                   </defs>
                   <XAxis dataKey="date" tick={{ fontSize: 10, fill: MUTED }} axisLine={{ stroke: BORDER }} tickLine={false} />
                   <YAxis tick={{ fontSize: 10, fill: MUTED }} axisLine={false} tickLine={false} width={32} />
-                  <Tooltip contentStyle={{ background: "#FFFFFF", border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: 12 }} />
+                  <Tooltip cursor={{ stroke: BORDER }} contentStyle={{ background: "#FFFFFF", border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: 12 }} />
+                  {period.day && <ReferenceLine x={period.day.slice(5)} stroke={TAUPE} strokeDasharray="3 3" />}
                   <Legend wrapperStyle={{ fontSize: 11 }} />
                   <Area type="monotone" dataKey="Working Hours" stroke={TAUPE} fill="url(#empWorkGrad)" strokeWidth={2} />
                   <Line type="monotone" dataKey="Production Hours" stroke={TEAL} strokeWidth={1.5} dot={false} />
@@ -248,7 +250,7 @@ export function EmployeesView({ period }: { period: Period }) {
 
       {sub === "time" && employee && (
         <>
-          <TimeAttendancePanels employee={employee} period={period} target={config?.efficiencyTargetPct ?? 100} />
+          <TimeAttendancePanels employee={employee} period={period} onPeriodChange={onPeriodChange} target={config?.efficiencyTargetPct ?? 100} />
 
       {/* ---- Attendance log: latest recorded day per employee -------------- */}
       <Card>
@@ -323,7 +325,7 @@ export function EmployeesView({ period }: { period: Period }) {
       )}
 
       {sub === "efficiency" && employee && (
-        <EfficiencyPanels employee={employee} period={period} target={config?.efficiencyTargetPct ?? 100} />
+        <EfficiencyPanels employee={employee} period={period} onPeriodChange={onPeriodChange} target={config?.efficiencyTargetPct ?? 100} />
       )}
     </div>
   );

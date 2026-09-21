@@ -9,7 +9,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Tabs, type TabItem } from "@/components/ui/tabs";
 import { AlertTriangle, Clock, CalendarClock, PackageX, DollarSign, UserCheck, Gauge, Search } from "lucide-react";
-import { TAUPE, TEAL, RED, AMBER, MUTED, BORDER, fmtN, fmtRMAxis, inPeriod, periodLabel, type Period } from "./dashboard-shared-lib";
+import { TAUPE, TEAL, RED, AMBER, MUTED, BORDER, fmtN, fmtRMAxis, inPeriod, periodLabel, type Period, type SitiSub } from "./dashboard-shared-lib";
 import { Kpi, LiveBadge } from "./dashboard-shared";
 
 // Siti's report checklist (handed over on paper, 2026-09-17), redesigned
@@ -96,13 +96,6 @@ const lateMin = (t: string | null) => {
   return m ? Math.max(0, Number(m[1]) * 60 + Number(m[2]) - 480) : 0;
 };
 
-const SUB_TABS: TabItem<"overview" | "production" | "cost" | "materials">[] = [
-  { key: "overview", label: "Overview" },
-  { key: "production", label: "Production" },
-  { key: "cost", label: "Cost" },
-  { key: "materials", label: "Materials" },
-];
-
 const DEPT_ALL_TAB: TabItem<string>[] = [{ key: "ALL", label: "All" }];
 
 function urgencyPill(daysLeft: number | null) {
@@ -111,11 +104,10 @@ function urgencyPill(daysLeft: number | null) {
   return { label: `${daysLeft} Days`, bg: "#FAEFCB", fg: "#9C6F1E" };
 }
 
-export function SitiOpsView({ period }: { period: Period }) {
+export function SitiOpsView({ period, sub }: { period: Period; sub: SitiSub }) {
   const { data, loading, error } = useCachedJson<Feed>("/api/dashboard/prototype");
   const [deptFilter, setDeptFilter] = useState("ALL");
   const [search, setSearch] = useState("");
-  const [sub, setSub] = useState<(typeof SUB_TABS)[number]["key"]>("overview");
 
   const production = data?.production;
   const inventory = data?.inventory;
@@ -263,8 +255,6 @@ export function SitiOpsView({ period }: { period: Period }) {
         <h2 className="text-lg font-semibold text-[#1F1D1B]">Operations (Siti's list)</h2>
         <LiveBadge live={prodLive && invLive} />
       </div>
-
-      <Tabs tabs={SUB_TABS} value={sub} onChange={setSub} variant="pill" />
 
       {sub === "overview" && (
         <>

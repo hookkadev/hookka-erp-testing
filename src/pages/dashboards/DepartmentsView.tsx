@@ -32,12 +32,20 @@ export function DepartmentsView({ period }: { period: Period }) {
       return e;
     };
     for (const w of employee?.workers ?? []) if (w.countsToHeadcount) get(w.dept).headcount++;
+    // Hours + efficiency are the HOUSE metric (performance.byDay[].workers,
+    // joined to the worker's department) so they reconcile with the Employees
+    // tab; attendance_records only supplies days worked.
+    const deptOf = new Map((employee?.workers ?? []).map((w) => [w.id, w.dept]));
+    for (const d of employee?.performance.byDay ?? []) {
+      if (!inPeriod(period, d.date)) continue;
+      for (const x of d.workers ?? []) {
+        const e = get(deptOf.get(x.workerId) ?? null);
+        e.working += x.workingMinutes;
+        e.prod += x.productionMinutes;
+      }
+    }
     for (const r of employee?.attendance ?? []) {
-      if (!inPeriod(period, r.date)) continue;
-      const e = get(r.dept);
-      e.working += r.workingMinutes;
-      e.prod += r.productionMinutes;
-      e.days += 1;
+      if (inPeriod(period, r.date)) get(r.dept).days += 1;
     }
     const rows = [...m.values()].sort((a, b) => b.headcount - a.headcount || a.dept.localeCompare(b.dept));
     const total = rows.reduce(
