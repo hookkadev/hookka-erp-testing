@@ -4367,6 +4367,72 @@ app.get("/other-party-bills", async (c) => {
   return c.json({ success: true, data, total: data.length });
 });
 
+// AP Invoices — ONE list of everything the company owes on paper (owner
+// 2026-09-22, Houzs adoption Phase 2): other-creditor bills (kind AP, editable
+// on their own tab) beside a READ-ONLY mirror of purchase invoices (kind PI —
+// Procurement's page stays the place to create/edit/post them). Nothing here
+// writes; the mirror is a view, the PI row links back to its origin.
+app.get("/ap-invoices", async (c) => {
+  const denied = await requirePermission(c, "accounting", "read");
+  if (denied) return denied;
+  const orgId = getOrgId(c);
+  const status = c.req.query("status") || ""; // "", "OPEN", "PAID", "CANCELLED"
+  const [ocbRes, piRes] = await Promise.all([
+    c.var.DB.prepare(
+      `SELECT b.id, b.billNo, b.partyName, b.billDate, b.referenceNo, b.description, b.totalSen, b.paidAmountSen, b.status,
+              dl.state AS lifecycleState
+         FROM other_party_bills b
+         LEFT JOIN document_lifecycle dl ON dl.orgId = b.orgId AND dl.sourceType = 'other_party_bill' AND dl.sourceId = b.billNo
+        WHERE b.orgId = ? AND b.partyType = 'CREDITOR' AND (dl.state IS NULL OR dl.state <> 'DELETED')`,
+    ).bind(orgId).all<Record<string, unknown>>(),
+    c.var.DB.prepare(
+      `SELECT id, pi_no, supplier_name, supplier_invoice_no, invoice_date, due_date, amount_sen, paid_amount_sen, status, is_opening
+         FROM purchase_invoices
+        WHERE status <> 'DRAFT'`,
+    ).all<Record<string, unknown>>().catch(() => ({ results: [] as Record<string, unknown>[] })),
+  ]);
+  type ApRow = {
+    kind: "AP" | "PI"; id: string; no: string; supplier: string; supplierRef: string; date: string; dueDate: string | null;
+    description: string; totalSen: number; paidSen: number; outstandingSen: number; status: string; opening: boolean;
+  };
+  const rows: ApRow[] = [];
+  for (const b of ocbRes.results ?? []) {
+    const total = Math.round(Number(b.totalSen ?? b.total_sen) || 0);
+    const paid = Math.round(Number(b.paidAmountSen ?? b.paid_amount_sen) || 0);
+    const lc = String(b.lifecycleState ?? b.lifecycle_state ?? "ACTIVE");
+    const st = String(b.status ?? "");
+    rows.push({
+      kind: "AP", id: String(b.id), no: String(b.billNo ?? b.bill_no ?? ""), supplier: String(b.partyName ?? b.party_name ?? ""),
+      supplierRef: String(b.referenceNo ?? b.reference_no ?? ""), date: String(b.billDate ?? b.bill_date ?? "").slice(0, 10), dueDate: null,
+      description: String(b.description ?? ""), totalSen: total, paidSen: paid, outstandingSen: total - paid,
+      status: lc !== "ACTIVE" ? "CANCELLED" : st === "CANCELLED" || st === "VOID" ? "CANCELLED" : total - paid <= 0 ? "PAID" : "OPEN",
+      opening: false,
+    });
+  }
+  for (const p of piRes.results ?? []) {
+    const total = Math.round(Number(p.amountSen ?? p.amount_sen) || 0);
+    const paid = Math.round(Number(p.paidAmountSen ?? p.paid_amount_sen) || 0);
+    const st = String(p.status ?? "");
+    rows.push({
+      kind: "PI", id: String(p.id), no: String(p.piNo ?? p.pi_no ?? ""), supplier: String(p.supplierName ?? p.supplier_name ?? ""),
+      supplierRef: String(p.supplierInvoiceNo ?? p.supplier_invoice_no ?? ""), date: String(p.invoiceDate ?? p.invoice_date ?? "").slice(0, 10),
+      dueDate: (p.dueDate ?? p.due_date) ? String(p.dueDate ?? p.due_date).slice(0, 10) : null,
+      description: "", totalSen: total, paidSen: paid, outstandingSen: total - paid,
+      status: st === "CANCELLED" || st === "VOID" ? "CANCELLED" : st === "PAID" || total - paid <= 0 ? "PAID" : "OPEN",
+      opening: !!Number(p.isOpening ?? p.is_opening ?? 0),
+    });
+  }
+  const filtered = status ? rows.filter((r) => r.status === status) : rows;
+  filtered.sort((a, b) => b.date.localeCompare(a.date) || b.no.localeCompare(a.no));
+  const totals = {
+    openSen: rows.filter((r) => r.status === "OPEN").reduce((s, r) => s + r.outstandingSen, 0),
+    openCount: rows.filter((r) => r.status === "OPEN").length,
+    apOpenSen: rows.filter((r) => r.status === "OPEN" && r.kind === "AP").reduce((s, r) => s + r.outstandingSen, 0),
+    piOpenSen: rows.filter((r) => r.status === "OPEN" && r.kind === "PI").reduce((s, r) => s + r.outstandingSen, 0),
+  };
+  return c.json({ success: true, data: { rows: filtered, totals } });
+});
+
 app.delete("/other-party-bills/:billNo", async (c) => {
   const denied = await requirePermission(c, "accounting", "delete");
   if (denied) return denied;
@@ -13313,6 +13379,107 @@ app.post("/bank-reco/ignore", async (c) => {
   }
 });
 
+// Book a bank movement the books don't have — right on the reconciliation page
+// (owner 2026-09-22, Houzs adoption Phase 3 「Book as receipt/expense」). Money
+// OUT → a Payment Voucher (immediate post, legacy road); money IN → an Official
+// Receipt. Amount is LOCKED to the statement line; the new document's bank leg
+// is matched to the line in the same batch, so the row leaves the unbooked
+// list the moment it is booked. Never for pre-opening or finalised months.
+app.post("/bank-reco/book-line", async (c) => {
+  const denied = await requirePermission(c, "accounting", "create");
+  if (denied) return denied;
+  try {
+    await ensureBankRecoCols(c.var.DB);
+    await ensurePvApprovalCols(c.var.DB);
+    const body = await c.req.json() as {
+      statementLineId?: string; accountCode?: string; party?: string; description?: string;
+    };
+    const id = String(body.statementLineId || "");
+    const line = await c.var.DB.prepare(
+      "SELECT id, accountCode, txnDate, amountSen, description, matchedLegId, ignored_at FROM bank_statement_lines WHERE id = ?",
+    ).bind(id).first<{ id: string; accountCode: string; txnDate: string; amountSen: number; description: string | null; matchedLegId: string | null; ignored_at?: string | null; ignoredAt?: string | null }>();
+    if (!line) return c.json({ success: false, error: "Statement line not found" }, 404);
+    if (line.matchedLegId) return c.json({ success: false, error: "This line is already matched" }, 400);
+    if (line.ignoredAt ?? line.ignored_at) return c.json({ success: false, error: "This line is ignored — restore it first" }, 400);
+    const obDateBk = await getOpeningDate(c.var.DB);
+    if (obDateBk && line.txnDate < obDateBk) {
+      return c.json({ success: false, error: `Dated before the opening date (${obDateBk}) — this money is already inside the opening balance.` }, 400);
+    }
+    if (await bankRecoMonthFinalized(c.var.DB, line.accountCode, line.txnDate)) {
+      return c.json({ success: false, error: BANK_RECO_FINALIZED_ERR }, 400);
+    }
+    const amountSen = Math.round(Number(line.amountSen) || 0);
+    if (amountSen === 0) return c.json({ success: false, error: "Zero-amount line" }, 400);
+    const coaRes = await c.var.DB.prepare(
+      "SELECT code, type, specialAccountType, isPostable FROM chart_of_accounts",
+    ).all<{ code: string; type: CoaRow["type"]; specialAccountType: string | null; isPostable: number | null }>();
+    const coa = new Map((coaRes.results ?? []).map((a) => [a.code, a] as const));
+    const bank = coa.get(line.accountCode);
+    if (!bank || (bank.specialAccountType !== "SBK" && bank.specialAccountType !== "SCH")) {
+      return c.json({ success: false, error: "Statement line's account is not a bank/cash account" }, 400);
+    }
+    const v = validateDocLines(coa, [{ accountCode: String(body.accountCode || ""), description: String(body.description ?? ""), amountSen: Math.abs(amountSen) }]);
+    if (!v.ok) return c.json({ success: false, error: v.error }, 400);
+    const party = String(body.party ?? "").trim();
+    const desc = String(body.description ?? "").trim() || String(line.description ?? "").slice(0, 120);
+    const orgId = getOrgId(c);
+    const actorUserId = (c as unknown as { get: (k: string) => string | undefined }).get("userId") ?? null;
+    const now = new Date().toISOString();
+    const isOut = amountSen < 0;
+    const docId = isOut ? `pv-${crypto.randomUUID().slice(0, 8)}` : `or-${crypto.randomUUID().slice(0, 8)}`;
+    const docNo = await issueDocNumber(c.var.DB, { bankAccountCode: line.accountCode, direction: isOut ? "out" : "in", dateIso: line.txnDate });
+    const statements: D1PreparedStatement[] = [];
+    let bankLegId = "";
+    if (isOut) {
+      statements.push(
+        c.var.DB.prepare(
+          `INSERT INTO payment_vouchers (id, pvNo, date, payee, description, payFrom, accrued, accrualAccount, settledAt, productLine, totalSen, status,
+             approval_state, approved_at, approved_by, createdBy, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, 0, NULL, NULL, NULL, ?, 'POSTED', 'APPROVED', ?, ?, ?, ?, ?)`,
+        ).bind(docId, docNo, line.txnDate, party, desc, line.accountCode, v.totalSen, now, actorUserId, actorUserId, now, now),
+        c.var.DB.prepare(
+          "INSERT INTO payment_voucher_lines (id, voucherId, accountCode, description, amountSen, lineOrder) VALUES (?, ?, ?, ?, ?, 0)",
+        ).bind(`pvl-${crypto.randomUUID().slice(0, 8)}`, docId, v.lines[0].accountCode, v.lines[0].description, v.totalSen),
+      );
+      // Build the legs by hand so we know the bank leg's id for the match.
+      bankLegId = `lje-${crypto.randomUUID().slice(0, 12)}`;
+      const legs: LedgerEntryInput[] = [
+        { id: `lje-${crypto.randomUUID().slice(0, 12)}`, sourceType: "payment_voucher", sourceId: docId, legNo: 1, accountCode: v.lines[0].accountCode, debitSen: v.totalSen, creditSen: 0, description: `${docNo} · ${desc || "Payment"}`, actorUserId, orgId },
+        { id: bankLegId, sourceType: "payment_voucher", sourceId: docId, legNo: 2, accountCode: line.accountCode, debitSen: 0, creditSen: v.totalSen, description: `${docNo} · ${party ? `to ${party}` : "Payment"} · booked from bank line`, actorUserId, orgId },
+      ];
+      const { statements: ledger } = await buildJournalEntryStatements(c.var.DB, orgId, legs);
+      statements.push(...ledger);
+    } else {
+      statements.push(
+        c.var.DB.prepare(
+          `INSERT INTO official_receipts (id, orNo, date, receivedFrom, description, payTo, totalSen, status, createdBy, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'POSTED', ?, ?, ?)`,
+        ).bind(docId, docNo, line.txnDate, party, desc, line.accountCode, v.totalSen, actorUserId, now, now),
+        c.var.DB.prepare(
+          "INSERT INTO official_receipt_lines (id, receiptId, accountCode, description, amountSen, lineOrder) VALUES (?, ?, ?, ?, ?, 0)",
+        ).bind(`orl-${crypto.randomUUID().slice(0, 8)}`, docId, v.lines[0].accountCode, v.lines[0].description, v.totalSen),
+      );
+      bankLegId = `lje-${crypto.randomUUID().slice(0, 12)}`;
+      const legs: LedgerEntryInput[] = [
+        { id: bankLegId, sourceType: "official_receipt", sourceId: docId, legNo: 1, accountCode: line.accountCode, debitSen: v.totalSen, creditSen: 0, description: `${docNo} · ${party ? `from ${party}` : "Receipt"} · booked from bank line`, actorUserId, orgId },
+        { id: `lje-${crypto.randomUUID().slice(0, 12)}`, sourceType: "official_receipt", sourceId: docId, legNo: 2, accountCode: v.lines[0].accountCode, debitSen: 0, creditSen: v.totalSen, description: `${docNo} · ${desc || "Receipt"}`, actorUserId, orgId },
+      ];
+      const { statements: ledger } = await buildJournalEntryStatements(c.var.DB, orgId, legs);
+      statements.push(...ledger);
+    }
+    // Match the new bank leg to the line in the same batch.
+    statements.push(
+      c.var.DB.prepare("UPDATE bank_statement_lines SET matchedLegId = ?, matchedAt = ? WHERE id = ? AND matchedLegId IS NULL")
+        .bind(bankLegId, now, id),
+    );
+    await c.var.DB.batch(statements);
+    return c.json({ success: true, data: { docId, docNo, kind: isOut ? "PV" : "OR" } }, 201);
+  } catch (e) {
+    console.error("[bank-reco] book-line failed:", e);
+    return c.json({ success: false, error: "Could not book this line" }, 400);
+  }
+});
+
 // Finalising a month freezes its reconciliation: the figures AND the
 // outstanding-item lists are snapshotted to kv, the month's statement lines
 // refuse further match/unmatch/ignore/delete/import, and the report shows the
@@ -13938,9 +14105,31 @@ app.get("/cash-position", async (c) => {
     amountSen: Math.round(Number(p.amountSen ?? p.amount_sen) || 0),
   }));
   const openingMonth = (obDateCp ?? "").slice(0, 7) || null;
+  // Vouchers on the approval ladder that are not posted yet (owner 2026-09-03:
+  // 「我开pv了，银行还么付款或老板还没有approve」) — the formal "committed but
+  // not yet in the books" queue. Checked ones are the firm commitments;
+  // Draft/Prepared ride along flagged so the board can show them softer.
+  await ensurePvApprovalCols(c.var.DB);
+  const awaitingRes = await c.var.DB.prepare(
+    `SELECT id, pvNo, date, payee, description, payFrom, totalSen, approval_state
+       FROM payment_vouchers
+      WHERE status <> 'VOID' AND approval_state IN ('DRAFT','PREPARED','CHECKED') AND accrued = 0
+      ORDER BY date ASC, pvNo ASC`,
+  ).all<Record<string, unknown>>().catch(() => ({ results: [] as Record<string, unknown>[] }));
+  const awaitingApproval = (awaitingRes.results ?? []).map((v) => ({
+    id: String(v.id),
+    pvNo: String(v.pvNo ?? v.pv_no ?? ""),
+    date: String(v.date ?? "").slice(0, 10),
+    payee: String(v.payee ?? ""),
+    description: String(v.description ?? ""),
+    payFrom: String(v.payFrom ?? v.pay_from ?? ""),
+    amountSen: Math.round(Number(v.totalSen ?? v.total_sen) || 0),
+    state: String(v.approvalState ?? v.approval_state ?? "DRAFT") as "DRAFT" | "PREPARED" | "CHECKED",
+  }));
+  const awaitingCheckedSen = awaitingApproval.filter((v) => v.state === "CHECKED").reduce((s, v) => s + v.amountSen, 0);
   return c.json({
     success: true,
-    data: { date, accounts, totalBankEstSen, totalAvailableSen, repay, receive, planned, tickWarnings, openingMonth },
+    data: { date, accounts, totalBankEstSen, totalAvailableSen, repay, receive, planned, tickWarnings, openingMonth, awaitingApproval, awaitingCheckedSen },
   });
 });
 

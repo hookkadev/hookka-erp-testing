@@ -221,7 +221,7 @@ const navigationGroups: NavGroup[] = [
       },
       {
         name: "Daily Operation", href: "/accounting?tab=payments", icon: Wallet, children: [
-          { name: "Expense Payment", href: "/accounting?tab=payments", icon: Wallet },
+          { name: "Payment Vouchers", href: "/accounting?tab=payments", icon: Wallet },
           { name: "Receipts", href: "/accounting?tab=receipts", icon: Receipt },
           { name: "Fund Transfer", href: "/accounting?tab=transfer", icon: Wallet },
           { name: "Cash Position", href: "/accounting?tab=dailycash", icon: Wallet },
@@ -249,6 +249,7 @@ const navigationGroups: NavGroup[] = [
       {
         name: "Creditor / Other Creditor", href: "/accounting?tab=ap", icon: Building2, children: [
           { name: "Creditor Aging", href: "/accounting?tab=ap", icon: Building2 },
+          { name: "AP Invoices", href: "/accounting?tab=apinvoices", icon: BookOpen },
           { name: "Supplier Discount", href: "/accounting?tab=supplier-discount", icon: CreditCard },
           { name: "Other Creditor", href: "/accounting?tab=ocreditor", icon: Building2 },
           { name: "Other Creditor Bills", href: "/accounting?tab=ocreditorbills", icon: BookOpen },
