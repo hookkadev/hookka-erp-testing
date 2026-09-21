@@ -4367,6 +4367,88 @@ app.get("/other-party-bills", async (c) => {
   return c.json({ success: true, data, total: data.length });
 });
 
+// Corrections report (Houzs adoption Phase 4, 2026-09-22): every posted
+// document that was later EDITED (restated) or CANCELLED (voided), from the
+// ledger itself — who, when, which document, the reversed amount and the
+// re-posted amount. Restates leave `<doc>_restate_rev:<stamp>` +
+// `<doc>_restate_post:<stamp>` leg families, voids leave `<doc>_void`; the
+// stamp groups one correction. Reasons come from the PV reject trail and the
+// bank-reco re-open journal where they exist. Read-only.
+app.get("/corrections", async (c) => {
+  const denied = await requirePermission(c, "accounting", "read");
+  if (denied) return denied;
+  const orgId = getOrgId(c);
+  const month = c.req.query("month") || ""; // YYYY-MM of the correction (postedAt), blank = last 90 days
+  const since = month && /^\d{4}-\d{2}$/.test(month) ? `${month}-01` : new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
+  const until = month && /^\d{4}-\d{2}$/.test(month) ? `${month}-31T23:59:59` : "9999-12-31";
+  const res = await c.var.DB.prepare(
+    `SELECT sourceType, sourceId, actorUserId, MIN(postedAt) AS posted_at,
+            SUM(debitSen) AS dr_sen, SUM(creditSen) AS cr_sen, COUNT(*) AS legs
+       FROM ledger_journal_entries
+      WHERE orgId = ? AND postedAt >= ? AND postedAt <= ?
+        AND (sourceType LIKE '%\\_restate\\_rev:%' ESCAPE '\\' OR sourceType LIKE '%\\_restate\\_post:%' ESCAPE '\\' OR sourceType LIKE '%\\_void' ESCAPE '\\' OR sourceType = 'opening_balance_reversal')
+      GROUP BY sourceType, sourceId, actorUserId`,
+  ).bind(orgId, since, until).all<Record<string, unknown>>();
+  type Row = { stamp: string; docType: string; docId: string; kind: "edit" | "cancel" | "opening"; actorUserId: string | null; at: string; reversedSen: number; repostedSen: number; legs: number };
+  const byKey = new Map<string, Row>();
+  for (const r of res.results ?? []) {
+    const st = String(r.sourceType ?? r.source_type ?? "");
+    const sid = String(r.sourceId ?? r.source_id ?? "");
+    const at = String(r.postedAt ?? r.posted_at ?? "");
+    const actor = (r.actorUserId ?? r.actor_user_id) as string | null;
+    const dr = Math.round(Number(r.drSen ?? r.dr_sen) || 0);
+    const m = /^(.*)_restate_(rev|post):(.+)$/.exec(st);
+    let key: string, row: Row;
+    if (m) {
+      key = `${m[1]}|${sid}|${m[3]}`;
+      row = byKey.get(key) ?? { stamp: m[3], docType: m[1], docId: sid, kind: "edit", actorUserId: actor, at, reversedSen: 0, repostedSen: 0, legs: 0 };
+      if (m[2] === "rev") row.reversedSen += dr; else row.repostedSen += dr;
+    } else if (st === "opening_balance_reversal") {
+      key = `opening|${sid}|${at}`;
+      row = byKey.get(key) ?? { stamp: at, docType: "opening_balance", docId: sid, kind: "opening", actorUserId: actor, at, reversedSen: 0, repostedSen: 0, legs: 0 };
+      row.reversedSen += dr;
+    } else {
+      key = `${st}|${sid}|${at}`;
+      row = byKey.get(key) ?? { stamp: at, docType: st.replace(/_void$/, ""), docId: sid, kind: "cancel", actorUserId: actor, at, reversedSen: 0, repostedSen: 0, legs: 0 };
+      row.reversedSen += dr;
+    }
+    row.legs += Math.round(Number(r.legs) || 0);
+    if (at < row.at) row.at = at;
+    byKey.set(key, row);
+  }
+  const rows = [...byKey.values()].sort((a, b) => b.at.localeCompare(a.at));
+  // Names for the actors; reasons where a trail exists.
+  const ids = [...new Set(rows.map((r) => r.actorUserId).filter((x): x is string => !!x))];
+  const nameById = new Map<string, string>();
+  if (ids.length) {
+    const u = await c.var.DB.prepare(`SELECT id, displayName FROM users WHERE id IN (${ids.map(() => "?").join(",")})`).bind(...ids).all<Record<string, unknown>>().catch(() => ({ results: [] as Record<string, unknown>[] }));
+    for (const x of u.results ?? []) nameById.set(String(x.id), String(x.displayName ?? x.display_name ?? ""));
+  }
+  const pvIds = rows.filter((r) => r.docType === "payment_voucher").map((r) => r.docId);
+  const pvNo = new Map<string, string>();
+  if (pvIds.length) {
+    const p = await c.var.DB.prepare(`SELECT id, pvNo FROM payment_vouchers WHERE id IN (${pvIds.map(() => "?").join(",")})`).bind(...pvIds).all<Record<string, unknown>>().catch(() => ({ results: [] as Record<string, unknown>[] }));
+    for (const x of p.results ?? []) pvNo.set(String(x.id), String(x.pvNo ?? x.pv_no ?? ""));
+  }
+  const reopens = await c.var.DB.prepare("SELECT key, value, updated_at FROM kv_config WHERE key LIKE 'bank_reco_reopen:%' AND updated_at >= ? AND updated_at <= ?")
+    .bind(since, until).all<{ key: string; value: string | null; updated_at?: string; updatedAt?: string }>().catch(() => ({ results: [] as { key: string; value: string | null; updated_at?: string; updatedAt?: string }[] }));
+  const reopenRows = (reopens.results ?? []).map((r) => {
+    const parts = String(r.key).split(":"); // bank_reco_reopen:<acct>:<month>:<ts>
+    let v: { actorUserId?: string | null; reason?: string } = {};
+    try { v = r.value ? JSON.parse(r.value) : {}; } catch { v = {}; }
+    return { kind: "reopen" as const, docType: "bank_reconciliation", docId: `${parts[1]} ${parts[2]}`, docNo: `${parts[1]} · ${parts[2]}`, at: parts.slice(3).join(":"), actor: v.actorUserId ? (nameById.get(v.actorUserId) ?? v.actorUserId) : "", reason: v.reason ?? "", reversedSen: 0, repostedSen: 0 };
+  });
+  const data = [
+    ...rows.map((r) => ({
+      kind: r.kind, docType: r.docType, docId: r.docId, docNo: pvNo.get(r.docId) ?? r.docId, at: r.at,
+      actor: r.actorUserId ? (nameById.get(r.actorUserId) ?? r.actorUserId) : "", reason: "",
+      reversedSen: r.reversedSen, repostedSen: r.repostedSen,
+    })),
+    ...reopenRows,
+  ].sort((a, b) => b.at.localeCompare(a.at));
+  return c.json({ success: true, data: { since, rows: data } });
+});
+
 // AP Invoices — ONE list of everything the company owes on paper (owner
 // 2026-09-22, Houzs adoption Phase 2): other-creditor bills (kind AP, editable
 // on their own tab) beside a READ-ONLY mirror of purchase invoices (kind PI —
