@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useCachedJson } from "@/lib/cached-fetch";
 import { PeriodPicker } from "./dashboard-shared";
-import { resolvePeriod, ymd, type Period, type PeopleSub, type OpsSub, type ServiceSub, type FinSub } from "./dashboard-shared-lib";
+import { resolvePeriod, opensOnToday, ymd, type Period, type PeopleSub, type OpsSub, type ServiceSub, type FinSub } from "./dashboard-shared-lib";
 import { TAB_SUBS } from "./dashboard-url-state-lib";
 import { useDashboardUrlState } from "./use-dashboard-url-state";
 import { FinanceView } from "./FinanceView";
@@ -104,8 +104,11 @@ export default function DashboardPrototypePage() {
 
   // DERIVED, not synced with an effect (a setState-in-effect here caused a
   // cascading re-render on every load). A bare URL opens on TODAY - see
-  // resolvePeriod.
-  const effectivePeriod = useMemo<Period>(() => resolvePeriod(period, months, ymd(new Date())), [period, months]);
+  // resolvePeriod - except Overview and Sales, which open on the month.
+  const effectivePeriod = useMemo<Period>(
+    () => resolvePeriod(period, months, ymd(new Date()), opensOnToday(tab)),
+    [period, months, tab],
+  );
 
   return (
     <div className="space-y-6 max-md:space-y-4">

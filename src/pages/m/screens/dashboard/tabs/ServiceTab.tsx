@@ -12,11 +12,15 @@
 // panel's, unchanged; only the result message moved from a toast to inline
 // (there is no ToastProvider under /m).
 import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
+import { ChevronRight } from "lucide-react";
 import { useCachedJson, invalidateCache } from "@/lib/cached-fetch";
 import { useConfirm } from "@/components/ui/confirm-dialog";
+import { usePermissions } from "@/lib/use-permission";
 import {
   AMBER, GREEN, RED, TEAL, dayLabel, fmtN, inFocus, inPeriod, periodLabel, previousPeriod, type Period,
 } from "../../../../dashboards/dashboard-shared-lib";
+import { SERVICE_CASES_NAV_HREF, serviceCaseHref, serviceCasesHref } from "../../../../dashboards/service-case-link-lib";
 import {
   NONE_KEY, agingSplit, avgClose, byCause, byPrevention, byUnit, causeKeys, causeLabel, causeTrend,
   closeTrend, openedVsClosed, preventionNotDone, topProducts, type TallyRow,
@@ -102,6 +106,11 @@ function CasePill({ c }: { c: ServiceCase }) {
 
 const age = (c: ServiceCase) => (c.ageDays == null ? "—" : `${c.ageDays} d`);
 
+// Opens one case in the real Service Cases module (/m/servicecases/:id). Null
+// when the caller may not see that module: rows then stay plain, no chevron.
+type OpenCase = ((id: string) => void) | null;
+const rowTap = (openCase: OpenCase, id: string) => (openCase && id ? () => openCase(id) : undefined);
+
 // ---- Opened vs closed (Report + Performance share it) --------------------
 
 type FlowPoint = { iso: string; date: string; opened: number; closed: number };
@@ -151,9 +160,9 @@ function FlowCharts({ flow, period, setPeriod, openedTitle }: {
 
 // ---- Report (sub "overview") ---------------------------------------------
 
-function Report({ cases, threshold, period, setPeriod, search, setSearch, causeFilter, clearCause }: {
+function Report({ cases, threshold, period, setPeriod, search, setSearch, causeFilter, clearCause, openCase }: {
   cases: ServiceCase[]; threshold: number; period: Period; setPeriod: (p: Period) => void;
-  search: string; setSearch: (s: string) => void; causeFilter: string | null; clearCause: () => void;
+  search: string; setSearch: (s: string) => void; causeFilter: string | null; clearCause: () => void; openCase: OpenCase;
 }) {
   const logged = useMemo(() => cases.filter((c) => inFocus(period, c.createdDate)), [cases, period]);
   const flow = useFlow(cases, period);
@@ -208,6 +217,7 @@ function Report({ cases, threshold, period, setPeriod, search, setSearch, causeF
               subLine={c.issue || "—"}
               pill={<CasePill c={c} />}
               meta={[{ label: "Logged", value: dayLabel(c.createdDate) }, { label: "Age", value: age(c) }]}
+              onClick={rowTap(openCase, c.id)}
             />
           )}
         />
@@ -312,8 +322,8 @@ function closeDelta(cur: number | null, prev: number | null) {
   return { text: `${d > 0 ? "+" : ""}${d} d vs previous period (${prev} d)`, good: d === 0 ? null : d < 0 };
 }
 
-function Performance({ cases, threshold, period, setPeriod }: {
-  cases: ServiceCase[]; threshold: number; period: Period; setPeriod: (p: Period) => void;
+function Performance({ cases, threshold, period, setPeriod, openCase }: {
+  cases: ServiceCase[]; threshold: number; period: Period; setPeriod: (p: Period) => void; openCase: OpenCase;
 }) {
   const ytd = period.mode === "ytd";
   const closedNow = useMemo(() => cases.filter((c) => c.status === "CLOSED" && inFocus(period, c.closedDate)), [cases, period]);
@@ -433,6 +443,7 @@ function Performance({ cases, threshold, period, setPeriod }: {
                 </div>
               }
               meta={[{ label: "Days open", value: c.daysOpen ?? "—" }]}
+              onClick={rowTap(openCase, c.id)}
             />
           )}
         />
@@ -443,7 +454,7 @@ function Performance({ cases, threshold, period, setPeriod }: {
 
 // ---- Overdue --------------------------------------------------------------
 
-function Overdue({ cases, threshold }: { cases: ServiceCase[]; threshold: number }) {
+function Overdue({ cases, threshold, openCase }: { cases: ServiceCase[]; threshold: number; openCase: OpenCase }) {
   // A live backlog, not a period slice: a case stuck for 20 days is overdue
   // whichever month is selected.
   const overdue = useMemo(
@@ -484,6 +495,7 @@ function Overdue({ cases, threshold }: { cases: ServiceCase[]; threshold: number
                   value: <span style={{ color: c.daysOverdue >= 7 ? RED : c.daysOverdue >= 3 ? AMBER : TEAL }}>+{c.daysOverdue} d</span>,
                 },
               ]}
+              onClick={rowTap(openCase, c.id)}
             />
           )}
         />
@@ -523,7 +535,7 @@ function Banner({ ok, children }: { ok: boolean; children: ReactNode }) {
   );
 }
 
-function Approvals() {
+function Approvals({ openCase }: { openCase: OpenCase }) {
   // ttl 0: an approval queue must never be served stale.
   const { data, loading, error, refresh } = useCachedJson<{ success?: boolean; data?: Pending[] }>(APPROVALS_URL, 0);
   const { confirm } = useConfirm();
@@ -588,9 +600,27 @@ function Approvals() {
           rows.map((r) => (
             <MobileCard key={r.id} radius={16}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                <span style={{ color: M.taupe, fontSize: 12, fontWeight: 700, fontVariantNumeric: "tabular-nums", letterSpacing: 0.2 }}>
-                  {r.caseNo ?? r.id}
-                </span>
+                {/* Only the case number opens the case: the card holds Approve / Reject. */}
+                {openCase ? (
+                  <button
+                    type="button"
+                    onClick={() => openCase(r.id)}
+                    aria-label={`Open ${r.caseNo ?? r.id} in Service Cases`}
+                    style={{
+                      display: "inline-flex", alignItems: "center", gap: 2, minHeight: 44, margin: "-10px 0", padding: "0 6px 0 0",
+                      border: "none", background: "transparent", color: M.taupe, fontSize: 12, fontWeight: 700, fontFamily: "inherit",
+                      fontVariantNumeric: "tabular-nums", letterSpacing: 0.2, textDecoration: "underline", textUnderlineOffset: 2,
+                      cursor: "pointer", WebkitTapHighlightColor: "transparent",
+                    }}
+                  >
+                    {r.caseNo ?? r.id}
+                    <ChevronRight size={16} strokeWidth={1.75} />
+                  </button>
+                ) : (
+                  <span style={{ color: M.taupe, fontSize: 12, fontWeight: 700, fontVariantNumeric: "tabular-nums", letterSpacing: 0.2 }}>
+                    {r.caseNo ?? r.id}
+                  </span>
+                )}
                 <span style={{ padding: "1px 8px", borderRadius: 9999, fontSize: 11, fontWeight: 600, background: M_ACCENT.warning.bg, color: M_ACCENT.warning.fg }}>
                   {r.kind ? KIND_LABEL[r.kind] : "Approval"}
                 </span>
@@ -654,6 +684,14 @@ export function ServiceTab({ period, setPeriod }: DashboardTabProps) {
   const [search, setSearch] = useState("");
   // Root-cause key tapped on Top issues; narrows the Report's case list only.
   const [causeFilter, setCauseFilter] = useState<string | null>(null);
+  // Case rows open the real Service Cases module; gated by the same server-decided
+  // nav entry as the desktop sidebar's "Service Cases" (as DashboardScreen does).
+  const navigate = useNavigate();
+  const { isNavAllowed } = usePermissions();
+  const canOpen = isNavAllowed(SERVICE_CASES_NAV_HREF);
+  const openCase: OpenCase = canOpen
+    ? (id) => { const href = serviceCaseHref(id, "m"); if (href) navigate(href); }
+    : null;
 
   const slice = data?.service ?? null;
   const cases = useMemo(() => slice?.cases ?? [], [slice]);
@@ -684,11 +722,12 @@ export function ServiceTab({ period, setPeriod }: DashboardTabProps) {
           <Report
             cases={cases} threshold={threshold} period={period} setPeriod={setPeriod}
             search={search} setSearch={setSearch} causeFilter={causeFilter} clearCause={() => setCauseFilter(null)}
+            openCase={openCase}
           />
         )}
-        {sub === "performance" && <Performance cases={cases} threshold={threshold} period={period} setPeriod={setPeriod} />}
-        {sub === "overdue" && <Overdue cases={cases} threshold={threshold} />}
-        {sub === "approvals" && <Approvals />}
+        {sub === "performance" && <Performance cases={cases} threshold={threshold} period={period} setPeriod={setPeriod} openCase={openCase} />}
+        {sub === "overdue" && <Overdue cases={cases} threshold={threshold} openCase={openCase} />}
+        {sub === "approvals" && <Approvals openCase={openCase} />}
         {sub === "issues" && (
           <>
             {period.day ? (
@@ -706,7 +745,25 @@ export function ServiceTab({ period, setPeriod }: DashboardTabProps) {
   return (
     <>
       <MSubPills subs={subs} active={sub} onChange={setSub} />
-      <div style={{ padding: "12px 14px 0" }}>{body}</div>
+      <div style={{ padding: "12px 14px 0" }}>
+        {canOpen ? (
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
+            <button
+              type="button"
+              onClick={() => navigate(serviceCasesHref("m"))}
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 2, minHeight: 44, padding: "0 4px 0 12px", border: "none",
+                background: "transparent", color: M.taupe, fontSize: 13, fontWeight: 600, fontFamily: "inherit", cursor: "pointer",
+                WebkitTapHighlightColor: "transparent",
+              }}
+            >
+              Open Service Cases
+              <ChevronRight size={18} strokeWidth={1.75} />
+            </button>
+          </div>
+        ) : null}
+        {body}
+      </div>
     </>
   );
 }

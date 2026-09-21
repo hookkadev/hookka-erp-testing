@@ -43,6 +43,17 @@ Ask 2026-09-22 (owner, "one last thing"): (1) the dashboard opens on TODAY, not 
 daily performance is the common check; (2) figures should follow the picked DATE wherever the data
 has a date, not only the month; (3) then fix the `docs-freshness` check on PR #443.
 Owner 2026-09-22: the People tab is labelled Employees (key `people` unchanged).
+Ask 2026-09-21 (owner, two parts, NOT committed yet - working tree on `main`):
+(1) 🔵 Overview and Sales must NOT open on today - they are read MONTHLY; the other tabs keep
+opening on today. Done in code: `opensOnToday(tab)` + a 4th `openOnToday` arg on `resolvePeriod`
+(`dashboard-shared-lib.ts`), passed by the desktop shell and `/m` `useDashboardPeriod(months, tab)`.
+A day the user picks is still honoured on those two tabs. Test added in
+`tests/dashboard-m-lib.test.mjs`; build:strict exit 0. NOT browser-verified, NOT deployed.
+(2) 🔵 Service tab: every service case shown must link straight to that case in the Service Cases
+module (sidebar entry), desktop + `/m`. Done in code: `ServiceCaseLink.tsx` / `use-service-case-links.ts` /
+`service-case-link-lib.ts`; desktop `/service-cases/:id`, phone `/m/servicecases/:id`, plus an "Open Service Cases"
+button; gated by the sidebar permission; no API change. build:strict exit 0, 33/33 dashboard tests.
+NOT browser-verified, NOT deployed.
 
 ## 2026-09-10 — 🔵 PRD T-004 · Import / Export across the whole system (P0/R3-R5 done, rest open)
 

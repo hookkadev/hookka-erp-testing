@@ -8,6 +8,8 @@ import {
 } from "./dashboard-shared-lib";
 import { Kpi } from "./dashboard-shared";
 import { ServiceIssuesPanel, TallyList } from "./ServiceIssuesPanel";
+import { ServiceCaseNo } from "./ServiceCaseLink";
+import { useServiceCaseLinks } from "./use-service-case-links";
 import {
   byPrevention, avgClose, closeTrend, openedVsClosed, agingSplit, preventionNotDone, causeLabel,
   type IssueCase,
@@ -47,6 +49,7 @@ export function ServicePerformancePanel({
   const threshold = slice?.overdueAfterDays ?? 0;
   const ytd = period.mode === "ytd";
   const bucketOf = (d: string) => (ytd ? d.slice(0, 7) : d);
+  const { canOpen, rowProps } = useServiceCaseLinks();
 
   // Closed inside the focused window, and inside the previous comparable period.
   const closedNow = useMemo(() => cases.filter((c) => c.status === "CLOSED" && inFocus(period, c.closedDate)), [cases, period]);
@@ -206,8 +209,8 @@ export function ServicePerformancePanel({
               </thead>
               <tbody>
                 {notDone.map((c) => (
-                  <tr key={c.id} className="border-b border-[#E2DDD8]">
-                    <td className="px-4 py-2.5 font-mono">{c.caseNo ?? c.id}</td>
+                  <tr key={c.id} {...rowProps(c.id, "border-b border-[#E2DDD8]")}>
+                    <td className="px-4 py-2.5 font-mono"><ServiceCaseNo id={c.id} caseNo={c.caseNo ?? c.id} canOpen={canOpen} /></td>
                     <td className="px-4 py-2.5">{c.customer ?? "—"}</td>
                     <td className="px-4 py-2.5" style={{ color: c.causes?.length ? "#1F1D1B" : AMBER }}>
                       {c.causes?.length ? c.causes.map(causeLabel).join(", ") : "Not yet analysed"}
