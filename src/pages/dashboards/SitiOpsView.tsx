@@ -9,7 +9,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Tabs, type TabItem } from "@/components/ui/tabs";
 import { AlertTriangle, Clock, CalendarClock, PackageX, DollarSign, UserCheck, Gauge, Search } from "lucide-react";
-import { TAUPE, TEAL, RED, AMBER, MUTED, BORDER, fmtN, fmtRMAxis, inPeriod, periodLabel, type Period, type SitiSub } from "./dashboard-shared-lib";
+import { TAUPE, TEAL, RED, AMBER, MUTED, BORDER, fmtN, fmtRMAxis, inPeriod, inFocus, dayLabel, periodLabel, type Period, type SitiSub } from "./dashboard-shared-lib";
 import { Kpi, LiveBadge } from "./dashboard-shared";
 
 // Siti's report checklist (handed over on paper, 2026-09-17), redesigned
@@ -78,12 +78,12 @@ type Feed = {
 
 // Monthly/range -> one bar per day; YTD -> one bar per month.
 function bucket<T extends { date: string }>(rows: T[], p: Period, add: (a: T, b: T) => T) {
-  if (p.mode !== "ytd") return rows.map((r) => ({ ...r, key: r.date.slice(5) }));
-  const m = new Map<string, T & { key: string }>();
+  if (p.mode !== "ytd") return rows.map((r) => ({ ...r, key: r.date.slice(5), iso: r.date }));
+  const m = new Map<string, T & { key: string; iso: string }>();
   for (const r of rows) {
     const key = r.date.slice(0, 7);
     const cur = m.get(key);
-    m.set(key, cur ? { ...add(cur, r), key } : { ...r, key });
+    m.set(key, cur ? { ...add(cur, r), key, iso: key } : { ...r, key, iso: key });
   }
   return [...m.values()];
 }
@@ -104,7 +104,9 @@ function urgencyPill(daysLeft: number | null) {
   return { label: `${daysLeft} Days`, bg: "#FAEFCB", fg: "#9C6F1E" };
 }
 
-export function SitiOpsView({ period, sub }: { period: Period; sub: SitiSub }) {
+export function SitiOpsView({
+  period, sub, onPeriodChange,
+}: { period: Period; sub: SitiSub; onPeriodChange: (p: Period) => void }) {
   const { data, loading, error } = useCachedJson<Feed>("/api/dashboard/prototype");
   const [deptFilter, setDeptFilter] = useState("ALL");
   const [search, setSearch] = useState("");
@@ -141,9 +143,20 @@ export function SitiOpsView({ period, sub }: { period: Period; sub: SitiSub }) {
     () =>
       bucket((production?.dailyOutput ?? []).filter((d) => inPeriod(period, d.date)), period,
         (a, b) => ({ ...a, units: a.units + b.units }))
-        .map((d) => ({ date: d.key, Units: d.units })),
+        .map((d) => ({ iso: d.iso, date: d.key, Units: d.units })),
     [production?.dailyOutput, period],
   );
+  // Click a bar: a month in YTD opens that month, a day anywhere else is
+  // highlighted (period.day, same field the datepicker writes). Charts keep
+  // drawing the whole period; the KPIs and attendance log narrow to the day.
+  const pick = (rows: { key?: string; date: string; iso: string }[]) => (e: { activeLabel?: unknown } | null) => {
+    const hit = rows.find((d) => d.date === e?.activeLabel);
+    if (!hit) return;
+    if (period.mode === "ytd") onPeriodChange({ mode: "monthly", month: hit.iso });
+    else onPeriodChange({ ...period, day: period.day === hit.iso ? undefined : hit.iso });
+  };
+  const dayLine = period.day && period.mode !== "ytd" ? period.day.slice(5) : null;
+
   const outputAvg = useMemo(
     () => (outputChartData.length ? outputChartData.reduce((a, d) => a + d.Units, 0) / outputChartData.length : 0),
     [outputChartData],
@@ -153,11 +166,11 @@ export function SitiOpsView({ period, sub }: { period: Period; sub: SitiSub }) {
     () =>
       bucket((production?.productionCost?.byDay ?? []).filter((d) => inPeriod(period, d.date)), period,
         (a, b) => ({ ...a, materialSen: a.materialSen + b.materialSen, laborSen: a.laborSen + b.laborSen }))
-        .map((d) => ({ date: d.key, Material: Math.round(d.materialSen / 100), Labor: Math.round(d.laborSen / 100) })),
+        .map((d) => ({ iso: d.iso, date: d.key, Material: Math.round(d.materialSen / 100), Labor: Math.round(d.laborSen / 100) })),
     [production?.productionCost?.byDay, period],
   );
   const totalCostSen = useMemo(
-    () => (production?.productionCost?.byDay ?? []).filter((d) => inPeriod(period, d.date)).reduce((a, d) => a + d.totalSen, 0),
+    () => (production?.productionCost?.byDay ?? []).filter((d) => inFocus(period, d.date)).reduce((a, d) => a + d.totalSen, 0),
     [production?.productionCost?.byDay, period],
   );
 
@@ -178,7 +191,7 @@ export function SitiOpsView({ period, sub }: { period: Period; sub: SitiSub }) {
   // 7-day sparkline. Same house metric the Employees tab uses (working_hour_
   // entries clocked ÷ completed job_cards earned), not attendance_records.
   const efficiencyStat = useMemo(() => {
-    const days = (employee?.performance.byDay ?? []).filter((d) => inPeriod(period, d.date));
+    const days = (employee?.performance.byDay ?? []).filter((d) => inFocus(period, d.date));
     const totalWorking = days.reduce((a, d) => a + d.workingMinutes, 0);
     const totalProduction = days.reduce((a, d) => a + d.productionMinutes, 0);
     const last7 = [...days].sort((a, b) => (a.date < b.date ? -1 : 1)).slice(-7).map((d) => ({
@@ -196,7 +209,7 @@ export function SitiOpsView({ period, sub }: { period: Period; sub: SitiSub }) {
   const attendanceLog = useMemo(() => {
     const byEmp = new Map<string, { last: NonNullable<Feed["employee"]>["attendance"][number]; days: number }>();
     for (const r of employee?.attendance ?? []) {
-      if (!r.date || !inPeriod(period, r.date)) continue;
+      if (!r.date || !inFocus(period, r.date)) continue;
       const k = r.employeeId ?? r.employeeName ?? "";
       const cur = byEmp.get(k);
       byEmp.set(k, { last: !cur || r.date >= (cur.last.date ?? "") ? r : cur.last, days: (cur?.days ?? 0) + 1 });
@@ -254,6 +267,15 @@ export function SitiOpsView({ period, sub }: { period: Period; sub: SitiSub }) {
       <div className="flex items-center gap-2">
         <h2 className="text-lg font-semibold text-[#1F1D1B]">Operations (Siti's list)</h2>
         <LiveBadge live={prodLive && invLive} />
+        {period.day && (
+          <button
+            type="button"
+            onClick={() => onPeriodChange({ ...period, day: undefined })}
+            className="text-xs rounded-md border border-[#E5E0D8] bg-[#F7F5F3] px-2 py-0.5 text-[#6B5C32] hover:bg-white"
+          >
+            Showing: {dayLabel(period.day)} — click to go back
+          </button>
+        )}
       </div>
 
       {sub === "overview" && (
@@ -525,16 +547,17 @@ export function SitiOpsView({ period, sub }: { period: Period; sub: SitiSub }) {
                   <CardTitle>{period.mode === "ytd" ? "Monthly" : "Daily"} Production Output</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div style={{ width: "100%", height: 260 }}>
+                  <div className="select-none [&_*]:outline-none [&_.recharts-wrapper]:outline-none" style={{ width: "100%", height: 260 }}>
                     {outputChartData.length === 0 ? (
                       <div className="flex items-center justify-center h-full text-xs text-[#6B7280]">No completions in range.</div>
                     ) : (
                       <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={outputChartData} margin={{ top: 6, right: 6, bottom: 0, left: 0 }}>
+                        <BarChart data={outputChartData} margin={{ top: 6, right: 6, bottom: 0, left: 0 }} style={{ cursor: "pointer" }} onClick={pick(outputChartData)}>
                           <XAxis dataKey="date" tick={{ fontSize: 10, fill: MUTED }} axisLine={{ stroke: BORDER }} tickLine={false} />
                           <YAxis tick={{ fontSize: 10, fill: MUTED }} axisLine={false} tickLine={false} width={32} allowDecimals={false} />
-                          <Tooltip contentStyle={{ background: "#FFFFFF", border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: 12 }} />
+                          <Tooltip cursor={{ fill: "#F0ECE9" }} contentStyle={{ background: "#FFFFFF", border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: 12 }} />
                           <Bar dataKey="Units" fill={TAUPE} radius={[3, 3, 0, 0]} />
+                          {dayLine && <ReferenceLine x={dayLine} stroke={AMBER} strokeWidth={2} />}
                           <ReferenceLine y={outputAvg} stroke={AMBER} strokeDasharray="4 3" strokeWidth={1.5} />
                         </BarChart>
                       </ResponsiveContainer>
@@ -596,12 +619,12 @@ export function SitiOpsView({ period, sub }: { period: Period; sub: SitiSub }) {
                   <CardTitle>Production Cost trend · {periodLabel(period)}</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div style={{ width: "100%", height: 200 }}>
+                  <div className="select-none [&_*]:outline-none [&_.recharts-wrapper]:outline-none" style={{ width: "100%", height: 200 }}>
                     {costChartData.length === 0 ? (
                       <div className="flex items-center justify-center h-full text-xs text-[#6B7280]">No costed batches.</div>
                     ) : (
                       <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={costChartData} margin={{ top: 6, right: 6, bottom: 0, left: 0 }}>
+                        <BarChart data={costChartData} margin={{ top: 6, right: 6, bottom: 0, left: 0 }} style={{ cursor: "pointer" }} onClick={pick(costChartData)}>
                           <XAxis dataKey="date" tick={{ fontSize: 10, fill: MUTED }} axisLine={{ stroke: BORDER }} tickLine={false} />
                           <YAxis tick={{ fontSize: 10, fill: MUTED }} axisLine={false} tickLine={false} width={44} tickFormatter={(v) => fmtRMAxis(Number(v) * 100)} />
                           <Tooltip
@@ -610,6 +633,7 @@ export function SitiOpsView({ period, sub }: { period: Period; sub: SitiSub }) {
                           />
                           <Bar dataKey="Material" stackId="cost" fill={TAUPE} />
                           <Bar dataKey="Labor" stackId="cost" fill={TEAL} radius={[3, 3, 0, 0]} />
+                          {dayLine && <ReferenceLine x={dayLine} stroke={AMBER} strokeWidth={2} />}
                         </BarChart>
                       </ResponsiveContainer>
                     )}
