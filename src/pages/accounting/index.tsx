@@ -4163,12 +4163,14 @@ type SDOpenPI = {
 type SDHistoryRow = {
   id: string;
   noteNumber: string;
+  supplierId: string;
   supplierName: string;
   date: string;
   reason: string;
   totalAmount: number;
   status: string;
   piNo?: string;
+  items?: { description: string; quantity: number; unitPriceSen: number; lineType: string }[];
 };
 
 // Per-PI allocation row state: ticked + the raw RM string the operator typed.
@@ -4195,6 +4197,10 @@ function SupplierDiscountTab() {
 
   const [saving, setSaving] = useState(false);
 
+  // Set while editing an existing (POSTED) row in place — locks the supplier
+  // picker + hides the allocation table (edit never touches allocations).
+  const [editingId, setEditingId] = useState<string | null>(null);
+
   // History list.
   const [history, setHistory] = useState<SDHistoryRow[]>([]);
 
@@ -4205,8 +4211,10 @@ function SupplierDiscountTab() {
       .catch(() => {});
   }, []);
 
-  // Hide orphan DRAFTs (a Save whose post leg failed) — the rows actually shown.
-  const visibleHistory = history.filter((n) => n.status !== "DRAFT");
+  // Hide orphan DRAFTs (a Save whose post leg failed) + voided/deleted rows —
+  // a deleted note should just disappear, not sit around as dead CANCELLED
+  // clutter (owner 2026-09-18: "remove the void button useless as shit").
+  const visibleHistory = history.filter((n) => n.status !== "DRAFT" && n.status !== "CANCELLED");
   const sdSel = useRowSelection(visibleHistory, (d) => d.noteNumber ?? d.id);
 
   useEffect(() => {
@@ -4274,6 +4282,7 @@ function SupplierDiscountTab() {
     setRow(pi.id, { checked: true, amountStr: (outstandingOf(pi) / 100).toFixed(2) });
 
   const resetForm = () => {
+    setEditingId(null);
     setSupplierId("");
     setNetRm("");
     setSstRm("");
@@ -4283,11 +4292,57 @@ function SupplierDiscountTab() {
     setAllocRows({});
   };
 
+  // Populate the form from an existing row and switch into edit mode — the
+  // supplier picker locks and the allocation table hides (Save then PUTs a
+  // restate instead of creating a new note).
+  const startEdit = (row: SDHistoryRow) => {
+    setEditingId(row.id);
+    setSupplierId(row.supplierId);
+    const net = row.items?.find((it) => it.lineType !== "TAX");
+    const sst = row.items?.find((it) => it.lineType === "TAX");
+    setNetRm(net ? ((net.quantity * net.unitPriceSen) / 100).toFixed(2) : (row.totalAmount / 100).toFixed(2));
+    setSstRm(sst ? ((sst.quantity * sst.unitPriceSen) / 100).toFixed(2) : "");
+    setReason(row.reason ?? "");
+    setCnDate(row.date);
+    setOpenPIs([]);
+    setAllocRows({});
+  };
+
   const canSave = !!supplierId && netSen > 0 && !saving;
 
   const handleSave = async () => {
     if (!supplierId) { toast.error("Select a supplier"); return; }
     if (!(netSen > 0)) { toast.error("Discount amount (net) must be greater than 0"); return; }
+
+    // items = net line (+ SST line if any) — same shape create and edit both send.
+    const items: { description: string; quantity: number; unitPriceSen: number; lineType: string }[] = [
+      { description: reason || "Discount", quantity: 1, unitPriceSen: netSen, lineType: "STOCKED" },
+    ];
+    if (sstSen > 0) items.push({ description: "SST portion", quantity: 1, unitPriceSen: sstSen, lineType: "TAX" });
+
+    if (editingId) {
+      setSaving(true);
+      try {
+        const res = await fetch(`/api/accounting/purchase-credit-notes/${encodeURIComponent(editingId)}/restate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ date: cnDate, reason, items }),
+        });
+        const j = (await res.json()) as { success?: boolean; error?: string };
+        if (!res.ok || !j.success) {
+          toast.error(j.error || "Failed to update supplier discount");
+          return;
+        }
+        toast.success("Supplier discount updated");
+        resetForm();
+        loadHistory();
+      } catch {
+        toast.error("Failed to update supplier discount");
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
 
     // Build the allocations from the ticked rows; cap each at its outstanding.
     const allocations: { piId: string; amountSen: number }[] = [];
@@ -4308,12 +4363,7 @@ function SupplierDiscountTab() {
 
     setSaving(true);
     try {
-      // 1) CREATE the DRAFT credit note. items = net line (+ SST line if any).
-      const items: { description: string; quantity: number; unitPriceSen: number; lineType: string }[] = [
-        { description: reason || "Discount", quantity: 1, unitPriceSen: netSen, lineType: "STOCKED" },
-      ];
-      if (sstSen > 0) items.push({ description: "SST portion", quantity: 1, unitPriceSen: sstSen, lineType: "TAX" });
-
+      // 1) CREATE the DRAFT credit note.
       const createRes = await fetch("/api/accounting/purchase-credit-notes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -4348,10 +4398,13 @@ function SupplierDiscountTab() {
     }
   };
 
-  const voidNote = async (row: SDHistoryRow) => {
+  // Owner rule (2026-09-21): every action button in this tab reads "Cancel" —
+  // it still calls the same reversal endpoint (GL mirror + PI/supplier
+  // restore) and the row disappears from history once CANCELLED.
+  const cancelNote = async (row: SDHistoryRow) => {
     if (!(await confirm({
-      title: "Void supplier discount?",
-      message: `Void ${row.noteNumber} (${formatCurrency(row.totalAmount)})? This reverses the GL posting and re-opens any invoices it was knocked off.`,
+      title: "Cancel supplier discount?",
+      message: `Cancel ${row.noteNumber} (${formatCurrency(row.totalAmount)})? This reverses the GL posting and re-opens any invoices it was knocked off.`,
       danger: true,
     }))) return;
     try {
@@ -4361,13 +4414,14 @@ function SupplierDiscountTab() {
       });
       const j = asMutationResponse(await res.json());
       if (res.ok && j?.success) {
-        toast.success(`${row.noteNumber} voided`);
+        toast.success(`${row.noteNumber} cancelled`);
+        if (editingId === row.id) resetForm();
         loadHistory();
       } else {
-        toast.error(j?.error || "Failed to void supplier discount");
+        toast.error(j?.error || "Failed to cancel supplier discount");
       }
     } catch {
-      toast.error("Failed to void supplier discount");
+      toast.error("Failed to cancel supplier discount");
     }
   };
 
@@ -4396,6 +4450,7 @@ function SupplierDiscountTab() {
                 options={supplierOptions}
                 placeholder="Type supplier name..."
                 allowClear
+                disabled={!!editingId}
               />
             </div>
             <div>
@@ -4443,8 +4498,10 @@ function SupplierDiscountTab() {
             </div>
           </div>
 
-          {/* Allocation table — only once a supplier is picked. */}
-          {supplierId && (
+          {/* Allocation table — only once a supplier is picked, and never while
+              editing (an edit never touches allocations; Cancel + re-create
+              instead if the knocked-off PIs need to change). */}
+          {supplierId && !editingId && (
             <div className="border-t border-[#F0ECE9] pt-3 space-y-2">
               <div className="flex items-center justify-between">
                 <p className="text-sm font-medium text-[#1F1D1B]">Knock off unpaid bills <span className="font-normal text-[#9CA3AF]">(optional)</span></p>
@@ -4520,9 +4577,12 @@ function SupplierDiscountTab() {
             </div>
           )}
 
-          <div className="flex justify-end border-t border-[#F0ECE9] pt-3">
+          <div className="flex items-center justify-end gap-2 border-t border-[#F0ECE9] pt-3">
+            {editingId && (
+              <Button variant="outline" size="sm" onClick={resetForm}>Discard</Button>
+            )}
             <Button variant="primary" size="sm" onClick={handleSave} disabled={!canSave}>
-              {saving ? "Saving…" : "Save"}
+              {saving ? "Saving…" : editingId ? "Update" : "Save"}
             </Button>
           </div>
         </CardContent>
@@ -4585,9 +4645,12 @@ function SupplierDiscountTab() {
                           <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-[#F3F0EC] text-[#6B7280] border border-[#E2DDD8]">{n.status}</span>
                         )}
                       </td>
-                      <td className="px-3 py-1.5 text-right">
+                      <td className="px-3 py-1.5 text-right whitespace-nowrap">
                         {n.status === "POSTED" && (
-                          <button onClick={() => voidNote(n)} className="text-xs text-[#9A3A2D] hover:text-[#7A2E24] underline decoration-dotted cursor-pointer">Void</button>
+                          <>
+                            <button onClick={() => startEdit(n)} className="text-xs text-[#6B5C32] hover:text-[#1F1D1B] underline decoration-dotted cursor-pointer mr-3">Edit</button>
+                            <button onClick={() => cancelNote(n)} className="text-xs text-[#9A3A2D] hover:text-[#7A2E24] underline decoration-dotted cursor-pointer">Cancel</button>
+                          </>
                         )}
                       </td>
                     </tr>
