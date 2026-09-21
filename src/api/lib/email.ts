@@ -471,7 +471,7 @@ export function supplierPoEmailTemplate(args: {
 // Tiny inline helpers — we don't pull in a full sanitiser for a single
 // trusted template string. Good enough to stop the inviter's displayName
 // from injecting tags.
-function escapeHtml(s: string): string {
+export function escapeHtml(s: string): string {
   return String(s)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")

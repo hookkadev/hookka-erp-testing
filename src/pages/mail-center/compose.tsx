@@ -33,6 +33,7 @@ import {
 } from "@/api/lib/mail-attachments";
 import { Mail, Send, Loader2, X, Save, Paperclip } from "lucide-react";
 import { RecipientsInput } from "./recipients-input";
+import { AckRequestRow } from "./ack-request-row";
 import { parseAddressList, recipientsValid } from "@/api/lib/mail-threading";
 
 // One picked file held in memory for the compose POST. contentBase64 is the
@@ -135,6 +136,9 @@ export function ComposeDialog({
   const [showBcc, setShowBcc] = useState(false);
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
+  // R8: ask the staff recipients to acknowledge (due in N hours).
+  const [ackRequired, setAckRequired] = useState(false);
+  const [ackDueHours, setAckDueHours] = useState(48);
   const [sending, setSending] = useState(false);
   // Picked attachments (held in memory only — NOT persisted to a local draft).
   const [files, setFiles] = useState<ComposeAttachment[]>([]);
@@ -161,6 +165,7 @@ export function ComposeDialog({
       setSubject(initialDraft?.subject ?? "");
       setBody(initialDraft?.body ?? "");
       setDraftId(initialDraft?.id ?? null);
+      setAckRequired(false);
       setSending(false);
       // Attachments are never persisted in a draft (see mail-local.ts note),
       // so a freshly-opened dialog — even one resuming a draft — starts empty.
@@ -331,6 +336,7 @@ export function ComposeDialog({
           subject: subject.trim(),
           text: body,
           ...(forwardOf ? { forwardOf } : {}),
+          ...(ackRequired ? { ackRequired: true, ackDueHours } : {}),
           ...(files.length > 0
             ? {
                 attachments: files.map((f) => ({
@@ -551,6 +557,15 @@ export function ComposeDialog({
               {attachError && (
                 <p className="text-[11px] text-red-600">{attachError}</p>
               )}
+
+              {/* R8: ask the staff recipients to confirm they have read it. */}
+              <AckRequestRow
+                checked={ackRequired}
+                hours={ackDueHours}
+                disabled={sending}
+                onChange={setAckRequired}
+                onHours={setAckDueHours}
+              />
             </>
           )}
         </div>

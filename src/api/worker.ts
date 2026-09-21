@@ -552,7 +552,17 @@ app.post("/api/internal/process-email-outbox", async (c) => {
         RESEND_FROM_EMAIL?: string;
       },
     );
-    return c.json({ ok: true, ...result });
+    // T-012 R8: overdue acknowledgement reminders ride the same tick. They
+    // enqueue into the outbox just drained, so they go out on the next tick
+    // (or the eager push). Best-effort — never fails the drain.
+    let ackChased = 0;
+    try {
+      const { chaseOverdueAcknowledgements } = await import("./lib/mail-acks");
+      ackChased = (await chaseOverdueAcknowledgements(c)).chased;
+    } catch (e) {
+      console.warn("[process-email-outbox] ack chase failed:", e);
+    }
+    return c.json({ ok: true, ...result, ackChased });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("[process-email-outbox] error:", e);

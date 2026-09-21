@@ -39,6 +39,21 @@ import {
 } from "../lib/mail-threading";
 import { emitAudit } from "../lib/audit";
 import {
+  ackDueAt,
+  acknowledgeMessage,
+  createAckRequests,
+  loadAcksForThread,
+  loadReadReceipts,
+  mailboxAudience,
+  markThreadRead,
+  markThreadUnread,
+  myReadJoinSql,
+  myUnreadSql,
+  staffRecipients,
+  type AckRow,
+  type ReadReceipt,
+} from "../lib/mail-acks";
+import {
   DEFAULT_BUCKET,
   putFile,
   signedDownloadUrl,
@@ -212,6 +227,51 @@ export async function ensureMailSchema(db: D1Database): Promise<void> {
      )`,
     `CREATE UNIQUE INDEX IF NOT EXISTS ux_email_labels_org_name
        ON email_labels (org_id, name)`,
+    // T-012 R7: per-PERSON read state. One row per (thread, user). read_at
+    // NULL = the person explicitly marked it unread; a row whose read_at is
+    // older than the thread's last_message_at means new mail arrived since
+    // they read it. No row ⇒ fall back to the legacy shared email_threads.
+    // unread flag, so existing threads keep their state on deploy instead of
+    // every mailbox lighting up unread for everyone. TEXT timestamps, like
+    // every other *_at column in this module (adapter rule).
+    `CREATE TABLE IF NOT EXISTS mail_thread_reads (
+       org_id TEXT NOT NULL DEFAULT 'hookka',
+       thread_id TEXT NOT NULL,
+       user_id TEXT NOT NULL,
+       user_name TEXT,
+       read_at TEXT,
+       PRIMARY KEY (org_id, thread_id, user_id)
+     )`,
+    `CREATE INDEX IF NOT EXISTS ix_mail_thread_reads_user
+       ON mail_thread_reads (org_id, user_id)`,
+    // T-012 R8: acknowledgement. The sender flags an outbound message as
+    // needing one (ack_required + a due time); one mail_acknowledgements row
+    // per STAFF recipient (an address in email_addresses) records who has
+    // confirmed and who has not. Overdue rows are chased by the outbox cron
+    // (chaseOverdueAcknowledgements) — chased_at / chase_count throttle it.
+    `ALTER TABLE email_messages ADD COLUMN IF NOT EXISTS ack_required INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE email_messages ADD COLUMN IF NOT EXISTS ack_due_at TEXT`,
+    `CREATE TABLE IF NOT EXISTS mail_acknowledgements (
+       id TEXT PRIMARY KEY,
+       org_id TEXT NOT NULL DEFAULT 'hookka',
+       message_id TEXT NOT NULL,
+       thread_id TEXT NOT NULL,
+       address TEXT NOT NULL,
+       user_id TEXT,
+       user_name TEXT,
+       requested_at TEXT,
+       due_at TEXT,
+       acked_at TEXT,
+       acked_by_user_id TEXT,
+       chased_at TEXT,
+       chase_count INTEGER NOT NULL DEFAULT 0
+     )`,
+    `CREATE INDEX IF NOT EXISTS ix_mail_acks_message
+       ON mail_acknowledgements (message_id)`,
+    `CREATE INDEX IF NOT EXISTS ix_mail_acks_thread
+       ON mail_acknowledgements (thread_id)`,
+    `CREATE INDEX IF NOT EXISTS ix_mail_acks_pending
+       ON mail_acknowledgements (org_id, acked_at, due_at)`,
   ];
   for (const stmt of stmts) {
     try {
@@ -630,6 +690,11 @@ type ThreadRow = {
   // turns it into `hasOutbound` — dual-read both.
   has_outbound?: number | boolean | null;
   hasOutbound?: number | boolean | null;
+  // Computed per CALLER by myUnreadSql() (T-012 R7). Absent on reads that
+  // did not join mail_thread_reads (e.g. the ownership pre-checks), in which
+  // case the legacy shared flag is what rowToThread falls back to.
+  my_unread?: number | boolean | null;
+  myUnread?: number | boolean | null;
 };
 
 function rowToThread(r: ThreadRow) {
@@ -646,7 +711,7 @@ function rowToThread(r: ThreadRow) {
     lastDirection: r.lastDirection ?? r.last_direction ?? "inbound",
     lastSnippet: r.lastSnippet ?? r.last_snippet ?? "",
     messageCount: Number(r.messageCount ?? r.message_count ?? 0),
-    unread: Number(r.unread ?? 0) === 1,
+    unread: Number(r.myUnread ?? r.my_unread ?? r.unread ?? 0) === 1,
     starred: Number(r.starred ?? 0) === 1,
     labels: parseJsonArray(r.labels),
     trashedAt: r.trashedAt ?? r.trashed_at ?? null,
@@ -675,10 +740,14 @@ type MessageRow = {
   sent_by_user_id: string | null;
   sent_by_name: string | null;
   created_at: string | null;
+  ack_required?: number | boolean | null;
+  ack_due_at?: string | null;
   // The pg driver camelCases EVERY result column (db-pg.ts transform.column.from),
   // so the snake reads above arrive camelCased and the snake key is undefined.
   // Without dual-reads the detail view shows EMPTY messages. Dual-read like
   // rowToAddress: camelCase first, snake kept as a fallback.
+  ackRequired?: number | boolean | null;
+  ackDueAt?: string | null;
   threadId?: string;
   messageId?: string | null;
   inReplyTo?: string | null;
@@ -727,6 +796,8 @@ function rowToMessage(r: MessageRow) {
     receivedAt: r.receivedAt ?? r.received_at ?? "",
     sentByUserId: r.sentByUserId ?? r.sent_by_user_id ?? undefined,
     sentByName: r.sentByName ?? r.sent_by_name ?? undefined,
+    ackRequired: Number(r.ackRequired ?? r.ack_required ?? 0) === 1,
+    ackDueAt: r.ackDueAt ?? r.ack_due_at ?? null,
     createdAt: r.createdAt ?? r.created_at ?? "",
   };
 }
@@ -1051,18 +1122,23 @@ app.get("/threads", async (c) => {
   // has_outbound: accurate Sent flag — does this thread have ANY outbound
   // message? Computed per row so the frontend's Sent folder is correct
   // instead of relying on the last_direction proxy.
+  // unread is per PERSON (R7): the caller's mail_thread_reads row decides;
+  // with no row the legacy shared flag applies. The join binds first.
   const sql =
     `SELECT t.*,
        EXISTS (
          SELECT 1 FROM email_messages m
           WHERE m.thread_id = t.id AND m.direction = 'outbound'
-       ) AS has_outbound
-       FROM email_threads t WHERE ${where.join(" AND ")}` +
+       ) AS has_outbound,
+       ${myUnreadSql()} AS my_unread
+       FROM email_threads t
+       ${myReadJoinSql()}
+       WHERE ${where.join(" AND ")}` +
     // One row past the page tells us whether a next page exists without a
     // second COUNT(*) round-trip.
     ` ORDER BY t.last_message_at DESC NULLS LAST LIMIT ${limit + 1} OFFSET ${offset}`;
   const res = await c.var.DB.prepare(sql)
-    .bind(...binds)
+    .bind(scope.userId, ...binds)
     .all<ThreadRow>();
   const rows = res.results ?? [];
   const page = rows.length > limit ? rows.slice(0, limit) : rows;
@@ -1146,22 +1222,98 @@ app.get("/threads/:id", async (c) => {
     console.error("[mail-center] loading attachments failed:", e);
   }
 
-  // Clear the unread flag on open.
+  // Opening the thread reads it — for THIS person only (R7). The legacy
+  // shared flag is left alone so colleagues without a read row keep theirs.
+  const lastMessageAt = thread.lastMessageAt ?? thread.last_message_at ?? null;
+  const readerName = await senderName(c.var.DB, scope.userId || null);
   try {
-    await c.var.DB.prepare(`UPDATE email_threads SET unread = 0 WHERE id = ?`)
-      .bind(id)
-      .run();
+    await markThreadRead(c.var.DB, {
+      orgId,
+      threadId: id,
+      userId: scope.userId,
+      userName: readerName || null,
+      lastMessageAt,
+    });
   } catch {
     /* read view must not fail if the mark-read write blips */
   }
 
+  // "Read by 3 of 5" + who has / has not acknowledged each message (R7/R8).
+  // Both are enhancements: a blip leaves them empty, never 500s the read.
+  let readBy: ReadReceipt[] = [];
+  let audience = 1;
+  let acks = new Map<string, AckRow[]>();
+  try {
+    readBy = await loadReadReceipts(c.var.DB, orgId, id, lastMessageAt);
+    audience = await mailboxAudience(
+      c.var.DB,
+      orgId,
+      thread.mailboxAddress ?? thread.mailbox_address ?? "",
+    );
+    acks = await loadAcksForThread(c.var.DB, orgId, id);
+  } catch (e) {
+    console.error("[mail-center] read receipts / acks failed:", e);
+  }
+
   return c.json({
-    thread: rowToThread(thread),
+    thread: { ...rowToThread(thread), unread: false, readBy, audience },
     messages: mappedMsgs.map((m) => ({
       ...m,
       attachments: attByMsg.get(m.id) ?? [],
+      acks: acks.get(m.id) ?? [],
     })),
   });
+});
+
+// POST /api/mail-center/threads/:id/messages/:mid/acknowledge — the caller
+// confirms a message that asked for acknowledgement (R8). Their own rows —
+// by account, or by a shared mailbox in their scope — are stamped; anyone
+// else's are untouched. Read-side action: gated like opening the thread.
+app.post("/threads/:id/messages/:mid/acknowledge", async (c) => {
+  const denied = await requirePermission(c, "mail-center", "read");
+  if (denied) return denied;
+  await ensureMailSchema(c.var.DB);
+  const orgId = getOrgId(c);
+  const id = c.req.param("id");
+  const mid = c.req.param("mid");
+  const scope = await getMailScope(c, orgId);
+  if (!scope.userId) return c.json({ error: "not signed in" }, 401);
+
+  const thread = await c.var.DB.prepare(
+    `SELECT mailbox_address FROM email_threads WHERE org_id = ? AND id = ? LIMIT 1`,
+  )
+    .bind(orgId, id)
+    .first<{ mailboxAddress?: string | null; mailbox_address?: string | null }>();
+  if (!thread) return c.json({ error: "Thread not found" }, 404);
+  if (
+    !scope.isAdmin &&
+    !scope.addresses.includes(
+      (thread.mailboxAddress ?? thread.mailbox_address ?? "").toLowerCase(),
+    )
+  ) {
+    return c.json({ error: "Thread not found" }, 404);
+  }
+
+  const changed = await acknowledgeMessage(c.var.DB, {
+    orgId,
+    messageRowId: mid,
+    userId: scope.userId,
+    addresses: scope.addresses,
+  });
+  if (changed === 0) {
+    return c.json(
+      { error: "nothing to acknowledge — this message did not ask you for one, or you already did" },
+      409,
+    );
+  }
+  await emitAudit(c, {
+    resource: "mail-center",
+    resourceId: id,
+    action: "acknowledge",
+    after: { messageId: mid, rows: changed },
+  });
+  const acks = await loadAcksForThread(c.var.DB, orgId, id);
+  return c.json({ ok: true, acks: acks.get(mid) ?? [] });
 });
 
 // ---------------------------------------------------------------------------
@@ -2227,6 +2379,10 @@ app.post("/threads/:id/reply", async (c) => {
     to?: string | string[];
     cc?: string | string[];
     bcc?: string | string[];
+    // R8: ask every STAFF recipient (To + Cc) to acknowledge, due in N hours
+    // (default 48).
+    ackRequired?: boolean;
+    ackDueHours?: number;
     // Inline outbound attachments (images + PDF), base64 (no data: prefix).
     attachments?: OutboundAttachmentBody[];
   };
@@ -2304,6 +2460,18 @@ app.post("/threads/:id/reply", async (c) => {
   }
   const recipientsErr = recipientsError(to, cc, bcc);
   if (recipientsErr) return c.json({ error: recipientsErr }, 400);
+
+  // Acknowledgement can only be asked of colleagues (a staff mailbox); check
+  // BEFORE sending so a mail never goes out with a request nobody can meet.
+  const ackRecipients = body.ackRequired
+    ? await staffRecipients(c.var.DB, orgId, [...to, ...cc])
+    : [];
+  if (body.ackRequired && ackRecipients.length === 0) {
+    return c.json(
+      { error: "acknowledgement needs at least one staff recipient (an @hookka.com mailbox)" },
+      400,
+    );
+  }
 
   const baseSubject = thread.subject ?? "(no subject)";
   const subject = /^re:/i.test(baseSubject) ? baseSubject : `Re: ${baseSubject}`;
@@ -2384,14 +2552,33 @@ app.post("/threads/:id/reply", async (c) => {
 
   await storeOutboundAttachments(c, orgId, rowId, attachments);
 
+  // The shared unread flag is NOT cleared here any more (R7): the sender's
+  // own read row is written below; colleagues keep their own state.
   await c.var.DB.prepare(
     `UPDATE email_threads
         SET last_message_at = ?, last_direction = 'outbound',
-            last_snippet = ?, message_count = message_count + 1, unread = 0
+            last_snippet = ?, message_count = message_count + 1
       WHERE org_id = ? AND id = ?`,
   )
     .bind(now, snippet, orgId, id)
     .run();
+  await markThreadRead(c.var.DB, {
+    orgId,
+    threadId: id,
+    userId: userId ?? "",
+    userName: fromName || null,
+    lastMessageAt: now,
+  });
+  if (ackRecipients.length > 0) {
+    await createAckRequests(c.var.DB, {
+      orgId,
+      messageRowId: rowId,
+      threadId: id,
+      recipients: ackRecipients,
+      now,
+      dueAt: ackDueAt(now, body.ackDueHours),
+    });
+  }
 
   await emitAudit(c, {
     resource: "mail-center",
@@ -2431,6 +2618,9 @@ app.post("/compose", async (c) => {
     subject?: string;
     text?: string;
     forwardOf?: string;
+    // R8: ask every STAFF recipient (To + Cc) to acknowledge, due in N hours.
+    ackRequired?: boolean;
+    ackDueHours?: number;
     // Inline outbound attachments (images + PDF), base64 (no data: prefix).
     attachments?: OutboundAttachmentBody[];
   };
@@ -2474,6 +2664,16 @@ app.post("/compose", async (c) => {
     return c.json({ error: "not allowed to send from " + fromAddress }, 403);
   }
   const from = await fromHeaderFor(c.var.DB, orgId, fromAddress);
+
+  const ackRecipients = body.ackRequired
+    ? await staffRecipients(c.var.DB, orgId, [...to, ...cc])
+    : [];
+  if (body.ackRequired && ackRecipients.length === 0) {
+    return c.json(
+      { error: "acknowledgement needs at least one staff recipient (an @hookka.com mailbox)" },
+      400,
+    );
+  }
 
   // Wrap the plain-text body in a minimal HTML part so the email carries both
   // (same approach as the reply handler).
@@ -2558,6 +2758,23 @@ app.post("/compose", async (c) => {
     .run();
 
   await storeOutboundAttachments(c, orgId, rowId, attachments);
+  await markThreadRead(c.var.DB, {
+    orgId,
+    threadId,
+    userId: userId ?? "",
+    userName: fromName || null,
+    lastMessageAt: now,
+  });
+  if (ackRecipients.length > 0) {
+    await createAckRequests(c.var.DB, {
+      orgId,
+      messageRowId: rowId,
+      threadId,
+      recipients: ackRecipients,
+      now,
+      dueAt: ackDueAt(now, body.ackDueHours),
+    });
+  }
 
   await emitAudit(c, {
     resource: "mail-center",
@@ -2654,37 +2871,89 @@ app.patch("/threads/:id", async (c) => {
     sets.push("labels = ?");
     binds.push(JSON.stringify(clean));
   }
-  if (body.unread !== undefined) {
-    // Fixes "mark unread": GET /threads/:id clears unread on open, and this is
-    // the only path that can SET it back to 1.
-    sets.push("unread = ?");
-    binds.push(body.unread ? 1 : 0);
-  }
+  // unread is per PERSON now (R7): written to the caller's read row, never
+  // to the shared column. Handled after the UPDATE below (it may be the only
+  // field, in which case the thread row itself is untouched).
   if (body.trashed !== undefined) {
     // Soft delete: set trashed_at=now to move to Trash, clear to null to
     // restore. TEXT column (ISO string), never timestamptz.
     sets.push("trashed_at = ?");
     binds.push(body.trashed ? new Date().toISOString() : null);
   }
-  if (sets.length === 0) {
+  if (sets.length === 0 && body.unread === undefined) {
     return c.json({ error: "no fields to update" }, 400);
   }
 
   // Existence + ownership were already verified above, so we don't gate on
   // meta.changes here — an idempotent write (e.g. clearing an already-clear
   // trashed_at) reports 0 changes on some engines and must NOT 404.
-  await c.var.DB.prepare(
-    `UPDATE email_threads SET ${sets.join(", ")} WHERE org_id = ? AND id = ?`,
-  )
-    .bind(...binds, orgId, id)
-    .run();
+  if (sets.length > 0) {
+    await c.var.DB.prepare(
+      `UPDATE email_threads SET ${sets.join(", ")} WHERE org_id = ? AND id = ?`,
+    )
+      .bind(...binds, orgId, id)
+      .run();
+  }
 
   const row = await c.var.DB.prepare(
     `SELECT * FROM email_threads WHERE org_id = ? AND id = ? LIMIT 1`,
   )
     .bind(orgId, id)
     .first<ThreadRow>();
-  return c.json(row ? rowToThread(row) : { id });
+
+  if (body.unread !== undefined && scope.userId) {
+    const name = await senderName(c.var.DB, scope.userId);
+    if (body.unread) {
+      await markThreadUnread(c.var.DB, {
+        orgId,
+        threadId: id,
+        userId: scope.userId,
+        userName: name || null,
+      });
+    } else {
+      await markThreadRead(c.var.DB, {
+        orgId,
+        threadId: id,
+        userId: scope.userId,
+        userName: name || null,
+        lastMessageAt: row?.lastMessageAt ?? row?.last_message_at ?? null,
+      });
+    }
+  }
+
+  // R15: assign / archive / delete leave an audit row. One row per PATCH,
+  // named after the most consequential change it carried.
+  const auditAction =
+    body.trashed === true
+      ? "delete"
+      : body.trashed === false
+        ? "restore"
+        : body.status === "closed"
+          ? "archive"
+          : body.status === "open"
+            ? "reopen"
+            : body.assignedToUserId !== undefined
+              ? "assign"
+              : null;
+  if (auditAction) {
+    await emitAudit(c, {
+      resource: "mail-center",
+      resourceId: id,
+      action: auditAction,
+      after: {
+        ...(body.status !== undefined ? { status: body.status } : {}),
+        ...(body.assignedToUserId !== undefined
+          ? { assignedToUserId: body.assignedToUserId, assignedToName: body.assignedToName ?? null }
+          : {}),
+        ...(body.trashed !== undefined ? { trashed: body.trashed } : {}),
+      },
+    });
+  }
+
+  const out = row ? rowToThread(row) : { id };
+  return c.json(
+    body.unread !== undefined ? { ...out, unread: !!body.unread } : out,
+  );
 });
 
 export default app;
