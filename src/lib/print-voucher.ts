@@ -63,6 +63,8 @@ export type VoucherSpec = {
   watermark?: string;
   /** Sub-table printed under the lines, e.g. the bills this payment settled. */
   detail?: { heading: string; columns: VoucherColumn[]; lines: VoucherLine[] };
+  /** Multi-line footer text (payment details / terms) — printed above the signatures; empty = not printed. */
+  footerText?: string;
 };
 
 // Minimal HTML-escape for any value interpolated into the voucher. Document
@@ -123,6 +125,7 @@ const VOUCHER_STYLES = `
   .detail th { background: #FAF8F5; font-size: 10px; }
   .detail td { font-size: 11px; padding: 4px 8px; }
   .sheet { position: relative; }
+  .footer-text { margin-top: 12px; font-size: 10.5px; color: #444; white-space: pre-wrap; border-top: 1px dashed #D8D3CE; padding-top: 8px; }
   .wm { position: absolute; left: 0; right: 0; top: 40%; text-align: center; font-size: 72px; font-weight: 800; letter-spacing: 6px; color: rgba(154, 58, 45, 0.13); transform: rotate(-24deg); pointer-events: none; user-select: none; }
   @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
   .sheet { page-break-after: always; }
@@ -174,6 +177,7 @@ export function buildVoucherSheet(spec: VoucherSpec): string {
     : "";
 
   const wm = spec.watermark ? `<div class="wm">${escapeHtml(spec.watermark)}</div>` : "";
+  const footerText = spec.footerText && spec.footerText.trim() ? `<div class="footer-text">${escapeHtml(spec.footerText.trim())}</div>` : "";
 
   return `<div class="sheet">
   ${wm}
@@ -196,6 +200,7 @@ export function buildVoucherSheet(spec: VoucherSpec): string {
   ${detailBlock}
   ${wordsBlock}
   ${remarksBlock}
+  ${footerText}
   <div class="sigs">${sigCols}</div>
   <div class="printed">Printed on ${escapeHtml(spec.printedOn)}</div>
 </div>`;
