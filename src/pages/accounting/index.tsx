@@ -5921,6 +5921,7 @@ type ScanFinanceResult = {
   extraDocs: number;
   // R10 — set when the scan recorded a sample the confirm call can learn from.
   sampleId?: string | null;
+  file?: File; // client-side: the scanned original, kept on the saved record (R17)
   rawLines?: { supplierCode: string | null; description: string | null; qty: number | null; unitPrice: number | null }[];
 };
 
@@ -5928,8 +5929,20 @@ type ScanFinanceResult = {
 // with so the diff becomes correction rows + aliases. Fire-and-forget: never blocks a save.
 // ponytail: lines map by position (srcIdx = raw index); rows the operator added/removed
 // shift the mapping. Amount edits are not sent — the form has no unit price to compare.
-function confirmFinanceScan(scan: ScanFinanceResult | null, docNo: string | null, supplierName: string | null, descriptions: string[]) {
-  if (!scan?.sampleId) return;
+function confirmFinanceScan(scan: ScanFinanceResult | null, docNo: string | null, supplierName: string | null, descriptions: string[], record: { resourceType: string; resourceId: string | null }) {
+  if (!scan) return;
+  // R17 — keep the original on the saved bill / voucher (same /api/files store the SO + PI use).
+  if (scan.file && record.resourceId) {
+    const fd = new FormData();
+    fd.append("file", scan.file);
+    fd.append("resourceType", record.resourceType);
+    fd.append("resourceId", record.resourceId);
+    fd.append("source", "scan-finance");
+    void fetch("/api/files", { method: "POST", body: fd })
+      .then((r) => { if (!r.ok) console.error("[scan-finance] original not kept, HTTP", r.status); })
+      .catch((e) => console.error("[scan-finance] original not kept:", e));
+  }
+  if (!scan.sampleId) return;
   const lines = (scan.rawLines ?? []).map((rl, i) => {
     const at = scan.lines.findIndex((l) => (l as { srcIdx?: number }).srcIdx === i);
     return { ...rl, description: at >= 0 && descriptions[at] != null ? descriptions[at] : rl.description };
@@ -5954,7 +5967,7 @@ function ScanPrefillButton({ label, onResult }: { label: string; onResult: (d: S
       const res = await fetch("/api/scan-finance/extract", { method: "POST", body: fd });
       const j = (await res.json()) as { success?: boolean; error?: string; data?: ScanFinanceResult };
       if (j?.success && j.data) {
-        await onResult(j.data);
+        await onResult({ ...j.data, file: f });
         if (j.data.extraDocs > 0) {
           toast.success(`Heads up: the file contains ${j.data.extraDocs + 1} documents — only the first was used.`);
         }
@@ -6171,7 +6184,8 @@ function OtherPartyBillsManager({ parties, accounts, side }: { parties: OtherPar
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
-    const j = asMutationResponse(await res.json());
+    const rawJ = await res.json();
+    const j = asMutationResponse(rawJ);
     if (j?.success) {
       // TEACH: if this bill came from a scan, the letterhead OCR read now maps
       // to the party the operator actually filed it under — right first time or
@@ -6185,7 +6199,7 @@ function OtherPartyBillsManager({ parties, accounts, side }: { parties: OtherPar
         });
       }
       if (scanRef.current) {
-        confirmFinanceScan(scanRef.current, form.referenceNo || null, allSideParties.find((p) => p.id === form.partyId)?.name ?? scannedPartyName, postableBillLines.map((l) => l.description ?? ""));
+        confirmFinanceScan(scanRef.current, form.referenceNo || null, allSideParties.find((p) => p.id === form.partyId)?.name ?? scannedPartyName, postableBillLines.map((l) => l.description ?? ""), { resourceType: "OTHER_PARTY_BILL", resourceId: editingBillNo ?? (rawJ as { data?: { billNo?: string } })?.data?.billNo ?? null });
         scanRef.current = null;
       }
       setScannedPartyName(null);
@@ -8027,11 +8041,12 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
         editingId ? `/api/accounting/payment-vouchers/${editingId}/restate` : "/api/accounting/payment-vouchers",
         { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
       );
-      const j = asMutationResponse(await res.json());
+      const rawJ = await res.json();
+      const j = asMutationResponse(rawJ);
       if (j?.success) {
         toast.success(editingId ? "Payment updated" : "Payment posted");
         if (scanRef.current) {
-          confirmFinanceScan(scanRef.current, scanRef.current.docNo, form.payee || null, postableLines.map((l) => l.description));
+          confirmFinanceScan(scanRef.current, scanRef.current.docNo, form.payee || null, postableLines.map((l) => l.description), { resourceType: "PV", resourceId: (rawJ as { data?: { pvNo?: string } })?.data?.pvNo ?? null });
           scanRef.current = null;
         }
         setShowForm(false);

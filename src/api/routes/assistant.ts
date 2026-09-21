@@ -28,6 +28,8 @@
 import { Hono } from "hono";
 import type { Env } from "../worker";
 import { emitAudit } from "../lib/audit";
+import { saveOriginalFile } from "./files";
+import { getOrgId } from "../lib/tenant";
 import {
   streamMessages,
   type AnthropicMessage,
@@ -662,6 +664,33 @@ app.post("/chat", async (c) => {
     const ingest = await ingestAttachments(body.attachments);
     parsedAttachments = ingest.parsed;
     rejections.push(...ingest.rejected);
+
+    // T-010 R17 — keep the originals (images / PDFs) of what the operator sent.
+    // Off the response path; a storage failure must never stop the chat.
+    // ponytail: spreadsheets are not in the file store's allow-list, so they are
+    // not kept; keyed by this request id, there is no parent record to hang them on.
+    const keptNames = new Set(ingest.parsed.map((p) => p.name));
+    const uploadedBy = (c.get as unknown as (k: string) => string | undefined)("userId") ?? null;
+    const orgId = getOrgId(c);
+    const keep = Promise.all(
+      body.attachments
+        .filter((a) => keptNames.has(a.name))
+        .map(async (a) => {
+          const bin = atob(a.base64);
+          const bytes = Uint8Array.from(bin, (ch) => ch.charCodeAt(0));
+          return saveOriginalFile(c.var.DB, c.env, {
+            orgId,
+            resourceType: "ASSISTANT",
+            resourceId: uploadedBy ?? "anonymous",
+            filename: a.name,
+            contentType: a.mediaType,
+            bytes: bytes.buffer,
+            uploadedBy,
+            source: "assistant",
+          });
+        }),
+    ).catch(() => []);
+    if (c.executionCtx?.waitUntil) c.executionCtx.waitUntil(keep);
 
     // Splice content into the LAST user message. We always know there's
     // at least one user message — the message array is non-empty and the

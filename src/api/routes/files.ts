@@ -311,6 +311,50 @@ function genId(): string {
 }
 
 /**
+ * Server-side twin of POST / for callers that already hold the bytes (T-010 R17:
+ * the assistant's attachments). Same key layout, checksum and `file_assets` row;
+ * no audit event and no MIME sniff — the caller has validated the bytes. Returns
+ * false (never throws) when the type is not storable or storage is unavailable,
+ * so it is safe as a best-effort side effect.
+ */
+export async function saveOriginalFile(
+  db: Env["Variables"]["DB"],
+  env: Env["Bindings"],
+  f: {
+    orgId: string;
+    resourceType: string;
+    resourceId: string;
+    filename: string;
+    contentType: string;
+    bytes: ArrayBuffer;
+    uploadedBy: string | null;
+    source: string;
+  },
+): Promise<boolean> {
+  if (!ALLOWED_MIME.has(f.contentType)) return false;
+  try {
+    await ensureRetentionSchema(db);
+    const id = genId();
+    const r2Key = buildKey({ orgId: f.orgId, resourceType: f.resourceType, resourceId: f.resourceId, id, filename: f.filename });
+    const checksum = await sha256Hex(f.bytes);
+    await putFile(env, r2Key, f.bytes, f.contentType);
+    await db
+      .prepare(
+        `INSERT INTO file_assets
+           (id, resourceType, resourceId, filename, contentType, sizeBytes,
+            r2Key, uploadedBy, uploadedAt, orgId, checksum, source)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(id, f.resourceType, f.resourceId, f.filename, f.contentType, f.bytes.byteLength, r2Key, f.uploadedBy, new Date().toISOString(), f.orgId, checksum, f.source)
+      .run();
+    return true;
+  } catch (e) {
+    console.warn("[files] saveOriginalFile failed:", e instanceof Error ? e.message : e);
+    return false;
+  }
+}
+
+/**
  * Build the storage object key. Format:
  *   <orgId>/<resourceType>/<resourceId>/<id>-<filename>
  *
