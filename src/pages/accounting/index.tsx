@@ -4163,12 +4163,14 @@ type SDOpenPI = {
 type SDHistoryRow = {
   id: string;
   noteNumber: string;
+  supplierId: string;
   supplierName: string;
   date: string;
   reason: string;
   totalAmount: number;
   status: string;
   piNo?: string;
+  items?: { description: string; quantity: number; unitPriceSen: number; lineType: string }[];
 };
 
 // Per-PI allocation row state: ticked + the raw RM string the operator typed.
@@ -4195,6 +4197,14 @@ function SupplierDiscountTab() {
 
   const [saving, setSaving] = useState(false);
 
+  // Inline row edit (history table): which row is being edited + its draft
+  // fields. An edit never touches allocations (Cancel + re-create for that).
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDate, setEditDate] = useState("");
+  const [editNet, setEditNet] = useState("");
+  const [editSst, setEditSst] = useState("");
+  const [editReason, setEditReason] = useState("");
+
   // History list.
   const [history, setHistory] = useState<SDHistoryRow[]>([]);
 
@@ -4205,7 +4215,8 @@ function SupplierDiscountTab() {
       .catch(() => {});
   }, []);
 
-  // Hide orphan DRAFTs (a Save whose post leg failed) — the rows actually shown.
+  // Hide orphan DRAFTs (a Save whose post leg failed). CANCELLED rows stay
+  // visible with their status badge (owner 2026-09-21).
   const visibleHistory = history.filter((n) => n.status !== "DRAFT");
   const sdSel = useRowSelection(visibleHistory, (d) => d.noteNumber ?? d.id);
 
@@ -4283,11 +4294,59 @@ function SupplierDiscountTab() {
     setAllocRows({});
   };
 
+  // Turn one history row into inputs (date / net / SST / reason).
+  const startEdit = (row: SDHistoryRow) => {
+    const net = row.items?.find((it) => it.lineType !== "TAX");
+    const sst = row.items?.find((it) => it.lineType === "TAX");
+    setEditingId(row.id);
+    setEditDate(row.date);
+    setEditNet(net ? ((net.quantity * net.unitPriceSen) / 100).toFixed(2) : (row.totalAmount / 100).toFixed(2));
+    setEditSst(sst ? ((sst.quantity * sst.unitPriceSen) / 100).toFixed(2) : "");
+    setEditReason(row.reason ?? "");
+  };
+
+  const saveEdit = async () => {
+    if (!editingId) return;
+    const netS = Math.round(Number(editNet) * 100);
+    const sstS = Math.round(Number(editSst) * 100);
+    if (!Number.isFinite(netS) || netS <= 0) { toast.error("Discount amount (net) must be greater than 0"); return; }
+    const items: { description: string; quantity: number; unitPriceSen: number; lineType: string }[] = [
+      { description: editReason || "Discount", quantity: 1, unitPriceSen: netS, lineType: "STOCKED" },
+    ];
+    if (Number.isFinite(sstS) && sstS > 0) items.push({ description: "SST portion", quantity: 1, unitPriceSen: sstS, lineType: "TAX" });
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/accounting/purchase-credit-notes/${encodeURIComponent(editingId)}/restate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date: editDate, reason: editReason, items }),
+      });
+      const j = (await res.json()) as { success?: boolean; error?: string };
+      if (!res.ok || !j.success) {
+        toast.error(j.error || "Failed to update supplier discount");
+        return;
+      }
+      toast.success("Supplier discount updated");
+      setEditingId(null);
+      loadHistory();
+    } catch {
+      toast.error("Failed to update supplier discount");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const canSave = !!supplierId && netSen > 0 && !saving;
 
   const handleSave = async () => {
     if (!supplierId) { toast.error("Select a supplier"); return; }
     if (!(netSen > 0)) { toast.error("Discount amount (net) must be greater than 0"); return; }
+
+    // items = net line (+ SST line if any).
+    const items: { description: string; quantity: number; unitPriceSen: number; lineType: string }[] = [
+      { description: reason || "Discount", quantity: 1, unitPriceSen: netSen, lineType: "STOCKED" },
+    ];
+    if (sstSen > 0) items.push({ description: "SST portion", quantity: 1, unitPriceSen: sstSen, lineType: "TAX" });
 
     // Build the allocations from the ticked rows; cap each at its outstanding.
     const allocations: { piId: string; amountSen: number }[] = [];
@@ -4308,12 +4367,7 @@ function SupplierDiscountTab() {
 
     setSaving(true);
     try {
-      // 1) CREATE the DRAFT credit note. items = net line (+ SST line if any).
-      const items: { description: string; quantity: number; unitPriceSen: number; lineType: string }[] = [
-        { description: reason || "Discount", quantity: 1, unitPriceSen: netSen, lineType: "STOCKED" },
-      ];
-      if (sstSen > 0) items.push({ description: "SST portion", quantity: 1, unitPriceSen: sstSen, lineType: "TAX" });
-
+      // 1) CREATE the DRAFT credit note.
       const createRes = await fetch("/api/accounting/purchase-credit-notes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -4348,10 +4402,13 @@ function SupplierDiscountTab() {
     }
   };
 
-  const voidNote = async (row: SDHistoryRow) => {
+  // Owner rule (2026-09-21): every action button in this tab reads "Cancel" —
+  // it still calls the same reversal endpoint (GL mirror + PI/supplier
+  // restore) and the row disappears from history once CANCELLED.
+  const cancelNote = async (row: SDHistoryRow) => {
     if (!(await confirm({
-      title: "Void supplier discount?",
-      message: `Void ${row.noteNumber} (${formatCurrency(row.totalAmount)})? This reverses the GL posting and re-opens any invoices it was knocked off.`,
+      title: "Cancel supplier discount?",
+      message: `Cancel ${row.noteNumber} (${formatCurrency(row.totalAmount)})? This reverses the GL posting and re-opens any invoices it was knocked off.`,
       danger: true,
     }))) return;
     try {
@@ -4361,13 +4418,14 @@ function SupplierDiscountTab() {
       });
       const j = asMutationResponse(await res.json());
       if (res.ok && j?.success) {
-        toast.success(`${row.noteNumber} voided`);
+        toast.success(`${row.noteNumber} cancelled`);
+        if (editingId === row.id) setEditingId(null);
         loadHistory();
       } else {
-        toast.error(j?.error || "Failed to void supplier discount");
+        toast.error(j?.error || "Failed to cancel supplier discount");
       }
     } catch {
-      toast.error("Failed to void supplier discount");
+      toast.error("Failed to cancel supplier discount");
     }
   };
 
@@ -4568,16 +4626,31 @@ function SupplierDiscountTab() {
                   </tr>
                 </thead>
                 <tbody>
-                  {visibleHistory.map((n) => (
-                    <tr key={n.id} className="border-b border-[#F0ECE9]">
+                  {visibleHistory.map((n) => {
+                    const editing = editingId === n.id;
+                    const inputCls = "rounded-md border border-[#E2DDD8] px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-[#6B5C32]";
+                    return (
+                    <Fragment key={n.id}>
+                    <tr className="border-b border-[#F0ECE9]">
                       <td className="px-3 py-1.5 w-8">
                         <input type="checkbox" checked={sdSel.isSelected(n.noteNumber ?? n.id)} onChange={() => sdSel.toggle(n.noteNumber ?? n.id)} className="h-3.5 w-3.5 accent-[#6B5C32] align-middle" />
                       </td>
                       <td className="px-3 py-1.5 tabular-nums text-xs font-medium">{n.noteNumber}</td>
                       <td className="px-3 py-1.5">{n.supplierName}</td>
-                      <td className="px-3 py-1.5 text-xs text-[#6B7280] whitespace-nowrap">{n.date}</td>
+                      <td className="px-3 py-1.5 text-xs text-[#6B7280] whitespace-nowrap">
+                        {editing ? (
+                          <input type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} className={inputCls} />
+                        ) : n.date}
+                      </td>
                       <td className="px-3 py-1.5 text-xs text-[#6B7280]">{n.piNo || "—"}</td>
-                      <td className="px-3 py-1.5 text-right tabular-nums font-medium">{formatCurrency(n.totalAmount)}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums font-medium">
+                        {editing ? (
+                          <div className="flex items-center justify-end gap-2">
+                            <input type="number" step="0.01" min="0" inputMode="decimal" value={editNet} onFocus={(e) => e.currentTarget.select()} onChange={(e) => setEditNet(e.target.value)} placeholder="Net" className={`${inputCls} w-24 text-right`} />
+                            <input type="number" step="0.01" min="0" inputMode="decimal" value={editSst} onFocus={(e) => e.currentTarget.select()} onChange={(e) => setEditSst(e.target.value)} placeholder="SST" className={`${inputCls} w-20 text-right`} />
+                          </div>
+                        ) : formatCurrency(n.totalAmount)}
+                      </td>
                       <td className="px-3 py-1.5">
                         {n.status === "POSTED" ? (
                           <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-[#EAF3DE] text-[#27500A] border border-[#C0DD97]">POSTED</span>
@@ -4585,13 +4658,31 @@ function SupplierDiscountTab() {
                           <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-[#F3F0EC] text-[#6B7280] border border-[#E2DDD8]">{n.status}</span>
                         )}
                       </td>
-                      <td className="px-3 py-1.5 text-right">
-                        {n.status === "POSTED" && (
-                          <button onClick={() => voidNote(n)} className="text-xs text-[#9A3A2D] hover:text-[#7A2E24] underline decoration-dotted cursor-pointer">Void</button>
-                        )}
+                      <td className="px-3 py-1.5 text-right whitespace-nowrap">
+                        {n.status === "POSTED" && (editing ? (
+                          <>
+                            <button onClick={saveEdit} disabled={saving} className="text-xs text-[#27500A] hover:text-[#1F1D1B] underline decoration-dotted cursor-pointer mr-3 disabled:opacity-50">{saving ? "Saving…" : "Save"}</button>
+                            <button onClick={() => setEditingId(null)} className="text-xs text-[#6B7280] hover:text-[#1F1D1B] underline decoration-dotted cursor-pointer">Discard</button>
+                          </>
+                        ) : (
+                          <>
+                            <button onClick={() => startEdit(n)} className="text-xs text-[#6B5C32] hover:text-[#1F1D1B] underline decoration-dotted cursor-pointer mr-3">Edit</button>
+                            <button onClick={() => cancelNote(n)} className="text-xs text-[#9A3A2D] hover:text-[#7A2E24] underline decoration-dotted cursor-pointer">Cancel</button>
+                          </>
+                        ))}
                       </td>
                     </tr>
-                  ))}
+                    {editing && (
+                      <tr className="border-b border-[#F0ECE9] bg-[#FAF9F7]">
+                        <td />
+                        <td colSpan={7} className="px-3 py-1.5">
+                          <input type="text" value={editReason} onChange={(e) => setEditReason(e.target.value)} placeholder="Reason" className={`${inputCls} w-full`} />
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

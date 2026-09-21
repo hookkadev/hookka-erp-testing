@@ -2394,7 +2394,12 @@ app.put("/purchase-credit-notes/:id", async (c) => {
 // 0088/0156 created purchase_credit_notes.status CHECK (status IN
 // ('DRAFT','POSTED')) — void writes 'CANCELLED', which that CHECK has always
 // rejected (same class as BUG-2026-06-25-001's purchase_invoices.status
-// CHECK): every void 500s with a raw constraint-violation error.
+// CHECK): every void 500s with a raw constraint-violation error. Also carries
+// `ledger_journal_entries.hidden` (mig 0177, applied manually — see
+// migrations-postgres/README.md) as a defensive self-apply: void AND the
+// edit-in-place restate below both rely on it to find whichever GL legs are
+// currently live for a note (original, or the latest restate) without
+// double-counting a prior edit's reversed pair.
 let _pendingPcnStatusMigration: Promise<void> | null = null;
 function ensurePcnCancellable(db: D1Database): Promise<void> {
   if (_pendingPcnStatusMigration) return _pendingPcnStatusMigration;
@@ -2404,6 +2409,7 @@ function ensurePcnCancellable(db: D1Database): Promise<void> {
       "ALTER TABLE purchase_credit_notes DROP CONSTRAINT IF EXISTS purchase_credit_notes_status_chk",
       "ALTER TABLE purchase_credit_notes ADD CONSTRAINT purchase_credit_notes_status_chk " +
         "CHECK (status IN ('DRAFT','POSTED','CANCELLED'))",
+      "ALTER TABLE ledger_journal_entries ADD COLUMN IF NOT EXISTS hidden INTEGER NOT NULL DEFAULT 0",
     ]);
   })().catch((err) => {
     _pendingPcnStatusMigration = null;
@@ -2411,6 +2417,222 @@ function ensurePcnCancellable(db: D1Database): Promise<void> {
   });
   return _pendingPcnStatusMigration;
 }
+
+// POST /purchase-credit-notes/:id/restate — edit a POSTED supplier discount IN
+// PLACE, same note number (owner 2026-09-18: void-then-retype was the only way
+// to fix a typo). Same shape as the other-party-bill / payment-voucher restate:
+// reverse whichever GL legs are currently visible (`hidden = 0` always names
+// exactly one live set — the original post, or a prior restate), post
+// corrected legs under a freshly stamped source, hide everything else.
+// Allocations (CREDIT_NOTE markers already knocked off specific PIs) are left
+// UNTOUCHED — the edited gross must still cover them (guard below); to
+// reallocate, Delete and re-create instead.
+app.post("/purchase-credit-notes/:id/restate", async (c) => {
+  const denied = await requirePermission(c, "accounting", "update");
+  if (denied) return denied;
+  await ensurePcnCancellable(c.var.DB);
+  const id = c.req.param("id");
+  const existing = await c.var.DB.prepare(
+    "SELECT * FROM purchase_credit_notes WHERE id = ?",
+  )
+    .bind(id)
+    .first<PcnRow>();
+  if (!existing) {
+    return c.json({ success: false, error: "Purchase CN not found" }, 404);
+  }
+  if (existing.status !== "POSTED") {
+    return c.json(
+      { success: false, error: "Only a posted credit note can be edited" },
+      400,
+    );
+  }
+  try {
+    const body = (await c.req.json()) as {
+      date?: string;
+      reason?: string;
+      reasonDetail?: string;
+      items?: Array<{
+        materialCode?: string;
+        description?: string;
+        quantity?: number;
+        unitPriceSen?: number;
+        lineType?: string;
+      }>;
+    };
+    if (!Array.isArray(body.items) || body.items.length === 0) {
+      return c.json({ success: false, error: "items are required" }, 400);
+    }
+    const items: PcnItem[] = [];
+    for (const raw of body.items) {
+      const quantity = Number(raw.quantity);
+      const unitPriceSen = Number(raw.unitPriceSen);
+      if (!Number.isInteger(unitPriceSen) || unitPriceSen < 0) {
+        return c.json(
+          {
+            success: false,
+            error: `unitPriceSen must be a non-negative integer (got ${raw.unitPriceSen}).`,
+          },
+          400,
+        );
+      }
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        return c.json(
+          { success: false, error: `quantity must be > 0 (got ${raw.quantity}).` },
+          400,
+        );
+      }
+      const lt = String(raw.lineType ?? "STOCKED").toUpperCase();
+      items.push({
+        materialCode: raw.materialCode ?? null,
+        description: String(raw.description ?? ""),
+        quantity,
+        unitPriceSen,
+        lineType: ["STOCKED", "FEE", "TAX", "REBATE", "DISCOUNT", "OTHER"].includes(lt)
+          ? lt
+          : "OTHER",
+      });
+    }
+    const totalAmount = items.reduce(
+      (s, it) => s + Math.round(it.quantity * it.unitPriceSen),
+      0,
+    );
+    if (totalAmount <= 0) {
+      return c.json({ success: false, error: "Total must be > 0" }, 400);
+    }
+    const cnDate = /^\d{4}-\d{2}-\d{2}$/.test(body.date ?? "")
+      ? (body.date as string)
+      : existing.date;
+
+    const orgId = getOrgId(c);
+    // Already-applied PI allocations can't exceed the edited gross — an edit
+    // never touches allocations (Delete + re-create does that instead).
+    const allocRow = await c.var.DB.prepare(
+      "SELECT COALESCE(SUM(booked_sen),0) AS s FROM supplier_payments WHERE paymentNo = ? AND method = 'CREDIT_NOTE' AND orgId = ?",
+    )
+      .bind(existing.noteNumber, orgId)
+      .first<{ s: number }>();
+    const allocatedSen = Number(allocRow?.s) || 0;
+    if (totalAmount < allocatedSen) {
+      return c.json(
+        {
+          success: false,
+          error: `Total (${(totalAmount / 100).toFixed(2)}) can't drop below what's already knocked off invoices (${(allocatedSen / 100).toFixed(2)}). Delete instead if you need to reallocate.`,
+        },
+        400,
+      );
+    }
+
+    const oldGross = Number(existing.totalAmount) || 0;
+    const now = new Date().toISOString();
+    const statements: D1PreparedStatement[] = [
+      c.var.DB.prepare(
+        `UPDATE purchase_credit_notes SET date = ?, reason = ?, reasonDetail = ?, items = ?, totalAmount = ?, updatedAt = ? WHERE id = ?`,
+      ).bind(cnDate, body.reason ?? "", body.reasonDetail ?? "", JSON.stringify(items), totalAmount, now, id),
+      c.var.DB.prepare(
+        "UPDATE suppliers SET outstandingSen = GREATEST(0, outstandingSen + ? - ?) WHERE id = ?",
+      ).bind(oldGross, totalAmount, existing.supplierId),
+    ];
+
+    const { mapPurchaseLinesToAccounts } = await import("./purchase-invoices");
+    const { bucket, pdefault } = await mapPurchaseLinesToAccounts(
+      c.var.DB,
+      items.map((it) => ({
+        mc: it.materialCode ?? null,
+        amt: Math.round(it.quantity * it.unitPriceSen),
+        lt: it.lineType,
+      })),
+    );
+    const sumLines = Object.values(bucket).reduce((s, v) => s + v, 0);
+    if (sumLines !== totalAmount)
+      bucket[pdefault] = (bucket[pdefault] ?? 0) + (totalAmount - sumLines);
+
+    const actorUserId =
+      (c as unknown as { get: (k: string) => string | undefined }).get("userId") ??
+      null;
+    const stamp = Date.now();
+    const postSource = `purchase_credit_note_restate_post:${stamp}`;
+
+    const cur =
+      (
+        await c.var.DB.prepare(
+          `SELECT accountCode, debitSen, creditSen FROM ledger_journal_entries
+            WHERE hidden = 0 AND sourceType LIKE 'purchase_credit_note%' AND sourceId = ? AND orgId = ?`,
+        )
+          .bind(id, orgId)
+          .all<Record<string, unknown>>()
+      ).results ?? [];
+    const legs: LedgerEntryInput[] = cur.map((l, i) => ({
+      id: `lje-${crypto.randomUUID().slice(0, 12)}`,
+      sourceType: `purchase_credit_note_restate_rev:${stamp}`,
+      sourceId: id,
+      legNo: i + 1,
+      accountCode: String(l.accountCode ?? l.account_code ?? ""),
+      debitSen: Number(l.creditSen ?? l.credit_sen) || 0,
+      creditSen: Number(l.debitSen ?? l.debit_sen) || 0,
+      description: `Restate rev · Purchase CN ${existing.noteNumber}`,
+      actorUserId,
+      orgId,
+    }));
+    let legNo = 1;
+    legs.push({
+      id: `lje-${crypto.randomUUID().slice(0, 12)}`,
+      sourceType: postSource,
+      sourceId: id,
+      legNo: legNo++,
+      accountCode: "400-0000",
+      debitSen: totalAmount,
+      creditSen: 0,
+      description: `Purchase CN ${existing.noteNumber} · ${existing.supplierName} (edited)`,
+      actorUserId,
+      orgId,
+    });
+    for (const [acct, amt] of Object.entries(bucket)) {
+      if (amt === 0) continue;
+      legs.push({
+        id: `lje-${crypto.randomUUID().slice(0, 12)}`,
+        sourceType: postSource,
+        sourceId: id,
+        legNo: legNo++,
+        accountCode: acct,
+        debitSen: 0,
+        creditSen: amt,
+        description: `Purchase CN ${existing.noteNumber} · return/credit (edited)`,
+        actorUserId,
+        orgId,
+      });
+    }
+    const { statements: ledgerStmts } = await buildJournalEntryStatements(
+      c.var.DB,
+      orgId,
+      legs,
+    );
+    statements.push(...ledgerStmts);
+    statements.push(
+      c.var.DB.prepare(
+        `UPDATE ledger_journal_entries SET hidden = 1
+          WHERE sourceId = ? AND orgId = ? AND sourceType LIKE 'purchase_credit_note%' AND sourceType <> ?`,
+      ).bind(id, orgId, postSource),
+    );
+
+    await c.var.DB.batch(statements);
+    const updated = await c.var.DB.prepare(
+      "SELECT * FROM purchase_credit_notes WHERE id = ?",
+    )
+      .bind(id)
+      .first<PcnRow>();
+    return c.json({ success: true, data: rowToPcn(updated!) });
+  } catch (e) {
+    console.error(`[ledger] PCN ${id} restate failed:`, e);
+    return c.json(
+      {
+        success: false,
+        error:
+          "Failed to update the supplier discount — nothing was saved. Retry, and report if it persists.",
+      },
+      500,
+    );
+  }
+});
 
 // POST /purchase-credit-notes/:id/void — reverse a posted supplier discount:
 // mirror its GL legs, undo the supplier AP counter, and unwind any PI
@@ -2446,7 +2668,12 @@ app.post("/purchase-credit-notes/:id/void", async (c) => {
       "UPDATE suppliers SET outstandingSen = outstandingSen + ? WHERE id = ?",
     ).bind(gross, existing.supplierId),
   ];
-  // Reverse the GL once: read the original legs, post their mirror.
+  // Reverse the GL once: read whichever legs are CURRENTLY visible (the
+  // original post, or — if this note was edited via /restate first — the
+  // latest restate; `hidden = 0` always names exactly one live set) and post
+  // their mirror, then hide the lot (both cancel, so nothing of this note's
+  // GL impact stays visible — matches the void/delete convention used
+  // elsewhere, e.g. lifecycle-machine.ts's `hiddenTargets`).
   if (
     (await ledgerHasSource(c.var.DB, orgId, "purchase_credit_note", id)) &&
     !(await ledgerHasSource(c.var.DB, orgId, "purchase_credit_note_void", id))
@@ -2454,7 +2681,7 @@ app.post("/purchase-credit-notes/:id/void", async (c) => {
     const orig =
       (
         await c.var.DB.prepare(
-          "SELECT accountCode, debitSen, creditSen FROM ledger_journal_entries WHERE sourceType = 'purchase_credit_note' AND sourceId = ? AND orgId = ?",
+          "SELECT accountCode, debitSen, creditSen FROM ledger_journal_entries WHERE hidden = 0 AND sourceType LIKE 'purchase_credit_note%' AND sourceId = ? AND orgId = ?",
         )
           .bind(id, orgId)
           .all<Record<string, unknown>>()
@@ -2481,6 +2708,11 @@ app.post("/purchase-credit-notes/:id/void", async (c) => {
       revLegs,
     );
     statements.push(...ls);
+    statements.push(
+      c.var.DB.prepare(
+        `UPDATE ledger_journal_entries SET hidden = 1 WHERE sourceId = ? AND orgId = ? AND sourceType LIKE 'purchase_credit_note%'`,
+      ).bind(id, orgId),
+    );
   }
   // Unwind PI allocations: every CREDIT_NOTE marker under this CN's number.
   const markers =
