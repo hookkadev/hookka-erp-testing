@@ -197,3 +197,9 @@ export const SITI_SUBS = [
 ] as const;
 export type EmpSub = (typeof EMP_SUBS)[number]["key"];
 export type SitiSub = (typeof SITI_SUBS)[number]["key"];
+export const SERVICE_SUBS = [
+  { key: "overview", label: "Report" },
+  { key: "overdue", label: "Overdue" },
+  { key: "approvals", label: "Approvals" },
+] as const;
+export type ServiceSub = (typeof SERVICE_SUBS)[number]["key"];
