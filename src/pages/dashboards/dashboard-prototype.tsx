@@ -1,7 +1,9 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useCachedJson } from "@/lib/cached-fetch";
 import { PeriodPicker } from "./dashboard-shared";
-import { EMP_SUBS, SITI_SUBS, SERVICE_SUBS, LIM_SUBS, type EmpSub, type Period, type SitiSub, type ServiceSub, type LimSub } from "./dashboard-shared-lib";
+import type { Period, EmpSub, SitiSub, ServiceSub, LimSub } from "./dashboard-shared-lib";
+import { TAB_SUBS } from "./dashboard-url-state-lib";
+import { useDashboardUrlState } from "./use-dashboard-url-state";
 import { AllOverviewView } from "./AllOverviewView";
 import { SalesOrdersView } from "./SalesOrdersView";
 import { SitiOpsView } from "./SitiOpsView";
@@ -54,13 +56,15 @@ const TABS: TabItem<"overview" | "sales" | "siti" | "employee" | "department" | 
   { key: "lim", label: "Daily (Lim)" },
 ];
 
+const TAB_KEYS = TABS.map((t) => t.key);
+
 export default function DashboardPrototypePage() {
-  const [tab, setTab] = useState<(typeof TABS)[number]["key"]>("overview");
-  const [period, setPeriod] = useState<Period>({ mode: "monthly", month: "" });
-  const [empSub, setEmpSub] = useState<EmpSub>("overview");
-  const [sitiSub, setSitiSub] = useState<SitiSub>("overview");
-  const [serviceSub, setServiceSub] = useState<ServiceSub>("overview");
-  const [limSub, setLimSub] = useState<LimSub>("efficiency");
+  // Tab, sub-tab and period all live in the URL (use-dashboard-url-state.ts):
+  // refresh keeps the place, Back/Forward walks tab changes. Sub-tabs are ONE
+  // value keyed by the current tab; see TAB_SUBS in dashboard-url-state-lib.ts.
+  type TabKey = (typeof TABS)[number]["key"];
+  const { tab, sub, period, setTab, setSub, setPeriod } = useDashboardUrlState<TabKey>(TAB_KEYS);
+  const subTabs = TAB_SUBS[tab];
 
   // The page reads the feed only for `meta.months` — the months that actually
   // exist in the book, which bound the stepper. Every tab below calls the same
@@ -130,10 +134,7 @@ export default function DashboardPrototypePage() {
             both stay put while a long tab scrolls. */}
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            {tab === "employee" && <Tabs tabs={[...EMP_SUBS]} value={empSub} onChange={setEmpSub} variant="pill" />}
-            {tab === "siti" && <Tabs tabs={[...SITI_SUBS]} value={sitiSub} onChange={setSitiSub} variant="pill" />}
-            {tab === "service" && <Tabs tabs={[...SERVICE_SUBS]} value={serviceSub} onChange={setServiceSub} variant="pill" />}
-            {tab === "lim" && <Tabs tabs={[...LIM_SUBS]} value={limSub} onChange={setLimSub} variant="pill" />}
+            {subTabs && <Tabs tabs={[...subTabs]} value={sub} onChange={setSub} variant="pill" />}
           </div>
           {months.length > 0 && (
             <PeriodPicker
@@ -150,17 +151,17 @@ export default function DashboardPrototypePage() {
         <AllOverviewView
           period={effectivePeriod}
           months={months}
-          onOpenTab={(t) => setTab(t as (typeof TABS)[number]["key"])}
+          onOpenTab={(t) => setTab(t as TabKey)}
         />
       )}
       {tab === "sales" && (
         <SalesOrdersView period={effectivePeriod} months={months} onPeriodChange={setPeriod} />
       )}
-      {tab === "siti" && <SitiOpsView period={effectivePeriod} sub={sitiSub} onPeriodChange={setPeriod} />}
-      {tab === "employee" && <EmployeesView period={effectivePeriod} sub={empSub} onPeriodChange={setPeriod} />}
+      {tab === "siti" && <SitiOpsView period={effectivePeriod} sub={sub as SitiSub} onPeriodChange={setPeriod} />}
+      {tab === "employee" && <EmployeesView period={effectivePeriod} sub={sub as EmpSub} onPeriodChange={setPeriod} />}
       {tab === "department" && <DepartmentsView period={effectivePeriod} />}
-      {tab === "service" && <ServiceView period={effectivePeriod} sub={serviceSub} onPeriodChange={setPeriod} />}
-      {tab === "lim" && <LimDailyView period={effectivePeriod} sub={limSub} onPeriodChange={setPeriod} />}
+      {tab === "service" && <ServiceView period={effectivePeriod} sub={sub as ServiceSub} onPeriodChange={setPeriod} />}
+      {tab === "lim" && <LimDailyView period={effectivePeriod} sub={sub as LimSub} onPeriodChange={setPeriod} />}
     </div>
   );
 }
