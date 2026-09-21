@@ -83,9 +83,9 @@ const lateMin = (t: string | null) => {
   return m ? Math.max(0, Number(m[1]) * 60 + Number(m[2]) - 480) : 0;
 };
 
-// Monthly -> one bar per day in the month; YTD/range -> one bar per month.
+// Monthly/range -> one bar per day; YTD -> one bar per month.
 function bucket<T extends { date: string }>(rows: T[], p: Period, add: (a: T, b: T) => T) {
-  if (p.mode === "monthly") return rows.map((r) => ({ ...r, key: r.date.slice(5) }));
+  if (p.mode !== "ytd") return rows.map((r) => ({ ...r, key: r.date.slice(5) }));
   const m = new Map<string, T & { key: string }>();
   for (const r of rows) {
     const key = r.date.slice(0, 7);
@@ -391,7 +391,7 @@ export function SitiOpsView({ period }: { period: Period }) {
 
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle>{period.mode === "monthly" ? "Daily" : "Monthly"} Production Output</CardTitle>
+            <CardTitle>{period.mode === "ytd" ? "Monthly" : "Daily"} Production Output</CardTitle>
           </CardHeader>
           <CardContent>
             <div style={{ width: "100%", height: 260 }}>
