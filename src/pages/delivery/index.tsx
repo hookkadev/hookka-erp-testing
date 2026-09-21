@@ -48,6 +48,7 @@ import PrintDO from "@/components/delivery/print-do";
 import type { PrintDOData, PrintMode } from "@/components/delivery/print-do";
 import { compareDoLinesByCustomerPO } from "@/lib/do-item-order";
 import { fetchJson, FetchJsonError } from "@/lib/fetch-json";
+import { useIdempotencyKey } from "@/lib/idempotency-key";
 import { verifiedSave, formatMismatchError } from "@/lib/verified-save";
 import { mutationWithData, MutationResultSchema } from "@/lib/schemas/common";
 import { DeliveryOrderSchema } from "@/lib/schemas/delivery-order";
@@ -975,6 +976,10 @@ export default function DeliveryPage() {
   const [resendingId, setResendingId] = useState<string | null>(null);
   const [selectedReadyPOs, setSelectedReadyPOs] = useState<Set<string>>(new Set());
   const [creatingDOFromPO, setCreatingDOFromPO] = useState(false);
+  // T-006 R10 — the DO create route is wrapped in withIdempotency server-side;
+  // without this header that wrapper is a no-op. A create that times out at
+  // fetchJson's 15s mark may already have shipped the goods on paper.
+  const createDoIdem = useIdempotencyKey();
   const [dragDropIdx, setDragDropIdx] = useState<number | null>(null);
 
   // ----- Detail Edit mode -----
@@ -2458,10 +2463,13 @@ export default function DeliveryPage() {
 
     setCreatingDOFromPO(true);
     try {
-      const data = await fetchJson("/api/delivery-orders", DOMutationSchema, {
-        method: "POST",
-        body,
-      });
+      const data = await createDoIdem.withKey((key) =>
+        fetchJson("/api/delivery-orders", DOMutationSchema, {
+          method: "POST",
+          headers: { "Idempotency-Key": key },
+          body,
+        }),
+      );
       if (!data.success) {
         toast.error(data.error || "Failed to create delivery order");
       }

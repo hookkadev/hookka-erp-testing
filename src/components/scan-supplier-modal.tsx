@@ -83,6 +83,7 @@ import {
   sourceDocOriginForCard,
 } from "@/lib/scan-queue-client";
 import { compressScanFile } from "@/lib/compress-scan-pdf";
+import { useIdempotencyKeys } from "@/lib/idempotency-key";
 
 // ─── Shared types (kept exported for callers) ─────────────────────────────
 
@@ -1806,6 +1807,12 @@ function CreatePIWizard({
   const patchCard = (id: string, patch: Partial<PreviewCard>) =>
     setCards((prev) => prev.map((c) => (c.id === id ? { ...c, ...patch } : c)));
 
+  // T-006 R10 — one key PER CARD: each card becomes its own purchase invoice,
+  // so a shared key would make the second card replay the first card's
+  // document. The key survives a lost response (the retry is the same
+  // attempt) and is dropped as soon as the server answers.
+  const createPiIdem = useIdempotencyKeys();
+
   const patchLine = (cardId: string, idx: number, patch: Partial<PreviewLine>) =>
     setCards((prev) =>
       prev.map((c) => {
@@ -2113,11 +2120,13 @@ function CreatePIWizard({
             card.scanQueueRowId ?? card.id,
           );
           if (fileId) payload.sourceDocumentFileId = fileId;
-          const res = await fetch("/api/purchase-invoices", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify(payload),
-          });
+          const res = await createPiIdem.withKey(card.id, (key) =>
+            fetch("/api/purchase-invoices", {
+              method: "POST",
+              headers: { "content-type": "application/json", "Idempotency-Key": key },
+              body: JSON.stringify(payload),
+            }),
+          );
           const j = (await res.json().catch(() => null)) as
             | { success?: boolean; error?: string; ref?: string; data?: { piNo?: string; id?: string } }
             | null;
@@ -4460,6 +4469,10 @@ function CreateGRNWizard({
   const patchCard = (id: string, patch: Partial<GRNPreviewCard>) =>
     setCards((prev) => prev.map((c) => (c.id === id ? { ...c, ...patch } : c)));
 
+  // T-006 R10 — one key per card, same reasoning as the purchase-invoice
+  // scan above: each card is its own goods receipt.
+  const createGrnIdem = useIdempotencyKeys();
+
   const patchLine = (cardId: string, idx: number, patch: Partial<GRNPreviewLine>) =>
     setCards((prev) =>
       prev.map((c) => {
@@ -4682,11 +4695,13 @@ function CreateGRNWizard({
           if (card.purchaseOrderId) {
             payload.poId = card.purchaseOrderId;
           }
-          const res = await fetch("/api/grn", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify(payload),
-          });
+          const res = await createGrnIdem.withKey(card.id, (key) =>
+            fetch("/api/grn", {
+              method: "POST",
+              headers: { "content-type": "application/json", "Idempotency-Key": key },
+              body: JSON.stringify(payload),
+            }),
+          );
           const j = (await res.json().catch(() => null)) as
             | { success?: boolean; error?: string; ref?: string; data?: { grnNumber?: string; grnNo?: string; id?: string } }
             | null;

@@ -486,8 +486,15 @@ app.post("/:id/cancel", async (c) => {
     h.status === "CN_ISSUED" ||
     h.status === "RETURNED_TO_STOCK"
   ) {
+    // Name the way out. A refusal with no recovery path reads as a dead end,
+    // and this one has real consequences: the returned quantity stays off the
+    // delivery order's invoiceable total for as long as the return stands.
+    const recovery =
+      h.status === "RETURNED_TO_STOCK"
+        ? " The goods were already credited back to stock, so cancelling here would leave stock overstated. If this return was raised in error, correct the stock with a stock adjustment and raise the shortfall with the office — the delivered quantity cannot be re-invoiced from this screen."
+        : "";
     return c.json(
-      { success: false, error: `Cannot cancel a ${h.status} return` },
+      { success: false, error: `Cannot cancel a ${h.status} return.${recovery}` },
       409,
     );
   }

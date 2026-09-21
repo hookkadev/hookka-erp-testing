@@ -137,8 +137,8 @@ Owns the buy-side document chain: **Purchase Orders** (PO) → **Goods Receipt N
 | `resolveRmForGRNItem` | `src/api/routes/grn.ts:480` | Resolve GRN line → raw_material |
 | `app.post("/")` (GRN create) | `src/api/routes/grn.ts:1383` | GRN create; builds stock+PO-counter statements into ONE batch with header+lines (T-006 R3) |
 | `app.put("/:id/arrival")` | `src/api/routes/grn.ts:2322` | Arrival state transition (gate) |
-| `app.post("/")` (PI create) | `src/api/routes/purchase-invoices.ts:1107` | PI create + convert-chain + GL post |
-| `app.put("/:id")` (PI edit) | `src/api/routes/purchase-invoices.ts:2003` | PI edit (DRAFT/CONFIRMED/legacy APPROVED) + GL correction |
+| `app.post("/")` (PI create) | `src/api/routes/purchase-invoices.ts:1137` | PI create + convert-chain + GL post |
+| `app.put("/:id")` (PI edit) | `src/api/routes/purchase-invoices.ts:2039` | PI edit (DRAFT/CONFIRMED/legacy APPROVED) + GL correction |
 | `checkInvoicedQtyCeilingAfterEdit` | `src/api/routes/purchase-invoices.ts:702` | Ceiling on re-synced invoiced_qty |
 | `checkPoRemaining` | `src/api/routes/purchase-invoices.ts:986` | PO ceiling, matched by po_item_id (T-006 R8), material_code as legacy fallback |
 | `mapPurchaseLinesToAccounts` | `src/api/routes/purchase-invoices.ts:199` | PI lines → GL account buckets |
