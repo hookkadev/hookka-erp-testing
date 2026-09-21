@@ -13,7 +13,7 @@ import {
 // Every field is optional on old cached feeds — a case without them is simply
 // "not yet analysed".
 
-function TallyList({
+export function TallyList({
   rows, total, onPick, empty,
 }: { rows: TallyRow[]; total: number; onPick?: (key: string) => void; empty: string }) {
   const max = Math.max(1, ...rows.map((r) => r.count));
@@ -52,8 +52,8 @@ function TallyList({
 const TREND_COLOURS = [TAUPE, TEAL, CHART_GOLD];
 
 export function ServiceIssuesPanel({
-  cases, period, onPickCause,
-}: { cases: IssueCase[]; period: Period; onPickCause: (key: string) => void }) {
+  cases, period, onPickCause, causeOnly,
+}: { cases: IssueCase[]; period: Period; onPickCause: (key: string) => void; causeOnly?: boolean }) {
   const causes = useMemo(() => byCause(cases), [cases]);
   const units = useMemo(() => byUnit(cases), [cases]);
   const prevention = useMemo(() => byPrevention(cases), [cases]);
@@ -89,7 +89,7 @@ export function ServiceIssuesPanel({
         </CardContent>
       </Card>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 max-md:gap-4">
+      {!causeOnly && <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 max-md:gap-4">
         <Card>
           <CardHeader className="pb-1"><CardTitle>By responsible unit</CardTitle></CardHeader>
           <CardContent><TallyList rows={units} total={cases.length} empty="No service cases in this period." /></CardContent>
@@ -98,10 +98,10 @@ export function ServiceIssuesPanel({
           <CardHeader className="pb-1"><CardTitle>Prevention status</CardTitle></CardHeader>
           <CardContent><TallyList rows={prevention} total={cases.length} empty="No service cases in this period." /></CardContent>
         </Card>
-      </div>
+      </div>}
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 max-md:gap-4">
-        <Card>
+        {!causeOnly && <Card>
           <CardHeader className="pb-1">
             <CardTitle>Most affected products (top 10)</CardTitle>
             <p className="text-xs text-[#6B7280]">Cases that list the product as affected; a product counts once per case.</p>
@@ -121,7 +121,7 @@ export function ServiceIssuesPanel({
               ))
             )}
           </CardContent>
-        </Card>
+        </Card>}
 
         <Card>
           <CardHeader className="pb-3">

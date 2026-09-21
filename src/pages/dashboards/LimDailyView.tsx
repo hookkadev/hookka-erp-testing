@@ -11,6 +11,7 @@ import {
   dayLabel, periodLabel, type Period, type LimSub,
 } from "./dashboard-shared-lib";
 import { Kpi, LiveBadge, SnapshotNote } from "./dashboard-shared";
+import { LimServicePanel, type LimServiceSlice } from "./LimServicePanel";
 import { AttendanceLogCard } from "./AttendanceLogCard";
 import { OverdueByDeptCard, DueSoonWorklist, type ProdOrderSummary } from "./OverdueCards";
 import { TimeAttendancePanels, EfficiencyPanels, type EmployeeSlice } from "./EmployeesInsights";
@@ -50,6 +51,7 @@ type Feed = {
   production?: { overdueByDept: { department: string; count: number }[]; dueSoon3Days: ProdOrderSummary[] };
   employee?: EmployeeSlice;
   lim?: LimSlice | null;
+  service?: LimServiceSlice | null;
 };
 
 const TOOLTIP = { background: "#FFFFFF", border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: 12 };
@@ -410,6 +412,8 @@ export function LimDailyView({
           </Card>
         </>
       ))}
+
+      {sub === "service" && <LimServicePanel slice={data.service} period={period} onPeriodChange={onPeriodChange} />}
 
       {sub === "overdue" && (
         <>
