@@ -34,6 +34,18 @@ Entries themselves stay newest-first.
 
 ---
 
+## BUG-2026-09-22-001 — the /m dashboard crashed on first paint: the new period calendar drew a month that had not loaded `ui-frontend` `dashboard` 🟢
+
+🟢 **Fixed** · owner-reported from an iPhone on the PR #443 canary (`canary-443.hookka-erp-testing.pages.dev/m/dashboard`): error boundary, "Array length must be a positive integer of safe magnitude", stack in `dashboard-url-state-lib` / `DashboardScreen`. Never reached `main`; lived one commit (`be7c07bc`).
+
+**Root cause.** `PeriodChip.tsx` gained a day calendar built by `calendarCells(viewMonth)` (`dashboard-shared-lib.ts`). The period's month is `""` until the dashboard feed has loaded, and `calendarCells("")` computed `Array(NaN)` -> `RangeError`. The sheet was closed, but JSX children are evaluated by the parent whether or not `<Sheet>` renders them, so it threw on the very first render. The desktop picker never hit it: it only mounts once `months.length > 0`. The visual check used a harness with the months preloaded, so it could not see the empty first render.
+
+**Fix.** `calendarCells` and `shiftMonth` return `[]` / the input unchanged for anything that is not `YYYY-MM` - one guard where both the desktop picker and the `/m` chip route through, rather than a `months.length` check in each caller.
+
+**Regression test.** `tests/dashboard-period.test.mjs` -> "the picker logic survives a period whose month has not loaded yet" (`""`, `"2026"`, `"2026-13"`, `"nope"`, plus `stepPeriod` / `periodPresets` with no months).
+
+---
+
 ## BUG-2026-09-18-001 — Supplier Discount void 500'd: the status CHECK never allowed CANCELLED `accounting` `data-integrity` 🟢
 
 🟢 **Fixed** · owner-reported (`erp.hookka.com/accounting?tab=supplier-discount`, void → `POST .../purchase-credit-notes/pcn-85c380af/void 500 (Internal Server Error)`).

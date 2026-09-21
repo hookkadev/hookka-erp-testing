@@ -178,8 +178,14 @@ export function presetActive(preset: Period, period: Period): boolean {
     : period.day === preset.day;
 }
 
-/** Monday-first calendar cells for YYYY-MM: leading nulls, then each YYYY-MM-DD. */
+/**
+ * Monday-first calendar cells for YYYY-MM: leading nulls, then each YYYY-MM-DD.
+ * Anything that is not a month is [] - the period's month is "" until the feed
+ * has loaded, and `Array(NaN)` throws a RangeError that took the whole /m
+ * dashboard down on first paint.
+ */
 export function calendarCells(viewMonth: string): (string | null)[] {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(viewMonth)) return [];
   const [y, m] = viewMonth.split("-").map(Number);
   // JS getDay() is Sunday=0, so shift by one and wrap.
   const lead = (new Date(y, m - 1, 1).getDay() + 6) % 7;
@@ -190,8 +196,9 @@ export function calendarCells(viewMonth: string): (string | null)[] {
   ];
 }
 
-/** YYYY-MM moved by `delta` months. */
+/** YYYY-MM moved by `delta` months (a non-month comes back unchanged). */
 export function shiftMonth(month: string, delta: number): string {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return month;
   const [y, m] = month.split("-").map(Number);
   const d = new Date(y, m - 1 + delta, 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;

@@ -71,3 +71,17 @@ test("shiftMonth wraps the year in both directions", () => {
   assert.equal(shiftMonth("2025-12", 1), "2026-01");
   assert.equal(shiftMonth("2026-09", -14), "2025-07");
 });
+
+// Regression: the period's month is "" until the feed has loaded. calendarCells("")
+// did `Array(NaN)` -> RangeError "Array length must be a positive integer of safe
+// magnitude" and crashed /m/dashboard on first paint (the sheet's children are
+// evaluated even while it is closed).
+test("the picker logic survives a period whose month has not loaded yet", () => {
+  for (const bad of ["", "2026", "2026-13", "nope"]) {
+    assert.deepEqual(calendarCells(bad), [], bad);
+    assert.equal(shiftMonth(bad, 1), bad, bad);
+  }
+  assert.equal(stepPeriod({ mode: "monthly", month: "" }, [], 1), null);
+  assert.equal(stepPeriod({ mode: "ytd", month: "" }, [], -1), null);
+  assert.deepEqual(periodPresets("", []), []);
+});
