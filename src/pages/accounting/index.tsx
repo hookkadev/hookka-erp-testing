@@ -10764,6 +10764,24 @@ function CashBookTab({ accounts }: { accounts: ChartOfAccount[] }) {
   const [pdfBusy, setPdfBusy] = useState(false);
   // Combo match selection + expandable payment detail (owner 2026-09-07).
   const [comboSel, setComboSel] = useState<Set<string>>(new Set());
+  // Book-from-bank-line inline form (Houzs adoption Phase 3, 2026-09-22).
+  const [bookLine, setBookLine] = useState<{ id: string; amountSen: number; txnDate: string; description: string; accountCode: string; party: string; note: string } | null>(null);
+  const bookAccounts = accounts.filter(
+    (a) => a.isPostable !== false && a.specialAccountType !== "SDC" && a.specialAccountType !== "SBK" && a.specialAccountType !== "SCH",
+  );
+  const handleBookLine = async () => {
+    if (!bookLine?.accountCode) return;
+    setBusy(true);
+    try {
+      const res = await fetch("/api/accounting/bank-reco/book-line", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ statementLineId: bookLine.id, accountCode: bookLine.accountCode, party: bookLine.party, description: bookLine.note }),
+      });
+      const j = (await res.json()) as { success?: boolean; error?: string; data?: { docNo: string; kind: string } };
+      if (j?.success) { toast.success(`${j.data?.kind} ${j.data?.docNo} booked and matched`); setBookLine(null); load(); }
+      else toast.error(j?.error || "Could not book this line");
+    } finally { setBusy(false); }
+  };
   const [payDetail, setPayDetail] = useState<Record<string, "loading" | { supplierName: string; piNo: string | null; opening: boolean; method: string; bookedSen: number }[]>>({});
   const [preview, setPreview] = useState<{
     fileName: string; month: string;
@@ -11465,7 +11483,8 @@ function CashBookTab({ accounts }: { accounts: ChartOfAccount[] }) {
                     const candidates = unmatchedLegs.filter((l) => l.amountSen === s.amountSen);
                     const earlier = s.txnDate.slice(0, 7) < month;
                     return (
-                      <tr key={s.id} className="border-b border-[#F0ECE9]">
+                      <Fragment key={s.id}>
+                      <tr className="border-b border-[#F0ECE9]">
                         <td className="px-3 py-1.5 text-xs text-[#6B7280] whitespace-nowrap">
                           {!isFinalMonth(s.txnDate) && (
                             <input type="checkbox" checked={comboSel.has(s.id)} onChange={() => toggleCombo(s.id)} className="mr-1.5 align-middle" title="Tick several lines that together paid ONE book entry, then combine & match" />
@@ -11491,12 +11510,43 @@ function CashBookTab({ accounts }: { accounts: ChartOfAccount[] }) {
                               ) : (
                                 <span className="text-[11px] text-[#9A3A2D]">not in book</span>
                               )}
+                              {s.txnDate >= (data.openingDate ?? "") && (
+                                <button onClick={() => setBookLine(bookLine?.id === s.id ? null : { id: s.id, amountSen: s.amountSen, txnDate: s.txnDate, description: s.description ?? "", accountCode: "", party: "", note: "" })} className={`ml-2 text-[11px] font-semibold cursor-pointer ${bookLine?.id === s.id ? "text-[#1F1D1B]" : "text-[#27500A] hover:text-[#1F1D1B]"}`} title={s.amountSen < 0 ? "Record this as a payment voucher and match it here" : "Record this as a receipt and match it here"}>
+                                {s.amountSen < 0 ? "book as expense" : "book as receipt"}
+                              </button>
+                              )}
                               <button onClick={() => handleIgnore(s.id, true)} className="ml-2 text-[#9CA3AF] hover:text-[#1F1D1B] text-[11px] underline decoration-dotted cursor-pointer" title="Leave this line out of the reconciliation">ignore</button>
                               <button onClick={() => handleDeleteLine(s.id)} className="ml-1.5 text-[#9CA3AF] hover:text-[#9A3A2D] text-[11px] underline decoration-dotted cursor-pointer">del</button>
                             </>
                           )}
                         </td>
                       </tr>
+                      {bookLine?.id === s.id && (
+                        <tr className="border-b border-[#F0ECE9] bg-[#EAF3DE]/40">
+                          <td colSpan={5} className="px-3 py-2">
+                            <div className="flex flex-wrap items-end gap-2 text-xs">
+                              <span className="font-semibold text-[#27500A] mr-1">
+                                {s.amountSen < 0 ? "Book as expense" : "Book as receipt"} · {formatCurrency(Math.abs(s.amountSen))} on {s.txnDate}
+                              </span>
+                              <label className="flex flex-col gap-0.5">
+                                <span className="text-[10px] text-[#6B7280]">{s.amountSen < 0 ? "Expense account (DR)" : "Income account (CR)"}</span>
+                                <AccountPicker accounts={bookAccounts} value={bookLine.accountCode} onChange={(code) => setBookLine({ ...bookLine, accountCode: code })} placeholder="Account…" />
+                              </label>
+                              <label className="flex flex-col gap-0.5">
+                                <span className="text-[10px] text-[#6B7280]">{s.amountSen < 0 ? "Payee" : "Received from"}</span>
+                                <input type="text" value={bookLine.party} onChange={(e) => setBookLine({ ...bookLine, party: e.target.value })} className="rounded border border-[#E2DDD8] bg-white px-2 py-1 text-xs w-44" placeholder="Who" />
+                              </label>
+                              <label className="flex flex-col gap-0.5 flex-1 min-w-[12rem]">
+                                <span className="text-[10px] text-[#6B7280]">Description</span>
+                                <input type="text" value={bookLine.note} onChange={(e) => setBookLine({ ...bookLine, note: e.target.value })} className="rounded border border-[#E2DDD8] bg-white px-2 py-1 text-xs w-full" placeholder={s.description ?? ""} />
+                              </label>
+                              <Button variant="primary" size="sm" disabled={!bookLine.accountCode || busy} onClick={() => void handleBookLine()}>Book &amp; match</Button>
+                              <Button variant="outline" size="sm" onClick={() => setBookLine(null)}>Cancel</Button>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                      </Fragment>
                     );
                   })}
                   {unmatchedStmt.length === 0 && (

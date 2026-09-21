@@ -21,13 +21,17 @@ APPROVED、0233/0214 记录、POST 支持 saveAs:"draft"(不铸号不过账)、P
 POST /:id/approval + /approval-batch(prepare/withdraw/reject(要 reason)/check(铸正式号)/approve
 (此刻才过账,复用唯一 pvPostingStatements)、权限键 accounting:check/approve、lifecycle 未过账=
 纯状态翻转、restate 拒未过账;守卫 tests/pv-approval.test.mjs 9 断言)。旧立即过账路径原样保留,
+<<<<<<< HEAD
 新页上线前零破坏。**PR 1.2**(UI):PaymentsTab 就地升级=「Payment Vouchers」页(tab+侧栏改名):
 表单双按钮 Save as draft / Post now(编辑草稿走 PUT、编辑已过账走 restate);行内梯子按钮
 (Draft: edit/Prepare→;Prepared: edit/withdraw/reject/Check→;Checked: reject/Approve & post)、
 四态芯片+reject 理由显示、Pending approval 过滤、勾选批量 Prepare/Check/Approve 琥珀条;
 **Cash Position 板新增「AWAITING APPROVAL」卡**(/cash-position 回 awaitingApproval[] +
 awaitingCheckedSen;Checked=硬承诺金额、Draft/Prepared 软显示)= owner 09-03 说的「老板还没
-approve」正式落地。Repo 已迁 hookkadev 组织(remote+gh default 已更新)。**Phase 2 ✅(同 PR)**:新 GET /ap-invoices(OCB CREDITOR 全量 kind=AP + purchase_invoices 非 DRAFT 只读镜像 kind=PI,状态归一 OPEN/PAID/CANCELLED,totals 分 AP/PI)+ 新 tab「AP Invoices」(Debtor / Creditor 组,侧栏同名):三张合计卡、Kind/Status/搜索过滤、PI 行链回 /procurement/pi、AP 行链回 OCB tab、New AP bill / Pay 两按钮直通。**Procurement PI 页零改动**(owner「本身purchase invoice 那边要保留」)。
+approve」正式落地。Repo 已迁 hookkadev 组织(remote+gh default 已更新)。**Phase 2 ✅(同 PR)**:新 GET /ap-invoices(OCB CREDITOR 全量 kind=AP + purchase_invoices 非 DRAFT 只读镜像 kind=PI,状态归一 OPEN/PAID/CANCELLED,totals 分 AP/PI)+ 新 tab「AP Invoices」(Debtor / Creditor 组,侧栏同名):三张合计卡、Kind/Status/搜索过滤、PI 行链回 /procurement/pi、AP 行链回 OCB tab、New AP bill / Pay 两按钮直通。**Procurement PI 页零改动**(owner「本身purchase invoice 那边要保留」)。**Phase 3 ③ ✅(同 PR)**:POST /bank-reco/book-line——银行行就地记账:钱出=PV(立即过账路,approval_state=APPROVED)、钱进=OR,金额锁死=行金额,新单据的银行腿同 batch 配对该行(立刻离开 unbooked);拒开账前/已封月/已配/已 ignore。UI:Cash Book 每条 not-in-book 行「book as expense / book as receipt」→ 行下内联表单(科目/对方/描述)→ Book & match。= owner 7 月剩的 5 条工资税费就地一键。
+=======
+新页上线前零破坏。
+>>>>>>> 85e58b4097f89dd8cd5aaf1d9daf0a0771e4486e
 
 背景:Houzs(trading)ERP 的 Claude 写了 `Houzs-Finance-Module-User-Guide.md` +
 `Houzs-Trading-Finance-Module-Spec.md`(在 Desktop\Claude\Hookka\,不在 repo),指定用途=

@@ -13379,6 +13379,107 @@ app.post("/bank-reco/ignore", async (c) => {
   }
 });
 
+// Book a bank movement the books don't have — right on the reconciliation page
+// (owner 2026-09-22, Houzs adoption Phase 3 「Book as receipt/expense」). Money
+// OUT → a Payment Voucher (immediate post, legacy road); money IN → an Official
+// Receipt. Amount is LOCKED to the statement line; the new document's bank leg
+// is matched to the line in the same batch, so the row leaves the unbooked
+// list the moment it is booked. Never for pre-opening or finalised months.
+app.post("/bank-reco/book-line", async (c) => {
+  const denied = await requirePermission(c, "accounting", "create");
+  if (denied) return denied;
+  try {
+    await ensureBankRecoCols(c.var.DB);
+    await ensurePvApprovalCols(c.var.DB);
+    const body = await c.req.json() as {
+      statementLineId?: string; accountCode?: string; party?: string; description?: string;
+    };
+    const id = String(body.statementLineId || "");
+    const line = await c.var.DB.prepare(
+      "SELECT id, accountCode, txnDate, amountSen, description, matchedLegId, ignored_at FROM bank_statement_lines WHERE id = ?",
+    ).bind(id).first<{ id: string; accountCode: string; txnDate: string; amountSen: number; description: string | null; matchedLegId: string | null; ignored_at?: string | null; ignoredAt?: string | null }>();
+    if (!line) return c.json({ success: false, error: "Statement line not found" }, 404);
+    if (line.matchedLegId) return c.json({ success: false, error: "This line is already matched" }, 400);
+    if (line.ignoredAt ?? line.ignored_at) return c.json({ success: false, error: "This line is ignored — restore it first" }, 400);
+    const obDateBk = await getOpeningDate(c.var.DB);
+    if (obDateBk && line.txnDate < obDateBk) {
+      return c.json({ success: false, error: `Dated before the opening date (${obDateBk}) — this money is already inside the opening balance.` }, 400);
+    }
+    if (await bankRecoMonthFinalized(c.var.DB, line.accountCode, line.txnDate)) {
+      return c.json({ success: false, error: BANK_RECO_FINALIZED_ERR }, 400);
+    }
+    const amountSen = Math.round(Number(line.amountSen) || 0);
+    if (amountSen === 0) return c.json({ success: false, error: "Zero-amount line" }, 400);
+    const coaRes = await c.var.DB.prepare(
+      "SELECT code, type, specialAccountType, isPostable FROM chart_of_accounts",
+    ).all<{ code: string; type: CoaRow["type"]; specialAccountType: string | null; isPostable: number | null }>();
+    const coa = new Map((coaRes.results ?? []).map((a) => [a.code, a] as const));
+    const bank = coa.get(line.accountCode);
+    if (!bank || (bank.specialAccountType !== "SBK" && bank.specialAccountType !== "SCH")) {
+      return c.json({ success: false, error: "Statement line's account is not a bank/cash account" }, 400);
+    }
+    const v = validateDocLines(coa, [{ accountCode: String(body.accountCode || ""), description: String(body.description ?? ""), amountSen: Math.abs(amountSen) }]);
+    if (!v.ok) return c.json({ success: false, error: v.error }, 400);
+    const party = String(body.party ?? "").trim();
+    const desc = String(body.description ?? "").trim() || String(line.description ?? "").slice(0, 120);
+    const orgId = getOrgId(c);
+    const actorUserId = (c as unknown as { get: (k: string) => string | undefined }).get("userId") ?? null;
+    const now = new Date().toISOString();
+    const isOut = amountSen < 0;
+    const docId = isOut ? `pv-${crypto.randomUUID().slice(0, 8)}` : `or-${crypto.randomUUID().slice(0, 8)}`;
+    const docNo = await issueDocNumber(c.var.DB, { bankAccountCode: line.accountCode, direction: isOut ? "out" : "in", dateIso: line.txnDate });
+    const statements: D1PreparedStatement[] = [];
+    let bankLegId = "";
+    if (isOut) {
+      statements.push(
+        c.var.DB.prepare(
+          `INSERT INTO payment_vouchers (id, pvNo, date, payee, description, payFrom, accrued, accrualAccount, settledAt, productLine, totalSen, status,
+             approval_state, approved_at, approved_by, createdBy, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, 0, NULL, NULL, NULL, ?, 'POSTED', 'APPROVED', ?, ?, ?, ?, ?)`,
+        ).bind(docId, docNo, line.txnDate, party, desc, line.accountCode, v.totalSen, now, actorUserId, actorUserId, now, now),
+        c.var.DB.prepare(
+          "INSERT INTO payment_voucher_lines (id, voucherId, accountCode, description, amountSen, lineOrder) VALUES (?, ?, ?, ?, ?, 0)",
+        ).bind(`pvl-${crypto.randomUUID().slice(0, 8)}`, docId, v.lines[0].accountCode, v.lines[0].description, v.totalSen),
+      );
+      // Build the legs by hand so we know the bank leg's id for the match.
+      bankLegId = `lje-${crypto.randomUUID().slice(0, 12)}`;
+      const legs: LedgerEntryInput[] = [
+        { id: `lje-${crypto.randomUUID().slice(0, 12)}`, sourceType: "payment_voucher", sourceId: docId, legNo: 1, accountCode: v.lines[0].accountCode, debitSen: v.totalSen, creditSen: 0, description: `${docNo} · ${desc || "Payment"}`, actorUserId, orgId },
+        { id: bankLegId, sourceType: "payment_voucher", sourceId: docId, legNo: 2, accountCode: line.accountCode, debitSen: 0, creditSen: v.totalSen, description: `${docNo} · ${party ? `to ${party}` : "Payment"} · booked from bank line`, actorUserId, orgId },
+      ];
+      const { statements: ledger } = await buildJournalEntryStatements(c.var.DB, orgId, legs);
+      statements.push(...ledger);
+    } else {
+      statements.push(
+        c.var.DB.prepare(
+          `INSERT INTO official_receipts (id, orNo, date, receivedFrom, description, payTo, totalSen, status, createdBy, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'POSTED', ?, ?, ?)`,
+        ).bind(docId, docNo, line.txnDate, party, desc, line.accountCode, v.totalSen, actorUserId, now, now),
+        c.var.DB.prepare(
+          "INSERT INTO official_receipt_lines (id, receiptId, accountCode, description, amountSen, lineOrder) VALUES (?, ?, ?, ?, ?, 0)",
+        ).bind(`orl-${crypto.randomUUID().slice(0, 8)}`, docId, v.lines[0].accountCode, v.lines[0].description, v.totalSen),
+      );
+      bankLegId = `lje-${crypto.randomUUID().slice(0, 12)}`;
+      const legs: LedgerEntryInput[] = [
+        { id: bankLegId, sourceType: "official_receipt", sourceId: docId, legNo: 1, accountCode: line.accountCode, debitSen: v.totalSen, creditSen: 0, description: `${docNo} · ${party ? `from ${party}` : "Receipt"} · booked from bank line`, actorUserId, orgId },
+        { id: `lje-${crypto.randomUUID().slice(0, 12)}`, sourceType: "official_receipt", sourceId: docId, legNo: 2, accountCode: v.lines[0].accountCode, debitSen: 0, creditSen: v.totalSen, description: `${docNo} · ${desc || "Receipt"}`, actorUserId, orgId },
+      ];
+      const { statements: ledger } = await buildJournalEntryStatements(c.var.DB, orgId, legs);
+      statements.push(...ledger);
+    }
+    // Match the new bank leg to the line in the same batch.
+    statements.push(
+      c.var.DB.prepare("UPDATE bank_statement_lines SET matchedLegId = ?, matchedAt = ? WHERE id = ? AND matchedLegId IS NULL")
+        .bind(bankLegId, now, id),
+    );
+    await c.var.DB.batch(statements);
+    return c.json({ success: true, data: { docId, docNo, kind: isOut ? "PV" : "OR" } }, 201);
+  } catch (e) {
+    console.error("[bank-reco] book-line failed:", e);
+    return c.json({ success: false, error: "Could not book this line" }, 400);
+  }
+});
+
 // Finalising a month freezes its reconciliation: the figures AND the
 // outstanding-item lists are snapshotted to kv, the month's statement lines
 // refuse further match/unmatch/ignore/delete/import, and the report shows the
