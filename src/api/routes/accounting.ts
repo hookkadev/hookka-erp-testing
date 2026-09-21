@@ -9229,6 +9229,15 @@ function ensurePvApprovalCols(db: Env["Variables"]["DB"]): Promise<void> {
       await db.prepare(
         "UPDATE payment_vouchers SET approval_state = 'APPROVED' WHERE approval_state IS NULL",
       ).run().catch(() => {});
+      // Migration 0159 created `status CHECK (status IN ('POSTED','VOID'))`;
+      // a draft-road voucher carries status 'DRAFT' and was refused by the
+      // constraint on prod (2026-09-22, same class as BUG-2026-09-18-001 —
+      // the PCN 'CANCELLED' void). Re-create the check with DRAFT allowed.
+      // Postgres names the auto constraint payment_vouchers_status_check.
+      await db.prepare("ALTER TABLE payment_vouchers DROP CONSTRAINT IF EXISTS payment_vouchers_status_check").run().catch(() => {});
+      await db.prepare(
+        "ALTER TABLE payment_vouchers ADD CONSTRAINT payment_vouchers_status_check CHECK (status IN ('POSTED','VOID','DRAFT'))",
+      ).run().catch(() => {});
     })().catch((e) => {
       _pendingPvApprovalCols = null;
       throw e;
@@ -9434,8 +9443,11 @@ app.post("/payment-vouchers", async (c) => {
     return c.json({ success: true, data: { id, pvNo } }, 201);
   } catch (e) {
     console.error("[pv] create failed:", e);
+    // Surface the database's own words — a swallowed cause cost a prod
+    // debugging round (2026-09-22, four-tier rollout).
+    const cause = e instanceof Error ? e.message : String(e);
     return c.json(
-      { success: false, error: "Failed to save the payment — is migration 0159 applied?" },
+      { success: false, error: `Failed to save the payment: ${cause.slice(0, 300)}` },
       400,
     );
   }

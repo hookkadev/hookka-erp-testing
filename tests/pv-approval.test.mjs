@@ -88,3 +88,22 @@ test("draft edit is allowed only before CHECK", () => {
   assert.match(body, /if \(state !== "DRAFT" && state !== "PREPARED"\)/);
   assert.match(body, /Checked vouchers are locked/);
 });
+
+// Found on prod 2026-09-22: migration 0159's `status CHECK (status IN
+// ('POSTED','VOID'))` refused the draft road's status 'DRAFT' — every
+// "Save as draft" 400'd with the generic "is migration 0159 applied?" text.
+// Same class as BUG-2026-09-18-001 (PCN void 'CANCELLED'). The self-apply
+// must widen the constraint, and the create path must surface the DB's own
+// error instead of a canned guess.
+test("self-apply widens the status CHECK to admit DRAFT", () => {
+  const start = src.indexOf("function ensurePvApprovalCols(");
+  const body = src.slice(start, src.indexOf("\nconst PV_DRAFT_PREFIX", start));
+  assert.match(body, /DROP CONSTRAINT IF EXISTS payment_vouchers_status_check/);
+  assert.match(body, /CHECK \(status IN \('POSTED','VOID','DRAFT'\)\)/);
+});
+
+test("PV create surfaces the database's own failure text", () => {
+  const body = handler('app.post("/payment-vouchers", async (c) => {');
+  assert.match(body, /Failed to save the payment: \$\{cause\.slice\(0, 300\)\}/);
+  assert.doesNotMatch(body, /is migration 0159 applied\?/);
+});

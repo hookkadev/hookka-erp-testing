@@ -16,3 +16,8 @@ ALTER TABLE payment_vouchers ADD COLUMN IF NOT EXISTS reject_reason TEXT;
 -- Every voucher that existed before the tiers were introduced posted at
 -- creation, so historically it IS approved.
 UPDATE payment_vouchers SET approval_state = 'APPROVED' WHERE approval_state IS NULL;
+-- 2026-09-22 (found on prod): status CHECK from 0159 only allowed POSTED|VOID;
+-- the draft road writes DRAFT. Widened. ⚠ RECORD ONLY — ensurePvApprovalCols
+-- re-creates the constraint at runtime.
+ALTER TABLE payment_vouchers DROP CONSTRAINT IF EXISTS payment_vouchers_status_check;
+ALTER TABLE payment_vouchers ADD CONSTRAINT payment_vouchers_status_check CHECK (status IN ('POSTED','VOID','DRAFT'));
