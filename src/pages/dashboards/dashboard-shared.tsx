@@ -67,7 +67,7 @@ function CalendarGrid({
       </div>
       <div className="grid grid-cols-7 gap-0.5">
         {cells.map((day, i) => {
-          if (!day) return <div key={`pad-${i}`} className="h-7" />;
+          if (!day) return <div key={`pad-${i}`} className="h-7 max-md:h-9" />;
           const isFrom = day === from;
           const isTo = day === to;
           const inRange = !!from && !!to && day > from && day < to;
@@ -85,7 +85,7 @@ function CalendarGrid({
               title={future ? "Future date" : undefined}
               onClick={() => !future && onPick(day)}
               className={
-                "h-7 rounded-md text-[11px] tabular-nums transition-colors " +
+                "h-7 max-md:h-9 rounded-md text-[11px] max-md:text-xs tabular-nums transition-colors " +
                 (future
                   ? "text-[#C9C2B6] cursor-not-allowed"
                   : selected
@@ -177,7 +177,7 @@ function DateTrigger({
   };
 
   return (
-    <div className="relative" ref={wrapRef}>
+    <div className="md:relative" ref={wrapRef}>
       <button
         type="button"
         onClick={() => {
@@ -189,7 +189,7 @@ function DateTrigger({
         }}
         aria-expanded={open}
         className={
-          "flex items-center gap-1 rounded-md border px-2.5 py-1 text-sm font-medium tabular-nums transition-colors " +
+          "flex items-center gap-1 rounded-md border px-2.5 py-1 max-md:h-10 text-sm font-medium tabular-nums transition-colors " +
           (open
             ? "border-[#6B5C32] bg-white text-[#1F1D1B]"
             : "border-transparent text-[#1F1D1B] hover:bg-[#F0ECE9]")
@@ -200,9 +200,9 @@ function DateTrigger({
       </button>
 
       {open && (
-        <div className="absolute right-0 z-50 mt-1 flex gap-3 rounded-lg border border-[#E5E0D8] bg-white p-3 shadow-lg">
-          <div className="flex flex-col gap-1 w-28 shrink-0">
-            <p className="text-[10px] uppercase tracking-wide pb-0.5" style={{ color: CHART_AXIS }}>
+        <div className="absolute right-0 z-50 mt-1 flex gap-3 rounded-lg border border-[#E5E0D8] bg-white p-3 shadow-lg max-md:fixed max-md:inset-x-4 max-md:right-4 max-md:mt-2 max-md:flex-col max-md:max-h-[calc(100dvh-8rem)] max-md:overflow-y-auto">
+          <div className="flex flex-col gap-1 w-28 shrink-0 max-md:w-full max-md:flex-row max-md:flex-wrap max-md:items-center">
+            <p className="text-[10px] uppercase tracking-wide pb-0.5 max-md:w-full" style={{ color: CHART_AXIS }}>
               Presets
             </p>
             {presets.map((p) => {
@@ -234,7 +234,7 @@ function DateTrigger({
                     setOpen(false);
                   }}
                   className={
-                    "rounded-md px-2 py-1 text-left text-[11px] font-medium " +
+                    "rounded-md px-2 py-1 text-left text-[11px] font-medium max-md:h-10 max-md:px-3 max-md:text-xs " +
                     (on ? "bg-[#6B5C32] text-white" : "text-[#1F1D1B] hover:bg-[#F7F5F3]")
                   }
                 >
@@ -248,19 +248,19 @@ function DateTrigger({
                 onChange({ mode: "monthly", month: viewMonth });
                 setOpen(false);
               }}
-              className="mt-1 rounded-md border border-[#E5E0D8] px-2 py-1 text-[11px] font-medium text-[#6B5C32] hover:bg-[#F7F5F3]"
+              className="mt-1 rounded-md border border-[#E5E0D8] px-2 py-1 text-[11px] font-medium text-[#6B5C32] hover:bg-[#F7F5F3] max-md:mt-0 max-md:h-10 max-md:px-3 max-md:text-xs"
             >
               Whole month
             </button>
           </div>
 
-          <div className="w-56">
+          <div className="w-56 max-md:w-full">
             <div className="flex items-center justify-between pb-1.5">
               <button
                 type="button"
                 aria-label="Previous month"
                 onClick={() => stepView(-1)}
-                className="h-6 w-6 grid place-items-center rounded-md hover:bg-[#F7F5F3]"
+                className="h-6 w-6 max-md:h-10 max-md:w-10 grid place-items-center rounded-md hover:bg-[#F7F5F3]"
                 style={{ color: CHART_AXIS }}
               >
                 <ChevronLeft className="h-4 w-4" />
@@ -270,7 +270,7 @@ function DateTrigger({
                 type="button"
                 aria-label="Next month"
                 onClick={() => stepView(1)}
-                className="h-6 w-6 grid place-items-center rounded-md hover:bg-[#F7F5F3]"
+                className="h-6 w-6 max-md:h-10 max-md:w-10 grid place-items-center rounded-md hover:bg-[#F7F5F3]"
                 style={{ color: CHART_AXIS }}
               >
                 <ChevronRight className="h-4 w-4" />
@@ -334,7 +334,7 @@ export function PeriodPicker({
   const prev = step(-1);
   const next = step(1);
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2 max-md:w-full max-md:justify-between">
       {/* Segmented control: the ACTIVE half carries its own border + white
           fill so which mode is on is readable at a glance — a background tint
           alone was too faint to tell apart on this cream page. */}
@@ -346,7 +346,7 @@ export function PeriodPicker({
             aria-pressed={period.mode === m}
             onClick={() => onChange({ ...period, mode: m })}
             className={
-              "px-3 py-1 text-xs font-medium rounded-md border transition-colors " +
+              "px-3 py-1 max-md:h-9 max-md:px-4 text-xs font-medium rounded-md border transition-colors " +
               (period.mode === m
                 ? "bg-white border-[#6B5C32] text-[#1F1D1B] shadow-sm"
                 : "bg-transparent border-transparent text-[#6B7280] hover:bg-white/60")
@@ -363,7 +363,7 @@ export function PeriodPicker({
           aria-label={period.mode === "ytd" ? "Previous year" : "Previous month"}
           disabled={!prev}
           onClick={() => prev && onChange(prev)}
-          className="h-7 w-7 grid place-items-center rounded-md border border-[#E2DDD8] text-[#6B7280] disabled:opacity-40 hover:bg-[#F7F5F3]"
+          className="h-7 w-7 max-md:h-10 max-md:w-10 grid place-items-center rounded-md border border-[#E2DDD8] text-[#6B7280] disabled:opacity-40 hover:bg-[#F7F5F3]"
         >
           <ChevronLeft className="h-4 w-4" />
         </button>
@@ -373,7 +373,7 @@ export function PeriodPicker({
           aria-label={period.mode === "ytd" ? "Next year" : "Next month"}
           disabled={!next}
           onClick={() => next && onChange(next)}
-          className="h-7 w-7 grid place-items-center rounded-md border border-[#E2DDD8] text-[#6B7280] disabled:opacity-40 hover:bg-[#F7F5F3]"
+          className="h-7 w-7 max-md:h-10 max-md:w-10 grid place-items-center rounded-md border border-[#E2DDD8] text-[#6B7280] disabled:opacity-40 hover:bg-[#F7F5F3]"
         >
           <ChevronRight className="h-4 w-4" />
         </button>
@@ -414,14 +414,14 @@ export function Kpi({
 }) {
   return (
     <Card>
-      <CardContent className="p-4 flex items-center gap-3">
-        <div className={cn("rounded-lg p-2.5 shrink-0", iconBgClass)}>
+      <CardContent className="p-4 max-md:p-3 flex items-center gap-3 max-md:gap-2">
+        <div className={cn("rounded-lg p-2.5 shrink-0 max-[420px]:hidden", iconBgClass)}>
           <Icon className={cn("h-5 w-5", iconColorClass)} />
         </div>
         <div className="min-w-0">
           <p
             className={cn(
-              "font-bold truncate tabular-nums",
+              "font-bold truncate tabular-nums max-md:text-xl",
               valueSizeClass ?? "text-2xl",
               valueColorClass ?? "text-[#1F1D1B]",
             )}

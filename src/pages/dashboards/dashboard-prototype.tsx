@@ -123,21 +123,29 @@ export default function DashboardPrototypePage() {
           a long tab scrolls, so you can switch tab or month without scrolling
           back up. -mx/px cancels the page gutter so the backdrop reaches the
           full width; the bottom border separates it from the content beneath. */}
-      <div className="sticky top-0 z-30 -mx-4 px-4 md:-mx-6 md:px-6 pt-1 pb-3 bg-[#F7F5F3]/95 backdrop-blur border-b border-[#E2DDD8] space-y-3">
+      <div className="sticky top-0 z-30 -mx-4 px-4 md:-mx-6 md:px-6 pt-1 pb-3 max-md:pb-2 bg-[#F7F5F3]/95 backdrop-blur border-b border-[#E2DDD8] space-y-3 max-md:space-y-2">
+        {/* Phones: no big title (keeps the sticky block short); the tab strip is
+            one scrollable row. md+: the original PageHeader, unchanged. */}
+        <h1 className="sr-only md:hidden">Overview</h1>
         <PageHeader
+          className="max-md:[&>div:first-child]:hidden"
           title="Overview"
           subtitle="Operations · live where noted"
           actions={
-            <Tabs tabs={TABS} value={tab} onChange={setTab} variant="pill" />
+            <Tabs tabs={TABS} value={tab} onChange={setTab} variant="pill" scrollable className="max-md:w-full" />
           }
         />
 
         {/* Sub-tab strip shares this sticky row with the period picker, so
             both stay put while a long tab scrolls. */}
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            {subTabs && <Tabs tabs={[...subTabs]} value={sub} onChange={setSub} variant="pill" />}
-          </div>
+        <div className="flex flex-wrap items-center justify-between gap-2 max-md:gap-y-2">
+          {subTabs ? (
+            <div className="max-md:w-full min-w-0">
+              <Tabs tabs={[...subTabs]} value={sub} onChange={setSub} variant="pill" scrollable />
+            </div>
+          ) : (
+            <div />
+          )}
           {months.length > 0 && (
             <PeriodPicker
               period={effectivePeriod}
