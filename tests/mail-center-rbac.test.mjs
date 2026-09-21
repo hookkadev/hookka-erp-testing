@@ -102,18 +102,20 @@ test("a non-admin's sidebar shows only mailboxes the backend returned", () => {
   assert.ok(injection.length > 0, "could not locate departmentGroups");
 
   // Every CANONICAL_DEPT_MAILBOXES read inside that block must sit behind an
-  // isSuperAdmin check.
+  // isSuperAdmin check. Since T-012 R12 a super admin's own sidebar is scoped
+  // too, so the "missing" offer is additionally gated on the all=1 list
+  // having loaded — "missing" must mean "no row anywhere".
   for (const m of injection.matchAll(/CANONICAL_DEPT_MAILBOXES/g)) {
     const before = injection.slice(Math.max(0, m.index - 260), m.index);
     assert.match(
       before,
-      /if \(isSuperAdmin\) \{/,
+      /if \(isSuperAdmin(?: && allAddresses)?\) \{/,
       "canonical mailbox injection must be admin-gated",
     );
   }
   assert.match(
     injection,
-    /\}, \[deptGroups, isSuperAdmin\]\);/,
+    /\}, \[deptGroups, isSuperAdmin, allAddresses\]\);/,
     "isSuperAdmin must be a dependency or the gate goes stale",
   );
 });
@@ -145,4 +147,18 @@ test("the org-chart directory and the visibility panel are scoped reads (T-012 R
   const dir = handler("get", "/directory");
   assert.match(dir, /if \(p\.source !== "user"\) return null;/);
   assert.match(dir, /if \(p\.key === meKey\) continue;/);
+});
+
+test("SUPER_ADMIN no longer bypasses the mailbox scope (T-012 R12)", () => {
+  // One rule for everyone: mail_user_scope decides. Configuration stays
+  // requireSuperAdmin (pinned above); VISIBILITY is granted per person.
+  const start = route.indexOf("async function getMailScope(");
+  const body = route.slice(start, route.indexOf("// Lowercase + de-duplicate", start));
+  assert.doesNotMatch(body, /role === "SUPER_ADMIN"/);
+  assert.doesNotMatch(body, /userRole/);
+  // 'company' is the level that sees everything, including catch-all
+  // threads on an address with no row.
+  assert.match(body, /if \(level === "company"\) \{[\s\S]*?isAdmin: true/);
+  // The management matrix's all=1 is a configuration read, SUPER_ADMIN only.
+  assert.match(handler("get", "/addresses"), /c\.req\.query\("all"\) === "1" && requireSuperAdmin\(c\) === null/);
 });

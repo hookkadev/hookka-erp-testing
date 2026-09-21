@@ -147,7 +147,7 @@ migrations-postgres/  244 Postgres migrations (the live schema)
 migrations/           131 legacy SQLite migrations (D1 era, retired 2026-04-27)
 tests/                ~330 node:test files — `npm test`
 scripts/              one-off + operational scripts, incl. gen-api-docs.mjs
-mobile/, mail-sync/, mail-inbound-worker/, agent-heartbeat-worker/
+mobile/, mail-inbound-worker/, agent-heartbeat-worker/
                       satellite deployables
 
 docs/

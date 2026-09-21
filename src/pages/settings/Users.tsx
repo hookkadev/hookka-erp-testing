@@ -332,7 +332,7 @@ export default function UsersPage() {
   const { data: usersResp, loading: loadingUsers, refresh: refreshUsersHook } = useCachedJson<ApiEnvelope<UserRow[]>>("/api/users");
   const { data: invitesResp, loading: loadingInvites, refresh: refreshInvitesHook } = useCachedJson<ApiEnvelope<InviteRow[]>>("/api/users/invites");
   // Mail Center returns a bare array (no { success, data } envelope).
-  const { data: addressesResp, refresh: refreshAddressesHook } = useCachedJson<MailAddress[]>("/api/mail-center/addresses");
+  const { data: addressesResp, refresh: refreshAddressesHook } = useCachedJson<MailAddress[]>("/api/mail-center/addresses?all=1");
   // The org chart's people, ONLY so the drawer can show the real reporting line.
   // users.reports_to is the legacy column and is blank for everyone whose line
   // was set through the chart — the edges live in org_reporting, keyed

@@ -962,6 +962,13 @@ export default function MailCenterPage() {
     "/api/mail-center/addresses",
     300,
   );
+  // Every address row, SUPER_ADMIN only — so the canonical "Set up" offer
+  // below means "no row exists anywhere", not "not in your scope" (R12: a
+  // super admin's own sidebar is scoped like everyone else's now).
+  const { data: allAddresses } = useCachedJson<MailAddress[]>(
+    isSuperAdmin ? "/api/mail-center/addresses?all=1" : null,
+    300,
+  );
   // The logged-in person's own mailbox (assigned-to / login email match).
   // "" when they own none — then "My inbox" quietly behaves as the shared
   // Inbox and the My-mailbox section is not drawn.
@@ -1136,10 +1143,18 @@ export default function MailCenterPage() {
       for (const c of CANONICAL_DEPT_MAILBOXES) deptNames.add(c.dept);
     }
 
+    // "Missing" means no row ANYWHERE (the all=1 list), not merely outside
+    // the caller's scope. Until that list loads, nothing is offered.
+    const anywhere = new Set(
+      (allAddresses ?? []).map((a) => a.address.toLowerCase()),
+    );
     const groups: { dept: string; entries: MailboxEntry[] }[] = [];
     for (const dept of Array.from(deptNames).sort(sortDepts)) {
       const existing = real.get(dept) ?? [];
-      const haveAddrs = new Set(existing.map((a) => a.address.toLowerCase()));
+      const haveAddrs = new Set([
+        ...existing.map((a) => a.address.toLowerCase()),
+        ...anywhere,
+      ]);
       const entries: MailboxEntry[] = existing.map((address) => ({
         kind: "real",
         address,
@@ -1147,17 +1162,18 @@ export default function MailCenterPage() {
       // Add any canonical shared mailbox for this dept that has no row yet.
       // Admin-only for the same reason as above: to a non-admin, "missing"
       // is indistinguishable from "not yours to see".
-      if (isSuperAdmin) {
+      if (isSuperAdmin && allAddresses) {
         for (const c of CANONICAL_DEPT_MAILBOXES) {
           if (c.dept === dept && !haveAddrs.has(c.address.toLowerCase())) {
             entries.push({ kind: "missing", address: c.address, dept });
           }
         }
       }
-      groups.push({ dept, entries });
+      // A department with nothing to show and nothing to set up is noise.
+      if (entries.length > 0) groups.push({ dept, entries });
     }
     return groups;
-  }, [deptGroups, isSuperAdmin]);
+  }, [deptGroups, isSuperAdmin, allAddresses]);
 
   // The personal "Other" bucket (aliases with no department).
   const personalMailboxes = useMemo(() => {

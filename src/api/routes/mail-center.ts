@@ -288,11 +288,12 @@ export async function ensureMailSchema(db: D1Database): Promise<void> {
 // ---------------------------------------------------------------------------
 // Inbound ingestion — called by the worker.ts pre-auth handler.
 // ---------------------------------------------------------------------------
-// One inbound attachment as it arrives on the /inbound payload. The sync layer
-// (mail-sync/sync.mjs + mail-inbound-worker) base64-encodes the raw bytes so the
+// One inbound attachment as it arrives on the /inbound payload. The routing
+// worker (mail-inbound-worker — the ONE inbound channel since T-012 R13
+// retired the Hostinger IMAP poller) base64-encodes the raw bytes so the
 // JSON POST stays credential-free; the ERP owns storage (uploads to Supabase
-// Storage here). Oversized files are dropped at the sync layer (see the size
-// caps there) so contentBase64 is always sane to decode in the Worker.
+// Storage here). Oversized files are dropped at the worker (see the size caps
+// there) so contentBase64 is always sane to decode here.
 export interface InboundAttachmentPayload {
   filename?: string;
   contentType?: string;
@@ -898,18 +899,23 @@ function rowToLabel(r: LabelRow) {
 }
 
 // ---------------------------------------------------------------------------
-// Hierarchical mailbox visibility (owner 2026-06-17). SUPER_ADMIN always sees
-// every thread/address in the org. Every other authenticated user has a
-// VISIBILITY LEVEL stored in mail_user_scope (default 'personal'):
+// Hierarchical mailbox visibility (owner 2026-06-17). ONE rule for everyone
+// (PRD T-012 R12, matching the other system's ruling): what a person sees is
+// decided by their VISIBILITY LEVEL in mail_user_scope (default 'personal')
+// — the SUPER_ADMIN role no longer bypasses it. Configuring mailboxes,
+// grants and levels stays SUPER_ADMIN-only (requireSuperAdmin below); seeing
+// a mailbox is granted per person, not per role.
 //   • 'personal'   — own assigned alias(es) + any shared mailbox granted via
 //                    email_address_access. (The original behaviour.)
 //   • 'department' — the personal set PLUS every active mailbox whose
 //                    assigned_dept matches the caller's own dept. If the caller
 //                    has no dept on file, this falls back to 'personal'.
-//   • 'company'    — every active mailbox in the org.
+//   • 'company'    — every thread and mailbox in the org (isAdmin: true, so
+//                    threads on an address with no email_addresses row —
+//                    catch-all mail to an unknown alias — are seen too).
 // Inherently scoped to the caller, so it needs no mail-center:* RBAC grant
 // (which was never seeded). The returned `level` lets callers/the UI reflect
-// the effective scope; isAdmin/userId/addresses are unchanged for callers.
+// the effective scope.
 // ---------------------------------------------------------------------------
 const MAIL_SCOPE_LEVELS = ["personal", "department", "company"] as const;
 type MailScopeLevel = (typeof MAIL_SCOPE_LEVELS)[number];
@@ -924,10 +930,7 @@ async function getMailScope(
   level: string;
 }> {
   const get = (c as unknown as { get: (k: string) => string | undefined }).get;
-  const role = get("userRole")?.toUpperCase();
   const userId = get("userId") ?? "";
-  if (role === "SUPER_ADMIN")
-    return { isAdmin: true, userId, addresses: [], level: "company" };
   if (!userId)
     return { isAdmin: false, userId: "", addresses: [], level: "personal" };
 
@@ -943,7 +946,7 @@ async function getMailScope(
     ? (levelRow!.level as MailScopeLevel)
     : "personal";
 
-  // 'company' — every active mailbox in the org.
+  // 'company' — every thread and mailbox in the org.
   if (level === "company") {
     const all = await c.var.DB.prepare(
       `SELECT address FROM email_addresses WHERE org_id = ? AND active = 1`,
@@ -951,7 +954,7 @@ async function getMailScope(
       .bind(orgId)
       .all<{ address: string }>();
     return {
-      isAdmin: false,
+      isAdmin: true,
       userId,
       addresses: dedupeLower((all.results ?? []).map((r) => r.address)),
       level,
@@ -1599,7 +1602,11 @@ app.get("/addresses", async (c) => {
   // or linking an alias; a cached copy would hide the just-made change.
   c.header("Cache-Control", "no-store");
   const scope = await getMailScope(c, orgId);
-  if (scope.isAdmin) {
+  // ?all=1 — the User Management mailbox matrix needs EVERY row to manage
+  // them, which is a configuration read (SUPER_ADMIN, like POST /addresses),
+  // not a visibility one. Anyone else asking for all gets their scoped list.
+  const wantAll = c.req.query("all") === "1" && requireSuperAdmin(c) === null;
+  if (scope.isAdmin || wantAll) {
     const res = await c.var.DB.prepare(
       `SELECT * FROM email_addresses WHERE org_id = ? ORDER BY address ASC`,
     )

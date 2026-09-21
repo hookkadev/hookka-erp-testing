@@ -1,5 +1,8 @@
 # GitHub Workflow Governance
 
+> **Last verified: 2026-09-21** (branch `feat/t012-mail-center`) — `mail-sync.yml` and the
+> `mail-sync/` IMAP poller were deleted (PRD T-012 R13); the workflow count below is 25.
+
 > **Last verified: 2026-08-14** (branch `docs/docs-vs-code-audit`) — corrected against the
 > source by the prose audit; the row(s) touched here are itemised in
 > [`docs/DOCS-VS-CODE-AUDIT.md`](DOCS-VS-CODE-AUDIT.md). Only the claims listed there were
@@ -11,10 +14,10 @@
 > all exist as named, there is no `ISSUE_TEMPLATE/` (correct — this doc says it is optional
 > and not needed), and `docs/BUG-HISTORY.md` is still the live bug log.
 >
-> For completeness, the **26** workflows present on 2026-08-14 are: agent-heartbeat,
+> For completeness, the **25** workflows present on 2026-09-21 are (mail-sync, the Hostinger IMAP poller, was retired on 2026-09-21 under PRD T-012 R13 — Cloudflare Email Routing → mail-inbound-worker is the one inbound channel): agent-heartbeat,
 > analyze-staging, auto-clockout, backup, daily-reports, delivery-agent,
 > deploy-cron-worker, deploy, distill-ocr-rules, **docs-freshness**, ios-build,
-> keep-warm, mail-sync, nightly-counter-rebuild, nightly-pi-gl-backfill,
+> keep-warm, nightly-counter-rebuild, nightly-pi-gl-backfill,
 > process-email-outbox, push-clock-reminder, qc-cron, rebuild-dashboard-snapshot,
 > refresh-bundle-baseline, replay-audit-dlq, scan-queue-sweep, **secret-hygiene**,
 > sync-staging, trim-staging, warm-lists. *(The list said 24 and omitted exactly the
