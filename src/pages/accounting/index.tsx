@@ -6148,6 +6148,128 @@ function ScanPrefillButton({ label, onResult }: { label: string; onResult: (d: S
     </>
   );
 }
+
+// Scan Bills — a STACK of bills at once (Houzs adoption Phase 5, 2026-09-22).
+// Each file is scanned in turn and becomes ONE draft Payment Voucher on the
+// approval ladder (saveAs:"draft" — no number, no GL). The account prefills
+// from the same payee's latest voucher, exactly as the single-scan button
+// does; a bill the AI can't read or that has no usable amount is listed as
+// skipped with the reason, never guessed. The owner then walks the drafts
+// through Prepare → Check → Approve on the Payment Vouchers page.
+function ScanBillsBatch({ rows, bankCash, onDone }: {
+  rows: PvRow[];
+  bankCash: ChartOfAccount[];
+  onDone: () => void;
+}) {
+  const { toast } = useToast();
+  const [open, setOpen] = useState(false);
+  const [queue, setQueue] = useState<{ name: string; state: "queued" | "scanning" | "saved" | "skipped"; note?: string; pvNo?: string }[]>([]);
+  const [busy, setBusy] = useState(false);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const normName = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const runFiles = async (files: File[]) => {
+    if (!files.length) return;
+    setBusy(true);
+    setQueue(files.map((f) => ({ name: f.name, state: "queued" })));
+    const payFrom = defaultBankCode(bankCash);
+    let saved = 0;
+    for (let i = 0; i < files.length; i++) {
+      setQueue((q) => q.map((x, j) => (j === i ? { ...x, state: "scanning" } : x)));
+      try {
+        const fd = new FormData();
+        fd.append("file", files[i]);
+        const res = await fetch("/api/scan-finance/extract", { method: "POST", body: fd });
+        const j = (await res.json()) as { success?: boolean; error?: string; data?: ScanFinanceResult };
+        if (!j?.success || !j.data) throw new Error(j?.error || "scan failed");
+        const d = j.data;
+        const amtLines = d.lines.length ? d.lines : d.totalSen ? [{ description: d.docNo ?? files[i].name, amountSen: d.totalSen }] : [];
+        if (!amtLines.length) throw new Error("no amount read");
+        const prior = d.partyName
+          ? rows.filter((r) => r.status !== "VOID" && r.lines?.length && normName(r.payee ?? "") === normName(d.partyName ?? ""))
+              .sort((a, b) => (b.date || "").localeCompare(a.date || ""))[0]
+          : undefined;
+        const acct = prior?.lines?.[0]?.accountCode ?? "";
+        if (!acct) throw new Error(d.partyName ? `new payee "${d.partyName}" — no account to prefill; key it by hand` : "payee not read");
+        const body = {
+          date: d.docDate ?? new Date().toISOString().slice(0, 10),
+          payee: d.partyName ?? "",
+          description: [d.docType, d.docNo].filter(Boolean).join(" · ") || files[i].name,
+          accrued: false,
+          payFrom,
+          saveAs: "draft",
+          lines: amtLines.map((l) => ({ accountCode: acct, description: l.description, amountSen: l.amountSen })),
+        };
+        const r2 = await fetch("/api/accounting/payment-vouchers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        const j2 = (await r2.json()) as { success?: boolean; error?: string; data?: { pvNo: string } };
+        if (!j2?.success) throw new Error(j2?.error || "save failed");
+        saved++;
+        setQueue((q) => q.map((x, k) => (k === i ? { ...x, state: "saved", pvNo: j2.data?.pvNo, note: `${d.partyName ?? ""} · ${formatCurrency(amtLines.reduce((s, l) => s + l.amountSen, 0))}` } : x)));
+      } catch (e) {
+        setQueue((q) => q.map((x, k) => (k === i ? { ...x, state: "skipped", note: (e as Error).message } : x)));
+      }
+    }
+    setBusy(false);
+    if (saved) { toast.success(`${saved} draft voucher${saved === 1 ? "" : "s"} created — Prepare / Check / Approve them below`); onDone(); }
+  };
+  return (
+    <>
+      <Button variant="outline" size="sm" onClick={() => { setQueue([]); setOpen(true); }} title="Drop a whole stack of bills — one draft voucher each">
+        <Upload className="h-4 w-4 mr-1.5" /> Scan Bills
+      </Button>
+      {open && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => { if (!busy) setOpen(false); }}>
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-5 border-b border-[#E2DDD8]">
+              <div>
+                <h2 className="text-base font-semibold text-[#1F1D1B]">Scan Bills</h2>
+                <p className="text-xs text-[#6B7280] mt-0.5">Drop several bills at once. Each becomes a <b>draft</b> voucher (no number, nothing posted) with the account prefilled from that payee's last voucher. Unreadable ones are listed, not guessed.</p>
+              </div>
+              <button onClick={() => { if (!busy) setOpen(false); }} className="text-[#9CA3AF] hover:text-[#6B7280] text-lg leading-none">✕</button>
+            </div>
+            <div className="p-5 space-y-3">
+              {queue.length === 0 && (
+                <div
+                  className="rounded-lg border-2 border-dashed border-[#E2DDD8] hover:bg-[#FAF8F6] px-6 py-12 text-center cursor-pointer"
+                  onClick={() => inputRef.current?.click()}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => { e.preventDefault(); void runFiles(Array.from(e.dataTransfer?.files ?? [])); }}
+                >
+                  <Upload className="h-8 w-8 mx-auto text-[#B4B2A9]" />
+                  <p className="mt-3 text-sm font-medium text-[#1F1D1B]">Drop PDFs / photos here</p>
+                  <p className="mt-1 text-xs text-[#6B7280]">or click to browse — up to 20 files, each ~30–90s to scan</p>
+                </div>
+              )}
+              {queue.length > 0 && (
+                <table className="w-full text-xs">
+                  <tbody>
+                    {queue.map((q, i) => (
+                      <tr key={i} className="border-t border-[#F0ECE9]">
+                        <td className="py-1.5 pr-3 w-full max-w-0"><div className="truncate">{q.name}</div>{q.note && <div className="text-[10px] text-[#6B7280] truncate">{q.note}</div>}</td>
+                        <td className="py-1.5 whitespace-nowrap text-right">
+                          {q.state === "queued" && <span className="text-[#9CA3AF]">waiting</span>}
+                          {q.state === "scanning" && <span className="text-[#7A5B12]">scanning…</span>}
+                          {q.state === "saved" && <span className="rounded-full bg-[#EAF3DE] text-[#27500A] px-2 py-0.5 font-semibold">draft {q.pvNo}</span>}
+                          {q.state === "skipped" && <span className="rounded-full bg-[#F7E5E1] text-[#9A3A2D] px-2 py-0.5 font-semibold">skipped</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              {queue.length > 0 && !busy && (
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setQueue([])}>Scan more</Button>
+                  <Button variant="primary" size="sm" onClick={() => setOpen(false)}>Done</Button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+      <input ref={inputRef} type="file" accept=".pdf,image/*" multiple className="sr-only" onChange={(e) => { void runFiles(Array.from(e.target.files ?? []).slice(0, 20)); e.target.value = ""; }} />
+    </>
+  );
+}
 // Party match for scan prefill. Same precedence as every other OCR surface
 // (owner 2026-08-01: 「我们的全部OCR都要有这样的功能」):
 //
@@ -8565,6 +8687,23 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
     } finally { setLadderBusy(false); }
   };
 
+  // Print footer (payment details / terms) — kv finance_print_footer.pv,
+  // editable from the small card below the header (Houzs adoption Phase 5).
+  const [printFooter, setPrintFooter] = useState("");
+  const [footerOpen, setFooterOpen] = useState(false);
+  const [footerDraft, setFooterDraft] = useState("");
+  useEffect(() => {
+    let dead = false;
+    fetch("/api/kv-config/finance_print_footer").then((r) => r.json() as Promise<{ data?: { pv?: string } | null }>)
+      .then((j) => { if (!dead) setPrintFooter(String(j?.data?.pv ?? "")); }).catch(() => {});
+    return () => { dead = true; };
+  }, []);
+  const saveFooter = async () => {
+    const res = await fetch("/api/kv-config/finance_print_footer", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pv: footerDraft }) });
+    const j = asMutationResponse(await res.json());
+    if (j?.success) { setPrintFooter(footerDraft); setFooterOpen(false); toast.success("Print footer saved"); }
+    else toast.error(j?.error || "Save failed");
+  };
   // Print with the settled-bills detail when the voucher is a supplier payment
   // (its lines hit the AP control) — fetched on demand so the list stays light.
   const printPvWithDetail = async (r: PvRow) => {
@@ -8576,7 +8715,7 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
         if (j?.success && j.data?.rows?.length) detail = j.data.rows;
       } catch { /* print without detail */ }
     }
-    printVoucher(buildPvVoucher(r, accounts, detail));
+    printVoucher({ ...buildPvVoucher(r, accounts, detail), footerText: printFooter });
   };
   const handleSettle = async (row: PvRow) => {
     const payFrom = window.prompt(
@@ -8670,6 +8809,7 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
           <p className="text-[11px] text-[#9CA3AF]">Draft → Prepared → Checked → Approved (posted). Save as draft to walk the ladder, or Post now for the one-click road.</p>
         </div>
         <div className="flex items-center gap-2">
+          <ScanBillsBatch rows={rows ?? []} bankCash={bankCash} onDone={load} />
           <ScanPrefillButton label="Scan Receipt" onResult={applyScan} />
           <Button variant="primary" size="sm" onClick={() => {
             if (showForm) resetForm();
@@ -8681,6 +8821,23 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
       </div>
       {migrationMissing && (
         <Card><CardContent className="p-4 text-sm text-[#9A3A2D]">Migration 0159 not applied yet — run the paste-version SQL first.</CardContent></Card>
+      )}
+      <div className="text-[11px] text-[#9CA3AF] flex items-center gap-2">
+        <span>Print footer{printFooter ? `: ${printFooter.split(/\r?\n/)[0].slice(0, 60)}${printFooter.length > 60 || /\n/.test(printFooter) ? "…" : ""}` : ": (none — nothing extra printed)"}</span>
+        <button onClick={() => { setFooterDraft(printFooter); setFooterOpen(true); }} className="underline decoration-dotted text-[#6B5C32] hover:text-[#1F1D1B] cursor-pointer">edit</button>
+      </div>
+      {footerOpen && (
+        <Card>
+          <CardContent className="p-4 space-y-2">
+            <div className="text-sm font-semibold text-[#1F1D1B]">Print footer — payment details / terms on every voucher</div>
+            <p className="text-[11px] text-[#6B7280]">Printed above the signature lines. Leave empty to print nothing. Line breaks are kept.</p>
+            <textarea value={footerDraft} onChange={(e) => setFooterDraft(e.target.value)} rows={4} className="w-full rounded-md border border-[#E2DDD8] bg-white px-2 py-1.5 text-sm" placeholder={"e.g. Payment by bank transfer — Hong Leong Bank 123-456789-0 / All cheques payable to HOOKKA MANUFACTURING SDN BHD"} />
+            <div className="flex gap-2">
+              <Button variant="primary" size="sm" onClick={() => void saveFooter()}>Save</Button>
+              <Button variant="outline" size="sm" onClick={() => setFooterOpen(false)}>Cancel</Button>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       {showForm && (
@@ -8832,7 +8989,7 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
       <BatchActionsBar
         count={pvSel.count}
         onClear={pvSel.clear}
-        onPrint={() => printVouchers(pvSel.selectedRows.map((r) => buildPvVoucher(r, accounts)))}
+        onPrint={() => printVouchers(pvSel.selectedRows.map((r) => ({ ...buildPvVoucher(r, accounts), footerText: printFooter })))}
         exportName="payment-vouchers"
         exportAoa={() => [
           ["PV No", "Date", "Pay To", "Paid From", "Status", "Remarks", "Product Line", "Voucher Total (RM)", "Account Code", "Account Name", "Line Description", "Amount (RM)"],
