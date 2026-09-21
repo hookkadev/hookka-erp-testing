@@ -53,6 +53,7 @@
 import { Hono } from "hono";
 import type { Env } from "../worker";
 import { getOrgId } from "../lib/tenant";
+import { withSnakeKeys } from "../lib/db-pg";
 import { requirePermission, hasPermission } from "../lib/rbac";
 import { collectOnTimeDelivery, EMPTY_ON_TIME } from "../lib/on-time-delivery";
 import { poInPlanning, poReadyForDelivery, type PipelinePO } from "../../lib/delivery-pipeline";
@@ -252,7 +253,10 @@ async function section<T>(
   run: () => Promise<T[]>,
 ): Promise<{ rows: T[]; error: string | null }> {
   try {
-    return { rows: (await run()) ?? [], error: null };
+    // Every read below is by SQL column name (`r.created_at`), but the driver
+    // hands rows back camelCased (`createdAt`, db-pg.ts columnFrom) — so every
+    // field read undefined and the DO loop crashed the whole feed with a 500.
+    return { rows: ((await run()) ?? []).map((r) => withSnakeKeys(r as object) as T), error: null };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error(`[dashboard-prototype] ${label} failed:`, msg);
