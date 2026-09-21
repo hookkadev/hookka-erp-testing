@@ -1,7 +1,7 @@
 # API — generated reference
 
 > **GENERATED FILE — do not hand-edit.** Regenerate with `node scripts/gen-api-docs.mjs`.
-> **Last generated: 2026-09-15** from `src/api/worker.ts` + `src/api/routes/*.ts`.
+> **Last generated: 2026-09-21** from `src/api/worker.ts` + `src/api/routes/*.ts`.
 
 The backend is a single [Hono](https://hono.dev) app in `src/api/worker.ts`, served
 as a Cloudflare Pages Function via `functions/api/[[route]].ts`. There is no
@@ -62,7 +62,7 @@ offsets pointing past the end of their own file.
 | `/api/mail-center` | `src/api/routes/mail-center.ts` | `GET /threads` <sub>:920</sub><br>`GET /threads/:id` <sub>:986</sub><br>`GET /outbox` <sub>:1129</sub><br>`GET /outbox/:id` <sub>:1223</sub><br>`GET /outbox/:id/attachments/:idx/download` <sub>:1278</sub><br>`GET /addresses` <sub>:1351</sub><br>`GET /labels` <sub>:1429</sub><br>`POST /labels` <sub>:1446</sub><br>`PATCH /labels/:id` <sub>:1501</sub><br>`DELETE /labels/:id` <sub>:1572</sub><br>`POST /test-inject` <sub>:1639</sub><br>`POST /addresses` <sub>:1680</sub><br>`PATCH /addresses/:id` <sub>:1758</sub><br>`GET /access` <sub>:1833</sub><br>`POST /access` <sub>:1859</sub><br>`DELETE /access` <sub>:1897</sub><br>`GET /scope-levels` <sub>:1929</sub><br>`PUT /scope-level` <sub>:1958</sub><br>`POST /threads/:id/reply` <sub>:2040</sub><br>`POST /compose` <sub>:2221</sub><br>`PATCH /threads/:id` <sub>:2371</sub> | gated |
 | `/api/datagrid-layouts` | `src/api/routes/datagrid-layouts.ts` | `GET /` <sub>:127</sub><br>`PUT /` <sub>:162</sub><br>`DELETE /` <sub>:251</sub> | gated |
 | `/api/bom` | `src/api/routes/bom.ts` | `GET /` <sub>:130</sub><br>`POST /` <sub>:144</sub><br>`GET /templates` <sub>:231</sub><br>`POST /templates` <sub>:302</sub><br>`PUT /templates` <sub>:377</sub><br>`PUT /templates/:id` <sub>:484</sub><br>`POST /templates/bulk-process-edit` <sub>:631</sub><br>`POST /resync-job-card-times` <sub>:823</sub><br>`POST /audit-contamination` <sub>:1197</sub><br>`GET /:id` <sub>:1336</sub><br>`PUT /:id` <sub>:1348</sub> | gated |
-| `/api/products` | `src/api/routes/products.ts` | `GET /` <sub>:464</sub><br>`GET /setup-incomplete` <sub>:571</sub><br>`POST /` <sub>:589</sub><br>`POST /bulk-import` <sub>:726</sub><br>`GET /:id` <sub>:934</sub><br>`PUT /:id` <sub>:943</sub><br>`DELETE /:id` <sub>:1151</sub><br>`GET /:productId/price-history` <sub>:1274</sub><br>`POST /:productId/prices` <sub>:1300</sub><br>`DELETE /price-row/:priceRowId` <sub>:1436</sub> | gated |
+| `/api/products` | `src/api/routes/products.ts` | `GET /` <sub>:465</sub><br>`GET /setup-incomplete` <sub>:572</sub><br>`POST /` <sub>:590</sub><br>`POST /bulk-import` <sub>:727</sub><br>`GET /:id` <sub>:961</sub><br>`PUT /:id` <sub>:970</sub><br>`DELETE /:id` <sub>:1178</sub><br>`GET /:productId/price-history` <sub>:1301</sub><br>`POST /:productId/prices` <sub>:1327</sub><br>`DELETE /price-row/:priceRowId` <sub>:1463</sub> | gated |
 | `/api/search` | `src/api/routes/search.ts` | `GET /` <sub>:95</sub> | gated |
 | `/api/product-configs` | `src/api/routes/product-configs.ts` | `GET /` <sub>:75</sub> | gated |
 | `/api/workers` | `src/api/routes/workers.ts` | `GET /` <sub>:253</sub><br>`POST /` <sub>:279</sub><br>`GET /:id` <sub>:440</sub><br>`PUT /:id` <sub>:455</sub><br>`DELETE /:id` <sub>:835</sub><br>`POST /:id/set-pin` <sub>:950</sub><br>`POST /bulk-generate-pins` <sub>:1026</sub><br>`GET /:id/salary-history` <sub>:1137</sub><br>`POST /:id/salary-history` <sub>:1158</sub><br>`GET /salary/effective` <sub>:1199</sub><br>`DELETE /:id/salary-history/:rowId` <sub>:1254</sub> | gated |
