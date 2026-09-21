@@ -32,6 +32,8 @@ import {
   MAIL_ATTACH_MAX_TOTAL_BYTES,
 } from "@/api/lib/mail-attachments";
 import { Mail, Send, Loader2, X, Save, Paperclip } from "lucide-react";
+import { RecipientsInput } from "./recipients-input";
+import { parseAddressList, recipientsValid } from "@/api/lib/mail-threading";
 
 // One picked file held in memory for the compose POST. contentBase64 is the
 // RAW base64 (the `data:...;base64,` prefix is stripped on read) so it maps
@@ -68,11 +70,6 @@ type MeResponse = {
   data?: { user?: { id?: string; email?: string } };
 };
 
-// Conservative single-@ shape check — mirrors the backend's EMAIL_RE so the
-// inline error matches what the server would reject. Not RFC-5322-complete on
-// purpose; we only block obvious garbage.
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
 type ComposeResponse = {
   ok?: boolean;
   threadId?: string;
@@ -90,6 +87,9 @@ export type ComposeDialogProps = {
   // When resuming a saved draft (from the Drafts folder) the parent passes it
   // here so the form opens pre-filled. Drafts are local-only (mail-local.ts).
   initialDraft?: MailDraft | null;
+  // Set by the Forward action: the thread this email quotes. Sent to the API
+  // so the audit row reads "forward" and the new thread references the old.
+  forwardOf?: string;
 };
 
 export function ComposeDialog({
@@ -97,6 +97,7 @@ export function ComposeDialog({
   onClose,
   onSent,
   initialDraft = null,
+  forwardOf,
 }: ComposeDialogProps) {
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -125,10 +126,15 @@ export function ComposeDialog({
   // The effective From is DERIVED below as override || first active mailbox, so
   // we never need an effect to seed it (which trips react-hooks/set-state).
   const [fromOverride, setFromOverride] = useState("");
-  const [to, setTo] = useState("");
+  // Recipients as chips (T-012 R2). Cc / Bcc rows stay hidden until the
+  // operator opens them or a resumed draft carries some.
+  const [to, setTo] = useState<string[]>([]);
+  const [cc, setCc] = useState<string[]>([]);
+  const [bcc, setBcc] = useState<string[]>([]);
+  const [showCc, setShowCc] = useState(false);
+  const [showBcc, setShowBcc] = useState(false);
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
-  const [touchedTo, setTouchedTo] = useState(false);
   const [sending, setSending] = useState(false);
   // Picked attachments (held in memory only — NOT persisted to a local draft).
   const [files, setFiles] = useState<ComposeAttachment[]>([]);
@@ -145,11 +151,16 @@ export function ComposeDialog({
   const wasOpen = useRef(false);
   useEffect(() => {
     if (open && !wasOpen.current) {
-      setTo(initialDraft?.to ?? "");
+      const draftCc = parseAddressList(initialDraft?.cc ?? "");
+      const draftBcc = parseAddressList(initialDraft?.bcc ?? "");
+      setTo(parseAddressList(initialDraft?.to ?? ""));
+      setCc(draftCc);
+      setBcc(draftBcc);
+      setShowCc(draftCc.length > 0);
+      setShowBcc(draftBcc.length > 0);
       setSubject(initialDraft?.subject ?? "");
       setBody(initialDraft?.body ?? "");
       setDraftId(initialDraft?.id ?? null);
-      setTouchedTo(false);
       setSending(false);
       // Attachments are never persisted in a draft (see mail-local.ts note),
       // so a freshly-opened dialog — even one resuming a draft — starts empty.
@@ -179,20 +190,22 @@ export function ComposeDialog({
     userDefaultFrom ||
     activeAddresses[0]?.address ||
     "";
-  const toValid = EMAIL_RE.test(to.trim());
-  const toError = touchedTo && to.trim().length > 0 && !toValid;
+  const recipientsOk =
+    to.length > 0 && recipientsValid([...to, ...cc, ...bcc]);
   const canSend =
     !sending &&
     !noMailbox &&
     !!fromAddress &&
-    toValid &&
+    recipientsOk &&
     subject.trim().length > 0 &&
     body.trim().length > 0;
   // A draft is worth saving once it has any content — no validation gate.
   const canSaveDraft =
     !sending &&
     !noMailbox &&
-    (to.trim().length > 0 ||
+    (to.length > 0 ||
+      cc.length > 0 ||
+      bcc.length > 0 ||
       subject.trim().length > 0 ||
       body.trim().length > 0);
 
@@ -203,7 +216,9 @@ export function ComposeDialog({
     const id = draftId ?? crypto.randomUUID();
     saveDraft({
       id,
-      to: to.trim(),
+      to: to.join(", "),
+      cc: cc.join(", "),
+      bcc: bcc.join(", "),
       subject: subject.trim(),
       body,
       fromAddress,
@@ -310,9 +325,12 @@ export function ComposeDialog({
         credentials: "include",
         body: JSON.stringify({
           fromAddress,
-          to: to.trim(),
+          to,
+          cc,
+          bcc,
           subject: subject.trim(),
           text: body,
+          ...(forwardOf ? { forwardOf } : {}),
           ...(files.length > 0
             ? {
                 attachments: files.map((f) => ({
@@ -416,25 +434,57 @@ export function ComposeDialog({
                 )}
               </div>
 
-              {/* To */}
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-[#6B7280]">To</label>
-                <Input
-                  type="email"
-                  value={to}
-                  onChange={(e) => setTo(e.target.value)}
-                  onBlur={() => setTouchedTo(true)}
-                  placeholder="customer@example.com"
+              {/* To / Cc / Bcc — address chips. Cc and Bcc unfold on demand. */}
+              <RecipientsInput
+                label="To"
+                value={to}
+                onChange={setTo}
+                disabled={sending}
+                placeholder="customer@example.com"
+                autoFocus
+              />
+              {(!showCc || !showBcc) && (
+                <div className="flex gap-3 text-[11px]">
+                  {!showCc && (
+                    <button
+                      type="button"
+                      onClick={() => setShowCc(true)}
+                      disabled={sending}
+                      className="text-[#6B5C32] hover:underline disabled:opacity-50"
+                    >
+                      Add Cc
+                    </button>
+                  )}
+                  {!showBcc && (
+                    <button
+                      type="button"
+                      onClick={() => setShowBcc(true)}
+                      disabled={sending}
+                      className="text-[#6B5C32] hover:underline disabled:opacity-50"
+                    >
+                      Add Bcc
+                    </button>
+                  )}
+                </div>
+              )}
+              {showCc && (
+                <RecipientsInput
+                  label="Cc"
+                  value={cc}
+                  onChange={setCc}
                   disabled={sending}
-                  aria-invalid={toError}
-                  className={toError ? "border-red-400 focus-visible:ring-red-400" : ""}
+                  placeholder="copy@example.com"
                 />
-                {toError && (
-                  <p className="text-[11px] text-red-600">
-                    Enter a valid email address.
-                  </p>
-                )}
-              </div>
+              )}
+              {showBcc && (
+                <RecipientsInput
+                  label="Bcc"
+                  value={bcc}
+                  onChange={setBcc}
+                  disabled={sending}
+                  placeholder="blind copy - recipients will not see this"
+                />
+              )}
 
               {/* Subject */}
               <div className="space-y-1">

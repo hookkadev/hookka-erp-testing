@@ -49,12 +49,19 @@ import {
 } from "./mail-labels";
 import { createLabel } from "./mail-actions";
 import { ComposeDialog } from "./compose";
+import { RecipientsInput } from "./recipients-input";
+import {
+  replyRecipients,
+  recipientsValid,
+  type ReplyMode,
+} from "@/api/lib/mail-threading";
 import {
   ArrowLeft,
   ArrowDownLeft,
   ArrowUpRight,
   Send,
   Reply,
+  ReplyAll,
   Forward,
   Archive,
   Inbox,
@@ -99,6 +106,10 @@ type MailMessage = {
   fromName: string;
   toAddresses: string[];
   ccAddresses: string[];
+  // Only ever set on an outbound message (an inbound mail never reveals Bcc).
+  bccAddresses?: string[];
+  messageId?: string;
+  referenceIds?: string;
   subject: string;
   textBody: string;
   htmlBody: string;
@@ -262,9 +273,23 @@ export default function MailCenterDetailPage({
   );
 
   const thread = data?.thread;
-  const messages = data?.messages ?? [];
+  // Memoised so the reply-recipient derivation below only re-runs when the
+  // thread actually reloads, not on every render.
+  const messages = useMemo(() => data?.messages ?? [], [data]);
 
   const [replyText, setReplyText] = useState("");
+  // Reply vs Reply all (T-012 R2). The To / Cc chips default to what the
+  // server would compute for the mode (newest correspondent, +everyone on
+  // that message for reply-all); `manual` holds the operator's edits and is
+  // cleared whenever the mode changes so the buttons always re-derive.
+  const [replyMode, setReplyMode] = useState<ReplyMode>("reply");
+  const [manual, setManual] = useState<{
+    to: string[];
+    cc: string[];
+    bcc: string[];
+  } | null>(null);
+  const [showReplyCc, setShowReplyCc] = useState(false);
+  const [showReplyBcc, setShowReplyBcc] = useState(false);
   const [sending, setSending] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [assigning, setAssigning] = useState(false);
@@ -305,6 +330,33 @@ export default function MailCenterDetailPage({
     threadMailbox ||
     activeAddresses[0]?.address ||
     "";
+
+  // Who the reply goes to, by the same rule the API enforces: the newest
+  // correspondent (R3), plus everyone on that message for reply-all (R2).
+  // Our own addresses are excluded so a reply-all never mails ourselves.
+  const computedRecipients = useMemo(
+    () =>
+      replyRecipients(
+        messages,
+        replyMode,
+        [replyFrom, threadMailbox].filter(Boolean),
+      ),
+    [messages, replyMode, replyFrom, threadMailbox],
+  );
+  const replyTo = manual?.to ?? computedRecipients.to;
+  const replyCc = manual?.cc ?? computedRecipients.cc;
+  const replyBcc = manual?.bcc ?? [];
+  const replyRecipientsOk =
+    replyTo.length > 0 &&
+    recipientsValid([...replyTo, ...replyCc, ...replyBcc]);
+  function editRecipients(patch: Partial<{ to: string[]; cc: string[]; bcc: string[] }>) {
+    setManual({ to: replyTo, cc: replyCc, bcc: replyBcc, ...patch });
+  }
+  function startReply(mode: ReplyMode) {
+    setReplyMode(mode);
+    setManual(null);
+    focusReply();
+  }
 
   // Star / labels / trashed are DB-backed and arrive on the thread itself.
   const starred = thread?.starred ?? false;
@@ -498,7 +550,7 @@ export default function MailCenterDetailPage({
   // outbound message + updated status flag refetch immediately (the hook
   // subscribes to its own URL's invalidations — see lib/cached-fetch.ts).
   async function handleSend() {
-    if (!url || sending) return;
+    if (!url || sending || !replyRecipientsOk) return;
     const text = replyText.trim();
     if (!text) return;
     setSending(true);
@@ -509,6 +561,12 @@ export default function MailCenterDetailPage({
         credentials: "include",
         body: JSON.stringify({
           text,
+          // Explicit recipients (the chips) + the mode, so what the operator
+          // saw is exactly what goes out; the server re-validates the set.
+          mode: replyMode,
+          to: replyTo,
+          cc: replyCc,
+          bcc: replyBcc,
           // Send the chosen From so the reply goes out from the logged-in
           // user's mailbox (or whatever they picked). The backend authorizes
           // it against their mailbox scope and falls back to the thread mailbox
@@ -538,6 +596,10 @@ export default function MailCenterDetailPage({
       setReplyText("");
       setFiles([]);
       setAttachError(null);
+      setManual(null);
+      setReplyMode("reply");
+      setShowReplyCc(false);
+      setShowReplyBcc(false);
       toast.success("Reply sent.");
       invalidateCache(url);
     } catch {
@@ -637,11 +699,21 @@ export default function MailCenterDetailPage({
               variant="primary"
               size="sm"
               className="gap-1.5 bg-[#6B5C32] text-white hover:bg-[#5a4d2a]"
-              onClick={focusReply}
-              title="Reply to this conversation"
+              onClick={() => startReply("reply")}
+              title="Reply to whoever wrote last"
             >
               <Reply className="h-4 w-4" />
               Reply
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => startReply("reply_all")}
+              title="Reply to everyone on the latest message"
+            >
+              <ReplyAll className="h-4 w-4" />
+              Reply all
             </Button>
             <Button
               variant="outline"
@@ -1062,16 +1134,58 @@ export default function MailCenterDetailPage({
                 <div className="flex items-center gap-1.5">
                   <Send className="h-3.5 w-3.5 text-amber-600" />
                   <p className="text-sm font-semibold text-foreground">
-                    Reply
+                    {replyMode === "reply_all" ? "Reply all" : "Reply"}
                   </p>
                 </div>
-                <span className="text-xs text-muted-foreground">
-                  To{" "}
-                  {thread.counterpartyName ||
-                    thread.counterpartyEmail ||
-                    "(unknown sender)"}
-                </span>
+                <div className="flex items-center gap-2 text-[11px]">
+                  {!showReplyCc && (
+                    <button
+                      type="button"
+                      onClick={() => setShowReplyCc(true)}
+                      disabled={sending}
+                      className="text-[#6B5C32] hover:underline disabled:opacity-50"
+                    >
+                      Add Cc
+                    </button>
+                  )}
+                  {!showReplyBcc && (
+                    <button
+                      type="button"
+                      onClick={() => setShowReplyBcc(true)}
+                      disabled={sending}
+                      className="text-[#6B5C32] hover:underline disabled:opacity-50"
+                    >
+                      Add Bcc
+                    </button>
+                  )}
+                </div>
               </div>
+              {/* To / Cc / Bcc chips — pre-filled by mode, editable. */}
+              <RecipientsInput
+                label="To"
+                value={replyTo}
+                onChange={(next) => editRecipients({ to: next })}
+                disabled={sending}
+                dense
+              />
+              {(showReplyCc || replyCc.length > 0) && (
+                <RecipientsInput
+                  label="Cc"
+                  value={replyCc}
+                  onChange={(next) => editRecipients({ cc: next })}
+                  disabled={sending}
+                  dense
+                />
+              )}
+              {(showReplyBcc || replyBcc.length > 0) && (
+                <RecipientsInput
+                  label="Bcc"
+                  value={replyBcc}
+                  onChange={(next) => editRecipients({ bcc: next })}
+                  disabled={sending}
+                  dense
+                />
+              )}
               {/* From picker — defaults to the logged-in user's own mailbox
                   (replyFrom), but stays switchable when the user has 2+ active
                   mailboxes. With 0/1 mailbox in scope there's nothing to pick,
@@ -1185,7 +1299,7 @@ export default function MailCenterDetailPage({
                   <Button
                     size="sm"
                     className="gap-1.5 bg-[#6B5C32] text-white hover:bg-[#5a4d2a]"
-                    disabled={sending || !replyText.trim()}
+                    disabled={sending || !replyText.trim() || !replyRecipientsOk}
                     onClick={handleSend}
                   >
                     {sending ? (
@@ -1209,6 +1323,7 @@ export default function MailCenterDetailPage({
         <ComposeDialog
           open={forwardOpen}
           onClose={() => setForwardOpen(false)}
+          forwardOf={thread.id}
           initialDraft={{
             id: `fwd-${thread.id}`,
             to: "",

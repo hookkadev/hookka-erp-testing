@@ -22,7 +22,10 @@ const KEY = "hookka-mail-local:v1";
 
 export type MailDraft = {
   id: string;
+  // Comma-separated address lists (the chips re-parse them on resume).
   to: string;
+  cc?: string;
+  bcc?: string;
   subject: string;
   body: string;
   fromAddress: string;

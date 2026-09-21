@@ -14,6 +14,33 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
+## 2026-09-21 — 🔵 PRD T-012 · Mail Center: staff mailboxes, copy fields, acknowledgement, org picker
+
+Requested by Mr Lim, PRD dated 2026-09-07, priority **Low (to be raised later)**. Full PRD:
+`T-012-Hookka-mail-center - wei siang.pdf` (not in repo — user's local Downloads). Sheet row
+DEV-04 (Samuel). Branch `feat/t012-mail-center` (worktree `hookka-erp-testing-t012`, off
+`origin/main` @ 6ef4f385).
+
+Asks (all 16 requirements, in dependency order):
+- R1 `sendMail` takes several recipients + cc / bcc / reply-to / custom headers (Brevo AND Resend)
+- R2 compose + reply gain cc / bcc + reply-all rebuilt from the latest inbound message
+- R3 a reply goes to the most recent correspondent, not the thread's first
+- R4 outgoing mail carries Message-ID; replies carry In-Reply-To + References
+- R5 registration / invite / accept-invite provision `first.last@hookka.com` in `email_addresses`
+- R6 Mail Center shows "My mailbox" first (inbox / sent by me / drafts)
+- R7 per-person read state (`mail_thread_reads`) replaces the shared `unread` flag; "read by 3 of 5"
+- R8 acknowledgement: sender flags a message, recipients confirm, thread shows who has / has not, overdue chased
+- R9 recipient picker (Department / My team / My managers) on a directory endpoint over the org chart
+- R10 "what may I see" panel
+- R11 thread list: server-side paging + sent / label / mailbox filters
+- R12 one rule for SUPER_ADMIN mailbox visibility (PRD: match the other system → scope table decides)
+- R13 retire the duplicate inbound channel (`mail-sync/` IMAP poller; routing worker stays)
+- R14 outbound attachments stored as files, not base64 text in `outbox_emails`
+- R15 audit rows for send / reply / forward / assign / archive / delete
+- R16 mobile Mail Center gains compose / reply / forward
+
+---
+
 ## 2026-09-10 — 🔵 PRD T-004 · Import / Export across the whole system (P0/R3-R5 done, rest open)
 
 Requested by Mr Lim, PRD dated 2026-09-07, priority **Low (to be raised later)**. Full PRD:

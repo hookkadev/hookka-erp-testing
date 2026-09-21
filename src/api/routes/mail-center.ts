@@ -27,6 +27,18 @@ import { getOrgId, DEFAULT_ORG_ID } from "../lib/tenant";
 import { sendMail } from "../lib/email";
 import { validateMailAttachments } from "../lib/mail-attachments";
 import {
+  EMAIL_RE,
+  buildThreadingHeaders,
+  invalidAddresses,
+  newMessageId,
+  normalizeMessageId,
+  parseAddressList,
+  referencesChain,
+  replyRecipients,
+  type ThreadMessageLite,
+} from "../lib/mail-threading";
+import { emitAudit } from "../lib/audit";
+import {
   DEFAULT_BUCKET,
   putFile,
   signedDownloadUrl,
@@ -150,6 +162,15 @@ export async function ensureMailSchema(db: D1Database): Promise<void> {
        ON email_messages (thread_id, created_at)`,
     `CREATE INDEX IF NOT EXISTS ix_email_messages_msgid
        ON email_messages (message_id)`,
+    // T-012 R1/R2: blind copies on an outbound message. Lazy idempotent add
+    // (same pattern as the email_threads columns above). Stored as a JSON
+    // array like to_addresses / cc_addresses; only ever set on direction =
+    // 'outbound' — an inbound mail never reveals its Bcc.
+    `ALTER TABLE email_messages ADD COLUMN IF NOT EXISTS bcc_addresses TEXT`,
+    // A reply threads off the PROVIDER's Message-ID when the provider rewrites
+    // ours, so the inbound resolver must be able to look that up too.
+    `CREATE INDEX IF NOT EXISTS ix_email_messages_provider_msgid
+       ON email_messages (provider_message_id)`,
     // Inbound attachments (owner 2026-06-18 — "e-invoices/photos must show").
     // One row per file on an inbound email. The bytes live in Supabase Storage
     // (bucket hookka-files, same as file_assets) under storage_path; this row
@@ -463,11 +484,19 @@ export async function ingestInboundEmail(
   ) as string[];
   if (refs.length) {
     const placeholders = refs.map(() => "?").join(", ");
+    // Our outbound rows carry BOTH the Message-ID we stamped (message_id) and
+    // the id the provider reported (provider_message_id). Brevo rewrites the
+    // header with its own id, so a customer's In-Reply-To may name either —
+    // match both, or every reply to a mail WE sent would start a new thread.
     const ref = await db
       .prepare(
-        `SELECT thread_id FROM email_messages WHERE org_id = ? AND message_id IN (${placeholders}) LIMIT 1`,
+        `SELECT thread_id FROM email_messages
+          WHERE org_id = ?
+            AND (message_id IN (${placeholders})
+                 OR provider_message_id IN (${placeholders}))
+          LIMIT 1`,
       )
-      .bind(orgId, ...refs)
+      .bind(orgId, ...refs, ...refs)
       // Result columns come back camelCase (db-pg.ts transform.column.from), so
       // thread_id → threadId. Reading the snake key returned undefined → every
       // reply started a NEW thread instead of joining the referenced one.
@@ -499,17 +528,22 @@ export async function ingestInboundEmail(
       )
       .run();
   } else {
-    // Re-open a closed thread when a new inbound message lands.
+    // Re-open a closed thread when a new inbound message lands. The
+    // counterparty follows whoever wrote LAST (T-012 R3): when a colleague of
+    // the original sender takes over the conversation, the list shows them
+    // and the reply box addresses them — not the address the thread began with.
     await db
       .prepare(
         `UPDATE email_threads
             SET last_message_at = ?, last_direction = 'inbound',
                 last_snippet = ?, message_count = message_count + 1,
                 unread = 1,
+                counterparty_email = ?,
+                counterparty_name = ?,
                 status = CASE WHEN status = 'closed' THEN 'open' ELSE status END
           WHERE id = ?`,
       )
-      .bind(sentAt, snippet, threadId)
+      .bind(sentAt, snippet, from, payload.fromName ?? null, threadId)
       .run();
   }
 
@@ -627,10 +661,12 @@ type MessageRow = {
   direction: string;
   message_id: string | null;
   in_reply_to: string | null;
+  reference_ids: string | null;
   from_address: string | null;
   from_name: string | null;
   to_addresses: string | null;
   cc_addresses: string | null;
+  bcc_addresses?: string | null;
   subject: string | null;
   text_body: string | null;
   html_body: string | null;
@@ -646,10 +682,12 @@ type MessageRow = {
   threadId?: string;
   messageId?: string | null;
   inReplyTo?: string | null;
+  referenceIds?: string | null;
   fromAddress?: string | null;
   fromName?: string | null;
   toAddresses?: string | null;
   ccAddresses?: string | null;
+  bccAddresses?: string | null;
   textBody?: string | null;
   htmlBody?: string | null;
   sentAt?: string | null;
@@ -676,10 +714,12 @@ function rowToMessage(r: MessageRow) {
     direction: r.direction,
     messageId: r.messageId ?? r.message_id ?? undefined,
     inReplyTo: r.inReplyTo ?? r.in_reply_to ?? undefined,
+    referenceIds: r.referenceIds ?? r.reference_ids ?? undefined,
     fromAddress: r.fromAddress ?? r.from_address ?? "",
     fromName: r.fromName ?? r.from_name ?? "",
     toAddresses: parseJsonArray(r.toAddresses ?? r.to_addresses),
     ccAddresses: parseJsonArray(r.ccAddresses ?? r.cc_addresses),
+    bccAddresses: parseJsonArray(r.bccAddresses ?? r.bcc_addresses ?? null),
     subject: r.subject ?? "",
     textBody: r.textBody ?? r.text_body ?? "",
     htmlBody: r.htmlBody ?? r.html_body ?? "",
@@ -1671,11 +1711,6 @@ app.post("/test-inject", async (c) => {
 // is touched here.
 // ---------------------------------------------------------------------------
 
-// Conservative single-@ email shape check. Intentionally not RFC-5322-complete
-// — we only need to reject obvious garbage; the domain suffix is enforced
-// separately below.
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
 // POST /api/mail-center/addresses — create an @hookka.com alias for a user.
 app.post("/addresses", async (c) => {
   const denied = requireSuperAdmin(c);
@@ -2029,14 +2064,101 @@ function escapeHtml(s: string): string {
 // thread, or one where the original recipient wasn't an @hookka.com address).
 const DEFAULT_REPLY_FROM = "Hookka <support@hookka.com>";
 
+// One outbound attachment as the compose / reply body carries it (base64, no
+// data: prefix). Same shape the browser builds and validateMailAttachments
+// checks; contentType is derived from the filename because the browser only
+// sends images + PDF.
+type OutboundAttachmentBody = { filename: string; contentBase64: string };
+
+function mimeFromFilename(filename: string): string {
+  const ext = filename.toLowerCase().split(".").pop();
+  switch (ext) {
+    case "pdf":
+      return "application/pdf";
+    case "png":
+      return "image/png";
+    case "jpg":
+    case "jpeg":
+      return "image/jpeg";
+    case "gif":
+      return "image/gif";
+    case "webp":
+      return "image/webp";
+    default:
+      return "application/octet-stream";
+  }
+}
+
+// The "<label> <addr>" From header for one of our mailboxes, or the bare
+// address when the row carries no label. A label lookup failure must never
+// block a send.
+async function fromHeaderFor(
+  db: D1Database,
+  orgId: string,
+  address: string,
+): Promise<string> {
+  try {
+    const addrRow = await db
+      .prepare(
+        `SELECT label FROM email_addresses
+           WHERE org_id = ? AND address = ? LIMIT 1`,
+      )
+      .bind(orgId, address)
+      .first<{ label: string | null }>();
+    const label = addrRow?.label?.trim();
+    return label ? `${label} <${address}>` : address;
+  } catch {
+    return address;
+  }
+}
+
+// Validate a recipient set for compose / reply: at least one To, every address
+// well-formed, nothing addressed twice across the three fields. Returns the
+// 400 message, or null when the set is fine.
+function recipientsError(to: string[], cc: string[], bcc: string[]): string | null {
+  if (to.length === 0) return "at least one recipient (to) is required";
+  const bad = invalidAddresses([...to, ...cc, ...bcc]);
+  if (bad.length > 0) return `invalid email address: ${bad[0]}`;
+  const seen = new Set<string>();
+  for (const a of [...to, ...cc, ...bcc]) {
+    if (seen.has(a)) return `${a} is listed more than once`;
+    seen.add(a);
+  }
+  return null;
+}
+
+// Persist the outbound copies (Storage + email_attachments) so the Sent view
+// shows what went out, exactly like an inbound mail's chips. storeAttachments
+// is best-effort per file and never fails the send that already happened.
+async function storeOutboundAttachments(
+  c: Context<Env>,
+  orgId: string,
+  msgRowId: string,
+  attachments: OutboundAttachmentBody[],
+): Promise<void> {
+  if (attachments.length === 0) return;
+  await storeAttachments(
+    c.var.DB,
+    c.env as unknown as StorageEnv,
+    orgId,
+    msgRowId,
+    attachments.map((a) => ({
+      filename: a.filename,
+      contentType: mimeFromFilename(a.filename),
+      contentBase64: a.contentBase64,
+    })),
+  );
+}
+
 // POST /api/mail-center/threads/:id/reply — send an outbound reply via the
 // shared sender (Brevo when BREVO_API_KEY is set — hookka.com is verified
 // there, so replies SEND today without any MX change), then record it.
 //
-// NOTE: sendMail does not yet support custom In-Reply-To / References headers,
-// so this reply is NOT RFC-threaded on the recipient's side for v1. The local
-// thread is still updated correctly; cross-client threading headers are a
-// follow-up once the sender helper grows a headers option.
+// T-012 R2/R3/R4: the reply is addressed to the MOST RECENT correspondent
+// (the newest inbound message's From), not the address the thread started
+// with; `mode: "reply_all"` also copies everyone that message was sent or
+// copied to; the caller may override To / Cc / Bcc outright. The mail carries
+// Message-ID / In-Reply-To / References so the other side's client threads it.
 app.post("/threads/:id/reply", async (c) => {
   const denied = await requirePermission(c, "mail-center", "create");
   if (denied) return denied;
@@ -2051,9 +2173,14 @@ app.post("/threads/:id/reply", async (c) => {
     // Optional From override — the address the operator picked in the reply
     // box. Absent ⇒ reply from the thread's mailbox (the original behaviour).
     fromAddress?: string;
+    // "reply" (default) → newest correspondent only; "reply_all" → plus
+    // everyone on that message. Ignored for To/Cc when the caller sends them.
+    mode?: "reply" | "reply_all";
+    to?: string | string[];
+    cc?: string | string[];
+    bcc?: string | string[];
     // Inline outbound attachments (images + PDF), base64 (no data: prefix).
-    // Transient — not persisted to /api/files; just forwarded to sendMail.
-    attachments?: Array<{ filename: string; contentBase64: string }>;
+    attachments?: OutboundAttachmentBody[];
   };
   const body: ReplyBody = await c.req
     .json<ReplyBody>()
@@ -2083,59 +2210,52 @@ app.post("/threads/:id/reply", async (c) => {
   if (!thread) return c.json({ error: "Thread not found" }, 404);
   // Per-user scope: only the mailbox owner (or an admin) can reply. Dual-read —
   // the pg driver camelCases result columns, so the snake keys are undefined.
-  // Without this the owner was 404'd and the reply recipient (counterparty_email)
-  // read empty → "thread has no counterparty email to reply to".
-  if (
-    !scope.isAdmin &&
-    !scope.addresses.includes(
-      (thread.mailboxAddress ?? thread.mailbox_address ?? "").toLowerCase(),
-    )
-  ) {
+  const mailbox = (thread.mailboxAddress ?? thread.mailbox_address ?? "").trim();
+  if (!scope.isAdmin && !scope.addresses.includes(mailbox.toLowerCase())) {
     return c.json({ error: "Thread not found" }, 404);
   }
 
-  const to = (thread.counterpartyEmail ?? thread.counterparty_email ?? "").trim();
-  if (!to) {
-    return c.json({ error: "thread has no counterparty email to reply to" }, 400);
-  }
-
-  const mailbox = (thread.mailboxAddress ?? thread.mailbox_address ?? "").trim();
-
   // Resolve the From: the operator may pick a mailbox in the reply box (default
   // is their own — see the FE). An explicit fromAddress is honoured only when
-  // the caller is allowed to send from it: SUPER_ADMIN may send from any, a
+  // the caller is allowed to send from it: an admin may send from any, a
   // non-admin only from a mailbox in their scope (same gate as /compose). An
   // absent / unauthorised override falls back to the thread's mailbox, which the
   // caller already passed the ownership check on above — so the reply never
   // silently goes out from an address the user can't use.
-  const requestedFrom = (body.fromAddress ?? "").trim();
+  const requestedFrom = (body.fromAddress ?? "").trim().toLowerCase();
   let fromAddress = mailbox;
   if (
     requestedFrom &&
-    (scope.isAdmin || scope.addresses.includes(requestedFrom.toLowerCase()))
+    (scope.isAdmin || scope.addresses.includes(requestedFrom))
   ) {
     fromAddress = requestedFrom;
   }
+  const from = fromAddress
+    ? await fromHeaderFor(c.var.DB, orgId, fromAddress)
+    : DEFAULT_REPLY_FROM;
 
-  // The send-from header: "<label> <addr>" when the address record carries a
-  // label (mirrors /compose), else the bare address; DEFAULT_REPLY_FROM only
-  // when the thread truly has no mailbox on file. A label lookup failure must
-  // never block the send.
-  let from = fromAddress || DEFAULT_REPLY_FROM;
-  if (fromAddress) {
-    try {
-      const addrRow = await c.var.DB.prepare(
-        `SELECT label FROM email_addresses
-           WHERE org_id = ? AND address = ? LIMIT 1`,
-      )
-        .bind(orgId, fromAddress)
-        .first<{ label: string | null }>();
-      const label = addrRow?.label?.trim();
-      if (label) from = `${label} <${fromAddress}>`;
-    } catch {
-      // Keep the bare address — a display-name lookup isn't worth failing over.
-    }
+  // The conversation so far — the newest message decides who the reply goes
+  // to and which ids the threading headers reference.
+  const msgs = await c.var.DB.prepare(
+    `SELECT * FROM email_messages WHERE org_id = ? AND thread_id = ? ORDER BY created_at ASC`,
+  )
+    .bind(orgId, id)
+    .all<MessageRow>();
+  const history: ThreadMessageLite[] = (msgs.results ?? []).map(rowToMessage);
+
+  const mode = body.mode === "reply_all" ? "reply_all" : "reply";
+  const ours = [fromAddress, mailbox].filter(Boolean);
+  const computed = replyRecipients(history, mode, ours);
+  const to =
+    body.to !== undefined ? parseAddressList(body.to) : computed.to;
+  const cc =
+    body.cc !== undefined ? parseAddressList(body.cc) : computed.cc;
+  const bcc = parseAddressList(body.bcc);
+  if (to.length === 0 && body.to === undefined) {
+    return c.json({ error: "thread has no correspondent to reply to" }, 400);
   }
+  const recipientsErr = recipientsError(to, cc, bcc);
+  if (recipientsErr) return c.json({ error: recipientsErr }, 400);
 
   const baseSubject = thread.subject ?? "(no subject)";
   const subject = /^re:/i.test(baseSubject) ? baseSubject : `Re: ${baseSubject}`;
@@ -2146,14 +2266,25 @@ app.post("/threads/:id/reply", async (c) => {
   const htmlBody =
     html || `<p>${escapeHtml(text).replace(/\n/g, "<br/>")}</p>`;
 
+  // RFC threading (R4): our own Message-ID, In-Reply-To = the message we are
+  // answering, References = its chain + itself.
+  const base = computed.base;
+  const messageId = newMessageId();
+  const inReplyTo = normalizeMessageId(base?.messageId) || null;
+  const references = referencesChain(base?.referenceIds, base?.messageId);
+  const headers = buildThreadingHeaders({ messageId, inReplyTo, references });
+
   const result = await sendMail(c.env, from, {
     to,
+    cc,
+    bcc,
     subject,
     text: text || undefined,
     html: htmlBody,
+    headers,
     // Forward the validated attachments (already capped at 5 MB / 10 files /
     // images+PDF above). Omitted when empty so the payload is byte-identical to
-    // the pre-attachment behaviour. Not persisted — transient outbound only.
+    // the pre-attachment behaviour.
     ...(attachments.length > 0 ? { attachments } : {}),
   });
   if (!result.ok) {
@@ -2167,24 +2298,30 @@ app.post("/threads/:id/reply", async (c) => {
 
   const now = new Date().toISOString();
   const snippet = (text || stripHtml(htmlBody)).slice(0, 240);
-  const messageId = crypto.randomUUID();
+  const rowId = crypto.randomUUID();
   await c.var.DB.prepare(
     `INSERT INTO email_messages
-       (id, org_id, thread_id, direction, from_address, from_name,
-        to_addresses, subject, text_body, html_body, sent_at, received_at,
+       (id, org_id, thread_id, direction, message_id, in_reply_to, reference_ids,
+        from_address, from_name, to_addresses, cc_addresses, bcc_addresses,
+        subject, text_body, html_body, sent_at, received_at,
         sent_by_user_id, sent_by_name, provider_message_id, created_at)
-     VALUES (?, ?, ?, 'outbound', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, 'outbound', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
     .bind(
-      messageId,
+      rowId,
       orgId,
       id,
+      messageId,
+      inReplyTo,
+      references.join(" ") || null,
       // Store the BARE chosen address (not the "label <addr>" header form) so
       // the message row's from_address stays a plain address — matches /compose
       // and how the thread's mailbox is recorded.
       fromAddress || DEFAULT_REPLY_FROM,
       fromName || null,
-      JSON.stringify([to]),
+      JSON.stringify(to),
+      JSON.stringify(cc),
+      JSON.stringify(bcc),
       subject,
       text || null,
       htmlBody,
@@ -2197,6 +2334,8 @@ app.post("/threads/:id/reply", async (c) => {
     )
     .run();
 
+  await storeOutboundAttachments(c, orgId, rowId, attachments);
+
   await c.var.DB.prepare(
     `UPDATE email_threads
         SET last_message_at = ?, last_direction = 'outbound',
@@ -2206,7 +2345,14 @@ app.post("/threads/:id/reply", async (c) => {
     .bind(now, snippet, orgId, id)
     .run();
 
-  return c.json({ ok: true, messageId });
+  await emitAudit(c, {
+    resource: "mail-center",
+    resourceId: id,
+    action: "reply",
+    after: { messageId: rowId, from: fromAddress, to, cc, bcc: bcc.length, mode },
+  });
+
+  return c.json({ ok: true, messageId: rowId, to, cc });
 });
 
 // POST /api/mail-center/compose — start a NEW outbound conversation (the reply
@@ -2216,8 +2362,12 @@ app.post("/threads/:id/reply", async (c) => {
 // then records a fresh thread + outbound message. Mirrors the reply handler's
 // send → record structure.
 //
+// T-012 R1/R2: `to` / `cc` / `bcc` each accept a list (or a comma-separated
+// string). `forwardOf` names the thread a Forward was built from so the audit
+// row says "forward" and the new thread references the original.
+//
 // Per-user scope: a non-admin may only send FROM an @hookka.com address that
-// is assigned/granted to them (getMailScope). SUPER_ADMIN may send from any.
+// is assigned/granted to them (getMailScope). An admin may send from any.
 app.post("/compose", async (c) => {
   const denied = await requirePermission(c, "mail-center", "create");
   if (denied) return denied;
@@ -2227,29 +2377,33 @@ app.post("/compose", async (c) => {
 
   type ComposeBody = {
     fromAddress?: string;
-    to?: string;
+    to?: string | string[];
+    cc?: string | string[];
+    bcc?: string | string[];
     subject?: string;
     text?: string;
+    forwardOf?: string;
     // Inline outbound attachments (images + PDF), base64 (no data: prefix).
-    // Transient — not persisted to /api/files; just forwarded to sendMail.
-    attachments?: Array<{ filename: string; contentBase64: string }>;
+    attachments?: OutboundAttachmentBody[];
   };
   const body: ComposeBody = await c.req
     .json<ComposeBody>()
     .catch(() => ({} as ComposeBody));
 
-  const fromAddress = (body.fromAddress ?? "").trim();
-  const to = (body.to ?? "").trim();
+  const fromAddress = (body.fromAddress ?? "").trim().toLowerCase();
+  const to = parseAddressList(body.to);
+  const cc = parseAddressList(body.cc);
+  const bcc = parseAddressList(body.bcc);
   const subject = (body.subject ?? "").trim();
   const text = (body.text ?? "").trim();
   const attachments = body.attachments ?? [];
+  const forwardOf = (body.forwardOf ?? "").trim();
 
   if (!fromAddress) {
     return c.json({ error: "fromAddress is required" }, 400);
   }
-  if (!EMAIL_RE.test(to)) {
-    return c.json({ error: "a valid recipient (to) is required" }, 400);
-  }
+  const recipientsErr = recipientsError(to, cc, bcc);
+  if (recipientsErr) return c.json({ error: recipientsErr }, 400);
   if (!subject) {
     return c.json({ error: "subject is required" }, 400);
   }
@@ -2268,39 +2422,31 @@ app.post("/compose", async (c) => {
 
   // Authorize the From: non-admins may only send from a mailbox they own or
   // have been granted. addresses are already lowercased in getMailScope.
-  if (!scope.isAdmin && !scope.addresses.includes(fromAddress.toLowerCase())) {
+  if (!scope.isAdmin && !scope.addresses.includes(fromAddress)) {
     return c.json({ error: "not allowed to send from " + fromAddress }, 403);
   }
-
-  // Resolve the display name for the From — "<label> <addr>" when the address
-  // record carries a label, else the bare address. Lookup failure must not
-  // block the send, so fall back to the bare address.
-  let from = fromAddress;
-  try {
-    const addrRow = await c.var.DB.prepare(
-      `SELECT label FROM email_addresses
-         WHERE org_id = ? AND address = ? LIMIT 1`,
-    )
-      .bind(orgId, fromAddress)
-      .first<{ label: string | null }>();
-    const label = addrRow?.label?.trim();
-    if (label) from = `${label} <${fromAddress}>`;
-  } catch {
-    // Keep the bare address — a display-name lookup is not worth failing over.
-  }
+  const from = await fromHeaderFor(c.var.DB, orgId, fromAddress);
 
   // Wrap the plain-text body in a minimal HTML part so the email carries both
   // (same approach as the reply handler).
   const htmlBody = `<p>${escapeHtml(text).replace(/\n/g, "<br/>")}</p>`;
 
+  // A fresh conversation carries only its own Message-ID (R4); the customer's
+  // reply will quote it in In-Reply-To and land back on this thread.
+  const messageId = newMessageId();
+  const headers = buildThreadingHeaders({ messageId });
+
   const result = await sendMail(c.env, from, {
     to,
+    cc,
+    bcc,
     subject,
     text,
     html: htmlBody,
+    headers,
     // Forward the validated attachments (already capped at 5 MB / 10 files /
     // images+PDF above). Omitted when empty so the payload is byte-identical to
-    // the pre-attachment behaviour. Not persisted — transient outbound only.
+    // the pre-attachment behaviour.
     ...(attachments.length > 0 ? { attachments } : {}),
   });
   if (!result.ok) {
@@ -2319,10 +2465,11 @@ app.post("/compose", async (c) => {
   const now = new Date().toISOString();
   const snippet = text.slice(0, 200);
   const threadId = crypto.randomUUID();
-  const messageId = crypto.randomUUID();
+  const rowId = crypto.randomUUID();
 
   // NEW thread row — outbound-initiated, so last_direction='outbound',
-  // message_count=1, unread=0 (we sent it; nothing for us to read).
+  // message_count=1, unread=0 (we sent it; nothing for us to read). The
+  // counterparty is the first To; a reply from anyone on the mail moves it.
   await c.var.DB.prepare(
     `INSERT INTO email_threads
        (id, org_id, mailbox_address, subject, counterparty_email,
@@ -2330,24 +2477,27 @@ app.post("/compose", async (c) => {
         last_snippet, message_count, unread, created_at)
      VALUES (?, ?, ?, ?, ?, '', 'open', ?, 'outbound', ?, 1, 0, ?)`,
   )
-    .bind(threadId, orgId, fromAddress, subject, to, now, snippet, now)
+    .bind(threadId, orgId, fromAddress, subject, to[0], now, snippet, now)
     .run();
 
   // First message row — the outbound email we just sent.
   await c.var.DB.prepare(
     `INSERT INTO email_messages
-       (id, org_id, thread_id, direction, from_address, from_name,
-        to_addresses, cc_addresses, subject, text_body, html_body, sent_at,
-        sent_by_user_id, sent_by_name, provider_message_id, created_at)
-     VALUES (?, ?, ?, 'outbound', ?, ?, ?, '[]', ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, org_id, thread_id, direction, message_id, from_address, from_name,
+        to_addresses, cc_addresses, bcc_addresses, subject, text_body, html_body,
+        sent_at, sent_by_user_id, sent_by_name, provider_message_id, created_at)
+     VALUES (?, ?, ?, 'outbound', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
     .bind(
-      messageId,
+      rowId,
       orgId,
       threadId,
+      messageId,
       fromAddress,
       fromName || null,
-      JSON.stringify([to]),
+      JSON.stringify(to),
+      JSON.stringify(cc),
+      JSON.stringify(bcc),
       subject,
       text,
       htmlBody,
@@ -2359,7 +2509,23 @@ app.post("/compose", async (c) => {
     )
     .run();
 
-  return c.json({ ok: true, threadId, messageId }, 201);
+  await storeOutboundAttachments(c, orgId, rowId, attachments);
+
+  await emitAudit(c, {
+    resource: "mail-center",
+    resourceId: threadId,
+    action: forwardOf ? "forward" : "send",
+    after: {
+      messageId: rowId,
+      from: fromAddress,
+      to,
+      cc,
+      bcc: bcc.length,
+      ...(forwardOf ? { forwardOf } : {}),
+    },
+  });
+
+  return c.json({ ok: true, threadId, messageId: rowId }, 201);
 });
 
 // PATCH /api/mail-center/threads/:id — mutate a thread: assign / resolve /

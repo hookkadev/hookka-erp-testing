@@ -20,12 +20,28 @@ export interface EmailAttachment {
   contentBase64: string;
 }
 
+// PRD T-012 R1: several recipients plus copy / blind copy / reply-to / custom
+// headers. `to` still accepts a bare string so the dozens of transactional
+// callers (invites, PO notices, the outbox drain) are untouched. Both
+// providers take the same neutral shape; each maps it to its own field names
+// (Resend `cc`/`bcc`/`reply_to`/`headers`, Brevo `cc`/`bcc`/`replyTo`/`headers`).
 export interface SendEmailArgs {
-  to: string;
+  to: string | string[];
+  cc?: string[];
+  bcc?: string[];
+  replyTo?: string;
+  // Extra RFC headers (Message-ID / In-Reply-To / References for threading).
+  headers?: Record<string, string>;
   subject: string;
   html: string;
   text?: string;
   attachments?: EmailAttachment[];
+}
+
+// Normalise `to` to a non-empty array (the one shape both providers accept).
+export function toRecipientList(to: string | string[]): string[] {
+  const list = Array.isArray(to) ? to : [to];
+  return list.map((a) => String(a ?? "").trim()).filter(Boolean);
 }
 
 export interface SendEmailResult {
@@ -106,6 +122,11 @@ export async function sendEmail(
     };
   }
 
+  const to = toRecipientList(args.to);
+  if (to.length === 0) {
+    return { ok: false, error: "no recipient" };
+  }
+
   try {
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -115,10 +136,18 @@ export async function sendEmail(
       },
       body: JSON.stringify({
         from,
-        to: args.to,
+        to,
         subject: args.subject,
         html: args.html,
         text: args.text,
+        // Copy / blind copy / reply-to / threading headers — each omitted when
+        // empty so a plain transactional send stays byte-identical to before.
+        ...(args.cc && args.cc.length > 0 ? { cc: args.cc } : {}),
+        ...(args.bcc && args.bcc.length > 0 ? { bcc: args.bcc } : {}),
+        ...(args.replyTo ? { reply_to: args.replyTo } : {}),
+        ...(args.headers && Object.keys(args.headers).length > 0
+          ? { headers: args.headers }
+          : {}),
         // Resend attachment shape: [{ filename, content }] with base64
         // content. Omitted entirely when the message carries none so the
         // payload stays byte-identical to the pre-attachment behaviour.
@@ -193,6 +222,11 @@ export async function sendEmailViaBrevo(
       error: "BREVO_API_KEY not configured — email not sent",
     };
   }
+  const to = toRecipientList(args.to);
+  if (to.length === 0) {
+    return { ok: false, error: "no recipient" };
+  }
+
   try {
     const res = await fetch("https://api.brevo.com/v3/smtp/email", {
       method: "POST",
@@ -203,10 +237,22 @@ export async function sendEmailViaBrevo(
       },
       body: JSON.stringify({
         sender: parseFrom(from),
-        to: [{ email: args.to }],
+        to: to.map((email) => ({ email })),
         subject: args.subject,
         htmlContent: args.html,
         textContent: args.text ?? args.html.replace(/<[^>]+>/g, ""),
+        // Copy / blind copy / reply-to / threading headers — Brevo wants
+        // `[{ email }]` lists and a `replyTo` object; omitted when empty.
+        ...(args.cc && args.cc.length > 0
+          ? { cc: args.cc.map((email) => ({ email })) }
+          : {}),
+        ...(args.bcc && args.bcc.length > 0
+          ? { bcc: args.bcc.map((email) => ({ email })) }
+          : {}),
+        ...(args.replyTo ? { replyTo: { email: args.replyTo } } : {}),
+        ...(args.headers && Object.keys(args.headers).length > 0
+          ? { headers: args.headers }
+          : {}),
         // Brevo attachment shape: `attachment: [{ name, content }]` with
         // base64 content. Brevo is the preferred provider (2026-05-27
         // cutover), so the customer-notice PDFs must ride this path too.
