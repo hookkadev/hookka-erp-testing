@@ -136,16 +136,28 @@ export function dayLabel(d: string): string {
  * has nothing in today's month yet, it opens on the newest month instead,
  * with no day: a highlighted day outside the charted month helps nobody.
  *
+ * Overview and Sales are the exception (owner 2026-09-21): they are read by
+ * the month, so the shells pass `openOnToday` = false for them (see
+ * opensOnToday) and a bare URL resolves to the plain month. A day the user
+ * picked themselves is still honoured on every tab.
+ *
  * Otherwise an unset or unknown month resolves to the newest month that
  * exists. DERIVED, never synced with an effect.
  */
-export function resolvePeriod(period: Period, months: string[], today: string): Period {
+export function resolvePeriod(period: Period, months: string[], today: string, openOnToday = true): Period {
   const thisMonth = today.slice(0, 7);
   if (period.mode === "monthly" && !period.month && !period.day && months.includes(thisMonth)) {
-    return { mode: "monthly", month: thisMonth, day: today };
+    return openOnToday ? { mode: "monthly", month: thisMonth, day: today } : { mode: "monthly", month: thisMonth };
   }
   const month = period.month && months.includes(period.month) ? period.month : (months[months.length - 1] ?? "");
   return { ...period, month };
+}
+
+/** Tabs whose bare URL opens on the MONTH, not on today. Same keys on desktop and /m. */
+const MONTHLY_TABS = new Set(["overview", "sales"]);
+
+export function opensOnToday(tab: string | undefined): boolean {
+  return !MONTHLY_TABS.has(tab ?? "");
 }
 
 // ---- Period picker logic (pure: tests/dashboard-period.test.mjs) ----------

@@ -8,6 +8,7 @@ import {
 import {
   buildSalesTrend, computeSalesKpis, previousSalesKpis, customerRevenue, overviewTotals, pctDelta,
 } from "../src/pages/dashboards/dashboard-sales-lib.ts";
+import { opensOnToday } from "../src/pages/dashboards/dashboard-shared-lib.ts";
 
 const months = ["2026-06", "2026-07", "2026-08"];
 
@@ -42,6 +43,16 @@ test("a bare URL opens on TODAY; anything the user picked is left alone", () => 
   assert.equal(resolvePeriod({ mode: "range", month: "", from: "2026-08-01", to: "2026-08-07" }, months, today).day, undefined);
   // Feed not loaded yet: no months, so no day and no crash.
   assert.deepEqual(resolvePeriod({ mode: "monthly", month: "" }, [], today), { mode: "monthly", month: "" });
+});
+
+test("Overview and Sales open on the MONTH; the other tabs open on today", () => {
+  const today = "2026-08-14";
+  for (const tab of ["overview", "sales"]) assert.equal(opensOnToday(tab), false, tab);
+  for (const tab of ["operations", "people", "service", "finance", undefined]) assert.equal(opensOnToday(tab), true, String(tab));
+  // Bare URL on a monthly tab: this month, no day.
+  assert.deepEqual(resolvePeriod({ mode: "monthly", month: "" }, months, today, false), { mode: "monthly", month: "2026-08" });
+  // A day the user picked is still honoured there.
+  assert.equal(resolvePeriod({ mode: "monthly", month: "2026-08", day: "2026-08-03" }, months, today, false).day, "2026-08-03");
 });
 
 test("Overview totals follow a focused day and compare it with the day before", () => {

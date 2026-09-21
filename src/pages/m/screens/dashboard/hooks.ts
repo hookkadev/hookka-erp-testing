@@ -2,7 +2,7 @@
 import { useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useCachedJson } from "@/lib/cached-fetch";
-import { ymd, type Period } from "../../../dashboards/dashboard-shared-lib";
+import { opensOnToday, ymd, type Period } from "../../../dashboards/dashboard-shared-lib";
 import { TAB_SUBS } from "../../../dashboards/dashboard-url-state-lib";
 import { readPeriod, resolvePeriod, writePeriod } from "./dashboard-m-lib";
 import { DASHBOARD_FEED_URL, type DashboardFeed } from "./types";
@@ -25,14 +25,15 @@ export function useDashboardFeed() {
 /**
  * The selected period, held in the URL search params (mode / month / from / to
  * / day) so refresh and Back keep the place. `period` is RESOLVED: a bare URL
- * opens on today, an unset or unknown month becomes the newest month with data. Pass it straight to
+ * opens on today (on the plain month for the Overview and Sales tabs), an
+ * unset or unknown month becomes the newest month with data. Pass it straight to
  * `inPeriod` / `inFocus`. `setPeriod` REPLACES history (Back does not step
  * through every month tap).
  */
-export function useDashboardPeriod(months: string[]) {
+export function useDashboardPeriod(months: string[], tab?: string) {
   const [params, setParams] = useSearchParams();
   const raw = useMemo(() => readPeriod(params), [params]);
-  const period = useMemo(() => resolvePeriod(raw, months, ymd(new Date())), [raw, months]);
+  const period = useMemo(() => resolvePeriod(raw, months, ymd(new Date()), opensOnToday(tab)), [raw, months, tab]);
   const setPeriod = useCallback(
     (p: Period) => setParams((prev) => writePeriod(prev, p), { replace: true }),
     [setParams],

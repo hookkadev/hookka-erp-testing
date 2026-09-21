@@ -7,6 +7,8 @@ import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useToast } from "@/components/ui/toast";
 import { ShieldCheck } from "lucide-react";
 import { BORDER, MUTED } from "./dashboard-shared-lib";
+import { ServiceCaseNo } from "./ServiceCaseLink";
+import { useServiceCaseLinks } from "./use-service-case-links";
 
 // ---------------------------------------------------------------------------
 // ServiceApprovalsPanel — service cases waiting for an approve / reject
@@ -49,6 +51,9 @@ export function ServiceApprovalsPanel({
   const { data, loading, error, refresh } = useCachedJson<{ success?: boolean; data?: Pending[] }>(URL, 0);
   const { confirm } = useConfirm();
   const { toast } = useToast();
+  // Only the case number links out: the row holds Approve / Reject, so the row
+  // itself is never a click target.
+  const { canOpen } = useServiceCaseLinks();
   const [busy, setBusy] = useState<string | null>(null);
   const [rejecting, setRejecting] = useState<string | null>(null);
   const [reason, setReason] = useState("");
@@ -109,7 +114,7 @@ export function ServiceApprovalsPanel({
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0 text-[12.5px]">
                     <p className="text-[#1F1D1B]">
-                      <span className="font-mono font-semibold">{r.caseNo ?? r.id}</span>
+                      <ServiceCaseNo id={r.id} caseNo={r.caseNo ?? r.id} canOpen={canOpen} className="font-mono font-semibold" />
                       <span className="mx-2 text-[#6B7280]">{r.customerName ?? "—"}</span>
                       <span className="inline-flex rounded-full bg-[#FAEFCB] px-2 py-0.5 text-[11px] font-semibold text-[#9C6F1E]">
                         {r.kind ? KIND_LABEL[r.kind] : "Approval"}

@@ -26,7 +26,7 @@ export function DashboardScreen() {
   const { feed, months } = useDashboardFeed();
   // Newest day that carries data: the period sheet anchors its presets to it.
   const latestDay = (feed?.sales?.byDay ?? []).reduce((m, d) => (d.date > m ? d.date : m), "");
-  const { period, setPeriod } = useDashboardPeriod(months);
+  const { period, setPeriod } = useDashboardPeriod(months, tab);
 
   const openTab = useCallback(
     (key: MobileTabKey) => navigate(`/m/dashboard/${key}${search}`),

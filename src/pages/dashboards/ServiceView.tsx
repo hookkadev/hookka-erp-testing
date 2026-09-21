@@ -12,6 +12,8 @@ import { Kpi, LiveBadge } from "./dashboard-shared";
 import { ServiceApprovalsPanel } from "./ServiceApprovalsPanel";
 import { ServiceIssuesPanel } from "./ServiceIssuesPanel";
 import { ServicePerformancePanel } from "./ServicePerformancePanel";
+import { ServiceCaseNo, OpenServiceCasesLink } from "./ServiceCaseLink";
+import { useServiceCaseLinks } from "./use-service-case-links";
 import { causeKeys, causeLabel } from "../../api/lib/service-issue-stats";
 
 // Service tab: service-case report, overdue tracking, and the
@@ -69,6 +71,8 @@ export function ServiceView({
   const [search, setSearch] = useState("");
   // Root-cause key clicked on Top issues; narrows the Report's case list only.
   const [causeFilter, setCauseFilter] = useState<string | null>(null);
+  // Case rows open the real Service Cases module (gated like its sidebar entry).
+  const { canOpen, rowProps } = useServiceCaseLinks();
 
   const slice = data?.service ?? null;
   const cases = useMemo(() => slice?.cases ?? [], [slice]);
@@ -153,6 +157,7 @@ export function ServiceView({
             Showing: {dayLabel(period.day)} — click to go back
           </button>
         )}
+        <OpenServiceCasesLink canOpen={canOpen} />
       </div>
 
       {sub === "overview" && (
@@ -219,8 +224,8 @@ export function ServiceView({
                   </thead>
                   <tbody>
                     {listRows.map((c) => (
-                      <tr key={c.id} className="border-b border-[#E2DDD8]">
-                        <td className="px-3 py-2 font-mono text-[#1F1D1B] whitespace-nowrap">{c.caseNo ?? "—"}</td>
+                      <tr key={c.id} {...rowProps(c.id, "border-b border-[#E2DDD8]")}>
+                        <td className="px-3 py-2 font-mono text-[#1F1D1B] whitespace-nowrap"><ServiceCaseNo id={c.id} caseNo={c.caseNo} canOpen={canOpen} /></td>
                         <td className="px-3 py-2 text-[#1F1D1B]">{c.customer ?? "—"}</td>
                         <td className="px-3 py-2 text-[#6B7280] max-w-[320px] truncate">{c.issue || "—"}</td>
                         <td className="px-3 py-2 text-[#6B7280] whitespace-nowrap">{dayLabel(c.createdDate)}</td>
@@ -267,8 +272,8 @@ export function ServiceView({
                   </thead>
                   <tbody>
                     {overdue.map((c) => (
-                      <tr key={c.id} className="border-b border-[#E2DDD8]">
-                        <td className="px-3 py-2 font-mono text-[#1F1D1B] whitespace-nowrap">{c.caseNo ?? "—"}</td>
+                      <tr key={c.id} {...rowProps(c.id, "border-b border-[#E2DDD8]")}>
+                        <td className="px-3 py-2 font-mono text-[#1F1D1B] whitespace-nowrap"><ServiceCaseNo id={c.id} caseNo={c.caseNo} canOpen={canOpen} /></td>
                         <td className="px-3 py-2 text-[#1F1D1B]">{c.customer ?? "—"}</td>
                         <td className="px-3 py-2 text-[#6B7280] max-w-[300px] truncate">{c.issue || "—"}</td>
                         <td className="px-3 py-2 text-[#6B7280] whitespace-nowrap">{dayLabel(c.createdDate)}</td>
