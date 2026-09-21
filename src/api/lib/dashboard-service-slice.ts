@@ -30,6 +30,8 @@ export type ServiceCaseLite = {
   causes: string[]; // distinct root-cause categories; [] = not yet analysed
   unit: string | null; // responsibleunit
   prevention: string | null; // prevention_status
+  preventionOwner: string | null; // prevention_owner
+  preventionAction: string; // prevention_action, first 160 chars ('' = none)
   products: string[]; // affected product labels (max 10)
   ageDays: number | null; // only for OPEN / IN_PROGRESS
   daysOverdue: number; // 0 unless open past the threshold
@@ -89,7 +91,7 @@ export async function buildServiceSlice(
       `SELECT id, case_no, customer_name, status, created_at, closed_at,
               issue_description, approval_kind, approval_status,
               root_cause_category, rootcauses, responsibleunit,
-              prevention_status, affected_product_ids
+              prevention_status, prevention_owner, prevention_action, affected_product_ids
          FROM service_cases
         ORDER BY created_at DESC
         LIMIT 3000`,
@@ -114,6 +116,8 @@ export async function buildServiceSlice(
       causes: parseCauses(r.rootcauses ?? r.rootCauses, r.root_cause_category ?? r.rootCauseCategory),
       unit: str(r, "responsibleunit", "responsibleUnit"),
       prevention: str(r, "prevention_status", "preventionStatus"),
+      preventionOwner: str(r, "prevention_owner", "preventionOwner"),
+      preventionAction: (str(r, "prevention_action", "preventionAction") ?? "").slice(0, 160),
       products: parseProductLabels(r.affected_product_ids ?? r.affectedProductIds),
       ...caseAging(status, createdRaw, now),
     }];

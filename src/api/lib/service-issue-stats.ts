@@ -124,6 +124,70 @@ export function causeTrend(
   return [...m.values()].sort((a, b) => (String(a.bucket) < String(b.bucket) ? -1 : 1));
 }
 
+// ---- Lim's "Service" sub-tab: closing speed, opening backlog, prevention -----
+
+/** Average days-to-close (1 dp) over the CLOSED cases in `cases`; n = how many contributed. */
+export function avgClose(cases: IssueCase[]): { avg: number | null; n: number } {
+  let sum = 0, n = 0;
+  for (const c of cases) { const d = daysToClose(c); if (d !== null) { sum += d; n += 1; } }
+  return { avg: n ? Math.round((sum / n) * 10) / 10 : null, n };
+}
+
+/** Avg close days + closed count per bucket of the CLOSED date. Pass only cases closed in the window. */
+export function closeTrend(closed: IssueCase[], bucketOf: (date: string) => string): { bucket: string; avg: number | null; closed: number }[] {
+  const m = new Map<string, IssueCase[]>();
+  for (const c of closed) if (c.status === "CLOSED" && c.closedDate) { const b = bucketOf(c.closedDate); m.set(b, [...(m.get(b) ?? []), c]); }
+  return [...m.entries()].sort(([a], [b]) => (a < b ? -1 : 1)).map(([bucket, cs]) => ({ bucket, avg: avgClose(cs).avg, closed: cs.length }));
+}
+
+/** Opened (by created date) vs closed (by closed date) per bucket, for dates accepted by `inRange`. */
+export function openedVsClosed(cases: IssueCase[], inRange: (date: string) => boolean, bucketOf: (date: string) => string) {
+  const m = new Map<string, { bucket: string; opened: number; closed: number }>();
+  const bump = (date: string, k: "opened" | "closed") => {
+    const b = bucketOf(date);
+    const r = m.get(b) ?? { bucket: b, opened: 0, closed: 0 };
+    r[k] += 1;
+    m.set(b, r);
+  };
+  for (const c of cases) {
+    if (inRange(c.createdDate)) bump(c.createdDate, "opened");
+    if (c.status === "CLOSED" && c.closedDate && inRange(c.closedDate)) bump(c.closedDate, "closed");
+  }
+  return [...m.values()].sort((a, b) => (a.bucket < b.bucket ? -1 : 1));
+}
+
+/**
+ * Aging of the still-open cases (ageDays = whole days since logged). With overdue
+ * threshold T: 0..T, T+1..2T+1, 2T+2+ (T=3 -> 0-3 / 4-7 / 8+).
+ */
+export function agingSplit(cases: { status: string; ageDays?: number | null }[], threshold: number) {
+  const rows = [
+    { label: `0–${threshold} days`, count: 0 },
+    { label: `${threshold + 1}–${2 * threshold + 1} days`, count: 0 },
+    { label: `${2 * threshold + 2}+ days`, count: 0 },
+  ];
+  for (const c of cases) {
+    if (!OPEN.has(c.status) || c.ageDays == null) continue;
+    rows[c.ageDays <= threshold ? 0 : c.ageDays <= 2 * threshold + 1 ? 1 : 2].count += 1;
+  }
+  return rows;
+}
+
+/**
+ * Cases whose prevention is not yet done, oldest first. In: not cancelled, prevention
+ * PENDING / IN_PROGRESS, or none recorded once the case is analysed (has a root cause) or closed.
+ * DONE and NOT_NEEDED are out. daysOpen = age while open, else days-to-close.
+ */
+export function preventionNotDone<T extends IssueCase & { ageDays?: number | null }>(cases: T[]): (T & { daysOpen: number | null })[] {
+  return cases
+    .filter((c) => {
+      if (c.status === "CANCELLED") return false;
+      if (c.prevention === "DONE" || c.prevention === "NOT_NEEDED") return false;
+      return !!c.prevention || !!c.causes?.length || c.status === "CLOSED";
+    })
+    .map((c) => ({ ...c, daysOpen: OPEN.has(c.status) ? c.ageDays ?? null : daysToClose(c) }))
+    .sort((a, b) => (a.createdDate < b.createdDate ? -1 : a.createdDate > b.createdDate ? 1 : 0));
+}
 const parseJson = (raw: unknown): unknown => {
   if (typeof raw !== "string" || !raw.trim()) return raw ?? null;
   try { return JSON.parse(raw); } catch { return null; }
