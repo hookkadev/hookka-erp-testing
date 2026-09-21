@@ -14,6 +14,36 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
+## 2026-09-21 — 🔵 Dashboard: tabs named by function, not by staff member
+
+Branch `feat/dashboard-prototype-siti-ops-tab`. Asks: (1) no staff names in the dashboard
+navigation — `Operations (Siti)` / `Service (Zamri)` / `Daily (Lim)` become functional tabs with
+sub-tabs; (2) the reviewer's daily set is dissolved into the tab that owns each chart, approvals
+stay in ONE queue (Service › Approvals) and Overview gets a "Needs action" strip linking to it;
+(3) mobile friendly. Tabs now: Overview · Sales · Operations · Employees · Service · Finance — the
+same keys the `/m` dashboard already uses (`daily` dropped there too). Old `?tab=siti|lim|
+employee|department` links are aliased in `parseDashboardUrl`. NOT done: the feed key `lim` in
+`/api/dashboard/prototype` and the backend comments still carry the name (internal, no UI).
+Follow-up same day: the four `/m` dashboard tabs that were "next phase" placeholders are now
+phone-native (`tabs/OperationsTab|PeopleTab|ServiceTab|FinanceTab.tsx`, sub-tabs via
+`useDashboardSub` + `MSubPills`, same `?sub=` keys as desktop). Service > Approvals on the phone
+uses the desktop panel's exact endpoints / confirm / reject-needs-a-reason. Also fixed: the
+Operations cost and production-revenue chart axes read 100x too high (`fmtRMAxis` takes RM, was
+handed RM x 100). NOT browser-verified by the agent (dev proxy needs a production login).
+Ask 2026-09-22 (owner: period control "unfriendly" at phone width, tab row should be a dropdown):
+(1) phone-width period control = ONE button opening a bottom sheet (Monthly/YTD, stepper, presets,
+44px calendar) rendered through a portal; (2) phone-width tab row = native `<select>` on the
+desktop page and on `/m/dashboard`; sub-tab pills stay.
+Follow-up (owner on an iPhone: "date picker is bad"): a phone never reaches the desktop picker -
+`DashboardLayout` redirects mobile devices to `/m` - and the `/m` PeriodChip only listed months.
+It now has the stepper, Today / Yesterday / Last 7 Days, Whole month and a 44px day calendar, on
+ONE shared logic (`stepPeriod` / `periodPresets` / `calendarCells` in `dashboard-shared-lib.ts`,
+`tests/dashboard-period.test.mjs`). Tab `<select>`s are 16px so iOS Safari does not zoom on focus.
+Ask 2026-09-22 (owner, "one last thing"): (1) the dashboard opens on TODAY, not the whole month -
+daily performance is the common check; (2) figures should follow the picked DATE wherever the data
+has a date, not only the month; (3) then fix the `docs-freshness` check on PR #443.
+Owner 2026-09-22: the People tab is labelled Employees (key `people` unchanged).
+
 ## 2026-09-10 — 🔵 PRD T-004 · Import / Export across the whole system (P0/R3-R5 done, rest open)
 
 Requested by Mr Lim, PRD dated 2026-09-07, priority **Low (to be raised later)**. Full PRD:

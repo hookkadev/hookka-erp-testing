@@ -151,7 +151,11 @@ const rows = mounts.map((mt) => {
   };
 });
 
-const routeFiles = readdirSync(ROUTES_DIR).filter((f) => f.endsWith(".ts"));
+// Sorted: readdir order is the FILESYSTEM's - alphabetical on NTFS, hash order
+// on the Linux CI runner. With two or more unmounted route files the list below
+// came out in a different order on each, so --check passed on every Windows
+// machine and failed in CI on the same commit.
+const routeFiles = readdirSync(ROUTES_DIR).filter((f) => f.endsWith(".ts")).sort();
 const mounted = new Set(rows.map((r) => r.fileRel).filter(Boolean));
 const unmounted = routeFiles
   .map((f) => `src/api/routes/${f}`)

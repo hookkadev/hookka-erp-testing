@@ -30,6 +30,7 @@
 // ---------------------------------------------------------------------------
 import { Hono } from "hono";
 import type { Env } from "../worker";
+import { gateExchange } from "../lib/service-approval";
 import { requirePermission } from "../lib/rbac";
 import { customerScopeSql } from "../lib/customer-scope";
 import { invalidateProductionListCaches } from "../lib/po-list-cache";
@@ -598,6 +599,12 @@ app.post("/", async (c) => {
         { success: false, error: "mode must be REPRODUCE, STOCK_SWAP, REPAIR, or null" },
         400,
       );
+    }
+
+    // 1-to-1 exchange (STOCK_SWAP / REPRODUCE) needs an approved case first.
+    const exchangeBlock = await gateExchange(c, caseId, mode);
+    if (exchangeBlock) {
+      return c.json({ success: false, error: exchangeBlock.error }, exchangeBlock.status);
     }
 
     // For SO/CO: re-validate the source order is still shipped (user could
@@ -1249,6 +1256,12 @@ app.put("/:id/mode", async (c) => {
         },
         409,
       );
+    }
+
+    // 1-to-1 exchange (STOCK_SWAP / REPRODUCE) needs an approved case first.
+    const exchangeBlock = await gateExchange(c, existing.caseId, next);
+    if (exchangeBlock) {
+      return c.json({ success: false, error: exchangeBlock.error }, exchangeBlock.status);
     }
 
     // For SO/CO sources we reload the original order to get customer details

@@ -3085,6 +3085,13 @@
   "service_cases": [
     "action_log",
     "affected_product_ids",
+    "approval_kind",
+    "approval_note",
+    "approval_requested_at",
+    "approval_requested_by",
+    "approval_status",
+    "approved_at",
+    "approved_by",
     "case_no",
     "closed_at",
     "created_at",

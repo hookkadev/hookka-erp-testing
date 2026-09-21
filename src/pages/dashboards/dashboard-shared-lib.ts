@@ -125,6 +125,108 @@ export function dayLabel(d: string): string {
   return `${Number(day)} ${MONTH_NAMES[Number(m) - 1] ?? m} ${y}`;
 }
 
+/**
+ * The period a view actually reads, from the period in the URL.
+ *
+ * A BARE URL (nothing picked yet: monthly, no month, no day) opens on TODAY -
+ * this month with `day` = today - because the daily check is the common visit
+ * (owner 2026-09-22). Every dated figure then narrows to the day via inFocus,
+ * while trend charts keep drawing the whole month around it. Clearing the
+ * highlight writes the month into the URL, so it stays cleared. If the book
+ * has nothing in today's month yet, it opens on the newest month instead,
+ * with no day: a highlighted day outside the charted month helps nobody.
+ *
+ * Otherwise an unset or unknown month resolves to the newest month that
+ * exists. DERIVED, never synced with an effect.
+ */
+export function resolvePeriod(period: Period, months: string[], today: string): Period {
+  const thisMonth = today.slice(0, 7);
+  if (period.mode === "monthly" && !period.month && !period.day && months.includes(thisMonth)) {
+    return { mode: "monthly", month: thisMonth, day: today };
+  }
+  const month = period.month && months.includes(period.month) ? period.month : (months[months.length - 1] ?? "");
+  return { ...period, month };
+}
+
+// ---- Period picker logic (pure: tests/dashboard-period.test.mjs) ----------
+// Shared by the desktop PeriodPicker and the /m PeriodChip so a phone and a
+// desktop step, preset and highlight identically.
+
+/**
+ * One step of the < > arrows. They move by whatever the mode MEASURES: a year
+ * in YTD (landing on the newest month that year has, so YTD covers all of it),
+ * otherwise a month - and a range steps back out to a plain month rather than
+ * sliding a window whose length nobody asked to keep. Targets are resolved
+ * against the months the book actually has; a direction with no data is null.
+ */
+export function stepPeriod(period: Period, months: string[], dir: -1 | 1): Period | null {
+  if (period.mode === "ytd") {
+    const years = [...new Set(months.map((m) => m.slice(0, 4)))].sort();
+    const yi = years.indexOf(period.month.slice(0, 4));
+    const target = years[yi + dir];
+    if (yi < 0 || !target) return null;
+    const last = months.filter((m) => m.startsWith(target)).pop();
+    return last ? { mode: "ytd", month: last } : null;
+  }
+  const next = months[months.indexOf(period.month) + dir];
+  return next ? { mode: "monthly", month: next } : null;
+}
+
+/**
+ * Today / Yesterday / Last 7 Days, anchored to the newest day the book
+ * ACTUALLY has - not the machine clock and not the end of the newest month
+ * (that made "Last 7 Days" select Sep 24-30 when data stopped on Sep 15, so
+ * every preset returned zero rows). A one-day preset stays on that day's
+ * MONTH and highlights it, so the trend still draws the whole month; a
+ * multi-day one genuinely re-scopes to a range.
+ */
+export function periodPresets(latestDay: string | undefined, months: string[]): { label: string; period: Period }[] {
+  const iso = latestDay || (months.length ? `${months[months.length - 1]}-01` : "");
+  if (!iso) return [];
+  const [y, m, d] = iso.split("-").map(Number);
+  const back = (n: number) => ymd(new Date(y, m - 1, d - n));
+  const one = (label: string, day: string) => ({ label, period: { mode: "monthly" as const, month: day.slice(0, 7), day } });
+  const from = back(6);
+  return [
+    one("Today", back(0)),
+    one("Yesterday", back(1)),
+    { label: "Last 7 Days", period: { mode: "range", month: from.slice(0, 7), from, to: back(0), label: "Last 7 Days" } },
+  ];
+}
+
+/** Is this preset the current selection? */
+export function presetActive(preset: Period, period: Period): boolean {
+  return preset.mode === "range"
+    ? period.mode === "range" && period.from === preset.from && period.to === preset.to
+    : period.day === preset.day;
+}
+
+/**
+ * Monday-first calendar cells for YYYY-MM: leading nulls, then each YYYY-MM-DD.
+ * Anything that is not a month is [] - the period's month is "" until the feed
+ * has loaded, and `Array(NaN)` throws a RangeError that took the whole /m
+ * dashboard down on first paint.
+ */
+export function calendarCells(viewMonth: string): (string | null)[] {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(viewMonth)) return [];
+  const [y, m] = viewMonth.split("-").map(Number);
+  // JS getDay() is Sunday=0, so shift by one and wrap.
+  const lead = (new Date(y, m - 1, 1).getDay() + 6) % 7;
+  const days = new Date(y, m, 0).getDate();
+  return [
+    ...Array<null>(lead).fill(null),
+    ...Array.from({ length: days }, (_, i) => `${viewMonth}-${String(i + 1).padStart(2, "0")}`),
+  ];
+}
+
+/** YYYY-MM moved by `delta` months (a non-month comes back unchanged). */
+export function shiftMonth(month: string, delta: number): string {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return month;
+  const [y, m] = month.split("-").map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
 export function ymd(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
@@ -173,3 +275,45 @@ export function previousPeriod(p: Period, months: string[]): Period | null {
   const lastOfPrev = [...months].filter((m) => m.slice(0, 4) === prevYear).pop();
   return lastOfPrev ? { mode: "ytd", month: lastOfPrev } : null;
 }
+
+// The rows a "focused" panel should read: the single highlighted day when one
+// is picked (chart click or datepicker), otherwise the whole period. Charts
+// keep using inPeriod so they still draw the whole month around the highlight.
+export function inFocus(p: Period, date: string | null | undefined): boolean {
+  if (p.day) return String(date ?? "").slice(0, 10) === p.day;
+  return inPeriod(p, date);
+}
+
+// Sub-tab strips live in the page's sticky row (next to the period picker), so
+// the keys are shared between the shell and the views.
+// Tabs and sub-tabs are named after the FUNCTION, never the person who reads
+// them: a chart has one home, and whoever holds the role opens that home.
+export const PEOPLE_SUBS = [
+  { key: "overview", label: "Overview" },
+  { key: "time", label: "Time & attendance" },
+  { key: "efficiency", label: "Efficiency" },
+  { key: "departments", label: "Departments" },
+] as const;
+export const OPS_SUBS = [
+  { key: "overview", label: "Overview" },
+  { key: "production", label: "Output" },
+  { key: "plan", label: "Plan vs Actual" },
+  { key: "cost", label: "Revenue & Cost" },
+  { key: "materials", label: "Materials" },
+] as const;
+export type PeopleSub = (typeof PEOPLE_SUBS)[number]["key"];
+export type OpsSub = (typeof OPS_SUBS)[number]["key"];
+export const SERVICE_SUBS = [
+  { key: "overview", label: "Report" },
+  { key: "performance", label: "Performance" },
+  { key: "overdue", label: "Overdue" },
+  { key: "approvals", label: "Approvals" },
+  { key: "issues", label: "Top issues" },
+] as const;
+export type ServiceSub = (typeof SERVICE_SUBS)[number]["key"];
+export const FIN_SUBS = [
+  { key: "perhead", label: "Per head" },
+  { key: "returns", label: "Returns & balance sheet" },
+  { key: "outlook", label: "Outlook & P/E" },
+] as const;
+export type FinSub = (typeof FIN_SUBS)[number]["key"];
