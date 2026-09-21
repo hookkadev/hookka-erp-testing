@@ -7940,6 +7940,120 @@ app.get("/pl-monthly", async (c) => {
   return c.json({ success: true, data: { fyLabel: fy.label, line, anchor: anchorYm, columns: matrix.columns, rows: matrix.rows } });
 });
 
+// Finance dashboard tab feed (routes/dashboard-finance.ts → lib/dashboard-finance.ts).
+// Per month: the P&L's own figures (same per-month window logic as `/pl-monthly`:
+// pre-opening months come from pnl_historical, the rest from computePnlWindow)
+// and the Balance Sheet's month-end totals (same ledger legs, opening floor,
+// account resolver and section map as the `/pl` balanceSheet). Nothing is
+// re-derived: revenue = netSalesSen, labour = direct labour + salary opex lines,
+// net profit = netProfitSen. Equity includes the un-closed current-year earnings
+// line exactly as the Balance Sheet tab shows it.
+export type FinanceMonthRow = {
+  ym: string;
+  revenueSen: number;
+  labourSen: number;
+  netProfitSen: number;
+  assetsSen: number;
+  liabilitiesSen: number;
+  ltLiabilitiesSen: number;
+  equitySen: number;
+};
+export async function loadFinanceSeries(
+  db: Env["Variables"]["DB"],
+  orgId: string,
+  monthsIn: string[],
+): Promise<FinanceMonthRow[]> {
+  const months = [...monthsIn].sort();
+  if (months.length === 0) return [];
+  const last = months[months.length - 1];
+  await ensurePnlHistorical(db);
+  const override = await getPnlSectionMap(db);
+  const matData = await loadMaterialCostData(db, orgId, last);
+  const dc = await loadDocDateResolver(db);
+  const [historical, openingRaw] = await Promise.all([loadHistoricalPnl(db, orgId), getOpeningDate(db)]);
+  const openingMonth = openingRaw ? openingRaw.slice(0, 7) : null;
+  const EMPTY_W: PnlWindow["materialWarnings"] = { negatives: [], unresolved: [] };
+
+  const pnl = new Map<string, { revenueSen: number; labourSen: number; netProfitSen: number }>();
+  for (const ym of months) {
+    const hist = selectHistoricalWindow(historical, openingMonth, ym, "all");
+    // A month before the books opened with no owner-keyed history has no P&L
+    // (the ledger floor drops every pre-opening leg) — skip the heavy window.
+    if (!hist && openingMonth && ym < openingMonth) {
+      pnl.set(ym, { revenueSen: 0, labourSen: 0, netProfitSen: 0 });
+      continue;
+    }
+    const w: PnlWindow = hist
+      ? { ...hist, materialWarnings: EMPTY_W }
+      : await computePnlWindow(db, orgId, ym, ym, "all", matData, dc, override);
+    const salaryOpex = w.expenseLines.filter((l) => l.salary).reduce((s, l) => s + l.amountSen, 0);
+    pnl.set(ym, {
+      revenueSen: w.netSalesSen,
+      labourSen: w.labourSen + salaryOpex,
+      netProfitSen: Math.round(w.netProfitSen),
+    });
+  }
+
+  // Balance sheet at each month-end: cumulative ledger legs up to that month.
+  const [legRes, coaRes, bsOverride, resolveAcct] = await Promise.all([
+    db.prepare("SELECT accountCode, sourceId, debitSen, creditSen, postedAt, sourceType FROM ledger_journal_entries WHERE hidden = 0")
+      .all<{ accountCode: string; sourceId: string; debitSen: number; creditSen: number; postedAt: string; sourceType: string }>(),
+    db.prepare("SELECT code, type FROM chart_of_accounts").all<{ code: string; type: CoaRow["type"] }>(),
+    getBsSectionMap(db),
+    loadAccountResolver(db),
+  ]);
+  const coaType = new Map((coaRes.results ?? []).map((a) => [a.code, a.type] as const));
+  const perYm = new Map<string, Map<string, { dr: number; cr: number }>>();
+  for (const l of legRes.results ?? []) {
+    const dd = dc.docDate(l.sourceType, l.sourceId, l.postedAt);
+    if (legBeforeOpening(l.sourceType, dd, dc.openingDate)) continue;
+    const ym = dd.slice(0, 7);
+    if (ym > last) continue;
+    let m = perYm.get(ym);
+    if (!m) { m = new Map(); perYm.set(ym, m); }
+    const code = resolveAcct(l.accountCode);
+    const e = m.get(code) ?? { dr: 0, cr: 0 };
+    e.dr += Number(l.debitSen) || 0;
+    e.cr += Number(l.creditSen) || 0;
+    m.set(code, e);
+  }
+  const legYms = [...perYm.keys()].sort();
+  const run = new Map<string, { dr: number; cr: number }>();
+  let li = 0;
+  const out: FinanceMonthRow[] = [];
+  for (const ym of months) {
+    while (li < legYms.length && legYms[li] <= ym) {
+      for (const [code, v] of perYm.get(legYms[li])!) {
+        const e = run.get(code) ?? { dr: 0, cr: 0 };
+        e.dr += v.dr;
+        e.cr += v.cr;
+        run.set(code, e);
+      }
+      li++;
+    }
+    let assets = 0, liab = 0, lt = 0, equity = 0, unclosed = 0;
+    for (const [code, v] of run) {
+      const type = coaType.get(code);
+      if (!type) continue;
+      const section = bsSectionFor(code, type, bsOverride);
+      if (section) {
+        const asset = bsSectionClass(section) === "asset";
+        const bal = asset ? v.dr - v.cr : v.cr - v.dr;
+        if (asset) assets += bal;
+        else if (section === "EQUITY") equity += bal;
+        else { liab += bal; if (section === "LONG_TERM_LIABILITY") lt += bal; }
+      }
+      if (type === "REVENUE") unclosed += v.cr - v.dr;
+      else if (type === "COST" || type === "EXPENSE") unclosed -= v.dr - v.cr;
+    }
+    out.push({
+      ym, ...(pnl.get(ym) ?? { revenueSen: 0, labourSen: 0, netProfitSen: 0 }),
+      assetsSen: assets, liabilitiesSen: liab, ltLiabilitiesSen: lt, equitySen: equity + unclosed,
+    });
+  }
+  return out;
+}
+
 // The cash-flow statement computation, shared by GET /cashflow-statement and
 // the dashboard card — one engine, so the two can never disagree.
 async function computeCashflowStatement(

@@ -1,9 +1,10 @@
 import { useMemo } from "react";
 import { useCachedJson } from "@/lib/cached-fetch";
 import { PeriodPicker } from "./dashboard-shared";
-import type { Period, EmpSub, SitiSub, ServiceSub, LimSub } from "./dashboard-shared-lib";
+import type { Period, EmpSub, SitiSub, ServiceSub, LimSub, FinSub } from "./dashboard-shared-lib";
 import { TAB_SUBS } from "./dashboard-url-state-lib";
 import { useDashboardUrlState } from "./use-dashboard-url-state";
+import { FinanceView } from "./FinanceView";
 import { AllOverviewView } from "./AllOverviewView";
 import { SalesOrdersView } from "./SalesOrdersView";
 import { SitiOpsView } from "./SitiOpsView";
@@ -46,7 +47,7 @@ import { Tabs, type TabItem } from "@/components/ui/tabs";
 
 // The tabs being trialled on main. Operations (Siti) is a draft - see
 // SitiOpsView.tsx's own header comment for what's real vs. stubbed.
-const TABS: TabItem<"overview" | "sales" | "siti" | "employee" | "department" | "service" | "lim">[] = [
+const TABS: TabItem<"overview" | "sales" | "siti" | "employee" | "department" | "service" | "lim" | "finance">[] = [
   { key: "overview", label: "All Overview" },
   { key: "sales", label: "Sales Orders" },
   { key: "siti", label: "Operations (Siti)" },
@@ -54,6 +55,7 @@ const TABS: TabItem<"overview" | "sales" | "siti" | "employee" | "department" | 
   { key: "department", label: "Departments" },
   { key: "service", label: "Service (Zamri)" },
   { key: "lim", label: "Daily (Lim)" },
+  { key: "finance", label: "Finance" },
 ];
 
 const TAB_KEYS = TABS.map((t) => t.key);
@@ -162,6 +164,7 @@ export default function DashboardPrototypePage() {
       {tab === "department" && <DepartmentsView period={effectivePeriod} />}
       {tab === "service" && <ServiceView period={effectivePeriod} sub={sub as ServiceSub} onPeriodChange={setPeriod} onSubChange={(x) => setSub(x)} />}
       {tab === "lim" && <LimDailyView period={effectivePeriod} sub={sub as LimSub} onPeriodChange={setPeriod} />}
+      {tab === "finance" && <FinanceView period={effectivePeriod} sub={sub as FinSub} months={months} onPeriodChange={setPeriod} />}
     </div>
   );
 }

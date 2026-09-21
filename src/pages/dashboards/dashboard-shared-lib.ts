@@ -212,3 +212,9 @@ export const SERVICE_SUBS = [
   { key: "issues", label: "Top issues" },
 ] as const;
 export type ServiceSub = (typeof SERVICE_SUBS)[number]["key"];
+export const FIN_SUBS = [
+  { key: "perhead", label: "Per head" },
+  { key: "returns", label: "Returns & balance sheet" },
+  { key: "outlook", label: "Outlook & P/E" },
+] as const;
+export type FinSub = (typeof FIN_SUBS)[number]["key"];

@@ -1,5 +1,5 @@
 import {
-  EMP_SUBS, SITI_SUBS, SERVICE_SUBS, LIM_SUBS,
+  EMP_SUBS, SITI_SUBS, SERVICE_SUBS, LIM_SUBS, FIN_SUBS,
   type Period,
 } from "./dashboard-shared-lib";
 
@@ -28,6 +28,7 @@ export const TAB_SUBS: Record<string, readonly { key: string; label: string }[]>
   siti: SITI_SUBS,
   service: SERVICE_SUBS,
   lim: LIM_SUBS,
+  finance: FIN_SUBS,
 };
 
 export const DEFAULT_TAB = "overview";
