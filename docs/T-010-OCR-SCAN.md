@@ -143,7 +143,7 @@ meets a NULL.
 | # | Check | Status |
 |---|---|---|
 | A1 | `GET /api/scan-queue/stats?days=7` → per kind: p50 / p95 duration, p50 of wait · identify · extract, `slowest_step` | endpoint built · prod **UNMEASURED** |
-| A2 | median −33 %; `rowsHoldingBytes` = 0 in the same response | **UNMEASURED** — needs a before/after week. Old rows keep their bytes until a one-off move runs (not written). |
+| A2 | median −33 %; `rowsHoldingBytes` = 0 in the same response | **UNMEASURED** — needs a before/after week. Old rows keep their bytes until `scripts/move-scan-bytes-to-storage.mjs` is run (written, never run). |
 | A3 | correct a Houzs Century PO → `ocr_corrections` rows; rescan returns corrected codes | logic proven in `tests/t010-ocr-scan.test.mjs`; live **UNMEASURED** |
 | A4 | supplier doc scanned twice picks up the first correction | same |
 | A5 | View original displays the PDF | SO + PI wired; GRN / finance have no original yet (R17 open) |
@@ -156,13 +156,23 @@ Fixture for A3: `TO DO PI-.pdf` (22 pages of Hookka DOs / invoices for Houzs Cen
 
 - **R18** base64 photo columns (POD `_helpers.ts`, service cases, attendance, SO page image) →
   file store. Four modules, two of them on the high-risk list; each wants its own change.
-- **R17** finance scans and assistant uploads do not yet store their original.
-- **R11 UI** `lowConfidence` is returned and counted; the preview modals do not highlight it
-  yet, there is no review-queue page, and the dashboard has no confidence column.
-- **R10 UI** `POST /api/scan-finance/samples/:id/confirm` exists; the finance forms do not call it.
+- **R17 gaps** finance originals are attached client-side after save (`/api/files`, resourceType
+  `OTHER_PARTY_BILL` / `PV`); they are NOT yet in `POSTED_DOC_CHECKS`, so a posted bill's original
+  can still be archived. Assistant originals (images / PDFs only) are keyed `ASSISTANT/<userId>`;
+  spreadsheets are not kept. The supplier-doc (GRN) modal still has no original (A5).
+- **R11 UI, remainder** the SUPPLIER preview modal (`scan-supplier-modal.tsx`, 5.9k lines) does not
+  highlight `lowConfidence` yet — only the PO modal does. The review page
+  (`/procurement/scan-review`) lists flagged scans and per-kind stats; its "Open scan" link goes to the
+  module list, not the exact scan.
+- **R10 UI, gap** the finance forms confirm on save, but only `docNo`, party name and line
+  descriptions can differ from the raw read (the forms hold no unit price / qty); amount edits are
+  not learned.
+- **Untested here** none of the new UI was exercised in a browser (no prod login, no DB).
 - **R4** covers the synchronous PO path (what the PRD names). The queued PO path uploads the
   uncompressed file on purpose — that upload IS the kept original.
-- One-off script to move existing `file_bytes_b64` rows into storage.
+- Legacy-bytes move: `scripts/move-scan-bytes-to-storage.mjs` is written (dry-run by default,
+  hash-verified read-back before it NULLs a row) and has **never been run** — how many rows it would
+  move is UNMEASURED.
 - `tests/db-schema.json` was extended **by hand** from migration 0233 (no DB access from this
   session). Re-run `node scripts/refresh-db-schema-fixture.mjs` after the first deploy.
 

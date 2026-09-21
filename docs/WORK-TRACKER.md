@@ -1,6 +1,6 @@
 # Hookka ERP — Work Tracker
 
-> **Last verified: 2026-09-21** — PRD T-010 entry added (branch `feat/t010-ocr-scan`, open, not merged).
+> **Last verified: 2026-09-21** — T-010 R10/R11/R17 rows updated + legacy-bytes move script written (not run); PRD T-010 entry added (branch `feat/t010-ocr-scan`, open, not merged).
 > **Last verified: 2026-08-14** — branch `fix/on-time-delivery-and-decisions` added below (open, not merged, its entry is the newest; its bug ids were renumbered 130-133 → 140-143 because `feat/leave-entitlement` claimed 130-133 and merged to `main` first). Previously: branch `feat/leave-entitlement` (MERGED as #326). Previously: branch `feat/job-card-completed-at` added below (open, not merged). Previously: branch `fix/security-posture` added below (open, not merged). Previously: PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
 > **Last verified: 2026-08-14** — branch `feat/pcb-calculation` added below (open, not merged, its entry is the newest). Previously: branch `feat/job-card-completed-at` added below (open, not merged). Previously: branch `fix/security-posture` added below (open, not merged). Previously: PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
 > **Last verified: 2026-08-14** — restamped on branch `fix/money-input-parsing` (its entry is the newest below, not yet deployed). PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
@@ -36,14 +36,14 @@ Every PRD requirement, one row each — status is updated as it lands:
 | R7 | `ocr_corrections` log written on every confirm from the accuracy module's comparison | 🔵 built — `ocr_corrections` via `correctionPairs` on PO / supplier / finance confirm |
 | R8 | known-error classifier → alias table for product / supplier codes, applied before the result is shown | 🔵 built — `ocr_code_aliases`, applied in the engine before the sample is written |
 | R9 | distillation fed (raw → corrected) pairs | 🔵 built — CORRECTION PAIRS block in the distill prompt |
-| R10 | finance scan records samples + confirmable | 🟡 backend built (`recordSample` + `/api/scan-finance/samples/:id/confirm`); finance forms don't call it yet |
-| R11 | per-field confidence; low-confidence highlighted + review queue; dashboard column | 🟡 `lowConfidence` returned + counted on the queue row; NO UI highlight / review queue / dashboard column yet |
+| R10 | finance scan records samples + confirmable | 🔵 built — bill + receipt forms call `/samples/:id/confirm` on save (docNo / party / line descriptions); live effect UNMEASURED |
+| R11 | per-field confidence; low-confidence highlighted + review queue; dashboard column | 🟡 PO modal highlights flagged fields; `GET /api/scan-queue/review` + `/procurement/scan-review` page (queue + per-kind unsure-field column). Supplier modal NOT highlighted yet |
 | R12 | rules versioned; success rate before/after each distillation | 🔵 built — `ocr_rule_versions` with before/after success rate |
 | R13 | scan samples carry the tenant; back-fill | 🔵 built — strict tenant filters + self-applied back-fill; prod row state UNMEASURED |
 | R14 | `file_assets` gains checksum / source / locked / archived; delete → archive; posted docs refuse delete | 🔵 built — checksum/source/locked/archived; archive; 409 `FILE_LOCKED` on posted DO / SI / PI |
 | R15 | stream endpoint inline for images + PDFs; View original opens | 🔵 built — `/stream` inline; PI button uses `/download?inline=1` |
 | R16 | every view writes an access row | 🔵 built — `ocr_file_access_log` on download + stream |
-| R17 | finance scans + assistant uploads store their original | ⚪ not started |
+| R17 | finance scans + assistant uploads store their original | 🔵 built — finance forms upload the original on save; assistant image/PDF attachments saved server-side via `saveOriginalFile`. Not in the posted-doc lock list yet |
 | R18 | base64 photo columns (POD, service case, attendance, customer-PO page) → file store, columns stay readable | ⚪ not started — four modules (POD, service case, attendance, SO page image), each its own change |
 | R19 | retention stated in writing; backup confirmed to include the file store | 🟡 retention written in `docs/T-010-OCR-SCAN.md` §4; **backup of the storage bucket UNMEASURED** |
 

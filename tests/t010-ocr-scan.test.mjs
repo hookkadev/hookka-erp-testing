@@ -247,3 +247,26 @@ test("R13 scan-po: every sample read/write is tenant-scoped", () => {
     assert.match(m[0], /org_id = \?/, m[0].slice(0, 80));
   }
 });
+
+// ---- Slice 2: R10 / R11 / R17 UI + server wiring (source pins) -------------
+test("R11 review endpoint is tenant-scoped and registered before /:id", () => {
+  const q = src("src/api/routes/scan-queue.ts");
+  const at = q.indexOf('app.get("/review"');
+  assert.ok(at > 0 && at < q.indexOf('app.get("/:id"'), "/review must precede /:id");
+  assert.match(q.slice(at, at + 1200), /org_id = \? AND status IN \('done', 'cached'\) AND consumed_at IS NULL/);
+});
+
+test("R10 finance forms confirm the scan sample and clear it when the form closes", () => {
+  const a = src("src/pages/accounting/index.tsx");
+  assert.equal(a.match(/confirmFinanceScan\(scanRef\.current/g)?.length, 2, "bill + receipt both confirm");
+  assert.equal(a.match(/if \(!showForm\) scanRef\.current = null/g)?.length, 2, "a closed form must not leak its scan");
+  assert.match(a, /samples\/\$\{encodeURIComponent\(scan\.sampleId\)\}\/confirm/);
+});
+
+test("R17 assistant attachments are kept via saveOriginalFile, off the response path", () => {
+  const a = src("src/api/routes/assistant.ts");
+  assert.match(a, /saveOriginalFile\(c\.var\.DB, c\.env,/);
+  assert.match(a, /executionCtx\.waitUntil\(keep\)/);
+  const f = src("src/api/routes/files.ts");
+  assert.match(f, /if \(!ALLOWED_MIME\.has\(f\.contentType\)\) return false;/);
+});
