@@ -1,4 +1,4 @@
-// People tab — phone port of the desktop People dashboard (EmployeesView +
+// Employees tab (key `people`) — phone port of the desktop Employees dashboard (EmployeesView +
 // EmployeesInsights + AttendanceLogCard + DeptEfficiencyCard + DepartmentsView).
 // Sub-tabs (?sub=): overview, time, efficiency, departments — same keys as desktop.
 //
@@ -611,7 +611,7 @@ export function PeopleTab({ period, setPeriod }: DashboardTabProps) {
   const { data, loading, error } = useCachedJson<Feed>(DASHBOARD_FEED_URL);
 
   if (loading) return <MState kind="loading" />;
-  if (error || !data?.success) return <MState kind="error" text={`Couldn't load People: ${error ?? "unknown error"}`} />;
+  if (error || !data?.success) return <MState kind="error" text={`Couldn't load Employees:${error ?? "unknown error"}`} />;
 
   const avail = data.availability?.employee;
   const employee = data.employee;

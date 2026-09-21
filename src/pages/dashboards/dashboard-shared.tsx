@@ -6,7 +6,10 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import type { LucideIcon } from "lucide-react";
-import { CHART_AXIS, monthLabel, periodLabel, ymd, type Period } from "./dashboard-shared-lib";
+import {
+  CHART_AXIS, monthLabel, periodLabel, ymd, stepPeriod, periodPresets, presetActive, calendarCells, shiftMonth,
+  type Period,
+} from "./dashboard-shared-lib";
 
 // Shared components for the dashboard-prototype tabs (SalesOrdersView + the
 // ones ported from it) — one Kpi card, one badge, one "missing" note, so the
@@ -45,18 +48,7 @@ function CalendarGrid({
   maxDate: string;
   onPick: (day: string) => void;
 }) {
-  const [y, m] = viewMonth.split("-").map(Number);
-  const first = new Date(y, m - 1, 1);
-  const daysInMonth = new Date(y, m, 0).getDate();
-  // Monday-first: JS getDay() is Sunday=0, so shift by one and wrap.
-  const lead = (first.getDay() + 6) % 7;
-
-  const cells: (string | null)[] = [
-    ...Array<null>(lead).fill(null),
-    ...Array.from({ length: daysInMonth }, (_, i) =>
-      `${y}-${String(m).padStart(2, "0")}-${String(i + 1).padStart(2, "0")}`,
-    ),
-  ];
+  const cells = calendarCells(viewMonth);
 
   return (
     <div>
@@ -69,7 +61,7 @@ function CalendarGrid({
       </div>
       <div className="grid grid-cols-7 gap-0.5">
         {cells.map((day, i) => {
-          if (!day) return <div key={`pad-${i}`} className="h-7 max-md:h-9" />;
+          if (!day) return <div key={`pad-${i}`} className="h-7 max-md:h-11" />;
           const isFrom = day === from;
           const isTo = day === to;
           const inRange = !!from && !!to && day > from && day < to;
@@ -163,26 +155,7 @@ function DateTrigger({
 
   const todayIso = ymd(new Date());
 
-  // Presets anchor to the newest day the book ACTUALLY has, not to the machine
-  // clock and not to the end of the newest month. Anchoring to the month end
-  // made "Last 7 Days" select Sep 24-30 when the data stopped on Sep 15, so
-  // every preset returned zero rows.
-  const latest = useMemo(() => {
-    const iso = latestDay || (months.length ? `${months[months.length - 1]}-01` : "");
-    if (!iso) return null;
-    const [ly, lm, ld] = iso.split("-").map(Number);
-    return new Date(ly, lm - 1, ld);
-  }, [latestDay, months]);
-
-  const presets = useMemo(() => {
-    if (!latest) return [];
-    const d = (n: number) => new Date(latest.getTime() - n * 86400000);
-    return [
-      { label: "Today", from: ymd(latest), to: ymd(latest) },
-      { label: "Yesterday", from: ymd(d(1)), to: ymd(d(1)) },
-      { label: "Last 7 Days", from: ymd(d(6)), to: ymd(latest) },
-    ];
-  }, [latest]);
+  const presets = useMemo(() => periodPresets(latestDay, months), [latestDay, months]);
 
   // One click HIGHLIGHTS that day: the period stays on the day's month so the
   // trend chart still draws the whole month, and `day` narrows the KPI row and
@@ -193,11 +166,7 @@ function DateTrigger({
     setOpen(false);
   };
 
-  const stepView = (delta: number) => {
-    const [vy, vm] = viewMonth.split("-").map(Number);
-    const next = new Date(vy, vm - 1 + delta, 1);
-    setViewMonth(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`);
-  };
+  const stepView = (delta: number) => setViewMonth(shiftMonth(viewMonth, delta));
 
   const body = (
     <>
@@ -205,43 +174,22 @@ function DateTrigger({
         <p className="text-[10px] uppercase tracking-wide pb-0.5 max-md:w-full" style={{ color: CHART_AXIS }}>
           Presets
         </p>
-        {presets.map((p) => {
-          const on =
-            p.from === p.to
-              ? period.day === p.from
-              : period.mode === "range" && period.from === p.from && period.to === p.to;
-          return (
-            <button
-              key={p.label}
-              type="button"
-              onClick={() => {
-                onChange(
-                  p.from === p.to
-                    ? // One day: stay on that day's MONTH and highlight it,
-                      // so the trend still draws the whole month and
-                      // clearing the highlight returns to it.
-                      { mode: "monthly", month: p.from.slice(0, 7), day: p.from }
-                    : // A real multi-day window genuinely re-scopes the
-                      // chart, and carries no day highlight of its own.
-                      {
-                        mode: "range",
-                        month: p.from.slice(0, 7),
-                        from: p.from,
-                        to: p.to,
-                        label: p.label,
-                      },
-                );
-                setOpen(false);
-              }}
-              className={
-                "rounded-md px-2 py-1 text-left text-[11px] font-medium max-md:h-11 max-md:px-4 max-md:text-sm max-md:border max-md:border-[#E5E0D8] " +
-                (on ? "bg-[#6B5C32] text-white" : "text-[#1F1D1B] hover:bg-[#F7F5F3]")
-              }
-            >
-              {p.label}
-            </button>
-          );
-        })}
+        {presets.map((p) => (
+          <button
+            key={p.label}
+            type="button"
+            onClick={() => {
+              onChange(p.period);
+              setOpen(false);
+            }}
+            className={
+              "rounded-md px-2 py-1 text-left text-[11px] font-medium max-md:h-11 max-md:px-4 max-md:text-sm max-md:border max-md:border-[#E5E0D8] " +
+              (presetActive(p.period, period) ? "bg-[#6B5C32] text-white" : "text-[#1F1D1B] hover:bg-[#F7F5F3]")
+            }
+          >
+            {p.label}
+          </button>
+        ))}
         <button
           type="button"
           onClick={() => {
@@ -362,32 +310,8 @@ export function PeriodPicker({
   latestDay?: string;
   onChange: (p: Period) => void;
 }) {
-  const idx = months.indexOf(period.month);
-
-  // The steppers move by whatever the current mode MEASURES. In YTD that is a
-  // year: stepping by month there looked broken, because "2026 YTD" reads the
-  // same after a month-sized step and only changes once it happens to cross a
-  // year boundary. Each target is resolved against the months the book actually
-  // has, so a direction with no data is dead rather than landing on an empty
-  // window (this book holds 2025 and 2026 only — forward from 2026 is dead).
-  const step = (dir: -1 | 1): Period | null => {
-    if (period.mode === "ytd") {
-      const years = [...new Set(months.map((m) => m.slice(0, 4)))].sort();
-      const yi = years.indexOf(period.month.slice(0, 4));
-      const target = years[yi + dir];
-      if (yi < 0 || !target) return null;
-      // Land on the newest month that year has, so YTD covers all of it.
-      const last = [...months].filter((m) => m.startsWith(target)).pop();
-      return last ? { mode: "ytd", month: last } : null;
-    }
-    // Monthly — and a range, which steps back out to a plain month rather than
-    // sliding a window whose length nobody asked to keep.
-    const next = months[idx + dir];
-    return next ? { mode: "monthly", month: next } : null;
-  };
-
-  const prev = step(-1);
-  const next = step(1);
+  const prev = stepPeriod(period, months, -1);
+  const next = stepPeriod(period, months, 1);
   const phone = useMediaQuery("(max-width: 767px)");
   const trigger = (controls: ReactNode) => (
     <DateTrigger period={period} months={months} latestDay={latestDay} onChange={onChange} phone={phone} controls={controls} />

@@ -23,7 +23,7 @@ import { Tabs, type TabItem } from "@/components/ui/tabs";
 // injected srcdoc document can be a real, navigable, testable React screen.
 //
 // Tabs are named after the FUNCTION, never after the person who reads them:
-// Overview, Sales, Operations, People, Service, Finance — the same keys the
+// Overview, Sales, Operations, Employees (key `people`), Service, Finance — the same keys the
 // /m dashboard uses (m/screens/dashboard/dashboard-m-lib.ts). A reviewer has
 // no tab of their own: each chart lives in the tab that owns it, approvals
 // live in Service > Approvals, and Overview's "Needs action" strip links
@@ -53,7 +53,7 @@ const TABS: TabItem<"overview" | "sales" | "operations" | "people" | "service" |
   { key: "overview", label: "Overview" },
   { key: "sales", label: "Sales" },
   { key: "operations", label: "Operations" },
-  { key: "people", label: "People" },
+  { key: "people", label: "Employees" },
   { key: "service", label: "Service" },
   { key: "finance", label: "Finance" },
 ];
@@ -142,7 +142,7 @@ export default function DashboardPrototypePage() {
             aria-label="Dashboard section"
             value={tab}
             onChange={(e) => setTab(e.target.value as TabKey)}
-            className="md:hidden order-1 h-11 min-w-0 flex-1 rounded-md border border-[#E2DDD8] bg-white px-3 text-sm font-semibold text-[#1F1D1B] focus:outline-none focus:border-[#6B5C32]"
+            className="md:hidden order-1 h-11 min-w-0 flex-1 rounded-md border border-[#E2DDD8] bg-white px-3 text-base font-semibold text-[#1F1D1B] focus:outline-none focus:border-[#6B5C32]"
           >
             {TABS.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
           </select>

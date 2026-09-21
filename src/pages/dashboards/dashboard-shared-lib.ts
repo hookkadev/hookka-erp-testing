@@ -125,6 +125,78 @@ export function dayLabel(d: string): string {
   return `${Number(day)} ${MONTH_NAMES[Number(m) - 1] ?? m} ${y}`;
 }
 
+// ---- Period picker logic (pure: tests/dashboard-period.test.mjs) ----------
+// Shared by the desktop PeriodPicker and the /m PeriodChip so a phone and a
+// desktop step, preset and highlight identically.
+
+/**
+ * One step of the < > arrows. They move by whatever the mode MEASURES: a year
+ * in YTD (landing on the newest month that year has, so YTD covers all of it),
+ * otherwise a month - and a range steps back out to a plain month rather than
+ * sliding a window whose length nobody asked to keep. Targets are resolved
+ * against the months the book actually has; a direction with no data is null.
+ */
+export function stepPeriod(period: Period, months: string[], dir: -1 | 1): Period | null {
+  if (period.mode === "ytd") {
+    const years = [...new Set(months.map((m) => m.slice(0, 4)))].sort();
+    const yi = years.indexOf(period.month.slice(0, 4));
+    const target = years[yi + dir];
+    if (yi < 0 || !target) return null;
+    const last = months.filter((m) => m.startsWith(target)).pop();
+    return last ? { mode: "ytd", month: last } : null;
+  }
+  const next = months[months.indexOf(period.month) + dir];
+  return next ? { mode: "monthly", month: next } : null;
+}
+
+/**
+ * Today / Yesterday / Last 7 Days, anchored to the newest day the book
+ * ACTUALLY has - not the machine clock and not the end of the newest month
+ * (that made "Last 7 Days" select Sep 24-30 when data stopped on Sep 15, so
+ * every preset returned zero rows). A one-day preset stays on that day's
+ * MONTH and highlights it, so the trend still draws the whole month; a
+ * multi-day one genuinely re-scopes to a range.
+ */
+export function periodPresets(latestDay: string | undefined, months: string[]): { label: string; period: Period }[] {
+  const iso = latestDay || (months.length ? `${months[months.length - 1]}-01` : "");
+  if (!iso) return [];
+  const [y, m, d] = iso.split("-").map(Number);
+  const back = (n: number) => ymd(new Date(y, m - 1, d - n));
+  const one = (label: string, day: string) => ({ label, period: { mode: "monthly" as const, month: day.slice(0, 7), day } });
+  const from = back(6);
+  return [
+    one("Today", back(0)),
+    one("Yesterday", back(1)),
+    { label: "Last 7 Days", period: { mode: "range", month: from.slice(0, 7), from, to: back(0), label: "Last 7 Days" } },
+  ];
+}
+
+/** Is this preset the current selection? */
+export function presetActive(preset: Period, period: Period): boolean {
+  return preset.mode === "range"
+    ? period.mode === "range" && period.from === preset.from && period.to === preset.to
+    : period.day === preset.day;
+}
+
+/** Monday-first calendar cells for YYYY-MM: leading nulls, then each YYYY-MM-DD. */
+export function calendarCells(viewMonth: string): (string | null)[] {
+  const [y, m] = viewMonth.split("-").map(Number);
+  // JS getDay() is Sunday=0, so shift by one and wrap.
+  const lead = (new Date(y, m - 1, 1).getDay() + 6) % 7;
+  const days = new Date(y, m, 0).getDate();
+  return [
+    ...Array<null>(lead).fill(null),
+    ...Array.from({ length: days }, (_, i) => `${viewMonth}-${String(i + 1).padStart(2, "0")}`),
+  ];
+}
+
+/** YYYY-MM moved by `delta` months. */
+export function shiftMonth(month: string, delta: number): string {
+  const [y, m] = month.split("-").map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
 export function ymd(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }

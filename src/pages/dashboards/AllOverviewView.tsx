@@ -32,7 +32,7 @@ import { overviewTotals, overviewSalesSnapshot, overviewWorkforce } from "./dash
 // every month of the selected month's year up to and including it.
 //
 // A domain card links onward only when its tab is mounted (Sales, Operations,
-// People); the others show their figures without a dead "Open" button.
+// Employees); the others show their figures without a dead "Open" button.
 //
 // "Needs action" is the reviewer's entry point — there is no per-person tab.
 // Each tile is a count plus a link to the sub-tab that owns the list; the
@@ -471,7 +471,7 @@ export function AllOverviewView({
           ]}
           note={workforce.avg == null ? "No efficiency recorded in this period — not shown as 0%." : undefined}
           noteTone={AMBER}
-          cta="Open People"
+          cta="Open Employees"
           onOpen={() => onOpenTab("people", "efficiency")}
         />
 

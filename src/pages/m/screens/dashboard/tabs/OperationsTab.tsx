@@ -3,7 +3,7 @@
 // same maths (inPeriod / inFocus / the day-or-month bucket rule), phone layout.
 // Sub-tab lives in ?sub= with the desktop's OPS_SUBS keys.
 //
-// Dropped vs desktop: the attendance log card (People tab owns it), the
+// Dropped vs desktop: the attendance log card (Employees tab owns it), the
 // efficiency sparkline, the department filter + search on the due-soon list,
 // chart tooltips / average reference line (the average is in the subtitle).
 // MChartCard is single-series, so Plan vs Actual charts one series at a time

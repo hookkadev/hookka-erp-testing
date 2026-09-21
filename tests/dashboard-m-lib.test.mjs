@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  readPeriod, writePeriod, resolvePeriod, periodChoices, tapBucket, compactSen, MOBILE_TABS,
+  readPeriod, writePeriod, resolvePeriod, tapBucket, compactSen, MOBILE_TABS,
 } from "../src/pages/m/screens/dashboard/dashboard-m-lib.ts";
 import {
   buildSalesTrend, computeSalesKpis, previousSalesKpis, customerRevenue, overviewTotals, pctDelta,
@@ -28,14 +28,6 @@ test("resolvePeriod falls back to the newest month; keeps a valid one", () => {
   assert.equal(resolvePeriod({ mode: "monthly", month: "" }, months).month, "2026-08");
   assert.equal(resolvePeriod({ mode: "monthly", month: "1999-01" }, months).month, "2026-08");
   assert.equal(resolvePeriod({ mode: "monthly", month: "2026-06" }, months).month, "2026-06");
-});
-
-test("periodChoices: months newest first; YTD lists years at their newest month", () => {
-  assert.deepEqual(periodChoices(months, "monthly").map((c) => c.value), ["2026-08", "2026-07", "2026-06"]);
-  assert.deepEqual(periodChoices(["2025-11", "2026-01", "2026-02"], "ytd"), [
-    { value: "2026-02", label: "2026" },
-    { value: "2025-11", label: "2025" },
-  ]);
 });
 
 test("tapBucket: toggles a day; YTD opens the month", () => {

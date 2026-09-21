@@ -23,7 +23,7 @@ export const MOBILE_TABS = [
   { key: "overview", label: "Overview" },
   { key: "sales", label: "Sales" },
   { key: "operations", label: "Operations" },
-  { key: "people", label: "People" },
+  { key: "people", label: "Employees" },
   { key: "service", label: "Service" },
   { key: "finance", label: "Finance" },
 ] as const;
@@ -54,17 +54,6 @@ export function resolvePeriod(period: Period, months: string[]): Period {
   const month =
     period.month && months.includes(period.month) ? period.month : (months[months.length - 1] ?? "");
   return { ...period, month };
-}
-
-/** Sheet list: newest first. Monthly lists months; YTD lists years. */
-export function periodChoices(months: string[], mode: "monthly" | "ytd"): { value: string; label: string }[] {
-  if (mode === "monthly") return [...months].reverse().map((m) => ({ value: m, label: m }));
-  const years = [...new Set(months.map((m) => m.slice(0, 4)))].sort().reverse();
-  // A YTD period carries the newest month of that year: the window is the year.
-  return years.map((y) => ({
-    value: [...months].filter((m) => m.startsWith(y)).pop() ?? `${y}-01`,
-    label: y,
-  }));
 }
 
 /**

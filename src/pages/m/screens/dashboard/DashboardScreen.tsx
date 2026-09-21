@@ -23,7 +23,9 @@ export function DashboardScreen() {
   const { search } = useLocation();
   const navigate = useNavigate();
   const { isNavAllowed } = usePermissions();
-  const { months } = useDashboardFeed();
+  const { feed, months } = useDashboardFeed();
+  // Newest day that carries data: the period sheet anchors its presets to it.
+  const latestDay = (feed?.sales?.byDay ?? []).reduce((m, d) => (d.date > m ? d.date : m), "");
   const { period, setPeriod } = useDashboardPeriod(months);
 
   const openTab = useCallback(
@@ -48,7 +50,7 @@ export function DashboardScreen() {
       <MobileHeader
         title="Dashboard"
         onBack={() => navigate("/m/more")}
-        trailing={<PeriodChip period={period} months={months} onChange={setPeriod} />}
+        trailing={<PeriodChip period={period} months={months} latestDay={latestDay} onChange={setPeriod} />}
       />
       {/* Sticky under the MobileHeader (minHeight 52), like SubTabs. */}
       <div style={{ position: "sticky", top: 52, zIndex: 30, padding: "8px 12px", backgroundColor: M.paper, borderBottom: `1px solid ${M.border}` }}>
@@ -58,7 +60,8 @@ export function DashboardScreen() {
           onChange={(e) => openTab(e.target.value as MobileTabKey)}
           style={{
             width: "100%", minHeight: 44, padding: "0 12px", borderRadius: 11, border: `1px solid ${M.hairline}`,
-            backgroundColor: M.card, color: M.raisin, fontSize: 15, fontWeight: 700,
+            // 16px: iOS Safari zooms the whole page when a control under 16px takes focus.
+            backgroundColor: M.card, color: M.raisin, fontSize: 16, fontWeight: 700,
           }}
         >
           {MOBILE_TABS.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}

@@ -98,7 +98,7 @@ export function EmployeesView({
     return (
       <Card className="border-[#F0D9AE] bg-[#FDF3E4]">
         <CardContent className="p-4 text-sm text-[#B5701A]">
-          Couldn't load People: {error ?? "unknown error"}
+          Couldn't load Employees:{error ?? "unknown error"}
         </CardContent>
       </Card>
     );
@@ -139,7 +139,7 @@ export function EmployeesView({
   return (
     <div className="space-y-6 max-md:space-y-4">
       <div className="flex flex-wrap items-center gap-2">
-        <h2 className="text-lg font-semibold text-[#1F1D1B]">People</h2>
+        <h2 className="text-lg font-semibold text-[#1F1D1B]">Employees</h2>
         <LiveBadge live={live} />
       </div>
       <MissingNote fields={missing} />

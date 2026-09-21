@@ -16,7 +16,7 @@ import type { EmployeeSlice } from "./EmployeesInsights";
 //   plan      Operations > Plan vs Actual   (definitions are in the card
 //             subtitles and mirrored in src/api/lib/dashboard-daily-slice.ts)
 //   revenue   Operations > Revenue & Cost   (value of orders completed per day)
-//   DeptEfficiencyCard   People > Efficiency
+//   DeptEfficiencyCard   Employees > Efficiency
 // Everything reads the same cached GET /api/dashboard/prototype feed. The
 // slice is optional: a 60s-cached payload from before it existed has no such
 // key and must render an explanation, not crash. `lim` is the feed's key for
