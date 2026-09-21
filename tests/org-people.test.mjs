@@ -96,3 +96,37 @@ test("subtree counts drive the collapsed-box number", () => {
   ]);
   assert.equal(org.countSubtree(root), 3);
 });
+
+// ---------------------------------------------------------------------------
+// Server-side subtree / upline helpers (PRD T-012 R9) — what the Mail Center
+// recipient picker asks of the flat list.
+// ---------------------------------------------------------------------------
+test("subtreeKeys: the root and everyone under it, cycle-safe", () => {
+  const people = [
+    p("user:ceo"),
+    p("user:mgr", "user:ceo"),
+    p("user:a", "user:mgr"),
+    p("worker:w1", "user:a"),
+    p("user:other", "user:ceo"),
+  ];
+  assert.deepEqual(
+    [...org.subtreeKeys(people, "user:mgr")].sort(),
+    ["user:a", "user:mgr", "worker:w1"],
+  );
+  assert.deepEqual([...org.subtreeKeys(people, "user:a")].sort(), ["user:a", "worker:w1"]);
+  // A cycle that reached the database must not hang the walk.
+  const loop = [p("user:x", "user:y"), p("user:y", "user:x")];
+  assert.deepEqual([...org.subtreeKeys(loop, "user:x")].sort(), ["user:x", "user:y"]);
+});
+
+test("uplineKeys: the manager chain, nearest first, self excluded", () => {
+  const people = [
+    p("user:ceo"),
+    p("user:mgr", "user:ceo"),
+    p("user:a", "user:mgr"),
+  ];
+  assert.deepEqual(org.uplineKeys(people, "user:a"), ["user:mgr", "user:ceo"]);
+  assert.deepEqual(org.uplineKeys(people, "user:ceo"), []);
+  const loop = [p("user:x", "user:y"), p("user:y", "user:x")];
+  assert.deepEqual(org.uplineKeys(loop, "user:x"), ["user:y"]);
+});

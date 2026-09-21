@@ -34,6 +34,7 @@ import {
 import { Mail, Send, Loader2, X, Save, Paperclip } from "lucide-react";
 import { RecipientsInput } from "./recipients-input";
 import { AckRequestRow } from "./ack-request-row";
+import { RecipientPicker } from "./recipient-picker";
 import { parseAddressList, recipientsValid } from "@/api/lib/mail-threading";
 
 // One picked file held in memory for the compose POST. contentBase64 is the
@@ -134,6 +135,20 @@ export function ComposeDialog({
   const [bcc, setBcc] = useState<string[]>([]);
   const [showCc, setShowCc] = useState(false);
   const [showBcc, setShowBcc] = useState(false);
+  // R9: org-chart recipient picker.
+  const [pickerOpen, setPickerOpen] = useState(false);
+  function addPicked(addresses: string[], field: "to" | "cc") {
+    const merge = (prev: string[]) => {
+      const have = new Set(prev.map((a) => a.toLowerCase()));
+      return [...prev, ...addresses.filter((a) => !have.has(a.toLowerCase()))];
+    };
+    if (field === "cc") {
+      setCc(merge);
+      setShowCc(true);
+    } else {
+      setTo(merge);
+    }
+  }
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   // R8: ask the staff recipients to acknowledge (due in N hours).
@@ -448,6 +463,7 @@ export function ComposeDialog({
                 disabled={sending}
                 placeholder="customer@example.com"
                 autoFocus
+                onOpenPicker={() => setPickerOpen(true)}
               />
               {(!showCc || !showBcc) && (
                 <div className="flex gap-3 text-[11px]">
@@ -641,6 +657,12 @@ export function ComposeDialog({
           </div>
         </div>
       </div>
+      <RecipientPicker
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        onPick={addPicked}
+        already={[...to, ...cc, ...bcc]}
+      />
     </div>
   );
 }

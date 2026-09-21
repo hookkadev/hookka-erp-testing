@@ -51,6 +51,7 @@ import { createLabel } from "./mail-actions";
 import { ComposeDialog } from "./compose";
 import { RecipientsInput } from "./recipients-input";
 import { AckRequestRow } from "./ack-request-row";
+import { RecipientPicker } from "./recipient-picker";
 import {
   replyRecipients,
   recipientsValid,
@@ -356,6 +357,8 @@ export default function MailCenterDetailPage({
   const [ackRequired, setAckRequired] = useState(false);
   const [ackDueHours, setAckDueHours] = useState(48);
   const [acking, setAcking] = useState<string | null>(null);
+  // R9: org-chart recipient picker for the reply box.
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [sending, setSending] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [assigning, setAssigning] = useState(false);
@@ -422,6 +425,18 @@ export default function MailCenterDetailPage({
     setReplyMode(mode);
     setManual(null);
     focusReply();
+  }
+  function addPicked(addresses: string[], field: "to" | "cc") {
+    const merge = (prev: string[]) => {
+      const have = new Set(prev.map((a) => a.toLowerCase()));
+      return [...prev, ...addresses.filter((a) => !have.has(a.toLowerCase()))];
+    };
+    if (field === "cc") {
+      editRecipients({ cc: merge(replyCc) });
+      setShowReplyCc(true);
+    } else {
+      editRecipients({ to: merge(replyTo) });
+    }
   }
 
   // Star / labels / trashed are DB-backed and arrive on the thread itself.
@@ -1315,6 +1330,7 @@ export default function MailCenterDetailPage({
                 onChange={(next) => editRecipients({ to: next })}
                 disabled={sending}
                 dense
+                onOpenPicker={() => setPickerOpen(true)}
               />
               {(showReplyCc || replyCc.length > 0) && (
                 <RecipientsInput
@@ -1493,6 +1509,13 @@ export default function MailCenterDetailPage({
           }}
         />
       )}
+
+      <RecipientPicker
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        onPick={addPicked}
+        already={[...replyTo, ...replyCc, ...replyBcc]}
+      />
 
       {confirmDialog}
     </div>

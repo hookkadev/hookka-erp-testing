@@ -68,6 +68,7 @@ import { useIncrementalList } from "@/components/ui/incremental-list";
 import { cn } from "@/lib/utils";
 import { ComposeDialog } from "./compose";
 import { pickDefaultFromAddress } from "./mail-from-default";
+import { VisibilityPanel } from "./visibility-panel";
 import MailCenterDetailPage from "./detail";
 import {
   subscribe as subscribeLocal,
@@ -1837,6 +1838,9 @@ export default function MailCenterPage() {
               </>
             )}
           </div>
+
+          {/* R10: what may I see — the caller's scope level + mailboxes. */}
+          <VisibilityPanel />
         </aside>
 
         {/* MIDDLE+RIGHT — "Auto-sent" renders the outbox panel across the

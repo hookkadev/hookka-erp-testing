@@ -123,3 +123,50 @@ export function buildOrgTree(people: readonly OrgPerson[]): OrgNode[] {
 export function countSubtree(node: OrgNode): number {
   return 1 + node.children.reduce((s, c) => s + countSubtree(c), 0);
 }
+
+// ---------------------------------------------------------------------------
+// Server-side helpers (PRD T-012 R9). The tree builder above serves the
+// chart; the Mail Center's recipient picker needs the two questions a
+// picker asks — "who is under this person?" and "who is above them?" —
+// answered on the flat list, without building the whole forest first.
+// ---------------------------------------------------------------------------
+
+/** Every key at or below `rootKey` (root included). Cycle-safe. */
+export function subtreeKeys(
+  people: readonly OrgPerson[],
+  rootKey: string,
+): Set<string> {
+  const childrenOf = new Map<string, string[]>();
+  for (const p of people) {
+    if (!p.managerKey) continue;
+    const arr = childrenOf.get(p.managerKey) ?? [];
+    arr.push(p.key);
+    childrenOf.set(p.managerKey, arr);
+  }
+  const out = new Set<string>();
+  const stack = [rootKey];
+  while (stack.length) {
+    const k = stack.pop()!;
+    if (out.has(k)) continue;
+    out.add(k);
+    for (const c of childrenOf.get(k) ?? []) stack.push(c);
+  }
+  return out;
+}
+
+/** The manager chain above `key`, nearest first. Cycle-safe, self excluded. */
+export function uplineKeys(
+  people: readonly OrgPerson[],
+  key: string,
+): string[] {
+  const managerOf = new Map(people.map((p) => [p.key, p.managerKey]));
+  const out: string[] = [];
+  const seen = new Set<string>([key]);
+  let cur = managerOf.get(key) ?? null;
+  while (cur && !seen.has(cur)) {
+    seen.add(cur);
+    out.push(cur);
+    cur = managerOf.get(cur) ?? null;
+  }
+  return out;
+}

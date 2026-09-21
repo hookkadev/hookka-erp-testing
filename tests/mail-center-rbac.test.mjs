@@ -130,3 +130,19 @@ test("the test-inject button is not offered to people who would get a 403", () =
   const region = page.slice(start, start + 900);
   assert.match(region, /isSuperAdmin && \(/, "inject button must be admin-gated");
 });
+
+test("the org-chart directory and the visibility panel are scoped reads (T-012 R9/R10)", () => {
+  for (const [verb, path] of [
+    ["get", "/directory"],
+    ["get", "/visibility"],
+  ]) {
+    const h = handler(verb, path);
+    assert.match(h, /requirePermission\(c, "mail-center", "read"\)/, path);
+    assert.match(h, /getMailScope\(c, orgId\)/, path);
+  }
+  // The directory lists only OFFICE accounts (workers have no email) and
+  // never the caller themselves.
+  const dir = handler("get", "/directory");
+  assert.match(dir, /if \(p\.source !== "user"\) return null;/);
+  assert.match(dir, /if \(p\.key === meKey\) continue;/);
+});

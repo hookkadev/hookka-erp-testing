@@ -34,7 +34,7 @@ const WORKER_DEPARTMENT = "Production";
 // Runtime self-apply. Migrations are inert on deploy in this repo — the table
 // exists only because this runs and is AWAITED before the first read or write.
 let _mig: Promise<void> | null = null;
-function ensureOrgReporting(db: D1Database): Promise<void> {
+export function ensureOrgReporting(db: D1Database): Promise<void> {
   if (_mig) return _mig;
   _mig = (async () => {
     await db
@@ -67,7 +67,7 @@ export function _resetOrgReportingMigForTests(): void {
  * already wired up before this table existed, so the existing chart does not
  * reset itself to flat on the day this ships.
  */
-async function loadPeople(db: D1Database): Promise<OrgPerson[]> {
+export async function loadPeople(db: D1Database): Promise<OrgPerson[]> {
   const people: OrgPerson[] = [];
 
   const uRes = await db

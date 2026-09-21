@@ -53,6 +53,8 @@ import {
   type AckRow,
   type ReadReceipt,
 } from "../lib/mail-acks";
+import { ensureOrgReporting, loadPeople } from "./org-chart";
+import { personKey, subtreeKeys, uplineKeys } from "../../lib/org-people";
 import {
   DEFAULT_BUCKET,
   putFile,
@@ -2161,6 +2163,201 @@ app.delete("/access", async (c) => {
 
 // GET /api/mail-center/scope-levels — every per-user level row in the org, for
 // rendering the visibility-level selector. Users absent here = 'personal'.
+// ---------------------------------------------------------------------------
+// Org chart in the Mail Center (PRD T-012 R9 / R10).
+//
+// GET /directory   — the recipient picker's three tabs (Department / My team /
+//                    My managers) plus Everyone, served off the same people
+//                    loader the org chart uses, so the picker and the chart
+//                    can never disagree about who reports to whom. Only
+//                    office accounts have an email; a person's address is
+//                    their personal mailbox when provisioned, else the login.
+// GET /visibility  — "what may I see": the caller's effective scope level and
+//                    the mailboxes they can read from and send from.
+// Both are inherently scoped to the caller and need only mail-center:read.
+// ---------------------------------------------------------------------------
+type DirectoryPerson = {
+  key: string;
+  userId: string | null;
+  name: string;
+  email: string;
+  position: string;
+  department: string;
+};
+
+app.get("/directory", async (c) => {
+  const denied = await requirePermission(c, "mail-center", "read");
+  if (denied) return denied;
+  await ensureMailSchema(c.var.DB);
+  await ensureOrgReporting(c.var.DB);
+  const orgId = getOrgId(c);
+  const scope = await getMailScope(c, orgId);
+
+  const people = (await loadPeople(c.var.DB)).filter((p) => p.active);
+
+  // Personal mailboxes by user id — the address a colleague is reached on.
+  const boxes = await c.var.DB.prepare(
+    `SELECT address, assigned_user_id, assigned_dept, label FROM email_addresses
+      WHERE org_id = ? AND active = 1`,
+  )
+    .bind(orgId)
+    .all<{
+      address: string;
+      assignedUserId?: string | null;
+      assigned_user_id?: string | null;
+      assignedDept?: string | null;
+      assigned_dept?: string | null;
+      label?: string | null;
+    }>();
+  const mailboxOf = new Map<string, string>();
+  const sharedByDept = new Map<string, Array<{ address: string; label: string }>>();
+  for (const b of boxes.results ?? []) {
+    const uid = b.assignedUserId ?? b.assigned_user_id ?? null;
+    if (uid) {
+      if (!mailboxOf.has(uid)) mailboxOf.set(uid, b.address.toLowerCase());
+      continue;
+    }
+    const dept = (b.assignedDept ?? b.assigned_dept ?? "").trim();
+    if (!dept) continue;
+    const list = sharedByDept.get(dept) ?? [];
+    list.push({ address: b.address.toLowerCase(), label: (b.label ?? "").trim() });
+    sharedByDept.set(dept, list);
+  }
+
+  const toEntry = (p: (typeof people)[number]): DirectoryPerson | null => {
+    if (p.source !== "user") return null;
+    const email = mailboxOf.get(p.id) ?? p.ref.toLowerCase();
+    if (!email) return null;
+    return {
+      key: p.key,
+      userId: p.id,
+      name: p.name,
+      email,
+      position: p.position,
+      department: p.departmentCode,
+    };
+  };
+
+  const meKey = scope.userId ? personKey("user", scope.userId) : "";
+  const me = people.find((p) => p.key === meKey) ?? null;
+  const byKey = new Map(people.map((p) => [p.key, p]));
+
+  // Department: everyone whose department matches mine, plus the department's
+  // shared mailboxes (support@ / finance@ / hr@ …) as pickable entries.
+  const department: DirectoryPerson[] = [];
+  if (me?.departmentCode) {
+    for (const p of people) {
+      if (p.departmentCode !== me.departmentCode || p.key === meKey) continue;
+      const e = toEntry(p);
+      if (e) department.push(e);
+    }
+    for (const box of sharedByDept.get(me.departmentCode) ?? []) {
+      department.push({
+        key: `mailbox:${box.address}`,
+        userId: null,
+        name: box.label || box.address,
+        email: box.address,
+        position: "Shared mailbox",
+        department: me.departmentCode,
+      });
+    }
+  }
+
+  // My team: my whole subtree, plus my peers (the people who share my
+  // manager). Me excluded.
+  const team: DirectoryPerson[] = [];
+  if (me) {
+    const keys = subtreeKeys(people, meKey);
+    if (me.managerKey) {
+      for (const p of people) {
+        if (p.managerKey === me.managerKey) keys.add(p.key);
+      }
+    }
+    keys.delete(meKey);
+    for (const k of keys) {
+      const p = byKey.get(k);
+      const e = p ? toEntry(p) : null;
+      if (e) team.push(e);
+    }
+  }
+
+  // My managers: the chain above me, nearest first.
+  const managers: DirectoryPerson[] = [];
+  if (me) {
+    for (const k of uplineKeys(people, meKey)) {
+      const p = byKey.get(k);
+      const e = p ? toEntry(p) : null;
+      if (e) managers.push(e);
+    }
+  }
+
+  const everyone: DirectoryPerson[] = [];
+  for (const p of people) {
+    if (p.key === meKey) continue;
+    const e = toEntry(p);
+    if (e) everyone.push(e);
+  }
+  const byName = (a: DirectoryPerson, b: DirectoryPerson) => a.name.localeCompare(b.name);
+  department.sort(byName);
+  team.sort(byName);
+  everyone.sort(byName);
+
+  c.header("Cache-Control", "no-store");
+  return c.json({
+    me: me ? toEntry(me) : null,
+    department,
+    team,
+    managers,
+    everyone,
+  });
+});
+
+app.get("/visibility", async (c) => {
+  const denied = await requirePermission(c, "mail-center", "read");
+  if (denied) return denied;
+  await ensureMailSchema(c.var.DB);
+  const orgId = getOrgId(c);
+  const scope = await getMailScope(c, orgId);
+
+  let rows: AddressRow[];
+  if (scope.isAdmin) {
+    const res = await c.var.DB.prepare(
+      `SELECT * FROM email_addresses WHERE org_id = ? AND active = 1 ORDER BY address ASC`,
+    )
+      .bind(orgId)
+      .all<AddressRow>();
+    rows = res.results ?? [];
+  } else if (scope.addresses.length === 0) {
+    rows = [];
+  } else {
+    const ph = scope.addresses.map(() => "?").join(", ");
+    const res = await c.var.DB.prepare(
+      `SELECT * FROM email_addresses
+        WHERE org_id = ? AND active = 1 AND LOWER(address) IN (${ph})
+        ORDER BY address ASC`,
+    )
+      .bind(orgId, ...scope.addresses)
+      .all<AddressRow>();
+    rows = res.results ?? [];
+  }
+  const mailboxes = rows.map(rowToAddress).map((a) => ({
+    address: a.address,
+    label: a.label,
+    dept: a.assignedDept ?? "",
+    // Own = assigned to me; the rest come via a grant or the scope level.
+    own: (a.assignedUserId ?? "") === scope.userId,
+  }));
+  c.header("Cache-Control", "no-store");
+  return c.json({
+    level: scope.isAdmin ? "company" : scope.level,
+    isAdmin: scope.isAdmin,
+    // Reading and sending are the same set here: the compose gate is the
+    // mailbox scope (see /compose), so what you can read you can send from.
+    readable: mailboxes,
+    sendable: mailboxes,
+  });
+});
+
 app.get("/scope-levels", async (c) => {
   const denied = requireSuperAdmin(c);
   if (denied) return denied;
