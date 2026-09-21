@@ -74,7 +74,7 @@ function DayChip({ period, onPeriodChange }: { period: Period; onPeriodChange: (
     <button
       type="button"
       onClick={() => onPeriodChange({ ...period, day: undefined })}
-      className="text-xs rounded-md border border-[#E5E0D8] bg-[#F7F5F3] px-2 py-0.5 text-[#6B5C32] hover:bg-white"
+      className="text-xs rounded-md border border-[#E5E0D8] bg-[#F7F5F3] px-2 py-0.5 text-[#6B5C32] hover:bg-white max-md:min-h-10 max-md:px-3 max-md:text-left"
     >
       Showing: {dayLabel(period.day)} — click to go back
     </button>
@@ -325,7 +325,7 @@ export function LimDailyView({
                   finished late counts as actual on the day it finished and as plan on the day it was due. Cancelled orders excluded.
                 </p>
               </div>
-              <Tabs tabs={[{ key: "units", label: "Units" }, { key: "orders", label: "Orders" }]} value={metric} onChange={setMetric} variant="pill" />
+              <Tabs tabs={[{ key: "units", label: "Units" }, { key: "orders", label: "Orders" }]} value={metric} onChange={setMetric} variant="pill" scrollable />
             </CardHeader>
             <CardContent>
               {barChart(planChart, (

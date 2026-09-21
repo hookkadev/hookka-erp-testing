@@ -79,7 +79,7 @@ export function AttendanceLogCard({ employee, period, perDay = false }: { employ
       <CardHeader className="pb-3">
         <CardTitle>
           Attendance log{" "}
-          <span className="ml-2 text-[11px] font-normal text-[#6B7280]">
+          <span className="ml-2 max-md:ml-0 max-md:block text-[11px] font-normal text-[#6B7280]">
             {perDay
               ? `${log.days} days · ${who} · ${periodLabel(period)}`
               : `${log.rows.length} employees · latest recorded day each · ${periodLabel(period)}`}

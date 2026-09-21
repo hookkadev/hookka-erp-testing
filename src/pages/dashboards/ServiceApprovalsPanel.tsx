@@ -115,11 +115,11 @@ export function ServiceApprovalsPanel({
                         {r.kind ? KIND_LABEL[r.kind] : "Approval"}
                       </span>
                     </p>
-                    {r.issue && <p className="mt-0.5 text-[#6B7280] truncate max-w-[60ch]">{r.issue}</p>}
+                    {r.issue && <p className="mt-0.5 text-[#6B7280] truncate max-w-[60ch] max-md:whitespace-normal">{r.issue}</p>}
                     {r.note && <p className="mt-0.5 text-[#6B7280] italic">Note: {r.note}</p>}
                     {r.requestedAt && <p className="mt-0.5 text-[11px] text-[#6B7280]">Requested {r.requestedAt.slice(0, 10)}</p>}
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex items-center gap-2 shrink-0 [&_button]:max-md:h-10">
                     <Button size="sm" disabled={busy === r.id} onClick={() => decide(r, "approve")}>Approve</Button>
                     <Button
                       size="sm"
@@ -132,12 +132,12 @@ export function ServiceApprovalsPanel({
                   </div>
                 </div>
                 {rejecting === r.id && (
-                  <div className="mt-2 flex items-center gap-2">
+                  <div className="mt-2 flex flex-wrap items-center gap-2 [&_button]:max-md:h-10">
                     <Input
                       value={reason}
                       onChange={(e) => setReason(e.target.value)}
                       placeholder="Reason for rejecting (required)"
-                      className="h-8 text-xs max-w-md"
+                      className="h-8 max-md:h-10 max-md:text-sm text-xs max-w-md"
                     />
                     <Button size="sm" variant="outline" disabled={!reason.trim() || busy === r.id} onClick={() => decide(r, "reject")}>
                       Confirm reject

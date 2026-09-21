@@ -176,14 +176,14 @@ export function SitiOpsView({
 
   return (
     <div className="space-y-5 max-md:space-y-4">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-lg font-semibold text-[#1F1D1B]">Operations (Siti's list)</h2>
         <LiveBadge live={prodLive && invLive} />
         {period.day && (
           <button
             type="button"
             onClick={() => onPeriodChange({ ...period, day: undefined })}
-            className="text-xs rounded-md border border-[#E5E0D8] bg-[#F7F5F3] px-2 py-0.5 text-[#6B5C32] hover:bg-white"
+            className="text-xs rounded-md border border-[#E5E0D8] bg-[#F7F5F3] px-2 py-0.5 text-[#6B5C32] hover:bg-white max-md:min-h-10 max-md:px-3 max-md:text-left"
           >
             Showing: {dayLabel(period.day)} — click to go back
           </button>

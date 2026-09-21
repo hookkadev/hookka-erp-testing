@@ -530,14 +530,14 @@ export function SalesOrdersView({
 
   return (
     <div className="space-y-6 max-md:space-y-4">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-lg font-semibold text-[#1F1D1B]">Sales Orders</h2>
         <LiveBadge live={live} />
         {selectedDetail ? (
           <button
             type="button"
             onClick={clearDay}
-            className="text-xs rounded-md border border-[#E5E0D8] bg-[#F7F5F3] px-2 py-0.5 text-[#6B5C32] hover:bg-white"
+            className="text-xs rounded-md border border-[#E5E0D8] bg-[#F7F5F3] px-2 py-0.5 text-[#6B5C32] hover:bg-white max-md:min-h-10 max-md:px-3 max-md:text-left"
           >
             Showing: {selectedDetail.label} — click to go back
           </button>
@@ -813,7 +813,7 @@ export function SalesOrdersView({
                     : `Top customer: ${attrChart.topName} (${attrChart.topPct}% of total) · Whole book: ${formatCurrency(attrChart.grandSen)}`}
                 </p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <div className="flex rounded-lg border border-[#E2DDD8] overflow-hidden">
                   {(["monthly", "quarterly", "yearly"] as const).map((g) => (
                     <button
@@ -821,7 +821,7 @@ export function SalesOrdersView({
                       type="button"
                       onClick={() => setAttrGran(g)}
                       className={
-                        "px-2.5 py-1 text-xs font-medium capitalize " +
+                        "px-2.5 py-1 max-md:py-2.5 text-xs font-medium capitalize " +
                         (attrGran === g ? "bg-[#F0ECE9] text-[#1F1D1B]" : "text-[#6B7280] hover:bg-[#F7F5F3]")
                       }
                     >
@@ -839,7 +839,7 @@ export function SalesOrdersView({
                       type="button"
                       onClick={() => setAttrView(v.k)}
                       className={
-                        "px-2.5 py-1 text-xs font-medium " +
+                        "px-2.5 py-1 max-md:py-2.5 text-xs font-medium " +
                         (attrView === v.k ? "bg-[#F0ECE9] text-[#1F1D1B]" : "text-[#6B7280] hover:bg-[#F7F5F3]")
                       }
                     >
@@ -1159,7 +1159,7 @@ export function SalesOrdersView({
                     key={st.state}
                     type="button"
                     onClick={() => setStateFilter((cur) => (cur === st.state ? null : st.state))}
-                    className="w-full flex items-center gap-2 text-[12.5px] text-left"
+                    className="w-full flex items-center gap-2 text-[12.5px] text-left max-md:py-1.5"
                     style={{ opacity: on ? 1 : 0.45 }}
                   >
                     <span
@@ -1202,7 +1202,7 @@ export function SalesOrdersView({
                     type="button"
                     onClick={() => setSkuCat(c === "All" ? null : c)}
                     className={
-                      "px-2 py-0.5 text-[11px] font-medium rounded-md border " +
+                      "px-2 py-0.5 max-md:py-2 max-md:px-3 text-[11px] font-medium rounded-md border " +
                       ((c === "All" ? skuCat === null : skuCat === c)
                         ? "bg-[#2A2723] border-[#2A2723] text-white"
                         : "bg-white border-[#E5E0D8] text-[#6B7280] hover:bg-[#F7F5F3]")

@@ -418,7 +418,7 @@ function Outlook({ d, onSaved }: { d: Resp; onSaved: () => void }) {
                 type="button"
                 onClick={save}
                 disabled={!dirty || saving}
-                className="rounded-md bg-[#6B5C32] px-4 py-1.5 text-sm font-medium text-white disabled:opacity-40"
+                className="rounded-md bg-[#6B5C32] px-4 py-1.5 max-md:h-10 text-sm font-medium text-white disabled:opacity-40"
               >
                 {saving ? "Saving…" : "Save"}
               </button>

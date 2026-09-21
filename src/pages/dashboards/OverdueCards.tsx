@@ -84,19 +84,19 @@ export function DueSoonWorklist({ orders }: { orders: ProdOrderSummary[] }) {
     <Card>
       <CardHeader className="pb-3 flex flex-row items-center justify-between gap-3 flex-wrap">
         <CardTitle>Due within 3 Days — Early Warning Worklist</CardTitle>
-        <div className="relative w-full max-w-[220px]">
+        <div className="relative w-full max-w-[220px] max-md:max-w-none">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[#9CA3AF]" />
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search PO, customer, product…"
-            className="h-8 pl-8 text-xs"
+            className="h-8 max-md:h-10 pl-8 text-xs max-md:text-sm"
           />
         </div>
       </CardHeader>
       <CardContent className="p-0">
         <div className="px-4 pb-3">
-          <Tabs tabs={worklistTabs} value={deptFilter} onChange={setDeptFilter} variant="pill" />
+          <Tabs tabs={worklistTabs} value={deptFilter} onChange={setDeptFilter} variant="pill" scrollable />
         </div>
         <div className="overflow-x-auto" style={{ maxHeight: 420, overflowY: "auto" }}>
           <table className="w-full text-[12.5px]">

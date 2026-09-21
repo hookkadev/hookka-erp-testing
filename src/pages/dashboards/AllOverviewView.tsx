@@ -293,7 +293,7 @@ export function AllOverviewView({
 
   return (
     <div className="space-y-6 max-md:space-y-4">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-lg font-semibold text-[#1F1D1B]">All Overview</h2>
         <LiveBadge live={!!data.availability?.sales?.live} />
       </div>

@@ -147,7 +147,7 @@ export function ServiceView({
           <button
             type="button"
             onClick={() => onPeriodChange({ ...period, day: undefined })}
-            className="text-xs rounded-md border border-[#E5E0D8] bg-[#F7F5F3] px-2 py-0.5 text-[#6B5C32] hover:bg-white"
+            className="text-xs rounded-md border border-[#E5E0D8] bg-[#F7F5F3] px-2 py-0.5 text-[#6B5C32] hover:bg-white max-md:min-h-10 max-md:px-3 max-md:text-left"
           >
             Showing: {dayLabel(period.day)} — click to go back
           </button>
@@ -196,14 +196,14 @@ export function ServiceView({
                 <button
                   type="button"
                   onClick={() => setCauseFilter(null)}
-                  className="text-xs rounded-md border border-[#E5E0D8] bg-[#F7F5F3] px-2 py-0.5 text-[#6B5C32] hover:bg-white"
+                  className="text-xs rounded-md border border-[#E5E0D8] bg-[#F7F5F3] px-2 py-0.5 text-[#6B5C32] hover:bg-white max-md:min-h-10 max-md:px-3 max-md:text-left"
                 >
                   Showing: {causeLabel(causeFilter)} — click to go back
                 </button>
               )}
-              <div className="relative w-full max-w-[220px]">
+              <div className="relative w-full max-w-[220px] max-md:max-w-none">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[#9CA3AF]" />
-                <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search case, customer, issue…" className="h-8 pl-8 text-xs" />
+                <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search case, customer, issue…" className="h-8 max-md:h-10 pl-8 text-xs max-md:text-sm" />
               </div>
             </CardHeader>
             <CardContent className="p-0">

@@ -103,20 +103,20 @@ export function EmployeesView({
     );
   }
 
-  const selectCls = "h-9 rounded-md border border-[#E2DDD8] bg-[#E8E1D6] px-3 text-sm text-[#1F1D1B] focus:outline-none";
+  const selectCls = "h-9 max-md:h-10 rounded-md border border-[#E2DDD8] bg-[#E8E1D6] px-3 text-sm text-[#1F1D1B] focus:outline-none";
   const filterBar = (
     <Card>
       <CardContent className="p-3 flex flex-wrap items-end gap-3">
-        <label className="text-[11px] text-[#6B7280] space-y-1 block">
+        <label className="text-[11px] text-[#6B7280] space-y-1 block max-md:w-full">
           Department
-          <select className={`${selectCls} block min-w-[180px]`} value={dept} onChange={(e) => { setDept(e.target.value); setEmp(""); }}>
+          <select className={`${selectCls} block min-w-[180px] max-md:w-full max-md:min-w-0`} value={dept} onChange={(e) => { setDept(e.target.value); setEmp(""); }}>
             <option value="">All departments</option>
             {depts.map((d) => <option key={d} value={d}>{d}</option>)}
           </select>
         </label>
-        <label className="text-[11px] text-[#6B7280] space-y-1 block">
+        <label className="text-[11px] text-[#6B7280] space-y-1 block max-md:w-full">
           Employee
-          <select className={`${selectCls} block min-w-[200px]`} value={emp} onChange={(e) => setEmp(e.target.value)}>
+          <select className={`${selectCls} block min-w-[200px] max-md:w-full max-md:min-w-0`} value={emp} onChange={(e) => setEmp(e.target.value)}>
             <option value="">All employees</option>
             {empOptions.map((w) => <option key={w.id} value={w.id}>{w.name ?? w.empNo ?? w.id}</option>)}
           </select>
@@ -124,11 +124,11 @@ export function EmployeesView({
         <button
           type="button"
           onClick={() => { setDept(""); setEmp(""); }}
-          className="h-9 rounded-md border border-[#E2DDD8] bg-[#E8E1D6] px-3 text-sm font-medium text-[#1F1D1B] hover:bg-[#DDD5C7]"
+          className="h-9 max-md:h-10 max-md:w-full rounded-md border border-[#E2DDD8] bg-[#E8E1D6] px-3 text-sm font-medium text-[#1F1D1B] hover:bg-[#DDD5C7]"
         >
           Reset
         </button>
-        <span className="ml-auto text-xs text-[#6B7280]">
+        <span className="ml-auto max-md:ml-0 text-xs text-[#6B7280]">
           {shownCount} employee{shownCount === 1 ? "" : "s"} · {dept || "all departments"}
         </span>
       </CardContent>
@@ -137,7 +137,7 @@ export function EmployeesView({
 
   return (
     <div className="space-y-6 max-md:space-y-4">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-lg font-semibold text-[#1F1D1B]">Employees</h2>
         <LiveBadge live={live} />
       </div>

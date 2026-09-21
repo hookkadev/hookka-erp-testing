@@ -19,8 +19,8 @@ function TallyList({
   const max = Math.max(1, ...rows.map((r) => r.count));
   if (total === 0) return <div className="py-6 text-center text-xs text-[#6B7280]">{empty}</div>;
   return (
-    <div className="select-none [&_*]:outline-none">
-      <div className="grid grid-cols-[minmax(110px,1.2fr)_2fr_44px_50px_44px_60px] gap-2 px-1 pb-1 text-[10.5px] font-semibold uppercase tracking-wide text-[#6B7280]">
+    <div className="select-none [&_*]:outline-none max-md:overflow-x-auto">
+      <div className="max-md:min-w-[440px] grid grid-cols-[minmax(110px,1.2fr)_2fr_44px_50px_44px_60px] gap-2 px-1 pb-1 text-[10.5px] font-semibold uppercase tracking-wide text-[#6B7280]">
         <span>Issue</span><span /><span className="text-right">Cases</span><span className="text-right">% cases</span>
         <span className="text-right">Open</span><span className="text-right">Avg close</span>
       </div>
@@ -32,7 +32,7 @@ function TallyList({
             key={r.key}
             role={onPick ? "button" : undefined}
             onClick={onPick ? () => onPick(r.key) : undefined}
-            className={`grid grid-cols-[minmax(110px,1.2fr)_2fr_44px_50px_44px_60px] gap-2 items-center px-1 py-1.5 border-t border-[#E2DDD8] text-[12.5px] ${onPick ? "cursor-pointer hover:bg-[#F7F5F3]" : ""}`}
+            className={`max-md:min-w-[440px] grid grid-cols-[minmax(110px,1.2fr)_2fr_44px_50px_44px_60px] gap-2 items-center px-1 py-1.5 max-md:py-2.5 border-t border-[#E2DDD8] text-[12.5px] ${onPick ? "cursor-pointer hover:bg-[#F7F5F3]" : ""}`}
           >
             <span className="truncate font-medium" style={{ color: none ? AMBER : "#1F1D1B" }}>{r.label}</span>
             <span className="h-3 rounded-sm bg-[#F0ECE9]">
