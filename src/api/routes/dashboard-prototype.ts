@@ -59,6 +59,7 @@ import { isCustomerScoped } from "../lib/customer-scope";
 import { collectOnTimeDelivery, EMPTY_ON_TIME } from "../lib/on-time-delivery";
 import { poInPlanning, poReadyForDelivery, type PipelinePO } from "../../lib/delivery-pipeline";
 import { loadPoValueMap, loadDoValueMap } from "../lib/do-value";
+import { buildDailySlice } from "../lib/dashboard-daily-slice";
 
 const app = new Hono<Env>();
 
@@ -324,7 +325,7 @@ app.get("/", async (c) => {
   // body has no such key — exactly what crashed SitiOpsView.tsx on a stale
   // cache hit — bumping makes that window zero instead of waiting out the
   // 60s TTL.
-  const rawPayload = await cached(c, `dashboard:prototype:${orgId}:v2`, 60, async () => {
+  const rawPayload = await cached(c, `dashboard:prototype:${orgId}:v3`, 60, async () => {
   // ---- Sales ------------------------------------------------------------
   // Whole book, not a window: the prototype owns the month picker, so it
   // needs every month that exists. ~1,500 rows of seven columns is small
@@ -1665,6 +1666,10 @@ app.get("/", async (c) => {
         // see the `section()` helper).
         costError: fgBatchSec.error ?? undefined,
       },
+      lim: {
+        live: !prodOrdSec.error && !jcAllSec.error,
+        reason: prodOrdSec.error ?? jcAllSec.error ?? undefined,
+      },
       inventory: {
         live: !inventorySec.error,
         reason: inventorySec.error ?? batchSec.error ?? undefined,
@@ -1775,6 +1780,8 @@ app.get("/", async (c) => {
       planVsActual,
       productionCost,
     },
+    // "Daily (Lim)" tab — see ../lib/dashboard-daily-slice.ts for definitions.
+    lim: buildDailySlice(prodOrdSec.rows, jcAllSec.rows, doValueError ? null : poValMap, doValueError),
     inventory: {
       groups: [...groups.values()].sort((a, b) => b.items - a.items),
       totals: {
@@ -1865,6 +1872,7 @@ app.get("/", async (c) => {
     employee: canWorkers ? rawPayload.employee : null,
     service: canService ? rawPayload.service : null,
     production: canProduction ? rawPayload.production : null,
+    lim: canProduction ? rawPayload.lim : null,
     availability: {
       ...rawPayload.availability,
       delivery: canDelivery
@@ -1885,6 +1893,9 @@ app.get("/", async (c) => {
       employee: canWorkers
         ? rawPayload.availability.employee
         : { live: false, workers: 0, attendanceRows: 0, reason: "insufficient permission: workers:read" },
+      lim: canProduction
+        ? rawPayload.availability.lim
+        : { live: false, reason: "insufficient permission: production-orders:read" },
       production: canProduction
         ? rawPayload.availability.production
         : { live: false, rows: 0, reason: "insufficient permission: production-orders:read" },

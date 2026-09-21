@@ -1,17 +1,16 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  LineChart, Line, ReferenceLine, Cell,
+  LineChart, Line, ReferenceLine,
 } from "recharts";
 import { useCachedJson } from "@/lib/cached-fetch";
 import { formatCurrency } from "@/lib/utils";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Tabs, type TabItem } from "@/components/ui/tabs";
-import { AlertTriangle, Clock, CalendarClock, PackageX, DollarSign, UserCheck, Gauge, Search } from "lucide-react";
-import { TAUPE, TEAL, RED, AMBER, MUTED, BORDER, fmtN, fmtRMAxis, inPeriod, inFocus, dayLabel, periodLabel, type Period, type SitiSub } from "./dashboard-shared-lib";
+import { AlertTriangle, Clock, CalendarClock, PackageX, DollarSign, UserCheck, Gauge } from "lucide-react";
+import { TAUPE, TEAL, AMBER, MUTED, BORDER, fmtN, fmtRMAxis, inPeriod, inFocus, dayLabel, periodLabel, type Period, type SitiSub } from "./dashboard-shared-lib";
 import { Kpi, LiveBadge } from "./dashboard-shared";
 import { AttendanceLogCard } from "./AttendanceLogCard";
+import { OverdueByDeptCard, DueSoonWorklist, type ProdOrderSummary } from "./OverdueCards";
 import type { EmployeeSlice } from "./EmployeesInsights";
 
 // Siti's report checklist (handed over on paper, 2026-09-17), redesigned
@@ -20,16 +19,6 @@ import type { EmployeeSlice } from "./EmployeesInsights";
 // the due-soon early-warning list — instead of stacked, mostly-empty cards.
 // Everything still reads the SAME cached GET /api/dashboard/prototype feed
 // every other tab reads; no tab has an endpoint of its own.
-type ProdOrderSummary = {
-  poNo: string | null;
-  customer: string | null;
-  productName: string | null;
-  currentDept: string | null;
-  daysToDD: number | null;
-  stagesDone: number;
-  stagesTotal: number;
-};
-
 type Feed = {
   success?: boolean;
   availability?: {
@@ -77,20 +66,10 @@ function bucket<T extends { date: string }>(rows: T[], p: Period, add: (a: T, b:
   return [...m.values()];
 }
 
-const DEPT_ALL_TAB: TabItem<string>[] = [{ key: "ALL", label: "All" }];
-
-function urgencyPill(daysLeft: number | null) {
-  if (daysLeft == null) return { label: "—", bg: "#F0ECE9", fg: "#6B5C32" };
-  if (daysLeft <= 1) return { label: daysLeft <= 0 ? "Overdue/1 Day" : "1 Day", bg: "#FBE7E3", fg: "#9A3A2D" };
-  return { label: `${daysLeft} Days`, bg: "#FAEFCB", fg: "#9C6F1E" };
-}
-
 export function SitiOpsView({
   period, sub, onPeriodChange,
 }: { period: Period; sub: SitiSub; onPeriodChange: (p: Period) => void }) {
   const { data, loading, error } = useCachedJson<Feed>("/api/dashboard/prototype");
-  const [deptFilter, setDeptFilter] = useState("ALL");
-  const [search, setSearch] = useState("");
 
   const production = data?.production;
   const inventory = data?.inventory;
@@ -112,11 +91,6 @@ export function SitiOpsView({
     const total = orders.reduce((a, o) => a + o.stagesTotal, 0);
     return { done, total, pct: total > 0 ? (done / total) * 100 : null };
   }, [production?.orders]);
-
-  const deptChartData = useMemo(
-    () => [...(production?.overdueByDept ?? [])].sort((a, b) => a.count - b.count),
-    [production?.overdueByDept],
-  );
 
   // Follows the global period picker (top right): Monthly = that month by day,
   // YTD = the year by month.
@@ -184,25 +158,6 @@ export function SitiOpsView({
       sparkline: last7,
     };
   }, [employee, period]);
-
-  // Bottom worklist — the due-within-3-days early warning list, filterable
-  // by department and free-text search over PO/customer/product.
-  const dueSoonDepts = useMemo(
-    () => [...new Set((production?.dueSoon3Days ?? []).map((o) => o.currentDept || "(no dept)"))].sort(),
-    [production?.dueSoon3Days],
-  );
-  const worklistTabs: TabItem<string>[] = useMemo(
-    () => [...DEPT_ALL_TAB, ...dueSoonDepts.map((d) => ({ key: d, label: d }))],
-    [dueSoonDepts],
-  );
-  const worklistRows = useMemo(() => {
-    const rows = production?.dueSoon3Days ?? [];
-    const q = search.trim().toLowerCase();
-    return rows
-      .filter((o) => deptFilter === "ALL" || (o.currentDept || "(no dept)") === deptFilter)
-      .filter((o) => !q || [o.poNo, o.customer, o.productName].some((v) => (v ?? "").toLowerCase().includes(q)))
-      .sort((a, b) => (a.daysToDD ?? 0) - (b.daysToDD ?? 0));
-  }, [production?.dueSoon3Days, deptFilter, search]);
 
   if (loading) {
     return <div className="py-16 text-center text-sm text-[#6B7280]">Loading…</div>;
@@ -343,87 +298,9 @@ export function SitiOpsView({
               </div>
             </div>
 
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle>Overdue by department</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div style={{ width: "100%", height: Math.max(160, deptChartData.length * 34) }}>
-                    {deptChartData.length === 0 ? (
-                      <div className="flex items-center justify-center h-full text-xs text-[#6B7280]">No overdue orders.</div>
-                    ) : (
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={deptChartData} layout="vertical" margin={{ top: 4, right: 20, bottom: 0, left: 4 }}>
-                          <XAxis type="number" tick={{ fontSize: 10, fill: MUTED }} axisLine={false} tickLine={false} allowDecimals={false} />
-                          <YAxis type="category" dataKey="department" width={90} tick={{ fontSize: 11, fill: "#1F1D1B" }} axisLine={false} tickLine={false} />
-                          <Tooltip contentStyle={{ background: "#FFFFFF", border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: 12 }} />
-                          <Bar dataKey="count" radius={[0, 3, 3, 0]}>
-                            {deptChartData.map((d) => (
-                              <Cell key={d.department} fill={d.count >= 10 ? RED : d.count >= 4 ? AMBER : TAUPE} />
-                            ))}
-                          </Bar>
-                        </BarChart>
-                      </ResponsiveContainer>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
+            <OverdueByDeptCard overdueByDept={production?.overdueByDept ?? []} />
 
-            {/* ---- Bottom: due-within-3-days worklist ---------------------------- */}
-            <Card>
-              <CardHeader className="pb-3 flex flex-row items-center justify-between gap-3 flex-wrap">
-                <CardTitle>Due within 3 Days — Early Warning Worklist</CardTitle>
-                <div className="relative w-full max-w-[220px]">
-                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[#9CA3AF]" />
-                  <Input
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    placeholder="Search PO, customer, product…"
-                    className="h-8 pl-8 text-xs"
-                  />
-                </div>
-              </CardHeader>
-              <CardContent className="p-0">
-                <div className="px-4 pb-3">
-                  <Tabs tabs={worklistTabs} value={deptFilter} onChange={setDeptFilter} variant="pill" />
-                </div>
-                <div className="overflow-x-auto" style={{ maxHeight: 420, overflowY: "auto" }}>
-                  <table className="w-full text-[12.5px]">
-                    <thead>
-                      <tr className="border-t border-b border-[#E2DDD8] sticky top-0 bg-white">
-                        {["PO Number", "Customer", "Product Description", "Department", "Urgency / Days Left"].map((h) => (
-                          <th key={h} className="text-left px-3 py-2 font-semibold uppercase text-[10.5px] tracking-wide text-[#6B7280]">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {worklistRows.map((o, i) => {
-                        const pill = urgencyPill(o.daysToDD);
-                        return (
-                          <tr key={o.poNo ?? i} className="border-b border-[#E2DDD8]">
-                            <td className="px-3 py-2 font-mono text-[#1F1D1B] whitespace-nowrap">{o.poNo ?? "—"}</td>
-                            <td className="px-3 py-2 text-[#1F1D1B]">{o.customer ?? "—"}</td>
-                            <td className="px-3 py-2 text-[#6B7280]">{o.productName ?? "—"}</td>
-                            <td className="px-3 py-2 text-[#6B7280] whitespace-nowrap">{o.currentDept ?? "—"}</td>
-                            <td className="px-3 py-2 whitespace-nowrap">
-                              <span
-                                className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold"
-                                style={{ background: pill.bg, color: pill.fg }}
-                              >
-                                {pill.label}
-                              </span>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                      {worklistRows.length === 0 && (
-                        <tr><td colSpan={5} className="px-4 py-6 text-center text-[#6B7280]">Nothing matches this filter.</td></tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </CardContent>
-            </Card>
+            <DueSoonWorklist orders={production?.dueSoon3Days ?? []} />
 
             {employee && <AttendanceLogCard employee={employee} period={period} />}
         </>
