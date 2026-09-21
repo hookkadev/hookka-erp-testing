@@ -62,8 +62,10 @@ export function EmployeesView({
     const days = (employee?.performance.byDay ?? [])
       .filter((d) => inPeriod(period, d.date))
       .sort((a, b) => (a.date < b.date ? -1 : 1));
-    const w = days.reduce((a, d) => a + d.workingMinutes, 0);
-    const p = days.reduce((a, d) => a + d.productionMinutes, 0);
+    // The chart keeps the whole period; the totals narrow to a focused day.
+    const focus = period.day ? days.filter((d) => d.date === period.day) : days;
+    const w = focus.reduce((a, d) => a + d.workingMinutes, 0);
+    const p = focus.reduce((a, d) => a + d.productionMinutes, 0);
     const rows = days.map((d) => {
       return {
         iso: d.date,

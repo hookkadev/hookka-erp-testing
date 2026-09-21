@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useCachedJson } from "@/lib/cached-fetch";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { fmtN, inPeriod, periodLabel, type Period } from "./dashboard-shared-lib";
+import { fmtN, inFocus, periodLabel, type Period } from "./dashboard-shared-lib";
 import { LiveBadge } from "./dashboard-shared";
 import type { EmployeeSlice } from "./EmployeesInsights";
 
@@ -37,7 +37,7 @@ export function DepartmentsView({ period }: { period: Period }) {
     // tab; attendance_records only supplies days worked.
     const deptOf = new Map((employee?.workers ?? []).map((w) => [w.id, w.dept]));
     for (const d of employee?.performance.byDay ?? []) {
-      if (!inPeriod(period, d.date)) continue;
+      if (!inFocus(period, d.date)) continue;
       for (const x of d.workers ?? []) {
         const e = get(deptOf.get(x.workerId) ?? null);
         e.working += x.workingMinutes;
@@ -45,7 +45,7 @@ export function DepartmentsView({ period }: { period: Period }) {
       }
     }
     for (const r of employee?.attendance ?? []) {
-      if (inPeriod(period, r.date)) get(r.dept).days += 1;
+      if (inFocus(period, r.date)) get(r.dept).days += 1;
     }
     const rows = [...m.values()].sort((a, b) => b.headcount - a.headcount || a.dept.localeCompare(b.dept));
     const total = rows.reduce(

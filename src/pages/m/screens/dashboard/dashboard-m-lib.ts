@@ -4,6 +4,8 @@
 // desktop URL scheme (dashboards/dashboard-url-state-lib.ts) so a desktop link
 // and a phone link describe the same window.
 import type { Period } from "../../../dashboards/dashboard-shared-lib";
+// Period resolution (including "a bare URL opens on today") is the desktop's.
+export { resolvePeriod } from "../../../dashboards/dashboard-shared-lib";
 import {
   DEFAULT_TAB,
   parseDashboardUrl,
@@ -47,13 +49,6 @@ export function writePeriod(prev: URLSearchParams, period: Period): URLSearchPar
   const sub = prev.get("sub");
   if (sub) out.set("sub", sub);
   return out;
-}
-
-/** Until a month is picked (or when it is not in the book) use the newest one. */
-export function resolvePeriod(period: Period, months: string[]): Period {
-  const month =
-    period.month && months.includes(period.month) ? period.month : (months[months.length - 1] ?? "");
-  return { ...period, month };
 }
 
 /**

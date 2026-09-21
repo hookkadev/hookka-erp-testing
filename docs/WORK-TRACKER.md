@@ -39,6 +39,9 @@ Follow-up (owner on an iPhone: "date picker is bad"): a phone never reaches the 
 It now has the stepper, Today / Yesterday / Last 7 Days, Whole month and a 44px day calendar, on
 ONE shared logic (`stepPeriod` / `periodPresets` / `calendarCells` in `dashboard-shared-lib.ts`,
 `tests/dashboard-period.test.mjs`). Tab `<select>`s are 16px so iOS Safari does not zoom on focus.
+Ask 2026-09-22 (owner, "one last thing"): (1) the dashboard opens on TODAY, not the whole month -
+daily performance is the common check; (2) figures should follow the picked DATE wherever the data
+has a date, not only the month; (3) then fix the `docs-freshness` check on PR #443.
 Owner 2026-09-22: the People tab is labelled Employees (key `people` unchanged).
 
 ## 2026-09-10 — 🔵 PRD T-004 · Import / Export across the whole system (P0/R3-R5 done, rest open)

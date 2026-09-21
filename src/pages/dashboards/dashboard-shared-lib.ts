@@ -125,6 +125,29 @@ export function dayLabel(d: string): string {
   return `${Number(day)} ${MONTH_NAMES[Number(m) - 1] ?? m} ${y}`;
 }
 
+/**
+ * The period a view actually reads, from the period in the URL.
+ *
+ * A BARE URL (nothing picked yet: monthly, no month, no day) opens on TODAY -
+ * this month with `day` = today - because the daily check is the common visit
+ * (owner 2026-09-22). Every dated figure then narrows to the day via inFocus,
+ * while trend charts keep drawing the whole month around it. Clearing the
+ * highlight writes the month into the URL, so it stays cleared. If the book
+ * has nothing in today's month yet, it opens on the newest month instead,
+ * with no day: a highlighted day outside the charted month helps nobody.
+ *
+ * Otherwise an unset or unknown month resolves to the newest month that
+ * exists. DERIVED, never synced with an effect.
+ */
+export function resolvePeriod(period: Period, months: string[], today: string): Period {
+  const thisMonth = today.slice(0, 7);
+  if (period.mode === "monthly" && !period.month && !period.day && months.includes(thisMonth)) {
+    return { mode: "monthly", month: thisMonth, day: today };
+  }
+  const month = period.month && months.includes(period.month) ? period.month : (months[months.length - 1] ?? "");
+  return { ...period, month };
+}
+
 // ---- Period picker logic (pure: tests/dashboard-period.test.mjs) ----------
 // Shared by the desktop PeriodPicker and the /m PeriodChip so a phone and a
 // desktop step, preset and highlight identically.

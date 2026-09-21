@@ -4,7 +4,7 @@
 import { useMemo, type ReactNode } from "react";
 import { ChevronRight, Factory, Package, ShoppingCart, Truck, Users } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
-import { AMBER, fmtN, periodLabel } from "../../../../dashboards/dashboard-shared-lib";
+import { AMBER, fmtN, periodLabel, dayLabel } from "../../../../dashboards/dashboard-shared-lib";
 import { overviewSalesSnapshot, overviewTotals, overviewWorkforce } from "../../../../dashboards/dashboard-sales-lib";
 import { MobileCard } from "../../../components";
 import { M } from "../../../theme";
@@ -81,7 +81,7 @@ export function OverviewTab({ period, months, openTab }: DashboardTabProps) {
   const neck = feed.production?.bottleneck;
   const inv = feed.inventory?.totals;
   const outstanding = (feed.delivery?.statusBreakdown ?? []).find((s) => /outstand|pending|open/i.test(s.key + s.label));
-  const suffix = period.mode === "monthly" ? "MTD" : "YTD";
+  const suffix = period.day ? "day" : period.mode === "monthly" ? "MTD" : "YTD";
 
   return (
     <div style={{ padding: "12px 14px 0" }}>
@@ -163,7 +163,7 @@ export function OverviewTab({ period, months, openTab }: DashboardTabProps) {
             icon={Users}
             onOpen={() => openTab("people")}
             stats={[
-              { label: "Present (latest day)", value: workforce.presentLabel },
+              { label: workforce.presentDay ? `Present (${dayLabel(workforce.presentDay)})` : "Present", value: workforce.presentLabel },
               { label: "Efficiency avg", value: workforce.avg == null ? "—" : `${workforce.avg.toFixed(1)}%` },
               { label: "Roster", value: `${fmtN(feed.availability?.employee?.workers ?? 0)} active` },
               { label: "Measured days", value: fmtN(workforce.measuredDays) },

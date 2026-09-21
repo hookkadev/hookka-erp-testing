@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import {
   MUTED, GREEN, RED, AMBER, fmtN,
-  periodLabel, isConfirmedOrder, type Period,
+  periodLabel, dayLabel, isConfirmedOrder, type Period,
 } from "./dashboard-shared-lib";
 import { LiveBadge } from "./dashboard-shared";
 import { overviewTotals, overviewSalesSnapshot, overviewWorkforce } from "./dashboard-sales-lib";
@@ -284,7 +284,7 @@ export function AllOverviewView({
       </p>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <Hero label={`Total Revenue (${period.mode === "monthly" ? "MTD" : "YTD"})`} value={formatCurrency(totals.revenueSen)} icon={TrendingUp}>
+        <Hero label={`Total Revenue (${period.day ? "day" : period.mode === "monthly" ? "MTD" : "YTD"})`} value={formatCurrency(totals.revenueSen)} icon={TrendingUp}>
           <Delta pct={deltaPct} vs={totals.prevLabel || "—"} />
           <p className="text-xs" style={{ color: MUTED }}>{fmtN(totals.orders)} orders recorded</p>
         </Hero>
@@ -428,7 +428,7 @@ export function AllOverviewView({
           icon={ShoppingCart}
           stats={[
             { label: "Top customer", value: sales.topCustomer },
-            { label: `Revenue ${period.mode === "monthly" ? "this period" : "YTD"}`, value: formatCurrency(totals.revenueSen) },
+            { label: `Revenue ${period.day ? "this day" : period.mode === "monthly" ? "this period" : "YTD"}`, value: formatCurrency(totals.revenueSen) },
             { label: "Top state (all time)", value: sales.topState },
             { label: "Dominant category (all time)", value: sales.topCategory },
           ]}
@@ -464,7 +464,7 @@ export function AllOverviewView({
           title="Workforce &amp; Attendance"
           icon={Users}
           stats={[
-            { label: "Present (latest day)", value: workforce.presentLabel },
+            { label: workforce.presentDay ? `Present (${dayLabel(workforce.presentDay)})` : "Present", value: workforce.presentLabel },
             { label: "Team efficiency avg", value: workforce.avg == null ? "—" : `${workforce.avg.toFixed(1)}%` },
             { label: "Roster", value: `${fmtN(data.availability?.employee?.workers ?? 0)} active` },
             { label: "Measured days", value: fmtN(workforce.measuredDays) },

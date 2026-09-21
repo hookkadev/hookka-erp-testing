@@ -5,7 +5,7 @@
 // import it (tests/dashboard-sales-lib.test.mjs).
 import { isOutstanding, isPendingDelivery, isCompleted } from "../../lib/so-status";
 import {
-  inPeriod, previousPeriod, periodLabel, isConfirmedOrder, ymd,
+  inPeriod, inFocus, previousPeriod, periodLabel, dayLabel, isConfirmedOrder, ymd,
   type Period,
 } from "./dashboard-shared-lib";
 
@@ -137,17 +137,26 @@ export function customerRevenue(orders: SalesOrderRow[]) {
 }
 
 // ---- Overview ------------------------------------------------------------
+// A focused day reads that day alone and compares it with the day before -
+// day-vs-month would be a wrong comparison.
 export function overviewTotals(byDay: ByDay[], period: Period, months: string[]) {
-  const days = byDay.filter((d) => inPeriod(period, d.date));
-  const prev = previousPeriod(period, months);
-  const prevDays = prev ? byDay.filter((d) => inPeriod(prev, d.date)) : [];
+  const days = byDay.filter((d) => inFocus(period, d.date));
+  let dayBefore = "";
+  if (period.day) {
+    const [y, m, d] = period.day.split("-").map(Number);
+    dayBefore = ymd(new Date(y, m - 1, d - 1));
+  }
+  const prev = period.day ? null : previousPeriod(period, months);
+  const prevDays = period.day
+    ? byDay.filter((d) => d.date === dayBefore)
+    : prev ? byDay.filter((d) => inPeriod(prev, d.date)) : [];
   const revenueSen = days.reduce((s, d) => s + d.revenueSen, 0);
   const prevRevenueSen = prevDays.reduce((s, d) => s + d.revenueSen, 0);
   return {
     revenueSen,
     orders: days.reduce((s, d) => s + d.orders, 0),
     prevRevenueSen,
-    prevLabel: prev ? periodLabel(prev) : "",
+    prevLabel: period.day ? dayLabel(dayBefore) : prev ? periodLabel(prev) : "",
     deltaPct: prevRevenueSen > 0 ? ((revenueSen - prevRevenueSen) / prevRevenueSen) * 100 : null,
   };
 }
@@ -157,7 +166,7 @@ export function overviewSalesSnapshot(
   byStateCategory: { state: string | null; category: string | null; revenueSen: number }[],
   period: Period,
 ) {
-  const inP = orders.filter((o) => inPeriod(period, o.createdAt));
+  const inP = orders.filter((o) => inFocus(period, o.createdAt));
   const top = customerRevenue(inP)[0];
   const total = inP.reduce((s, o) => s + o.totalSen, 0);
 
@@ -188,17 +197,19 @@ export type AttendanceRow = {
 };
 
 export function overviewWorkforce(rows: AttendanceRow[], period: Period, fmt: (n: number) => string) {
-  const inP = rows.filter((r) => inPeriod(period, r.date));
+  const inP = rows.filter((r) => inFocus(period, r.date));
   const measured = inP.filter((r) => r.efficiencyPct != null);
   const avg = measured.length
     ? measured.reduce((s, r) => s + (r.efficiencyPct ?? 0), 0) / measured.length
     : null;
-  const latest = rows.reduce((m, r) => (r.date && r.date > m ? r.date : m), "");
+  // "Present" is one day's roll-call: the focused day, else the newest day recorded.
+  const latest = period.day ?? rows.reduce((m, r) => (r.date && r.date > m ? r.date : m), "");
   const today = rows.filter((r) => r.date === latest);
   const present = today.filter((r) => (r.status ?? "").toUpperCase() !== "ABSENT").length;
   return {
     avg,
     presentLabel: latest ? `${fmt(present)} / ${fmt(today.length)}` : "—",
+    presentDay: latest,
     measuredDays: measured.length,
   };
 }

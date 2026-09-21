@@ -205,8 +205,8 @@ offsets pointing past the end of their own file.
 
 These are imported elsewhere, mounted conditionally, or dead. 2 file(s):
 
-- `src/api/routes/service-case-approvals.ts`
 - `src/api/routes/_fabric-cascade.ts`
+- `src/api/routes/service-case-approvals.ts`
 
 ---
 

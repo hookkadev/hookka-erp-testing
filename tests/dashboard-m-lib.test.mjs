@@ -25,9 +25,37 @@ test("period round-trips through the URL and keeps sub + unrelated params", () =
 });
 
 test("resolvePeriod falls back to the newest month; keeps a valid one", () => {
-  assert.equal(resolvePeriod({ mode: "monthly", month: "" }, months).month, "2026-08");
-  assert.equal(resolvePeriod({ mode: "monthly", month: "1999-01" }, months).month, "2026-08");
-  assert.equal(resolvePeriod({ mode: "monthly", month: "2026-06" }, months).month, "2026-06");
+  // Today is outside the book here, so nothing opens on a day.
+  assert.deepEqual(resolvePeriod({ mode: "monthly", month: "" }, months, "2026-11-03"), { mode: "monthly", month: "2026-08" });
+  assert.equal(resolvePeriod({ mode: "monthly", month: "1999-01" }, months, "2026-11-03").month, "2026-08");
+  assert.equal(resolvePeriod({ mode: "monthly", month: "2026-06" }, months, "2026-11-03").month, "2026-06");
+});
+
+test("a bare URL opens on TODAY; anything the user picked is left alone", () => {
+  const today = "2026-08-14";
+  assert.deepEqual(resolvePeriod({ mode: "monthly", month: "" }, months, today), { mode: "monthly", month: "2026-08", day: today });
+  // Cleared highlight (month now in the URL), another month, a picked day, YTD, a range: untouched.
+  assert.deepEqual(resolvePeriod({ mode: "monthly", month: "2026-08" }, months, today), { mode: "monthly", month: "2026-08" });
+  assert.deepEqual(resolvePeriod({ mode: "monthly", month: "2026-06" }, months, today), { mode: "monthly", month: "2026-06" });
+  assert.equal(resolvePeriod({ mode: "monthly", month: "2026-07", day: "2026-07-02" }, months, today).day, "2026-07-02");
+  assert.equal(resolvePeriod({ mode: "ytd", month: "" }, months, today).day, undefined);
+  assert.equal(resolvePeriod({ mode: "range", month: "", from: "2026-08-01", to: "2026-08-07" }, months, today).day, undefined);
+  // Feed not loaded yet: no months, so no day and no crash.
+  assert.deepEqual(resolvePeriod({ mode: "monthly", month: "" }, [], today), { mode: "monthly", month: "" });
+});
+
+test("Overview totals follow a focused day and compare it with the day before", () => {
+  const byDay = [
+    { date: "2026-08-13", orders: 2, revenueSen: 200 },
+    { date: "2026-08-14", orders: 3, revenueSen: 300 },
+    { date: "2026-08-20", orders: 9, revenueSen: 900 },
+  ];
+  const day = overviewTotals(byDay, { mode: "monthly", month: "2026-08", day: "2026-08-14" }, months);
+  assert.deepEqual([day.revenueSen, day.orders, day.prevRevenueSen, day.prevLabel, day.deltaPct], [300, 3, 200, "13 Aug 2026", 50]);
+  const month = overviewTotals(byDay, { mode: "monthly", month: "2026-08" }, months);
+  assert.deepEqual([month.revenueSen, month.orders, month.prevLabel], [1400, 14, "Jul 2026"]);
+  // First of the month: the day before is in the previous month.
+  assert.equal(overviewTotals(byDay, { mode: "monthly", month: "2026-08", day: "2026-08-01" }, months).prevLabel, "31 Jul 2026");
 });
 
 test("tapBucket: toggles a day; YTD opens the month", () => {

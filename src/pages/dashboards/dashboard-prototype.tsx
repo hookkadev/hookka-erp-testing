@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useCachedJson } from "@/lib/cached-fetch";
 import { PeriodPicker } from "./dashboard-shared";
-import type { Period, PeopleSub, OpsSub, ServiceSub, FinSub } from "./dashboard-shared-lib";
+import { resolvePeriod, ymd, type Period, type PeopleSub, type OpsSub, type ServiceSub, type FinSub } from "./dashboard-shared-lib";
 import { TAB_SUBS } from "./dashboard-url-state-lib";
 import { useDashboardUrlState } from "./use-dashboard-url-state";
 import { FinanceView } from "./FinanceView";
@@ -102,20 +102,10 @@ export default function DashboardPrototypePage() {
     [data],
   );
 
-  // The selected month is DERIVED, not synced with an effect: until the user
-  // picks one (and any time the stored month is not in the book) it resolves
-  // to the newest month that exists. Doing this with a setState-in-effect
-  // caused a cascading re-render on every load.
-  const effectivePeriod = useMemo<Period>(
-    () => ({
-      ...period,
-      month:
-        period.month && months.includes(period.month)
-          ? period.month
-          : (months[months.length - 1] ?? ""),
-    }),
-    [period, months],
-  );
+  // DERIVED, not synced with an effect (a setState-in-effect here caused a
+  // cascading re-render on every load). A bare URL opens on TODAY - see
+  // resolvePeriod.
+  const effectivePeriod = useMemo<Period>(() => resolvePeriod(period, months, ymd(new Date())), [period, months]);
 
   return (
     <div className="space-y-6 max-md:space-y-4">
