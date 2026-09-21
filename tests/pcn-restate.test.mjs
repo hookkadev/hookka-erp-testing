@@ -103,10 +103,20 @@ test("the frontend's row actions are Edit + Cancel, not a raw Void button", () =
   assert.match(block, /\/restate`/, "Edit must POST to the restate endpoint");
 });
 
-test("the history list hides CANCELLED rows too, not only DRAFT", () => {
+test("the history list keeps CANCELLED rows visible (only DRAFT is hidden)", () => {
   const FE = read("src/pages/accounting/index.tsx");
   const tabStart = FE.indexOf("function SupplierDiscountTab");
   const visLine = FE.slice(tabStart, FE.indexOf("\n", FE.indexOf("visibleHistory = history.filter", tabStart)));
   assert.match(visLine, /"DRAFT"/);
-  assert.match(visLine, /"CANCELLED"/);
+  assert.doesNotMatch(visLine, /"CANCELLED"/, "owner 2026-09-21: a cancelled row shows its CANCELLED status, it is not removed");
+});
+
+test("Edit is inline in the history row, not the top entry form", () => {
+  const FE = read("src/pages/accounting/index.tsx");
+  const tabStart = FE.indexOf("function SupplierDiscountTab");
+  const block = FE.slice(tabStart, FE.indexOf("\nfunction ", tabStart + 1));
+  assert.match(block, /const saveEdit = async/);
+  assert.match(block, /editingId === n\.id/, "the row itself swaps to inputs");
+  assert.doesNotMatch(block, /disabled=\{!!editingId\}/, "the top form must not have an edit mode");
+  assert.doesNotMatch(block, /supplierId && !editingId/);
 });
