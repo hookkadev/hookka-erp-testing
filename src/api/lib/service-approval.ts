@@ -22,7 +22,7 @@
 // ---------------------------------------------------------------------------
 import type { Context } from "hono";
 import type { Env } from "../worker";
-import { runSelfApply } from "./self-apply";
+import { memoizeSelfApply, runSelfApply } from "./self-apply";
 import { emitAudit } from "./audit";
 
 export type ApprovalKind = "EXCHANGE" | "GENERAL";
@@ -42,15 +42,20 @@ const APPROVAL_DDL = [
   "ALTER TABLE service_cases ADD COLUMN IF NOT EXISTS approval_note TEXT",
 ];
 
-// Boolean memo, never a promise (tests/self-apply-memo-is-boolean).
-let _applied = false;
-export async function ensureApprovalColumns(db: D1Database): Promise<void> {
-  if (_applied) return;
-  await runSelfApply(db as never, "service-approval", APPROVAL_DDL);
-  _applied = true;
+// Same shape as ensure-leave-columns.ts: the memo is DROPPED when the DDL
+// round fails, so the next request retries (tests/self-apply-retry).
+let approvalColumnsPromise: Promise<void> | null = null;
+export function ensureApprovalColumns(db: D1Database): Promise<void> {
+  return memoizeSelfApply(
+    () => approvalColumnsPromise,
+    (p) => {
+      approvalColumnsPromise = p;
+    },
+    () => runSelfApply(db as never, "service-approval", APPROVAL_DDL),
+  );
 }
 export function _resetApprovalColumnsForTests(): void {
-  _applied = false;
+  approvalColumnsPromise = null;
 }
 
 type GateRow = { approval_kind?: string | null; approval_status?: string | null } | null;
