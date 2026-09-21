@@ -1,5 +1,7 @@
 // DashboardScreen — the /m/dashboard/:tab shell: header (back + period chip),
-// scrollable tab strip, and the active tab from TAB_REGISTRY. It owns nothing
+// a tab DROPDOWN (native <select>: one 44px row and the OS picker, instead of a
+// six-pill strip stacked on each tab's own sub-tab pills), and the active tab
+// from TAB_REGISTRY. It owns nothing
 // tab-specific: tabs, their data and their states live behind the registry.
 //
 // URL: tab in the path (/m/dashboard/sales), period in the query string
@@ -8,7 +10,8 @@
 import { useCallback } from "react";
 import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import { usePermissions } from "@/lib/use-permission";
-import { MobileHeader, SubTabs } from "../../components";
+import { MobileHeader } from "../../components";
+import { M } from "../../theme";
 import { DASHBOARD_NAV_HREF, MOBILE_TABS, isMobileTab, type MobileTabKey } from "./dashboard-m-lib";
 import { useDashboardFeed, useDashboardPeriod } from "./hooks";
 import { PeriodChip } from "./PeriodChip";
@@ -47,7 +50,20 @@ export function DashboardScreen() {
         onBack={() => navigate("/m/more")}
         trailing={<PeriodChip period={period} months={months} onChange={setPeriod} />}
       />
-      <SubTabs tabs={[...MOBILE_TABS]} active={tab} onChange={(k) => openTab(k as MobileTabKey)} />
+      {/* Sticky under the MobileHeader (minHeight 52), like SubTabs. */}
+      <div style={{ position: "sticky", top: 52, zIndex: 30, padding: "8px 12px", backgroundColor: M.paper, borderBottom: `1px solid ${M.border}` }}>
+        <select
+          aria-label="Dashboard section"
+          value={tab}
+          onChange={(e) => openTab(e.target.value as MobileTabKey)}
+          style={{
+            width: "100%", minHeight: 44, padding: "0 12px", borderRadius: 11, border: `1px solid ${M.hairline}`,
+            backgroundColor: M.card, color: M.raisin, fontSize: 15, fontWeight: 700,
+          }}
+        >
+          {MOBILE_TABS.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+        </select>
+      </div>
       <Tab period={period} setPeriod={setPeriod} months={months} openTab={openTab} />
     </>
   );

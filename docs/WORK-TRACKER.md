@@ -30,6 +30,10 @@ phone-native (`tabs/OperationsTab|PeopleTab|ServiceTab|FinanceTab.tsx`, sub-tabs
 uses the desktop panel's exact endpoints / confirm / reject-needs-a-reason. Also fixed: the
 Operations cost and production-revenue chart axes read 100x too high (`fmtRMAxis` takes RM, was
 handed RM x 100). NOT browser-verified by the agent (dev proxy needs a production login).
+Ask 2026-09-22 (owner: period control "unfriendly" at phone width, tab row should be a dropdown):
+(1) phone-width period control = ONE button opening a bottom sheet (Monthly/YTD, stepper, presets,
+44px calendar) rendered through a portal; (2) phone-width tab row = native `<select>` on the
+desktop page and on `/m/dashboard`; sub-tab pills stay.
 
 ## 2026-09-10 — 🔵 PRD T-004 · Import / Export across the whole system (P0/R3-R5 done, rest open)
 

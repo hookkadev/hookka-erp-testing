@@ -124,35 +124,44 @@ export default function DashboardPrototypePage() {
           back up. -mx/px cancels the page gutter so the backdrop reaches the
           full width; the bottom border separates it from the content beneath. */}
       <div className="sticky top-0 z-30 -mx-4 px-4 md:-mx-6 md:px-6 pt-1 pb-3 max-md:pb-2 bg-[#F7F5F3]/95 backdrop-blur border-b border-[#E2DDD8] space-y-3 max-md:space-y-2">
-        {/* Phones: no big title (keeps the sticky block short); the tab strip is
-            one scrollable row. md+: the original PageHeader, unchanged. */}
+        {/* Phones: no big title and no tab strip (keeps the sticky block to two
+            short rows) - the tab is a native <select> beside the period button
+            below, which opens the OS picker. md+: the PageHeader, unchanged. */}
         <h1 className="sr-only md:hidden">Dashboard</h1>
         <PageHeader
-          className="max-md:[&>div:first-child]:hidden"
+          className="max-md:hidden"
           title="Dashboard"
           subtitle="Live where noted"
-          actions={
-            <Tabs tabs={TABS} value={tab} onChange={setTab} variant="pill" scrollable className="max-md:w-full" />
-          }
+          actions={<Tabs tabs={TABS} value={tab} onChange={setTab} variant="pill" />}
         />
 
         {/* Sub-tab strip shares this sticky row with the period picker, so
             both stay put while a long tab scrolls. */}
         <div className="flex flex-wrap items-center justify-between gap-2 max-md:gap-y-2">
+          <select
+            aria-label="Dashboard section"
+            value={tab}
+            onChange={(e) => setTab(e.target.value as TabKey)}
+            className="md:hidden order-1 h-11 min-w-0 flex-1 rounded-md border border-[#E2DDD8] bg-white px-3 text-sm font-semibold text-[#1F1D1B] focus:outline-none focus:border-[#6B5C32]"
+          >
+            {TABS.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+          </select>
           {subTabs ? (
-            <div className="max-md:w-full min-w-0">
+            <div className="max-md:order-3 max-md:w-full min-w-0">
               <Tabs tabs={[...subTabs]} value={sub} onChange={setSub} variant="pill" scrollable />
             </div>
           ) : (
             <div />
           )}
           {months.length > 0 && (
-            <PeriodPicker
-              period={effectivePeriod}
-              months={months}
-              latestDay={latestDay}
-              onChange={setPeriod}
-            />
+            <div className="max-md:order-2">
+              <PeriodPicker
+                period={effectivePeriod}
+                months={months}
+                latestDay={latestDay}
+                onChange={setPeriod}
+              />
+            </div>
           )}
         </div>
       </div>
