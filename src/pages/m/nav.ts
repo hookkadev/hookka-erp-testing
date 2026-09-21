@@ -25,8 +25,10 @@ import {
   HardHat,
   Wallet,
   FlaskConical,
+  LayoutDashboard,
   type LucideIcon,
 } from "lucide-react";
+import { DASHBOARD_NAV_HREF } from "./screens/dashboard/dashboard-m-lib";
 
 export type TabKey = "home" | "sales" | "delivery" | "procure" | "more";
 
@@ -67,6 +69,11 @@ export type ModuleLink = {
    * fabricate a number. // TODO: populate from unread mail / new announcements.
    */
   badge?: string | number;
+  /**
+   * Desktop href whose server-side nav gate (navHidden) also gates this row:
+   * More hides the row when usePermissions().isNavAllowed(navGate) is false.
+   */
+  navGate?: string;
 };
 
 export type ModuleGroup = {
@@ -85,6 +92,7 @@ export const MORE_GROUPS: ModuleGroup[] = [
   {
     title: "Overview",
     items: [
+      { label: "Dashboard", icon: LayoutDashboard, path: "/m/dashboard", navGate: DASHBOARD_NAV_HREF },
       { label: "Announcements", icon: Megaphone, path: "/m/announcements" },
       { label: "Mail Center", icon: Mail, path: "/m/mail-center" },
     ],

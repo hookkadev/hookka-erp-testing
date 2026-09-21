@@ -17,30 +17,21 @@ import {
 } from "recharts";
 import { useCachedJson } from "@/lib/cached-fetch";
 import { formatCurrency } from "@/lib/utils";
-import {
-  isOutstanding,
-  isPendingDelivery,
-  isCompleted,
-} from "@/lib/so-status";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { ShoppingCart, DollarSign, Truck, CheckCircle, CalendarX2 } from "lucide-react";
 import {
   TAUPE, GREEN, AMBER, TEAL, fmtN, fmtRMAxis, ymd, dayLabel,
   CHART_INK, CHART_GOLD, CHART_AXIS, CARD_BORDER, CARD_BG, CHART_SERIES,
-  inPeriod, previousPeriod, periodLabel, isConfirmedOrder, type Period,
+  inPeriod, periodLabel, isConfirmedOrder, type Period,
 } from "./dashboard-shared-lib";
 import { Kpi, LiveBadge } from "./dashboard-shared";
 import { rollingForecast } from "@/lib/revenue-forecast";
+import { pctDelta, buildSalesTrend, previousSalesKpis, computeSalesKpis } from "./dashboard-sales-lib";
 
 // Today, in the app's own local date. Used to cap the zero-fill: a future day
 // has no rows because it has not happened, which is not the same as a day that
 // recorded nothing.
 const todayYmd = ymd(new Date());
-
-const pctDelta = (now: number, prev: number): string => {
-  const d = ((now - prev) / prev) * 100;
-  return `${d >= 0 ? "+" : ""}${d.toFixed(1)}%`;
-};
 
 // Six customers + Other, drawn from the shared warm-industrial series so the
 // attribution chart reads as part of the same system as the trend/forecast.
@@ -172,57 +163,11 @@ export function SalesOrdersView({
   // window is generated here and missing ones default to 0, so a quiet day
   // reads as a real zero rather than vanishing. The fill stops at today: days
   // that have not happened yet are not zeros, they are unknown.
-  const chartData = useMemo(() => {
-    const sorted = [...byDay].sort((a, b) => (a.date < b.date ? -1 : 1));
-
-    if (period.mode === "ytd") {
-      const byMonth = new Map<string, { revenueSen: number; orders: number }>();
-      for (const d of sorted) {
-        const m = d.date.slice(0, 7);
-        const e = byMonth.get(m) ?? { revenueSen: 0, orders: 0 };
-        e.revenueSen += d.revenueSen;
-        e.orders += d.orders;
-        byMonth.set(m, e);
-      }
-      return [...byMonth.entries()].map(([m, v]) => ({
-        date: m.slice(5),
-        iso: m,
-        Revenue: Math.round(v.revenueSen / 100),
-        Orders: v.orders,
-      }));
-    }
-
-    const have = new Map(sorted.map((d) => [d.date, d]));
-    let first: string;
-    let last: string;
-    if (period.mode === "range" && period.from && period.to) {
-      first = period.from;
-      last = period.to;
-    } else {
-      const [y, m] = period.month.split("-").map(Number);
-      if (!y || !m) return [];
-      first = `${period.month}-01`;
-      last = `${period.month}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`;
-    }
-    if (last > todayYmd) last = todayYmd;
-    if (first > last) return [];
-
-    const out: { date: string; iso: string; Revenue: number; Orders: number }[] = [];
-    const cursor = new Date(first + "T00:00:00");
-    const end = new Date(last + "T00:00:00");
-    while (cursor <= end) {
-      const iso = ymd(cursor);
-      const hit = have.get(iso);
-      out.push({
-        date: iso.slice(8),
-        iso,
-        Revenue: hit ? Math.round(hit.revenueSen / 100) : 0,
-        Orders: hit ? hit.orders : 0,
-      });
-      cursor.setDate(cursor.getDate() + 1);
-    }
-    return out;
-  }, [byDay, period.mode, period.month, period.from, period.to]);
+  const chartData = useMemo(
+    () => buildSalesTrend(byDay, period, todayYmd),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [byDay, period.mode, period.month, period.from, period.to],
+  );
 
   // Clicking a bar drills in: a month in YTD becomes the selected month; a day
   // anywhere else highlights that day. The highlight lives on `period.day`, the
@@ -259,19 +204,10 @@ export function SalesOrdersView({
   // whole previous month produced "-86.6% vs Aug 2026", which reads as a
   // collapse when it is really just a day-vs-month mismatch. No comparison is
   // better than a wrong one.
-  const prevKpis = useMemo(() => {
-    if (selectedDetail) return null;
-    const prev = previousPeriod(period, months);
-    if (!prev) return null;
-    const rows = allOrders
-      .filter((o) => inPeriod(prev, o.createdAt))
-      .filter((o) => isConfirmedOrder(o.status));
-    return {
-      label: periodLabel(prev),
-      count: rows.length,
-      revenueSen: rows.reduce((s, o) => s + o.totalSen, 0),
-    };
-  }, [allOrders, period, months, selectedDetail]);
+  const prevKpis = useMemo(
+    () => previousSalesKpis(allOrders, period, months, !!selectedDetail),
+    [allOrders, period, months, selectedDetail],
+  );
 
   // Clicking a day in the trend narrows EVERYTHING that is order-scoped —
   // the KPI row, the pipeline and the recent list — to that day, so the cards
@@ -285,25 +221,7 @@ export function SalesOrdersView({
     [orders, selectedDetail],
   );
 
-  const kpis = useMemo(() => {
-    const live = scopedOrders.filter((o) => isConfirmedOrder(o.status));
-    const outstanding = scopedOrders.filter((o) => isOutstanding(o.status));
-    const pending = scopedOrders.filter((o) => isPendingDelivery(o.status));
-    const completed = scopedOrders.filter((o) => isCompleted(o.status));
-    return {
-      // Count and money share ONE definition — confirmed orders only (owner
-      // 2026-09-15). Counting drafts in the headline while excluding them from
-      // revenue is how a card ends up disagreeing with itself. This tracks the
-      // house Command Center rather than the Sales LIST page, which counts
-      // every row; the two house surfaces genuinely differ.
-      soCount: live.length,
-      revenueSen: live.reduce((s, o) => s + o.totalSen, 0),
-      outstandingCount: outstanding.length,
-      outstandingSen: outstanding.reduce((s, o) => s + o.totalSen, 0),
-      pendingDelivery: pending.length,
-      completedCount: completed.length,
-    };
-  }, [scopedOrders]);
+  const kpis = useMemo(() => computeSalesKpis(scopedOrders), [scopedOrders]);
 
   // Sales Attribution — revenue by CUSTOMER over time. Granularity buckets the
   // order's own createdAt, so this one spans the whole book rather than the

@@ -16,9 +16,10 @@ import {
 } from "lucide-react";
 import {
   MUTED, GREEN, RED, AMBER, fmtN,
-  inPeriod, previousPeriod, periodLabel, isConfirmedOrder, type Period,
+  periodLabel, isConfirmedOrder, type Period,
 } from "./dashboard-shared-lib";
 import { LiveBadge } from "./dashboard-shared";
+import { overviewTotals, overviewSalesSnapshot, overviewWorkforce } from "./dashboard-sales-lib";
 
 // All Overview — the dashboard's landing tab, ported from the static design
 // prototype's own first screen. Reads the SAME GET /api/dashboard/prototype
@@ -170,18 +171,10 @@ export function AllOverviewView({
 }) {
   const { data, loading, error } = useCachedJson<Feed>("/api/dashboard/prototype");
 
-  const totals = useMemo(() => {
-    const byDay = data?.sales?.byDay ?? [];
-    const days = byDay.filter((d) => inPeriod(period, d.date));
-    const prev = previousPeriod(period, months);
-    const prevDays = prev ? byDay.filter((d) => inPeriod(prev, d.date)) : [];
-    return {
-      revenueSen: days.reduce((s, d) => s + d.revenueSen, 0),
-      orders: days.reduce((s, d) => s + d.orders, 0),
-      prevRevenueSen: prevDays.reduce((s, d) => s + d.revenueSen, 0),
-      prevLabel: prev ? periodLabel(prev) : "",
-    };
-  }, [data, period, months]);
+  const totals = useMemo(
+    () => overviewTotals(data?.sales?.byDay ?? [], period, months),
+    [data, period, months],
+  );
 
   // Whole-book reconciliation. Deliberately ignores the period picker: its job
   // is to be compared against the house Sales page, which shows the book.
@@ -218,57 +211,17 @@ export function AllOverviewView({
     };
   }, [data, months]);
 
-  const deltaPct =
-    totals.prevRevenueSen > 0
-      ? ((totals.revenueSen - totals.prevRevenueSen) / totals.prevRevenueSen) * 100
-      : null;
+  const deltaPct = totals.deltaPct;
 
-  const sales = useMemo(() => {
-    const orders = (data?.sales?.orders ?? []).filter((o) => inPeriod(period, o.createdAt));
-    const byCustomer = new Map<string, number>();
-    for (const o of orders) {
-      const k = o.customer ?? "Unnamed";
-      byCustomer.set(k, (byCustomer.get(k) ?? 0) + o.totalSen);
-    }
-    const total = [...byCustomer.values()].reduce((s, v) => s + v, 0);
-    const top = [...byCustomer.entries()].sort((a, b) => b[1] - a[1])[0];
+  const sales = useMemo(
+    () => overviewSalesSnapshot(data?.sales?.orders ?? [], data?.sales?.byStateCategory ?? [], period),
+    [data, period],
+  );
 
-    // No date column on byStateCategory — these are book-wide, labelled as such.
-    const byState = new Map<string, number>();
-    const byCat = new Map<string, number>();
-    let bookTotal = 0;
-    for (const r of data?.sales?.byStateCategory ?? []) {
-      byState.set(r.state ?? "—", (byState.get(r.state ?? "—") ?? 0) + r.revenueSen);
-      byCat.set(r.category ?? "—", (byCat.get(r.category ?? "—") ?? 0) + r.revenueSen);
-      bookTotal += r.revenueSen;
-    }
-    const pick = (m: Map<string, number>) => {
-      const e = [...m.entries()].sort((a, b) => b[1] - a[1])[0];
-      return e && bookTotal > 0 ? `${e[0]} (${Math.round((e[1] / bookTotal) * 100)}%)` : "—";
-    };
-    return {
-      topCustomer: top && total > 0 ? `${top[0]} (${Math.round((top[1] / total) * 100)}%)` : "—",
-      topState: pick(byState),
-      topCategory: pick(byCat),
-    };
-  }, [data, period]);
-
-  const workforce = useMemo(() => {
-    const rows = data?.employee?.attendance ?? [];
-    const inP = rows.filter((r) => inPeriod(period, r.date));
-    const measured = inP.filter((r) => r.efficiencyPct != null);
-    const avg = measured.length
-      ? measured.reduce((s, r) => s + (r.efficiencyPct ?? 0), 0) / measured.length
-      : null;
-    const latest = rows.reduce((m, r) => (r.date && r.date > m ? r.date : m), "");
-    const today = rows.filter((r) => r.date === latest);
-    const present = today.filter((r) => (r.status ?? "").toUpperCase() !== "ABSENT").length;
-    return {
-      avg,
-      presentLabel: latest ? `${fmtN(present)} / ${fmtN(today.length)}` : "—",
-      measuredDays: measured.length,
-    };
-  }, [data, period]);
+  const workforce = useMemo(
+    () => overviewWorkforce(data?.employee?.attendance ?? [], period, fmtN),
+    [data, period],
+  );
 
   if (loading) {
     return <div className="py-16 text-center text-sm" style={{ color: MUTED }}>Loading…</div>;
