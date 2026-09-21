@@ -12857,6 +12857,15 @@ app.get("/bank-reco", async (c) => {
     for (const r of allMatched.results ?? []) {
       if (!obDateBr || r.txnDate >= obDateBr) matchedLegIds.add(r.matchedLegId);
     }
+    // Legs consumed by a reverse-combo (SPLIT) line are matched too.
+    await ensureBankLineSplits(c.var.DB);
+    const splitLegs = await c.var.DB.prepare(
+      "SELECT s.leg_id, l.txnDate FROM bank_line_leg_splits s JOIN bank_statement_lines l ON l.id = s.line_id WHERE l.accountCode = ?",
+    ).bind(account).all<Record<string, unknown>>().catch(() => ({ results: [] as Record<string, unknown>[] }));
+    for (const s of splitLegs.results ?? []) {
+      const d = String(s.txnDate ?? s.txn_date ?? "");
+      if (!obDateBr || d >= obDateBr) matchedLegIds.add(String(s.legId ?? s.leg_id ?? ""));
+    }
   } catch {
     migrationMissing = true;
   }
@@ -12980,7 +12989,9 @@ app.post("/bank-reco/match", async (c) => {
     )
       .bind(legId)
       .first();
-    if (taken) return c.json({ success: false, error: "This ledger leg is already matched to another statement line" }, 400);
+    await ensureBankLineSplits(c.var.DB);
+    const takenBySplit = await c.var.DB.prepare("SELECT leg_id FROM bank_line_leg_splits WHERE leg_id = ? LIMIT 1").bind(legId).first().catch(() => null);
+    if (taken || takenBySplit) return c.json({ success: false, error: "This ledger leg is already matched to another statement line" }, 400);
     await c.var.DB.prepare(
       "UPDATE bank_statement_lines SET matchedLegId = ?, matchedAt = ? WHERE id = ?",
     )
@@ -13004,6 +13015,15 @@ app.post("/bank-reco/unmatch", async (c) => {
     if (!umLine) return c.json({ success: false, error: "Statement line not found" }, 404);
     if (await bankRecoMonthFinalized(c.var.DB, umLine.accountCode, umLine.txnDate)) {
       return c.json({ success: false, error: BANK_RECO_FINALIZED_ERR }, 400);
+    }
+    // A reverse-combo (SPLIT) line releases every leg it was divided across.
+    if (umLine.matchedLegId === BANK_LINE_SPLIT_SENTINEL) {
+      await ensureBankLineSplits(c.var.DB);
+      await c.var.DB.batch([
+        c.var.DB.prepare("DELETE FROM bank_line_leg_splits WHERE line_id = ?").bind(lineId),
+        c.var.DB.prepare("UPDATE bank_statement_lines SET matchedLegId = NULL, matchedAt = NULL WHERE id = ?").bind(lineId),
+      ]);
+      return c.json({ success: true, data: { released: "split" } });
     }
     // Unmatching one piece of a combo group dissolves the WHOLE group — a
     // half-matched payment is never left behind (its remaining pieces would
@@ -13091,12 +13111,106 @@ app.post("/bank-reco/match-group", async (c) => {
     const takenG = await c.var.DB.prepare(
       "SELECT id FROM bank_statement_lines WHERE matchedLegId = ? LIMIT 1",
     ).bind(legId).first();
-    if (takenG) return c.json({ success: false, error: "This ledger leg is already matched to another statement line" }, 400);
+    await ensureBankLineSplits(c.var.DB);
+    const takenGSplit = await c.var.DB.prepare("SELECT leg_id FROM bank_line_leg_splits WHERE leg_id = ? LIMIT 1").bind(legId).first().catch(() => null);
+    if (takenG || takenGSplit) return c.json({ success: false, error: "This ledger leg is already matched to another statement line" }, 400);
     const nowG = new Date().toISOString();
     await c.var.DB.prepare(
       `UPDATE bank_statement_lines SET matchedLegId = ?, matchedAt = ? WHERE id IN (${marks})`,
     ).bind(legId, nowG, ...lineIds).run();
     return c.json({ success: true, data: { matched: lineIds.length } });
+  } catch {
+    return c.json({ success: false, error: "Invalid request body" }, 400);
+  }
+});
+
+// Reverse combo (Houzs adoption Phase 3, 2026-09-22): ONE statement line paid
+// SEVERAL book entries — the bank bundled two vouchers into one transfer. The
+// line's matchedLegId becomes the sentinel and one split row per leg records
+// the pieces (Σ pieces = line amount = Σ leg amounts, exact). The shared
+// loader treats each split row as a virtual claiming line for its leg.
+// ⚠ Migration 0234/0215 = record; THIS self-apply = mechanism.
+const BANK_LINE_SPLIT_SENTINEL = "SPLIT";
+let _pendingBankLineSplits: Promise<void> | null = null;
+function ensureBankLineSplits(db: Env["Variables"]["DB"]): Promise<void> {
+  if (!_pendingBankLineSplits) {
+    _pendingBankLineSplits = db.prepare(
+      `CREATE TABLE IF NOT EXISTS bank_line_leg_splits (
+         line_id    TEXT NOT NULL,
+         leg_id     TEXT NOT NULL,
+         amount_sen INTEGER NOT NULL,
+         created_at TEXT NOT NULL,
+         PRIMARY KEY (line_id, leg_id)
+       )`,
+    ).run().then(() => undefined).catch((e) => {
+      _pendingBankLineSplits = null;
+      throw e;
+    });
+  }
+  return _pendingBankLineSplits;
+}
+
+app.post("/bank-reco/match-split", async (c) => {
+  const denied = await requirePermission(c, "accounting", "update");
+  if (denied) return denied;
+  try {
+    await ensureBankRecoCols(c.var.DB);
+    await ensureBankLineSplits(c.var.DB);
+    const body = await c.req.json();
+    const lineId = String(body.statementLineId || "");
+    const legIds: string[] = Array.isArray(body.legIds) ? [...new Set((body.legIds as unknown[]).map((x) => String(x)))] : [];
+    if (legIds.length < 2 || legIds.length > 20) {
+      return c.json({ success: false, error: "Pick 2–20 book entries that this one bank line paid" }, 400);
+    }
+    const line = await c.var.DB.prepare(
+      "SELECT id, accountCode, txnDate, amountSen, matchedLegId, ignored_at FROM bank_statement_lines WHERE id = ?",
+    ).bind(lineId).first<{ id: string; accountCode: string; txnDate: string; amountSen: number; matchedLegId: string | null; ignored_at?: string | null; ignoredAt?: string | null }>();
+    if (!line) return c.json({ success: false, error: "Statement line not found" }, 404);
+    if (line.matchedLegId) return c.json({ success: false, error: "Line already matched" }, 400);
+    if (line.ignoredAt ?? line.ignored_at) return c.json({ success: false, error: "Line is ignored — restore it first" }, 400);
+    const obDateS = await getOpeningDate(c.var.DB);
+    if (obDateS && line.txnDate < obDateS) {
+      return c.json({ success: false, error: `Dated before the opening date (${obDateS}) — inside the opening balance.` }, 400);
+    }
+    if (await bankRecoMonthFinalized(c.var.DB, line.accountCode, line.txnDate)) {
+      return c.json({ success: false, error: BANK_RECO_FINALIZED_ERR }, 400);
+    }
+    const marks = legIds.map(() => "?").join(",");
+    const legRes = await c.var.DB.prepare(
+      `SELECT id, accountCode, sourceType, debitSen, creditSen FROM ledger_journal_entries WHERE id IN (${marks}) AND hidden = 0`,
+    ).bind(...legIds).all<{ id: string; accountCode: string; sourceType: string; debitSen: number; creditSen: number }>();
+    const legs = legRes.results ?? [];
+    if (legs.length !== legIds.length) return c.json({ success: false, error: "Ledger leg not found" }, 404);
+    const resolveS = await loadAccountResolver(c.var.DB);
+    let sumSen = 0;
+    for (const g of legs) {
+      if (resolveS(g.accountCode) !== line.accountCode) return c.json({ success: false, error: "A leg belongs to a different account" }, 400);
+      if (isOpeningSource(g.sourceType)) return c.json({ success: false, error: "Opening-balance legs are never matched" }, 400);
+      sumSen += (Number(g.debitSen) || 0) - (Number(g.creditSen) || 0);
+    }
+    const lineAmt = Math.round(Number(line.amountSen) || 0);
+    if (sumSen !== lineAmt) {
+      return c.json({ success: false, error: `Amounts differ — selected book entries total ${sumSen} sen vs bank line ${lineAmt} sen. A split match must be exact.` }, 400);
+    }
+    // Sweep void pre-opening claims, then no leg may already be taken (by a
+    // plain match OR by another split).
+    if (obDateS) {
+      await c.var.DB.prepare(
+        "UPDATE bank_statement_lines SET matchedLegId = NULL, matchedAt = NULL WHERE accountCode = ? AND matchedLegId IS NOT NULL AND txnDate < ?",
+      ).bind(line.accountCode, obDateS).run();
+    }
+    const takenPlain = await c.var.DB.prepare(`SELECT matchedLegId FROM bank_statement_lines WHERE matchedLegId IN (${marks}) LIMIT 1`).bind(...legIds).first();
+    const takenSplit = await c.var.DB.prepare(`SELECT leg_id FROM bank_line_leg_splits WHERE leg_id IN (${marks}) LIMIT 1`).bind(...legIds).first();
+    if (takenPlain || takenSplit) return c.json({ success: false, error: "One of these book entries is already matched" }, 400);
+    const now = new Date().toISOString();
+    await c.var.DB.batch([
+      c.var.DB.prepare("UPDATE bank_statement_lines SET matchedLegId = ?, matchedAt = ? WHERE id = ?").bind(BANK_LINE_SPLIT_SENTINEL, now, lineId),
+      ...legs.map((g) =>
+        c.var.DB.prepare("INSERT INTO bank_line_leg_splits (line_id, leg_id, amount_sen, created_at) VALUES (?, ?, ?, ?)")
+          .bind(lineId, g.id, (Number(g.debitSen) || 0) - (Number(g.creditSen) || 0), now),
+      ),
+    ]);
+    return c.json({ success: true, data: { legs: legs.length } });
   } catch {
     return c.json({ success: false, error: "Invalid request body" }, 400);
   }
@@ -13580,7 +13694,8 @@ async function loadBankRecoState(
     for (const a of aliasRows.results ?? []) if (resolveRp(a.oldCode) === account) equivalents.push(a.oldCode);
   } catch { equivalents = [account]; }
   const marks = equivalents.map(() => "?").join(",");
-  const [legRes, matchedRes] = await Promise.all([
+  await ensureBankLineSplits(db);
+  const [legRes, matchedRes, splitRes] = await Promise.all([
     db.prepare(
       `SELECT id, sourceType, sourceId, debitSen, creditSen, description, postedAt FROM ledger_journal_entries
         WHERE accountCode IN (${marks}) AND hidden = 0`,
@@ -13588,6 +13703,13 @@ async function loadBankRecoState(
     db.prepare(
       "SELECT matchedLegId, txnDate, amountSen FROM bank_statement_lines WHERE accountCode = ? AND matchedLegId IS NOT NULL",
     ).bind(account).all<{ matchedLegId: string; txnDate: string; amountSen: number }>(),
+    // Reverse combo (one bank line → several legs): each split row is a
+    // virtual claiming line for ITS leg, dated on the bank line's day.
+    db.prepare(
+      `SELECT s.leg_id, s.amount_sen, l.txnDate FROM bank_line_leg_splits s
+         JOIN bank_statement_lines l ON l.id = s.line_id
+        WHERE l.accountCode = ?`,
+    ).bind(account).all<Record<string, unknown>>().catch(() => ({ results: [] as Record<string, unknown>[] })),
   ]);
   const { docDate, openingDate } = await loadDocDateResolver(db);
   const legs = (legRes.results ?? [])
@@ -13607,12 +13729,19 @@ async function loadBankRecoState(
   // only when they add EXACTLY to its amount, on the LAST piece's date.
   const legAmtById = new Map(legs.map((l) => [l.id, l.amountSen] as const));
   const grouped = new Map<string, { sumSen: number; lastDate: string }>();
+  const claim = (legId: string, txnDate: string, amountSen: number) => {
+    if (openingDate && txnDate < openingDate) return;
+    const g = grouped.get(legId) ?? { sumSen: 0, lastDate: "" };
+    g.sumSen += Math.round(amountSen || 0);
+    if (txnDate > g.lastDate) g.lastDate = txnDate;
+    grouped.set(legId, g);
+  };
   for (const r of matchedRes.results ?? []) {
-    if (openingDate && r.txnDate < openingDate) continue;
-    const g = grouped.get(r.matchedLegId) ?? { sumSen: 0, lastDate: "" };
-    g.sumSen += Math.round(Number(r.amountSen) || 0);
-    if (r.txnDate > g.lastDate) g.lastDate = r.txnDate;
-    grouped.set(r.matchedLegId, g);
+    if (r.matchedLegId === BANK_LINE_SPLIT_SENTINEL) continue; // its pieces come from the split table
+    claim(r.matchedLegId, r.txnDate, Number(r.amountSen));
+  }
+  for (const s of splitRes.results ?? []) {
+    claim(String(s.legId ?? s.leg_id ?? ""), String(s.txnDate ?? s.txn_date ?? ""), Number(s.amountSen ?? s.amount_sen));
   }
   const clearedOn = new Map<string, string>();
   for (const [legId, g] of grouped) {
@@ -13637,9 +13766,18 @@ async function computeBankRecoReport(
   try { meta = metaRow?.value ? JSON.parse(metaRow.value) : null; } catch { meta = null; }
   const { legs: stateLegs, clearedOn, openingDate: obDateRp } = await loadBankRecoState(db, account);
   const stmtRes = await db.prepare(
-    `SELECT amountSen, txnDate, description, matchedLegId FROM bank_statement_lines
+    `SELECT id, amountSen, txnDate, description, matchedLegId FROM bank_statement_lines
       WHERE accountCode = ? AND ignored_at IS NULL AND txnDate <= ?`,
-  ).bind(account, monthEnd).all<{ amountSen: number; txnDate: string; description: string | null; matchedLegId: string | null }>();
+  ).bind(account, monthEnd).all<{ id: string; amountSen: number; txnDate: string; description: string | null; matchedLegId: string | null }>();
+  // Reverse-combo lines: which legs each SPLIT line was divided across.
+  const splitLegsByLine = new Map<string, string[]>();
+  const splitRowsRp = await db.prepare(
+    `SELECT s.line_id, s.leg_id FROM bank_line_leg_splits s JOIN bank_statement_lines l ON l.id = s.line_id WHERE l.accountCode = ?`,
+  ).bind(account).all<Record<string, unknown>>().catch(() => ({ results: [] as Record<string, unknown>[] }));
+  for (const s of splitRowsRp.results ?? []) {
+    const lid = String(s.lineId ?? s.line_id ?? ""), gid = String(s.legId ?? s.leg_id ?? "");
+    splitLegsByLine.set(lid, [...(splitLegsByLine.get(lid) ?? []), gid]);
+  }
   // A match clears an item only WITHIN the report's month. A June voucher the
   // bank processed on 2 July is matched — correctly — yet as of 30 June it is
   // still in transit, so June must list it as uncleared (and, mirrored, a
@@ -13677,7 +13815,18 @@ async function computeBankRecoReport(
   const unbookedStmt: BankRecoOutstanding[] = [];
   for (const r of stmtRes.results ?? []) {
     if (obDateRp && r.txnDate < obDateRp) continue; // pre-opening: inside the opening balance
-    if (r.matchedLegId) {
+    if (r.matchedLegId === BANK_LINE_SPLIT_SENTINEL) {
+      // Booked when EVERY leg it was split across is dated within the month
+      // and cleared by month end (each leg's clearing date is this line's
+      // day, via the loader's virtual claims). Otherwise still unbooked.
+      const legIds = splitLegsByLine.get(r.id) ?? [];
+      const allIn = legIds.length > 0 && legIds.every((g) => {
+        const d = legDayById.get(g);
+        const cd = clearedOn.get(g);
+        return d !== undefined && d <= monthEnd && cd !== undefined && cd <= monthEnd;
+      });
+      if (allIn) continue;
+    } else if (r.matchedLegId) {
       const legDay = legDayById.get(r.matchedLegId);
       // A missing leg (match target outside the walk) keeps the old
       // semantics: treated as booked, not resurfaced.
@@ -14148,16 +14297,43 @@ app.post("/bank-reco/finalize", async (c) => {
     if (!/^\d{4}-\d{2}$/.test(month)) return c.json({ success: false, error: "month must be YYYY-MM" }, 400);
     await ensureBankRecoCols(c.var.DB);
     const key = `bank_reco_final:${account}:${month}`;
+    const actorUserId = (c as unknown as { get: (k: string) => string | undefined }).get("userId") ?? null;
+    const now = new Date().toISOString();
+    // Strict-lock mode (Houzs adoption Phase 3, owner 2026-09-22 「月锁可以做，
+    // 但是别启动先」): kv bank_reco_strict_lock = "1" turns it ON. Default OFF
+    // keeps today's behaviour exactly. When ON: finalise only when the month
+    // tallies AND has no unbooked statement lines; re-open needs a reason.
+    // Every re-open — strict or not — is journaled to kv so the trail exists.
+    const strictRow = await c.var.DB.prepare("SELECT value FROM kv_config WHERE key = 'bank_reco_strict_lock'")
+      .first<{ value: string | null }>().catch(() => null);
+    const strict = strictRow?.value === "1";
     if (body.reopen) {
-      await c.var.DB.prepare("DELETE FROM kv_config WHERE key = ?").bind(key).run();
+      const reason = String((body as { reason?: string }).reason ?? "").trim();
+      if (strict && !reason) {
+        return c.json({ success: false, error: "Re-opening a finalised month needs a reason (strict lock is on)." }, 400);
+      }
+      const prior = await c.var.DB.prepare("SELECT value FROM kv_config WHERE key = ?").bind(key).first<{ value: string | null }>().catch(() => null);
+      await c.var.DB.batch([
+        c.var.DB.prepare("DELETE FROM kv_config WHERE key = ?").bind(key),
+        c.var.DB.prepare(
+          `INSERT INTO kv_config (key, value, updated_at) VALUES (?, ?, ?)
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+        ).bind(`bank_reco_reopen:${account}:${month}:${now}`, JSON.stringify({ actorUserId, reason, priorSnapshot: prior?.value ? JSON.parse(prior.value) : null }), now),
+      ]);
       return c.json({ success: true, data: { reopened: true } });
     }
     const snap = await computeBankRecoReport(c.var.DB, account, month);
     if (!snap.importedAt) {
       return c.json({ success: false, error: "Import this month's bank statement before finalising" }, 400);
     }
-    const actorUserId = (c as unknown as { get: (k: string) => string | undefined }).get("userId") ?? null;
-    const now = new Date().toISOString();
+    if (strict) {
+      if (!snap.balanced) {
+        return c.json({ success: false, error: `Strict lock: the month does not tally (out by ${(((snap.computedGlSen ?? 0) - snap.glSen) / 100).toFixed(2)}). Fix the reconciliation first.` }, 400);
+      }
+      if (snap.unbookedStmtCount > 0) {
+        return c.json({ success: false, error: `Strict lock: ${snap.unbookedStmtCount} bank line${snap.unbookedStmtCount === 1 ? "" : "s"} still not in the book. Book, match or ignore them first.` }, 400);
+      }
+    }
     const { bookPreSen: _pre, bookByDay: _byDay, ...snapStored } = snap;
     void _pre; void _byDay; // daily view recomputes live — keep the snapshot lean
     await c.var.DB.prepare(
@@ -14170,6 +14346,67 @@ app.post("/bank-reco/finalize", async (c) => {
   } catch {
     return c.json({ success: false, error: "Invalid request body" }, 400);
   }
+});
+
+// Strict-lock switch (default OFF — owner flips it when ready).
+app.get("/bank-reco/strict-lock", async (c) => {
+  const denied = await requirePermission(c, "accounting", "read");
+  if (denied) return denied;
+  const row = await c.var.DB.prepare("SELECT value FROM kv_config WHERE key = 'bank_reco_strict_lock'")
+    .first<{ value: string | null }>().catch(() => null);
+  return c.json({ success: true, data: { strict: row?.value === "1" } });
+});
+app.put("/bank-reco/strict-lock", async (c) => {
+  const denied = await requirePermission(c, "accounting", "update");
+  if (denied) return denied;
+  try {
+    const body = await c.req.json() as { strict?: boolean };
+    await c.var.DB.prepare(
+      `INSERT INTO kv_config (key, value, updated_at) VALUES ('bank_reco_strict_lock', ?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+    ).bind(body.strict ? "1" : "0", new Date().toISOString()).run();
+    return c.json({ success: true, data: { strict: !!body.strict } });
+  } catch { return c.json({ success: false, error: "Invalid body" }, 400); }
+});
+
+// Statement chain check (Houzs adoption Phase 3 「串链」): consecutive months'
+// statements must hand over — this month's opening = last month's closing —
+// and every month between the first import and the latest must be present.
+// A gap or a mismatch is named, so a skipped mid-year upload can't hide.
+app.get("/bank-reco/chain", async (c) => {
+  const denied = await requirePermission(c, "accounting", "read");
+  if (denied) return denied;
+  const account = c.req.query("account") || "";
+  const err = await bankAccountOrError(c.var.DB, account);
+  if (err) return c.json({ success: false, error: err }, 400);
+  const rows = await c.var.DB.prepare("SELECT key, value FROM kv_config WHERE key LIKE ?")
+    .bind(`bank_reco_meta:${account}:%`).all<{ key: string; value: string | null }>();
+  const months: { month: string; openingSen: number | null; closingSen: number | null }[] = [];
+  for (const r of rows.results ?? []) {
+    const m = String(r.key).slice(`bank_reco_meta:${account}:`.length);
+    if (!/^\d{4}-\d{2}$/.test(m)) continue;
+    let meta: { openingSen?: number; closingSen?: number } | null = null;
+    try { meta = r.value ? JSON.parse(r.value) : null; } catch { meta = null; }
+    months.push({ month: m, openingSen: meta?.openingSen ?? null, closingSen: meta?.closingSen ?? null });
+  }
+  months.sort((a, b) => a.month.localeCompare(b.month));
+  const nextMonth = (ym: string) => {
+    const [y, m] = ym.split("-").map(Number);
+    return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;
+  };
+  const issues: { kind: "gap" | "mismatch"; month: string; detail: string }[] = [];
+  for (let i = 1; i < months.length; i++) {
+    const prev = months[i - 1], cur = months[i];
+    let expect = nextMonth(prev.month);
+    while (expect < cur.month) {
+      issues.push({ kind: "gap", month: expect, detail: `No statement imported for ${expect} — between ${prev.month} and ${cur.month}.` });
+      expect = nextMonth(expect);
+    }
+    if (expect === cur.month && prev.closingSen !== null && cur.openingSen !== null && prev.closingSen !== cur.openingSen) {
+      issues.push({ kind: "mismatch", month: cur.month, detail: `${cur.month} opens at ${(cur.openingSen / 100).toFixed(2)} but ${prev.month} closed at ${(prev.closingSen / 100).toFixed(2)} — the statements don't hand over.` });
+    }
+  }
+  return c.json({ success: true, data: { account, months, issues, ok: issues.length === 0 } });
 });
 
 // ---------------------------------------------------------------------------

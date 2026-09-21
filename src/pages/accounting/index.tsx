@@ -10769,6 +10769,44 @@ function CashBookTab({ accounts }: { accounts: ChartOfAccount[] }) {
   const bookAccounts = accounts.filter(
     (a) => a.isPostable !== false && a.specialAccountType !== "SDC" && a.specialAccountType !== "SBK" && a.specialAccountType !== "SCH",
   );
+  // Strict month lock switch (default OFF) + statement chain check (2026-09-22).
+  const [strictLock, setStrictLock] = useState(false);
+  const [chain, setChain] = useState<{ months: { month: string }[]; issues: { kind: string; month: string; detail: string }[] } | null>(null);
+  useEffect(() => {
+    let dead = false;
+    fetch("/api/accounting/bank-reco/strict-lock").then((r) => r.json() as Promise<{ data?: { strict: boolean } }>)
+      .then((j) => { if (!dead) setStrictLock(!!j?.data?.strict); }).catch(() => {});
+    return () => { dead = true; };
+  }, []);
+  useEffect(() => {
+    if (!account) return;
+    let dead = false;
+    fetch(`/api/accounting/bank-reco/chain?account=${account}`).then((r) => r.json() as Promise<{ success?: boolean; data?: typeof chain }>)
+      .then((j) => { if (!dead && j?.success && j.data) setChain(j.data); }).catch(() => {});
+    return () => { dead = true; };
+  }, [account, data]);
+  const toggleStrictLock = async (on: boolean) => {
+    if (on && !window.confirm("Turn strict month lock ON?\n\nA month can then only be finalised when it tallies AND every bank line is booked, and re-opening needs a reason.")) return;
+    const res = await fetch("/api/accounting/bank-reco/strict-lock", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ strict: on }) });
+    const j = asMutationResponse(await res.json());
+    if (j?.success) { setStrictLock(on); toast.success(on ? "Strict lock ON" : "Strict lock off"); }
+    else toast.error(j?.error || "Failed");
+  };
+  // Reverse combo: one bank line → several book legs (2026-09-22).
+  const [splitFor, setSplitFor] = useState<{ id: string; amountSen: number; legIds: Set<string> } | null>(null);
+  const handleSplitMatch = async () => {
+    if (!splitFor || splitFor.legIds.size < 2) return;
+    setBusy(true);
+    try {
+      const res = await fetch("/api/accounting/bank-reco/match-split", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ statementLineId: splitFor.id, legIds: [...splitFor.legIds] }),
+      });
+      const j = (await res.json()) as { success?: boolean; error?: string; data?: { legs: number } };
+      if (j?.success) { toast.success(`Bank line split across ${j.data?.legs} book entries`); setSplitFor(null); load(); }
+      else toast.error(j?.error || "Split match failed");
+    } finally { setBusy(false); }
+  };
   const handleBookLine = async () => {
     if (!bookLine?.accountCode) return;
     setBusy(true);
@@ -11062,13 +11100,19 @@ function CashBookTab({ accounts }: { accounts: ChartOfAccount[] }) {
       const gap = formatCurrency(Math.abs((report.computedGlSen ?? 0) - report.glSen));
       if (!window.confirm(`Still out by ${gap}. Finalise anyway? The saved record will carry the difference.`)) return;
     }
-    if (reopen && !window.confirm("Re-open this month? The saved reconciliation record is removed and its lines can be changed again.")) return;
+    let reason = "";
+    if (reopen) {
+      const v = window.prompt("Re-open this month? The saved reconciliation record is removed and its lines can be changed again.\n\nReason (kept on record" + (strictLock ? ", REQUIRED under strict lock" : ", optional") + "):", "");
+      if (v === null) return;
+      reason = v.trim();
+      if (strictLock && !reason) { toast.error("A reason is required to re-open under strict lock"); return; }
+    }
     setBusy(true);
     try {
       const res = await fetch("/api/accounting/bank-reco/finalize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountCode: account, month, reopen }),
+        body: JSON.stringify({ accountCode: account, month, reopen, reason }),
       });
       const j = asMutationResponse(await res.json());
       if (j?.success) {
@@ -11225,6 +11269,22 @@ function CashBookTab({ accounts }: { accounts: ChartOfAccount[] }) {
                   ✓ {m}
                 </button>
               ))}
+            </div>
+          )}
+          {account && (
+            <div className="flex items-center gap-3 flex-wrap w-full pt-1 border-t border-[#F0ECE9] mt-1">
+              <label className="flex items-center gap-1.5 text-[11px] text-[#6B7280] cursor-pointer" title="ON: a month can only be finalised when it tallies AND every bank line is booked; re-open requires a reason. OFF (default): today's behaviour.">
+                <input type="checkbox" checked={strictLock} onChange={(e) => void toggleStrictLock(e.target.checked)} className="h-3.5 w-3.5 accent-[#6B5C32]" />
+                Strict month lock {strictLock ? <span className="rounded bg-[#F7E5E1] text-[#9A3A2D] px-1.5 py-0.5 text-[10px] font-semibold">ON</span> : <span className="text-[#9CA3AF]">(off)</span>}
+              </label>
+              {chain && chain.issues.length > 0 && (
+                <span className="text-[11px] text-[#9A3A2D]" title={chain.issues.map((i) => i.detail).join("\n")}>
+                  ⚠ Statement chain: {chain.issues.length} issue{chain.issues.length === 1 ? "" : "s"} — {chain.issues[0].detail}
+                </span>
+              )}
+              {chain && chain.issues.length === 0 && chain.months.length > 1 && (
+                <span className="text-[11px] text-[#27500A]">✓ Statements chain cleanly {chain.months[0].month} → {chain.months[chain.months.length - 1].month}</span>
+              )}
             </div>
           )}
         </CardContent>
@@ -11515,6 +11575,11 @@ function CashBookTab({ accounts }: { accounts: ChartOfAccount[] }) {
                                 {s.amountSen < 0 ? "book as expense" : "book as receipt"}
                               </button>
                               )}
+                              {unmatchedLegs.filter((l) => Math.sign(l.amountSen) === Math.sign(s.amountSen) && Math.abs(l.amountSen) < Math.abs(s.amountSen)).length >= 2 && (
+                                <button onClick={() => setSplitFor(splitFor?.id === s.id ? null : { id: s.id, amountSen: s.amountSen, legIds: new Set() })} className={`ml-2 text-[11px] font-semibold cursor-pointer ${splitFor?.id === s.id ? "text-[#1F1D1B]" : "text-[#2C4170] hover:text-[#1F1D1B]"}`} title="This ONE bank line paid several book entries — pick them">
+                                  split across…
+                                </button>
+                              )}
                               <button onClick={() => handleIgnore(s.id, true)} className="ml-2 text-[#9CA3AF] hover:text-[#1F1D1B] text-[11px] underline decoration-dotted cursor-pointer" title="Leave this line out of the reconciliation">ignore</button>
                               <button onClick={() => handleDeleteLine(s.id)} className="ml-1.5 text-[#9CA3AF] hover:text-[#9A3A2D] text-[11px] underline decoration-dotted cursor-pointer">del</button>
                             </>
@@ -11546,6 +11611,33 @@ function CashBookTab({ accounts }: { accounts: ChartOfAccount[] }) {
                           </td>
                         </tr>
                       )}
+                      {splitFor?.id === s.id && (() => {
+                        const cands = unmatchedLegs.filter((l) => Math.sign(l.amountSen) === Math.sign(s.amountSen) && Math.abs(l.amountSen) < Math.abs(s.amountSen));
+                        const picked = cands.filter((l) => splitFor.legIds.has(l.id));
+                        const sum = picked.reduce((t, l) => t + l.amountSen, 0);
+                        const exact = picked.length >= 2 && sum === s.amountSen;
+                        return (
+                          <tr className="border-b border-[#F0ECE9] bg-[#EEF2FB]/50">
+                            <td colSpan={5} className="px-3 py-2 text-xs">
+                              <div className="flex flex-wrap items-center gap-2 mb-1">
+                                <span className="font-semibold text-[#2C4170]">Split {formatCurrency(Math.abs(s.amountSen))} across book entries · picked {formatCurrency(Math.abs(sum))}{exact ? " ✓ exact" : picked.length ? ` (${formatCurrency(Math.abs(s.amountSen - sum))} to go)` : ""}</span>
+                                <Button variant="primary" size="sm" disabled={!exact || busy} onClick={() => void handleSplitMatch()}>Match all {picked.length}</Button>
+                                <Button variant="outline" size="sm" onClick={() => setSplitFor(null)}>Cancel</Button>
+                              </div>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6">
+                                {cands.map((l) => (
+                                  <label key={l.id} className="flex items-center gap-2 py-0.5 cursor-pointer">
+                                    <input type="checkbox" checked={splitFor.legIds.has(l.id)} onChange={() => setSplitFor((cur) => { if (!cur) return cur; const n = new Set(cur.legIds); if (n.has(l.id)) n.delete(l.id); else n.add(l.id); return { ...cur, legIds: n }; })} />
+                                    <span className="text-[#6B7280] whitespace-nowrap">{l.day}</span>
+                                    <span className="truncate flex-1" title={l.description}>{l.description}</span>
+                                    <span className="tabular-nums whitespace-nowrap">{formatCurrency(Math.abs(l.amountSen))}</span>
+                                  </label>
+                                ))}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })()}
                       </Fragment>
                     );
                   })}
