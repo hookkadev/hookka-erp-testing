@@ -618,7 +618,7 @@ export default function PurchaseInvoiceDetailPage() {
                 onClick={() => {
                   const url = `/api/files/${encodeURIComponent(
                     pi.sourceDocumentFileId as string,
-                  )}/download`;
+                  )}/download?inline=1`;
                   window.open(url, "_blank", "noopener,noreferrer");
                 }}
                 disabled={busy}

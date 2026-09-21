@@ -19,6 +19,11 @@
 // Setup: `npx wrangler secret put ANTHROPIC_API_KEY`.
 // ---------------------------------------------------------------------------
 import { Hono } from "hono";
+import {
+  ensureOcrLearningSchema,
+  recordCorrections,
+  type LearnDb,
+} from "../lib/ocr-learning";
 import type { Env } from "../worker";
 import { requirePermission } from "../lib/rbac";
 import { getOrgId } from "../lib/tenant";
@@ -571,6 +576,8 @@ app.post("/extract", async (c) => {
   const arrayBuffer = await file.arrayBuffer();
   const orgId = getOrgId(c);
   const createdBy = (c.get("userId" as never) as string | undefined) ?? null;
+  // po_scan_samples.org_id / party_id are self-applied (migrations are inert).
+  await ensureOcrLearningSchema(c.var.DB as unknown as LearnDb).catch(() => {});
   // Fallback hint only — the first token of the FILE NAME. Owner 2026-08-05:
   // 「为什么它会收到像 PO2068 这样的东西？非常奇怪」— operators name files after the
   // PO ("PO 2608-027.pdf", "9752.pdf"), so this token is routinely the PO
@@ -592,6 +599,7 @@ app.post("/extract", async (c) => {
     orgId,
     createdBy,
     recordSample: false,
+    aiRetries: 0,
   });
 
   // Need the catalog for post-processing (validateAndEnrichPO). Reload
@@ -606,8 +614,8 @@ app.post("/extract", async (c) => {
     try {
       await (c.var.DB as unknown as DBLike)
         .prepare(
-          `INSERT INTO po_scan_samples (id, customerHint, poIdentifier, rawExtracted, correctedJson, createdBy)
-           VALUES (?, ?, ?, ?, NULL, ?)`,
+          `INSERT INTO po_scan_samples (id, customerHint, poIdentifier, rawExtracted, correctedJson, createdBy, org_id)
+           VALUES (?, ?, ?, ?, NULL, ?, ?)`,
         )
         .bind(
           sampleId,
@@ -615,6 +623,7 @@ app.post("/extract", async (c) => {
           null,
           JSON.stringify({ error: engineResult.error }),
           createdBy,
+          orgId,
         )
         .run();
     } catch (e) {
@@ -676,8 +685,8 @@ app.post("/extract", async (c) => {
     try {
       await (c.var.DB as unknown as DBLike)
         .prepare(
-          `INSERT INTO po_scan_samples (id, customerHint, poIdentifier, rawExtracted, correctedJson, createdBy)
-           VALUES (?, ?, ?, ?, NULL, ?)`,
+          `INSERT INTO po_scan_samples (id, customerHint, poIdentifier, rawExtracted, correctedJson, createdBy, org_id, party_id)
+           VALUES (?, ?, ?, ?, NULL, ?, ?, ?)`,
         )
         .bind(
           sampleId,
@@ -685,6 +694,8 @@ app.post("/extract", async (c) => {
           po.customerPO ?? null,
           rawExtracted,
           createdBy,
+          orgId,
+          po.customerId ?? null,
         )
         .run();
     } catch (e) {
@@ -745,6 +756,10 @@ app.post("/samples/:id/confirm", async (c) => {
     /* best-effort */
   }
 
+  // R13 — a sample belongs to a tenant; confirming someone else's is a 404.
+  const orgId = getOrgId(c);
+  await ensureOcrLearningSchema(c.var.DB as unknown as LearnDb).catch(() => {});
+
   // The operator's own pick is the most authoritative customer signal we ever
   // get: the preview modal's customer <select> writes customerId + the catalog
   // name onto the PO before it is confirmed. Promote it to `customerHint` so
@@ -764,8 +779,8 @@ app.post("/samples/:id/confirm", async (c) => {
   if (typeof pickedCustomerId === "string" && pickedCustomerId) {
     try {
       const row = await (c.var.DB as unknown as DBLike)
-        .prepare("SELECT name FROM customers WHERE id = ?")
-        .bind(pickedCustomerId)
+        .prepare("SELECT name FROM customers WHERE id = ? AND orgId = ?")
+        .bind(pickedCustomerId, orgId)
         .first<{ name: string | null }>();
       pickedHint = cleanCustomerHint(row?.name);
     } catch {
@@ -776,13 +791,13 @@ app.post("/samples/:id/confirm", async (c) => {
   const result = pickedHint
     ? await (c.var.DB as unknown as DBLike)
         .prepare(
-          "UPDATE po_scan_samples SET correctedJson = ?, isGold = ?, customerHint = ? WHERE id = ?",
+          "UPDATE po_scan_samples SET correctedJson = ?, isGold = ?, customerHint = ?, party_id = ? WHERE id = ? AND org_id = ?",
         )
-        .bind(payload, goldFlag, pickedHint, id)
+        .bind(payload, goldFlag, pickedHint, pickedCustomerId, id, orgId)
         .run()
     : await (c.var.DB as unknown as DBLike)
-        .prepare("UPDATE po_scan_samples SET correctedJson = ?, isGold = ? WHERE id = ?")
-        .bind(payload, goldFlag, id)
+        .prepare("UPDATE po_scan_samples SET correctedJson = ?, isGold = ? WHERE id = ? AND org_id = ?")
+        .bind(payload, goldFlag, id, orgId)
         .run();
 
   if (!result.success || result.meta.changes === 0) {
@@ -792,13 +807,36 @@ app.post("/samples/:id/confirm", async (c) => {
     );
   }
 
+  // T-010 R7/R8 — write what the model got wrong, learn code aliases from it,
+  // and queue this customer for re-distillation. Best-effort by contract: the
+  // import has already succeeded and must not fail over the learning tables.
+  let learned = { corrections: 0, aliases: 0, queued: false };
+  try {
+    const sampleRow = await (c.var.DB as unknown as DBLike)
+      .prepare("SELECT rawExtracted, party_id FROM po_scan_samples WHERE id = ? AND org_id = ?")
+      .bind(id, orgId)
+      .first<{ rawExtracted: string | null; party_id?: string | null; partyId?: string | null }>();
+    learned = await recordCorrections(c.var.DB as unknown as LearnDb, {
+      tenantId: orgId,
+      kind: "po",
+      sampleId: id,
+      partyId:
+        (typeof pickedCustomerId === "string" && pickedCustomerId) ||
+        sampleRow?.party_id || sampleRow?.partyId || null,
+      raw: parseJsonOrNull(sampleRow?.rawExtracted ?? ""),
+      corrected,
+      correctedBy: (c.get("userId" as never) as string | undefined) ?? null,
+    });
+  } catch (e) {
+    console.warn("[scan-po confirm→learn] skipped:", e);
+  }
+
   let distillQueued = false;
   if (goldFlag === 1) {
     try {
-      const orgId = getOrgId(c);
       const sample = await (c.var.DB as unknown as DBLike)
-        .prepare("SELECT customerHint FROM po_scan_samples WHERE id = ?")
-        .bind(id)
+        .prepare("SELECT customerHint FROM po_scan_samples WHERE id = ? AND org_id = ?")
+        .bind(id, orgId)
         .first<{ customerHint: string | null }>();
       const hint = (sample?.customerHint ?? "").trim();
       if (hint) {
@@ -838,7 +876,7 @@ app.post("/samples/:id/confirm", async (c) => {
     }
   }
 
-  return c.json({ success: true, distillQueued });
+  return c.json({ success: true, distillQueued, learned });
 });
 
 // ===========================================================================
@@ -856,10 +894,11 @@ app.get("/samples/by-po/:poIdentifier", async (c) => {
       `SELECT id, customerHint, poIdentifier, rawExtracted, correctedJson, isGold, createdAt
          FROM po_scan_samples
          WHERE poIdentifier = ?
+           AND org_id = ?
          ORDER BY createdAt DESC
          LIMIT 1`,
     )
-    .bind(poIdentifier)
+    .bind(poIdentifier, getOrgId(c))
     .first<{
       id: string;
       customerHint: string | null;
@@ -928,8 +967,8 @@ app.patch("/samples/by-po/:poIdentifier", async (c) => {
   }
 
   const result = await (c.var.DB as unknown as DBLike)
-    .prepare("UPDATE po_scan_samples SET isGold = ? WHERE poIdentifier = ?")
-    .bind(goldFlag, poIdentifier)
+    .prepare("UPDATE po_scan_samples SET isGold = ? WHERE poIdentifier = ? AND org_id = ?")
+    .bind(goldFlag, poIdentifier, getOrgId(c))
     .run();
 
   return c.json({

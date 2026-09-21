@@ -19,6 +19,7 @@ import { postScanQueueConsume } from "@/lib/scan-queue-client";
 import { resolveScanParty } from "@/lib/scan-party-resolve";
 import { usePartyAliases, teachPartyAlias } from "@/lib/party-alias-client";
 import { moneyFieldToSen } from "@/lib/money-field";
+import { compressScanFile } from "@/lib/compress-scan-pdf";
 
 // Background scan queue dispatch — shared with scan-supplier-modal. >2-file
 // drops POST to /api/scan-queue/upload + navigate to /scan-queue/<batchId>
@@ -545,7 +546,10 @@ export function ScanPOModal({ open, onClose, onCreated }: Props) {
 
     const runOne = async (job: PageJob): Promise<JobRes> => {
       const fd = new FormData();
-      fd.append("file", job.pageFile);
+      // T-010 R4 — compress the copy that goes to OCR, exactly as the supplier
+      // path does. ONLY this copy: the File kept as the SO's original
+      // (so-original.ts) stays the untouched upload.
+      fd.append("file", await compressScanFile(job.pageFile));
       // Retry policy: Anthropic flakes for several reasons that all warrant
       // backing off and trying again rather than dropping the page on the
       // floor:

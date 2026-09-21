@@ -24,6 +24,7 @@ import { requirePermission } from "../lib/rbac";
 import { getOrgId } from "../lib/tenant";
 import { distillSupplierRules } from "../lib/ocr-distill";
 import { runExtract } from "../lib/scan-engine";
+import { confirmSupplierSample } from "../lib/ocr-learning";
 
 const app = new Hono<Env>();
 
@@ -95,6 +96,7 @@ app.post("/extract", async (c) => {
     poContext,
     // Legacy route writes a sample for the learning loop.
     recordSample: true,
+    aiRetries: 0,
   });
 
   if (!result.ok) {
@@ -145,22 +147,14 @@ app.post("/samples/:id/confirm", async (c) => {
   const gold = body.gold === true ? 1 : 0;
 
   const orgId = getOrgId(c);
-  let updated;
-  try {
-    updated = await c.var.DB.prepare(
-      "UPDATE supplier_scan_samples SET correctedJson = ?, isGold = ? WHERE id = ? AND (orgId = ? OR orgId IS NULL)",
-    )
-      .bind(correctedJson, gold, id, orgId)
-      .run();
-  } catch (e) {
-    return c.json(
-      { success: false, error: `Save failed: ${(e as Error).message}` },
-      500,
-    );
-  }
-  const changed =
-    (updated as unknown as { meta?: { changes?: number } }).meta?.changes ?? 0;
-  if (changed === 0) {
+  const saved = await confirmSupplierSample(c.var.DB, {
+    tenantId: orgId,
+    sampleId: id,
+    correctedJson,
+    gold: gold === 1,
+    correctedBy: (c.get("userId" as never) as string | undefined) ?? null,
+  });
+  if (!saved.found) {
     return c.json({ success: false, error: "Sample not found." }, 404);
   }
 
@@ -169,9 +163,9 @@ app.post("/samples/:id/confirm", async (c) => {
   if (gold === 1) {
     try {
       const row = await c.var.DB.prepare(
-        "SELECT supplierId, supplierHint FROM supplier_scan_samples WHERE id = ?",
+        "SELECT supplierId, supplierHint FROM supplier_scan_samples WHERE id = ? AND orgId = ?",
       )
-        .bind(id)
+        .bind(id, orgId)
         .first<{ supplierId: string | null; supplierHint: string | null }>();
       let supId = row?.supplierId ?? null;
       if (!supId && row?.supplierHint) {
@@ -206,7 +200,7 @@ app.post("/samples/:id/confirm", async (c) => {
     }
   }
 
-  return c.json({ success: true, distillQueued });
+  return c.json({ success: true, distillQueued, learned: saved.learned });
 });
 
 export default app;

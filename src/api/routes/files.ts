@@ -14,11 +14,18 @@
 //   GET    /api/files/:id              — fetch metadata.
 //   GET    /api/files/:id/download     — 302 to a short-lived presigned
 //                                        URL (or the /stream proxy if signing
-//                                        fails).
-//   GET    /api/files/:id/stream       — proxy stream the body. Used as
-//                                        the fallback when presigned URLs
-//                                        aren't available.
-//   DELETE /api/files/:id              — removes the row + storage object.
+//                                        fails). `?inline=1` opens it in the
+//                                        browser instead of saving it.
+//   GET    /api/files/:id/stream       — proxy stream the body, INLINE for
+//                                        images / PDFs / video ("View
+//                                        original" points here).
+//   DELETE /api/files/:id              — ARCHIVES the row. Nothing is ever
+//                                        hard-deleted, and the original of a
+//                                        posted document refuses even that.
+//
+// Originals are records (PRD T-010 R14-R16): every file carries a SHA-256
+// `checksum` and a `source`, can be `locked`, is `archived` rather than deleted,
+// and every view writes a row to `ocr_file_access_log`.
 //
 // Behavior when Supabase Storage isn't configured:
 //   Every route returns 503 with `{ ok: false, error: "file storage
@@ -36,7 +43,7 @@
 // Both stay in sync — the SupabaseAdapter adapter routes camelCase queries to
 // snake_case columns via column-rename-map.json (see lib/supabase-compat.ts).
 // ---------------------------------------------------------------------------
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import type { Env } from "../worker";
 import { getOrgId } from "../lib/tenant";
 import {
@@ -48,6 +55,7 @@ import {
 } from "../lib/supabase-storage";
 import { requirePermission } from "../lib/rbac";
 import { emitAudit } from "../lib/audit";
+import { isBenignSelfApplyError, memoizeSelfApply, runSelfApply } from "../lib/self-apply";
 
 const app = new Hono<Env>();
 
@@ -185,7 +193,118 @@ type FileAssetRow = {
   uploadedBy: string | null;
   uploadedAt: string;
   orgId: string;
+  checksum?: string | null;
+  source?: string | null;
+  locked?: boolean | null;
+  archived?: boolean | null;
 };
+
+// Migration files are inert on deploy (CLAUDE.md) — the columns and the access
+// log are created here, awaited before the first read or write that needs them.
+let retentionMemo: Promise<void> | null = null;
+const ensureRetentionSchema = (db: Env["Variables"]["DB"]): Promise<void> =>
+  memoizeSelfApply(
+    () => retentionMemo,
+    (p) => {
+      retentionMemo = p;
+    },
+    () =>
+      runSelfApply(db, "files-retention", [
+        "ALTER TABLE file_assets ADD COLUMN IF NOT EXISTS checksum TEXT",
+        "ALTER TABLE file_assets ADD COLUMN IF NOT EXISTS source TEXT",
+        "ALTER TABLE file_assets ADD COLUMN IF NOT EXISTS locked BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE file_assets ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE file_assets ADD COLUMN IF NOT EXISTS archived_at TEXT",
+        "ALTER TABLE file_assets ADD COLUMN IF NOT EXISTS archived_by TEXT",
+        `CREATE TABLE IF NOT EXISTS ocr_file_access_log (
+           id          TEXT PRIMARY KEY,
+           org_id      TEXT NOT NULL,
+           user_id     TEXT,
+           file_id     TEXT NOT NULL,
+           action      TEXT NOT NULL,
+           ip_address  TEXT,
+           accessed_at TEXT NOT NULL
+         )`,
+        "CREATE INDEX IF NOT EXISTS ocr_file_access_log_file_idx ON ocr_file_access_log (file_id, accessed_at)",
+      ]),
+  );
+
+/**
+ * A file that is the original of a POSTED document is evidence; it cannot be
+ * removed by anyone. One row per way a file can be tied to such a document.
+ * `by` says which value the query is bound with.
+ */
+export const POSTED_DOC_CHECKS: {
+  label: string;
+  by: "resourceId" | "id";
+  resourceType?: string;
+  sql: string;
+}[] = [
+  {
+    label: "a posted Delivery Order",
+    by: "resourceId",
+    resourceType: "SO",
+    sql: "SELECT id FROM delivery_orders WHERE sales_order_id = ? AND status NOT IN ('DRAFT','CANCELLED') LIMIT 1",
+  },
+  {
+    label: "a Sales Invoice",
+    by: "resourceId",
+    resourceType: "SO",
+    sql: "SELECT id FROM invoices WHERE sales_order_id = ? AND status NOT IN ('DRAFT','CANCELLED') LIMIT 1",
+  },
+  {
+    label: "a posted Purchase Invoice",
+    by: "id",
+    sql: "SELECT id FROM purchase_invoices WHERE source_document_file_id = ? AND status NOT IN ('DRAFT','CANCELLED') LIMIT 1",
+  },
+];
+
+/** Why this file may not be removed — or null when it may. Fails CLOSED. */
+async function lockReason(db: Env["Variables"]["DB"], row: FileAssetRow): Promise<string | null> {
+  if (row.locked) return "This file is locked and cannot be deleted.";
+  for (const chk of POSTED_DOC_CHECKS) {
+    if (chk.resourceType && chk.resourceType !== row.resourceType) continue;
+    try {
+      const hit = await db.prepare(chk.sql).bind(row[chk.by]).first<{ id: string }>();
+      if (hit) return `This file is the original of ${chk.label} (${hit.id}) and cannot be deleted.`;
+    } catch (err) {
+      // A table/column this deployment never created means "not linked". Any
+      // OTHER failure must not be read as permission to delete.
+      if (isBenignSelfApplyError(err)) continue;
+      throw err;
+    }
+  }
+  return null;
+}
+
+/** R16 — one row per view. Off the response path; never fails the view. */
+function logAccess(c: Context<Env>, fileId: string, action: "download" | "view" | "stream"): void {
+  const write = c.var.DB.prepare(
+    `INSERT INTO ocr_file_access_log (id, org_id, user_id, file_id, action, ip_address, accessed_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  )
+    .bind(
+      `fal-${crypto.randomUUID().slice(0, 12)}`,
+      getOrgId(c),
+      (c.get as unknown as (k: string) => string | undefined)("userId") ?? null,
+      fileId,
+      action,
+      c.req.header("cf-connecting-ip") ?? c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? null,
+      new Date().toISOString(),
+    )
+    .run()
+    .catch((e: unknown) => console.warn("[files] access log failed:", e instanceof Error ? e.message : e));
+  // ponytail: one row per request, thumbnails included. If catalogue grids make
+  // this table noisy, log only resourceTypes that hold originals.
+  if (c.executionCtx?.waitUntil) c.executionCtx.waitUntil(write);
+}
+
+const INLINE_SAFE = /^(image\/(png|jpeg|webp|gif|heic)|application\/pdf|video\/(mp4|quicktime|webm|3gpp))$/;
+
+async function sha256Hex(buf: ArrayBuffer): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", buf));
+  return Array.from(digest, (b) => b.toString(16).padStart(2, "0")).join("");
+}
 
 function genId(): string {
   return `fa-${crypto.randomUUID().slice(0, 12)}`;
@@ -292,18 +411,24 @@ app.post("/", async (c) => {
     c.get as unknown as (k: string) => string | undefined
   )("userId") ?? null;
   const uploadedAt = new Date().toISOString();
+  // Where the file came from — "scan-po", "scan-supplier", "scan-finance",
+  // "assistant", … Free text from the caller; "upload" when it says nothing.
+  const source = String(form.get("source") ?? "").trim().slice(0, 40) || "upload";
 
   try {
+    await ensureRetentionSchema(c.var.DB);
+    const bytes = await file.arrayBuffer();
+    const checksum = await sha256Hex(bytes);
     // Upload first, DB second — if the DB write fails we have an
     // orphan object in storage (cleanable by a sweeper job; cheaper than
     // an orphan DB row pointing at nothing).
-    await putFile(c.env, r2Key, await file.arrayBuffer(), contentType);
+    await putFile(c.env, r2Key, bytes, contentType);
 
     await c.var.DB.prepare(
       `INSERT INTO file_assets
          (id, resourceType, resourceId, filename, contentType, sizeBytes,
-          r2Key, uploadedBy, uploadedAt, orgId)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          r2Key, uploadedBy, uploadedAt, orgId, checksum, source)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
       .bind(
         id,
@@ -316,6 +441,8 @@ app.post("/", async (c) => {
         uploadedBy,
         uploadedAt,
         orgId,
+        checksum,
+        source,
       )
       .run();
 
@@ -336,6 +463,8 @@ app.post("/", async (c) => {
         uploadedBy,
         uploadedAt,
         orgId,
+        checksum,
+        source,
       },
     });
 
@@ -352,6 +481,8 @@ app.post("/", async (c) => {
         uploadedBy,
         uploadedAt,
         orgId,
+        checksum,
+        source,
       },
     });
   } catch (err) {
@@ -378,7 +509,10 @@ app.get("/", async (c) => {
   const resourceType = c.req.query("resourceType");
   const resourceId = c.req.query("resourceId");
 
+  await ensureRetentionSchema(c.var.DB);
   let sql = "SELECT * FROM file_assets WHERE orgId = ?";
+  // Archived files leave every list; they are still fetchable by id (audit).
+  if (c.req.query("includeArchived") !== "1") sql += " AND archived IS NOT TRUE";
   const binds: unknown[] = [orgId];
   if (resourceType) {
     sql += " AND resourceType = ?";
@@ -456,8 +590,17 @@ app.get("/:id/download", async (c) => {
     .first<FileAssetRow>();
   if (!row) return c.json({ success: false, error: "Not found" }, 404);
 
+  const inline = c.req.query("inline") === "1";
+  await ensureRetentionSchema(c.var.DB);
+  logAccess(c, id, inline ? "view" : "download");
   try {
     const url = await signedDownloadUrl(c.env, row.r2Key, 300);
+    if (url && inline) {
+      // No `download` param → the storage host serves it with its stored
+      // Content-Type and the browser renders it. Different origin, so nothing
+      // it renders can touch this app's session.
+      return c.redirect(url, 302);
+    }
     if (url) {
       // Force the browser to save with the real filename. Without this the
       // presigned URL serves the object under its storage key, so the file
@@ -495,17 +638,22 @@ app.get("/:id/stream", async (c) => {
     .first<FileAssetRow>();
   if (!row) return c.json({ success: false, error: "Not found" }, 404);
 
+  await ensureRetentionSchema(c.var.DB);
+  logAccess(c, id, "stream");
   try {
     const obj = await getFile(c.env, row.r2Key);
     if (!obj) return c.json({ success: false, error: "Not found" }, 404);
+    // R15 — "View original" must SHOW the document. Inline only for the types
+    // the upload sniffer can vouch for (images, PDF, video — none of which can
+    // run script in this origin); anything else, e.g. a stale row from before
+    // the allowlist, is still forced to download. `?download=1` forces it too.
+    const disposition =
+      INLINE_SAFE.test(row.contentType) && c.req.query("download") !== "1" ? "inline" : "attachment";
     return new Response(obj.body, {
       headers: {
         "Content-Type": row.contentType,
         "Content-Length": String(row.sizeBytes),
-        // Force download — browser doesn't try to render HTML/SVG inline
-        // even if a stale row from before the upload allowlist landed
-        // somehow stored such content.
-        "Content-Disposition": `attachment; filename="${row.filename.replace(/"/g, "")}"`,
+        "Content-Disposition": `${disposition}; filename="${row.filename.replace(/"/g, "")}"`,
         // Belt-and-braces: tell the browser not to MIME-sniff in case the
         // upload validator missed a polyglot file.
         "X-Content-Type-Options": "nosniff",
@@ -521,13 +669,19 @@ app.get("/:id/stream", async (c) => {
 });
 
 // ---------------------------------------------------------------------------
-// DELETE /api/files/:id — removes row + R2 object
+// DELETE /api/files/:id — ARCHIVE (R14). The row and the storage object both
+// stay; the file just leaves every list. The original of a posted document
+// refuses even that, with an explicit reason.
+//
+// This also removes the old orphan path: a hard delete with storage down used to
+// drop the row and strand the object.
 // ---------------------------------------------------------------------------
 app.delete("/:id", async (c) => {
   const denied = await requirePermission(c, "files", "delete");
   if (denied) return denied;
   const id = c.req.param("id");
   const orgId = getOrgId(c);
+  await ensureRetentionSchema(c.var.DB);
   const row = await c.var.DB.prepare(
     "SELECT * FROM file_assets WHERE id = ? AND orgId = ?",
   )
@@ -535,37 +689,25 @@ app.delete("/:id", async (c) => {
     .first<FileAssetRow>();
   if (!row) return c.json({ success: false, error: "Not found" }, 404);
 
-  try {
-    await deleteFile(c.env, row.r2Key);
-  } catch (err) {
-    if (err instanceof SupabaseStorageNotConfiguredError) {
-      // Without storage credentials we can't actually delete the bytes;
-      // still drop the DB row so the user-facing list reflects the intent.
-      // The orphan object will get pruned once storage is configured and
-      // the sweeper runs.
-      console.warn(
-        "[files/DELETE] storage unavailable — dropping DB row only, leaving orphan key",
-        row.r2Key,
-      );
-    } else {
-      console.error("[files/DELETE] storage delete failed:", err);
-      return c.json({ success: false, error: "delete failed" }, 500);
-    }
-  }
+  const reason = await lockReason(c.var.DB, row);
+  if (reason) return c.json({ success: false, error: reason, code: "FILE_LOCKED" }, 409);
 
-  await c.var.DB.prepare("DELETE FROM file_assets WHERE id = ? AND orgId = ?")
-    .bind(id, orgId)
+  const archivedBy = (c.get as unknown as (k: string) => string | undefined)("userId") ?? null;
+  await c.var.DB.prepare(
+    "UPDATE file_assets SET archived = TRUE, archived_at = ?, archived_by = ? WHERE id = ? AND orgId = ?",
+  )
+    .bind(new Date().toISOString(), archivedBy, id, orgId)
     .run();
 
-  // Sprint 2 task 5 — emit audit_events row on every successful delete.
   await emitAudit(c, {
     resource: "files",
     resourceId: id,
     action: "delete",
     before: row,
+    after: { ...row, archived: true },
   });
 
-  return c.json({ success: true });
+  return c.json({ success: true, archived: true });
 });
 
 export default app;

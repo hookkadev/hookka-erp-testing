@@ -12,8 +12,11 @@
 //   · single-doc contract — the FIRST detected doc prefills the form; a
 //     multi-doc PDF surfaces a hint so the operator splits it
 //   · amounts converted to integer SEN here (forms are MoneyInput-style)
-//   · no learning-loop sample rows (finance parties aren't suppliers; the
-//     per-entity distill infra can be extended later if volume justifies it)
+//   · T-010 R10: it now RECORDS a sample like every other scan and returns its
+//     `sampleId`; POST /samples/:id/confirm (accounting:create) saves what the
+//     clerk actually posted, which feeds the same correction log. Finance
+//     parties are not suppliers, so party_id stays null: corrections are
+//     logged and counted, but no per-party rules or aliases are distilled.
 //
 // The result only PREFILLS the form — the operator reviews, picks the GL
 // account(s), and saves through the normal POST. Nothing posts automatically.
@@ -23,6 +26,7 @@ import type { Env } from "../worker";
 import { requirePermission } from "../lib/rbac";
 import { getOrgId } from "../lib/tenant";
 import { runExtract } from "../lib/scan-engine";
+import { confirmSupplierSample } from "../lib/ocr-learning";
 
 const app = new Hono<Env>();
 
@@ -90,10 +94,11 @@ app.post("/extract", async (c) => {
     fileName: name,
     orgId: getOrgId(c),
     createdBy: (c.get("userId" as never) as string | undefined) ?? null,
-    recordSample: false,
+    recordSample: true,
+    aiRetries: 1,
   });
   if (!result.ok) {
-    return c.json({ success: false, error: result.error }, 502);
+    return c.json({ success: false, error: result.error, sampleId: result.sampleId }, 502);
   }
 
   const env = result.data as { docs?: RawDoc[] };
@@ -118,8 +123,37 @@ app.post("/extract", async (c) => {
       taxSen: toSen(d.tax),
       totalSen: toSen(d.total),
       extraDocs: docs.length > 1 ? docs.length - 1 : 0,
+      lowConfidence: (d as { lowConfidence?: string[] }).lowConfidence ?? [],
     },
+    sampleId: result.sampleId ?? null,
   });
+});
+
+// POST /api/scan-finance/samples/:id/confirm  body: { correctedJson }
+// `correctedJson` uses the ENGINE's shape ({docNo, supplierName, lines:[{description,
+// qty, unitPrice}]}) so it diffs against the stored raw extraction.
+app.post("/samples/:id/confirm", async (c) => {
+  const denied = await requirePermission(c, "accounting", "create");
+  if (denied) return denied;
+  let body: { correctedJson?: unknown };
+  try {
+    body = (await c.req.json()) as { correctedJson?: unknown };
+  } catch {
+    return c.json({ success: false, error: "Invalid JSON body." }, 400);
+  }
+  if (body.correctedJson === undefined) {
+    return c.json({ success: false, error: "Missing `correctedJson`." }, 400);
+  }
+  const saved = await confirmSupplierSample(c.var.DB, {
+    tenantId: getOrgId(c),
+    sampleId: c.req.param("id"),
+    correctedJson:
+      typeof body.correctedJson === "string" ? body.correctedJson : JSON.stringify(body.correctedJson),
+    gold: false,
+    correctedBy: (c.get("userId" as never) as string | undefined) ?? null,
+  });
+  if (!saved.found) return c.json({ success: false, error: "Sample not found." }, 404);
+  return c.json({ success: true, learned: saved.learned });
 });
 
 export default app;

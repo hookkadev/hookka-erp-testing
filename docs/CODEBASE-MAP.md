@@ -750,7 +750,7 @@ that proves those locks can actually go red.
 - Per-customer product prices (customer_products/customer_product_prices) shadow master product_prices; customers.tsx CustomerProductsPanel intentionally MIRRORS the Products page bulk-edit dirtyEdits pattern — keep in sync, don't fork.
 - Customer hubs feed the DO/Service hub chain (delivery_hubs, customer_hubs); hub-cascade-completeness + service-hub-chain tests guard the cascade — editing hub routes can break downstream delivery/consignment integrity.
 - Hub deletions are EXPLICIT-ONLY (BUG-2026-07-27-002, `tests/hub-wipe-guard.test.mjs`): customers.ts PUT deletes only ids named in `body.deletedHubIds` and UPSERTs the rest — never reintroduce the replace-diff (it let stale-tab saves wipe hubs). Hub INSERT inherits the customer's org; hub state pickers include SGR (canonical Selangor, `malaysia-states.ts`); scan-PO create shows a confirm gate before creating hub-less SOs.
-- /api/files (files.ts) serves customer, product-doc and modular uploads with attachment disposition but `<img src=.../download>` still renders — shared endpoint, don't special-case per resourceType.
+- /api/files (files.ts) is a shared endpoint — don't special-case per resourceType. **Since T-010 (2026-09-21, branch `feat/t010-ocr-scan`)**: `/stream` serves sniff-verified image / PDF / video `inline` (SO "View original" opens it), `/download?inline=1` 302s to a signed URL without the `download` param, DELETE **archives** (`archived = TRUE`) and returns **409 `FILE_LOCKED`** for the original of a posted DO / Sales Invoice / Purchase Invoice (`POSTED_DOC_CHECKS`), and every download/stream writes `ocr_file_access_log`. `<img src=…/download>` still renders. Design: `docs/T-010-OCR-SCAN.md`.
 - kv_config is a shared generic store (e.g. public_holidays consumed by payroll) — changing its shape can affect unrelated modules.
 - **Mail Center permissions are TWO independent layers, and confusing them is the mistake.**
   (1) RBAC `mail-center:<action>` — what you may DO. The action names mislead: `create` is
@@ -1165,7 +1165,7 @@ that proves those locks can actually go red.
 - **`POST /api/qc-pending/bulk-skip` exists and has NEVER BEEN RUN.** It is the reviewed way to retire the 3,009-row legacy backlog: dry-run unless `confirm:true`, `beforeSlotIso` + a >=10-char `reason` both mandatory, only touches PENDING/IN_PROGRESS. Clearing the backlog is the owner's call.
 - QC Phase 2 is DESCOPED (memory project_qc_phase2_descoped): qc_tags rows still get written on FAIL but owner does NOT want them surfaced in Inventory or as DO warnings. Don't re-surface qc_tags.
 - **WIP templates check the DEPARTMENT, not the batch** (mig 0219). 0068 left all 11 at 3-5 bare phrases with NULL criteria — "Stitch consistency", "Overall finish look acceptable" — which is a list people learn to tick. Every item now states HOW, HOW MANY and what to WRITE DOWN, and the items added are METHOD + CONFORMANCE: built to the document not to memory (the marker/cut list for THIS model is at the station), the first-off measured before the batch ran (cutting stations), the process STEP actually performed (glue before fastening, corner blocks, centre rail, locked seam ends), the tolerance as a number, and the station's known expensive-later defects (nap reversal at Fab Cut is a re-cut; at Packing it is a rebuild). The two 0068 OPINIONS are re-stated as measurements, guarded on the old text. `tests/qc-wip-templates.test.mjs` parses the migrations and fails the build if any WIP item loses its criteria, records nothing, or reads as an opinion.
-- files.ts serves images via attachment Content-Disposition yet <img src=/api/files/:id/download> still renders — relied on by the Products Catalog modular photo grid. Don't change disposition.
+- files.ts `<img src=/api/files/:id/download>` renders and the Products Catalog modular photo grid relies on it. The old "don't change disposition" note is superseded by T-010: `/stream` is `inline` for image/PDF/video, `/download` keeps its attachment redirect unless `?inline=1`. Files are archived, never deleted. See `docs/T-010-OCR-SCAN.md`.
 - rack stock-in is move-aware and idempotent (writes fg_units / job_cards). WIP idempotency uses wip_cascade_log claim (created at runtime, opt-in via orgId) — see arch_wip_idempotency_gap; don't double-apply.
 - THREE paths put a piece into a rack and must agree on its `rack_items` identity (BUG-2026-06-25-007): the office Packing-sheet dropdown + the /p/ piece-sticker scan + the worker scan all funnel through `applyPackingRack` (`packing-rack-write.ts`); the /r/ rack-QR "scan items" stock-in goes through `public-rack-qr.ts` (resolve + `currentRackOfPiece` + `pieceNotes`). All four sites call `packingPieceIdentity` (`packing-piece-identity.ts`) for `description`(=rack_items.productName) + `notes`(="SO <no>") — the move-match key. Before this only /r/ wrote rack_items, so an office/worker-assigned piece never showed in the Warehouse grid. Don't re-inline the formula or a re-assign MOVE can't find the old row (= duplicate).
 - CSRF is GLOBAL, not per-call: `src/lib/api-client.ts:58` monkey-patches `window.fetch` to auto-inject `X-CSRF-Token` on EVERY mutating /api/* request (unless the caller already set it) + `credentials:'include'`. So NO raw fetch is ever "missing CSRF" — an audit flagging "N fetches missing the CSRF token" is ALL false positives; do NOT add `csrfHeaders()` to "fix" it (a patchRack CSRF "fix" shipped then proved a no-op for exactly this reason).
@@ -1907,7 +1907,7 @@ and gets it right — cite it in the fix.
 
 ### Map fragment — Scanning Queue, OCR, Public QR, AI Assistant, TOTP, Orgs & CRM/Leads
 
-> **Last verified: 2026-08-13** against the eight route files below, `src/api/worker.ts`
+> **Last verified: 2026-09-21** for the T-010 notes marked below (scan-queue tenancy, `po_scan_samples.org_id`); everything else in this fragment still carries its **2026-08-13** stamp against the eight route files below, `src/api/worker.ts`
 > (mount lines), `src/api/lib/auth-middleware.ts` (`PUBLIC_PATHS` / `PUBLIC_PREFIXES`),
 > `src/api/lib/rbac.ts` (`requirePermission`), `src/api/lib/tenant.ts` (`getOrgId`),
 > `src/api/lib/api-rate-limit-config.ts`, `migrations/0026_po_scan_samples.sql`,
@@ -2244,11 +2244,13 @@ pricing engine (`src/api/routes/sales-leads.ts:56-60`).
   `src/dashboard-routes.tsx`. Polling happens inside the modals: `src/components/scan-po-modal.tsx:109`
   and `src/components/scan-supplier-modal.tsx:581` poll `/batch/:batchId`, and both resume
   via `/pending`. Do not go looking for a queue page.
+- **T-010 (2026-09-21, branch `feat/t010-ocr-scan`, not deployed): the `OR org_id IS NULL` escape hatch below is REMOVED** — all 11 reads are strict `org_id = ?`, and `ensureScanQueueTable` back-fills tenant-less rows. File bytes moved to object storage (`storage_key`); `insertQueueRow` is the one INSERT; `GET /api/scan-queue/stats` reports p50/p95. The text below describes `main`.
 - **`(org_id = ? OR org_id IS NULL)` is the scan-queue tenancy idiom** (seven places in
   `src/api/routes/scan-queue.ts`). It is legacy tolerance for rows written before the
   column existed — but it also means any row that lands with a NULL org is visible to
   every tenant. New writes always stamp the org, so the null-tolerant half should shrink,
   not grow.
+- **Correction 2026-09-21:** `tests/db-schema.json` (a real-DB snapshot) shows `po_scan_samples.org_id` EXISTS; what was missing is any CODE that filters on it. Whether prod rows are populated is **UNMEASURED**. T-010 (branch `feat/t010-ocr-scan`) filters every read/write by it, adds `party_id`, and back-fills NULLs.
 - **`po_scan_samples` has no org column at all** — see `migrations/0026_po_scan_samples.sql`.
   Every read, write and the few-shot selection over that table is therefore global. This is
   the root of finding S2 below; treat the table as a single shared pool until a column is

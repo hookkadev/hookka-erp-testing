@@ -48,6 +48,9 @@
 import type { Env } from "../worker";
 import { cleanCustomerHint } from "../../lib/customer-hint";
 import { matchByCompanyName } from "../../lib/company-name-match";
+import { callAnthropic, CACHE_1H, type AiUsage } from "./ai-http";
+import { applyCodeAliases, ensureOcrLearningSchema, loadCodeAliasMap, type LearnDb } from "./ocr-learning";
+import { loadPartyAliasMap, resolveAlias } from "./party-alias";
 
 // ---------- Anthropic config ------------------------------------------------
 // Owner ruling 2026-06-29 evening: scans were timing out on Sonnet
@@ -65,7 +68,10 @@ const PO_MODEL = "claude-sonnet-4-6";
 // the heavy Sonnet/Haiku extractor runs, we let Haiku scan ONLY the page
 // boundaries — much cheaper and parallelisable per chunk afterwards.
 const BOUNDARY_MODEL = "claude-haiku-4-5-20251001";
-const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
+// Stage 1 (T-010 R3): read the letterhead only. Same cheap model as the
+// boundary detector — it returns one company name, never line items.
+const IDENTIFY_MODEL = BOUNDARY_MODEL;
+const IDENTIFY_TIMEOUT_MS = 30_000;
 
 // Hard ceiling on a single Anthropic call. WITHOUT this, a request the model
 // never finishes (a page it chokes on, an upstream stall) hangs the fetch
@@ -131,6 +137,14 @@ export function num(v: unknown): number | null {
 }
 export const str = (v: unknown): string | null =>
   v === null || v === undefined ? null : String(v).trim() || null;
+const strList = (v: unknown): string[] =>
+  Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && x.length < 80).slice(0, 50) : [];
+
+// Appended to BOTH extraction prompts (R11). Self-reported, so it is a review
+// aid, not a probability: it points the operator's eye, it does not gate import.
+export const CONFIDENCE_RULE = `CONFIDENCE
+==========
+On every document object (each entry of pos[] / docs[]) add "lowConfidence": an array of field paths you are NOT sure of — illegible, handwritten, struck through, partly cut off, or inferred rather than read. Header fields by name ("customerPO", "docNo"); line fields as "items[0].fabricCode" / "lines[2].qty" (0-indexed). Use [] when everything was clearly printed. Never omit the key, and never list a field merely because it is null.`;
 
 // ===========================================================================
 // SUPPLIER side — prompt + types + sanitizer
@@ -172,6 +186,8 @@ export type SupplierDoc = {
   // Document-level discount (a "Less: Discount" / "Discount" line the supplier
   // subtracts before/around the subtotal). null when none printed.
   discount?: number | null;
+  /** Field paths the model was unsure of, e.g. "docNo", "lines[2].qty" (R11). */
+  lowConfidence?: string[];
 };
 // Engine-level supplier return. ALWAYS multi-doc since 2026-06-30 — a PDF can
 // contain N supplier docs (each with its own letterhead / docNo). Legacy
@@ -238,6 +254,7 @@ export function sanitizeSupplierDoc(
     tax: num(raw.tax),
     total: num(raw.total),
     discount: num(raw.discount),
+    lowConfidence: strList(raw.lowConfidence),
   };
 }
 
@@ -736,6 +753,13 @@ export type ExtractOpts = {
   poContext?: string;
   // Customer PO-specific (scan-po)
   customerCode?: string | null;
+  // Letterhead name already read by an earlier pass (the queue's triage of the
+  // parent PDF) — skips stage 1 for this file.
+  partyHint?: string | null;
+  // Model-call retries. The queue leaves this at the default; the synchronous
+  // routes pass 0 because the browser already owns retry + a 90s abort there,
+  // and stacking both turns one 529 into nine calls.
+  aiRetries?: number;
   // Shared
   orgId: string;
   createdBy?: string | null;
@@ -746,17 +770,47 @@ export type ExtractOpts = {
 type SupplierData = SupplierExtractionResult;
 type PoData = { pos: unknown[] }; // raw shape — route does validation
 
+/** Per-scan measurements (T-010 R1) — the queue persists these on its row. */
+export type ScanMetrics = {
+  identifyMs: number;
+  extractMs: number;
+  tokensIn: number;
+  tokensOut: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  aiAttempts: number;
+  /** Customer / supplier id the rules were loaded for; null = unidentified. */
+  partyId: string | null;
+  aliasHits: number;
+  /** Fields the model flagged as unsure, summed over every document. */
+  lowConfidence: number;
+};
+
+const emptyMetrics = (): ScanMetrics => ({
+  identifyMs: 0, extractMs: 0, tokensIn: 0, tokensOut: 0, cacheReadTokens: 0,
+  cacheWriteTokens: 0, aiAttempts: 0, partyId: null, aliasHits: 0, lowConfidence: 0,
+});
+
+function addUsage(m: ScanMetrics, u: AiUsage, attempts: number): void {
+  m.tokensIn += u.tokensIn;
+  m.tokensOut += u.tokensOut;
+  m.cacheReadTokens += u.cacheReadTokens;
+  m.cacheWriteTokens += u.cacheWriteTokens;
+  m.aiAttempts += attempts;
+}
+
 export type ExtractResult =
   | {
       ok: true;
       data: SupplierData | PoData;
       sampleId?: string | null;
+      metrics?: ScanMetrics;
       // Echoed for routes that want to surface cache metrics (PO route uses
       // this in its `meta` response block — undefined when the queue worker
       // calls us).
       meta?: { cacheHit: boolean; cacheCreated: boolean };
     }
-  | { ok: false; error: string; sampleId?: string | null };
+  | { ok: false; error: string; sampleId?: string | null; metrics?: ScanMetrics };
 
 function genSupplierSampleId(): string {
   return `sss-${crypto.randomUUID().slice(0, 8)}`;
@@ -764,15 +818,6 @@ function genSupplierSampleId(): string {
 function genPoSampleId(): string {
   return `pos-${crypto.randomUUID().slice(0, 8)}`;
 }
-
-type AnthropicResponse = {
-  content?: Array<{ type: string; text?: string }>;
-  error?: { type?: string; message?: string };
-  usage?: {
-    cache_creation_input_tokens?: number;
-    cache_read_input_tokens?: number;
-  };
-};
 
 // Pick the right Claude media block (PDF vs image) + media_type. Mirrors the
 // shapes the two legacy routes used to build inline.
@@ -812,6 +857,78 @@ function buildMediaBlock(opts: {
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// STAGE 1 — who issued this document? (T-010 R3)
+//
+// One cheap call over PAGE 1 ONLY. Its answer picks which party's learned rules
+// go into the stage-2 prompt, so the prompt no longer carries every customer's
+// rules and one customer's re-distillation no longer busts everyone's cache.
+// Failure is never fatal: an unidentified document falls back to the old
+// behaviour (PO: all rule blocks; supplier: universal rules only).
+// ---------------------------------------------------------------------------
+const IDENTIFY_PROMPT = `Read ONLY the letterhead / header block / company stamp at the top of this document and name the company that ISSUED it (the sender). Do not read line items. When two companies are printed, the issuer is the one in the letterhead — not the "To" / "Bill to" / "Deliver to" party. Output VALID JSON ONLY, first character '{': {"issuer": string|null}`;
+
+const u8ToArrayBuffer = (u: Uint8Array): ArrayBuffer =>
+  u.buffer.slice(u.byteOffset, u.byteOffset + u.byteLength) as ArrayBuffer;
+
+export async function identifyIssuer(
+  opts: Pick<ExtractOpts, "bytes" | "mimeType" | "fileName">,
+  apiKey: string,
+  metrics: ScanMetrics,
+): Promise<string | null> {
+  const t0 = Date.now();
+  try {
+    let bytes = opts.bytes;
+    const isPdf = opts.mimeType === "application/pdf" || opts.fileName.toLowerCase().endsWith(".pdf");
+    if (isPdf && (await getPdfPageCount(bytes)) > 1) {
+      const [first] = await splitPdfByChunks(bytes, [{ startPage: 1, endPage: 1 }]);
+      if (first) bytes = u8ToArrayBuffer(first.pdfBytes);
+    }
+    const media = buildMediaBlock({ mimeType: opts.mimeType, fileName: opts.fileName, base64: toBase64(bytes) });
+    if (!media) return null;
+    const ai = await callAnthropic(
+      apiKey,
+      {
+        model: IDENTIFY_MODEL,
+        max_tokens: 200,
+        temperature: 0,
+        messages: [{ role: "user", content: [{ type: "text", text: IDENTIFY_PROMPT }, media] }],
+      },
+      { timeoutMs: IDENTIFY_TIMEOUT_MS, retries: 1 },
+    );
+    metrics.aiAttempts += ai.attempts;
+    if (!ai.ok) return null;
+    addUsage(metrics, ai.usage, 0);
+    const parsed = JSON.parse(stripJsonFences(ai.text)) as { issuer?: unknown };
+    return str(parsed.issuer);
+  } catch {
+    return null;
+  } finally {
+    metrics.identifyMs = Date.now() - t0;
+  }
+}
+
+/** Letterhead name → party id: a taught alias first, then the tolerant matcher. */
+async function resolveIssuer(
+  db: DBLike,
+  opts: ExtractOpts,
+  apiKey: string,
+  partyType: "CUSTOMER" | "SUPPLIER",
+  metrics: ScanMetrics,
+  loadParties: () => Promise<{ id: string; name: string }[]>,
+): Promise<{ partyId: string | null; readName: string | null }> {
+  const readName = str(opts.partyHint) ?? (await identifyIssuer(opts, apiKey, metrics));
+  if (!readName) return { partyId: null, readName: null };
+  try {
+    const aliasMap = await loadPartyAliasMap(db as never, opts.orgId, partyType);
+    const partyId =
+      resolveAlias(aliasMap, readName) ?? matchByCompanyName(await loadParties(), readName)?.id ?? null;
+    return { partyId, readName };
+  } catch {
+    return { partyId: null, readName };
+  }
+}
+
 export async function runExtract(
   db: DBLike,
   env: Env["Bindings"],
@@ -825,6 +942,10 @@ export async function runExtract(
         "ANTHROPIC_API_KEY not configured. Run `npx wrangler secret put ANTHROPIC_API_KEY` to enable scanning.",
     };
   }
+
+  // Tenant columns + back-fills (R13) must exist before the first
+  // `org_id = ?` read below — migrations are inert on deploy. Memoised.
+  await ensureOcrLearningSchema(db as unknown as LearnDb).catch(() => {});
 
   const base64 = toBase64(opts.bytes);
   const mediaBlock = buildMediaBlock({
@@ -856,12 +977,27 @@ async function runSupplierExtract(
   apiKey: string,
 ): Promise<ExtractResult> {
   const orgId = opts.orgId;
-  const supplierId = opts.supplierId ?? null;
+  let supplierId = opts.supplierId ?? null;
   const poContext = (opts.poContext ?? "").trim();
 
-  // Resolve the supplier (for its learned rules + the sample hint).
+  const metrics = emptyMetrics();
+
+  // Resolve the supplier (for its learned rules + the sample hint). When the
+  // operator did not pick one, stage 1 reads the letterhead and resolves it —
+  // before T-010 an un-picked supplier simply scanned with NO learned rules.
   let supplierName = opts.supplierName ?? null;
   let supplierRules: string | null = null;
+  if (!supplierId) {
+    const who = await resolveIssuer(db, opts, apiKey, "SUPPLIER", metrics, async () => {
+      const res = await db
+        .prepare("SELECT id, name FROM suppliers WHERE orgId = ?")
+        .bind(orgId)
+        .all<{ id: string; name: string }>();
+      return res.results ?? [];
+    });
+    supplierId = who.partyId;
+    supplierName = supplierName || who.readName;
+  }
   if (supplierId) {
     try {
       const sup = await db
@@ -878,15 +1014,16 @@ async function runSupplierExtract(
       /* ocrPromptRules column may not exist yet */
     }
   }
+  metrics.partyId = supplierId;
   const supplierHint =
     supplierName ||
     opts.fileName.split(/[-_ .]/)[0]?.slice(0, 40) ||
     null;
 
+  // Two cache breakpoints, both 1 hour: the universal prompt is shared by every
+  // supplier; the rules block is this supplier's alone, so re-distilling one
+  // supplier can no longer evict anyone else's cache.
   const rulesText = formatSupplierRules(supplierName, supplierRules);
-  const cachedPrefix = rulesText
-    ? `${SUPPLIER_SYSTEM_PROMPT}\n\n${rulesText}`
-    : SUPPLIER_SYSTEM_PROMPT;
 
   // Few-shot: operator-confirmed extractions for THIS supplier (gold first).
   let fewShotText = "";
@@ -896,7 +1033,7 @@ async function runSupplierExtract(
         `SELECT correctedJson, isGold
            FROM supplier_scan_samples
           WHERE correctedJson IS NOT NULL
-            AND (orgId = ? OR orgId IS NULL)
+            AND orgId = ?
             AND (
                   UPPER(COALESCE(supplierHint,'')) = UPPER(?)
                OR regexp_replace(UPPER(COALESCE(supplierHint,'')), '[^A-Z0-9]', '', 'g')
@@ -925,76 +1062,65 @@ async function runSupplierExtract(
   let parsed: SupplierExtractionResult | null = null;
   let errorMsg: string | null = null;
 
-  try {
-    const resp = await fetch(ANTHROPIC_URL, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      signal: AbortSignal.timeout(EXTRACT_TIMEOUT_MS),
-      body: JSON.stringify({
-        model: SUPPLIER_MODEL,
-        max_tokens: 8192,
-        temperature: 0,
-        messages: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text: cachedPrefix,
-                cache_control: { type: "ephemeral" },
-              },
-              ...(fewShotText ? [{ type: "text", text: fewShotText }] : []),
-              ...(poContext
-                ? [
-                    {
-                      type: "text",
-                      text: `RECEIVING AGAINST THIS PURCHASE ORDER (use the codes/descriptions to align the supplier's lines; keep the supplier's own qty/price):\n${poContext}`,
-                    },
-                  ]
-                : []),
-              mediaBlock,
-              {
-                type: "text",
-                text: "Extract the supplier document above per the rules. Respond with VALID JSON ONLY — first character '{', last character '}', no preamble, no markdown fences.",
-              },
-            ],
-          },
-        ],
-      }),
-    });
+  const t0 = Date.now();
+  const ai = await callAnthropic(
+    apiKey,
+    {
+      model: SUPPLIER_MODEL,
+      max_tokens: 8192,
+      temperature: 0,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: `${SUPPLIER_SYSTEM_PROMPT}
 
-    const bodyText = await resp.text();
-    if (!resp.ok) {
-      errorMsg = `Anthropic ${resp.status}: ${bodyText.slice(0, 500)}`;
-    } else {
-      let parsedResp: AnthropicResponse = {};
-      try {
-        parsedResp = JSON.parse(bodyText) as AnthropicResponse;
-      } catch {
-        errorMsg = `Anthropic returned non-JSON: ${bodyText.slice(0, 300)}`;
-      }
-      if (parsedResp.error) {
-        errorMsg = `Anthropic: ${parsedResp.error.type}: ${parsedResp.error.message}`;
-      } else if (!errorMsg) {
-        const firstText =
-          parsedResp.content?.find((b) => b.type === "text")?.text ?? "";
-        claudeText = stripJsonFences(firstText);
-        try {
-          // sanitizeSupplierExtraction tolerates BOTH the new {docs:[...]}
-          // envelope and the legacy single-doc shape (for older few-shot
-          // samples or stale prompts).
-          parsed = sanitizeSupplierExtraction(JSON.parse(claudeText));
-        } catch (e) {
-          errorMsg = `Claude returned invalid JSON: ${(e as Error).message}. Raw: ${claudeText.slice(0, 300)}`;
-        }
-      }
+${CONFIDENCE_RULE}`, cache_control: CACHE_1H },
+            ...(rulesText ? [{ type: "text", text: rulesText, cache_control: CACHE_1H }] : []),
+            ...(fewShotText ? [{ type: "text", text: fewShotText }] : []),
+            ...(poContext
+              ? [
+                  {
+                    type: "text",
+                    text: `RECEIVING AGAINST THIS PURCHASE ORDER (use the codes/descriptions to align the supplier's lines; keep the supplier's own qty/price):
+${poContext}`,
+                  },
+                ]
+              : []),
+            mediaBlock,
+            {
+              type: "text",
+              text: "Extract the supplier document above per the rules. Respond with VALID JSON ONLY — first character '{', last character '}', no preamble, no markdown fences.",
+            },
+          ],
+        },
+      ],
+    },
+    { timeoutMs: EXTRACT_TIMEOUT_MS, retries: opts.aiRetries },
+  );
+  metrics.extractMs = Date.now() - t0;
+  metrics.aiAttempts += ai.attempts;
+  if (!ai.ok) {
+    errorMsg = ai.error;
+  } else {
+    addUsage(metrics, ai.usage, 0);
+    claudeText = stripJsonFences(ai.text);
+    try {
+      // sanitizeSupplierExtraction tolerates BOTH the new {docs:[...]}
+      // envelope and the legacy single-doc shape (for older few-shot
+      // samples or stale prompts).
+      parsed = sanitizeSupplierExtraction(JSON.parse(claudeText));
+    } catch (e) {
+      errorMsg = `Claude returned invalid JSON: ${(e as Error).message}. Raw: ${claudeText.slice(0, 300)}`;
     }
-  } catch (e) {
-    errorMsg = `Network/fetch error: ${(e as Error).message}`;
+  }
+
+  // Learned code aliases (R8) — applied BEFORE the sample is written and before
+  // the operator sees anything, so a code corrected once never needs retyping.
+  if (parsed) {
+    const aliasMap = await loadCodeAliasMap(db as unknown as LearnDb, orgId, "supplier", supplierId);
+    metrics.aliasHits = applyCodeAliases("supplier", parsed, aliasMap).length;
+    metrics.lowConfidence = parsed.docs.reduce((n, d) => n + (d.lowConfidence?.length ?? 0), 0);
   }
 
   // Sample row — fed back into distillSupplierRules for the learning loop.
@@ -1039,9 +1165,10 @@ async function runSupplierExtract(
       ok: false,
       error: errorMsg ?? "Extraction failed.",
       sampleId,
+      metrics,
     };
   }
-  return { ok: true, data: parsed, sampleId };
+  return { ok: true, data: parsed, sampleId, metrics };
 }
 
 // ---------------------------------------------------------------------------
@@ -1083,7 +1210,16 @@ async function runPoExtract(
   const customerHintGuess = cleanCustomerHint(
     opts.fileName.split(/[-_ .]/)[0]?.slice(0, 40),
   );
-  const cachedPrefix = `${PO_SYSTEM_PROMPT}\n\nCATALOG\n=======\n${catalogText}\n\n${customerRulesText}`;
+  // Stage 1 → only the issuing customer's rule block. Two 1-hour breakpoints:
+  // prompt+catalog is shared by every scan in the org; the rules block belongs to
+  // one customer, so re-distilling it invalidates nobody else.
+  const metrics = emptyMetrics();
+  const roster = catalog.customers;
+  const who = await resolveIssuer(db, opts, apiKey, "CUSTOMER", metrics, async () => roster);
+  const issuer = who.partyId ? roster.find((cu) => cu.id === who.partyId) ?? null : null;
+  metrics.partyId = issuer?.id ?? null;
+  if (issuer) customerRulesText = formatCustomerRules({ ...catalog, customers: [issuer] });
+  const sharedPrefix = `${PO_SYSTEM_PROMPT}\n\n${CONFIDENCE_RULE}\n\nCATALOG\n=======\n${catalogText}`;
 
   // Few-shot: operator-confirmed PO extractions — gold first, same-customer
   // prefix-boosted. Loaded outside the cache boundary so adding a new gold
@@ -1095,6 +1231,7 @@ async function runPoExtract(
         `SELECT id, correctedJson, isGold, customerHint
            FROM po_scan_samples
            WHERE correctedJson IS NOT NULL
+             AND org_id = ?
            ORDER BY
              (CASE WHEN regexp_replace(UPPER(COALESCE(customerHint, '')), '[^A-Z0-9]', '', 'g')
                         LIKE regexp_replace(UPPER(?), '[^A-Z0-9]', '', 'g') || '%'
@@ -1103,7 +1240,7 @@ async function runPoExtract(
              createdAt DESC
            LIMIT 3`,
       )
-      .bind(customerHintGuess ?? "")
+      .bind(orgId, issuer?.name ?? who.readName ?? customerHintGuess ?? "")
       .all<{
         id: string;
         correctedJson: string | null;
@@ -1131,81 +1268,69 @@ async function runPoExtract(
   let cacheHit = false;
   let cacheCreated = false;
 
-  try {
-    const resp = await fetch(ANTHROPIC_URL, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      signal: AbortSignal.timeout(EXTRACT_TIMEOUT_MS),
-      body: JSON.stringify({
-        model: PO_MODEL,
-        max_tokens: 8192,
-        temperature: 0,
-        messages: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text: cachedPrefix,
-                cache_control: { type: "ephemeral" },
-              },
-              ...(fewShotText ? [{ type: "text", text: fewShotText }] : []),
-              mediaBlock,
-              {
-                type: "text",
-                text:
-                  `Extract all POs from the ${mediaBlock.type === "document" ? "PDF" : "image"} above using the rules + catalog. ` +
-                  "OUTPUT FORMAT: Your response must be VALID JSON ONLY. Do NOT write any preamble, explanation, analysis, or chain-of-thought. Do NOT start with phrases like 'Looking at the PDF…', 'I can see…', 'Let me analyze…'. Do NOT wrap in markdown fences. The very first character of your response must be '{' and the very last must be '}'. Anything else will break our JSON parser.",
-              },
-            ],
-          },
-        ],
-      }),
-    });
-
-    const bodyText = await resp.text();
-    if (!resp.ok) {
-      errorMsg = `Anthropic ${resp.status}: ${bodyText.slice(0, 500)}`;
-    } else {
-      let parsedResp: AnthropicResponse = {};
-      try {
-        parsedResp = JSON.parse(bodyText) as AnthropicResponse;
-      } catch {
-        errorMsg = `Anthropic returned non-JSON: ${bodyText.slice(0, 300)}`;
+  const t0 = Date.now();
+  const ai = await callAnthropic(
+    apiKey,
+    {
+      model: PO_MODEL,
+      max_tokens: 8192,
+      temperature: 0,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: sharedPrefix, cache_control: CACHE_1H },
+            { type: "text", text: customerRulesText, cache_control: CACHE_1H },
+            ...(fewShotText ? [{ type: "text", text: fewShotText }] : []),
+            mediaBlock,
+            {
+              type: "text",
+              text:
+                `Extract all POs from the ${mediaBlock.type === "document" ? "PDF" : "image"} above using the rules + catalog. ` +
+                "OUTPUT FORMAT: Your response must be VALID JSON ONLY. Do NOT write any preamble, explanation, analysis, or chain-of-thought. Do NOT start with phrases like 'Looking at the PDF…', 'I can see…', 'Let me analyze…'. Do NOT wrap in markdown fences. The very first character of your response must be '{' and the very last must be '}'. Anything else will break our JSON parser.",
+            },
+          ],
+        },
+      ],
+    },
+    { timeoutMs: EXTRACT_TIMEOUT_MS, retries: opts.aiRetries },
+  );
+  metrics.extractMs = Date.now() - t0;
+  metrics.aiAttempts += ai.attempts;
+  if (!ai.ok) {
+    errorMsg = ai.error;
+  } else {
+    addUsage(metrics, ai.usage, 0);
+    cacheHit = ai.usage.cacheReadTokens > 0;
+    cacheCreated = ai.usage.cacheWriteTokens > 0;
+    claudeText = stripJsonFences(ai.text);
+    try {
+      const raw = JSON.parse(claudeText) as { pos?: unknown };
+      // Tolerate Claude returning a single PO instead of {pos:[...]}.
+      if (Array.isArray((raw as unknown as { items?: unknown }).items)) {
+        parsed = { pos: [raw] };
+      } else {
+        parsed = raw as { pos: unknown[] };
       }
-      if (parsedResp.error) {
-        errorMsg = `Anthropic: ${parsedResp.error.type}: ${parsedResp.error.message}`;
-      } else if (!errorMsg) {
-        cacheHit = (parsedResp.usage?.cache_read_input_tokens ?? 0) > 0;
-        cacheCreated =
-          (parsedResp.usage?.cache_creation_input_tokens ?? 0) > 0;
-        const firstText =
-          parsedResp.content?.find((b) => b.type === "text")?.text ?? "";
-        claudeText = stripJsonFences(firstText);
-        try {
-          const raw = JSON.parse(claudeText) as { pos?: unknown };
-          // Tolerate Claude returning a single PO instead of {pos:[...]}.
-          if (Array.isArray((raw as unknown as { items?: unknown }).items)) {
-            parsed = { pos: [raw] };
-          } else {
-            parsed = raw as { pos: unknown[] };
-          }
-          if (!Array.isArray(parsed?.pos)) {
-            errorMsg = "Claude returned no `pos` array.";
-          } else {
-            parseOk = true;
-          }
-        } catch (e) {
-          errorMsg = `Claude returned invalid JSON: ${(e as Error).message}. Raw: ${claudeText.slice(0, 300)}`;
-        }
+      if (!Array.isArray(parsed?.pos)) {
+        errorMsg = "Claude returned no `pos` array.";
+      } else {
+        parseOk = true;
       }
+    } catch (e) {
+      errorMsg = `Claude returned invalid JSON: ${(e as Error).message}. Raw: ${claudeText.slice(0, 300)}`;
     }
-  } catch (e) {
-    errorMsg = `Network/fetch error: ${(e as Error).message}`;
+  }
+
+  // Learned code aliases (R8) — before the sample row and before the operator
+  // sees anything. The model's own reading survives as `<field>Ocr`.
+  if (parseOk && parsed) {
+    const aliasMap = await loadCodeAliasMap(db as unknown as LearnDb, orgId, "po", metrics.partyId);
+    metrics.aliasHits = applyCodeAliases("po", parsed, aliasMap).length;
+    for (const po of parsed.pos) {
+      const flagged = (po as { lowConfidence?: unknown } | null)?.lowConfidence;
+      if (Array.isArray(flagged)) metrics.lowConfidence += flagged.length;
+    }
   }
 
   // Sample insert. The legacy route writes one row per parsed PO (because
@@ -1235,8 +1360,8 @@ async function runPoExtract(
     try {
       await db
         .prepare(
-          `INSERT INTO po_scan_samples (id, customerHint, poIdentifier, rawExtracted, correctedJson, createdBy)
-           VALUES (?, ?, ?, ?, NULL, ?)`,
+          `INSERT INTO po_scan_samples (id, customerHint, poIdentifier, rawExtracted, correctedJson, createdBy, org_id, party_id)
+           VALUES (?, ?, ?, ?, NULL, ?, ?, ?)`,
         )
         .bind(
           sampleId,
@@ -1244,6 +1369,8 @@ async function runPoExtract(
           null,
           parsed ? JSON.stringify(parsed) : JSON.stringify({ error: errorMsg, claudeText }),
           opts.createdBy ?? null,
+          orgId,
+          metrics.partyId,
         )
         .run();
     } catch (e) {
@@ -1256,12 +1383,14 @@ async function runPoExtract(
       ok: false,
       error: errorMsg ?? "Extraction failed.",
       sampleId,
+      metrics,
     };
   }
   return {
     ok: true,
     data: parsed,
     sampleId,
+    metrics,
     meta: { cacheHit, cacheCreated },
   };
 }
@@ -1289,17 +1418,20 @@ async function runPoExtract(
 // totals, no catalog injection — just where each document starts and ends.
 // max_tokens 4096 is plenty (16 chunks × ~30 tokens each ≈ 500 tokens).
 
-export type DocBoundary = { startPage: number; endPage: number };
+// `issuer` (T-010 R6): the boundary pass already reads every letterhead to find
+// the splits, so it reports the name too — each child then skips its own stage 1.
+export type DocBoundary = { startPage: number; endPage: number; issuer?: string | null };
 
 const BOUNDARY_SYSTEM_PROMPT = `You receive a multi-page supplier-document PDF that may bundle multiple separate documents (tax invoices, delivery orders) together.
 
 Return ONLY the page-range boundaries — do NOT extract line items or any other data.
 
 Output VALID JSON only, no preamble, no markdown:
-{"chunks": [{"startPage": 1, "endPage": 2}, {"startPage": 3, "endPage": 3}, ...]}
+{"chunks": [{"startPage": 1, "endPage": 2, "issuer": "ACME Textile Sdn Bhd"}, {"startPage": 3, "endPage": 3, "issuer": null}, ...]}
 
 Rules:
 - Page numbers are 1-indexed.
+- issuer = the company in that chunk's letterhead (the SENDER, never the "To" / "Bill to" party). null if unreadable.
 - Each chunk = ONE supplier document. A tax INVOICE and its matching DELIVERY ORDER (same docNo, same supplier) belong in the SAME chunk — they're part of one document set.
 - A new chunk starts when: supplier letterhead changes, OR docNo changes, OR document type switches from one set to a new set.
 - Cover every page exactly once. The last chunk's endPage MUST equal the total page count.
@@ -1341,15 +1473,9 @@ export async function detectSupplierDocBoundaries(
   };
 
   try {
-    const resp = await fetch(ANTHROPIC_URL, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      signal: AbortSignal.timeout(BOUNDARY_TIMEOUT_MS),
-      body: JSON.stringify({
+    const ai = await callAnthropic(
+      apiKey,
+      {
         model: BOUNDARY_MODEL,
         max_tokens: 4096,
         temperature: 0,
@@ -1366,27 +1492,11 @@ export async function detectSupplierDocBoundaries(
             ],
           },
         ],
-      }),
-    });
-    const bodyText = await resp.text();
-    if (!resp.ok) {
-      return {
-        error: `Anthropic ${resp.status}: ${bodyText.slice(0, 300)}`,
-      };
-    }
-    let parsedResp: AnthropicResponse = {};
-    try {
-      parsedResp = JSON.parse(bodyText) as AnthropicResponse;
-    } catch {
-      return { error: `Anthropic returned non-JSON: ${bodyText.slice(0, 200)}` };
-    }
-    if (parsedResp.error) {
-      return {
-        error: `Anthropic: ${parsedResp.error.type}: ${parsedResp.error.message}`,
-      };
-    }
-    const firstText =
-      parsedResp.content?.find((b) => b.type === "text")?.text ?? "";
+      },
+      { timeoutMs: BOUNDARY_TIMEOUT_MS, retries: 1 },
+    );
+    if (!ai.ok) return { error: ai.error };
+    const firstText = ai.text;
     const cleaned = stripJsonFences(firstText);
     let parsed: { chunks?: unknown };
     try {
@@ -1402,7 +1512,7 @@ export async function detectSupplierDocBoundaries(
     const chunks: DocBoundary[] = [];
     for (const raw of parsed.chunks) {
       if (!raw || typeof raw !== "object") continue;
-      const obj = raw as { startPage?: unknown; endPage?: unknown };
+      const obj = raw as { startPage?: unknown; endPage?: unknown; issuer?: unknown };
       const start = Number(obj.startPage);
       const end = Number(obj.endPage);
       if (
@@ -1415,7 +1525,7 @@ export async function detectSupplierDocBoundaries(
           error: `Invalid chunk shape: ${JSON.stringify(raw).slice(0, 100)}`,
         };
       }
-      chunks.push({ startPage: start, endPage: end });
+      chunks.push({ startPage: start, endPage: end, issuer: str(obj.issuer) });
     }
     if (chunks.length === 0) {
       return { error: "Boundary detector returned zero chunks" };
@@ -1438,7 +1548,7 @@ export async function splitPdfByChunks(
   sourceBytes: ArrayBuffer,
   chunks: DocBoundary[],
 ): Promise<
-  { pdfBytes: Uint8Array; startPage: number; endPage: number }[]
+  { pdfBytes: Uint8Array; startPage: number; endPage: number; issuer?: string | null }[]
 > {
   const { PDFDocument } = await import("pdf-lib");
   const source = await PDFDocument.load(sourceBytes);
@@ -1447,6 +1557,7 @@ export async function splitPdfByChunks(
     pdfBytes: Uint8Array;
     startPage: number;
     endPage: number;
+    issuer?: string | null;
   }[] = [];
   for (const c of chunks) {
     // Clamp out-of-range chunks defensively (boundary detector should never
@@ -1460,7 +1571,7 @@ export async function splitPdfByChunks(
     const copied = await child.copyPages(source, pageIdxs);
     for (const p of copied) child.addPage(p);
     const bytes = await child.save();
-    result.push({ pdfBytes: bytes, startPage: start, endPage: end });
+    result.push({ pdfBytes: bytes, startPage: start, endPage: end, issuer: c.issuer ?? null });
   }
   return result;
 }

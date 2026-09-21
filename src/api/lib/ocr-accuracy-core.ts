@@ -152,18 +152,12 @@ function docsOf(v: unknown): AnyRec[] {
 }
 
 export function diffSupplierSample(raw: unknown, corrected: unknown): DiffResult {
-  let rd = docsOf(raw);
-  const cd = docsOf(corrected);
-  const fields = new Set<string>();
   // Same envelope-vs-document mismatch as the sales side: `rawJson` may hold
   // every document on the page while `correctedJson` holds the one that was
   // imported. Narrow to the matching docNo before counting a length difference,
   // or a two-invoice scan reads as "Doc added/removed" on both halves.
-  if (rd.length > cd.length && cd.length === 1) {
-    const want = norm(cd[0].docNo);
-    const hit = want ? rd.find((d) => norm(d.docNo) === want) : undefined;
-    if (hit) rd = [hit];
-  }
+  const [rd, cd] = alignSupplierDocs(raw, corrected);
+  const fields = new Set<string>();
   if (rd.length !== cd.length) fields.add("Doc added/removed");
   const dn = Math.min(rd.length, cd.length);
   for (let d = 0; d < dn; d++) {
@@ -181,6 +175,84 @@ export function diffSupplierSample(raw: unknown, corrected: unknown): DiffResult
     }
   }
   return { changed: fields.size > 0, fields: [...fields] };
+}
+
+// ---- Field-level correction pairs (T-010 R7) ------------------------------
+//
+// The diff functions above answer "which LABELS changed" and throw the values
+// away. The learning loop needs the values: what the model read, what the person
+// typed instead, and enough of the line to say where. Same tables, same
+// alignment (rawPoFor / docNo narrowing), same `eq` — so the correction log and
+// the dashboard can never disagree about whether a field was edited.
+
+export type CorrectionPair = {
+  /** JSON key, not the dashboard label — stable for alias + distill lookups. */
+  field: string;
+  /** 0-based line index; null for a header field. */
+  lineNo: number | null;
+  rawValue: string;
+  finalValue: string;
+  /** The line's own text (rawSpec / description) — tells the distiller WHERE. */
+  context: string | null;
+};
+
+const asText = (v: unknown): string => (v === null || v === undefined ? "" : String(v).trim());
+
+function pairsFor(
+  r: AnyRec,
+  c: AnyRec,
+  keys: [string, string][],
+  lineNo: number | null,
+  out: CorrectionPair[],
+): void {
+  for (const [key] of keys) {
+    if (eq(r[key], c[key])) continue;
+    const context = asText(r.rawSpec ?? r.description ?? c.description ?? c.productName) || null;
+    out.push({
+      field: key,
+      lineNo,
+      rawValue: asText(r[key]),
+      finalValue: asText(c[key]),
+      context: lineNo === null ? null : context,
+    });
+  }
+}
+
+/** Supplier raw docs narrowed to the ones the operator imported (see diffSupplierSample). */
+function alignSupplierDocs(raw: unknown, corrected: unknown): [AnyRec[], AnyRec[]] {
+  let rd = docsOf(raw);
+  const cd = docsOf(corrected);
+  if (rd.length > cd.length && cd.length === 1) {
+    const want = norm(cd[0].docNo);
+    const hit = want ? rd.find((d) => norm(d.docNo) === want) : undefined;
+    if (hit) rd = [hit];
+  }
+  return [rd, cd];
+}
+
+export function correctionPairs(
+  kind: "po" | "supplier",
+  raw: unknown,
+  corrected: unknown,
+): CorrectionPair[] {
+  const out: CorrectionPair[] = [];
+  if (kind === "po") {
+    const r = asRec(rawPoFor(raw, corrected));
+    const c = asRec(corrected);
+    pairsFor(r, c, SO_HEADER, null, out);
+    const ri = asArr(r.items);
+    const ci = asArr(c.items);
+    for (let i = 0; i < Math.min(ri.length, ci.length); i++) pairsFor(ri[i], ci[i], SO_LINE, i, out);
+    return out;
+  }
+  const [rd, cd] = alignSupplierDocs(raw, corrected);
+  for (let d = 0; d < Math.min(rd.length, cd.length); d++) {
+    pairsFor(rd[d], cd[d], SUP_HEADER, null, out);
+    const rl = asArr(rd[d].lines);
+    const cl = asArr(cd[d].lines);
+    for (let i = 0; i < Math.min(rl.length, cl.length); i++) pairsFor(rl[i], cl[i], SUP_LINE, i, out);
+  }
+  return out;
 }
 
 // ---- Aggregation helpers (pure) -------------------------------------------
