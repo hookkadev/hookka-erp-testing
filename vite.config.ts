@@ -110,6 +110,13 @@ export default defineConfig({
     __BUILD_ID__: JSON.stringify(Date.now().toString(36)),
   },
   plugins: [react(), tailwindcss(), stripCrossorigin()],
+  // Local dev: UI with hot reload on :3000, API from `npm run dev:worker`
+  // (wrangler on :8787). Host is left as localhost:3000 so the API's
+  // default CORS/CSRF origin (http://localhost:3000) still matches.
+  server: {
+    port: 3000,
+    proxy: { '/api': 'http://127.0.0.1:8787' },
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
