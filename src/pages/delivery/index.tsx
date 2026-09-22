@@ -4074,7 +4074,11 @@ export default function DeliveryPage() {
         render: (_v, row) => <EditableExpectedDD row={row} onSave={updateExpectedDD} />,
       },
     ],
-    [selectedReadyPOs, updateExpectedDD]
+    // NOT selectedReadyPOs (BUG-2026-09-22-005): no column reads it, and
+    // listing it rebuilt these columns on every selection emission, which
+    // made DataGrid recompute its rows and emit the selection again — the
+    // loop that froze this tab. Selection state belongs to the grid.
+    [updateExpectedDD]
   );
 
   // ---------- DO Columns ----------

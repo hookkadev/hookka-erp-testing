@@ -34,6 +34,47 @@ Entries themselves stay newest-first.
 
 ---
 
+## BUG-2026-09-22-005 — Pending Delivery tab spun in a render loop; the whole page froze and no navigation completed `ui-frontend` `perf` `delivery` `data-grid` 🟢
+
+🟢 **Fixed** · owner-reported three times in one day, in escalating words: "click to other
+tab it stuck" → "still no fix" → "when I click Pending Delivery and then navigate anywhere it
+freezes and I can't interact with anything". **This is the real root cause of the first
+report**; #467's two fixes (double navigation, scroll state) were real but secondary.
+
+**Root cause — a closed loop between the page and the shared grid.**
+1. `DataGrid`'s selection effect (`data-grid.tsx`, `[selectedKeys, sortedData]`) calls
+   `onSelectionChange(rows)` whenever `sortedData` changes identity — and `sortedData` is
+   `[...filteredData]`, a FRESH array on every recompute, whose memo depends on `columns`.
+2. The delivery page stores that emission as `setSelectedReadyPOs(new Set(rows…))` — a fresh
+   object every time, even when empty.
+3. `pendingDeliveryColumns` listed `selectedReadyPOs` in its `useMemo` deps although no column
+   reads it (eslint had flagged the dep as unnecessary for months).
+So: emit → new Set → new columns → new `filteredData` → new `sortedData` → effect → emit → …
+Every cycle re-rendered the 7k-line page. React Router 7 schedules every navigation as a
+`startTransition`, and a transition is interrupted by each urgent update — the loop starved
+every tab switch and every route change made from that tab. Nothing threw: React only warns
+about passive-effect loops in dev, and prod spun silently.
+
+**Fix — both halves, at the shared seam first (the ponytail rule: one guard where all
+callers route through).** `DataGrid` now emits only when the selection actually changed:
+same length, same row references, same order ⇒ no call. A data refresh produces new row
+objects, so parents that read fields off the emitted rows still get fresh ones (the
+2026-07-03 invoices stale-selection rule is preserved: rows hidden by a filter shrink the
+emission). And the page's `pendingDeliveryColumns` no longer depends on `selectedReadyPOs`.
+The 16 other `onSelectionChange` callers were checked: their selection-dependent memos derive
+values, none rebuilds `columns`, so the delivery page was the only closed loop — but the grid
+guard now makes the class impossible for the next one.
+
+**Regression test.** `tests/datagrid-selection-emit.test.mjs` — pins the identity guard in
+the grid and the dep list on the page (no DOM runner in this repo, so source guards).
+`tsc -p tsconfig.app.json --noEmit`: exit 0. Class registered: BUG-CLASSES **C24**.
+
+**Not verified live.** No login this session. Expected on prod after deploy: open Pending
+Delivery, then click Planning / Pending Dispatch / the sidebar — each responds at once; the
+CPU graph in DevTools › Performance is flat while idling on Pending Delivery (it was pegged).
+
+---
+
 ## BUG-2026-09-22-003 — Delivery page: switching stage tabs felt stuck, and every tab paged the newest 200 DOs of every status `ui-frontend` `perf` `delivery` 🟢
 
 🟢 **Fixed** · owner-reported (screenshot on Pending Delivery: "when I click to planning /
