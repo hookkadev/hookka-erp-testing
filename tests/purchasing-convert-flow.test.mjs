@@ -302,11 +302,14 @@ function makeDb() {
         .filter((r) => String(getCol(r, "purchaseOrderId")) === String(binds[0]))
         .map((r) => ({ quantity: getCol(r, "quantity"), receivedQty: Number(getCol(r, "receivedQty")) || 0 }));
     }
-    // SELECT material_code, materialName, quantity, receivedQty FROM purchase_order_items WHERE purchaseOrderId = ?
+    // T-006 R8 — SELECT id, material_code, materialName, quantity, receivedQty
+    // FROM purchase_order_items WHERE purchaseOrderId = ? (checkPoRemaining
+    // now keys the ceiling by the PO line's own id, not material_code).
     if (/FROM purchase_order_items WHERE purchaseOrderId = \?/i.test(sql)) {
       return tables.purchase_order_items
         .filter((r) => String(getCol(r, "purchaseOrderId")) === String(binds[0]))
         .map((r) => ({
+          id: r.id,
           material_code: getCol(r, "material_code"),
           materialName: getCol(r, "materialName"),
           quantity: getCol(r, "quantity"),
@@ -336,9 +339,13 @@ function makeDb() {
     if (/FROM purchase_invoice_items WHERE pi_id = \?/i.test(sql)) {
       return tables.purchase_invoice_items.filter((r) => String(getCol(r, "pi_id")) === String(binds[0]));
     }
-    // Already-invoiced against a PO, per material code:
-    //   SELECT pii.material_code AS mc, COALESCE(SUM(pii.qty),0) AS qty
+    // T-006 R8 — already-invoiced against a PO, resolved to po_item_id (via
+    // pii.grn_item_id → grn_items.po_item_id) where resolvable, else
+    // material_code for a legacy/manual line with no GRN behind it:
+    //   SELECT gi.po_item_id AS "poItemId", pii.material_code AS mc,
+    //          COALESCE(SUM(pii.qty),0) AS qty
     //     FROM purchase_invoice_items pii JOIN purchase_invoices pi ...
+    //     LEFT JOIN grn_items gi ON gi.id = pii.grn_item_id
     //    WHERE COALESCE(pii.po_id, pi.purchaseOrderId) = ? AND pi.status != 'CANCELLED'
     // A GRN-sourced line counts here through its own po_id — which is exactly
     // why the GRN-then-PO order was already blocked while PO-then-GRN was not.
@@ -347,7 +354,7 @@ function makeDb() {
       // The re-line path excludes the invoice being edited (AND pii.pi_id != ?)
       // — its current lines are about to be replaced.
       const excluded = /pii\.pi_id != \?/.test(sql) ? String(binds[1]) : null;
-      const byCode = new Map();
+      const byKey = new Map();
       for (const it of tables.purchase_invoice_items) {
         if (excluded && String(getCol(it, "pi_id")) === excluded) continue;
         const pi = tables.purchase_invoices.find(
@@ -357,11 +364,28 @@ function makeDb() {
         const effectivePo =
           getCol(it, "po_id") ?? getCol(pi, "purchaseOrderId") ?? null;
         if (effectivePo == null || String(effectivePo) !== wanted) continue;
+        const grnItemId = getCol(it, "grn_item_id");
+        const gi = grnItemId
+          ? tables.grn_items.find((g) => String(g.id) === String(grnItemId))
+          : null;
+        const poItemId = gi ? getCol(gi, "po_item_id") ?? null : null;
         const code = getCol(it, "material_code");
-        if (!code) continue;
-        byCode.set(code, (byCode.get(code) ?? 0) + (Number(getCol(it, "qty")) || 0));
+        if (!poItemId && !code) continue; // wholly unresolvable — not guarded here
+        const key = poItemId ?? `code:${code}`;
+        const prev = byKey.get(key) ?? { poItemId, mc: code ?? null, qty: 0 };
+        prev.qty += Number(getCol(it, "qty")) || 0;
+        byKey.set(key, prev);
       }
-      return [...byCode].map(([mc, qty]) => ({ mc, qty }));
+      return [...byKey.values()];
+    }
+    // raw_materials lookup behind resolveRmForGRNItem — without it every GRN
+    // line resolves to "unresolved" and no stock statements are built, which
+    // would make the A3 single-batch test silently vacuous.
+    if (/FROM raw_materials WHERE (itemCode|description) = \?/i.test(sql)) {
+      const col = /WHERE itemCode/i.test(sql) ? "itemCode" : "description";
+      return tables.raw_materials.filter(
+        (r) => String(getCol(r, col)) === String(binds[0]),
+      );
     }
     // suppliers / poNo lookups not used here
     if (/FROM purchase_orders WHERE id = \?/i.test(sql)) {
@@ -822,6 +846,59 @@ test("a legitimate split still passes: 60 off the PO, then 40 off the GRN", asyn
   assert.equal(over.status, 409);
 });
 
+// T-006 R8 / BUG-2026-08-13-052 — every PO-sourced GRN line stores
+// material_code = "" in production (root cause diagnosed, deliberately NOT
+// fixed at the source — see BUG-HISTORY.md). checkPoRemaining used to match
+// PO lines to invoice lines by material_code alone, so a blank code meant the
+// ceiling could never find its PO line and silently let ANY quantity through.
+// po_item_id is an explicit FK that survives the blank code entirely.
+test("the PO ceiling rejects even when the GRN line's material_code is blank", async () => {
+  const db = makeDb();
+  seedPoAndReceipt(db);
+  // Simulate the real-world state directly rather than relying on
+  // seedPoAndReceipt's normally-populated fixture.
+  const gi = db.tables.grn_items.find((r) => r.id === 201);
+  gi.materialCode = "";
+  const piRoot = mount(piApp, db);
+
+  assert.equal((await post(piRoot, poDirectPI(100))).status, 200);
+
+  const res = await post(piRoot, {
+    grnId: "grn-2",
+    supplierId: "sup-2",
+    supplierName: "ADD WOOD",
+    purchaseOrderId: "po-2",
+    items: [
+      { materialCode: "", materialName: "WOOD-2 - Pine plank", qty: 100, unitPriceSen: 10000, grnItemId: 201 },
+    ],
+  });
+  assert.equal(res.status, 409, "a blank material_code must not let the ceiling silently pass");
+  assert.match((await res.json()).error, /remaining 0/);
+});
+
+// T-006 R9 — a PI with no header grnId AND no header purchaseOrderId fell
+// through both branches that call checkPoRemaining. A line still naming its
+// own poId got INSERTed with that poId (so it counted against the PO on the
+// NEXT invoice), but this invoice itself was never checked against the
+// ceiling at all.
+test("a header with neither grnId nor purchaseOrderId still honours a line's own poId", async () => {
+  const db = makeDb();
+  seedPoAndReceipt(db);
+  const piRoot = mount(piApp, db);
+
+  assert.equal((await post(piRoot, poDirectPI(100))).status, 200);
+
+  const res = await post(piRoot, {
+    supplierId: "sup-2",
+    supplierName: "ADD WOOD",
+    items: [
+      { materialCode: "WOOD-2", materialName: "WOOD-2 - Pine plank", qty: 1, unitPriceSen: 10000, poId: "po-2" },
+    ],
+  });
+  assert.equal(res.status, 409, "a line-level-only poId must still hit the PO ceiling");
+  assert.match((await res.json()).error, /remaining 0/);
+});
+
 test("two GRN-sourced invoices split 60/40 without double-counting the PO", async () => {
   const db = makeDb();
   seedPoAndReceipt(db);
@@ -942,4 +1019,196 @@ test("explicit body.status DRAFT forces DRAFT even for arrived goods", async () 
   assert.equal(res.status, 201);
   const data = (await res.json()).data;
   assert.equal(data.status, "DRAFT");
+});
+
+// ---------------------------------------------------------------------------
+// T-006 follow-up — R8's switch from material_code to po_item_id silently
+// dropped the OLD code's aggregation. The pre-R8 ceiling summed every PO line
+// sharing a material_code into one bucket (`prev?.qty ?? 0 + ...`); R8's
+// itemIdByMaterialCode is a plain code→id map, so with the same material on
+// two PO lines the LAST line wins and a PO-direct invoice is measured against
+// that one line's quantity instead of the material's total on the PO.
+// A perfectly legitimate invoice for the whole order then 409s.
+// ---------------------------------------------------------------------------
+function seedPoTwoLinesSameCode(db, { each = 50 } = {}) {
+  db.tables.suppliers.push({ id: "sup-3", code: "S3", name: "TWIN CO", email: null });
+  db.tables.purchase_orders.push({
+    id: "po-3", poNo: "PO-3", supplierId: "sup-3", supplierName: "TWIN CO",
+    subtotalSen: each * 2 * 10000, totalSen: each * 2 * 10000, status: "CONFIRMED",
+    orderDate: "2026-09-01", expectedDate: "", receivedDate: "", notes: "",
+    orgId: "org-test",
+  });
+  // Same material, two lines — a real pattern: two delivery dates, two
+  // sub-locations, or simply the operator adding the line twice.
+  for (const suffix of ["a", "b"]) {
+    db.tables.purchase_order_items.push({
+      id: `poi-3${suffix}`, purchaseOrderId: "po-3", materialCategory: "WOOD",
+      material_code: "WOOD-3", materialName: "WOOD-3 - Oak plank", supplierSKU: "",
+      quantity: each, unitPriceSen: 10000, totalSen: each * 10000, receivedQty: 0,
+      unit: "pcs", orgId: "org-test",
+    });
+  }
+}
+
+test("a PO with the same material on two lines is billable for the full ordered qty", async () => {
+  const db = makeDb();
+  seedPoTwoLinesSameCode(db); // 50 + 50 = 100 ordered of WOOD-3
+  const piRoot = mount(piApp, db);
+
+  // One invoice for the whole purchase order. No GRN, so the line resolves by
+  // material_code — and the material's ceiling on this PO is 100, not 50.
+  const res = await post(piRoot, {
+    purchaseOrderId: "po-3",
+    supplierId: "sup-3",
+    supplierName: "TWIN CO",
+    items: [
+      { materialCode: "WOOD-3", materialName: "WOOD-3 - Oak plank", qty: 100, unitPriceSen: 10000, poId: "po-3" },
+    ],
+  });
+  assert.equal(
+    res.status,
+    200,
+    `billing the full ordered quantity must pass — got ${res.status}: ${JSON.stringify(await res.clone().json())}`,
+  );
+});
+
+test("the same-code PO still refuses more than the two lines add up to", async () => {
+  const db = makeDb();
+  seedPoTwoLinesSameCode(db);
+  const piRoot = mount(piApp, db);
+
+  const res = await post(piRoot, {
+    purchaseOrderId: "po-3",
+    supplierId: "sup-3",
+    supplierName: "TWIN CO",
+    items: [
+      { materialCode: "WOOD-3", materialName: "WOOD-3 - Oak plank", qty: 101, unitPriceSen: 10000, poId: "po-3" },
+    ],
+  });
+  assert.equal(res.status, 409, "101 against a 100 ceiling must still be refused");
+});
+
+// ---------------------------------------------------------------------------
+// T-006 A2 — "Two 100-unit GRNs against a 100-unit PO: the second is refused."
+// The over-receipt tolerance used to compare 110% of the ORDERED quantity
+// against THIS document's receivedQty alone, so two separate receipts each
+// read "under tolerance" and both posted. Until now this was asserted only by
+// grepping grn.ts for the cumulative expression; this drives both receipts
+// through the real route.
+// ---------------------------------------------------------------------------
+test("A2 — a second receipt that busts the PO's tolerance is refused", async () => {
+  const db = makeDb();
+  seedOpenPo(db); // PO-9 line poi-9: 5 ordered, 0 received
+  const grnRoot = mount(grnApp, db);
+
+  const receive = (qty) =>
+    grnRoot.request("/", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        poId: "po-9",
+        receivedBy: "Ahmad",
+        arrival_state: "ARRIVED",
+        items: [{ poItemIndex: 0, receivedQty: qty, acceptedQty: qty, rejectedQty: 0 }],
+      }),
+    });
+
+  // Receipt #1 takes the whole order.
+  assert.equal((await receive(5)).status, 201);
+  assert.equal(Number(db.tables.purchase_order_items.find((r) => r.id === "poi-9").receivedQty), 5);
+
+  // Receipt #2 for the same 5 — on its own it reads "5 <= 5.5", which is how
+  // the same goods used to be received twice. Cumulatively it is 10.
+  const second = await receive(5);
+  assert.equal(second.status, 400, "the second full receipt must be refused");
+  assert.match((await second.json()).error, /already received 5/);
+
+  // And nothing was written: the PO line still reads 5, not 10.
+  assert.equal(
+    Number(db.tables.purchase_order_items.find((r) => r.id === "poi-9").receivedQty),
+    5,
+    "a refused receipt must not draw the PO line down",
+  );
+  assert.equal(db.tables.grns.length, 1, "a refused receipt must not leave a GRN behind");
+});
+
+test("A2 — the tolerance still allows a legitimate split receipt up to 110%", async () => {
+  const db = makeDb();
+  seedOpenPo(db); // 5 ordered → ceiling 5.5
+  const grnRoot = mount(grnApp, db);
+
+  const receive = (qty) =>
+    grnRoot.request("/", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        poId: "po-9",
+        receivedBy: "Ahmad",
+        arrival_state: "ARRIVED",
+        items: [{ poItemIndex: 0, receivedQty: qty, acceptedQty: qty, rejectedQty: 0 }],
+      }),
+    });
+
+  assert.equal((await receive(3)).status, 201);
+  assert.equal((await receive(2)).status, 201, "3 + 2 = 5 against a 5-unit order must pass");
+  assert.equal(Number(db.tables.purchase_order_items.find((r) => r.id === "poi-9").receivedQty), 5);
+});
+
+// ---------------------------------------------------------------------------
+// T-006 A3 — "Killing the worker between GRN batches leaves no posted GRN
+// without stock." R3's answer is that there are no longer separate batches to
+// die between: header + lines + stock + PO counter go into ONE db.batch().
+// The in-memory mock cannot simulate a mid-batch crash (it has no rollback),
+// but it CAN prove the property that makes the crash survivable — that every
+// one of those writes travels in a single batch call, so the database's own
+// atomicity covers them together.
+// ---------------------------------------------------------------------------
+test("A3 — a born-POSTED GRN's header, stock and PO counter go in ONE batch", async () => {
+  const db = makeDb();
+  seedOpenPo(db);
+  // Give the receipt a resolvable raw material so the stock statements are
+  // actually built (an unresolved line posts no rm_batches row).
+  db.tables.raw_materials.push({
+    id: "rm-9", itemCode: "FOAM-9", description: "Foam block", balanceQty: 0,
+  });
+
+  const batches = [];
+  const realBatch = db.batch;
+  db.batch = async (stmts) => {
+    batches.push(stmts.length);
+    return realBatch(stmts);
+  };
+
+  const res = await mount(grnApp, db).request("/", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      poId: "po-9",
+      receivedBy: "Ahmad",
+      arrival_state: "ARRIVED",
+      items: [
+        { poItemIndex: 0, materialCode: "FOAM-9", materialName: "FOAM-9 - Foam block", receivedQty: 5, acceptedQty: 5, rejectedQty: 0, unitPrice: 10000 },
+      ],
+    }),
+  });
+  assert.equal(res.status, 201);
+
+  // The three groups that used to be three separate db.batch() calls —
+  // header+lines, stock, PO counter — now arrive as one.
+  assert.equal(
+    batches.length,
+    1,
+    `a born-POSTED create must issue exactly ONE batch, got ${batches.length}`,
+  );
+
+  // ...and that one batch really did carry all three: a GRN row, a stock
+  // batch row, and the drawn-down PO counter.
+  assert.equal(db.tables.grns.length, 1, "GRN header written");
+  assert.equal(db.tables.grn_items.length, 1, "GRN line written");
+  assert.equal(db.tables.rm_batches.length, 1, "stock posted in the same batch");
+  assert.equal(
+    Number(db.tables.purchase_order_items.find((r) => r.id === "poi-9").receivedQty),
+    5,
+    "PO counter drawn down in the same batch",
+  );
 });

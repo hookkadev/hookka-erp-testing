@@ -1,5 +1,13 @@
 # Delivery & Consignment — Module Guide
 
+> **Last verified: 2026-09-21** (branch `fix/t006-transfer-convert-guards`) — every table
+> anchor re-derived to its exact definition line, plus the prose anchors for `DeliveryPage`,
+> `runBulkDoTransition`, `resendCustomerNotice` / `warnIfNoCustomerEmail` and
+> `buildDoDeliveredSoAndInvoice`. DO create on this page now sends an `Idempotency-Key`
+> (`src/lib/idempotency-key.ts`). Consignment: the CO list's "Transfer to Delivery Order"
+> dialog is gone (it 400'd on every click after T-006 R1); that menu item is now "Create
+> Consignment Note" → `/consignment/note`, and CN convert-to-invoice sends a key too.
+>
 > **Last verified: 2026-08-14** (branch `docs/docs-vs-code-audit`) — corrected against the
 > source by the prose audit; the row(s) touched here are itemised in
 > [`docs/DOCS-VS-CODE-AUDIT.md`](../DOCS-VS-CODE-AUDIT.md). Only the claims listed there were
@@ -26,7 +34,7 @@ deliver write `stock_movements` and read `fg_units`, and fire idempotent custome
 
 ## Entry points
 - Pages
-  - `/delivery` → `src/pages/delivery/index.tsx:882` (`DeliveryPage`) — DO workbench **and** the whole
+  - `/delivery` → `src/pages/delivery/index.tsx:883` (`DeliveryPage`) — DO workbench **and** the whole
     3PL provider UI, behind a `pageTab` toggle (`orders` | `3pl` | `agent`, URL `?section=`).
   - `/delivery/:id` → `src/pages/delivery/detail.tsx` (single DO detail; the drawer's "Open full page")
   - DO detail **drawer** (right slide-over, opened from a row) → chrome `src/components/ui/document-detail-drawer.tsx`,
@@ -64,7 +72,7 @@ deliver write `stock_movements` and read `fg_units`, and fire idempotent custome
    `validateDoComposition` (`_helpers.ts:2035`) enforces the hub-integrity guard. PL-first variant: `app.post("/packing-list-first")` (`delivery-orders.ts:2067`).
 2. **Status transition + edit** — `app.put("/:id")` `delivery-orders.ts:2949` → `applyDeliveryOrderUpdate` (`_helpers.ts:4194`); every
    move is checked against `VALID_TRANSITIONS[existing.status]` (`_helpers.ts:4249`). Bulk moves come from FE `runBulkDoTransition`
-   (`delivery/index.tsx:3002`). DELIVERED→INVOICED builds SO + invoice via `buildDoDeliveredSoAndInvoice` (`_helpers.ts:1558`) /
+   (`delivery/index.tsx:3010`). DELIVERED→INVOICED builds SO + invoice via `buildDoDeliveredSoAndInvoice` (`_helpers.ts:1617`) /
    `computeDoInvoiceLines` (`_helpers.ts:1342`).
 3. **Customer notice (backend safety-net)** — any transition calls `fireCustomerNoticeBestEffort` (`_helpers.ts:131`),
    which fire-and-forgets `queueDoCustomerNotice` (`_helpers.ts:3637`). Idempotency = atomic `UPDATE … WHERE dispatchEmailAt/deliveredEmailAt IS NULL`;
@@ -78,18 +86,18 @@ deliver write `stock_movements` and read `fg_units`, and fire idempotent custome
 ## Key functions / sections (locate-to-function)
 | Symbol / section | file:line | Role |
 |---|---|---|
-| `DeliveryPage` | `src/pages/delivery/index.tsx:882` | DO workbench + 3PL + agent, `pageTab` toggle |
-| `runBulkDoTransition` | `src/pages/delivery/index.tsx:3002` | FE bulk status move (all guards/cascades) |
-| `resendCustomerNotice` / `warnIfNoCustomerEmail` | `delivery/index.tsx:2891 / :2873` | Feature A per-DO resend / Feature B no-email warning |
+| `DeliveryPage` | `src/pages/delivery/index.tsx:883` | DO workbench + 3PL + agent, `pageTab` toggle |
+| `runBulkDoTransition` | `src/pages/delivery/index.tsx:3010` | FE bulk status move (all guards/cascades) |
+| `resendCustomerNotice` / `warnIfNoCustomerEmail` | `delivery/index.tsx:2899 / :2881` | Feature A per-DO resend / Feature B no-email warning |
 | `columns` (DataGrid) | `src/pages/delivery/index.tsx` (~3.9k) | DO grid column defs |
 | `getContextMenuItems` | `src/pages/delivery/index.tsx` (~4.4k) | THE DO status table — row menu **and** the drawer's action bar |
-| `detailLive` | `src/pages/delivery/index.tsx:3653` | Drawer's document re-read from the list; its bar filtered from the row menu |
-| `lineSpec` | `src/pages/delivery/index.tsx:3686` | One-line build spec per DO line, via the shared `buildSpec` |
+| `detailLive` | `src/pages/delivery/index.tsx:3661` | Drawer's document re-read from the list; its bar filtered from the row menu |
+| `lineSpec` | `src/pages/delivery/index.tsx:3694` | One-line build spec per DO line, via the shared `buildSpec` |
 | `drawerActionBar` / `drawerLineSpec` / `DRAWER_DOC_CONFIG` | `src/lib/document-drawer.ts` | Drawer model: full-page route, action-bar filter, spec-line delegation |
 | `DocumentDetailDrawer` | `src/components/ui/document-detail-drawer.tsx` | Shared slide-over chrome (chrome only, no domain knowledge) |
 | 3PL Providers block | `src/pages/delivery/index.tsx` (~6.5k) | `pageTab==="3pl"` list + Create/Edit dialog |
 | `DeliveryAgentTab` | `src/pages/delivery/agent-tab.tsx:128` | Brief strip + proposal approve/reject |
-| `ConsignmentNotePage` | `src/pages/consignment/note.tsx:454` | CN workbench (DO-parity mirror) |
+| `ConsignmentNotePage` | `src/pages/consignment/note.tsx:455` | CN workbench (DO-parity mirror) |
 | `VALID_TRANSITIONS` | `delivery-orders/_helpers.ts:87` | DO status machine |
 | `fireCustomerNoticeBestEffort` | `delivery-orders/_helpers.ts:131` | Backend notice safety-net (waitUntil) |
 | `createDeliveryOrderForPOs` | `delivery-orders/_helpers.ts:2164` | Build a DO from POs |
@@ -97,7 +105,7 @@ deliver write `stock_movements` and read `fg_units`, and fire idempotent custome
 | `applyDeliveryOrderUpdate` | `delivery-orders/_helpers.ts:4194` | DO edit + transition apply |
 | `buildDoDeliveredSoAndInvoice` / `computeDoInvoiceLines` | `delivery-orders/_helpers.ts:1558 / 1342` | DELIVERED→INVOICED SO + invoice build |
 | `queueDoCustomerNotice` | `delivery-orders/_helpers.ts:3637` | Recipient chain + idempotent email claim |
-| `app.post("/packing-list-first")` | `src/api/routes/delivery-orders.ts:2067` | PL-first auto-split create |
+| `app.post("/packing-list-first")` | `src/api/routes/delivery-orders.ts:2073` | PL-first auto-split create |
 | `createPackingListCore` | `src/api/routes/packing-lists.ts:628` | Truck-run packing-list build |
 | `collectDeliveryBrief` / `generateDeliveryProposals` | `src/api/lib/delivery-agent.ts:633 / 868` | Agent brief + proposals |
 | `cheapestForState` / `loadStateRateCard` | `src/api/lib/delivery-agent.ts` | Cheapest-3PL routing |

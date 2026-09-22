@@ -1,6 +1,9 @@
 # Hookka ERP — Work Tracker
 
 > **Last verified: 2026-09-22** — branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
+> **Last verified: 2026-09-21** — branch `fix/t006-transfer-convert-guards` (open PR against
+> `main`, not merged) added its entry as the newest below, and merged `main` in: both sides'
+> new entries were kept, T-006 first then T-004, with nothing dropped from either.
 > **Last verified: 2026-08-14** — branch `fix/on-time-delivery-and-decisions` added below (open, not merged, its entry is the newest; its bug ids were renumbered 130-133 → 140-143 because `feat/leave-entitlement` claimed 130-133 and merged to `main` first). Previously: branch `feat/leave-entitlement` (MERGED as #326). Previously: branch `feat/job-card-completed-at` added below (open, not merged). Previously: branch `fix/security-posture` added below (open, not merged). Previously: PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
 > **Last verified: 2026-08-14** — branch `feat/pcb-calculation` added below (open, not merged, its entry is the newest). Previously: branch `feat/job-card-completed-at` added below (open, not merged). Previously: branch `fix/security-posture` added below (open, not merged). Previously: PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
 > **Last verified: 2026-08-14** — restamped on branch `fix/money-input-parsing` (its entry is the newest below, not yet deployed). PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
@@ -145,6 +148,73 @@ module (sidebar entry), desktop + `/m`. Done in code: `ServiceCaseLink.tsx` / `u
 `service-case-link-lib.ts`; desktop `/service-cases/:id`, phone `/m/servicecases/:id`, plus an "Open Service Cases"
 button; gated by the sidebar permission; no API change. build:strict exit 0, 33/33 dashboard tests.
 NOT browser-verified, NOT deployed.
+
+## 2026-09-21 — 🔵 T-006 follow-through: the four gaps in the R1-R10 work (branch `fix/t006-transfer-convert-guards`)
+
+Review of the merged T-006 work (on `staging`, NOT on `main`) turned up four gaps, plus a bigger
+one found while checking them. All fixed on this branch except where stated.
+
+**The big one: R10 was inert in the product.** `withIdempotency` no-ops without an
+`Idempotency-Key` header, and not one of the six wrapped routes had a caller sending one — the
+requirement passed its test (which greps the route files) and protected nothing. Added
+`src/lib/idempotency-key.ts` (`useIdempotencyKey` / `useIdempotencyKeys`) and wired all eight
+call sites. The rule it encodes: hold ONE key across an unanswered attempt (fetchJson reports a
+timeout or drop as status 0, and such a request may well have committed), rotate it the moment
+any response arrives — including 4xx, which the server caches deliberately, so a held key would
+replay an old rejection onto a corrected form forever. Per-row keys in the scan modal, where each
+card is its own document. `tests/t006-r10-client-key.test.mjs` fails if a call site loses its key
+or mints one inline at the fetch.
+
+**R8 regression, found by writing the test first:** R8's switch from `material_code` to
+`po_item_id` silently dropped the old code's aggregation, so a PO listing the same material on
+two lines measured a PO-direct invoice against ONE line — billing the full ordered quantity
+409'd. The ceiling is now bucketed (material code when the PO line has one, line id when it
+doesn't), restoring the old aggregation without losing R8. The block message also stopped
+printing a raw PO-line UUID.
+
+**A2 and A3 had no behavioural coverage** — both were regexes over `grn.ts`. A2 now drives two
+receipts through the real route and asserts the second is refused, the PO counter is untouched
+and no GRN row is left behind; A3 asserts a born-POSTED create issues exactly ONE `db.batch()`
+carrying header + line + stock + PO counter. The mock D1 grew a `raw_materials` lookup, without
+which every line resolved as unresolved and A3 would have passed vacuously.
+
+**Consignment page's dead "Transfer to Delivery Order" button** (flagged in the plan, not fixed
+then): since R1's server-side refusal it 400'd on every click. Replaced with "Create Consignment
+Note" pointing at `/consignment/note`; the unreachable dialog and its four state hooks are gone.
+
+**NOT fixed, deliberately — see the foot of [T-006-TRANSFER-CONVERT-FIX-PLAN.md](T-006-TRANSFER-CONVERT-FIX-PLAN.md):**
+R2's concurrency window (a CHECK constraint would refuse the legitimate ADMIN-approved
+over-receipt path; closing it needs a conditional UPDATE or a row lock, and a live DB to test
+against), and R7's cancel-after-restock dead end (the refusal is correct, but an erroneous
+restocked return can never be cancelled and its quantity never re-invoiced — writing the inverse
+of a FIFO cost reversal blind is the bigger risk; **owner decision needed**). The R5 `NOT VALID`
+constraint and R8's newly-enforced ceilings both rest on **UNMEASURED** prod data — no DB access
+from this session.
+
+Verified: `tsc -p tsconfig.app.json --noEmit` clean, `npm test` 4635 pass / 0 fail / 3
+pre-existing skips, eslint clean on every touched file (pre-existing hook-dep warnings only).
+Prod impact **UNMEASURED**.
+
+---
+
+## 2026-09-10 — ⚪ PRD T-006 · Transfer/Convert foundation (fix plan written — SUPERSEDED, see 2026-09-21 above: R1-R10 all shipped)
+
+Requested by Mr Lim, PRD dated 2026-09-07, priority **Low (to be raised later)**. Full PRD:
+`T-006-Hookka-transfer-convert - wei siang.pdf` (user's local Downloads). Branch
+`fix/transfer-convert-duplicate-guard`, off `origin/main`.
+
+All 10 PRD findings independently re-verified against current source (background investigation,
+HEAD `e40d5550`) — every one CONFIRMED still live. Full analysis + per-requirement fix approach,
+sequencing, and open owner-decisions written to
+[T-006-TRANSFER-CONVERT-FIX-PLAN.md](T-006-TRANSFER-CONVERT-FIX-PLAN.md). Headline: R1 (Sales page
+"Transfer to Delivery Order" never sends `productionOrderIds`, so the once-only-delivery guard from
+the May duplicate-DO incident never runs on this entry point) is the same dollar-risk class as that
+incident. R8 as literally worded in the PRD ("fix the empty material_code") is the exact fix
+BUG-2026-08-13-052 already diagnosed and explicitly rejected (risk: silently redirects stock
+postings to the wrong raw material) — fix plan uses `grn_items.po_item_id` instead, sidestepping it
+entirely; flagged as a deviation the PRD author should sign off on. Not started: no code written yet.
+
+---
 
 ## 2026-09-10 — 🔵 PRD T-004 · Import / Export across the whole system (P0/R3-R5 done, rest open)
 
