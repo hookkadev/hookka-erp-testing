@@ -6551,7 +6551,7 @@ function CorrectionsTab() {
 // 出来罢了…purchase invoice 那边要保留」— Procurement's PI page is untouched and
 // stays the only place to create/edit/post a PI; the PI rows here link back.
 type ApInvRow = {
-  kind: "AP" | "PI"; id: string; no: string; supplier: string; supplierRef: string; date: string; dueDate: string | null;
+  kind: "AP" | "PI"; id: string; no: string; supplier: string; partyId?: string; supplierRef: string; date: string; dueDate: string | null;
   description: string; totalSen: number; paidSen: number; outstandingSen: number; status: "OPEN" | "PAID" | "CANCELLED"; opening: boolean;
 };
 function ApInvoicesTab() {
@@ -6584,7 +6584,7 @@ function ApInvoicesTab() {
         </div>
         <div className="flex gap-2">
           <Link to="/accounting?tab=ocreditorbills"><Button variant="outline" size="sm">New AP bill</Button></Link>
-          <Link to="/accounting?tab=payments"><Button variant="primary" size="sm">Pay (Payment Vouchers)</Button></Link>
+          <Link to="/accounting?tab=payments"><Button variant="primary" size="sm">New AP Payment</Button></Link>
         </div>
       </div>
       {data && (
@@ -6638,7 +6638,13 @@ function ApInvoicesTab() {
                     <td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(r.totalSen)}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums text-[#6B7280]">{r.paidSen ? formatCurrency(r.paidSen) : "—"}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums font-medium">{r.outstandingSen ? formatCurrency(r.outstandingSen) : "—"}</td>
-                    <td className="px-3 py-1.5"><span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${chip(r)}`}>{r.status}</span></td>
+                    <td className="px-3 py-1.5 whitespace-nowrap">
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${chip(r)}`}>{r.status}</span>
+                      {r.status === "OPEN" && r.partyId && (
+                        // Houzs "Record payment": opens New AP Payment with this creditor picked and the bill ticked.
+                        <Link to={`/accounting?tab=payments&pay=${r.kind}:${encodeURIComponent(r.id)}:${encodeURIComponent(r.partyId)}`} className="ml-2 text-[11px] underline decoration-dotted text-[#6B5C32] hover:text-[#1F1D1B]">pay</Link>
+                      )}
+                    </td>
                   </tr>
                 ))}
                 {rows.length === 0 && <tr><td colSpan={10} className="px-3 py-8 text-center text-sm text-[#9CA3AF]">Nothing matches</td></tr>}
@@ -8489,7 +8495,43 @@ type PvRow = {
   checkedAt?: string | null; checked_at?: string | null;
   approvedAt?: string | null; approved_at?: string | null;
   lines: { accountCode: string; description: string | null; amountSen: number }[];
+  // AP Payment (Houzs adoption, 2026-09-22): pays a creditor's bills instead
+  // of expense lines. EXPENSE / undefined = the classic voucher.
+  pvKind?: "AP" | "EXPENSE";
+  partyKind?: "SUPPLIER" | "OTHER" | null;
+  partyId?: string | null;
+  advanceSen?: number;
+  advanceOpenSen?: number;
+  allocs?: PvAllocOut[];
 };
+type PvAllocOut = { docKind: "PI" | "AP"; docId: string; docNo: string; docRef: string; amountSen: number };
+type PvOpenBill = {
+  docKind: "PI" | "AP"; id: string; no: string; ref: string; date: string; dueDate: string | null;
+  totalSen: number; paidSen: number; outstandingSen: number; reservedSen: number; reservedBy: string[]; availableSen: number;
+  currency: string; foreign: boolean; opening: boolean;
+};
+type PvStatusChip = "ALL" | "DRAFT" | "PREPARED" | "CHECKED" | "APPROVED" | "ADVANCE_OPEN" | "CANCELLED";
+const PV_STATUS_CHIPS: { key: PvStatusChip; label: string }[] = [
+  { key: "ALL", label: "All" }, { key: "DRAFT", label: "Draft" }, { key: "PREPARED", label: "Prepared" }, { key: "CHECKED", label: "Checked" },
+  { key: "APPROVED", label: "Approved" }, { key: "ADVANCE_OPEN", label: "Advance open" }, { key: "CANCELLED", label: "Cancelled" },
+];
+// The settled-bills detail block for a voucher's print: an AP voucher carries
+// its ticks (draft or posted), so no round-trip is needed.
+function pvApPrintDetail(pv: PvRow): { supplierName: string; piNo: string | null; opening: boolean; method: string; bookedSen: number }[] | undefined {
+  if (pv.pvKind !== "AP") return undefined;
+  const rows: { supplierName: string; piNo: string | null; opening: boolean; method: string; bookedSen: number }[] =
+    (pv.allocs ?? []).map((a) => ({ supplierName: pv.payee ?? "", piNo: a.docNo || a.docId, opening: false, method: "", bookedSen: a.amountSen }));
+  if ((pv.advanceSen ?? 0) > 0) rows.push({ supplierName: pv.payee ?? "", piNo: null, opening: false, method: "", bookedSen: pv.advanceSen ?? 0 });
+  return rows.length ? rows : undefined;
+}
+
+// ?pay=<PI|AP>:<docId>:<partyId> — the "Pay" deep-link from AP Invoices.
+function parsePayLink(raw: string | null): { docKind: "PI" | "AP"; docId: string; partyId: string } | null {
+  if (!raw) return null;
+  const [docKind, docId, partyId] = raw.split(":");
+  if ((docKind !== "PI" && docKind !== "AP") || !docId || !partyId) return null;
+  return { docKind, docId, partyId };
+}
 
 function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
   const { toast } = useToast();
@@ -8497,7 +8539,9 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
   const [rows, setRows] = useState<PvRow[] | null>(null);
   const [migrationMissing, setMigrationMissing] = useState(false);
   const [expandedPv, setExpandedPv] = useState<Record<string, boolean>>({});
-  const [showForm, setShowForm] = useState(false);
+  // A deep-link opens New AP Payment straight away (state seeded, no effect).
+  const initialPay = parsePayLink(new URLSearchParams(window.location.search).get("pay"));
+  const [showForm, setShowForm] = useState(!!initialPay);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     date: new Date().toISOString().slice(0, 10),
@@ -8513,12 +8557,76 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
   ]);
 
   const [q, setQ] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"ALL" | "PENDING" | "PAID" | "UNPAID" | "VOID">("ALL");
+  const [statusFilter, setStatusFilter] = useState<PvStatusChip>("ALL");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [bankFilter, setBankFilter] = useState("");
   // Ladder actions in flight (single or batch) — buttons disable meanwhile.
   const [ladderBusy, setLadderBusy] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  // Editing a not-yet-posted voucher goes to PUT (plain replace); editing a
+  // posted one goes to /restate (reverse + re-post under the same number).
+  const [editingPosted, setEditingPosted] = useState(true);
+
+  // ── AP Payment form (Houzs: New AP Payment) ──
+  // One creditor per voucher: a supplier (purchase invoices, optional advance)
+  // or an other creditor (its bills). The ticked bills post at APPROVE through
+  // the payment pages' own engines under this voucher's number.
+  const [formKind, setFormKind] = useState<"EXPENSE" | "AP">(initialPay ? "AP" : "EXPENSE");
+  const [apForm, setApForm] = useState({
+    date: new Date().toISOString().slice(0, 10),
+    payFrom: "",
+    partyKind: (initialPay?.docKind === "AP" ? "OTHER" : "SUPPLIER") as "SUPPLIER" | "OTHER",
+    partyId: initialPay?.partyId ?? "",
+    reference: "",
+    advance: "",
+  });
+  const [apAlloc, setApAlloc] = useState<Record<string, string>>({});
+  // apBills carries the key it was loaded for; a key mismatch = loading.
+  const [apBills, setApBills] = useState<{ key: string; partyName: string; advanceOpenSen: number; bills: PvOpenBill[] } | null>(null);
+  const [suppliers, setSuppliers] = useState<{ id: string; code?: string | null; name: string; isActive?: boolean }[]>([]);
+  const [otherCreditors, setOtherCreditors] = useState<{ id: string; name: string; type: string; isActive?: boolean }[]>([]);
+  // The deep-linked bill gets ticked in full once the creditor's list is here.
+  const pendingPayRef = useRef<string | null>(initialPay?.docId ?? null);
+  useEffect(() => {
+    let dead = false;
+    fetch("/api/suppliers").then((r) => r.json() as Promise<{ success?: boolean; data?: typeof suppliers } | typeof suppliers>)
+      .then((j) => { if (dead) return; const raw = Array.isArray(j) ? j : (j?.success ? j.data ?? [] : []); setSuppliers(raw.filter((s) => s.isActive !== false)); })
+      .catch(() => {});
+    fetch("/api/accounting/other-parties").then((r) => r.json() as Promise<{ success?: boolean; data?: typeof otherCreditors }>)
+      .then((j) => { if (!dead && j?.success) setOtherCreditors((j.data ?? []).filter((p) => p.type === "CREDITOR" && p.isActive !== false)); })
+      .catch(() => {});
+    return () => { dead = true; };
+  }, []);
+  // Bills reload whenever the creditor changes (and once on edit, keyed by the
+  // voucher so its own ticks are not counted as "reserved elsewhere").
+  const apBillsKey = formKind === "AP" && apForm.partyId ? `${apForm.partyKind}|${apForm.partyId}|${editingId ?? ""}` : "";
+  const apBillsLoading = !!apBillsKey && apBills?.key !== apBillsKey;
+  useEffect(() => {
+    if (!apBillsKey) return;
+    const [partyKind, partyId, exclude] = apBillsKey.split("|");
+    let dead = false;
+    fetch(`/api/accounting/payment-vouchers/open-bills?partyKind=${partyKind}&partyId=${encodeURIComponent(partyId)}${exclude ? `&exclude=${encodeURIComponent(exclude)}` : ""}`)
+      .then((r) => r.json() as Promise<{ success?: boolean; error?: string; data?: { partyName: string; advanceOpenSen: number; bills: PvOpenBill[] } }>)
+      .then((j) => {
+        if (dead) return;
+        if (j?.success && j.data) {
+          setApBills({ key: apBillsKey, ...j.data });
+          // Deep-link: tick the requested bill in full once its list is here.
+          const pending = pendingPayRef.current;
+          if (pending) {
+            pendingPayRef.current = null;
+            const bill = j.data.bills.find((b) => b.id === pending);
+            if (bill && !bill.foreign) setApAlloc((m) => ({ ...m, [bill.id]: (bill.availableSen / 100).toFixed(2) }));
+          }
+        } else {
+          setApBills({ key: apBillsKey, partyName: "", advanceOpenSen: 0, bills: [] });
+          if (j?.error) toast.error(j.error);
+        }
+      })
+      .catch(() => { if (!dead) setApBills({ key: apBillsKey, partyName: "", advanceOpenSen: 0, bills: [] }); });
+    return () => { dead = true; };
+  }, [apBillsKey, toast]);
 
   const bankCash = accounts.filter(
     (a) => a.specialAccountType === "SBK" || a.specialAccountType === "SCH",
@@ -8575,11 +8683,17 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
   // Ladder position (Houzs four tiers). Legacy rows carry no state → APPROVED.
   const apState = (r: PvRow): PvApprovalState => (r.approvalState ?? r.approval_state) ?? "APPROVED";
   const isPosted = (r: PvRow) => r.status !== "VOID" && apState(r) === "APPROVED";
-  const statusOf = (r: PvRow) =>
-    r.status === "VOID" ? "VOID" : !isPosted(r) ? apState(r) : (r.accrued === 1 && !r.settledAt ? "UNPAID" : "PAID");
+  // Houzs chips: the ladder states, Approved (= posted), Advance open (a
+  // supplier AP payment whose unallocated advance is not yet knocked off),
+  // Cancelled. An accrued-unpaid voucher sits under Approved with its own badge.
+  const chipOf = (r: PvRow): Exclude<PvStatusChip, "ALL" | "ADVANCE_OPEN"> =>
+    r.status === "VOID" ? "CANCELLED" : !isPosted(r) ? apState(r) : "APPROVED";
+  const matchesChip = (r: PvRow, chip: PvStatusChip) =>
+    chip === "ALL" ? true : chip === "ADVANCE_OPEN" ? isPosted(r) && (r.advanceOpenSen ?? 0) > 0 : chipOf(r) === chip;
+  const chipCount = (chip: PvStatusChip) => (rows ?? []).filter((r) => matchesChip(r, chip)).length;
   const visibleRows = (rows ?? []).filter((r) => {
-    if (q.trim()) { const kw = q.toLowerCase(); if (![r.pvNo, r.payee ?? "", r.description ?? ""].some((s) => s.toLowerCase().includes(kw))) return false; }
-    if (statusFilter === "PENDING" ? isPosted(r) || r.status === "VOID" : statusFilter !== "ALL" && statusOf(r) !== statusFilter) return false;
+    if (q.trim()) { const kw = q.toLowerCase(); if (![r.pvNo, r.payee ?? "", r.description ?? "", ...(r.allocs ?? []).map((a) => a.docNo)].some((s) => s.toLowerCase().includes(kw))) return false; }
+    if (!matchesChip(r, statusFilter)) return false;
     if (dateFrom && r.date < dateFrom) return false;
     if (dateTo && r.date > dateTo) return false;
     if (bankFilter && (r.payFrom ?? "") !== bankFilter) return false;
@@ -8588,16 +8702,67 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
 
   const pvSel = useRowSelection(visibleRows, (r) => r.pvNo ?? r.id);
 
-  const [editingId, setEditingId] = useState<string | null>(null);
-  // Editing a not-yet-posted voucher goes to PUT (plain replace); editing a
-  // posted one goes to /restate (reverse + re-post under the same number).
-  const [editingPosted, setEditingPosted] = useState(true);
-
   const resetForm = () => {
     setShowForm(false);
     setEditingId(null);
+    setFormKind("EXPENSE");
     setForm({ date: new Date().toISOString().slice(0, 10), payee: "", description: "", accrued: false, payFrom: "", accrualAccount: "", productLine: "" });
     setLines([{ accountCode: "", description: "", amount: "" }]);
+    setApForm({ date: new Date().toISOString().slice(0, 10), payFrom: "", partyKind: "SUPPLIER", partyId: "", reference: "", advance: "" });
+    setApAlloc({});
+    setApBills(null);
+  };
+  const openNew = (kind: "EXPENSE" | "AP") => {
+    resetForm();
+    setFormKind(kind);
+    setShowForm(true);
+  };
+
+  // AP form derived figures. Unreadable amounts stop the save (same money
+  // parser as the expense lines — BUG-2026-08-13-095).
+  const apTicked = (apBills?.bills ?? []).filter((b) => (apAlloc[b.id] ?? "").trim() !== "");
+  const apMoneyError = firstMoneyFieldError([
+    ...apTicked.map((b) => ({ label: `${b.no} amount`, value: apAlloc[b.id] ?? "" })),
+    ...(apForm.advance.trim() ? [{ label: "Advance", value: apForm.advance }] : []),
+  ]);
+  // One parser for the AP form's money cells (display + payload); an
+  // unreadable cell is refused by handleSaveAp before any figure is sent.
+  const apSen = (v: string) => moneyFieldToSen(v) ?? 0;
+  const apAllocSen = apTicked.reduce((s, b) => s + apSen(apAlloc[b.id] ?? ""), 0);
+  const apAdvanceSen = apSen(apForm.advance);
+  const apTotalSen = apAllocSen + apAdvanceSen;
+  const apOverAlloc = apTicked.find((b) => apSen(apAlloc[b.id] ?? "") > b.availableSen);
+  const handleSaveAp = async (mode: "draft" | "post") => {
+    if (apMoneyError) { toast.error(apMoneyError); return; }
+    if (apOverAlloc) { toast.error(`${apOverAlloc.no}: more than the ${formatCurrency(apOverAlloc.availableSen)} still payable`); return; }
+    if (apTotalSen <= 0) { toast.error("Tick at least one bill (or enter an advance)"); return; }
+    const body = {
+      kind: "AP",
+      date: apForm.date,
+      payFrom: apForm.payFrom || defaultBankCode(bankCash),
+      partyKind: apForm.partyKind,
+      partyId: apForm.partyId,
+      description: apForm.reference,
+      advanceSen: apForm.partyKind === "SUPPLIER" ? apAdvanceSen : 0,
+      allocations: apTicked.map((b) => ({ docKind: b.docKind, docId: b.id, amountSen: apSen(apAlloc[b.id] ?? "") })).filter((a) => a.amountSen > 0),
+      saveAs: mode === "draft" && !editingId ? "draft" : undefined,
+    };
+    setSaving(true);
+    try {
+      const res = await fetch(editingId ? `/api/accounting/payment-vouchers/${editingId}` : "/api/accounting/payment-vouchers", {
+        method: editingId ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const j = asMutationResponse(await res.json());
+      if (j?.success) {
+        toast.success(editingId ? "AP payment updated" : mode === "draft" ? "Draft saved — Prepare it when ready" : "AP payment posted — bills knocked off");
+        resetForm();
+        load();
+      } else toast.error(j?.error || "Save failed");
+    } finally {
+      setSaving(false);
+    }
   };
 
   // mode: "draft" saves onto the four-tier ladder (no number, no GL yet);
@@ -8707,11 +8872,12 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
   // Print with the settled-bills detail when the voucher is a supplier payment
   // (its lines hit the AP control) — fetched on demand so the list stays light.
   const printPvWithDetail = async (r: PvRow) => {
-    let detail: { supplierName: string; piNo: string | null; opening: boolean; method: string; bookedSen: number }[] | undefined;
-    if (r.lines.some((l) => l.accountCode.startsWith("400") || l.accountCode.startsWith("405"))) {
+    type DetailRow = { supplierName: string; piNo: string | null; opening: boolean; method: string; bookedSen: number };
+    let detail: DetailRow[] | undefined = pvApPrintDetail(r);
+    if (!detail && r.lines.some((l) => l.accountCode.startsWith("400") || l.accountCode.startsWith("405"))) {
       try {
         const res = await fetch(`/api/accounting/bank-reco/payment-detail?paymentNo=${encodeURIComponent(r.pvNo)}`);
-        const j = await res.json() as { success?: boolean; data?: { rows: typeof detail } };
+        const j = await res.json() as { success?: boolean; data?: { rows: DetailRow[] } };
         if (j?.success && j.data?.rows?.length) detail = j.data.rows;
       } catch { /* print without detail */ }
     }
@@ -8758,6 +8924,18 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
   const startEdit = (r: PvRow) => {
     setEditingId(r.id);
     setEditingPosted(isPosted(r));
+    if (r.pvKind === "AP") {
+      // Only an unposted AP voucher is editable (posted → cancel and redo).
+      setFormKind("AP");
+      setApForm({
+        date: r.date, payFrom: r.payFrom ?? "", partyKind: r.partyKind === "OTHER" ? "OTHER" : "SUPPLIER", partyId: r.partyId ?? "",
+        reference: r.description ?? "", advance: (r.advanceSen ?? 0) > 0 ? ((r.advanceSen ?? 0) / 100).toFixed(2) : "",
+      });
+      setApAlloc(Object.fromEntries((r.allocs ?? []).map((a) => [a.docId, (a.amountSen / 100).toFixed(2)])));
+      setShowForm(true);
+      return;
+    }
+    setFormKind("EXPENSE");
     setForm({ date: r.date, payee: r.payee ?? "", description: r.description ?? "", accrued: r.accrued === 1, payFrom: r.payFrom ?? "", accrualAccount: r.accrualAccount ?? "", productLine: r.productLine ?? "" });
     setLines(r.lines.length ? r.lines.map((l) => ({ accountCode: l.accountCode, description: l.description ?? "", amount: (l.amountSen / 100).toFixed(2) })) : [{ accountCode: "", description: "", amount: "" }]);
     setShowForm(true);
@@ -8806,16 +8984,16 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-lg font-semibold text-[#1F1D1B]">Payment Vouchers</h2>
-          <p className="text-[11px] text-[#9CA3AF]">Draft → Prepared → Checked → Approved (posted). Save as draft to walk the ladder, or Post now for the one-click road.</p>
+          <p className="text-[11px] text-[#9CA3AF]">Every payment out, one door. <b>AP Payment</b> pays a creditor's bills (purchase invoices / other-creditor bills); <b>Payment Voucher</b> pays an expense. Draft → Prepared → Checked → Approved (posted), or Post now.</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap justify-end">
           <ScanBillsBatch rows={rows ?? []} bankCash={bankCash} onDone={load} />
           <ScanPrefillButton label="Scan Receipt" onResult={applyScan} />
-          <Button variant="primary" size="sm" onClick={() => {
-            if (showForm) resetForm();
-            else { resetForm(); setShowForm(true); }
-          }}>
-            <Plus className="h-4 w-4" /> New Voucher
+          <Button variant="primary" size="sm" onClick={() => (showForm && formKind === "AP" && !editingId ? resetForm() : openNew("AP"))} title="Pay a supplier's purchase invoices or an other creditor's bills">
+            <Plus className="h-4 w-4" /> New AP Payment
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => (showForm && formKind === "EXPENSE" && !editingId ? resetForm() : openNew("EXPENSE"))} title="Pay an expense straight to its account">
+            <Plus className="h-4 w-4" /> New Payment Voucher
           </Button>
         </div>
       </div>
@@ -8840,7 +9018,145 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
         </Card>
       )}
 
-      {showForm && (
+      {showForm && formKind === "AP" && (() => {
+        const partyOpts = apForm.partyKind === "SUPPLIER"
+          ? suppliers.map((s) => ({ value: s.id, label: s.code ? `${s.code} ${s.name}` : s.name }))
+          : otherCreditors.map((p) => ({ value: p.id, label: p.name }));
+        const setAmt = (id: string, v: string) => setApAlloc((m) => { const n = { ...m }; if (v === "") delete n[id]; else n[id] = v; return n; });
+        const cannot = saving || apTotalSen <= 0 || !!apMoneyError || !!apOverAlloc || !apForm.partyId || !(apForm.payFrom || defaultBankCode(bankCash));
+        return (
+          <Card>
+            <CardContent className="p-4 space-y-4">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="text-sm font-semibold text-[#1F1D1B]">{editingId ? "Edit AP payment" : "New AP Payment"} <span className="text-[11px] font-normal text-[#9CA3AF]">DR creditor control · CR Pay from — posted when approved</span></div>
+                <div className="inline-flex rounded-md border border-[#E2DDD8] overflow-hidden text-xs">
+                  {(["SUPPLIER", "OTHER"] as const).map((k) => (
+                    <button key={k} type="button" disabled={!!editingId}
+                      onClick={() => { setApForm((f) => ({ ...f, partyKind: k, partyId: "" })); setApAlloc({}); setApBills(null); }}
+                      className={`px-3 py-1.5 ${apForm.partyKind === k ? "bg-[#6B5C32] text-white" : "bg-white text-[#6B7280] hover:bg-[#FAF8F5]"} ${editingId ? "cursor-not-allowed" : "cursor-pointer"}`}>
+                      {k === "SUPPLIER" ? "Supplier (purchase invoices)" : "Other creditor (bills)"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="sm:col-span-2">
+                  <label className="text-xs font-medium text-[#6B7280] mb-1 block">{apForm.partyKind === "SUPPLIER" ? "Supplier" : "Other creditor"}</label>
+                  <SearchableSelect
+                    value={apForm.partyId}
+                    onChange={(v) => { setApForm((f) => ({ ...f, partyId: v })); setApAlloc({}); }}
+                    options={partyOpts}
+                    placeholder={apForm.partyKind === "SUPPLIER" ? "Type supplier code or name…" : "Type creditor name…"}
+                    allowClear
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-[#6B7280] mb-1 block">Date</label>
+                  <input type="date" value={apForm.date} onChange={(e) => setApForm({ ...apForm, date: e.target.value })} className={`${selCls} w-full`} />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-[#6B7280] mb-1 block">Pay from <span className="ml-1 text-[#B4B2A9] cursor-help" title="Bank / cash account credited (CR)">ⓘ</span></label>
+                  <select value={apForm.payFrom || defaultBankCode(bankCash)} onChange={(e) => setApForm({ ...apForm, payFrom: e.target.value })} className={`${selCls} w-full`}>
+                    <option value="">— pick bank/cash —</option>
+                    {bankCash.map((a) => <option key={a.code} value={a.code}>{a.code} {a.name}</option>)}
+                  </select>
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="text-xs font-medium text-[#6B7280] mb-1 block">Reference / remarks</label>
+                  <input type="text" placeholder="e.g. TT ref, cheque no" value={apForm.reference} onChange={(e) => setApForm({ ...apForm, reference: e.target.value })} className={`${selCls} w-full`} />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-[#6B7280] mb-1 block">Bills to pay {apBills?.partyName ? <span className="text-[#1F1D1B] font-semibold">· {apBills.partyName}</span> : null}</label>
+                {!apForm.partyId ? (
+                  <div className="text-xs text-[#9CA3AF] border border-dashed border-[#E2DDD8] rounded-md px-3 py-4">Pick the creditor first — its unpaid bills appear here.</div>
+                ) : apBillsLoading || apBills === null ? (
+                  <div className="text-xs text-[#9CA3AF] px-3 py-4">Loading bills…</div>
+                ) : apBills.bills.length === 0 ? (
+                  <div className="text-xs text-[#9CA3AF] border border-dashed border-[#E2DDD8] rounded-md px-3 py-4">No open bills for this creditor.{apForm.partyKind === "SUPPLIER" ? " You can still pay an advance below." : ""}</div>
+                ) : (
+                  <div className="border border-[#E2DDD8] rounded-md overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="bg-[#FAF8F5] text-[11px] font-medium text-[#9CA3AF]">
+                          <th className="px-2.5 py-1.5 w-8" />
+                          <th className="px-2.5 py-1.5 text-left">Bill</th>
+                          <th className="px-2.5 py-1.5 text-left">Ref</th>
+                          <th className="px-2.5 py-1.5 text-left">Date</th>
+                          <th className="px-2.5 py-1.5 text-left">Due</th>
+                          <th className="px-2.5 py-1.5 text-right">Total</th>
+                          <th className="px-2.5 py-1.5 text-right">Outstanding</th>
+                          <th className="px-2.5 py-1.5 text-right">Pay (RM)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {apBills.bills.map((b) => {
+                          const ticked = (apAlloc[b.id] ?? "") !== "";
+                          const over = ticked && apSen(apAlloc[b.id] ?? "") > b.availableSen;
+                          return (
+                            <tr key={b.id} className={`border-t border-[#F0ECE9] ${b.foreign ? "opacity-60" : ""}`}>
+                              <td className="px-2.5 py-1">
+                                <input type="checkbox" checked={ticked} disabled={b.foreign || b.availableSen <= 0}
+                                  onChange={(e) => setAmt(b.id, e.target.checked ? (b.availableSen / 100).toFixed(2) : "")}
+                                  className="h-3.5 w-3.5 accent-[#6B5C32]" title={b.foreign ? `${b.currency} invoice — pay on the Supplier Payment page` : "Tick = pay in full; edit the amount for a part payment"} />
+                              </td>
+                              <td className="px-2.5 py-1 whitespace-nowrap tabular-nums">
+                                {b.no}{b.opening && <span className="ml-1 text-[10px] text-[#9CA3AF]">opening</span>}
+                                {b.foreign && <span className="ml-1 rounded bg-[#F0ECE9] px-1 text-[10px] text-[#6B7280]">{b.currency} — Supplier Payment page</span>}
+                              </td>
+                              <td className="px-2.5 py-1 text-[#6B7280]">{b.ref}</td>
+                              <td className="px-2.5 py-1 text-[#6B7280] whitespace-nowrap">{b.date}</td>
+                              <td className="px-2.5 py-1 text-[#6B7280] whitespace-nowrap">{b.dueDate ?? "—"}</td>
+                              <td className="px-2.5 py-1 text-right tabular-nums">{formatCurrency(b.totalSen)}</td>
+                              <td className="px-2.5 py-1 text-right tabular-nums">
+                                {formatCurrency(b.outstandingSen)}
+                                {b.reservedSen > 0 && <div className="text-[10px] text-[#9A3A2D]" title={`Already ticked on ${b.reservedBy.join(", ")}`}>−{formatCurrency(b.reservedSen)} on {b.reservedBy.join(", ")}</div>}
+                              </td>
+                              <td className="px-2.5 py-1 text-right">
+                                <input type="text" placeholder="0.00" value={apAlloc[b.id] ?? ""} disabled={b.foreign || b.availableSen <= 0}
+                                  onChange={(e) => setAmt(b.id, e.target.value)}
+                                  className={`w-28 rounded border border-[#E2DDD8] bg-white px-2 py-1 text-right tabular-nums text-xs ${over || isUnreadableMoney(apAlloc[b.id] ?? "") ? "text-[#9A3A2D] border-[#9A3A2D]" : ""}`} />
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                {apOverAlloc && <div className="mt-1 text-[11px] text-[#9A3A2D]">{apOverAlloc.no}: more than the {formatCurrency(apOverAlloc.availableSen)} still payable.</div>}
+                {apMoneyError && <div className="mt-1 text-[11px] text-[#9A3A2D]">{apMoneyError}</div>}
+              </div>
+
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                {apForm.partyKind === "SUPPLIER" ? (
+                  <div>
+                    <label className="text-xs font-medium text-[#6B7280] mb-1 block">Advance / unallocated (RM) <span className="ml-1 text-[#B4B2A9] cursor-help" title="Paid on top of the bills — sits as a prepayment on this supplier's ledger; knock it off later on the Supplier Payment page">ⓘ</span></label>
+                    <input type="text" placeholder="0.00" value={apForm.advance} onChange={(e) => setApForm({ ...apForm, advance: e.target.value })} className={`${selCls} w-40 text-right tabular-nums ${isUnreadableMoney(apForm.advance) ? "text-[#9A3A2D]" : ""}`} />
+                    {(apBills?.advanceOpenSen ?? 0) > 0 && <div className="text-[11px] text-[#7A5B12] mt-1">This supplier already holds {formatCurrency(apBills!.advanceOpenSen)} unapplied advance — apply it on <Link to="/invoices/supplier-payments" className="underline decoration-dotted">Supplier Payment</Link> before paying more.</div>}
+                  </div>
+                ) : <div />}
+                <span className="text-sm text-[#6B7280]">Total <span className="text-lg font-semibold text-[#1F1D1B] tabular-nums">{apMoneyError ? "—" : formatCurrency(apTotalSen)}</span>{apAdvanceSen > 0 && <span className="ml-2 text-[11px] text-[#9CA3AF]">incl. advance {formatCurrency(apAdvanceSen)}</span>}</span>
+              </div>
+
+              <div className="flex flex-wrap gap-2 pt-3 border-t border-[#F0ECE9] items-center">
+                {editingId ? (
+                  <Button variant="primary" size="sm" disabled={cannot} onClick={() => void handleSaveAp("post")}>{saving ? "Updating…" : "Save changes"}</Button>
+                ) : (
+                  <>
+                    <Button variant="primary" size="sm" disabled={cannot} onClick={() => void handleSaveAp("draft")} title="No number, nothing knocked off yet — goes onto the approval ladder">{saving ? "Saving…" : "Save as draft"}</Button>
+                    <Button variant="outline" size="sm" disabled={cannot} onClick={() => void handleSaveAp("post")} title="One click: number issued, bills knocked off and posted now">Post now</Button>
+                  </>
+                )}
+                <Button variant="outline" size="sm" onClick={resetForm}>Cancel</Button>
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })()}
+
+      {showForm && formKind === "EXPENSE" && (
         <Card>
           <CardContent className="p-4 space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -8953,13 +9269,23 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
         </Card>
       )}
 
+      {rows !== null && (
+        <div className="text-[11px] uppercase tracking-wide text-[#9CA3AF]">{rows.length} payment voucher{rows.length === 1 ? "" : "s"}</div>
+      )}
+      <div className="inline-flex flex-wrap rounded-md border border-[#E2DDD8] bg-white overflow-hidden text-xs">
+        {PV_STATUS_CHIPS.map((ch) => {
+          const n = chipCount(ch.key);
+          const on = statusFilter === ch.key;
+          return (
+            <button key={ch.key} type="button" onClick={() => setStatusFilter(ch.key)}
+              className={`px-3 py-1.5 font-semibold uppercase tracking-wide cursor-pointer ${on ? "bg-[#6B5C32] text-white" : "text-[#6B7280] hover:bg-[#FAF8F5]"} ${ch.key !== "ALL" ? "border-l border-[#F0ECE9]" : ""}`}>
+              {ch.label}{ch.key !== "ALL" && n > 0 && <span className={`ml-1 tabular-nums ${on ? "text-white/80" : "text-[#9CA3AF]"}`}>{n}</span>}
+            </button>
+          );
+        })}
+      </div>
       <div className="flex flex-wrap items-center gap-2 mb-3">
-        <input type="text" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search PV no / payee / description" className="rounded-md border border-[#E2DDD8] px-3 py-1.5 text-sm w-64" />
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)} className="rounded-md border border-[#E2DDD8] px-2 py-1.5 text-sm">
-          <option value="ALL">All status</option>
-          <option value="PENDING">Pending approval (Draft / Prepared / Checked)</option>
-          <option value="PAID">Paid</option><option value="UNPAID">Unpaid (accrued)</option><option value="VOID">Void</option>
-        </select>
+        <input type="text" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search PV no / payee / bill no / description" className="rounded-md border border-[#E2DDD8] px-3 py-1.5 text-sm w-64" />
         <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="rounded-md border border-[#E2DDD8] px-2 py-1.5 text-sm" />
         <span className="text-xs text-[#9CA3AF]">→</span>
         <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="rounded-md border border-[#E2DDD8] px-2 py-1.5 text-sm" />
@@ -8995,15 +9321,26 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
           ["PV No", "Date", "Pay To", "Paid From", "Status", "Remarks", "Product Line", "Voucher Total (RM)", "Account Code", "Account Name", "Line Description", "Amount (RM)"],
           ...pvSel.selectedRows.flatMap((r) => {
             const bank = r.payFrom || r.accrualAccount || "";
-            return r.lines.map((l) => [
+            const head = [
               r.pvNo ?? r.id,
               r.date ?? "",
               r.payee ?? "",
               bank ? accountLabel(accounts, bank) : "",
               r.status ?? "",
               r.description ?? "",
-              r.productLine ?? "",
+              r.pvKind === "AP" ? "AP payment" : (r.productLine ?? ""),
               (Number(r.totalSen ?? 0) / 100).toFixed(2),
+            ];
+            // An AP voucher exports one row per settled bill (the control
+            // account it relieves, the bill number as the line description).
+            if (r.pvKind === "AP") {
+              const ctl = r.partyKind === "OTHER" ? "405-0000" : "400-0000";
+              const rows = (r.allocs ?? []).map((a) => [...head, ctl, accounts.find((a2) => a2.code === ctl)?.name ?? "", a.docNo || a.docId, (a.amountSen / 100).toFixed(2)]);
+              if ((r.advanceSen ?? 0) > 0) rows.push([...head, ctl, accounts.find((a2) => a2.code === ctl)?.name ?? "", "Advance / unallocated", ((r.advanceSen ?? 0) / 100).toFixed(2)]);
+              return rows;
+            }
+            return r.lines.map((l) => [
+              ...head,
               l.accountCode,
               accounts.find((a) => a.code === l.accountCode)?.name ?? "",
               l.description ?? "",
@@ -9044,6 +9381,7 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
                     </td>
                     <td className="px-3 py-1.5 tabular-nums text-xs whitespace-nowrap">
                       <span className="inline-block w-3 text-[#9CA3AF]">{expandedPv[r.id] ? "▾" : "▸"}</span> {r.pvNo}
+                      <span className={`ml-2 rounded px-1.5 py-0.5 text-[10px] font-semibold ${r.pvKind === "AP" ? "bg-[#EEF2FB] text-[#2C4170]" : "bg-[#F6F1E7] text-[#6B5C32]"}`} title={r.pvKind === "AP" ? "AP Payment — pays creditor bills" : "Payment Voucher — pays an expense"}>{r.pvKind === "AP" ? "AP" : "PV"}</span>
                     </td>
                     <td className="px-3 py-1.5 text-xs text-[#6B7280] whitespace-nowrap">{r.date}</td>
                     <td className="px-3 py-1.5">{[r.payee, r.description].filter(Boolean).join(" · ")}</td>
@@ -9052,7 +9390,11 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
                         ? <span className="text-[#9A3A2D]">accrued → {r.accrualAccount}</span>
                         : (r.payFrom ?? "")}
                     </td>
-                    <td className="px-3 py-1.5 text-xs text-[#6B7280]">{r.productLine ?? "shared"}</td>
+                    <td className="px-3 py-1.5 text-xs text-[#6B7280]">
+                      {r.pvKind === "AP"
+                        ? <span title={(r.allocs ?? []).map((a) => `${a.docNo} ${formatCurrency(a.amountSen)}`).join("\n")}>{(r.allocs ?? []).length} bill{(r.allocs ?? []).length === 1 ? "" : "s"}{(r.advanceSen ?? 0) > 0 ? " + advance" : ""}</span>
+                        : (r.productLine ?? "shared")}
+                    </td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(r.totalSen)}</td>
                     <td className="px-3 py-1.5 text-xs">
                       {(() => {
@@ -9062,6 +9404,7 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
                         if (st === "DRAFT") return chip("Draft", "bg-[#F0ECE9] text-[#6B7280]", (r.rejectReason ?? r.reject_reason) ? `Rejected: ${r.rejectReason ?? r.reject_reason}` : undefined);
                         if (st === "PREPARED") return chip("Prepared", "bg-[#EEF2FB] text-[#2C4170]");
                         if (st === "CHECKED") return chip("Checked · awaiting approval", "bg-[#FBF3E4] text-[#7A5B12]", `Formal No. ${r.pvNo} — pending in Cash Position`);
+                        if ((r.advanceOpenSen ?? 0) > 0) return chip(`Approved · advance open ${formatCurrency(r.advanceOpenSen ?? 0)}`, "bg-[#FBF3E4] text-[#7A5B12]", "Unapplied supplier advance — knock it off on the Supplier Payment page");
                         return r.accrued === 1 && !r.settledAt ? chip("Approved · accrued, unpaid", "bg-[#F7E5E1] text-[#9A3A2D]") : chip("Approved · paid", "bg-[#EAF3DE] text-[#27500A]");
                       })()}
                       {(r.rejectReason ?? r.reject_reason) && apState(r) === "DRAFT" && (
@@ -9090,7 +9433,7 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
                         </>
                       )}
                       <button onClick={() => void printPvWithDetail(r)} title="Print payment voucher" className="inline-flex items-center gap-1 text-[#6B5C32] hover:text-[#1F1D1B] text-xs underline decoration-dotted cursor-pointer mr-3"><Printer className="h-3 w-3" />print</button>
-                      {isPosted(r) && (
+                      {isPosted(r) && r.pvKind !== "AP" && (
                         <button onClick={() => startEdit(r)} className="text-[#6B5C32] hover:text-[#1F1D1B] text-xs underline decoration-dotted cursor-pointer mr-3">edit</button>
                       )}
                       {isPosted(r) && r.accrued === 1 && !r.settledAt && (
@@ -9107,7 +9450,36 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
                   {expandedPv[r.id] && (
                     <tr className="bg-[#FAF8F5] border-b border-[#F0ECE9]">
                       <td colSpan={9} className="px-8 py-2">
-                        {r.lines.length === 0 ? (
+                        {r.pvKind === "AP" ? (
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr className="text-[#9CA3AF] text-left">
+                                <th className="py-1 pr-4 font-medium">Bill</th>
+                                <th className="py-1 pr-4 font-medium">Ref</th>
+                                <th className="py-1 font-medium text-right">Paid</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {(r.allocs ?? []).map((a, i) => (
+                                <tr key={i} className="border-t border-[#F0ECE9]">
+                                  <td className="py-1 pr-4 whitespace-nowrap tabular-nums">{a.docNo || a.docId} <span className="text-[10px] text-[#9CA3AF]">{a.docKind === "PI" ? "purchase invoice" : "other-creditor bill"}</span></td>
+                                  <td className="py-1 pr-4 text-[#6B7280]">{a.docRef}</td>
+                                  <td className="py-1 text-right tabular-nums">{formatCurrency(a.amountSen)}</td>
+                                </tr>
+                              ))}
+                              {(r.advanceSen ?? 0) > 0 && (
+                                <tr className="border-t border-[#F0ECE9]">
+                                  <td className="py-1 pr-4">Advance / unallocated{(r.advanceOpenSen ?? 0) > 0 && isPosted(r) ? <span className="ml-1 text-[10px] text-[#7A5B12]">· {formatCurrency(r.advanceOpenSen ?? 0)} still unapplied</span> : null}</td>
+                                  <td className="py-1 pr-4" />
+                                  <td className="py-1 text-right tabular-nums">{formatCurrency(r.advanceSen ?? 0)}</td>
+                                </tr>
+                              )}
+                              {(r.allocs ?? []).length === 0 && (r.advanceSen ?? 0) <= 0 && (
+                                <tr><td colSpan={3} className="py-1 text-[#9CA3AF]">No bills on this voucher.</td></tr>
+                              )}
+                            </tbody>
+                          </table>
+                        ) : r.lines.length === 0 ? (
                           <div className="text-xs text-[#9CA3AF]">No line detail.</div>
                         ) : (
                           <table className="w-full text-xs">
