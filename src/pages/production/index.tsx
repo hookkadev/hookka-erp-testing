@@ -151,14 +151,6 @@ const OVERVIEW_DEFAULT_WIDTHS: Record<string, number> = {
   soId: 120, product: 220, customer: 110, customerPO: 120, specialOrder: 130, qty: 50, customerDD: 104, ourExpectedDD: 118,
   FAB_CUT: 108, FAB_SEW: 108, FOAM_CUTTING: 108, FOAM: 108, WOOD_CUT: 108, FRAMING: 108, WEBBING: 108, UPHOLSTERY: 108, PACKING: 108,
 };
-// Tablet (<=1280px) compact defaults + the columns dropped from the matrix.
-// Mirrors the dept DataGrid `defaultHidden: isTablet` rule so both views
-// shrink the same way. Sum at tablet ≈ 36 + 812 + 9×72 ≈ 1,150px.
-const OVERVIEW_TABLET_WIDTHS: Record<string, number> = {
-  product: 180, customer: 100, qty: 44, customerDD: 92,
-  FAB_CUT: 72, FAB_SEW: 72, FOAM_CUTTING: 72, FOAM: 72, WOOD_CUT: 72, FRAMING: 72, WEBBING: 72, UPHOLSTERY: 72, PACKING: 72,
-};
-const OVERVIEW_TABLET_HIDDEN = new Set(["customerPO", "specialOrder", "ourExpectedDD"]);
 const OVERVIEW_COLW_STORAGE = "prod-overview-colwidths-v1";
 // Width (px) of the leading multi-select checkbox gutter prepended to the
 // Overview matrix grid. Kept OUT of OVERVIEW_COL_KEYS so it isn't sortable,
@@ -1271,33 +1263,20 @@ export default function ProductionPage({
     } catch { /* ignore */ }
     return {};
   });
-  // Tablet: same rule the dept DataGrids use (`defaultHidden: isTablet`) —
-  // drop the three lowest-priority columns and use compact default widths so
-  // the matrix fits ~1180px instead of ~1980px. A user-resized width still
-  // wins over the compact default.
-  const ovHidden = isTablet;
   const overviewColW = useCallback(
-    (key: string) =>
-      overviewColWidths[key] ??
-      (isTablet ? OVERVIEW_TABLET_WIDTHS[key] : undefined) ??
-      OVERVIEW_DEFAULT_WIDTHS[key] ??
-      100,
-    [overviewColWidths, isTablet],
-  );
-  const overviewVisibleKeys = useMemo(
-    () => (ovHidden ? OVERVIEW_COL_KEYS.filter((k) => !OVERVIEW_TABLET_HIDDEN.has(k)) : OVERVIEW_COL_KEYS),
-    [ovHidden],
+    (key: string) => overviewColWidths[key] ?? OVERVIEW_DEFAULT_WIDTHS[key] ?? 100,
+    [overviewColWidths],
   );
   // Leading `OVERVIEW_SELECT_COL_W`px track = the multi-select checkbox
   // gutter. The header row + every body row reuse this same template, so the
   // gutter keeps them aligned without touching the resizable data columns.
   const overviewTemplate = useMemo(
-    () => `${OVERVIEW_SELECT_COL_W}px ${overviewVisibleKeys.map((k) => `${overviewColW(k)}px`).join(" ")}`,
-    [overviewColW, overviewVisibleKeys],
+    () => `${OVERVIEW_SELECT_COL_W}px ${OVERVIEW_COL_KEYS.map((k) => `${overviewColW(k)}px`).join(" ")}`,
+    [overviewColW],
   );
   const overviewMinWidth = useMemo(
-    () => OVERVIEW_SELECT_COL_W + overviewVisibleKeys.reduce((s, k) => s + overviewColW(k), 0),
-    [overviewColW, overviewVisibleKeys],
+    () => OVERVIEW_SELECT_COL_W + OVERVIEW_COL_KEYS.reduce((s, k) => s + overviewColW(k), 0),
+    [overviewColW],
   );
   const resetOverviewWidth = useCallback((key: string) => {
     setOverviewColWidths((prev) => {
@@ -7962,7 +7941,7 @@ export default function ProductionPage({
           </div>
         )}
         {/* Widen dept columns + scroll the whole matrix left/right as one unit.
-            Header and body share the same computed minWidth so they scroll together; the
+            Header and body share minWidth:1684 so they scroll together; the
             column filter popovers are portaled to <body> so this overflow box
             can't clip them. — Wei Siang 2026-05-29 */}
         <OverviewResizeCtx.Provider value={overviewResizeValue}>
@@ -8038,7 +8017,6 @@ export default function ProductionPage({
               />
             )}
           />
-          {!ovHidden && (
           <OverviewHeader
             label="Customer PO"
             sortKey="customerPO"
@@ -8056,8 +8034,6 @@ export default function ProductionPage({
               />
             )}
           />
-          )}
-          {!ovHidden && (
           <OverviewHeader
             label="Special Order"
             sortKey="specialOrder"
@@ -8075,7 +8051,6 @@ export default function ProductionPage({
               />
             )}
           />
-          )}
           <OverviewHeader
             label="Qty"
             align="center"
@@ -8112,7 +8087,6 @@ export default function ProductionPage({
               />
             )}
           />
-          {!ovHidden && (
           <OverviewHeader
             label="Our Expected DD"
             align="center"
@@ -8131,7 +8105,6 @@ export default function ProductionPage({
               />
             )}
           />
-          )}
           {DEPARTMENTS.map((d) => (
             <OverviewHeader
               key={d.code}
@@ -8306,24 +8279,20 @@ export default function ProductionPage({
                 )}
               </div>
               <div className="px-3 py-1.5 text-xs text-[#6B7280] truncate flex items-center">{order.customerName}</div>
-              {!ovHidden && (
-                <div
-                  className="px-3 py-1.5 text-xs text-[#1F1D1B] doc-number truncate flex items-center"
-                  title={order.customerPOId || ""}
-                >
-                  {order.customerPOId || "—"}
-                </div>
-              )}
-              {!ovHidden && (
-                <div
-                  className={`px-3 py-1.5 text-xs truncate flex items-center ${
-                    order.specialOrder ? "text-[#9A3A2D] font-semibold" : "text-[#D1CCC4]"
-                  }`}
-                  title={order.specialOrder || ""}
-                >
-                  {order.specialOrder || "—"}
-                </div>
-              )}
+              <div
+                className="px-3 py-1.5 text-xs text-[#1F1D1B] doc-number truncate flex items-center"
+                title={order.customerPOId || ""}
+              >
+                {order.customerPOId || "—"}
+              </div>
+              <div
+                className={`px-3 py-1.5 text-xs truncate flex items-center ${
+                  order.specialOrder ? "text-[#9A3A2D] font-semibold" : "text-[#D1CCC4]"
+                }`}
+                title={order.specialOrder || ""}
+              >
+                {order.specialOrder || "—"}
+              </div>
               <div className="px-2 py-1.5 text-xs text-center text-[#6B7280] flex items-center justify-center">{order.quantity}</div>
               {/* Customer DD + Our Expected DD — read-only planning dates (sourced
                   from the SO). Replaced the old editable targetEndDate "Due"
@@ -8331,11 +8300,9 @@ export default function ProductionPage({
               <div className="px-2 py-1.5 text-[11px] text-[#6B7280] flex items-center justify-center tabular-nums">
                 {order.customerDeliveryDate ? fmtShortDate(order.customerDeliveryDate) : "—"}
               </div>
-              {!ovHidden && (
-                <div className="px-2 py-1.5 text-[11px] text-[#6B7280] flex items-center justify-center tabular-nums">
-                  {order.hookkaExpectedDD ? fmtShortDate(order.hookkaExpectedDD) : "—"}
-                </div>
-              )}
+              <div className="px-2 py-1.5 text-[11px] text-[#6B7280] flex items-center justify-center tabular-nums">
+                {order.hookkaExpectedDD ? fmtShortDate(order.hookkaExpectedDD) : "—"}
+              </div>
               {DEPARTMENTS.map((d) => {
                 // FAB_CUT sibling-walk (cellFor "Option C") must search the
                 // FULL order list, not visibleOrders. A column filter (e.g.
