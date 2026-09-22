@@ -1,5 +1,7 @@
 # Bug History
 
+> **Last verified: 2026-09-22** — newest entry BUG-2026-09-22-178 (branch `fix/scan-queue-client-driven`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+
 Living log of bugs we've identified, diagnosed, and fixed in Hookka ERP.
 
 Each entry: ID, status, what happened (user-visible symptom), root cause, fix
