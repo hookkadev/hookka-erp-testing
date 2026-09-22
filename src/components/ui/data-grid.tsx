@@ -2631,6 +2631,8 @@ export function DataGrid<T extends Record<string, any>>({
     onRowClick?.(row);
   }, [keyField, sortedData, onRowClick]);
 
+  // The rows last handed to onSelectionChange — see the identity guard below.
+  const lastEmittedSelection = useRef<T[] | null>(null);
   useEffect(() => {
     if (!onSelectionChange) return;
     // Depend on sortedData too (2026-07-03, invoices stale-selection bug):
@@ -2641,6 +2643,21 @@ export function DataGrid<T extends Record<string, any>>({
     // invisible rows. Internal selectedKeys are kept, so clearing the filter
     // restores the same ticks.
     const selected = sortedData.filter(row => selectedKeys.has(String(getNestedValue(row, keyField))));
+    // Emit only when the selection actually changed (BUG-2026-09-22-005,
+    // BUG-CLASSES C24). `sortedData` is a fresh array on EVERY recompute and
+    // recomputes whenever `columns` changes identity. A parent that stores
+    // this emission as a fresh object (`new Set(rows…)`) AND rebuilds its
+    // columns from that state closed a loop: emit → new state → new columns
+    // → new sortedData → emit … — the delivery page's Pending Delivery tab
+    // spun forever, starving every navigation transition ("click a tab and
+    // the page freezes"). Same rows, same order, same references ⇒ nothing
+    // to tell the parent. A data refresh produces NEW row objects, so a
+    // parent that reads fields off the emitted rows still gets fresh ones.
+    const prev = lastEmittedSelection.current;
+    if (prev && prev.length === selected.length && prev.every((row, i) => row === selected[i])) {
+      return;
+    }
+    lastEmittedSelection.current = selected;
     onSelectionChange(selected);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedKeys, sortedData]);

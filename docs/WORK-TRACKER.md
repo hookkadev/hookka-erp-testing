@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-22** — branch `fix/datagrid-selection-loop` added below (open, its entry is the newest). Previously: branch `fix/delivery-tab-switch-pagination` (MERGED as #467). Previously: branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
 > **Last verified: 2026-09-22** — branch `fix/delivery-loading-gate-po-paging` added below (open, its entry is the newest). Previously: branch `fix/delivery-tab-switch-pagination` (MERGED as #467). Previously: branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
 > **Last verified: 2026-09-22** — branch `feat/po-supplier-searchable-select` added below (open, pushed, no PR). NOTE: the 2026-09-22 Houzs entry below still carries committed merge-conflict markers (`<<<<<<< HEAD` … `>>>>>>> 85e58b40`) on `main`; left for its owner to resolve.
 > **Last verified: 2026-09-22** — branch `feat/service-dashboard-root-cause-graph` added below (stacked on the staging sync PR).
@@ -16,6 +17,24 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+---
+
+## 2026-09-22 — 🔵 Delivery page FREEZE: Pending Delivery render loop (branch `fix/datagrid-selection-loop`) — the real root cause of the day's first report
+
+Owner: "when I click in pending delivery and after I try to navigate anywhere it is freeze and I
+can't interact anything". Traced to a closed loop between `DataGrid.onSelectionChange` (re-emits
+on every `sortedData` identity, which is `[...filteredData]` and depends on `columns`) and the
+page (`setSelectedReadyPOs(new Set(...))` + `pendingDeliveryColumns` memo listing
+`selectedReadyPOs` in its deps — the eslint warning that sat for months). BUG-2026-09-22-005,
+class **C24**.
+
+- [x] `data-grid.tsx`: emit only when the selection actually changed (same rows, same order,
+  same references) — the guard every caller routes through.
+- [x] `delivery/index.tsx`: `pendingDeliveryColumns` deps = `[updateExpectedDD]`.
+- [x] 16 other `onSelectionChange` pages checked — none rebuilds `columns` from selection.
+- [x] `tests/datagrid-selection-emit.test.mjs`; `tsc` exit 0.
+- [ ] PR → `main` + cherry-pick PR → `staging`. Live: UNMEASURED (no login).
 
 ---
 
