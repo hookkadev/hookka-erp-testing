@@ -1,6 +1,6 @@
 # Hookka ERP — Work Tracker
 
-> **Last verified: 2026-09-22** — branch `feat/po-supplier-searchable-select` added below (open, pushed, no PR). NOTE: the 2026-09-22 Houzs entry below still carries committed merge-conflict markers (`<<<<<<< HEAD` … `>>>>>>> 85e58b40`) on `main`; left for its owner to resolve.
+> **Last verified: 2026-09-22** — branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
 > **Last verified: 2026-08-14** — branch `fix/on-time-delivery-and-decisions` added below (open, not merged, its entry is the newest; its bug ids were renumbered 130-133 → 140-143 because `feat/leave-entitlement` claimed 130-133 and merged to `main` first). Previously: branch `feat/leave-entitlement` (MERGED as #326). Previously: branch `feat/job-card-completed-at` added below (open, not merged). Previously: branch `fix/security-posture` added below (open, not merged). Previously: PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
 > **Last verified: 2026-08-14** — branch `feat/pcb-calculation` added below (open, not merged, its entry is the newest). Previously: branch `feat/job-card-completed-at` added below (open, not merged). Previously: branch `fix/security-posture` added below (open, not merged). Previously: PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
 > **Last verified: 2026-08-14** — restamped on branch `fix/money-input-parsing` (its entry is the newest below, not yet deployed). PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
@@ -15,7 +15,21 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
-## 2026-09-22 — 🔵 PO create: searchable supplier picker (branch `feat/po-supplier-searchable-select`, pushed, no PR yet)
+## 2026-09-22 — 🔵 PO list: search finds a PO by the raw material bought on it (branch `feat/po-search-line-items`)
+
+Staff ask (screenshots, 2026-09-22): "search a raw material item and see which Purchase
+Order(s) it was purchased under — PO no, supplier, date, qty, status". The PO grid's
+global search only saw column values; `items` stringified to `[object Object]`.
+
+- [x] `src/lib/po-items-search.ts` — `poItemsSearchText(items)` flattens internal code /
+  supplier SKU (dual-keyed) / description per line.
+- [x] `src/pages/procurement/index.tsx` — each row carries `itemsSearchText`; DataGrid gets
+  `alwaysSearchKeys={["itemsSearchText"]}`. Typing a search already flips the fetch to the
+  whole dataset (search-safe rule), so every PO is covered, not just the current page.
+- [x] `tests/po-items-search.test.mjs`; `tsc -p tsconfig.app.json` exit 0.
+- [ ] PR → merge → verify live on prod (search `ASC1010F` on /procurement).
+
+## 2026-09-22 — ✅ PO create: searchable supplier picker (branch `feat/po-supplier-searchable-select`, MERGED #459)
 
 Ask (owner, screenshot of New Purchase Order): "the supplier dropdown change to a searchable
 dropdown for more friendly usage". Done in `src/pages/procurement/create.tsx` only — native
@@ -31,7 +45,6 @@ APPROVED、0233/0214 记录、POST 支持 saveAs:"draft"(不铸号不过账)、P
 POST /:id/approval + /approval-batch(prepare/withdraw/reject(要 reason)/check(铸正式号)/approve
 (此刻才过账,复用唯一 pvPostingStatements)、权限键 accounting:check/approve、lifecycle 未过账=
 纯状态翻转、restate 拒未过账;守卫 tests/pv-approval.test.mjs 9 断言)。旧立即过账路径原样保留,
-<<<<<<< HEAD
 新页上线前零破坏。**BUG-2026-09-22-177（#456 热修）**:0159 的 status CHECK 只许 POSTED|VOID → 草稿 DRAFT 被拒;self-apply 放宽 + create 报 DB 原话。**prod 全梯子实测**:draft 0 分录→prepare→reject 无理由被挡→check 铸 HPV-2609-045 仍 0 分录→Checked 锁编辑→板子 AWAITING 出现→approve 过账 CR 1 sen→void 归零 ✓。**Self-check 首跑抓到**:AP 控制高 72,196.03、AR 控制低 168,790(待向 owner 解读)。**PR 1.2**(UI):PaymentsTab 就地升级=「Payment Vouchers」页(tab+侧栏改名):
 表单双按钮 Save as draft / Post now(编辑草稿走 PUT、编辑已过账走 restate);行内梯子按钮
 (Draft: edit/Prepare→;Prepared: edit/withdraw/reject/Check→;Checked: reject/Approve & post)、
@@ -39,9 +52,6 @@ POST /:id/approval + /approval-batch(prepare/withdraw/reject(要 reason)/check(�
 **Cash Position 板新增「AWAITING APPROVAL」卡**(/cash-position 回 awaitingApproval[] +
 awaitingCheckedSen;Checked=硬承诺金额、Draft/Prepared 软显示)= owner 09-03 说的「老板还没
 approve」正式落地。Repo 已迁 hookkadev 组织(remote+gh default 已更新)。**Phase 2 ✅(同 PR)**:新 GET /ap-invoices(OCB CREDITOR 全量 kind=AP + purchase_invoices 非 DRAFT 只读镜像 kind=PI,状态归一 OPEN/PAID/CANCELLED,totals 分 AP/PI)+ 新 tab「AP Invoices」(Debtor / Creditor 组,侧栏同名):三张合计卡、Kind/Status/搜索过滤、PI 行链回 /procurement/pi、AP 行链回 OCB tab、New AP bill / Pay 两按钮直通。**Procurement PI 页零改动**(owner「本身purchase invoice 那边要保留」)。**Phase 3 ③ ✅(同 PR)**:POST /bank-reco/book-line——银行行就地记账:钱出=PV(立即过账路,approval_state=APPROVED)、钱进=OR,金额锁死=行金额,新单据的银行腿同 batch 配对该行(立刻离开 unbooked);拒开账前/已封月/已配/已 ignore。UI:Cash Book 每条 not-in-book 行「book as expense / book as receipt」→ 行下内联表单(科目/对方/描述)→ Book & match。= owner 7 月剩的 5 条工资税费就地一键。**Phase 3 ①②④ ✅(PR 3b)**:①严格月锁——kv bank_reco_strict_lock(GET/PUT /bank-reco/strict-lock,**默认 OFF**=owner「别启动先」),ON 时 finalize 要 balanced 且 unbooked=0、re-open 必填 reason;所有 re-open 无论开关一律写 kv bank_reco_reopen:<acct>:<month>:<ts>(actor/reason/旧快照)留痕;Cash Book 报表卡加开关 checkbox(ON 要确认)。②串链 GET /bank-reco/chain——按 bank_reco_meta 逐月检查 gap(缺月点名)+ mismatch(本月 opening≠上月 closing),卡上红字/绿勾。④反向组合 POST /bank-reco/match-split——一条银行行拆给 N 条腿:新表 bank_line_leg_splits(self-apply,0234/0215 记录)、行 matchedLegId=哨兵 SPLIT、loader 把每 split 行当虚拟 claiming line 喂同一 claim() 闸、report 行侧 SPLIT 行=全部腿月内且清才 booked、match/match-group taken 检查兼看 split 表、unmatch 释放整组、GET /bank-reco matchedLegIds 含 split 腿;UI「split across…」多选腿 Σ=行才亮。守卫 +2(35/35)。**Phase 1 ③ 打印对照 Houzs ✅**:VoucherSpec +watermark/+detail/签名带 name+on;PV 打印=四栏签名(Prepared/Checked/Approved 印梯子真人+日期,Received 空栏)、未过账水印 DRAFT / NOT YET APPROVED、作废 CANCELLED、供应商付款附「Bills settled by this payment」明细表(打印时按需拉 payment-detail);GET /payment-vouchers 回 preparedByName/checkedByName/approvedByName/createdByName。附件合订(print-bundle)待 Phase 5 附件功能一起。**Phase 4 ✅(同 PR)**:①**Self-check** tab(Monthly Operation 组)——纯前端聚合既有探针成一页红/黄/绿卡:AP 控制 vs 供应商单(ap-reconciliation 逐项)、AR 控制 vs 客户发票、试算表、审批梯子上未过账 PV(>7 天变红)、accrued 未付、板子勾了账单没确认、每个银行户口的对账单串链;每卡链到修的地方;Run again 重跑。②**Corrections** tab——GET /corrections 从 ledger 腿家族挖:*_restate_rev/post:<stamp>=Edited(冲/重记金额)、*_void=Cancelled、opening_balance_reversal、kv bank_reco_reopen=Reco re-opened(带 reason);月份筛/最近 90 天,actor 名字解析,CSV/Excel/PDF 导出。③统一 reason:目前 PV reject + reco re-open 必填留痕;其他单据的 edit/cancel 先只显示轨迹(表底注明)。**Phase 5 ✅(PR 5)**:①**Scan Bills 批量**——PV 页新按钮,一次拖 ≤20 张账单,逐张 OCR→每张一张 **draft** PV(走 saveAs:draft 梯子,不铸号不过账),科目从同 payee 上一张凭证带;读不出/新 payee 无科目=skipped 列原因不猜;完成后直接在页面 Prepare/Check/Approve 批量走。②**打印页脚**——kv finance_print_footer.pv(通用 /api/kv-config),PV 页顶「Print footer: … edit」小卡编辑多行文字,印在签名栏上方(空=不印);VoucherSpec +footerText。③ OR 收据簿升级(钱确认才铸正式号)= Hookka 没有卡机/转账待确认流程,现行 OR 立即正式已够——**不做**。④ 清单批量打印 PDF = 既有 BatchActionsBar 已支持——**已有**。
-=======
-新页上线前零破坏。
->>>>>>> 85e58b4097f89dd8cd5aaf1d9daf0a0771e4486e
 
 背景:Houzs(trading)ERP 的 Claude 写了 `Houzs-Finance-Module-User-Guide.md` +
 `Houzs-Trading-Finance-Module-Spec.md`(在 Desktop\Claude\Hookka\,不在 repo),指定用途=

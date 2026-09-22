@@ -181,7 +181,7 @@ authoritative current detail.** New here? Start with [ONBOARDING-PATH.md](ONBOAR
 
 | Frontend page | API route | Primary tables | Tests |
 |---|---|---|---|
-| `src/pages/procurement/index.tsx` — PO list + POFormDialog (2175) | `src/api/routes/purchase-orders.ts` — PO CRUD + status lifecycle | `purchase_orders` / `purchase_order_items` | `tests/grn-arrival-state.test.mjs` |
+| `src/pages/procurement/index.tsx` — PO list + POFormDialog (2190). Grid search also matches LINE ITEMS (internal code / supplier SKU / description) via `itemsSearchText` + `alwaysSearchKeys` — helper `src/lib/po-items-search.ts` (2026-09-22) | `src/api/routes/purchase-orders.ts` — PO CRUD + status lifecycle | `purchase_orders` / `purchase_order_items` | `tests/grn-arrival-state.test.mjs`, `tests/po-items-search.test.mjs` |
 | `src/pages/procurement/detail.tsx` — PO detail + ThreeWayMatchPanel (1497) | `src/api/routes/grn.ts` — GRN CRUD + arrival + Post-to-Stock cascade | `grns` / `grn_items` | `tests/ocr-distill-supplier.test.mjs` |
 | `src/pages/procurement/create.tsx` — full-page PO create; the Supplier header field is a `SearchableSelect` (type code or name; clear entry resets purchase company to HOOKKA), no longer a native `<select>` | `src/api/routes/goods-in-transit.ts` — GIT CRUD | `goods_in_transit` | `tests/supplier-payment-alloc.test.mjs` |
 | `src/pages/procurement/grn.tsx` — GRN list (1252) | `src/api/routes/purchase-invoices.ts` — PI CRUD + lifecycle | `purchase_invoices` / `purchase_invoice_items` | `tests/three-pl-state-rates.test.mjs` |
