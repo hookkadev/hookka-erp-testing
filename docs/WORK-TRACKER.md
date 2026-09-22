@@ -1,6 +1,9 @@
 # Hookka ERP — Work Tracker
 
 > **Last verified: 2026-09-22** — branch `claude/nice-sanderson-27be32` (dashboard Service > Top issues redesign) added below (open, its entry is the newest). Previously: branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
+> **Last verified: 2026-09-22** — branch `feat/po-supplier-searchable-select` added below (open, pushed, no PR). NOTE: the 2026-09-22 Houzs entry below still carries committed merge-conflict markers (`<<<<<<< HEAD` … `>>>>>>> 85e58b40`) on `main`; left for its owner to resolve.
+> **Last verified: 2026-09-22** — branch `fix/service-dashboard-other-catch-all` added below (open, pushed, no PR).
+> **Last verified: 2026-09-22** — branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
 > **Last verified: 2026-08-14** — branch `fix/on-time-delivery-and-decisions` added below (open, not merged, its entry is the newest; its bug ids were renumbered 130-133 → 140-143 because `feat/leave-entitlement` claimed 130-133 and merged to `main` first). Previously: branch `feat/leave-entitlement` (MERGED as #326). Previously: branch `feat/job-card-completed-at` added below (open, not merged). Previously: branch `fix/security-posture` added below (open, not merged). Previously: PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
 > **Last verified: 2026-08-14** — branch `feat/pcb-calculation` added below (open, not merged, its entry is the newest). Previously: branch `feat/job-card-completed-at` added below (open, not merged). Previously: branch `fix/security-posture` added below (open, not merged). Previously: PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
 > **Last verified: 2026-08-14** — restamped on branch `fix/money-input-parsing` (its entry is the newest below, not yet deployed). PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
@@ -62,6 +65,19 @@ staging before merging** — label collisions in the heatmap at 31 day columns o
 **prod 已验（#465 merge cba0fcdb，deploy ✓，1 sen 两条路各走完整梯子后立即作废）**：①other creditor 路（Houzs Century OCB-2606-002）：draft 带勾单、open-bills 立刻显示 reserved 1 sen（available 119,999）、0 分录 0 结算行；prepare→check 铸 HPV-2609-046 仍 0 分录、bill 未动；approve → Other Creditor Payments 出现 HPV-2609-046（ACTIVE，1 sen，310-0010）、bill paid 1/outstanding 119,999、GL DR 405-0000 1 / CR 310-0010 1（sourceType other_party_payment）；从 PV 页 void → 结算单 lifecycle VOID、bill paid 归 0、PV 读 VOID。②supplier 路（OCEAN SKY PI-2608-091）：check 铸 HPV-2609-047 → approve → Supplier Payment 页出现同号（ACTIVE，1 行）、PI paid 1 / PARTIAL_PAID、GL DR 400-0000 1 / CR 310-0010 1；void → PI paid 0 / CONFIRMED、supplier payment VOID、PV VOID。UI：深链 ?pay=AP:opb-ced66add-2:op-1bcbd71b 直开 New AP Payment、债主已选、OCB-2606-002 勾满 1,200.00；芯片 ALL/DRAFT/PREPARED/CHECKED/APPROVED 91/ADVANCE OPEN/CANCELLED 7；两张测试凭证带 AP 标签灰显。
 
 ---
+## 2026-09-22 — 🔵 Service dashboard: "Other" no longer headlines Top issues (branch `fix/service-dashboard-other-catch-all`, pushed, no PR yet)
+
+Ask (owner): "the dashboard for service cases, the top issue there is category of other 2 please fix".
+Traced create modal → PUT sanitizer → feed slice → `byCause`: nothing defaults a case to OTHER, so the
+two cases were tagged Other by hand and simply out-counted the real causes. **Prod UNMEASURED** (prod
+read denied in this session) — which two cases they are is unknown; click the Other row on the
+dashboard to list them and re-categorise if they are mis-tagged. Code fix: `OTHER` is a catch-all —
+`tally` ranks it below every real cause (above Not yet analysed) and new `topCauses()` excludes it from
+Top 3 on desktop (`ServiceIssuesPanel`) and `/m` (`ServiceTab`). Still counted, still clickable.
+Test added in `tests/service-issue-stats.test.mjs` (14/14), `tsc -p tsconfig.app.json` clean. Bug fix →
+target `main`. Docs: `CODEBASE-MAP.md` ServiceView row restamped.
+
+## 2026-09-22 — 🔵 PO create: searchable supplier picker (branch `feat/po-supplier-searchable-select`, pushed, no PR yet)
 ## 2026-09-22 — 🔵 PO list: search finds a PO by the raw material bought on it (branch `feat/po-search-line-items`)
 
 Staff ask (screenshots, 2026-09-22): "search a raw material item and see which Purchase
@@ -221,6 +237,30 @@ the `??`-blank-overwrite bug at the PUT merge block — NOT fixed, only the new 
 it), R9 export fields (`price1`, sofa tier prices, `skuCode`, pricing-permission banner), R11-R13
 (grid "export all" / invoice 200 cap / mobile placeholder), R1/R2 (shared `src/lib/import-export/`
 client lib), R15 doc updates beyond products.md.
+## 2026-09-14 — 🔵 PRD T-006 · Transfer/Convert foundation (R1-R10 all implemented, pending merge)
+
+Requested by Mr Lim, PRD dated 2026-09-07, priority **Low (to be raised later)**. Full PRD:
+`T-006-Hookka-transfer-convert - wei siang.pdf` (user's local Downloads). Branch
+`fix/transfer-convert-duplicate-guard`, off `origin/main`. Plan:
+[T-006-TRANSFER-CONVERT-FIX-PLAN.md](T-006-TRANSFER-CONVERT-FIX-PLAN.md).
+
+**All 10 requirements (R1-R10) implemented and independently re-verified against the actual diff**
+(not just commit messages) — R1 SO→DO server-side refusal when `productionOrderIds` is empty, R2 GRN
+over-receipt now cumulative against `receivedQty`, R3 GRN create folded into one atomic `db.batch()`,
+R4 CN-invoice void now releases via a new `status_before_conversion` column, R5 DB `CHECK` constraint
+on `grn_items.invoiced_qty` (`NOT VALID`, self-applied, race translated to 409), R6 purchase-return
+writeback + cap, R7 delivery-return qty cap + cancel-after-restock refusal, R8 PO ceiling matched by
+`po_item_id` instead of the PRD's literal (and previously-rejected, BUG-2026-08-13-052)
+`material_code` fill, R9 line-level-only PO id ceiling gap closed, R10 idempotency wrapped on all 6
+create/convert routes. Verified 2026-09-14: `npx tsc --noEmit` clean, 49/49 new `tests/t006-*.test.mjs`
+pass, full `npm test` 4621/4624 pass (3 pre-existing skips, 0 fail).
+
+**Known open follow-up, not fixed here (flagged in the plan itself):** Consignment page's own
+"Transfer to Delivery Order" button (`consignment/index.tsx` ~line 1094) has the identical
+hand-built-items bug: R1's new server-side refusal means this button now fails on every click
+instead of silently succeeding wrong (it could never have legitimately succeeded — CO-linked POs are
+already blocked from DOs elsewhere). Needs a follow-up: redirect to `/consignment/note`, disable with
+a message, or remove if provably dead.
 
 ---
 

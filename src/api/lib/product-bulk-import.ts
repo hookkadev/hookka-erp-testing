@@ -4,6 +4,30 @@
 export const PRODUCT_BULK_CATEGORIES = ["BEDFRAME", "SOFA", "ACCESSORY"] as const;
 export const PRODUCT_BULK_STATUSES = ["ACTIVE", "INACTIVE"] as const;
 
+// Per-unit material usage columns (the "BOM products" sheet). Each non-blank
+// cell becomes one bom_components row for that product, matched on
+// materialName on re-import: a number replaces that material's qty, 0
+// removes it, blank leaves it alone. Other BOM rows are never touched.
+// Labels are the sheet headers the import matches (case/space-insensitive).
+export const PRODUCT_BULK_MATERIALS = [
+  { key: "usageNonWoven", label: "Non-Woven Usage (Roll)", materialName: "Non-Woven", materialCategory: "PACKING", unit: "ROLL" },
+  { key: "usagePin", label: "Pin Usage (Box)", materialName: "Pin", materialCategory: "ACCESSORIES", unit: "BOX" },
+  { key: "usageScrew", label: "Screw Usage (Pcs)", materialName: "Screw", materialCategory: "ACCESSORIES", unit: "PCS" },
+  { key: "usageLeg", label: "Leg Usage (Pcs)", materialName: "Leg", materialCategory: "ACCESSORIES", unit: "PCS" },
+  { key: "usageSingleFace", label: "Single Face Usage (Roll)", materialName: "Single Face", materialCategory: "PACKING", unit: "ROLL" },
+  { key: "usagePlastic", label: "Plastic Usage (KG)", materialName: "Plastic", materialCategory: "PACKING", unit: "KG" },
+  { key: "usageOppTape", label: "Opp Tape Usage (Roll)", materialName: "Opp Tape", materialCategory: "PACKING", unit: "ROLL" },
+  { key: "usageBracket", label: "Bracket Usage (Pcs)", materialName: "Bracket", materialCategory: "ACCESSORIES", unit: "PCS" },
+  { key: "usageMechanism", label: "Mechanism Usage (Pcs)", materialName: "Mechanism", materialCategory: "ACCESSORIES", unit: "PCS" },
+] as const;
+
+export type ProductBulkMaterialUsage = {
+  materialName: string;
+  materialCategory: string;
+  unit: string;
+  qtyPerUnit: number;
+};
+
 export type ProductBulkImportInput = {
   id?: unknown; // if present and matches an existing row, code changes are a rename not a new row
   code?: unknown;
@@ -18,7 +42,7 @@ export type ProductBulkImportInput = {
   fabricUsage?: unknown;
   unitM3?: unknown;
   status?: unknown;
-};
+} & { [K in (typeof PRODUCT_BULK_MATERIALS)[number]["key"]]?: unknown };
 
 export type ShapedProductBulkRow = {
   id?: string;
@@ -34,6 +58,7 @@ export type ShapedProductBulkRow = {
   fabricUsage?: number;
   unitM3?: number;
   status?: string;
+  materials?: ProductBulkMaterialUsage[]; // only the non-blank usage cells
 };
 
 function bulkStr(v: unknown): string | undefined {
@@ -103,6 +128,23 @@ export function shapeProductBulkRow(
   if (fabricUsage !== undefined) out.fabricUsage = fabricUsage;
   const unitM3 = bulkNum(row.unitM3);
   if (unitM3 !== undefined) out.unitM3 = unitM3;
+
+  const materials: ProductBulkMaterialUsage[] = [];
+  for (const m of PRODUCT_BULK_MATERIALS) {
+    const raw = row[m.key];
+    if (raw === undefined || raw === null || String(raw).trim() === "") continue;
+    const qty = bulkNum(String(raw).trim());
+    if (qty === undefined || qty < 0) {
+      return { ok: false, reason: `${m.label} must be a number ≥ 0 (got "${String(raw)}")` };
+    }
+    materials.push({
+      materialName: m.materialName,
+      materialCategory: m.materialCategory,
+      unit: m.unit,
+      qtyPerUnit: qty,
+    });
+  }
+  if (materials.length > 0) out.materials = materials;
 
   // Mirrors POST / and PUT /:id (BUG-2026-06-22-008).
   if (categoryUpper === "BEDFRAME" && !sizeCode) {

@@ -52,9 +52,24 @@ test("the guard's ceiling and consumption are read for THAT PO", () => {
   // the running total describe different things.
   assert.match(
     SRC,
-    /SELECT material_code, materialName, quantity, receivedQty FROM purchase_order_items WHERE purchaseOrderId = \?[\s\S]{0,160}\.bind\(poId\)/,
+    /SELECT id, material_code, materialName, quantity, receivedQty FROM purchase_order_items WHERE purchaseOrderId = \?[\s\S]{0,160}\.bind\(poId\)/,
   );
   assert.match(SRC, /\.bind\(poId\)[\s\S]{0,80}material_code/);
+});
+
+// T-006 R8 — a PO-sourced GRN line's material_code is ALWAYS blank
+// (BUG-2026-08-13-052, deliberately not fixed at the source). The old
+// material_code-only match silently skipped the ceiling for every such line.
+test("the ceiling matches by po_item_id, not material_code (T-006 R8)", () => {
+  assert.match(
+    SRC,
+    /LEFT JOIN grn_items gi ON gi\.id = pii\.grn_item_id/,
+    "already-invoiced must resolve through the GRN line's own po_item_id",
+  );
+  assert.match(SRC, /gi\.po_item_id AS "poItemId"/);
+  const fn = SRC.slice(SRC.indexOf("async function checkPoRemaining("));
+  assert.match(fn, /const orderedByItemId = new Map/);
+  assert.match(fn, /const itemIdByMaterialCode = new Map/, "material_code stays as the legacy/manual-row fallback, not the primary key");
 });
 
 test("ONE ceiling serves both invoice paths (BUG-2026-08-07-003)", () => {
@@ -65,8 +80,8 @@ test("ONE ceiling serves both invoice paths (BUG-2026-08-07-003)", () => {
   const calls = SRC.match(/await checkPoRemaining\(db, poId, rows/g) ?? [];
   assert.equal(
     calls.length,
-    3,
-    "the GRN branch, the PO branch and the re-line path must share one ceiling",
+    4,
+    "the GRN branch, the PO branch, the line-only-poId branch (T-006 R9), and the re-line path must share one ceiling",
   );
   // The re-line path must EXCLUDE the invoice it is replacing, or an edit that
   // even lowers the quantity is measured against its own lines and rejected.

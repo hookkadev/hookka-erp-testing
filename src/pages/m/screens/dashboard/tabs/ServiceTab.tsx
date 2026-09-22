@@ -23,7 +23,7 @@ import {
 import { SERVICE_CASES_NAV_HREF, serviceCaseHref, serviceCasesHref } from "../../../../dashboards/service-case-link-lib";
 import {
   NONE_KEY, agingSplit, analysisProgress, avgClose, byCause, byPrevention, causeKeys, causeLabel, causeTrend,
-  closeTrend, openedVsClosed, preventionNotDone, topProducts, type TallyRow,
+  closeTrend, openedVsClosed, preventionNotDone, topCauses, topProducts, type TallyRow,
 } from "../../../../../api/lib/service-issue-stats";
 import { ListRow, MobileCard, StatusPill } from "../../../components";
 import { resolveStatus, SERVICE_CASE_STATUS_MAP } from "../../../config/helpers";
@@ -247,7 +247,7 @@ function Issues({ cases, period, onPickCause, causeOnly }: {
   // became one "analysis progress" list — how far each step has got.
   const progress = useMemo(() => analysisProgress(cases), [cases]);
   const products = useMemo(() => topProducts(cases, 10), [cases]);
-  const top3 = useMemo(() => causes.filter((r) => r.key !== NONE_KEY && r.count > 0).slice(0, 3), [causes]);
+  const top3 = useMemo(() => topCauses(causes, 3), [causes]);
   const trend = useMemo(
     () => causeTrend(cases, top3.map((r) => r.key), (d) => (ytd ? d.slice(0, 7) : d.slice(5))),
     [cases, top3, ytd],

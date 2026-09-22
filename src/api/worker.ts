@@ -309,6 +309,17 @@ function pickDbUrl(env: Env["Bindings"], requestUrl: string): string | undefined
   return env.HYPERDRIVE?.connectionString ?? env.DATABASE_URL;
 }
 
+// Staging/preview gets its own slice of the shared SESSION_CACHE namespace
+// (see lib/kv-prefix.ts). Before auth, which caches sessions in KV. c.env is
+// replaced per request, never mutated — the bindings object is isolate-wide.
+app.use("/api/*", async (c, next) => {
+  if (c.env.SESSION_CACHE && isPreviewHostname(c.req.url)) {
+    const { prefixedKv } = await import("./lib/kv-prefix");
+    c.env = { ...c.env, SESSION_CACHE: prefixedKv(c.env.SESSION_CACHE, "stg:") };
+  }
+  await next();
+});
+
 // Must run before authMiddleware (which itself hits the DB to verify tokens).
 // The adapter is further wrapped in instrumentD1 so every prepare/all/first/
 // run/batch emits a [slow-query] line when it exceeds SLOW_QUERY_MS.

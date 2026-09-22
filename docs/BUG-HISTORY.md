@@ -176,6 +176,34 @@ number on a screen, never by a test.
 **Gap left open.** No test covers this route, and no test anywhere asserts that
 a money field in a payload is non-zero for a book that has sales. That single
 assertion would have caught all five instances of this class. Logged as C23 row 7.
+## BUG-2026-09-21-181 — the Dashboard Prototype feed read every row by its SQL name, and the driver had renamed them all `dashboard` `api` 🟢
+
+🟢 Fixed on `staging` (the route is also on `main` — prod impact **UNMEASURED**, no prod
+read access). `/test/dashboard-prototype` on staging showed no values: the page got a
+**500** from `GET /api/dashboard/prototype` (and a 504 on the page).
+
+**Root cause.** `src/api/routes/dashboard-prototype.ts` reads rows as `r.created_at`,
+`r.driver_name`, … (105 snake_case reads, 5 dual-keyed). `getSql` (`src/api/lib/db-pg.ts`,
+`columnFrom`) returns every row **camelCased**, so all of them were `undefined`. The DO loop
+then threw on `touchDay(dayKey(r.created_at))!.created++` (null day key), taking the whole
+feed down. The file's own header says its SQL "cannot be executed anywhere but production",
+so it was never run against a real driver before shipping.
+
+**Fix.** One place: `section()` — which all 17 queries go through — now maps each row
+through the new `withSnakeKeys` (`db-pg.ts`), the exact inverse of `columnFrom` (rename map,
+then `postgres.fromCamel`), keeping the camelCase keys too. Reproduced in-process against
+staging data (`kahx…`) as SUPER_ADMIN: 500 before, 200 after, every section `live: true`.
+
+**Regression test.** `tests/dashboard-prototype-snake-reads.test.mjs` — unit-tests
+`withSnakeKeys` and pins that every `prepare` in the route is inside a `section()`.
+Class: [BUG-CLASSES C23](BUG-CLASSES.md).
+
+**Superseded 2026-09-22 (staging↔main sync, PR #463).** `main` had rewritten the same route
+independently (`/dashboard-experimental`, `src/pages/dashboards/`), reading every row
+camelCased — 0 snake reads — so the sync took that version and the `withSnakeKeys` wrap in
+`section()` no longer exists. `withSnakeKeys` stays in `db-pg.ts`; the guard test now
+asserts the route has no `r.snake_case` read and every `prepare` is inside `section()`.
+Nothing about this entry's root cause changes — it is how the bug is prevented that moved.
 
 ---
 

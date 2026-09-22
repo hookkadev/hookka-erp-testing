@@ -1549,6 +1549,28 @@ the two builders that existed, and nothing stops the third.
 
 ---
 
+## C23 — a row read by its SQL (snake_case) name after the driver camelCased it
+
+**Shape.** `getSql` (`src/api/lib/db-pg.ts`, `columnFrom`) returns every column camelCased.
+Code that reads `r.created_at` gets `undefined` — no error, just blank figures, until a `!`
+or a date parse turns it into a crash. Most likely in code written against PostgREST or
+psql output, where the names come back as written.
+
+**The rule.** Read `r.camelCase ?? r.snake_case` (CLAUDE.md), or, for a file that reads
+by SQL name throughout, route its rows through `withSnakeKeys` at the ONE place they enter.
+
+**Instances**
+
+| # | file | reads | state |
+|---|---|---|---|
+| 1 | `src/api/routes/dashboard-prototype.ts` | 105 snake reads across 17 queries | ✅ 2026-09-21 (-181) — `section()` mapped rows through `withSnakeKeys`. **Superseded 2026-09-22** by the staging↔main sync (PR #463): the route is now `main`'s rewrite, which reads every row camelCased (0 snake reads), so the wrap is gone; `withSnakeKeys` stays in `db-pg.ts` for the next file that needs it |
+
+**Enforced by** `tests/dashboard-prototype-snake-reads.test.mjs` (row 1 only — since 2026-09-22 it asserts the route has NO `r.snake_case` read and every `prepare` sits inside `section()`, plus the `withSnakeKeys` unit test). **Not swept
+repo-wide yet** — the next fixer should grep `\br\.[a-z]+_[a-z_]+` in `src/api` and check each
+hit is dual-keyed.
+
+---
+
 ## When you fix something here
 
 1. Find its class above. If there isn't one, add it.

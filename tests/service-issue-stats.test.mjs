@@ -4,7 +4,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  NONE_KEY, byCause, byUnit, byPrevention, topProducts, causeTrend, avgClose, closeTrend, openedVsClosed, agingSplit, preventionNotDone, parseCauses, parseProductLabels,
+  NONE_KEY, OTHER_KEY, topCauses, byCause, byUnit, byPrevention, topProducts, causeTrend, avgClose, closeTrend, openedVsClosed, agingSplit, preventionNotDone, parseCauses, parseProductLabels,
 } from "../src/api/lib/service-issue-stats.ts";
 
 const c = (o) => ({ status: "OPEN", createdDate: "2026-09-01", closedDate: null, ...o });
@@ -23,6 +23,17 @@ test("multi-cause case counts once per distinct cause; % is share of cases", () 
   assert.equal(get(NONE_KEY).count, 1);
   assert.equal(get(NONE_KEY).label, "Not yet analysed");
   assert.equal(rows.at(-1).key, NONE_KEY, "unanalysed row is always last");
+});
+
+test("Other is a catch-all: sorts below real causes, above unanalysed, never a Top 3 cause", () => {
+  const rows = byCause([
+    c({ causes: ["OTHER"] }), c({ causes: ["OTHER"] }), c({ causes: ["OTHER"] }),
+    c({ causes: ["PRODUCTION"] }), c({ causes: ["DESIGN"] }),
+    c({ causes: [] }),
+  ]);
+  assert.deepEqual(rows.map((r) => r.key), ["DESIGN", "PRODUCTION", OTHER_KEY, NONE_KEY]);
+  assert.equal(rows.find((r) => r.key === OTHER_KEY).count, 3, "still counted, just not ranked");
+  assert.deepEqual(topCauses(rows, 3).map((r) => r.key), ["DESIGN", "PRODUCTION"]);
 });
 
 test("days-to-close averages CLOSED cases only; open counted separately", () => {
