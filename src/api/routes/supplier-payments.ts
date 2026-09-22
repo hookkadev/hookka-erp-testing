@@ -309,189 +309,14 @@ app.post("/", async (c) => {
         dateIso: date,
       });
 
-      // 3. Accumulate statements + GL totals across all allocations.
-      const statements: D1PreparedStatement[] = [];
-      let totalBooked = 0;
-      let totalBank = 0;
-      let totalFx = 0;
-
-      // 4. Per-allocation: fetch PI, compute, push sub-ledger + PI bump.
-      for (const a of allocations) {
-        const piId = String(a.piId ?? "");
-        if (!piId) continue;
-        const pi = await c.var.DB.prepare(
-          `SELECT id, pi_no, amount_sen, paid_amount_sen, status, currency,
-                  fx_rate, supplier_id, supplier_name
-             FROM purchase_invoices WHERE id = ?`,
-        )
-          .bind(piId)
-          .first<PiRow>();
-        if (
-          !pi ||
-          (pi.status !== "CONFIRMED" && pi.status !== "APPROVED" && pi.status !== "PARTIAL_PAID")
-        ) {
-          return c.json(
-            {
-              success: false,
-              error: `PI ${piId} not found or not in a payable status (APPROVED / PARTIAL_PAID)`,
-            },
-            400,
-          );
-        }
-
-        const outstandingBookedSen = piOutstandingSen(pi);
-        const currency = pi.currency ? String(pi.currency) : "MYR";
-        const isForeign = !!pi.currency && currency.toUpperCase() !== "MYR";
-        const fxRate = Number(pi.fxRate ?? pi.fx_rate) || 1;
-
-        const r = computeAlloc({
-          outstandingBookedSen,
-          isForeign,
-          fxRate,
-          payMyrSen: a.payMyrSen,
-          foreignSen: a.foreignSen,
-          payRate: a.payRate,
-          full: !!a.full,
-        });
-        if (!r.ok) {
-          return c.json({ success: false, error: r.error }, 400);
-        }
-
-        // Skip empty rows (operator left this PI blank in a multi-PI dialog).
-        if (r.bookedSen <= 0) continue;
-
-        const spId = `sp-${crypto.randomUUID().slice(0, 8)}`;
-        statements.push(
-          c.var.DB.prepare(
-            `INSERT INTO supplier_payments (
-               id, paymentNo, supplierId, supplierName, purchaseInvoiceId,
-               date, amountSen, bookedSen, foreignSen, payFxRate,
-               method, reference, notes, orgId
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          ).bind(
-            spId,
-            payNo,
-            pi.supplierId ?? pi.supplier_id ?? supplierId,
-            pi.supplierName ?? pi.supplier_name ?? "",
-            piId,
-            date,
-            r.bankSen,
-            r.bookedSen,
-            isForeign ? (Number(a.foreignSen) || 0) : null,
-            isForeign ? (Number(a.payRate) || 0) : null,
-            "BANK_TRANSFER",
-            reference ?? "",
-            `Payment ${payNo}`,
-            orgId,
-          ),
-        );
-
-        statements.push(
-          c.var.DB.prepare(
-            `UPDATE purchase_invoices
-               SET paid_amount_sen = paid_amount_sen + ?,
-                   status = CASE
-                     WHEN paid_amount_sen + ? >= amount_sen THEN 'PAID'
-                     WHEN paid_amount_sen + ? > 0 THEN 'PARTIAL_PAID'
-                     ELSE status
-                   END
-             WHERE id = ?`,
-          ).bind(r.bookedSen, r.bookedSen, r.bookedSen, piId),
-        );
-
-        totalBooked += r.bookedSen;
-        totalBank += r.bankSen;
-        totalFx += r.fxDiffSen;
-      }
-
-      // 4b. Supplier advance — one unallocated row (no PI). Flows into the GL
-      // totals below (DR 400-0000 / CR bank), so it lands on the supplier's
-      // creditor ledger as a prepaid (debit) balance to knock off manually later.
-      if (advanceSen > 0) {
-        const supRow = await c.var.DB
-          .prepare("SELECT name FROM suppliers WHERE id = ?")
-          .bind(supplierId)
-          .first<{ name: string }>();
-        statements.push(
-          c.var.DB.prepare(
-            `INSERT INTO supplier_payments (
-               id, paymentNo, supplierId, supplierName, purchaseInvoiceId,
-               date, amountSen, bookedSen, foreignSen, payFxRate,
-               method, reference, notes, orgId
-             ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, NULL, NULL, ?, ?, ?, ?)`,
-          ).bind(
-            `sp-${crypto.randomUUID().slice(0, 8)}`,
-            payNo,
-            supplierId,
-            supRow?.name ?? "",
-            date,
-            advanceSen,
-            advanceSen,
-            "BANK_TRANSFER",
-            reference ?? "",
-            `Advance ${payNo}`,
-            orgId,
-          ),
-        );
-        totalBooked += advanceSen;
-        totalBank += advanceSen;
-      }
-
-      // 5. Nothing to pay (every allocation resolved to 0).
-      if (totalBooked <= 0) {
-        return c.json({ success: false, error: "no allocations" }, 400);
-      }
-
-      // 6. Build the GL legs — ONE entry group keyed by payNo.
-      //    DR 400-0000 (Σ booked) · CR bank (Σ bank) · ±530-0000 (Σ FX).
-      //    fxDiff > 0 → paid less → GAIN → credit 530; < 0 → loss → debit 530.
-      const legs: Parameters<typeof buildJournalEntryStatements>[2] = [
-        {
-          id: `lje-${crypto.randomUUID().slice(0, 12)}`,
-          sourceType: "supplier_payment",
-          sourceId: payNo,
-          legNo: 1,
-          accountCode: AP_CONTROL,
-          debitSen: totalBooked,
-          creditSen: 0,
-          description: `Supplier payment ${payNo}`,
-          actorUserId,
-          orgId,
-        },
-        {
-          id: `lje-${crypto.randomUUID().slice(0, 12)}`,
-          sourceType: "supplier_payment",
-          sourceId: payNo,
-          legNo: 2,
-          accountCode: payFrom,
-          debitSen: 0,
-          creditSen: totalBank,
-          description: `Supplier payment ${payNo}`,
-          actorUserId,
-          orgId,
-        },
-      ];
-      if (totalFx !== 0) {
-        legs.push({
-          id: `lje-${crypto.randomUUID().slice(0, 12)}`,
-          sourceType: "supplier_payment",
-          sourceId: payNo,
-          legNo: 3,
-          accountCode: FX_GAIN_ACCT,
-          debitSen: totalFx < 0 ? -totalFx : 0,
-          creditSen: totalFx > 0 ? totalFx : 0,
-          description: `Realised FX · ${payNo}`,
-          actorUserId,
-          orgId,
-        });
-      }
-      const { statements: ls } = await buildJournalEntryStatements(
-        c.var.DB,
-        orgId,
-        legs,
-      );
-      statements.push(...ls);
-      statements.push(bumpSupplierPaymentsRev(c.var.DB));
+      // 3–6. Rows + PI bumps + GL legs come from the ONE builder shared with
+      // the Payment Vouchers AP road (approve-time posting), so the two roads
+      // can never post differently.
+      const built = await buildSupplierPaymentCreate(c.var.DB, {
+        orgId, actorUserId, supplierId, payFrom, date, reference, allocations, advanceSen, paymentNo: payNo,
+      });
+      if (!built.ok) return c.json({ success: false, error: built.error }, 400);
+      const { statements, totalBooked, totalBank, totalFx } = built;
 
       // 7. Execute the whole batch atomically (mirror purchase-invoices.ts).
       await c.var.DB.batch(statements);
@@ -556,6 +381,230 @@ app.post("/", async (c) => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// buildSupplierPaymentCreate — the ONE builder of a supplier payment: the
+// per-PI allocation rows (+ optional unallocated advance row), the PI
+// paid_amount_sen bumps, and the GL legs (DR 400-0000 Σ booked · CR bank
+// Σ bank · ±530-0000 Σ FX). Used by POST / above (immediate) and by the
+// Payment Vouchers "AP Payment" road in accounting.ts, which posts at APPROVE
+// under the voucher's own formal number (owner 2026-09-22, Houzs adoption:
+// 「ap payment 和 payment voucher 一起」). The caller mints `paymentNo` and
+// batches the statements; nothing here writes.
+// ---------------------------------------------------------------------------
+export type SupplierPaymentCreateInput = {
+  orgId: string;
+  actorUserId: string | null;
+  supplierId: string;
+  payFrom: string;
+  date: string;
+  reference?: string;
+  allocations: CreateAllocation[];
+  advanceSen: number;
+  paymentNo: string;
+};
+export type SupplierPaymentCreateResult =
+  | { ok: true; statements: D1PreparedStatement[]; totalBooked: number; totalBank: number; totalFx: number }
+  | { ok: false; error: string };
+
+export async function buildSupplierPaymentCreate(
+  db: Env["Variables"]["DB"],
+  input: SupplierPaymentCreateInput,
+): Promise<SupplierPaymentCreateResult> {
+  const { orgId, actorUserId, supplierId, payFrom, date, reference, allocations, paymentNo: payNo } = input;
+  const advanceSen = Math.max(0, Math.round(Number(input.advanceSen) || 0));
+  // Migration-7 columns + relaxed PI status CHECK (memoized; the route already
+  // ran it, the PV road relies on this call).
+  await ensurePartialPaymentColumns(db);
+
+  // 3. Accumulate statements + GL totals across all allocations.
+  const statements: D1PreparedStatement[] = [];
+  let totalBooked = 0;
+  let totalBank = 0;
+  let totalFx = 0;
+
+  // 4. Per-allocation: fetch PI, compute, push sub-ledger + PI bump.
+  for (const a of allocations) {
+    const piId = String(a.piId ?? "");
+    if (!piId) continue;
+    const pi = await db.prepare(
+      `SELECT id, pi_no, amount_sen, paid_amount_sen, status, currency,
+              fx_rate, supplier_id, supplier_name
+         FROM purchase_invoices WHERE id = ?`,
+    )
+      .bind(piId)
+      .first<PiRow>();
+    if (
+      !pi ||
+      (pi.status !== "CONFIRMED" && pi.status !== "APPROVED" && pi.status !== "PARTIAL_PAID")
+    ) {
+      return { ok: false, error: `PI ${piId} not found or not in a payable status (APPROVED / PARTIAL_PAID)` };
+    }
+    // A PV-road allocation must be this supplier's — the immediate route's
+    // dialog only ever lists the picked supplier's PIs, so this is a no-op
+    // there and the guard the voucher form relies on. A legacy PI with no
+    // supplier id recorded is let through (as it always was).
+    const piSupplier = String(pi.supplierId ?? pi.supplier_id ?? "");
+    if (piSupplier && piSupplier !== supplierId) {
+      return { ok: false, error: `PI ${pi.piNo ?? pi.pi_no ?? piId} belongs to a different supplier` };
+    }
+
+    const outstandingBookedSen = piOutstandingSen(pi);
+    const currency = pi.currency ? String(pi.currency) : "MYR";
+    const isForeign = !!pi.currency && currency.toUpperCase() !== "MYR";
+    const fxRate = Number(pi.fxRate ?? pi.fx_rate) || 1;
+
+    const r = computeAlloc({
+      outstandingBookedSen,
+      isForeign,
+      fxRate,
+      payMyrSen: a.payMyrSen,
+      foreignSen: a.foreignSen,
+      payRate: a.payRate,
+      full: !!a.full,
+    });
+    if (!r.ok) {
+      return { ok: false, error: r.error };
+    }
+
+    // Skip empty rows (operator left this PI blank in a multi-PI dialog).
+    if (r.bookedSen <= 0) continue;
+
+    const spId = `sp-${crypto.randomUUID().slice(0, 8)}`;
+    statements.push(
+      db.prepare(
+        `INSERT INTO supplier_payments (
+           id, paymentNo, supplierId, supplierName, purchaseInvoiceId,
+           date, amountSen, bookedSen, foreignSen, payFxRate,
+           method, reference, notes, orgId
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(
+        spId,
+        payNo,
+        pi.supplierId ?? pi.supplier_id ?? supplierId,
+        pi.supplierName ?? pi.supplier_name ?? "",
+        piId,
+        date,
+        r.bankSen,
+        r.bookedSen,
+        isForeign ? (Number(a.foreignSen) || 0) : null,
+        isForeign ? (Number(a.payRate) || 0) : null,
+        "BANK_TRANSFER",
+        reference ?? "",
+        `Payment ${payNo}`,
+        orgId,
+      ),
+    );
+
+    statements.push(
+      db.prepare(
+        `UPDATE purchase_invoices
+           SET paid_amount_sen = paid_amount_sen + ?,
+               status = CASE
+                 WHEN paid_amount_sen + ? >= amount_sen THEN 'PAID'
+                 WHEN paid_amount_sen + ? > 0 THEN 'PARTIAL_PAID'
+                 ELSE status
+               END
+         WHERE id = ?`,
+      ).bind(r.bookedSen, r.bookedSen, r.bookedSen, piId),
+    );
+
+    totalBooked += r.bookedSen;
+    totalBank += r.bankSen;
+    totalFx += r.fxDiffSen;
+  }
+
+  // 4b. Supplier advance — one unallocated row (no PI). Flows into the GL
+  // totals below (DR 400-0000 / CR bank), so it lands on the supplier's
+  // creditor ledger as a prepaid (debit) balance to knock off manually later.
+  if (advanceSen > 0) {
+    const supRow = await db
+      .prepare("SELECT name FROM suppliers WHERE id = ?")
+      .bind(supplierId)
+      .first<{ name: string }>();
+    statements.push(
+      db.prepare(
+        `INSERT INTO supplier_payments (
+           id, paymentNo, supplierId, supplierName, purchaseInvoiceId,
+           date, amountSen, bookedSen, foreignSen, payFxRate,
+           method, reference, notes, orgId
+         ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, NULL, NULL, ?, ?, ?, ?)`,
+      ).bind(
+        `sp-${crypto.randomUUID().slice(0, 8)}`,
+        payNo,
+        supplierId,
+        supRow?.name ?? "",
+        date,
+        advanceSen,
+        advanceSen,
+        "BANK_TRANSFER",
+        reference ?? "",
+        `Advance ${payNo}`,
+        orgId,
+      ),
+    );
+    totalBooked += advanceSen;
+    totalBank += advanceSen;
+  }
+
+  // 5. Nothing to pay (every allocation resolved to 0).
+  if (totalBooked <= 0) {
+    return { ok: false, error: "no allocations" };
+  }
+
+  // 6. Build the GL legs — ONE entry group keyed by payNo.
+  //    DR 400-0000 (Σ booked) · CR bank (Σ bank) · ±530-0000 (Σ FX).
+  //    fxDiff > 0 → paid less → GAIN → credit 530; < 0 → loss → debit 530.
+  const legs: Parameters<typeof buildJournalEntryStatements>[2] = [
+    {
+      id: `lje-${crypto.randomUUID().slice(0, 12)}`,
+      sourceType: "supplier_payment",
+      sourceId: payNo,
+      legNo: 1,
+      accountCode: AP_CONTROL,
+      debitSen: totalBooked,
+      creditSen: 0,
+      description: `Supplier payment ${payNo}`,
+      actorUserId,
+      orgId,
+    },
+    {
+      id: `lje-${crypto.randomUUID().slice(0, 12)}`,
+      sourceType: "supplier_payment",
+      sourceId: payNo,
+      legNo: 2,
+      accountCode: payFrom,
+      debitSen: 0,
+      creditSen: totalBank,
+      description: `Supplier payment ${payNo}`,
+      actorUserId,
+      orgId,
+    },
+  ];
+  if (totalFx !== 0) {
+    legs.push({
+      id: `lje-${crypto.randomUUID().slice(0, 12)}`,
+      sourceType: "supplier_payment",
+      sourceId: payNo,
+      legNo: 3,
+      accountCode: FX_GAIN_ACCT,
+      debitSen: totalFx < 0 ? -totalFx : 0,
+      creditSen: totalFx > 0 ? totalFx : 0,
+      description: `Realised FX · ${payNo}`,
+      actorUserId,
+      orgId,
+    });
+  }
+  const { statements: ls } = await buildJournalEntryStatements(db, orgId, legs);
+  statements.push(...ls);
+  statements.push(bumpSupplierPaymentsRev(db));
+  return { ok: true, statements, totalBooked, totalBank, totalFx };
+}
+
+// Exported for the Payment Vouchers AP road: cancelling an approved AP
+// voucher IS voiding its supplier payment (same rows, same GL, same PI
+// roll-back) — one lifecycle core, two doors.
+export { buildSupplierPaymentLifecycle };
 
 // ---------------------------------------------------------------------------
 // POST /knock-off — manually apply part (or all) of an unapplied supplier

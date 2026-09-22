@@ -22,7 +22,7 @@ import {
 } from "../../../../dashboards/dashboard-shared-lib";
 import { SERVICE_CASES_NAV_HREF, serviceCaseHref, serviceCasesHref } from "../../../../dashboards/service-case-link-lib";
 import {
-  NONE_KEY, agingSplit, avgClose, byCause, byPrevention, byUnit, causeKeys, causeLabel, causeTrend,
+  NONE_KEY, agingSplit, analysisProgress, avgClose, byCause, byPrevention, causeKeys, causeLabel, causeTrend,
   closeTrend, openedVsClosed, preventionNotDone, topCauses, topProducts, type TallyRow,
 } from "../../../../../api/lib/service-issue-stats";
 import { ListRow, MobileCard, StatusPill } from "../../../components";
@@ -243,8 +243,9 @@ function Issues({ cases, period, onPickCause, causeOnly }: {
 }) {
   const ytd = period.mode === "ytd";
   const causes = useMemo(() => byCause(cases), [cases]);
-  const units = useMemo(() => byUnit(cases), [cases]);
-  const prevention = useMemo(() => byPrevention(cases), [cases]);
+  // Desktop twin (ServiceIssuesPanel, 2026-09-22): unit + prevention tables
+  // became one "analysis progress" list — how far each step has got.
+  const progress = useMemo(() => analysisProgress(cases), [cases]);
   const products = useMemo(() => topProducts(cases, 10), [cases]);
   const top3 = useMemo(() => topCauses(causes, 3), [causes]);
   const trend = useMemo(
@@ -274,11 +275,13 @@ function Issues({ cases, period, onPickCause, causeOnly }: {
 
       {causeOnly ? null : (
         <>
-          <MSection title="By responsible unit">
-            <MRankList items={tallyItems(units, cases.length, null)} valueHeading="Cases" emptyText={empty} />
-          </MSection>
-          <MSection title="Prevention status">
-            <MRankList items={tallyItems(prevention, cases.length, null)} valueHeading="Cases" emptyText={empty} />
+          <MSection title="Analysis progress" hint="per step">
+            <Note>How far the root-cause process has got for the cases logged in this period.</Note>
+            <MRankList
+              items={progress.map((s) => ({ key: s.key, label: s.label, value: s.done, valueLabel: `${fmtN(s.done)} / ${fmtN(s.total)}`, sub: `${s.pct}% of cases` }))}
+              valueHeading="Done"
+              emptyText={empty}
+            />
           </MSection>
           <MSection title="Most affected products" hint="top 10">
             <Note>Cases that list the product as affected; a product counts once per case.</Note>

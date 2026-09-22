@@ -66,6 +66,7 @@ export type ImportRow = Record<string, unknown>;
 // call this directly with their own filtered row set, wired to a separate
 // "Export" button — a page passing the unfiltered array here is the caller's
 // bug, not this function's.
+// eslint-disable-next-line react-refresh/only-export-components -- co-located export helper the pages wire to their own Export button; HMR penalty is acceptable
 export async function exportImportRows(
   columns: ImportColumn[],
   rows: ImportRow[],
