@@ -494,8 +494,12 @@ app.get("/", async (c) => {
       if (actual !== null && actual > 0 && actual !== (jc.estMinutes ?? 0)) {
         cardsWithMeasuredActual += 1;
       }
+      // day.productionMinutes is DERIVED from the per-worker cells after the
+      // gate below (see the reduce just before the daily array is built), so it
+      // is NOT accumulated here — an ungated += would re-admit output booked on
+      // unclocked days into the day / range totals, which is the inflation this
+      // fix removes.
       const day = ensure(date);
-      day.productionMinutes += mins;
 
       const jcWorkerIds = new Set<string>();
       if (jc.pic1Id) {
@@ -577,19 +581,18 @@ app.get("/", async (c) => {
       }
 
       for (const [wid, rawMins] of perWorkerMins) {
+        const wc = day.workersByWorker.get(wid);
+        // Day-intersection gate (2026-09-22, fix/efficiency-worked-day-
+        // intersection): credit a JC's output to a worker ONLY on a date where
+        // that worker clocked production hours (a WHE cell with
+        // workingMinutes > 0 — the WHE loop above only loaded isProduction rows
+        // in the unfiltered case). A worker who produced but did not clock in
+        // today is not surfaced here, so range efficiency can never read output
+        // over an absent denominator (the >100% inflation this fix removes).
+        // In the healthy case every completion day has clocked hours and
+        // nothing is dropped.
+        if (!wc || wc.workingMinutes <= 0) continue;
         const myMins = Math.round(rawMins);
-        let wc = day.workersByWorker.get(wid);
-        if (!wc) {
-          // Worker has JC credit but no working_hour_entries row for this date.
-          // Surface them in workers[] anyway with workingMinutes=0.
-          wc = {
-            workerId: wid,
-            workingMinutes: 0,
-            productionMinutes: 0,
-            jobs: [],
-          };
-          day.workersByWorker.set(wid, wc);
-        }
         wc.productionMinutes += myMins;
         wc.jobs.push({
           jobCardId: jc.id,
@@ -648,17 +651,12 @@ app.get("/", async (c) => {
         if (mins <= 0) continue;
         workerIds.add(wid);
         const day = ensure(d);
-        day.productionMinutes += mins;
-        let wc = day.workersByWorker.get(wid);
-        if (!wc) {
-          wc = {
-            workerId: wid,
-            workingMinutes: 0,
-            productionMinutes: 0,
-            jobs: [],
-          };
-          day.workersByWorker.set(wid, wc);
-        }
+        const wc = day.workersByWorker.get(wid);
+        // Same day-intersection gate as the JC numerator: approved extra
+        // production time counts only on a date where the worker clocked
+        // production hours. day.productionMinutes is derived from the cells
+        // afterwards, so it is not accumulated here.
+        if (!wc || wc.workingMinutes <= 0) continue;
         wc.productionMinutes += mins;
         // Surface as a drilldown line so the per-worker jobs sum equals the
         // worker's productionMinutes (parity with the JC rows above).
@@ -690,6 +688,20 @@ app.get("/", async (c) => {
     for (const row of r.results ?? []) {
       workerNameById.set(row.id, row.name);
     }
+  }
+
+  // ---- Derive each day's productionMinutes from its per-worker cells.
+  // day.workingMinutes already equals Σ worker.workingMinutes (both come from
+  // the same WHE rows); doing the same for productionMinutes keeps the day, the
+  // per-worker rows and the range totals built on ONE gated source — output that
+  // was booked on a day the worker did not clock production hours is excluded on
+  // all three levels, not just the per-worker one. (The day-level `jobs[]`
+  // drilldown still lists every completed card as a record of what finished; it
+  // is not the efficiency numerator.)
+  for (const cell of byDate.values()) {
+    let sum = 0;
+    for (const wc of cell.workersByWorker.values()) sum += wc.productionMinutes;
+    cell.productionMinutes = sum;
   }
 
   // ---- Build daily array sorted ascending by date.

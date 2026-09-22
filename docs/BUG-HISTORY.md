@@ -34,6 +34,58 @@ Entries themselves stay newest-first.
 
 ---
 
+## BUG-2026-09-22-004 — Efficiency % inflated when Working Hours weren't fully entered (numerator/denominator span mismatch) `employee-performance` `efficiency` 🟡
+
+🟡 **Fix in progress** (code shipped, prod-impact UNMEASURED — see below) · owner-reported
+("efficiency rate 要对 — 来上班几小时 vs 产出多少"; non-production hours must be deducted).
+
+**Symptom.** On the Employees page — Efficiency Overview, Department Performance and Employee
+Performance — a worker's Efficiency % could read far above 100% (the code's own comment cites
+a real 428% case, and the owner's screenshots showed 113–131% rows). It happened whenever the
+selected date range had job-card completions on days the Working Hours grid had not been
+filled in for.
+
+**Root cause.** Efficiency % = production output ÷ clocked production hours, but the two sides
+came from different tables over different day-spans. The numerator (`/api/job-cards/summary`
+and the per-worker loop in `department-performance.ts`) credited a completed card to its PIC on
+`completedDate` with **no check that the worker clocked any hours that day**; the denominator
+only summed `working_hour_entries` on days that WERE entered. So the numerator could cover more
+days than the denominator and the ratio exploded. The page's own tooltip comment admitted the
+mismatch and claimed it "can't intersect the two at the per-day level" — but the per-worker
+activity window it needed is exactly `working_hour_entries`.
+
+**Fix** (`fix/efficiency-worked-day-intersection`). A completed card's minutes now count for a
+worker ONLY on a `completedDate` where that worker also has a **production-dept**
+`working_hour_entries` row — so output is credited only on days actually clocked, and a day
+spent wholly in a non-production dept never credits output either (non-prod deducted on BOTH
+sides).
+- `src/api/routes/job-cards.ts` `/summary` (~317-395): production-dept `EXISTS` gate on each
+  pic1/pic2 branch; `working_hour_entries` added to the snapshot `sourceTables` so entering
+  hours invalidates the cache.
+- `src/api/routes/department-performance.ts` (~498, 579-602, 650-665, ~696): per-worker JC and
+  ADD_PROD credit skipped on unclocked days; `day.productionMinutes` now DERIVED from the gated
+  per-worker cells (symmetric with `workingMinutes`), so day / per-worker / range totals share
+  one gated source. The `projectPerformanceSummary` fold is unchanged and stays correct.
+- `src/pages/employees.tsx` (~4134, ~4183): stale "can't intersect" caveat rewritten; tooltip
+  now reads "Standard output (counted only on days clocked) ÷ clocked production hrs".
+
+**In the healthy case this is a no-op** — when hours are entered for every completion day the
+gate matches every row and the figure is unchanged. It only trims output booked on unclocked
+days.
+
+**Regression / gate.** `tsc -p tsconfig.app.json --noEmit`: exit 0. `npm test`: 4697/4697 pass
+(the `docs-module-guide-anchors` anchor was re-pointed after the inserted lines shifted
+`job-cards.ts`). A dedicated unit test is not yet added — the gate lives in SQL/handler code
+that the pure-function suite here can't exercise without a DB harness (follow-up).
+
+**Prod impact UNMEASURED.** Hookka's DB (ref `vpwdqtsxexpiqxzweivd`) was not reachable from the
+dev session. Shipped `scripts/check-efficiency-day-gate.mjs` (read-only): it prints OLD vs NEW
+Efficiency % per worker for a range and lists every mover and every >100% row. **The session
+with `HOOKKA_PROD_DB_URL` must run it before this is marked 🟢** — confirm full-data periods are
+a no-op and the movers are exactly the unentered-hours periods.
+
+---
+
 ## BUG-2026-09-22-003 — Delivery page: switching stage tabs felt stuck, and every tab paged the newest 200 DOs of every status `ui-frontend` `perf` `delivery` 🟢
 
 🟢 **Fixed** · owner-reported (screenshot on Pending Delivery: "when I click to planning /
