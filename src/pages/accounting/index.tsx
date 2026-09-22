@@ -11470,6 +11470,12 @@ function DailyCashTab() {
     setImgPopup(null);
   };
   const boardRef = useRef<HTMLDivElement | null>(null);
+  // Owner 2026-09-22 「这些 tick 了还需要出现吗？」— a ticked row has gone through
+  // the bank, so it leaves the pending list and folds under a one-line count
+  // per account; open the fold to see them or untick a mistake. The maths
+  // (Bank balance est. / Available) is unchanged — it never depended on the
+  // rows being visible.
+  const [showTicked, setShowTicked] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     let dead = false;
@@ -11785,42 +11791,66 @@ function DailyCashTab() {
                     Includes {a.unbookedCount} bank item{a.unbookedCount === 1 ? "" : "s"} not booked yet ({formatCurrency(a.unbookedSen)}) — record them via the Cash Book.
                   </div>
                 )}
-                {a.pending.length > 0 && (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b border-[#E2DDD8] text-xs text-[#6B7280]">
-                          <th className="px-3 py-2 text-left">✓</th>
-                          <th className="px-3 py-2 text-left">Date</th>
-                          <th className="px-3 py-2 text-left">PV No.</th>
-                          <th className="px-3 py-2 text-left">Description</th>
-                          <th className="px-3 py-2 text-right">Received</th>
-                          <th className="px-3 py-2 text-right">Pending payment</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {a.pending.map((p) => (
-                          <tr key={p.legId} className={`border-b border-[#F0ECE9] ${p.ticked ? "opacity-45" : ""}`}>
-                            <td className="px-3 py-1">
-                              <input
-                                type="checkbox"
-                                checked={p.ticked}
-                                onChange={(e) => void handleTick(a, p.legId, e.target.checked)}
-                                className="h-4 w-4 accent-[#27500A] cursor-pointer"
-                                title={p.ticked ? "Untick — it has NOT gone through after all" : "Tick — my banking app shows this went through"}
-                              />
-                            </td>
-                            <td className="px-3 py-1 text-xs text-[#6B7280] whitespace-nowrap">{p.day}</td>
-                            <td className="px-3 py-1 text-xs whitespace-nowrap">{p.sourceId}</td>
-                            <td className="px-3 py-1 text-xs w-full max-w-0"><div className="truncate" title={p.description}>{p.description}</div></td>
-                            <td className="px-3 py-1 text-right tabular-nums text-xs whitespace-nowrap text-[#27500A]">{tdInC(p.amountSen)}</td>
-                            <td className="px-3 py-1 text-right tabular-nums text-xs whitespace-nowrap">{tdOutC(p.amountSen)}</td>
+                {a.pending.length > 0 && (() => {
+                  const open = a.pending.filter((p) => !p.ticked);
+                  const ticked = a.pending.filter((p) => p.ticked);
+                  const tickedIn = ticked.reduce((s, p) => s + (p.amountSen > 0 ? p.amountSen : 0), 0);
+                  const tickedOut = ticked.reduce((s, p) => s + (p.amountSen < 0 ? -p.amountSen : 0), 0);
+                  const showing = !!showTicked[a.code];
+                  const row = (p: typeof a.pending[number]) => (
+                    <tr key={p.legId} className={`border-b border-[#F0ECE9] ${p.ticked ? "opacity-45" : ""}`}>
+                      <td className="px-3 py-1">
+                        <input
+                          type="checkbox"
+                          checked={p.ticked}
+                          onChange={(e) => void handleTick(a, p.legId, e.target.checked)}
+                          className="h-4 w-4 accent-[#27500A] cursor-pointer"
+                          title={p.ticked ? "Untick — it has NOT gone through after all" : "Tick — my banking app shows this went through"}
+                        />
+                      </td>
+                      <td className="px-3 py-1 text-xs text-[#6B7280] whitespace-nowrap">{p.day}</td>
+                      <td className="px-3 py-1 text-xs whitespace-nowrap">{p.sourceId}</td>
+                      <td className="px-3 py-1 text-xs w-full max-w-0"><div className="truncate" title={p.description}>{p.description}</div></td>
+                      <td className="px-3 py-1 text-right tabular-nums text-xs whitespace-nowrap text-[#27500A]">{tdInC(p.amountSen)}</td>
+                      <td className="px-3 py-1 text-right tabular-nums text-xs whitespace-nowrap">{tdOutC(p.amountSen)}</td>
+                    </tr>
+                  );
+                  return (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-[#E2DDD8] text-xs text-[#6B7280]">
+                            <th className="px-3 py-2 text-left">✓</th>
+                            <th className="px-3 py-2 text-left">Date</th>
+                            <th className="px-3 py-2 text-left">PV No.</th>
+                            <th className="px-3 py-2 text-left">Description</th>
+                            <th className="px-3 py-2 text-right">Received</th>
+                            <th className="px-3 py-2 text-right">Pending payment</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
+                        </thead>
+                        <tbody>
+                          {open.map(row)}
+                          {open.length === 0 && (
+                            <tr><td colSpan={6} className="px-3 py-2 text-xs text-[#9CA3AF]">Nothing pending — everything booked has gone through the bank.</td></tr>
+                          )}
+                          {ticked.length > 0 && (
+                            <tr className="bg-[#FAF8F5]">
+                              <td colSpan={6} className="px-3 py-1.5 text-xs">
+                                <button type="button" onClick={() => setShowTicked((m) => ({ ...m, [a.code]: !m[a.code] }))} className="text-[#27500A] hover:text-[#1F1D1B] cursor-pointer" title="Ticked = seen in the banking app; they leave the pending list. Open to review or untick.">
+                                  {showing ? "▾" : "▸"} ✓ Ticked as gone through: {ticked.length}
+                                  {tickedOut > 0 && <span className="ml-2 tabular-nums">out {formatCurrency(tickedOut)}</span>}
+                                  {tickedIn > 0 && <span className="ml-2 tabular-nums">in {formatCurrency(tickedIn)}</span>}
+                                  <span className="ml-2 text-[#9CA3AF]">{showing ? "hide" : "show"}</span>
+                                </button>
+                              </td>
+                            </tr>
+                          )}
+                          {showing && ticked.map(row)}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })()}
                 {a.oldPendingCount > 0 && (
                   <div className="px-4 py-1.5 text-[11px] text-[#9CA3AF] border-t border-[#F0ECE9]">
                     Older reconciliation items (before the last finalised month): {a.oldPendingCount} · {formatCurrency(a.oldPendingSen)} — handle them in the Cash Book. Still counted in the maths above.
