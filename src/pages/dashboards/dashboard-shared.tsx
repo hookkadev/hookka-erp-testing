@@ -155,7 +155,7 @@ function DateTrigger({
 
   const todayIso = ymd(new Date());
 
-  const presets = useMemo(() => periodPresets(latestDay, months), [latestDay, months]);
+  const presets = useMemo(() => periodPresets(latestDay, months, todayIso), [latestDay, months, todayIso]);
 
   // One click HIGHLIGHTS that day: the period stays on the day's month so the
   // trend chart still draws the whole month, and `day` narrows the KPI row and

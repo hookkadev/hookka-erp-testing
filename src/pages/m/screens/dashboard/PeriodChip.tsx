@@ -73,8 +73,8 @@ export function PeriodChip({
   const disabled = months.length === 0;
   const prev = stepPeriod(period, months, -1);
   const next = stepPeriod(period, months, 1);
-  const presets = periodPresets(latestDay, months);
   const today = ymd(new Date());
+  const presets = periodPresets(latestDay, months, today);
   const from = period.day ?? period.from;
   const to = period.day ?? period.to;
   const apply = (p: Period) => {

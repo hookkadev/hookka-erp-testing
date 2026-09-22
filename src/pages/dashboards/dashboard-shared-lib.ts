@@ -185,25 +185,34 @@ export function stepPeriod(period: Period, months: string[], dir: -1 | 1): Perio
 }
 
 /**
- * Today / Yesterday / Last 7 Days, anchored to the newest day the book
- * ACTUALLY has - not the machine clock and not the end of the newest month
- * (that made "Last 7 Days" select Sep 24-30 when data stopped on Sep 15, so
- * every preset returned zero rows). A one-day preset stays on that day's
- * MONTH and highlights it, so the trend still draws the whole month; a
- * multi-day one genuinely re-scopes to a range.
+ * Today / Yesterday / Last 7 Days.
+ *
+ * Today and Yesterday mean the real calendar day - same as `resolvePeriod`'s
+ * default-open day, so the picker never claims two different dates are
+ * "today". A day with no sales yet shows empty, same as a fresh page load
+ * already does; that is a real answer, not a reason to relabel yesterday.
+ *
+ * Last 7 Days stays anchored to the newest day the book ACTUALLY has, not the
+ * end of the newest month (owner 2026-09-21: that made it select Sep 24-30
+ * when data stopped on Sep 15, an all-zero window) - a relative multi-day
+ * window has no calendar meaning of its own to preserve the way a single
+ * named day does.
  */
-export function periodPresets(latestDay: string | undefined, months: string[]): { label: string; period: Period }[] {
-  const iso = latestDay || (months.length ? `${months[months.length - 1]}-01` : "");
-  if (!iso) return [];
-  const [y, m, d] = iso.split("-").map(Number);
-  const back = (n: number) => ymd(new Date(y, m - 1, d - n));
+export function periodPresets(latestDay: string | undefined, months: string[], today: string): { label: string; period: Period }[] {
   const one = (label: string, day: string) => ({ label, period: { mode: "monthly" as const, month: day.slice(0, 7), day } });
-  const from = back(6);
-  return [
-    one("Today", back(0)),
-    one("Yesterday", back(1)),
-    { label: "Last 7 Days", period: { mode: "range", month: from.slice(0, 7), from, to: back(0), label: "Last 7 Days" } },
-  ];
+  const iso = latestDay || (months.length ? `${months[months.length - 1]}-01` : "");
+  if (!iso && !today) return [];
+  const last7: { label: string; period: Period }[] = [];
+  if (iso) {
+    const [y, m, d] = iso.split("-").map(Number);
+    const back = (n: number) => ymd(new Date(y, m - 1, d - n));
+    const from = back(6);
+    last7.push({ label: "Last 7 Days", period: { mode: "range", month: from.slice(0, 7), from, to: back(0), label: "Last 7 Days" } });
+  }
+  if (!today) return last7;
+  const [ty, tm, td] = today.split("-").map(Number);
+  const todayBack = (n: number) => ymd(new Date(ty, tm - 1, td - n));
+  return [one("Today", todayBack(0)), one("Yesterday", todayBack(1)), ...last7];
 }
 
 /** Is this preset the current selection? */
