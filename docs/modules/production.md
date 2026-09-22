@@ -68,7 +68,7 @@ Owns the shop floor: a **dept-tabbed WIP board** (one production_order per confi
 | `consumeRawMaterialsForPO` / `postJobCardLabor` | `src/api/lib/po-cost-cascade.ts:813 / 1116` | RM consumption / labour GL posting |
 | `applyPackingRack` | `src/api/lib/packing-rack-write.ts:71` | Rack set/clear + rack_items occupancy mirror |
 | `PUT /templates/:id` / `POST /templates/bulk-process-edit` | `src/api/routes/bom.ts:484 / 631` | BOM template update / batch process edit |
-| `GET /:id/events` | `src/api/routes/job-cards.ts:430` | Job-card event timeline |
+| `GET /:id/events` | `src/api/routes/job-cards.ts:476` | Job-card event timeline |
 
 ## Gotchas
 - **index.tsx is 9,643 lines, driven entirely by `activeTab`.** Almost every column set, row derivation, and render block branches on the dept code — never assume one code path. Don't read end-to-end.

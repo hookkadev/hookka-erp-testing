@@ -1,7 +1,7 @@
 # API — generated reference
 
 > **GENERATED FILE — do not hand-edit.** Regenerate with `node scripts/gen-api-docs.mjs`.
-> **Last generated: 2026-09-21** from `src/api/worker.ts` + `src/api/routes/*.ts`.
+> **Last generated: 2026-09-22** from `src/api/worker.ts` + `src/api/routes/*.ts`.
 
 The backend is a single [Hono](https://hono.dev) app in `src/api/worker.ts`, served
 as a Cloudflare Pages Function via `functions/api/[[route]].ts`. There is no
@@ -130,7 +130,7 @@ offsets pointing past the end of their own file.
 | `/api/admin/health` | `src/api/routes/admin-health.ts` | `GET /kpis-diag` <sub>:379</sub><br>`GET /kpis` <sub>:454</sub><br>`GET /by-endpoint` <sub>:537</sub><br>`GET /errors-by-endpoint` <sub>:620</sub><br>`GET /errors-hourly` <sub>:689</sub><br>`GET /status-breakdown` <sub>:742</sub><br>`GET /error-messages` <sub>:773</sub><br>`GET /daily-trend` <sub>:826</sub><br>`GET /deploys` <sub>:903</sub><br>`GET /github-runs` <sub>:969</sub><br>`GET /slow-sql` <sub>:1142</sub><br>`GET /long-tasks` <sub>:1215</sub><br>`GET /audit-feed` <sub>:1261</sub><br>`GET /security-events` <sub>:1384</sub><br>`GET /fe-errors` <sub>:1575</sub><br>`GET /fe-perf` <sub>:1622</sub><br>`GET /fe-api` <sub>:1690</sub><br>`GET /fe-stuck` <sub>:1778</sub><br>`GET /db-indexes` <sub>:1902</sub><br>`GET /db-connect` <sub>:1997</sub><br>`GET /db-size-code-mismatch` <sub>:2096</sub><br>`POST /db-size-code-backfill` <sub>:2199</sub><br>`POST /db-fix-superking-2038` <sub>:2275</sub> | gated |
 | `/api/admin` | `src/api/routes/admin.ts` | `POST /archive/run` <sub>:153</sub><br>`POST /rebuild-all-pos` <sub>:561</sub><br>`POST /rebuild-pos/:soId` <sub>:677</sub><br>`POST /ensure-perf-indexes` <sub>:823</sub><br>`POST /dedupe-invoices` <sub>:859</sub><br>`POST /backfill-so-prices` <sub>:994</sub><br>`POST /backfill-invoice-prices` <sub>:1103</sub><br>`GET /backfill-special-order-surcharge` <sub>:1322</sub><br>`POST /backfill-invoice-po-link` <sub>:1499</sub><br>`GET /backfill-invoiced-plan` <sub>:1825</sub><br>`POST /backfill-special-order-surcharge` <sub>:1877</sub> | gated |
 | `/api/fe-rum` | `src/api/routes/fe-rum.ts` | `POST /event` <sub>:126</sub> | gated (some paths public) |
-| `/api/job-cards` | `src/api/routes/job-cards.ts` | `GET /` <sub>:100</sub><br>`GET /summary` <sub>:261</sub><br>`GET /:id/events` <sub>:430</sub><br>`GET /duedate-original-backup` <sub>:536</sub><br>`GET /completion-pic-original-backup` <sub>:688</sub> | gated |
+| `/api/job-cards` | `src/api/routes/job-cards.ts` | `GET /` <sub>:100</sub><br>`GET /summary` <sub>:261</sub><br>`GET /:id/events` <sub>:476</sub><br>`GET /duedate-original-backup` <sub>:582</sub><br>`GET /completion-pic-original-backup` <sub>:734</sub> | gated |
 | `/api/audit-events` | `src/api/routes/audit-events.ts` | `GET /` <sub>:49</sub> | gated |
 | `/api/dashboard/overview` | `src/api/routes/dashboard-overview.ts` | `GET /` <sub>:49</sub> | gated |
 | `/api/dashboard/prototype` | `src/api/routes/dashboard-prototype.ts` | `GET /` <sub>:293</sub> | gated |

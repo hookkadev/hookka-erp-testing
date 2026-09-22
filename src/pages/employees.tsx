@@ -4131,21 +4131,22 @@ function EfficiencyOverviewTab({
           const prodMins = prodMinsByWorker.get(row.workerId) ?? 0;
           return (prodMins / (prodHours * 60)) * 100;
         },
-        // Numerator vs denominator coverage is the killer caveat here:
+        // Efficiency % = standard OUTPUT ÷ clocked PRODUCTION hours:
         //   - prodMins  = sum of job_cards.completedDate within [from,to]
-        //                 with the worker as PIC1/PIC2
+        //                 with the worker as PIC1/PIC2 (STANDARD minutes — the
+        //                 recorded duration is a copy of the standard, so this
+        //                 reads "standard work cleared", not measured time)
         //   - prodHours = sum of working_hour_entries.date within [from,to]
-        //                 in production depts only
-        // The two come from DIFFERENT tables. If the operator picks a 5-week
-        // range but has only entered working hours for the last 7 days, the
-        // numerator covers 5 weeks while the denominator covers 1 week and
-        // the ratio explodes (e.g. 30h prod / 7h working = 428% - reported
-        // 2026-05-08). We can't intersect the two at the per-day level
-        // without per-worker activity windows, but we CAN:
-        //   1. show "—" when the worker has zero working_hour_entries in
-        //      ANY dept in the range (was already there - keep), AND
-        //   2. spell out both sides in the tooltip with the daysWithEntries
-        //      coverage so the operator can spot the skew at a glance.
+        //                 in production depts only (non-prod deducted)
+        // The numerator/denominator table-span mismatch that used to blow this
+        // up (5-week completions ÷ 1-week of entered hours = 428%, reported
+        // 2026-05-08) is now closed AT SOURCE: `/api/job-cards/summary` credits
+        // a completion only on a date the worker also clocked production hours
+        // (fix/efficiency-worked-day-intersection, 2026-09-22), so prodMins can
+        // no longer cover days prodHours does not. In the healthy case — hours
+        // entered for every completion day — the figure is unchanged. We still
+        // show "—" for a worker with zero production hours in the range, and
+        // spell out both sides in the tooltip with the daysWithEntries coverage.
         render: (_value, row) => {
           const prodHours = Object.entries(row.byDept).reduce(
             (s, [code, h]) => (productionDeptCodes.has(code) ? s + h : s),
@@ -4180,7 +4181,7 @@ function EfficiencyOverviewTab({
           return (
             <span
               className={`font-semibold tabular-nums ${cls}`}
-              title={`${formatHours(prodMins)} production (job_cards) / ${prodHours.toFixed(1)}h in production depts (working_hour_entries, ${row.daysWithEntries}d entered)`}
+              title={`Standard output ${formatHours(prodMins)} (job_cards, counted only on days clocked) ÷ ${prodHours.toFixed(1)}h clocked in production depts (working_hour_entries, ${row.daysWithEntries}d entered). Non-production hours are excluded from both sides.`}
             >
               {pct.toFixed(1)}%
             </span>

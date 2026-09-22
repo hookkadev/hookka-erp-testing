@@ -275,7 +275,11 @@ app.get("/summary", async (c) => {
   const orgId = getOrgId(c);
   const snapConfig = {
     tableName: "job_cards_summary_snapshot",
-    sourceTables: ["job_cards", "worker_nonprod_requests"],
+    // working_hour_entries added 2026-09-22: the numerator is now day-gated
+    // against production WHE (see below), so entering / editing hours must
+    // invalidate this snapshot or the Efficiency % keeps serving the pre-gate
+    // figure until job_cards next changes.
+    sourceTables: ["job_cards", "worker_nonprod_requests", "working_hour_entries"],
   };
   const cacheKey = `from=${from}&to=${to}`;
   const _snap_check = await Promise.all([
@@ -317,6 +321,43 @@ app.get("/summary", async (c) => {
   const jcTotalMin =
     "CASE WHEN departmentCode = 'FAB_CUT' THEN COALESCE(productionTimeMinutes, 0) " +
     "ELSE COALESCE(productionTimeMinutes, 0) * GREATEST(1, COALESCE(wipQty, 1)) END";
+
+  // Day-intersection gate (2026-09-22, fix/efficiency-worked-day-intersection).
+  // A completed JC's minutes count for a worker ONLY on a completedDate where
+  // that worker ALSO clocked PRODUCTION hours. The numerator (JC completions)
+  // otherwise spans days the denominator (production working_hour_entries) does
+  // not, so Efficiency % explodes on any range whose Working Hours grid isn't
+  // fully entered — the 428% inflation the Employees page flags in its own
+  // Efficiency % comment. Gating on isProduction WHE also means a day a worker
+  // spent wholly in a non-production dept never credits output, so non-prod is
+  // deducted on BOTH sides of the ratio.
+  //
+  // Prod codes are resolved in JS (not `WHERE isProduction`) because
+  // isProduction may be an integer column and Postgres rejects a non-boolean
+  // WHERE. In the healthy case — every completion day has clocked hours — the
+  // gate matches every row and the figure is unchanged; it only trims output
+  // booked on days with no production clock-in.
+  const prodDeptRes = await c.var.DB
+    .prepare("SELECT code, isProduction FROM departments")
+    .bind()
+    .all<{ code: string; isProduction: number | boolean | null }>();
+  const prodCodes = (prodDeptRes.results ?? [])
+    .filter((r) => !!r.isProduction)
+    .map((r) => r.code)
+    .filter((code): code is string => typeof code === "string" && code.length > 0);
+  // Defensive: with no production dept configured, fall back to the ungated
+  // numerator rather than emitting `IN ()` (a syntax error). The report then
+  // degrades to the old behaviour instead of 500-ing.
+  const gateOn = prodCodes.length > 0;
+  const prodPh = prodCodes.map(() => "?").join(",");
+  const dayGate = (picCol: "pic1Id" | "pic2Id") =>
+    gateOn
+      ? `AND EXISTS (SELECT 1 FROM working_hour_entries whe
+                      WHERE whe.workerId = job_cards.${picCol}
+                        AND whe.date = job_cards.completedDate
+                        AND whe.departmentCode IN (${prodPh}))`
+      : "";
+
   const sql = `
     SELECT wid AS worker_id,
            SUM(contrib_min) AS production_minutes,
@@ -332,6 +373,7 @@ app.get("/summary", async (c) => {
            AND status IN ('COMPLETED','TRANSFERRED')
            AND completedDate IS NOT NULL
            AND completedDate >= ? AND completedDate <= ?
+           ${dayGate("pic1Id")}
 
         UNION ALL
 
@@ -345,14 +387,18 @@ app.get("/summary", async (c) => {
            AND status IN ('COMPLETED','TRANSFERRED')
            AND completedDate IS NOT NULL
            AND completedDate >= ? AND completedDate <= ?
+           ${dayGate("pic2Id")}
       ) sub
      WHERE wid IS NOT NULL AND wid != ''
      GROUP BY wid
   `;
 
+  const binds: unknown[] = gateOn
+    ? [from, to, ...prodCodes, from, to, ...prodCodes]
+    : [from, to, from, to];
   const res = await c.var.DB
     .prepare(sql)
-    .bind(from, to, from, to)
+    .bind(...binds)
     .all<WorkerProdSummaryRow>();
 
   const byWorker = new Map<
