@@ -41,6 +41,14 @@ for here instead of loading 335 or 481 stuff every time I press".
 
 ---
 
+## 2026-09-22 晚 — ✅ Cash Position 打勾行收起（owner「这些 tick 了还需要出现吗？」→「做」；#477 已上线已验）
+
+打勾（=网银已见）的行离开 pending 名单，每个户口卡底一行「✓ Ticked as gone through: N · out RM x · in RM y — show」，展开可看/取消勾；同一行渲染器、同一 checkbox、同一 handler；数字（Bank balance est. / Available）从不读 DOM，分毫不变。全勾完显示「Nothing pending — everything booked has gone through the bank.」。守卫 tests/cashpos-ticked-fold.test.mjs。**prod 验**：HLBB 卡只剩 10 条未勾 + 「✓ 44 · out 195,316.54 · in 182,270.60」，Bank balance est. 24,576.65 与 owner 截图一致。顺带：docs-freshness 配对规则要求源码改动配文档改动——第一次红了，补 CODEBASE-MAP 的 Daily Cash Position 条目后绿。
+
+另：owner 裁「Dashboard 三个留 FORECASTING 那个，其他两个退下」→ 我解释了三个是什么 + 两点前置（/dashboard 是登录落地页要一起改；Experimental 是别的会话在做）→ owner「不需要做任何东西先」。**未动。**
+
+---
+
 ## 2026-09-22 晚 — ✅ 侧栏瘦身 + Receipts 三门合一 + PV 附件/打印合订（owner「全部做」；#468 / #471 / #472 全上线已验）
 
 owner 两问「side bar 很多功能重复是吗？」「能像 2990 那样 export pv with attachment 吗？」→ 只检查报告（真重复：付钱三门、收钱三门、账单清单两处、账龄两处、四个 dashboard；放错组：Stock/Stock Take/Labour 在 Maintenance）→「全部做，包括 receipts 三门合一和 PV 附件」。
