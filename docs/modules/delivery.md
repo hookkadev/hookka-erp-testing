@@ -1,5 +1,16 @@
 # Delivery & Consignment — Module Guide
 
+> **Last verified: 2026-09-22** (branch `fix/delivery-tab-switch-pagination`) — DO list
+> pagination is now PER STAGE TAB: `doBrowseUrl` (`delivery/index.tsx:~562`) sends
+> `GET /api/delivery-orders?status=<tab statuses>&page&limit=50`, bound in the route's
+> paginated branch as `AND status IN (...)`; PO tabs fetch no DO rows; Packing List takes the
+> newest 200 live DOs its bulk buttons act on. `Delivered (MTD)` is `/stats.deliveredMtd`
+> (server, Malaysian month — `src/lib/delivery-list-filters.ts`). Tab changes are ONE
+> `useUrlBatch` write (`goTab`). Only these claims were re-verified; `delivery-orders.ts` is
+> now ~3,050 lines and `delivery/index.tsx` 7,505 — anchors below were not re-derived, use
+> [`CODEBASE-MAP.md`](../CODEBASE-MAP.md) for current line numbers. The CN mirror
+> (`consignment/note.tsx`) still pages globally (its list API takes ONE `?status=`).
+
 > **Last verified: 2026-08-14** (branch `docs/docs-vs-code-audit`) — corrected against the
 > source by the prose audit; the row(s) touched here are itemised in
 > [`docs/DOCS-VS-CODE-AUDIT.md`](../DOCS-VS-CODE-AUDIT.md). Only the claims listed there were
@@ -78,13 +89,13 @@ deliver write `stock_movements` and read `fg_units`, and fire idempotent custome
 ## Key functions / sections (locate-to-function)
 | Symbol / section | file:line | Role |
 |---|---|---|
-| `DeliveryPage` | `src/pages/delivery/index.tsx:882` | DO workbench + 3PL + agent, `pageTab` toggle |
-| `runBulkDoTransition` | `src/pages/delivery/index.tsx:3002` | FE bulk status move (all guards/cascades) |
-| `resendCustomerNotice` / `warnIfNoCustomerEmail` | `delivery/index.tsx:2891 / :2873` | Feature A per-DO resend / Feature B no-email warning |
+| `DeliveryPage` | `src/pages/delivery/index.tsx:899` | DO workbench + 3PL + agent, `pageTab` toggle |
+| `runBulkDoTransition` | `src/pages/delivery/index.tsx:3027` | FE bulk status move (all guards/cascades) |
+| `resendCustomerNotice` / `warnIfNoCustomerEmail` | `delivery/index.tsx:2916 / :2898` | Feature A per-DO resend / Feature B no-email warning |
 | `columns` (DataGrid) | `src/pages/delivery/index.tsx` (~3.9k) | DO grid column defs |
 | `getContextMenuItems` | `src/pages/delivery/index.tsx` (~4.4k) | THE DO status table — row menu **and** the drawer's action bar |
-| `detailLive` | `src/pages/delivery/index.tsx:3653` | Drawer's document re-read from the list; its bar filtered from the row menu |
-| `lineSpec` | `src/pages/delivery/index.tsx:3686` | One-line build spec per DO line, via the shared `buildSpec` |
+| `detailLive` | `src/pages/delivery/index.tsx:3678` | Drawer's document re-read from the list; its bar filtered from the row menu |
+| `lineSpec` | `src/pages/delivery/index.tsx:3711` | One-line build spec per DO line, via the shared `buildSpec` |
 | `drawerActionBar` / `drawerLineSpec` / `DRAWER_DOC_CONFIG` | `src/lib/document-drawer.ts` | Drawer model: full-page route, action-bar filter, spec-line delegation |
 | `DocumentDetailDrawer` | `src/components/ui/document-detail-drawer.tsx` | Shared slide-over chrome (chrome only, no domain knowledge) |
 | 3PL Providers block | `src/pages/delivery/index.tsx` (~6.5k) | `pageTab==="3pl"` list + Create/Edit dialog |
@@ -97,7 +108,7 @@ deliver write `stock_movements` and read `fg_units`, and fire idempotent custome
 | `applyDeliveryOrderUpdate` | `delivery-orders/_helpers.ts:4194` | DO edit + transition apply |
 | `buildDoDeliveredSoAndInvoice` / `computeDoInvoiceLines` | `delivery-orders/_helpers.ts:1558 / 1342` | DELIVERED→INVOICED SO + invoice build |
 | `queueDoCustomerNotice` | `delivery-orders/_helpers.ts:3637` | Recipient chain + idempotent email claim |
-| `app.post("/packing-list-first")` | `src/api/routes/delivery-orders.ts:2067` | PL-first auto-split create |
+| `app.post("/packing-list-first")` | `src/api/routes/delivery-orders.ts:2093` | PL-first auto-split create |
 | `createPackingListCore` | `src/api/routes/packing-lists.ts:628` | Truck-run packing-list build |
 | `collectDeliveryBrief` / `generateDeliveryProposals` | `src/api/lib/delivery-agent.ts:633 / 868` | Agent brief + proposals |
 | `cheapestForState` / `loadStateRateCard` | `src/api/lib/delivery-agent.ts` | Cheapest-3PL routing |
