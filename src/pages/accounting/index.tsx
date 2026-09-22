@@ -503,28 +503,28 @@ function AccountPicker({
 // here.
 const TABS: { key: TabKey; label: string; icon: React.ReactNode; group: string }[] = [
   // Monthly Report
-  { key: "overview", label: "Overview", icon: <LayoutDashboard className="h-4 w-4" />, group: "Monthly Report" },
-  { key: "pl", label: "P&L", icon: <BarChart3 className="h-4 w-4" />, group: "Monthly Report" },
-  { key: "coststruct", label: "Cost Structure", icon: <List className="h-4 w-4" />, group: "Monthly Report" },
-  { key: "cashflow", label: "Cash Flow", icon: <TrendingUp className="h-4 w-4" />, group: "Monthly Report" },
-  { key: "bs", label: "Balance Sheet", icon: <Scale className="h-4 w-4" />, group: "Monthly Report" },
-  { key: "tb", label: "Trial Balance", icon: <Scale className="h-4 w-4" />, group: "Monthly Report" },
-  { key: "gl", label: "General Ledger", icon: <FileText className="h-4 w-4" />, group: "Monthly Report" },
+  { key: "overview", label: "Overview", icon: <LayoutDashboard className="h-4 w-4" />, group: "Reports" },
+  { key: "pl", label: "P&L", icon: <BarChart3 className="h-4 w-4" />, group: "Reports" },
+  { key: "coststruct", label: "Cost Structure", icon: <List className="h-4 w-4" />, group: "Reports" },
+  { key: "cashflow", label: "Cash Flow", icon: <TrendingUp className="h-4 w-4" />, group: "Reports" },
+  { key: "bs", label: "Balance Sheet", icon: <Scale className="h-4 w-4" />, group: "Reports" },
+  { key: "tb", label: "Trial Balance", icon: <Scale className="h-4 w-4" />, group: "Reports" },
+  { key: "gl", label: "General Ledger", icon: <FileText className="h-4 w-4" />, group: "Reports" },
   // Owner 2026-07-29: Monthly Trend + Cost / Expense Classes retired from the
   // tab bar (unused; components + endpoints stay — re-adding a registry line
   // here restores either instantly).
-  { key: "plmonthly", label: "Monthly P&L", icon: <BarChart3 className="h-4 w-4" />, group: "Monthly Report" },
+  { key: "plmonthly", label: "Monthly P&L", icon: <BarChart3 className="h-4 w-4" />, group: "Reports" },
   // Daily Operation
-  { key: "payments", label: "Payment Vouchers", icon: <BookOpen className="h-4 w-4" />, group: "Daily Operation" },
-  { key: "receipts", label: "Receipts", icon: <BookOpen className="h-4 w-4" />, group: "Daily Operation" },
-  { key: "transfer", label: "Fund Transfer", icon: <Wallet className="h-4 w-4" />, group: "Daily Operation" },
-  { key: "dailycash", label: "Cash Position", icon: <Wallet className="h-4 w-4" />, group: "Daily Operation" },
+  { key: "payments", label: "Payment Vouchers", icon: <BookOpen className="h-4 w-4" />, group: "Daily" },
+  { key: "receipts", label: "Receipts", icon: <BookOpen className="h-4 w-4" />, group: "Daily" },
+  { key: "transfer", label: "Fund Transfer", icon: <Wallet className="h-4 w-4" />, group: "Daily" },
+  { key: "dailycash", label: "Cash Position", icon: <Wallet className="h-4 w-4" />, group: "Daily" },
   // Monthly Operation
-  { key: "journals", label: "Journal Entries", icon: <BookOpen className="h-4 w-4" />, group: "Monthly Operation" },
-  { key: "cashbook", label: "Cash Book", icon: <BookOpen className="h-4 w-4" />, group: "Monthly Operation" },
-  { key: "selfcheck", label: "Self-check", icon: <Calculator className="h-4 w-4" />, group: "Monthly Operation" },
-  { key: "corrections", label: "Corrections", icon: <BookOpen className="h-4 w-4" />, group: "Monthly Operation" },
-  { key: "assets", label: "Fixed Assets", icon: <Building2 className="h-4 w-4" />, group: "Monthly Operation" },
+  { key: "journals", label: "Journal Entries", icon: <BookOpen className="h-4 w-4" />, group: "Monthly" },
+  { key: "cashbook", label: "Cash Book", icon: <BookOpen className="h-4 w-4" />, group: "Monthly" },
+  { key: "selfcheck", label: "Self-check", icon: <Calculator className="h-4 w-4" />, group: "Monthly" },
+  { key: "corrections", label: "Corrections", icon: <BookOpen className="h-4 w-4" />, group: "Monthly" },
+  { key: "assets", label: "Fixed Assets", icon: <Building2 className="h-4 w-4" />, group: "Monthly" },
   // Debtor / Creditor
   { key: "ar", label: "Debtor Aging", icon: <Users className="h-4 w-4" />, group: "Debtor / Creditor" },
   { key: "ap", label: "Creditor Aging", icon: <Building2 className="h-4 w-4" />, group: "Debtor / Creditor" },
@@ -537,15 +537,15 @@ const TABS: { key: TabKey; label: string; icon: React.ReactNode; group: string }
   { key: "ocreditorbills", label: "Other Creditor Bills", icon: <BookOpen className="h-4 w-4" />, group: "Debtor / Creditor" },
   { key: "ocreditorpay", label: "Other Creditor Payments", icon: <Wallet className="h-4 w-4" />, group: "Debtor / Creditor" },
   // Maintenance
-  { key: "coa", label: "Chart of Accounts", icon: <List className="h-4 w-4" />, group: "Maintenance" },
-  { key: "labor", label: "Labour", icon: <Users className="h-4 w-4" />, group: "Maintenance" },
-  { key: "stock", label: "Stock", icon: <List className="h-4 w-4" />, group: "Maintenance" },
-  { key: "stockmap", label: "Stock Mapping", icon: <List className="h-4 w-4" />, group: "Maintenance" },
-  { key: "openstock", label: "Opening Stock", icon: <Scale className="h-4 w-4" />, group: "Maintenance" },
-  { key: "stocktake", label: "Stock Take", icon: <Scale className="h-4 w-4" />, group: "Maintenance" },
-  { key: "opening", label: "Opening Balance", icon: <Scale className="h-4 w-4" />, group: "Maintenance" },
-  { key: "audit", label: "Audit Log", icon: <FileText className="h-4 w-4" />, group: "Maintenance" },
-  { key: "maint", label: "Maintenance", icon: <List className="h-4 w-4" />, group: "Maintenance" },
+  { key: "coa", label: "Chart of Accounts", icon: <List className="h-4 w-4" />, group: "Setup" },
+  { key: "labor", label: "Labour", icon: <Users className="h-4 w-4" />, group: "Monthly" },
+  { key: "stock", label: "Stock Summary", icon: <List className="h-4 w-4" />, group: "Reports" },
+  { key: "stockmap", label: "Stock Mapping", icon: <List className="h-4 w-4" />, group: "Setup" },
+  { key: "openstock", label: "Opening Stock", icon: <Scale className="h-4 w-4" />, group: "Setup" },
+  { key: "stocktake", label: "Stock Take", icon: <Scale className="h-4 w-4" />, group: "Monthly" },
+  { key: "opening", label: "Opening Balance", icon: <Scale className="h-4 w-4" />, group: "Setup" },
+  { key: "audit", label: "Audit Log", icon: <FileText className="h-4 w-4" />, group: "Setup" },
+  { key: "maint", label: "Maintenance", icon: <List className="h-4 w-4" />, group: "Setup" },
 ];
 
 // =============== MAIN PAGE ===============
@@ -605,12 +605,14 @@ export default function AccountingPage() {
           {tab === "overview" && (
             <OverviewTab journals={journals} arData={arData} apData={apData} />
           )}
-          {tab === "pl" && <PLStatementTab />}
+          {/* One P&L entry, three views (owner 2026-09-22 sidebar slim-down);
+              the old deep links still land on their view. */}
+          {tab === "pl" && <PlHubTab key="pl" initialView="statement" />}
+          {tab === "plmonthly" && <PlHubTab key="plmonthly" initialView="monthly" />}
+          {tab === "coststruct" && <PlHubTab key="coststruct" initialView="cost" />}
           {tab === "audit" && <AuditLogTab />}
           {tab === "trend" && <MonthlyTrendTab />}
-          {tab === "plmonthly" && <MonthlyPlTab />}
           {tab === "ceclass" && <CostExpenseClassesTab />}
-          {tab === "coststruct" && <CostStructureTab />}
           {tab === "bs" && <BalanceSheetTab />}
           {tab === "cashflow" && <CashFlowTab />}
           {tab === "coa" && <COATab accounts={accounts} onRefresh={fetchAll} />}
@@ -632,7 +634,7 @@ export default function AccountingPage() {
           {tab === "odebtorpay" && <OtherPartyPaymentsTab accounts={accounts} side="DEBTOR" />}
           {tab === "ocreditor" && <OtherPartiesTab side="CREDITOR" />}
           {tab === "ocreditorbills" && <OtherPartyBillsTab accounts={accounts} side="CREDITOR" />}
-          {tab === "apinvoices" && <ApInvoicesTab />}
+          {tab === "apinvoices" && <ApInvoicesTab accounts={accounts} />}
           {tab === "selfcheck" && <SelfCheckTab />}
           {tab === "corrections" && <CorrectionsTab />}
           {tab === "ocreditorpay" && <OtherPartyPaymentsTab accounts={accounts} side="CREDITOR" />}
@@ -665,6 +667,33 @@ export default function AccountingPage() {
           )}
         </>
       )}
+    </div>
+  );
+}
+
+// P&L — one sidebar entry, three views (owner 2026-09-22: P&L / Monthly P&L /
+// Cost Structure were three menu items for one report). The three tabs are
+// untouched; this just switches between them.
+function PlHubTab({ initialView }: { initialView: "statement" | "monthly" | "cost" }) {
+  const [view, setView] = useState(initialView);
+  const views: { key: typeof view; label: string; hint: string }[] = [
+    { key: "statement", label: "P&L Statement", hint: "One period, the full statement" },
+    { key: "monthly", label: "Monthly P&L", hint: "Month by month, side by side" },
+    { key: "cost", label: "Cost Structure", hint: "Fixed / variable / other cost classes" },
+  ];
+  return (
+    <div className="space-y-3">
+      <div className="inline-flex rounded-md border border-[#E2DDD8] bg-white overflow-hidden text-xs">
+        {views.map((v, i) => (
+          <button key={v.key} type="button" onClick={() => setView(v.key)} title={v.hint}
+            className={`px-3 py-1.5 font-semibold cursor-pointer ${view === v.key ? "bg-[#6B5C32] text-white" : "text-[#6B7280] hover:bg-[#FAF8F5]"} ${i > 0 ? "border-l border-[#F0ECE9]" : ""}`}>
+            {v.label}
+          </button>
+        ))}
+      </div>
+      {view === "statement" && <PLStatementTab />}
+      {view === "monthly" && <MonthlyPlTab />}
+      {view === "cost" && <CostStructureTab />}
     </div>
   );
 }
@@ -6569,7 +6598,13 @@ type ApInvRow = {
   kind: "AP" | "PI"; id: string; no: string; supplier: string; partyId?: string; supplierRef: string; date: string; dueDate: string | null;
   description: string; totalSen: number; paidSen: number; outstandingSen: number; status: "OPEN" | "PAID" | "CANCELLED"; opening: boolean;
 };
-function ApInvoicesTab() {
+function ApInvoicesTab({ accounts }: { accounts: ChartOfAccount[] }) {
+  // Raise / edit other-creditor bills right here (sidebar slim-down 2026-09-22:
+  // the Other Creditor Bills entry folded into this page). The mirror list
+  // reloads when the manager posts (ver bump).
+  const parties = useOtherPartiesList();
+  const [manage, setManage] = useState(false);
+  const [ver, setVer] = useState(0);
   const [data, setData] = useState<{ rows: ApInvRow[]; totals: { openSen: number; openCount: number; apOpenSen: number; piOpenSen: number } } | null>(null);
   const [kind, setKind] = useState<"ALL" | "AP" | "PI">("ALL");
   const [status, setStatus] = useState<"OPEN" | "PAID" | "CANCELLED" | "ALL">("OPEN");
@@ -6581,7 +6616,7 @@ function ApInvoicesTab() {
       .then((j) => { if (!dead && j?.success && j.data) setData(j.data); })
       .catch(() => {});
     return () => { dead = true; };
-  }, [status]);
+  }, [status, ver]);
   const rows = (data?.rows ?? []).filter((r) => {
     if (kind !== "ALL" && r.kind !== kind) return false;
     if (q.trim()) { const kw = q.toLowerCase(); if (![r.no, r.supplier, r.supplierRef, r.description].some((s) => s.toLowerCase().includes(kw))) return false; }
@@ -6595,10 +6630,10 @@ function ApInvoicesTab() {
       <div className="flex justify-between items-start flex-wrap gap-2">
         <div>
           <h2 className="text-lg font-semibold text-[#1F1D1B]">AP Invoices</h2>
-          <p className="text-[11px] text-[#9CA3AF]">Everything owed on paper in one list. <b>AP</b> = other-creditor bills (raise / edit them on Other Creditor Bills); <b>PI</b> = purchase invoices, read-only mirror — Procurement's page is where they are created and posted.</p>
+          <p className="text-[11px] text-[#9CA3AF]">Everything owed on paper in one list. <b>AP</b> = other-creditor bills (raise / edit them below); <b>PI</b> = purchase invoices, read-only mirror — Procurement's page is where they are created and posted.</p>
         </div>
         <div className="flex gap-2">
-          <Link to="/accounting?tab=ocreditorbills"><Button variant="outline" size="sm">New AP bill</Button></Link>
+          <Button variant="outline" size="sm" onClick={() => setManage((m) => !m)}>{manage ? "Hide bill editor" : "New AP bill"}</Button>
           <Link to="/accounting?tab=payments"><Button variant="primary" size="sm">New AP Payment</Button></Link>
         </div>
       </div>
@@ -6644,7 +6679,7 @@ function ApInvoicesTab() {
                   <tr key={`${r.kind}-${r.id}`} className={`border-b border-[#F0ECE9] hover:bg-[#FAF8F5] ${r.status === "CANCELLED" ? "opacity-50" : ""}`}>
                     <td className="px-3 py-1.5"><span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${r.kind === "PI" ? "bg-[#EEF2FB] text-[#2C4170]" : "bg-[#F6F1E7] text-[#6B5C32]"}`}>{r.kind}</span>{r.opening && <span className="ml-1 text-[10px] text-[#9CA3AF]">opening</span>}</td>
                     <td className="px-3 py-1.5 tabular-nums text-xs whitespace-nowrap">
-                      {r.kind === "PI" ? <Link to="/procurement/pi" className="underline decoration-dotted text-[#6B5C32]" title="Open on Procurement › Purchase Invoices">{r.no}</Link> : <Link to="/accounting?tab=ocreditorbills" className="underline decoration-dotted text-[#6B5C32]">{r.no}</Link>}
+                      {r.kind === "PI" ? <Link to="/procurement/pi" className="underline decoration-dotted text-[#6B5C32]" title="Open on Procurement › Purchase Invoices">{r.no}</Link> : <button type="button" onClick={() => setManage(true)} className="underline decoration-dotted text-[#6B5C32] cursor-pointer" title="Edit below (other-creditor bills)">{r.no}</button>}
                     </td>
                     <td className="px-3 py-1.5">{r.supplier}</td>
                     <td className="px-3 py-1.5 text-xs text-[#6B7280]">{r.supplierRef}</td>
@@ -6668,6 +6703,33 @@ function ApInvoicesTab() {
           )}
         </CardContent>
       </Card>
+
+      {manage && (
+        <div className="space-y-3">
+          <div className="text-sm font-semibold text-[#1F1D1B]">Other-creditor bills — raise / edit <span className="text-[11px] font-normal text-[#9CA3AF]">press Done to refresh the mirror above</span></div>
+          <OtherPartyBillsManager parties={parties} accounts={accounts} side="CREDITOR" />
+          <FoldSection title="Other creditors — names & contacts" hint="add / edit the parties these bills belong to">
+            <OtherPartiesTab side="CREDITOR" />
+          </FoldSection>
+          <Button variant="outline" size="sm" onClick={() => { setManage(false); setVer((v) => v + 1); }}>Done — refresh the list</Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// A fold-away section (sidebar slim-down 2026-09-22): the names list and the
+// old settle page still exist, but live INSIDE the bills page instead of as
+// their own menu entries.
+function FoldSection({ title, hint, children, defaultOpen = false }: { title: string; hint?: string; children: React.ReactNode; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="rounded-md border border-dashed border-[#E2DDD8]">
+      <button type="button" onClick={() => setOpen((o) => !o)} className="w-full flex items-center justify-between px-3 py-2 text-left cursor-pointer hover:bg-[#FAF8F5]">
+        <span className="text-xs font-semibold text-[#6B5C32]">{open ? "▾" : "▸"} {title}</span>
+        {hint && <span className="text-[11px] text-[#9CA3AF]">{hint}</span>}
+      </button>
+      {open && <div className="border-t border-dashed border-[#E2DDD8] p-3">{children}</div>}
     </div>
   );
 }
@@ -6678,6 +6740,12 @@ function OtherPartyBillsTab({ accounts, side }: { accounts: ChartOfAccount[]; si
     <div className="space-y-4">
       <OtherPartyAging side={side} />
       <OtherPartyBillsManager parties={parties} accounts={accounts} side={side} />
+      <FoldSection title={side === "DEBTOR" ? "Other debtors — names & contacts" : "Other creditors — names & contacts"} hint="add / edit the parties these bills belong to">
+        <OtherPartiesTab side={side} />
+      </FoldSection>
+      <FoldSection title={side === "DEBTOR" ? "Receipts against these bills" : "Payments against these bills"} hint={side === "DEBTOR" ? "also on Daily › Receipts › New Other Debtor Receipt" : "also on Daily › Payment Vouchers › New AP Payment"}>
+        <OtherPartyPaymentsManager parties={parties} accounts={accounts} side={side} />
+      </FoldSection>
     </div>
   );
 }
@@ -9190,7 +9258,7 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-lg font-semibold text-[#1F1D1B]">Payment Vouchers</h2>
-          <p className="text-[11px] text-[#9CA3AF]">Every payment out, one door. <b>AP Payment</b> pays a creditor's bills (purchase invoices / other-creditor bills); <b>Payment Voucher</b> pays an expense. Draft → Prepared → Checked → Approved (posted), or Post now.</p>
+          <p className="text-[11px] text-[#9CA3AF]">Every payment out, one door. <b>AP Payment</b> pays a creditor's bills (purchase invoices / other-creditor bills); <b>Payment Voucher</b> pays an expense. Draft → Prepared → Checked → Approved (posted), or Post now. Foreign-currency PIs, advance knock-off and trade-finance repayment: <Link to="/invoices/supplier-payments" className="underline decoration-dotted text-[#6B5C32]">Supplier Payment page</Link>.</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">
           <ScanBillsBatch rows={rows ?? []} bankCash={bankCash} onDone={load} />
