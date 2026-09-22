@@ -41,6 +41,17 @@ for here instead of loading 335 or 481 stuff every time I press".
 
 ---
 
+## 2026-09-22 晚 — ✅ 侧栏瘦身 + Receipts 三门合一 + PV 附件/打印合订（owner「全部做」；#468 / #471 / #472 全上线已验）
+
+owner 两问「side bar 很多功能重复是吗？」「能像 2990 那样 export pv with attachment 吗？」→ 只检查报告（真重复：付钱三门、收钱三门、账单清单两处、账龄两处、四个 dashboard；放错组：Stock/Stock Take/Labour 在 Maintenance）→「全部做，包括 receipts 三门合一和 PV 附件」。
+
+- **#468 PV 附件 + 扫描自动附 + 打印合订**：files.ts 上传/删除主体抽成 `storeUploadedFile` / `removeStoredFile`（MIME 白名单+魔数嗅探+Supabase Storage+file_assets+audit 只此一条路，POST/DELETE /api/files 成薄壳）；accounting.ts `GET/POST /payment-vouchers/:id/attachments`、`DELETE …/:fileId`（作废凭证不收新档；Check 起证据锁不给删；删必须属于该凭证）；清单带 attachmentCount。UI：行 📎 计数、展开区 Attachments 块（open/add/remove）、`print + files` 合订（图片原样、PDF 经 pdfjs 逐页转图 → VoucherSpec.appendix 每页一张 A4 带标题；任一附件渲染不了整份拒印）；Scan Bills 扫完自动附到它建的 draft（上传失败留言不丢凭证）；Scan Receipt 存档时附上；printVouchers 等图片解码完才开打印框。**prod 实测**：draft pv-d926fc4e 上传 116B PNG → 列出/计数 1/stream 原样 116B → Prepare→Check 后删被拒「Evidence is locked…」→ reject 回 draft 删成功 → void 后上传被拒「A cancelled voucher takes no attachments」。守卫 tests/pv-attachments.test.mjs。
+- **#471 Receipts 三门合一**：accounting › Receipts = `ReceiptsHubTab`：New Customer Receipt / New Other Debtor Receipt / New Official Receipt 三按钮 + 一张合并清单（CUST/OD/OR 标签、芯片 All/Customer/Other debtor/Official/Cancelled、搜索/日期、批量打印导出、展开看分配/行、print/edit/void 各走各单据端点）。**表单零复制**：`CustomerReceiptForm` 从 /invoices/payments 页抽出并导出（该页也渲染同一组件），`OtherPartyPaymentForm` 从 OtherPartyPaymentsManager 抽出（两个 manager + hub 共用），`OfficialReceiptForm` 从旧 ReceiptsTab 抽出；客户收据 voucher/预付 helper 迁到 src/lib/customer-receipt.ts（react-refresh 不许组件模块导出普通函数；两个旧测试改指向）。**prod 验**：42 receipts（CUSTOMER 40 / OFFICIAL 2 / CANCELLED 5）三门表单都能开。守卫 tests/receipts-hub.test.mjs。
+- **#472 侧栏瘦身 40→32**：Reports(Overview/P&L/Cash Flow/BS/TB/GL/Stock Summary)·Daily(Payment Vouchers/Receipts/Fund Transfer/Cash Position)·Monthly(Journal Entries/Cash Book/Stock Take/Labour/Fixed Assets/Self-check/Corrections)·Debtors(Debtor Aging/Other Debtor Bills/Credit Notes/Debit Notes)·Creditors(Creditor Aging/AP Invoices/Supplier Discount)·e-Invoice·Setup(COA/Stock Mapping/Opening Stock/Opening Balance/Audit Log/Settings)。**只从菜单退下、URL 全保留**：Customer Payment、Supplier Payment（PV 页顶链接，管外币 PI/预付 knock off/TF 还款）、Other Creditor Payments/Other Debtor Receipts（折进 Bills 页 FoldSection）、Other Debtor/Creditor 名单（折进 Bills 页与 AP Invoices）、Other Creditor Bills（AP Invoices「New AP bill」就地开编辑器）、Monthly P&L/Cost Structure（`PlHubTab` 一入口三 view，旧深链落各自 view）。三个 Dashboard 没动（owner 未裁）。守卫 tests/finance-sidebar.test.mjs。**prod 验**：侧栏六组齐、P&L 三 view 齐。
+- 同日早前：#465 AP Payment（见下段）。全套 4733 绿。
+
+---
+
 ## 2026-09-22 晚 — ✅ Payment Vouchers「AP Payment」并入（#465 已上线已验）（owner「Payment voucher 没有包含ap payment?」→ 贴 Houzs 截图「最好是这样」）
 
 **漏项承认**：Houzs 采纳 Phase 1 只把 Expense Payment 改名+装梯子，「ap payment 和 payment voucher 一起」没做——
