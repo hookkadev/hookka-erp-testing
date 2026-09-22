@@ -1,5 +1,9 @@
 # Hookka ERP — Codebase Map (the single authoritative map)
 
+> **Restamped 2026-09-22 on branch `feat/po-supplier-searchable-select`:** Procurement row for
+> `src/pages/procurement/create.tsx` corrected — the Supplier field is the shared `SearchableSelect`
+> (was a native `<select>`); onChange behaviour unchanged.
+
 > **Restamped 2026-09-18 on branch `fix/pcn-void-status-check-v2`:** Supplier Discount
 > (purchase CN) void was 500ing on prod — `purchase_credit_notes.status` never allowed
 > `CANCELLED` (BUG-2026-09-18-001). Fixed + the entry rewritten in place; the Supplier
@@ -179,7 +183,7 @@ authoritative current detail.** New here? Start with [ONBOARDING-PATH.md](ONBOAR
 |---|---|---|---|
 | `src/pages/procurement/index.tsx` — PO list + POFormDialog (2190). Grid search also matches LINE ITEMS (internal code / supplier SKU / description) via `itemsSearchText` + `alwaysSearchKeys` — helper `src/lib/po-items-search.ts` (2026-09-22) | `src/api/routes/purchase-orders.ts` — PO CRUD + status lifecycle | `purchase_orders` / `purchase_order_items` | `tests/grn-arrival-state.test.mjs`, `tests/po-items-search.test.mjs` |
 | `src/pages/procurement/detail.tsx` — PO detail + ThreeWayMatchPanel (1497) | `src/api/routes/grn.ts` — GRN CRUD + arrival + Post-to-Stock cascade | `grns` / `grn_items` | `tests/ocr-distill-supplier.test.mjs` |
-| `src/pages/procurement/create.tsx` — full-page PO create | `src/api/routes/goods-in-transit.ts` — GIT CRUD | `goods_in_transit` | `tests/supplier-payment-alloc.test.mjs` |
+| `src/pages/procurement/create.tsx` — full-page PO create; the Supplier header field is a `SearchableSelect` (type code or name; clear entry resets purchase company to HOOKKA), no longer a native `<select>` | `src/api/routes/goods-in-transit.ts` — GIT CRUD | `goods_in_transit` | `tests/supplier-payment-alloc.test.mjs` |
 | `src/pages/procurement/grn.tsx` — GRN list (1252) | `src/api/routes/purchase-invoices.ts` — PI CRUD + lifecycle | `purchase_invoices` / `purchase_invoice_items` | `tests/three-pl-state-rates.test.mjs` |
 | `src/pages/procurement/grn/create.tsx` — GRN create (1490) | `src/api/routes/three-way-match.ts` — PO↔GRN↔PI variance | `suppliers` | |
 | `src/pages/procurement/grn-detail.tsx` — GRN detail + Post-to-Stock (1332) | `src/api/routes/suppliers.ts` — supplier CRUD | `supplier_materials` / `supplier_material_bindings` | |
