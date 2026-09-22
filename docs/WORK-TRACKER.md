@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-22** — branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
 > **Last verified: 2026-09-21** — branch `fix/t006-transfer-convert-guards` (open PR against
 > `main`, not merged) added its entry as the newest below, and merged `main` in: both sides'
 > new entries were kept, T-006 first then T-004, with nothing dropped from either.
@@ -16,6 +17,137 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
 ---
+
+## 2026-09-22 — 🔵 PO list: search finds a PO by the raw material bought on it (branch `feat/po-search-line-items`)
+
+Staff ask (screenshots, 2026-09-22): "search a raw material item and see which Purchase
+Order(s) it was purchased under — PO no, supplier, date, qty, status". The PO grid's
+global search only saw column values; `items` stringified to `[object Object]`.
+
+- [x] `src/lib/po-items-search.ts` — `poItemsSearchText(items)` flattens internal code /
+  supplier SKU (dual-keyed) / description per line.
+- [x] `src/pages/procurement/index.tsx` — each row carries `itemsSearchText`; DataGrid gets
+  `alwaysSearchKeys={["itemsSearchText"]}`. Typing a search already flips the fetch to the
+  whole dataset (search-safe rule), so every PO is covered, not just the current page.
+- [x] `tests/po-items-search.test.mjs`; `tsc -p tsconfig.app.json` exit 0.
+- [ ] PR → merge → verify live on prod (search `ASC1010F` on /procurement).
+
+## 2026-09-22 — 🔵 Dashboard: Day / Month / YTD period nav redesign (branch `feat/dashboard-date-nav-redesign`, pushed, PR #461 → staging)
+
+Ask (owner): expand the dashboard's Monthly/YTD toggle to Day/Month/YTD, each with its own
+arrow-stepping granularity, center label and click-to-pick popover. Same day as
+BUG-2026-09-22-002 (the Today/Yesterday preset fix, PR #458, merged to `main` first — this
+branch is cut from that tip).
+
+Built entirely on the EXISTING `Period` shape (`dashboard-shared-lib.ts`) — no new mode. Which
+of the three views a period reads as is DERIVED (`mode==="ytd"` → YTD; a range preset or a set
+`day` → Day; else → Month), so every existing `Period` consumer (`inFocus`, `inPeriod`,
+`previousPeriod`, the URL round-trip, ~40 `periodLabel` call sites across the dashboard views)
+needed zero changes. Day steps ±1 calendar day capped at today; Month/YTD keep the unchanged,
+already-tested `stepPeriod`. New: `stepDay`, `yearsWithData` (both `dashboard-shared-lib.ts`),
+`MonthGrid` (`dashboard-shared.tsx`, a year-stepped 12-month picker for the Month view's
+popover — months with no data disabled, same bound the stepper already uses). Mirrored on both
+surfaces that share this logic: the desktop `PeriodPicker` and the `/m` `PeriodChip` sheet.
+Same branch: the experimental-dashboard header subtitle now warns "Data may be inaccurate. Use
+with caution" instead of claiming "Live where noted".
+
+`tests/dashboard-period.test.mjs`: 13/13 pass (7 new). Full `npm test`: 4,700/4,700 pass, 0
+fail. `tsc -p tsconfig.app.json --noEmit`: exit 0. **Not browser-verified** — dev server needs a
+production login this session does not have. **`staging` is currently ~58 commits behind
+`main`**, so PR #461's commit list is noisy (every commit `main` has that `staging` doesn't,
+plus mine) — not a defect in this branch. Docs restamped: `CODEBASE-MAP.md`
+(dashboard-prototype.tsx / dashboard-shared.tsx / dashboard-shared-lib.ts rows).
+
+## 2026-09-22 — ✅ PO create: searchable supplier picker (branch `feat/po-supplier-searchable-select`, MERGED #459)
+
+Ask (owner, screenshot of New Purchase Order): "the supplier dropdown change to a searchable
+dropdown for more friendly usage". Done in `src/pages/procurement/create.tsx` only — native
+`<select>` swapped for the existing `SearchableSelect` (type code or name; `allowClear` is the
+old "— Pick a supplier —" reset, still restores purchase company HOOKKA); onChange logic
+unchanged. `tsc -p tsconfig.app.json` clean. **Not browser-verified** (dev server needs login).
+Feature → target `staging`. Docs restamped: `CODEBASE-MAP.md` procurement row.
+
+## 2026-09-22 — ✅ Houzs 财务模块对照采纳计划（owner「开工直接做到完」,五 phase 全部上线 #452-#456）
+
+**进度**:Phase 1 ②四层审批后端 = PR 1.1(`ensurePvApprovalCols` 8 列 self-apply+legacy 回填
+APPROVED、0233/0214 记录、POST 支持 saveAs:"draft"(不铸号不过账)、PUT /:id 草稿编辑(CHECK 后锁)、
+POST /:id/approval + /approval-batch(prepare/withdraw/reject(要 reason)/check(铸正式号)/approve
+(此刻才过账,复用唯一 pvPostingStatements)、权限键 accounting:check/approve、lifecycle 未过账=
+纯状态翻转、restate 拒未过账;守卫 tests/pv-approval.test.mjs 9 断言)。旧立即过账路径原样保留,
+新页上线前零破坏。**BUG-2026-09-22-177（#456 热修）**:0159 的 status CHECK 只许 POSTED|VOID → 草稿 DRAFT 被拒;self-apply 放宽 + create 报 DB 原话。**prod 全梯子实测**:draft 0 分录→prepare→reject 无理由被挡→check 铸 HPV-2609-045 仍 0 分录→Checked 锁编辑→板子 AWAITING 出现→approve 过账 CR 1 sen→void 归零 ✓。**Self-check 首跑抓到**:AP 控制高 72,196.03、AR 控制低 168,790(待向 owner 解读)。**PR 1.2**(UI):PaymentsTab 就地升级=「Payment Vouchers」页(tab+侧栏改名):
+表单双按钮 Save as draft / Post now(编辑草稿走 PUT、编辑已过账走 restate);行内梯子按钮
+(Draft: edit/Prepare→;Prepared: edit/withdraw/reject/Check→;Checked: reject/Approve & post)、
+四态芯片+reject 理由显示、Pending approval 过滤、勾选批量 Prepare/Check/Approve 琥珀条;
+**Cash Position 板新增「AWAITING APPROVAL」卡**(/cash-position 回 awaitingApproval[] +
+awaitingCheckedSen;Checked=硬承诺金额、Draft/Prepared 软显示)= owner 09-03 说的「老板还没
+approve」正式落地。Repo 已迁 hookkadev 组织(remote+gh default 已更新)。**Phase 2 ✅(同 PR)**:新 GET /ap-invoices(OCB CREDITOR 全量 kind=AP + purchase_invoices 非 DRAFT 只读镜像 kind=PI,状态归一 OPEN/PAID/CANCELLED,totals 分 AP/PI)+ 新 tab「AP Invoices」(Debtor / Creditor 组,侧栏同名):三张合计卡、Kind/Status/搜索过滤、PI 行链回 /procurement/pi、AP 行链回 OCB tab、New AP bill / Pay 两按钮直通。**Procurement PI 页零改动**(owner「本身purchase invoice 那边要保留」)。**Phase 3 ③ ✅(同 PR)**:POST /bank-reco/book-line——银行行就地记账:钱出=PV(立即过账路,approval_state=APPROVED)、钱进=OR,金额锁死=行金额,新单据的银行腿同 batch 配对该行(立刻离开 unbooked);拒开账前/已封月/已配/已 ignore。UI:Cash Book 每条 not-in-book 行「book as expense / book as receipt」→ 行下内联表单(科目/对方/描述)→ Book & match。= owner 7 月剩的 5 条工资税费就地一键。**Phase 3 ①②④ ✅(PR 3b)**:①严格月锁——kv bank_reco_strict_lock(GET/PUT /bank-reco/strict-lock,**默认 OFF**=owner「别启动先」),ON 时 finalize 要 balanced 且 unbooked=0、re-open 必填 reason;所有 re-open 无论开关一律写 kv bank_reco_reopen:<acct>:<month>:<ts>(actor/reason/旧快照)留痕;Cash Book 报表卡加开关 checkbox(ON 要确认)。②串链 GET /bank-reco/chain——按 bank_reco_meta 逐月检查 gap(缺月点名)+ mismatch(本月 opening≠上月 closing),卡上红字/绿勾。④反向组合 POST /bank-reco/match-split——一条银行行拆给 N 条腿:新表 bank_line_leg_splits(self-apply,0234/0215 记录)、行 matchedLegId=哨兵 SPLIT、loader 把每 split 行当虚拟 claiming line 喂同一 claim() 闸、report 行侧 SPLIT 行=全部腿月内且清才 booked、match/match-group taken 检查兼看 split 表、unmatch 释放整组、GET /bank-reco matchedLegIds 含 split 腿;UI「split across…」多选腿 Σ=行才亮。守卫 +2(35/35)。**Phase 1 ③ 打印对照 Houzs ✅**:VoucherSpec +watermark/+detail/签名带 name+on;PV 打印=四栏签名(Prepared/Checked/Approved 印梯子真人+日期,Received 空栏)、未过账水印 DRAFT / NOT YET APPROVED、作废 CANCELLED、供应商付款附「Bills settled by this payment」明细表(打印时按需拉 payment-detail);GET /payment-vouchers 回 preparedByName/checkedByName/approvedByName/createdByName。附件合订(print-bundle)待 Phase 5 附件功能一起。**Phase 4 ✅(同 PR)**:①**Self-check** tab(Monthly Operation 组)——纯前端聚合既有探针成一页红/黄/绿卡:AP 控制 vs 供应商单(ap-reconciliation 逐项)、AR 控制 vs 客户发票、试算表、审批梯子上未过账 PV(>7 天变红)、accrued 未付、板子勾了账单没确认、每个银行户口的对账单串链;每卡链到修的地方;Run again 重跑。②**Corrections** tab——GET /corrections 从 ledger 腿家族挖:*_restate_rev/post:<stamp>=Edited(冲/重记金额)、*_void=Cancelled、opening_balance_reversal、kv bank_reco_reopen=Reco re-opened(带 reason);月份筛/最近 90 天,actor 名字解析,CSV/Excel/PDF 导出。③统一 reason:目前 PV reject + reco re-open 必填留痕;其他单据的 edit/cancel 先只显示轨迹(表底注明)。**Phase 5 ✅(PR 5)**:①**Scan Bills 批量**——PV 页新按钮,一次拖 ≤20 张账单,逐张 OCR→每张一张 **draft** PV(走 saveAs:draft 梯子,不铸号不过账),科目从同 payee 上一张凭证带;读不出/新 payee 无科目=skipped 列原因不猜;完成后直接在页面 Prepare/Check/Approve 批量走。②**打印页脚**——kv finance_print_footer.pv(通用 /api/kv-config),PV 页顶「Print footer: … edit」小卡编辑多行文字,印在签名栏上方(空=不印);VoucherSpec +footerText。③ OR 收据簿升级(钱确认才铸正式号)= Hookka 没有卡机/转账待确认流程,现行 OR 立即正式已够——**不做**。④ 清单批量打印 PDF = 既有 BatchActionsBar 已支持——**已有**。
+
+背景:Houzs(trading)ERP 的 Claude 写了 `Houzs-Finance-Module-User-Guide.md` +
+`Houzs-Trading-Finance-Module-Spec.md`(在 Desktop\Claude\Hookka\,不在 repo),指定用途=
+Hookka 逐页对照采纳。Owner 裁决:**不做** Deposit Invoice(客户无此 deposit 模式)、Merchant
+Recon(无卡机);**月锁做但默认关**(「可以做,但是别启动先」);**要做** PV 检查层级(推翻我
+初判)、AP/Other Payable 同页、AP payment 与 PV 统一、PV 打印对照 Houzs、「还有很多功能补全
+和优化」。现状盘点:Hookka 已有 PAYMENT/EXPENSE(payment_vouchers 表,status 无审批层)、
+OFFICIAL RECEIPT、FUND TRANSFER、OTHER DEBTORS/CREDITORS 各自独立 tab + invoices/supplier-
+payments 独立页——碎片化正是他要统一的点。
+
+**Phase 1 — Money out 统一(最大件)**:①统一 Payment Vouchers 页,三种 purpose(AP Payment
+勾 PI/OCB、Expense/Petty、Transfer/bank-in)一张表一个入口(现 supplier-payments/PV tab/
+Fund Transfer tab 三处;**Customer Refund owner 裁「暂时不需要」**,以后要再加);②四层 Draft→Prepare→Check→Approve(+Reject/
+Withdraw/批量,keys 先全给 owner,approve 才入账+knock off);③打印对照 Houzs(凭证版式+附件
+合订 print-bundle);④Daily Cash Position 的 pending 接「Checked 未 Approve」正式化。
+**Phase 2 — AP 同页**:OCB(非货品账单)+采购发票**只读镜像**一张表(Kind 列;owner 确认
+「只是多一份出来」——**Procurement 的 Purchase Invoice 页原封保留**,采购流程不动,镜像行
+点开跳原单),Record payment 直通统一 PV 页。
+**Phase 3 — 对账升级**:①月锁严格版(无未决+文件覆盖头尾+tally 才可锁;解锁需 reason 留痕)
+——**建好默认 OFF**;②对账单串链检查(断链点名缺哪天);③Book as receipt/expense(银行行
+就地记账);④反向组合(一条银行行↔几张账面单)。
+**Phase 4 — 检查与留痕**:①Self-check 页(控制科目差异点名/未入账付款/取消单挂钱,带一键修)
+;②Corrections 报表(改动链:谁/何时/reason/旧→冲→新);③改过期数据统一要 reason。
+**Phase 5 — 效率件**:①Scan bills 批量;②OR 收据簿升级(每收款自动一张、钱确认才铸正式号)
+;③打印页脚付款资料设置;④清单批量打印 PDF。
+顺序 1→2→3→4→5,每 phase 完成 prod 验收才动下一个。
+
+## 2026-09-21 — 🔵 Dashboard: tabs named by function, not by staff member
+
+Branch `feat/dashboard-prototype-siti-ops-tab`. Asks: (1) no staff names in the dashboard
+navigation — `Operations (Siti)` / `Service (Zamri)` / `Daily (Lim)` become functional tabs with
+sub-tabs; (2) the reviewer's daily set is dissolved into the tab that owns each chart, approvals
+stay in ONE queue (Service › Approvals) and Overview gets a "Needs action" strip linking to it;
+(3) mobile friendly. Tabs now: Overview · Sales · Operations · Employees · Service · Finance — the
+same keys the `/m` dashboard already uses (`daily` dropped there too). Old `?tab=siti|lim|
+employee|department` links are aliased in `parseDashboardUrl`. NOT done: the feed key `lim` in
+`/api/dashboard/prototype` and the backend comments still carry the name (internal, no UI).
+Follow-up same day: the four `/m` dashboard tabs that were "next phase" placeholders are now
+phone-native (`tabs/OperationsTab|PeopleTab|ServiceTab|FinanceTab.tsx`, sub-tabs via
+`useDashboardSub` + `MSubPills`, same `?sub=` keys as desktop). Service > Approvals on the phone
+uses the desktop panel's exact endpoints / confirm / reject-needs-a-reason. Also fixed: the
+Operations cost and production-revenue chart axes read 100x too high (`fmtRMAxis` takes RM, was
+handed RM x 100). NOT browser-verified by the agent (dev proxy needs a production login).
+Ask 2026-09-22 (owner: period control "unfriendly" at phone width, tab row should be a dropdown):
+(1) phone-width period control = ONE button opening a bottom sheet (Monthly/YTD, stepper, presets,
+44px calendar) rendered through a portal; (2) phone-width tab row = native `<select>` on the
+desktop page and on `/m/dashboard`; sub-tab pills stay.
+Follow-up (owner on an iPhone: "date picker is bad"): a phone never reaches the desktop picker -
+`DashboardLayout` redirects mobile devices to `/m` - and the `/m` PeriodChip only listed months.
+It now has the stepper, Today / Yesterday / Last 7 Days, Whole month and a 44px day calendar, on
+ONE shared logic (`stepPeriod` / `periodPresets` / `calendarCells` in `dashboard-shared-lib.ts`,
+`tests/dashboard-period.test.mjs`). Tab `<select>`s are 16px so iOS Safari does not zoom on focus.
+Ask 2026-09-22 (owner, "one last thing"): (1) the dashboard opens on TODAY, not the whole month -
+daily performance is the common check; (2) figures should follow the picked DATE wherever the data
+has a date, not only the month; (3) then fix the `docs-freshness` check on PR #443.
+Owner 2026-09-22: the People tab is labelled Employees (key `people` unchanged).
+Ask 2026-09-21 (owner, two parts, NOT committed yet - working tree on `main`):
+(1) 🔵 Overview and Sales must NOT open on today - they are read MONTHLY; the other tabs keep
+opening on today. Done in code: `opensOnToday(tab)` + a 4th `openOnToday` arg on `resolvePeriod`
+(`dashboard-shared-lib.ts`), passed by the desktop shell and `/m` `useDashboardPeriod(months, tab)`.
+A day the user picks is still honoured on those two tabs. Test added in
+`tests/dashboard-m-lib.test.mjs`; build:strict exit 0. NOT browser-verified, NOT deployed.
+(2) 🔵 Service tab: every service case shown must link straight to that case in the Service Cases
+module (sidebar entry), desktop + `/m`. Done in code: `ServiceCaseLink.tsx` / `use-service-case-links.ts` /
+`service-case-link-lib.ts`; desktop `/service-cases/:id`, phone `/m/servicecases/:id`, plus an "Open Service Cases"
+button; gated by the sidebar permission; no API change. build:strict exit 0, 33/33 dashboard tests.
+NOT browser-verified, NOT deployed.
 
 ## 2026-09-21 — 🔵 T-006 follow-through: the four gaps in the R1-R10 work (branch `fix/t006-transfer-convert-guards`)
 

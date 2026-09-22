@@ -36,6 +36,12 @@ export interface TabsProps<T extends string = string> {
    * by passing e.g. "grid-cols-9". If omitted, pills size to their content.
    */
   gridColsClass?: string;
+  /**
+   * Pill variant only: on phones (<md) keep the pills on ONE horizontally
+   * scrollable row (no wrap/shrink, hidden scrollbar) and scroll the active
+   * pill into view. Desktop layout is unchanged.
+   */
+  scrollable?: boolean;
 }
 
 export function Tabs<T extends string = string>({
@@ -45,16 +51,18 @@ export function Tabs<T extends string = string>({
   variant = "underline",
   className,
   gridColsClass,
+  scrollable,
 }: TabsProps<T>) {
   if (variant === "pill") {
     return (
       <div
         className={cn(
           "rounded-lg border border-[#E6E0D9] bg-[#FAF8F4] p-1",
+          scrollable && "max-md:overflow-x-auto max-md:[scrollbar-width:none] max-md:[&::-webkit-scrollbar]:hidden",
           className,
         )}
       >
-        <div className={cn("gap-1", gridColsClass ? `grid ${gridColsClass}` : "flex")}>
+        <div className={cn("gap-1", gridColsClass ? `grid ${gridColsClass}` : "flex", scrollable && "max-md:w-max")}>
           {tabs.map((tab) => {
             const active = tab.key === value;
             return (
@@ -63,8 +71,14 @@ export function Tabs<T extends string = string>({
                 type="button"
                 disabled={tab.disabled}
                 onClick={() => onChange(tab.key)}
+                ref={
+                  scrollable && active
+                    ? (el) => el?.scrollIntoView?.({ block: "nearest", inline: "center" })
+                    : undefined
+                }
                 className={cn(
                   "rounded px-3 py-2 text-xs font-semibold uppercase tracking-wide transition truncate",
+                  scrollable && "max-md:shrink-0 max-md:whitespace-nowrap",
                   active
                     ? "border border-[#6B5C32] bg-white text-[#1F1D1B] shadow-sm"
                     : "text-[#8A7F73] hover:text-[#1F1D1B]",

@@ -1,5 +1,7 @@
 # Procurement — Module Guide
 
+> **Last verified: 2026-09-22** (`ProcurementPage` anchor re-derived: `index.tsx:812`; grid search now covers line items).
+>
 > **Last verified: 2026-09-21** (branch `fix/t006-transfer-convert-guards`) — every table
 > anchor re-derived to its exact definition line, and the Core-flows prose anchors corrected
 > (`grn.ts` arrival transitions, create-status derivation, `postGRNToStock`,
@@ -91,7 +93,7 @@ Owns the buy-side document chain: **Purchase Orders** (PO) → **Goods Receipt N
 
 ## Entry points
 - Pages
-  - `/procurement` → `src/pages/procurement/index.tsx:804` (`ProcurementPage` — PO list, filters, grid; `POFormDialog` deep-link prefill at `:63`)
+  - `/procurement` → `src/pages/procurement/index.tsx:812` (`ProcurementPage` — PO list, filters, grid; `POFormDialog` deep-link prefill at `:63`)
   - `/procurement/create` → `src/pages/procurement/create.tsx:71` (`CreatePurchaseOrderPage`, wrapper `:63`; full-page PO create)
   - `/procurement/:id` → `src/pages/procurement/detail.tsx:113` (`PurchaseOrderDetailPage`; status actions + 412-requiresGrn guard; `ThreeWayMatchPanel` defined at `:1392`, rendered at `:1341`)
   - `/procurement/grn` → `src/pages/procurement/grn.tsx:351` (`GRNPage` — GRN list; `GRNFormDialog` at `:49`)
@@ -132,8 +134,8 @@ Owns the buy-side document chain: **Purchase Orders** (PO) → **Goods Receipt N
 ## Key functions / sections (locate-to-function)
 | Symbol / section | file:line | Role |
 |---|---|---|
-| `ProcurementPage` | `src/pages/procurement/index.tsx:807` | PO list, filters, banner, grid |
-| `POFormDialog` | `src/pages/procurement/index.tsx:64` | Create/edit PO modal (deep-link prefill) |
+| `ProcurementPage` | `src/pages/procurement/index.tsx:812` | PO list, filters, banner, grid |
+| `POFormDialog` | `src/pages/procurement/index.tsx:65` | Create/edit PO modal (deep-link prefill) |
 | `PurchaseOrderDetailPage` | `src/pages/procurement/detail.tsx:118` | PO detail; status actions, 412-requiresGrn guard |
 | `ThreeWayMatchPanel` | `src/pages/procurement/detail.tsx:1399` | PO↔GRN↔PI variance panel (derived) |
 | `app.post("/")` (PO create) | `src/api/routes/purchase-orders.ts:434` | PO create; `body.status` verbatim |

@@ -237,7 +237,10 @@ function makeDb({ products = CATALOGUE, cases = [], fgBatches = [] } = {}) {
     serviceOrders: [],
     serviceOrderLines: [],
     productionOrders: [],
-    cases: cases.map((r) => ({ ...r })),
+    // These tests are about product resolution / stock, not the exchange gate
+    // (tests/service-exchange-approval covers that), so every case starts with
+    // an APPROVED exchange approval; a fixture can override either field.
+    cases: cases.map((r) => ({ approval_kind: "EXCHANGE", approval_status: "APPROVED", ...r })),
     fgBatches: fgBatches.map((r) => ({ ...r })),
     // Every statement the route handed to batch(), in order — lets a test
     // assert what WOULD have been written even when nothing was.

@@ -34,6 +34,49 @@ Entries themselves stay newest-first.
 
 ---
 
+## BUG-2026-09-22-002 — dashboard "Today" / "Yesterday" presets could show a different day than the page's own "today" `ui-frontend` `dashboard` 🟢
+
+🟢 **Fixed** · owner-reported ("today and yesterday was wrong").
+
+**Root cause.** `periodPresets()` (`dashboard-shared-lib.ts`) pinned the "Today" and
+"Yesterday" quick-pick buttons to `latestDay` — the newest day the book has an actual sales
+row for — not the real clock. That anchor was added in `93c2b84c` (2026-09-21) to stop "Last
+7 Days" landing on an all-zero window when data had stopped days earlier, and got reused for
+Today/Yesterday too without separately reasoning about what those two labels mean. The SAME
+commit made the page's own default-open day (`resolvePeriod`) use the real clock — so a fresh
+page load and the "Today" button could point at two different actual dates. Whenever today's
+sales hadn't posted yet (a day still in progress — the common case, not an edge case), "Today"
+silently showed yesterday's figures and "Yesterday" showed the day before that.
+
+**Fix.** `periodPresets()` now takes `today` and uses it for Today/Yesterday, matching
+`resolvePeriod`'s default-open day; an empty day is a legitimate state, same as it already is
+on first load. "Last 7 Days" is untouched — still anchored to `latestDay`, since a relative
+multi-day window has no calendar identity of its own to preserve and genuinely does need to
+avoid landing on empty data. Both callers (`dashboard-shared.tsx` desktop picker, `/m`
+`PeriodChip.tsx`) now pass the real clock day.
+
+**Regression test.** `tests/dashboard-period.test.mjs` — "Today / Yesterday follow the real
+calendar day, even when the book's data lags behind it" and the sibling test locking Last 7
+Days to `latestDay` still. `node --test`: 10/10 pass. `tsc -p tsconfig.app.json --noEmit`:
+exit 0.
+
+**Not verified live.** No DB access and no staging login this session — whether `latestDay`
+is currently lagging behind real "today" in prod, and by how much, is **UNMEASURED**.
+
+---
+
+## BUG-2026-09-22-001 — the /m dashboard crashed on first paint: the new period calendar drew a month that had not loaded `ui-frontend` `dashboard` 🟢
+
+🟢 **Fixed** · owner-reported from an iPhone on the PR #443 canary (`canary-443.hookka-erp-testing.pages.dev/m/dashboard`): error boundary, "Array length must be a positive integer of safe magnitude", stack in `dashboard-url-state-lib` / `DashboardScreen`. Never reached `main`; lived one commit (`be7c07bc`).
+
+**Root cause.** `PeriodChip.tsx` gained a day calendar built by `calendarCells(viewMonth)` (`dashboard-shared-lib.ts`). The period's month is `""` until the dashboard feed has loaded, and `calendarCells("")` computed `Array(NaN)` -> `RangeError`. The sheet was closed, but JSX children are evaluated by the parent whether or not `<Sheet>` renders them, so it threw on the very first render. The desktop picker never hit it: it only mounts once `months.length > 0`. The visual check used a harness with the months preloaded, so it could not see the empty first render.
+
+**Fix.** `calendarCells` and `shiftMonth` return `[]` / the input unchanged for anything that is not `YYYY-MM` - one guard where both the desktop picker and the `/m` chip route through, rather than a `months.length` check in each caller.
+
+**Regression test.** `tests/dashboard-period.test.mjs` -> "the picker logic survives a period whose month has not loaded yet" (`""`, `"2026"`, `"2026-13"`, `"nope"`, plus `stepPeriod` / `periodPresets` with no months).
+
+---
+
 ## BUG-2026-09-18-001 — Supplier Discount void 500'd: the status CHECK never allowed CANCELLED `accounting` `data-integrity` 🟢
 
 🟢 **Fixed** · owner-reported (`erp.hookka.com/accounting?tab=supplier-discount`, void → `POST .../purchase-credit-notes/pcn-85c380af/void 500 (Internal Server Error)`).
@@ -327,6 +370,24 @@ live** — repairing balances while the cause is still running just rebuilds the
 damage — and only on the owner's word.
 
 Regression: `tests/wip-settle-once.test.mjs`.
+
+## BUG-2026-09-22-177 — "Save as draft" refused by the payment_vouchers status CHECK `accounting` `payment-voucher` 🟢
+
+First prod smoke of the four-tier ladder (#452/#453): every draft create
+returned 400 "Failed to save the payment — is migration 0159 applied?"
+while the legacy Post-now road succeeded. Migration 0159 created
+`status TEXT … CHECK (status IN ('POSTED','VOID'))`; the draft road inserts
+`status='DRAFT'`, so Postgres rejected the row — the same class as
+BUG-2026-09-18-001 (PCN void writing `CANCELLED` into a two-value check).
+The generic catch text pointed at a migration that WAS applied and hid the
+constraint name, which cost a debugging round.
+
+Fix ([accounting.ts](../src/api/routes/accounting.ts)): `ensurePvApprovalCols`
+now drops and re-creates `payment_vouchers_status_check` with `DRAFT`
+admitted (record: migrations-postgres/0233 tail); the create path returns the
+database's own message (`Failed to save the payment: <cause>`) instead of a
+canned guess. Guards: `tests/pv-approval.test.mjs` (+2). Verified on prod:
+draft → prepare → check (formal No. minted) → approve (legs posted) → void.
 
 ## BUG-2026-09-04-176 — a cross-month match cleared an item for a month it hadn't reached the bank in `accounting` `bank-reco` 🟢
 

@@ -23,8 +23,11 @@ import { Hono } from "hono";
 import type { Env } from "../worker";
 import { requirePermission } from "../lib/rbac";
 import { customerScopeSql } from "../lib/customer-scope";
+import approvals from "./service-case-approvals";
 
 const app = new Hono<Env>();
+// Approval endpoints — registered first so "/approvals" wins over "/:id".
+app.route("/", approvals);
 
 type SourceType = "SO" | "CO" | "EXTERNAL";
 type CaseStatus = "OPEN" | "IN_PROGRESS" | "CLOSED" | "CANCELLED";

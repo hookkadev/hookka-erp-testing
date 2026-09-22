@@ -54,9 +54,13 @@ import { Hono } from "hono";
 import type { Env } from "../worker";
 import { getOrgId } from "../lib/tenant";
 import { requirePermission, hasPermission } from "../lib/rbac";
+import { buildServiceSlice } from "../lib/dashboard-service-slice";
+import { isCustomerScoped } from "../lib/customer-scope";
 import { collectOnTimeDelivery, EMPTY_ON_TIME } from "../lib/on-time-delivery";
 import { poInPlanning, poReadyForDelivery, type PipelinePO } from "../../lib/delivery-pipeline";
 import { loadPoValueMap, loadDoValueMap } from "../lib/do-value";
+import { buildDailySlice } from "../lib/dashboard-daily-slice";
+import { countsToHeadcount } from "../lib/headcount-rule";
 
 const app = new Hono<Env>();
 
@@ -207,6 +211,7 @@ type ProdOrdRow = {
   currentDepartment: string | null;
   progress: number | string | null;
   targetEndDate: string | null;
+  completedDate: string | null;
   // Free text ("HB Fully Cover, Divan Bottom Fully Cover") or "" — NOT a
   // boolean column. `specialOrder: !!r.specialOrder` below only cares
   // whether it's non-empty; the pipeline predicates below need the actual
@@ -305,6 +310,11 @@ app.get("/", async (c) => {
     hasPermission(c, "production-orders", "read"),
   ]);
 
+  // Customer-scoped roles (SALES) must not see the whole case book through a
+  // shared, org-wide cached feed, so the slice is dropped for them.
+  const canService =
+    (await hasPermission(c, "service-cases", "read")) && !isCustomerScoped(c);
+
   const orgId = getOrgId(c);
   const { cached } = await import("../lib/kv-cache");
 
@@ -312,7 +322,11 @@ app.get("/", async (c) => {
   // 60s SWR cache is safe: no write path needs to invalidate it, and it's
   // the same TTL/mechanism dashboard-overview.ts already uses for the same
   // "many sequential queries on every page load" problem.
-  const rawPayload = await cached(c, `dashboard:prototype:${orgId}:v1`, 60, async () => {
+  // v2 (2026-09-17): payload gained production.productionCost. A pre-bump
+  // body has no such key — exactly what crashed SitiOpsView.tsx on a stale
+  // cache hit — bumping makes that window zero instead of waiting out the
+  // 60s TTL.
+  const rawPayload = await cached(c, `dashboard:prototype:${orgId}:v3`, 60, async () => {
   // ---- Sales ------------------------------------------------------------
   // Whole book, not a window: the prototype owns the month picker, so it
   // needs every month that exists. ~1,500 rows of seven columns is small
@@ -465,6 +479,9 @@ app.get("/", async (c) => {
         ORDER BY name ASC`,
     ).all<WorkerRow>().then((r) => r.results ?? []),
   );
+
+  // Service (Zamri) tab — own file, see dashboard-service-slice.ts.
+  const serviceSec = await section("service", async () => [await buildServiceSlice(c.var.DB)]);
 
   const attSec = await section("attendance", () =>
     c.var.DB.prepare(
@@ -990,8 +1007,8 @@ app.get("/", async (c) => {
     c.var.DB.prepare(
       `SELECT id, po_no, sales_order_id, customer_name, product_code,
               product_name, item_category, size_label, quantity, status,
-              current_department, progress, target_end_date, special_order,
-              consignment_order_id, repairscope
+              current_department, progress, target_end_date, completed_date,
+              special_order, consignment_order_id, repairscope
          FROM production_orders
         WHERE org_id = ?`,
     )
@@ -1131,6 +1148,148 @@ app.get("/", async (c) => {
     (m, x) => (x.cards > (m?.cards ?? -1) ? x : m),
     null as { dept: string; seq: number; cards: number; orders: Set<string> } | null,
   );
+
+  // ---- Siti's list (draft, 2026-09-17) -----------------------------------
+  // Owner's next-up report checklist, handed over on paper. Derived entirely
+  // from data already loaded above — no new queries except the one extra
+  // column (completed_date) added to prodOrdSec's SELECT. Draft-quality by
+  // request: covers what's cheaply and honestly derivable now; Production
+  // Cost needs cost_ledger, which nothing in this route touches yet, so it's
+  // left as an explicit gap below rather than a guessed number.
+
+  // "全部 department 的 overdue" — every OPEN order already past the
+  // customer's promised date (risk === critical, same predicate the
+  // Production tab's risk banding uses), grouped by its current department.
+  const overdueByDept = (() => {
+    const m = new Map<string, number>();
+    for (const o of prodOrdersRisked) {
+      if (o.risk !== "critical") continue;
+      const k = o.currentDept || "(no dept)";
+      m.set(k, (m.get(k) ?? 0) + 1);
+    }
+    return [...m.entries()]
+      .map(([department, count]) => ({ department, count }))
+      .sort((a, b) => b.count - a.count);
+  })();
+
+  // "要 overdue 的 - 3 天前" — early warning: not yet overdue, but the
+  // customer date is within the next 3 days and most stages are still open
+  // (same "at risk" shape riskOf() already uses, narrowed to a 3-day window
+  // instead of 7).
+  const dueSoon3Days = prodOrdersRisked
+    .filter((o) => o.daysToDD != null && o.daysToDD >= 0 && o.daysToDD <= 3)
+    .sort((a, b) => (a.daysToDD ?? 0) - (b.daysToDD ?? 0));
+
+  // "Daily Production Output" — units and orders that finished each day.
+  // Reads the WHOLE prodOrdSec.rows (not openProdOrders, which excludes
+  // anything COMPLETED by definition), so this is the one place in the file
+  // that looks at completed orders' own rows rather than their job cards.
+  const dailyOutput = (() => {
+    const m = new Map<string, { date: string; orders: number; units: number }>();
+    for (const r of prodOrdSec.rows) {
+      if ((r.status ?? "").toUpperCase() !== "COMPLETED") continue;
+      const d = dayKey(r.completedDate);
+      if (!d) continue;
+      let e = m.get(d);
+      if (!e) m.set(d, (e = { date: d, orders: 0, units: 0 }));
+      e.orders++;
+      e.units += num(r.quantity);
+    }
+    return [...m.values()].sort((a, b) => (a.date < b.date ? -1 : 1));
+  })();
+
+  // "Production Plan vs Actual" — for completed orders that carry both
+  // dates: targetEndDate (plan) vs completedDate (actual). Positive
+  // varianceDays = finished late. Orders missing either date are excluded
+  // rather than silently counted as on-time.
+  const planVsActual = (() => {
+    const rows = prodOrdSec.rows
+      .filter((r) => (r.status ?? "").toUpperCase() === "COMPLETED")
+      .map((r) => {
+        const plan = dayKey(r.targetEndDate);
+        const actual = dayKey(r.completedDate);
+        if (!plan || !actual) return null;
+        const varianceDays = Math.round(
+          (Date.parse(actual + "T00:00:00Z") - Date.parse(plan + "T00:00:00Z")) / 86400000,
+        );
+        return {
+          poNo: r.poNo,
+          productName: r.productName,
+          plan,
+          actual,
+          varianceDays,
+        };
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null);
+    return {
+      rows,
+      onTime: rows.filter((r) => r.varianceDays <= 0).length,
+      late: rows.filter((r) => r.varianceDays > 0).length,
+      withBothDates: rows.length,
+      // So the caller can render "N of M completed orders carry both dates"
+      // instead of implying every completed order was judged.
+      completedTotal: prodOrdSec.rows.filter((r) => (r.status ?? "").toUpperCase() === "COMPLETED").length,
+    };
+  })();
+
+  // "Production Cost" — the one genuinely new query for Siti's list. Reads
+  // fg_batches, which carries the real cost basis of what was produced
+  // (materialCostSen/laborCostSen/overheadCostSen, filled in by
+  // po-cost-cascade.ts once the material side settles — see that file's own
+  // "UPDATE fg_batches SET ... costSen" writes). No org_id filter: fg_batches
+  // and cost_ledger carry none anywhere else in this codebase either (see
+  // src/api/routes/cost-ledger.ts), so this follows the same convention
+  // rather than inventing a column that doesn't exist.
+  const fgBatchSec = await section("fg batch cost", () =>
+    c.var.DB.prepare(
+      `SELECT productionOrderId, completedDate, originalQty,
+              unitCostSen, materialCostSen, laborCostSen, overheadCostSen
+         FROM fg_batches
+        WHERE completedDate IS NOT NULL AND completedDate <> ''`,
+    )
+      .all<{
+        productionOrderId: string | null;
+        completedDate: string | null;
+        originalQty: number | string | null;
+        unitCostSen: number | string | null;
+        materialCostSen: number | string | null;
+        laborCostSen: number | string | null;
+        overheadCostSen: number | string | null;
+      }>()
+      .then((r) => r.results ?? []),
+  );
+  const productionCost = (() => {
+    const m = new Map<
+      string,
+      { date: string; materialSen: number; laborSen: number; overheadSen: number; totalSen: number; batches: number }
+    >();
+    let batchesWithCost = 0;
+    for (const b of fgBatchSec.rows) {
+      const d = dayKey(b.completedDate);
+      if (!d) continue;
+      const material = num(b.materialCostSen);
+      const labor = num(b.laborCostSen);
+      const overhead = num(b.overheadCostSen);
+      const total = material + labor + overhead;
+      if (total > 0) batchesWithCost++;
+      let e = m.get(d);
+      if (!e) m.set(d, (e = { date: d, materialSen: 0, laborSen: 0, overheadSen: 0, totalSen: 0, batches: 0 }));
+      e.materialSen += material;
+      e.laborSen += labor;
+      e.overheadSen += overhead;
+      e.totalSen += total;
+      e.batches++;
+    }
+    return {
+      byDay: [...m.values()].sort((a, b) => (a.date < b.date ? -1 : 1)),
+      totalBatches: fgBatchSec.rows.length,
+      // fg_batches are created with every cost column at 0 (fg-completion.ts)
+      // and only gain a real figure once po-cost-cascade.ts settles the
+      // material side. This is published so the UI can say "N of M batches
+      // costed" instead of implying every batch has a real number.
+      batchesWithCost,
+    };
+  })();
 
   // ---- Delivery: "Where DOs are sitting" status strip --------------------
   // The real Delivery page's SIX buckets (src/pages/delivery/index.tsx
@@ -1464,6 +1623,7 @@ app.get("/", async (c) => {
         rows: salesTabRows.length,
         reason: salesSec.error ?? soItemCatSec.error ?? undefined,
       },
+      service: { live: !serviceSec.error, reason: serviceSec.error ?? undefined },
       employee: {
         live: !attSec.error && !workersSec.error && !wheSec.error && !jcSec.error,
         reason: attSec.error ?? workersSec.error ?? wheSec.error ?? jcSec.error
@@ -1501,6 +1661,15 @@ app.get("/", async (c) => {
         live: !prodOrdSec.error && !jcAllSec.error,
         reason: prodOrdSec.error ?? jcAllSec.error ?? undefined,
         rows: openProdOrders.length,
+        // Separate from `live` above on purpose: a failed fg_batches query
+        // should not mark the whole Production tab dead, only Production
+        // Cost within it (which degrades to empty, not fabricated, on error —
+        // see the `section()` helper).
+        costError: fgBatchSec.error ?? undefined,
+      },
+      lim: {
+        live: !prodOrdSec.error && !jcAllSec.error,
+        reason: prodOrdSec.error ?? jcAllSec.error ?? undefined,
       },
       inventory: {
         live: !inventorySec.error,
@@ -1605,7 +1774,15 @@ app.get("/", async (c) => {
       // On-time delivery for the header KPI reuses the SAME house figure the
       // Delivery view shows — one number, one definition, two screens.
       onTime: otif,
+      // Siti's list (draft) — see the comment above prodOrdersRisked/bottleneck.
+      overdueByDept,
+      dueSoon3Days,
+      dailyOutput,
+      planVsActual,
+      productionCost,
     },
+    // "Daily (Lim)" tab — see ../lib/dashboard-daily-slice.ts for definitions.
+    lim: buildDailySlice(prodOrdSec.rows, jcAllSec.rows, doValueError ? null : poValMap, doValueError),
     inventory: {
       groups: [...groups.values()].sort((a, b) => b.items - a.items),
       totals: {
@@ -1616,6 +1793,14 @@ app.get("/", async (c) => {
         stockValueSen: Math.round(stockValueSen),
         batchesWithStock,
       },
+      // Siti's list (draft): "Material Shortage". `min_stock` is 0 on every
+      // row (MEASURED, see the file header), so there is no real reorder
+      // point to compare against — this is a cheaper proxy, active raw
+      // materials sitting at zero or negative balance right now. Once a
+      // genuine reorder point exists somewhere, replace this with that.
+      materialShortage: rmRows
+        .filter((r) => !!r.isActive && num(r.balanceQty) <= 0)
+        .map((r) => ({ code: r.itemCode, description: r.description, group: r.itemGroup, balanceQty: num(r.balanceQty) })),
       ageing,
       // The WHOLE book, ordered by the value actually sitting on the floor.
       // It was capped at 50, which made the item list disagree with the
@@ -1637,6 +1822,7 @@ app.get("/", async (c) => {
         .sort((a, b) => b.valueSen - a.valueSen),
       finishedGoods: finishedGoods.sort((a, b) => (b.available + b.reserved) - (a.available + a.reserved)),
     },
+    service: serviceSec.rows[0] ?? null,
     employee: {
       workers: workerRows.map((w) => ({
         id: w.id,
@@ -1650,8 +1836,7 @@ app.get("/", async (c) => {
         // Headcount rule copied from the real Employees page: ACTIVE only,
         // and TEST* accounts excluded (owner 2026-07-11, same rule Payroll
         // uses so headcount tallies system-wide).
-        countsToHeadcount:
-          w.status === "ACTIVE" && !/^TEST/i.test(w.empNo ?? ""),
+        countsToHeadcount: countsToHeadcount(w.status, w.empNo),
       })),
       attendance,
       // The house workforce metric. `attendance` above is kept for clock-in /
@@ -1685,7 +1870,9 @@ app.get("/", async (c) => {
     purchase: canPurchase ? rawPayload.purchase : null,
     inventory: canInventory ? rawPayload.inventory : null,
     employee: canWorkers ? rawPayload.employee : null,
+    service: canService ? rawPayload.service : null,
     production: canProduction ? rawPayload.production : null,
+    lim: canProduction ? rawPayload.lim : null,
     availability: {
       ...rawPayload.availability,
       delivery: canDelivery
@@ -1700,9 +1887,15 @@ app.get("/", async (c) => {
       inventory: canInventory
         ? rawPayload.availability.inventory
         : { live: false, rows: 0, reason: "insufficient permission: inventory:read" },
+      service: canService
+        ? rawPayload.availability.service
+        : { live: false, reason: "insufficient permission: service-cases:read" },
       employee: canWorkers
         ? rawPayload.availability.employee
         : { live: false, workers: 0, attendanceRows: 0, reason: "insufficient permission: workers:read" },
+      lim: canProduction
+        ? rawPayload.availability.lim
+        : { live: false, reason: "insufficient permission: production-orders:read" },
       production: canProduction
         ? rawPayload.availability.production
         : { live: false, rows: 0, reason: "insufficient permission: production-orders:read" },
