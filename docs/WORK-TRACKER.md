@@ -1,13 +1,10 @@
 # Hookka ERP — Work Tracker
 
-<<<<<<< HEAD
 > **Last verified: 2026-09-22** — branch `fix/delivery-tab-switch-pagination` added below (open, its entry is the newest). Previously: branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
-=======
 > **Last verified: 2026-09-22** — branch `feat/po-supplier-searchable-select` added below (open, pushed, no PR). NOTE: the 2026-09-22 Houzs entry below still carries committed merge-conflict markers (`<<<<<<< HEAD` … `>>>>>>> 85e58b40`) on `main`; left for its owner to resolve.
 > **Last verified: 2026-09-22** — branch `feat/service-dashboard-root-cause-graph` added below (stacked on the staging sync PR).
 > **Last verified: 2026-09-22** — branch `fix/service-dashboard-other-catch-all` added below (open, pushed, no PR).
 > **Last verified: 2026-09-22** — branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
->>>>>>> origin/main
 > **Last verified: 2026-08-14** — branch `fix/on-time-delivery-and-decisions` added below (open, not merged, its entry is the newest; its bug ids were renumbered 130-133 → 140-143 because `feat/leave-entitlement` claimed 130-133 and merged to `main` first). Previously: branch `feat/leave-entitlement` (MERGED as #326). Previously: branch `feat/job-card-completed-at` added below (open, not merged). Previously: branch `fix/security-posture` added below (open, not merged). Previously: PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
 > **Last verified: 2026-08-14** — branch `feat/pcb-calculation` added below (open, not merged, its entry is the newest). Previously: branch `feat/job-card-completed-at` added below (open, not merged). Previously: branch `fix/security-posture` added below (open, not merged). Previously: PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
 > **Last verified: 2026-08-14** — restamped on branch `fix/money-input-parsing` (its entry is the newest below, not yet deployed). PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
@@ -22,7 +19,6 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
-<<<<<<< HEAD
 ## 2026-09-22 — 🔵 Delivery page: tab switch "stuck" + per-status pagination (branch `fix/delivery-tab-switch-pagination`)
 
 Owner ask (screenshot of /delivery on Pending Delivery, 2026-09-22): (1) "when on pending
@@ -42,7 +38,9 @@ for here instead of loading 335 or 481 stuff every time I press".
   the browse page, which no longer holds delivered rows on other tabs.
 - [x] tests + `tsc -p tsconfig.app.json` (exit 0); docs restamped (CODEBASE-MAP delivery index, modules/delivery.md, BUG-HISTORY).
 - [ ] Bug fix → `main`. Live tab-switch timing on prod is UNMEASURED (dev server needs login).
-=======
+
+---
+
 ## 2026-09-22 晚 — ✅ Payment Vouchers「AP Payment」并入（#465 已上线已验）（owner「Payment voucher 没有包含ap payment?」→ 贴 Houzs 截图「最好是这样」）
 
 **漏项承认**：Houzs 采纳 Phase 1 只把 Expense Payment 改名+装梯子，「ap payment 和 payment voucher 一起」没做——
@@ -94,7 +92,6 @@ Test added in `tests/service-issue-stats.test.mjs` (14/14), `tsc -p tsconfig.app
 target `main`. Docs: `CODEBASE-MAP.md` ServiceView row restamped.
 
 ---
->>>>>>> origin/main
 
 ## 2026-09-22 — 🔵 PO list: search finds a PO by the raw material bought on it (branch `feat/po-search-line-items`)
 
