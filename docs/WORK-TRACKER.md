@@ -15,6 +15,30 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
+## 2026-09-22 晚 — 🔵 Payment Vouchers「AP Payment」并入（owner「Payment voucher 没有包含ap payment?」→ 贴 Houzs 截图「最好是这样」）
+
+**漏项承认**：Houzs 采纳 Phase 1 只把 Expense Payment 改名+装梯子，「ap payment 和 payment voucher 一起」没做——
+付 PI 仍在 /invoices/supplier-payments、付 other creditor bill 仍在 Other Creditor Payments tab，两者都没审批梯子。
+
+**做法（对照截图：New AP Payment / New Payment Voucher 两按钮 + ALL/DRAFT/PREPARED/CHECKED/APPROVED/ADVANCE OPEN/CANCELLED 芯片）**：
+- 后端 `pv_kind='AP'` 凭证：`party_kind` SUPPLIER（PI + 可选 `advance_sen` 预付）| OTHER（other creditor bills），勾的单在新表
+  `payment_voucher_allocs`（self-apply `ensurePvApColumns`，记录 0235/0216）；同一条梯子 Draft→Prepared→Checked→Approved。
+- **Approve / Post now 那一下由付款页原有引擎写结算单**：抽出 `buildSupplierPaymentCreate`（supplier-payments.ts，POST / 也改用它——
+  行为不变的重构）与 `buildOtherPartyPaymentCreate`（accounting.ts），`paymentNo = pvNo`——账龄/对账/GL/Cash Position 看到的就是一张普通付款；
+  凭证本身不写分录。取消 = 结算单自己的 lifecycle core（`buildSupplierPaymentLifecycle` 导出 / `buildOtherPartyPaymentLifecycle`），
+  从 Supplier Payment 页作废的也会在 PV 清单读成 CANCELLED（清单 JOIN 结算单的 document_lifecycle）。已过账 AP 凭证不给就地改（Houzs：cancel 重开）。
+- `GET /payment-vouchers/open-bills`：该债主未付单，**扣掉别的未过账凭证已勾金额**（Houzs「已被别的未过账 voucher 勾走的会扣掉」），
+  编辑中的凭证自身除外；外币 PI 只显示不给勾（付款日汇率在 Supplier Payment 页）；预付只限 supplier。
+- UI：两按钮、七芯片带计数、AP 表单（Supplier/Other 切换 + SearchableSelect 债主 + 未付单勾选/部分金额 + 预付 + Total）、
+  行 AP/PV 标签、展开显示勾的单、ADVANCE OPEN 芯片=已过账 supplier AP 凭证预付未 knock off、打印「Bills settled」直接用勾单、
+  AP Invoices 每行 `pay` 深链 `?pay=<PI|AP>:<id>:<partyId>` 直开表单并勾满该单。
+- 守卫 `tests/pv-ap-payment.test.mjs` 9 断言（两个 builder 各恰好 2 个调用点、AP 不走 pvPostingStatements、reservation 只算未过账、
+  lifecycle 顺序、restate 拒、schema fixture）；money-input 守卫登记 `if (apMoneyError)` 闸 + `apSen` 预算；全套 4706 绿。
+- 顺手：docs/WORK-TRACKER.md 顶部残留的 `<<<<<<< HEAD` 冲突标记（上一轮 rebase 遗留，已在 main）清掉。
+
+**待 prod 验**：1 sen 级 AP 凭证全梯子（draft→check 铸号→approve 结算单出现于 Supplier Payment 页且 PI paid 变动→void 回滚）。
+
+---
 ## 2026-09-22 — 🔵 PO list: search finds a PO by the raw material bought on it (branch `feat/po-search-line-items`)
 
 Staff ask (screenshots, 2026-09-22): "search a raw material item and see which Purchase
