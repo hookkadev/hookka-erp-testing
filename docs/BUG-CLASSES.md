@@ -1,5 +1,8 @@
 # Recurring bug classes — the index that makes P5 executable
 
+> **Last verified: 2026-09-22** — restamped on branch `fix/scan-queue-client-driven`, which
+> **adds C25 — long work handed to `ctx.waitUntil`** (BUG-2026-09-22-178). Previously:
+>
 > **Last verified: 2026-09-11** — restamped on branch `fix/po-list-cache-key-collision`,
 > which **adds C22 — a cache key coarser than the handler it names** (BUG-2026-09-11-180:
 > the Production Overview served another page's job-card-less payload and rendered its
@@ -1667,4 +1670,33 @@ know the selection, read it through a ref or the row itself.
 | 3 | the other 16 `onSelectionChange=` pages | none rebuilds `columns` from selection (checked 2026-09-22) | ⬜ no test forbids the next one; the grid-side guard now makes it inert |
 
 Test: `tests/datagrid-selection-emit.test.mjs`.
+
+## C25 — long work handed to `ctx.waitUntil`, which is cancelled 30 s after the response
+
+**Shape.** A handler returns fast and hands the real work to `c.executionCtx.waitUntil(...)`,
+with a comment saying the runtime "keeps the worker alive until the promise settles". It
+keeps it alive for **30 seconds** (Cloudflare docs, shared across all waitUntil calls of the
+request), then cancels. Anything that takes longer — an AI call, a big import, a fan-out of
+fetches — dies mid-flight with no exception in our code, so nothing marks the row failed. Any
+"stuck row" recovery then defines the user-visible delay (STUCK_MS = 5 min for the scan
+queue), and if the recovery re-kicks under waitUntil, the cycle repeats until an attempt cap.
+
+**Why it keeps happening.** The doc line is easy to misremember as "no limit", the failure
+leaves no stack trace (the warning is only in Workers Logs), and a page that happens to finish
+under 30 s makes the design look like it works.
+
+**The rule.** `waitUntil` is for work that finishes in seconds (cache write, an email, a
+version bump). Work that can take longer than that is driven by a request the client holds
+open, or by Cloudflare Queues / a cron with its own 15-min budget. Any recovery sweeper only
+re-queues; it never re-kicks under waitUntil.
+
+**Instances**
+
+| # | where | state |
+|---|---|---|
+| 1 | `scan-queue.ts` `processBatch` under waitUntil (upload, retry, both sweepers) | ✅ 2026-09-22 (BUG-2026-09-22-178) — browser-driven `/work`, all kicks removed, guarded |
+| 2 | `fireCustomerNoticeBestEffort` (delivery-orders.ts) — one email under waitUntil | ⬜ fits in 30 s; fine as long as it stays one call |
+| 3 | every other `waitUntil(` in `src/api` | ⬜ not audited for duration; grep and check the slowest |
+
+Test: `tests/scan-queue-client-driven.test.mjs` (no `waitUntil(` in scan-queue.ts).
 

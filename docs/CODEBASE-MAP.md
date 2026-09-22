@@ -40,6 +40,8 @@
 > section gains the `attendance_records` warning — that table carries no production or
 > efficiency data and never has (BUG-2026-08-13-103).
 >
+> **Last verified: 2026-09-22 on branch `fix/scan-queue-client-driven`** — the Scan-queue rows only (`scan-queue.ts` row, its route table, its Internals paragraph): re-anchored after BUG-2026-09-22-178 made the OCR browser-driven; the machine gate `check-codebase-map.mjs` exits 0 (its only errors were these rows); its 17 advisories about unmapped `src/pages/m/**` and production-component files predate this branch and are unchanged.
+
 > **Last verified: 2026-09-22** (dashboard-prototype.tsx / dashboard-shared.tsx / dashboard-shared-lib.ts rows: Day/Month/YTD nav redesign) / 2026-09-21 (URL navigation state) / 2026-08-14 — re-checked mechanically by `node scripts/check-codebase-map.mjs`,
 > which validates that every cited path resolves, every `file:LINE` is in range, and every symbol
 > named beside a line ref is really defined near it. Exit 0 on this revision. Coverage gap is now
@@ -2007,7 +2009,7 @@ handler with no `userId`, no `userRole` and no orgId on the context.
 
 | Frontend page | API route | Primary tables | Tests |
 |---|---|---|---|
-| `src/components/scan-po-modal.tsx` — customer-PO scan wizard, in-modal queue polling (3439) · `src/lib/so-original.ts` — keeps the customer's original PO on the SO for EVERY create path (94); extracted out of the modal because the in-modal version silently saved nothing for a month, see BUG-2026-08-19-155 | `src/api/routes/scan-queue.ts` — async OCR queue for PO + supplier scans (1541); mounted `src/api/worker.ts:1406` | `scan_queue` (self-created, `src/api/routes/scan-queue.ts:108`) | `tests/ocr-accuracy-sampleid.test.mjs` |
+| `src/components/scan-po-modal.tsx` — customer-PO scan wizard, in-modal queue polling (3439) · `src/lib/so-original.ts` — keeps the customer's original PO on the SO for EVERY create path (94); extracted out of the modal because the in-modal version silently saved nothing for a month, see BUG-2026-08-19-155 | `src/api/routes/scan-queue.ts` — async OCR queue for PO + supplier scans (1598); **browser-driven since 2026-09-22** (BUG-2026-09-22-178): mounted `src/api/worker.ts:1414`; the modal holds `POST /batch/:id/work` requests open, one row per request — waitUntil is cancelled 30 s after the response and must never drive a Sonnet call; driver = `src/lib/scan-queue-client.ts` `createScanQueueDriver` | `scan_queue` (self-created, `src/api/routes/scan-queue.ts:121`) | `tests/ocr-accuracy-sampleid.test.mjs` |
 | `src/components/scan-supplier-modal.tsx` — supplier PI/GRN scan wizard (5876) · `src/lib/scan-queue-client.ts` — consume + source-doc upload helpers (143) — the source-doc upload takes a local File OR a queue row, because a direct upload has no queue row (BUG-2026-08-19-156) | `src/api/routes/scan-po.ts` — customer-PO OCR + few-shot samples + per-customer prompt rules (1075); mounted `src/api/worker.ts:1396` | `po_scan_samples` (**no org column** — `migrations/0026_po_scan_samples.sql`) / `customers.ocrPromptRules` | `tests/ocr-accuracy-customer-grouping.test.mjs` |
 | `src/pages/do-scan.tsx` — PUBLIC driver scan page, routed `/d/:token` (`src/router.tsx:105`) (1031) | `src/api/routes/public-do-qr.ts` — **PUBLIC** DO / packing-list dispatch+deliver QR flow (1019); mounted `src/api/worker.ts:1210` | `delivery_orders` / `delivery_order_items` / `packing_lists` / `production_orders` / `sales_orders` / `job_cards` (+ everything the DO cascade writes) | `tests/do-qr-public.test.mjs` / `tests/security-public-endpoints.test.mjs` / `tests/delivery-incomplete-dual-key.test.mjs` |
 | `src/components/assistant/AssistantSlideOver.tsx` — chat panel (1318) · `src/components/assistant/FloatingChatButton.tsx` | `src/api/routes/assistant.ts` — Hookka AI SSE chat + tool loop (995); mounted `src/api/worker.ts:1441` (history router first at `src/api/worker.ts:1440`) | `audit_events` (one row per tool call) + whatever `src/api/lib/assistant-tools.ts` reads (60 tools incl. an arbitrary-SELECT tool) | `tests/assistant-agent-command-prompt.test.mjs` |
@@ -2036,25 +2038,25 @@ two roles. "Org-scoped" means the SQL carries an `org_id` / `orgId` bind.
 | Method + path | Ref | Posture | Org scope |
 |---|---|---|---|
 | POST `/api/scan-queue/upload` | `src/api/routes/scan-queue.ts:698` | `purchase-orders:create` | writes `org_id` from `getOrgId` |
-| GET `/api/scan-queue/batch/:batchId` | `src/api/routes/scan-queue.ts:876` | `purchase-orders:create` | `(org_id = ? OR org_id IS NULL)` |
+| POST `/api/scan-queue/batch/:batchId/work` | `src/api/routes/scan-queue.ts:886` | `purchase-orders:create` | org-scoped existence check, then claims ONE `queued` row and processes it in-request; `busy` past 6 `processing` rows |
+| GET `/api/scan-queue/batch/:batchId` | `src/api/routes/scan-queue.ts:943` | `purchase-orders:create` | `(org_id = ? OR org_id IS NULL)` |
 | GET `/api/scan-queue/pending` | `src/api/routes/scan-queue.ts:956` | `purchase-orders:create` | org + `created_by = <caller>` |
 | GET `/api/scan-queue/:id` | `src/api/routes/scan-queue.ts:1081` | `purchase-orders:create` | org-filtered |
 | GET `/api/scan-queue/:id/bytes` | `src/api/routes/scan-queue.ts:1141` | `purchase-orders:create` | org-filtered; returns raw PDF/image bytes |
 | POST `/api/scan-queue/:id/retry` | `src/api/routes/scan-queue.ts:1201` | `purchase-orders:create` | org-filtered SELECT, then an id-only UPDATE (transitively safe) |
 | POST `/api/scan-queue/:id/consume` | `src/api/routes/scan-queue.ts:1273` | `purchase-orders:create` | org-filtered |
 
-The sweeper is **not** in this router: `sweepStuckScans` (`src/api/routes/scan-queue.ts:1414`)
+Sweepers (`sweepStuckBatch` per poll, `sweepStuckScans` cron) only **re-queue** stuck rows; the next open modal drives them. The cron sweeper is **not** in this router: `sweepStuckScans` (`src/api/routes/scan-queue.ts:1481`)
 is exported and mounted by hand as `POST /api/internal/scan-queue-sweep`
-(`src/api/worker.ts:790`), registered **before** `authMiddleware` and gated by a
+(`src/api/worker.ts:791`), registered **before** `authMiddleware` and gated by a
 constant-time `CRON_SECRET` compare that 503s when the secret is unset or under 16 chars
 (`src/api/worker.ts:791-798`). Its SQL is deliberately org-blind — it is a system sweep.
 
-Internals: `ensureScanQueueTable` (`src/api/routes/scan-queue.ts:101`) ·
-`hydrateRow` (`src/api/routes/scan-queue.ts:235`) ·
-`processBatch` (`src/api/routes/scan-queue.ts:317`) ·
-`processOneAtATime` (`src/api/routes/scan-queue.ts:328`) ·
-`sweepStuckBatch` (`src/api/routes/scan-queue.ts:1495`, the real recovery path — Pages has
-no cron, so the poll endpoints self-heal).
+Internals: `ensureScanQueueTable` (`src/api/routes/scan-queue.ts:114`) ·
+`hydrateRow` (`src/api/routes/scan-queue.ts:248`) ·
+`processOneRow` (`src/api/routes/scan-queue.ts:334`, one claim + extract per `/work` request; returns processed | skipped | drained | error) ·
+`sweepStuckBatch` (`src/api/routes/scan-queue.ts:1557`, the per-poll recovery path — Pages has
+no cron, so the poll endpoints self-heal; re-queues ONLY, the open modal drives the row).
 
 ### `src/api/routes/scan-po.ts` — customer-PO OCR
 
