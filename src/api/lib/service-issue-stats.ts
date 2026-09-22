@@ -9,6 +9,10 @@
 //    "share of cases", not share of causes.
 //  - A case with no root cause / unit / prevention recorded lands in the
 //    NONE row ("Not yet analysed" etc.) — always present, even at 0.
+//  - ROOT CAUSE = category + the detail recorded under it on the case's
+//    "Root Cause & Prevention" panel (department, supplier, 3PL, sub-reason…).
+//    "Issues by category" tallies the category alone; "Root cause" tallies the
+//    pair, so "Transport / 3PL — GDEX" and "Transport / 3PL — J&T" are two rows.
 //  - "Other" is a catch-all, not an issue: it sorts below every real cause
 //    (just above NONE) and never enters "Top 3 causes" (owner 2026-09-22:
 //    the top issue on the dashboard read "Other · 2").
@@ -19,14 +23,20 @@
 
 export const NONE_KEY = "__NONE__";
 export const OTHER_KEY = "OTHER";
+/** Separates category from detail in a root-cause tally key. */
+export const RC_SEP = "::";
 /** Rows that never rank as a real issue: unanalysed first-from-bottom, then the Other catch-all. */
-const catchAllRank = (k: string) => (k === NONE_KEY ? 2 : k === OTHER_KEY ? 1 : 0);
+const catchAllRank = (k: string) => (k === NONE_KEY ? 2 : k.split(RC_SEP)[0] === OTHER_KEY ? 1 : 0);
+
+export type RootCauseEntry = { category: string; detail: string };
 
 export type IssueCase = {
   status: string;
   createdDate: string; // YYYY-MM-DD
   closedDate: string | null;
   causes?: string[] | null;
+  /** category + detail per root-cause block; absent on a feed cached before it shipped. */
+  rootCauses?: RootCauseEntry[] | null;
   unit?: string | null;
   prevention?: string | null;
   products?: string[] | null;
@@ -65,6 +75,22 @@ export function daysToClose(c: IssueCase): number | null {
   const d = Math.round((Date.parse(c.closedDate) - Date.parse(c.createdDate)) / DAY_MS);
   return Number.isFinite(d) ? Math.max(0, d) : null;
 }
+
+/** Root-cause keys ("CATEGORY::detail"), one per distinct block; NONE when it has none.
+ *  Falls back to bare categories on a feed cached before `rootCauses` shipped. */
+export const rootCauseKeys = (c: IssueCase): string[] => {
+  const entries = c.rootCauses?.length
+    ? c.rootCauses
+    : (c.causes ?? []).map((category) => ({ category, detail: "" }));
+  return entries.length ? [...new Set(entries.map((e) => `${e.category}${RC_SEP}${e.detail}`))] : [NONE_KEY];
+};
+export const rootCauseLabel = (k: string): string => {
+  if (k === NONE_KEY) return "Not yet analysed";
+  const i = k.indexOf(RC_SEP);
+  const cat = i < 0 ? k : k.slice(0, i);
+  const detail = i < 0 ? "" : k.slice(i + RC_SEP.length);
+  return `${causeLabel(cat)} — ${detail || "no detail recorded"}`;
+};
 
 /** Keys a case counts under for the cause dimension (NONE when it has none). */
 export const causeKeys = (c: IssueCase): string[] => (c.causes?.length ? [...new Set(c.causes)] : [NONE_KEY]);
@@ -105,6 +131,7 @@ export const topCauses = (rows: TallyRow[], n = 3): TallyRow[] =>
   rows.filter((r) => catchAllRank(r.key) === 0 && r.count > 0).slice(0, n);
 
 export const byCause = (cases: IssueCase[]) => tally(cases, causeKeys, causeLabel);
+export const byRootCause = (cases: IssueCase[]) => tally(cases, rootCauseKeys, rootCauseLabel);
 export const byUnit = (cases: IssueCase[]) => tally(cases, (c) => [c.unit || NONE_KEY], unitLabel);
 export const byPrevention = (cases: IssueCase[]) => tally(cases, (c) => [c.prevention || NONE_KEY], preventionLabel);
 
@@ -203,18 +230,54 @@ const parseJson = (raw: unknown): unknown => {
   try { return JSON.parse(raw); } catch { return null; }
 };
 
-/** Distinct root-cause categories of a case: the multi `rootcauses` JSON array, else the legacy single column. */
-export function parseCauses(rootcauses: unknown, legacyCategory: unknown): string[] {
-  const arr = parseJson(rootcauses);
-  const out = new Set<string>();
-  if (Array.isArray(arr)) {
-    for (const e of arr) {
-      const c = e && typeof e === "object" ? (e as { category?: unknown }).category : null;
-      if (typeof c === "string" && c.trim()) out.add(c.trim());
+// The one field per category that names the root cause, in the order the
+// detail form writes them (detail.tsx CategoryDetailsForm): dept for
+// PRODUCTION / PROCESS / PICKING / DESIGN, supplier for MATERIAL, 3PL or driver
+// for TRANSPORT, salesperson for SALES, SOP / suggested fix, and the free-text
+// sub-reason (CUSTOMER, and the fallback for every category).
+const DETAIL_KEYS = [
+  "departmentName", "designDeptName", "supplierName", "threePlCompany", "driverName",
+  "salesPerson", "sopName", "suggestedFix", "notes",
+];
+const DETAIL_MAX = 60;
+
+/** Short label for a root-cause block's structured details ('' when nothing usable was recorded). */
+export function rootCauseDetail(details: unknown): string {
+  const d = parseJson(details);
+  if (!d || typeof d !== "object" || Array.isArray(d)) return "";
+  for (const k of DETAIL_KEYS) {
+    const v = (d as Record<string, unknown>)[k];
+    if (typeof v === "string" && v.trim()) {
+      const t = v.trim().replace(/\s+/g, " ");
+      return t.length > DETAIL_MAX ? t.slice(0, DETAIL_MAX - 1) + "…" : t;
     }
   }
-  if (!out.size && typeof legacyCategory === "string" && legacyCategory.trim()) out.add(legacyCategory.trim());
-  return [...out];
+  return "";
+}
+
+/** Root-cause blocks of a case (category + detail label): the multi `rootcauses` JSON array, else the legacy single columns. */
+export function parseRootCauses(rootcauses: unknown, legacyCategory: unknown, legacyDetails?: unknown): RootCauseEntry[] {
+  const arr = parseJson(rootcauses);
+  const out: RootCauseEntry[] = [];
+  const seen = new Set<string>();
+  const push = (category: unknown, details: unknown) => {
+    if (typeof category !== "string" || !category.trim()) return;
+    const e = { category: category.trim(), detail: rootCauseDetail(details) };
+    const k = `${e.category}${RC_SEP}${e.detail}`;
+    if (!seen.has(k)) { seen.add(k); out.push(e); }
+  };
+  if (Array.isArray(arr)) {
+    for (const e of arr) {
+      if (e && typeof e === "object") push((e as { category?: unknown }).category, (e as { details?: unknown }).details);
+    }
+  }
+  if (!out.length) push(legacyCategory, legacyDetails);
+  return out;
+}
+
+/** Distinct root-cause categories of a case: the multi `rootcauses` JSON array, else the legacy single column. */
+export function parseCauses(rootcauses: unknown, legacyCategory: unknown): string[] {
+  return [...new Set(parseRootCauses(rootcauses, legacyCategory).map((e) => e.category))];
 }
 
 /** Product labels ("CODE — name") from the affected-products JSON ({productId, code, name} entries; bare strings tolerated). */

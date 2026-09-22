@@ -1,6 +1,7 @@
 # Hookka ERP — Work Tracker
 
 > **Last verified: 2026-09-22** — branch `feat/po-supplier-searchable-select` added below (open, pushed, no PR). NOTE: the 2026-09-22 Houzs entry below still carries committed merge-conflict markers (`<<<<<<< HEAD` … `>>>>>>> 85e58b40`) on `main`; left for its owner to resolve.
+> **Last verified: 2026-09-22** — branch `feat/service-dashboard-root-cause-graph` added below (stacked on the staging sync PR).
 > **Last verified: 2026-09-22** — branch `fix/service-dashboard-other-catch-all` added below (open, pushed, no PR).
 > **Last verified: 2026-09-22** — branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
 > **Last verified: 2026-08-14** — branch `fix/on-time-delivery-and-decisions` added below (open, not merged, its entry is the newest; its bug ids were renumbered 130-133 → 140-143 because `feat/leave-entitlement` claimed 130-133 and merged to `main` first). Previously: branch `feat/leave-entitlement` (MERGED as #326). Previously: branch `feat/job-card-completed-at` added below (open, not merged). Previously: branch `fix/security-posture` added below (open, not merged). Previously: PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
@@ -16,6 +17,18 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
 ---
+
+## 2026-09-22 — 🔵 Service dashboard: "Issues by category" + new "Root cause" graph (branch `feat/service-dashboard-root-cause-graph`, stacked on `chore/sync-staging-from-main`, PR → staging)
+
+Ask (owner, screenshots): "first one should be called issues by category, because root cause is inside
+the service case where it labels Root Cause & Prevention — implement a new graph for the root cause".
+The first panel tallies the same field as the list page's Category column, so it is now titled
+**Issues by category** (and "Top 3 categories"). New **Root cause** panel = category + the detail the
+operator recorded under it on the case (department / supplier / 3PL / driver / salesperson / SOP /
+sub-reason; first named field wins, 60 chars). Feed slice adds `rootCauses[{category,detail}]` and
+reads `root_cause_details`; `byRootCause` / `rootCauseDetail` / `parseRootCauses` in
+`service-issue-stats.ts` with tests (17/17). Desktop `ServiceIssuesPanel` + `/m` `ServiceTab`.
+`tsc -p tsconfig.app.json` clean. Not browser-verified. Prod UNMEASURED.
 
 ## 2026-09-22 — 🔵 Service dashboard: "Other" no longer headlines Top issues (branch `fix/service-dashboard-other-catch-all`, pushed, no PR yet)
 
