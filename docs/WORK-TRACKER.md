@@ -74,6 +74,13 @@ for here instead of loading 335 or 481 stuff every time I press".
 
 ---
 
+## 2026-09-22 晚 — ✅ owner 四问（AP Invoices 默认 ALL / 测试单是什么 / 打印带附件? / JV 看不了明细）→「做,全部」（#484 已上线已验）
+
+- ① AP Invoices 默认 ALL（select 里 All 排第一）。② 清单里 HPV-2609-044/045/046/047/049 = 我 prod 冒烟的 1 sen 作废凭证 → 已按 owner 令用 lifecycle delete 藏起（Audit Log 留底）；**顺手修**：未过账的作废草稿按 delete 回「Already cancelled」永远走不掉 → 未过账 delete 现写 document_lifecycle DELETED（unvoid 回 ACTIVE），守卫加进 tests/pv-approval.test.mjs；作废凭证不再显示草稿时的退回理由。③ 打印：print=只印凭证；**print + files**=凭证+全部附件合订（有附件才出现）；批量 Print/PDF 目前不带附件。④ **JV 明细**：双击行（或 ⋮ › View detail）弹窗——逐行科目/描述/借/贷 + 合计（不平衡标红）+ print/edit+post(草稿)/void/unvoid/duplicate；单击仍是勾选。守卫 tests/jv-detail-view.test.mjs。**prod 验**：JE-2609-0001 双击弹出 780-0010 DR 12,500 / 310-0010 CR 12,500；5 张测试单已从清单消失（94 张）。
+- owner 顺问「upload bill 支持读多页?upload 多个文件看多个 PV?」→ **量过代码**：扫描引擎整份 PDF 送模型，一张账单跨几页读成一张（引擎提示词明写）；Scan Bills 一次 ≤20 个文件 = 每文件一张 draft（现在还自动附档）。**缺口**：一个 PDF 里装几张账单 → 只取第一张成草稿，其余只提示 extraDocs（scan-finance.ts 单文件单单契约）。待 owner 裁要不要「一个 PDF 几张账单 → 几张草稿（附件同一份 PDF）」。
+
+---
+
 ## 2026-09-22 晚 — ✅ finance@hookka.com 权限量测（owner「我要确定 finance@hookka.com 的 user 有什么权限？」；#482 探针已上线）
 
 FINANCE 是 0045 种进表的角色，`GET /api/auth/role-permissions/:role` 原本只答 code 角色 → 表角色只能登录进去才知道。#482：探针对非 code 角色跑**跟闸门同一条 join**（rbac.ts loadRolePermissions：roles.name = users.role），回 `source`（role_permissions / no-rows-fallback / join-failed-fallback），零行时照闸门口径报 fallback 而不是空集。只读、users:read 闸。守卫 tests/role-permissions-table-read.test.mjs（两边 join 文本同锚）。
