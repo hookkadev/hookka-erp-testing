@@ -9,12 +9,18 @@
 //    "share of cases", not share of causes.
 //  - A case with no root cause / unit / prevention recorded lands in the
 //    NONE row ("Not yet analysed" etc.) — always present, even at 0.
+//  - "Other" is a catch-all, not an issue: it sorts below every real cause
+//    (just above NONE) and never enters "Top 3 causes" (owner 2026-09-22:
+//    the top issue on the dashboard read "Other · 2").
 //  - Days to close = whole calendar days from created date to closed date,
 //    averaged over CLOSED cases that have a closed date.
 //  - Open = status OPEN or IN_PROGRESS.
 // ---------------------------------------------------------------------------
 
 export const NONE_KEY = "__NONE__";
+export const OTHER_KEY = "OTHER";
+/** Rows that never rank as a real issue: unanalysed first-from-bottom, then the Other catch-all. */
+const catchAllRank = (k: string) => (k === NONE_KEY ? 2 : k === OTHER_KEY ? 1 : 0);
 
 export type IssueCase = {
   status: string;
@@ -91,8 +97,12 @@ export function tally(
     avgCloseDays: a.n ? Math.round((a.sum / a.n) * 10) / 10 : null,
   }));
   return rows.sort((x, y) =>
-    x.key === NONE_KEY ? 1 : y.key === NONE_KEY ? -1 : y.count - x.count || x.label.localeCompare(y.label));
+    catchAllRank(x.key) - catchAllRank(y.key) || y.count - x.count || x.label.localeCompare(y.label));
 }
+
+/** The real causes to chart as "Top N": catch-all rows (Other / unanalysed) and zero rows excluded. */
+export const topCauses = (rows: TallyRow[], n = 3): TallyRow[] =>
+  rows.filter((r) => catchAllRank(r.key) === 0 && r.count > 0).slice(0, n);
 
 export const byCause = (cases: IssueCase[]) => tally(cases, causeKeys, causeLabel);
 export const byUnit = (cases: IssueCase[]) => tally(cases, (c) => [c.unit || NONE_KEY], unitLabel);
