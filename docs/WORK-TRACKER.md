@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-22** — branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
 > **Last verified: 2026-08-14** — branch `fix/on-time-delivery-and-decisions` added below (open, not merged, its entry is the newest; its bug ids were renumbered 130-133 → 140-143 because `feat/leave-entitlement` claimed 130-133 and merged to `main` first). Previously: branch `feat/leave-entitlement` (MERGED as #326). Previously: branch `feat/job-card-completed-at` added below (open, not merged). Previously: branch `fix/security-posture` added below (open, not merged). Previously: PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
 > **Last verified: 2026-08-14** — branch `feat/pcb-calculation` added below (open, not merged, its entry is the newest). Previously: branch `feat/job-card-completed-at` added below (open, not merged). Previously: branch `fix/security-posture` added below (open, not merged). Previously: PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
 > **Last verified: 2026-08-14** — restamped on branch `fix/money-input-parsing` (its entry is the newest below, not yet deployed). PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
@@ -38,6 +39,55 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 **待 prod 验**：1 sen 级 AP 凭证全梯子（draft→check 铸号→approve 结算单出现于 Supplier Payment 页且 PI paid 变动→void 回滚）。
 
 ---
+## 2026-09-22 — 🔵 PO list: search finds a PO by the raw material bought on it (branch `feat/po-search-line-items`)
+
+Staff ask (screenshots, 2026-09-22): "search a raw material item and see which Purchase
+Order(s) it was purchased under — PO no, supplier, date, qty, status". The PO grid's
+global search only saw column values; `items` stringified to `[object Object]`.
+
+- [x] `src/lib/po-items-search.ts` — `poItemsSearchText(items)` flattens internal code /
+  supplier SKU (dual-keyed) / description per line.
+- [x] `src/pages/procurement/index.tsx` — each row carries `itemsSearchText`; DataGrid gets
+  `alwaysSearchKeys={["itemsSearchText"]}`. Typing a search already flips the fetch to the
+  whole dataset (search-safe rule), so every PO is covered, not just the current page.
+- [x] `tests/po-items-search.test.mjs`; `tsc -p tsconfig.app.json` exit 0.
+- [ ] PR → merge → verify live on prod (search `ASC1010F` on /procurement).
+
+## 2026-09-22 — 🔵 Dashboard: Day / Month / YTD period nav redesign (branch `feat/dashboard-date-nav-redesign`, pushed, PR #461 → staging)
+
+Ask (owner): expand the dashboard's Monthly/YTD toggle to Day/Month/YTD, each with its own
+arrow-stepping granularity, center label and click-to-pick popover. Same day as
+BUG-2026-09-22-002 (the Today/Yesterday preset fix, PR #458, merged to `main` first — this
+branch is cut from that tip).
+
+Built entirely on the EXISTING `Period` shape (`dashboard-shared-lib.ts`) — no new mode. Which
+of the three views a period reads as is DERIVED (`mode==="ytd"` → YTD; a range preset or a set
+`day` → Day; else → Month), so every existing `Period` consumer (`inFocus`, `inPeriod`,
+`previousPeriod`, the URL round-trip, ~40 `periodLabel` call sites across the dashboard views)
+needed zero changes. Day steps ±1 calendar day capped at today; Month/YTD keep the unchanged,
+already-tested `stepPeriod`. New: `stepDay`, `yearsWithData` (both `dashboard-shared-lib.ts`),
+`MonthGrid` (`dashboard-shared.tsx`, a year-stepped 12-month picker for the Month view's
+popover — months with no data disabled, same bound the stepper already uses). Mirrored on both
+surfaces that share this logic: the desktop `PeriodPicker` and the `/m` `PeriodChip` sheet.
+Same branch: the experimental-dashboard header subtitle now warns "Data may be inaccurate. Use
+with caution" instead of claiming "Live where noted".
+
+`tests/dashboard-period.test.mjs`: 13/13 pass (7 new). Full `npm test`: 4,700/4,700 pass, 0
+fail. `tsc -p tsconfig.app.json --noEmit`: exit 0. **Not browser-verified** — dev server needs a
+production login this session does not have. **`staging` is currently ~58 commits behind
+`main`**, so PR #461's commit list is noisy (every commit `main` has that `staging` doesn't,
+plus mine) — not a defect in this branch. Docs restamped: `CODEBASE-MAP.md`
+(dashboard-prototype.tsx / dashboard-shared.tsx / dashboard-shared-lib.ts rows).
+
+## 2026-09-22 — ✅ PO create: searchable supplier picker (branch `feat/po-supplier-searchable-select`, MERGED #459)
+
+Ask (owner, screenshot of New Purchase Order): "the supplier dropdown change to a searchable
+dropdown for more friendly usage". Done in `src/pages/procurement/create.tsx` only — native
+`<select>` swapped for the existing `SearchableSelect` (type code or name; `allowClear` is the
+old "— Pick a supplier —" reset, still restores purchase company HOOKKA); onChange logic
+unchanged. `tsc -p tsconfig.app.json` clean. **Not browser-verified** (dev server needs login).
+Feature → target `staging`. Docs restamped: `CODEBASE-MAP.md` procurement row.
+
 ## 2026-09-22 — ✅ Houzs 财务模块对照采纳计划（owner「开工直接做到完」,五 phase 全部上线 #452-#456）
 
 **进度**:Phase 1 ②四层审批后端 = PR 1.1(`ensurePvApprovalCols` 8 列 self-apply+legacy 回填

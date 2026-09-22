@@ -34,6 +34,37 @@ Entries themselves stay newest-first.
 
 ---
 
+## BUG-2026-09-22-002 — dashboard "Today" / "Yesterday" presets could show a different day than the page's own "today" `ui-frontend` `dashboard` 🟢
+
+🟢 **Fixed** · owner-reported ("today and yesterday was wrong").
+
+**Root cause.** `periodPresets()` (`dashboard-shared-lib.ts`) pinned the "Today" and
+"Yesterday" quick-pick buttons to `latestDay` — the newest day the book has an actual sales
+row for — not the real clock. That anchor was added in `93c2b84c` (2026-09-21) to stop "Last
+7 Days" landing on an all-zero window when data had stopped days earlier, and got reused for
+Today/Yesterday too without separately reasoning about what those two labels mean. The SAME
+commit made the page's own default-open day (`resolvePeriod`) use the real clock — so a fresh
+page load and the "Today" button could point at two different actual dates. Whenever today's
+sales hadn't posted yet (a day still in progress — the common case, not an edge case), "Today"
+silently showed yesterday's figures and "Yesterday" showed the day before that.
+
+**Fix.** `periodPresets()` now takes `today` and uses it for Today/Yesterday, matching
+`resolvePeriod`'s default-open day; an empty day is a legitimate state, same as it already is
+on first load. "Last 7 Days" is untouched — still anchored to `latestDay`, since a relative
+multi-day window has no calendar identity of its own to preserve and genuinely does need to
+avoid landing on empty data. Both callers (`dashboard-shared.tsx` desktop picker, `/m`
+`PeriodChip.tsx`) now pass the real clock day.
+
+**Regression test.** `tests/dashboard-period.test.mjs` — "Today / Yesterday follow the real
+calendar day, even when the book's data lags behind it" and the sibling test locking Last 7
+Days to `latestDay` still. `node --test`: 10/10 pass. `tsc -p tsconfig.app.json --noEmit`:
+exit 0.
+
+**Not verified live.** No DB access and no staging login this session — whether `latestDay`
+is currently lagging behind real "today" in prod, and by how much, is **UNMEASURED**.
+
+---
+
 ## BUG-2026-09-22-001 — the /m dashboard crashed on first paint: the new period calendar drew a month that had not loaded `ui-frontend` `dashboard` 🟢
 
 🟢 **Fixed** · owner-reported from an iPhone on the PR #443 canary (`canary-443.hookka-erp-testing.pages.dev/m/dashboard`): error boundary, "Array length must be a positive integer of safe magnitude", stack in `dashboard-url-state-lib` / `DashboardScreen`. Never reached `main`; lived one commit (`be7c07bc`).

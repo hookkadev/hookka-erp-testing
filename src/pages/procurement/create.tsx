@@ -29,6 +29,7 @@ import { useToast } from "@/components/ui/toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { useCachedJson, invalidateCachePrefix } from "@/lib/cached-fetch";
 import { formatCurrency, formatRM } from "@/lib/utils";
 import {
@@ -637,11 +638,13 @@ function CreatePurchaseOrderPage() {
                     below (only materials offered by this supplier are shown).
                     The PO supplier header is still derived from line items
                     for the save payload; this field is the filter anchor. */}
-                <select
-                  className="w-full h-9 rounded-md border border-[#E2DDD8] bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#6B5C32]/20 focus:border-[#6B5C32]"
+                <SearchableSelect
+                  className="h-9"
                   value={selectedSupplierId}
-                  onChange={(e) => {
-                    const nextId = e.target.value;
+                  placeholder="— Pick a supplier —"
+                  allowClear
+                  options={activeSuppliers.map((s) => ({ value: s.id, label: `${s.code} - ${s.name}` }))}
+                  onChange={(nextId) => {
                     setSelectedSupplierId(nextId);
                     // Reset picker filters when supplier changes so the
                     // operator isn't stranded in a now-empty category.
@@ -656,13 +659,7 @@ function CreatePurchaseOrderPage() {
                       setPurchaseOrgCode("HOOKKA");
                     }
                   }}
-                  aria-label="Select supplier for this purchase order"
-                >
-                  <option value="">— Pick a supplier —</option>
-                  {activeSuppliers.map((s) => (
-                    <option key={s.id} value={s.id}>{s.code} - {s.name}</option>
-                  ))}
-                </select>
+                />
                 {/* Status hint below the dropdown */}
                 <div className="mt-1 text-xs min-h-[1.2em]">
                   {items.length > 0 && hasMixedSuppliers ? (

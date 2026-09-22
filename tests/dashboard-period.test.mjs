@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  stepPeriod, periodPresets, presetActive, calendarCells, shiftMonth,
+  stepPeriod, stepDay, yearsWithData, periodLabel, periodPresets, presetActive, calendarCells, shiftMonth,
 } from "../src/pages/dashboards/dashboard-shared-lib.ts";
 
 const months = ["2025-11", "2025-12", "2026-06", "2026-08", "2026-09"];
@@ -30,24 +30,37 @@ test("YTD steps by YEAR and lands on that year's newest month", () => {
   assert.equal(stepPeriod({ mode: "ytd", month: "2025-12" }, months, -1), null);
 });
 
-test("presets anchor to the newest day WITH DATA, not the clock or the month end", () => {
-  const p = periodPresets("2026-09-15", months);
+// Regression: Today/Yesterday used to anchor to the newest day WITH DATA,
+// same as Last 7 Days - so whenever today's sales hadn't posted yet, "Today"
+// silently showed yesterday's figures (and the page's own default-open day,
+// resolvePeriod's `today` param, disagreed with it). Fixed 2026-09-22.
+test("Today / Yesterday follow the real calendar day, even when the book's data lags behind it", () => {
+  const p = periodPresets("2026-09-15", months, "2026-09-17");
   assert.deepEqual(p.map((x) => x.label), ["Today", "Yesterday", "Last 7 Days"]);
-  assert.deepEqual(p[0].period, { mode: "monthly", month: "2026-09", day: "2026-09-15" });
-  assert.deepEqual(p[1].period, { mode: "monthly", month: "2026-09", day: "2026-09-14" });
-  assert.deepEqual(p[2].period, { mode: "range", month: "2026-09", from: "2026-09-09", to: "2026-09-15", label: "Last 7 Days" });
+  assert.deepEqual(p[0].period, { mode: "monthly", month: "2026-09", day: "2026-09-17" });
+  assert.deepEqual(p[1].period, { mode: "monthly", month: "2026-09", day: "2026-09-16" });
 });
 
-test("presets cross a month boundary, fall back to the newest month, and are empty with no data", () => {
-  const p = periodPresets("2026-09-02", months);
-  assert.equal(p[1].period.day, "2026-09-01");
-  assert.deepEqual([p[2].period.from, p[2].period.to, p[2].period.month], ["2026-08-27", "2026-09-02", "2026-08"]);
-  assert.equal(periodPresets("", months)[0].period.day, "2026-09-01");
-  assert.deepEqual(periodPresets("", []), []);
+test("Last 7 Days still anchors to the newest day WITH DATA, not the clock or the month end", () => {
+  // owner 2026-09-21: anchoring it to the end of the newest month instead
+  // selected Sep 24-30 when data stopped on Sep 15 - an all-zero window. A
+  // relative multi-day window has no calendar identity of its own to keep,
+  // unlike a single named day, so it stays anchored to real data.
+  const p = periodPresets("2026-09-15", months, "2026-09-17");
+  assert.deepEqual(p[2].period, { mode: "range", month: "2026-09", from: "2026-09-09", to: "2026-09-15", label: "Last 7 Days" });
+  const q = periodPresets("2026-09-02", months, "2026-09-02");
+  assert.deepEqual([q[2].period.from, q[2].period.to, q[2].period.month], ["2026-08-27", "2026-09-02", "2026-08"]);
+});
+
+test("presets with no sales at all: Today/Yesterday still follow the clock; truly nothing returns []", () => {
+  const p = periodPresets("", [], "2026-09-17");
+  assert.deepEqual(p.map((x) => x.label), ["Today", "Yesterday"]);
+  assert.equal(p[0].period.day, "2026-09-17");
+  assert.deepEqual(periodPresets("", [], ""), []);
 });
 
 test("presetActive: a day preset matches the highlighted day, a range preset the exact window", () => {
-  const [today, , last7] = periodPresets("2026-09-15", months);
+  const [today, , last7] = periodPresets("2026-09-15", months, "2026-09-15");
   assert.equal(presetActive(today.period, { mode: "monthly", month: "2026-09", day: "2026-09-15" }), true);
   assert.equal(presetActive(today.period, { mode: "monthly", month: "2026-09" }), false);
   assert.equal(presetActive(last7.period, last7.period), true);
@@ -84,4 +97,28 @@ test("the picker logic survives a period whose month has not loaded yet", () => 
   assert.equal(stepPeriod({ mode: "monthly", month: "" }, [], 1), null);
   assert.equal(stepPeriod({ mode: "ytd", month: "" }, [], -1), null);
   assert.deepEqual(periodPresets("", []), []);
+});
+
+// ---- Day / Month / YTD nav redesign (2026-09-22) --------------------------
+
+test("stepDay moves one calendar day, uncapped going back, never past maxDay going forward", () => {
+  assert.equal(stepDay("2026-08-22", 1, "2026-09-17"), "2026-08-23");
+  assert.equal(stepDay("2026-08-22", -1, "2026-09-17"), "2026-08-21");
+  assert.equal(stepDay("2026-09-01", -1, "2026-09-17"), "2026-08-31", "crosses a month boundary");
+  assert.equal(stepDay("2026-09-17", 1, "2026-09-17"), null, "cannot step into the future");
+  assert.equal(stepDay("2026-01-01", -365, "2026-09-17"), "2025-01-01", "a past day is always a real answer");
+});
+
+test("yearsWithData returns the distinct years, oldest first", () => {
+  assert.deepEqual(yearsWithData(months), ["2025", "2026"]);
+  assert.deepEqual(yearsWithData([]), []);
+});
+
+test("periodLabel: YTD reads '(Jan – Present)' for the real current year, '(Jan – Dec)' for a past one", () => {
+  assert.equal(periodLabel({ mode: "ytd", month: "2026-06" }, "2026-09-17"), "2026 (Jan – Present)");
+  assert.equal(periodLabel({ mode: "ytd", month: "2025-06" }, "2026-09-17"), "2025 (Jan – Dec)");
+  // No `today` passed: every read-only caller across the dashboard views that
+  // never shows the current in-progress year must keep working unchanged.
+  assert.equal(periodLabel({ mode: "ytd", month: "2026-06" }), "2026");
+  assert.equal(periodLabel({ mode: "monthly", month: "2026-08" }, "2026-09-17"), "Aug 2026", "monthly/day untouched by `today`");
 });
