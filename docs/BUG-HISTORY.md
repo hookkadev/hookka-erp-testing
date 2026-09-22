@@ -34,6 +34,83 @@ Entries themselves stay newest-first.
 
 ---
 
+## BUG-2026-09-22-005 — Pending Delivery tab spun in a render loop; the whole page froze and no navigation completed `ui-frontend` `perf` `delivery` `data-grid` 🟢
+
+🟢 **Fixed** · owner-reported three times in one day, in escalating words: "click to other
+tab it stuck" → "still no fix" → "when I click Pending Delivery and then navigate anywhere it
+freezes and I can't interact with anything". **This is the real root cause of the first
+report**; #467's two fixes (double navigation, scroll state) were real but secondary.
+
+**Root cause — a closed loop between the page and the shared grid.**
+1. `DataGrid`'s selection effect (`data-grid.tsx`, `[selectedKeys, sortedData]`) calls
+   `onSelectionChange(rows)` whenever `sortedData` changes identity — and `sortedData` is
+   `[...filteredData]`, a FRESH array on every recompute, whose memo depends on `columns`.
+2. The delivery page stores that emission as `setSelectedReadyPOs(new Set(rows…))` — a fresh
+   object every time, even when empty.
+3. `pendingDeliveryColumns` listed `selectedReadyPOs` in its `useMemo` deps although no column
+   reads it (eslint had flagged the dep as unnecessary for months).
+So: emit → new Set → new columns → new `filteredData` → new `sortedData` → effect → emit → …
+Every cycle re-rendered the 7k-line page. React Router 7 schedules every navigation as a
+`startTransition`, and a transition is interrupted by each urgent update — the loop starved
+every tab switch and every route change made from that tab. Nothing threw: React only warns
+about passive-effect loops in dev, and prod spun silently.
+
+**Fix — both halves, at the shared seam first (the ponytail rule: one guard where all
+callers route through).** `DataGrid` now emits only when the selection actually changed:
+same length, same row references, same order ⇒ no call. A data refresh produces new row
+objects, so parents that read fields off the emitted rows still get fresh ones (the
+2026-07-03 invoices stale-selection rule is preserved: rows hidden by a filter shrink the
+emission). And the page's `pendingDeliveryColumns` no longer depends on `selectedReadyPOs`.
+The 16 other `onSelectionChange` callers were checked: their selection-dependent memos derive
+values, none rebuilds `columns`, so the delivery page was the only closed loop — but the grid
+guard now makes the class impossible for the next one.
+
+**Regression test.** `tests/datagrid-selection-emit.test.mjs` — pins the identity guard in
+the grid and the dep list on the page (no DOM runner in this repo, so source guards).
+`tsc -p tsconfig.app.json --noEmit`: exit 0. Class registered: BUG-CLASSES **C24**.
+
+**Not verified live.** No login this session. Expected on prod after deploy: open Pending
+Delivery, then click Planning / Pending Dispatch / the sidebar — each responds at once; the
+CPU graph in DevTools › Performance is flat while idling on Pending Delivery (it was pegged).
+
+---
+
+## BUG-2026-09-22-004 — Delivery page painted skeletons over rows it already had: one slow / 504 sibling fetch blanked every tab `ui-frontend` `perf` `delivery` 🟢
+
+🟢 **Fixed** · owner-reported (prod screenshot 2026-09-22: Planning tab, grid footer says "335
+total records" yet every row is a skeleton and all four summary cards read "-"; console shows
+one `504` on an API resource).
+
+**Root cause.** `src/pages/delivery/index.tsx` kept ONE page-level `loading` flag =
+`doLoading || poLoading || soLoading || custLoading || prodLoading` and passed it to every grid
+and card. The Planning rows come from `/ready-planning` alone and were already in memory; the
+sales-order / customer / product fetches only ENRICH rows (refs, hub, m³). So while any one of
+those five was still in flight — or being held for up to 30 s by an upstream 504 — the grid
+that had its data showed six skeleton rows and the cards showed "-". The user read that as
+"nothing I asked for was deployed". The 504 itself is a SEPARATE, upstream problem
+(**UNMEASURED which endpoint — the console line carried no URL**); this fix stops one slow
+endpoint from hiding a page that is otherwise ready.
+
+**Fix.** `loading` is now the CURRENT tab's rows only: `poLoading` on Planning / Pending
+Delivery, `doLoading` on the DO stage tabs, never on Packing List. The four cards gate on
+`/stats` having answered. Same branch, per the owner's repeated ask: Planning / Pending Delivery
+now page client-side (`pageSlice`, 50 per page, bypassed while a search term is typed so search
+still spans the whole list) through the same `PagerFooter` the DO tabs use — one footer
+component for the three lists.
+
+**Regression test.** `tests/delivery-list-filters.test.mjs` — `pageSlice` bounds / bypass, and
+a source guard that the five-way `loading` OR is gone and both PO grids slice. Anchor guard
+(`tests/docs-module-guide-anchors.test.mjs`) re-pointed. `tsc -p tsconfig.app.json --noEmit`:
+exit 0.
+
+**Not verified live.** No login for either environment in this session. What IS measured:
+the prod bundle served at erp.hookka.com already carries #467 (`doBrowseUrl`), so the
+"nothing changed" impression came from this loading gate, not from a stale bundle or a
+browser cache. Next time it happens: DevTools → Network → filter `504` → the URL names the
+slow endpoint.
+
+---
+
 ## BUG-2026-09-22-003 — Delivery page: switching stage tabs felt stuck, and every tab paged the newest 200 DOs of every status `ui-frontend` `perf` `delivery` 🟢
 
 🟢 **Fixed** · owner-reported (screenshot on Pending Delivery: "when I click to planning /
