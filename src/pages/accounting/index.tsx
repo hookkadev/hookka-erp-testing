@@ -3166,6 +3166,10 @@ function JournalsTab({
   // was removed as a no-op in BUG-2026-08-13-090 and never rebuilt).
   const [editingJv, setEditingJv] = useState<JournalEntry | null>(null);
   const [selectedJvs, setSelectedJvs] = useState<JournalEntry[]>([]);
+  // Detail view (owner 2026-09-22 「JV 无法 view detail … 双击点开」): double-click
+  // a row (or ⋮ › View) to see every line with the DR/CR totals; single click
+  // keeps selecting for the batch bar. The actions inside mirror the ⋮ menu.
+  const [detailJv, setDetailJv] = useState<JournalEntry | null>(null);
 
   // Owner 2026-07-28 (JE-2607-0001): this used to ignore the response entirely
   // — a rejected/aborted Post showed NOTHING and the entry silently stayed
@@ -3322,6 +3326,7 @@ function JournalsTab({
     // fabricated figure — dropped rather than pointed at a page that does not
     // exist (there is no per-journal detail route).
     const items: ContextMenuItem[] = [
+      { label: "View detail", action: (r) => setDetailJv(r) },
       { label: "Print voucher", action: (r) => printVoucher(buildJvVoucher(r)) },
     ];
     if (row.status === "DRAFT") {
@@ -3400,9 +3405,82 @@ function JournalsTab({
             contextMenuItems={contextMenuItems}
             selectable
             onSelectionChange={setSelectedJvs}
+            onDoubleClick={(row) => setDetailJv(row)}
           />
         </CardContent>
       </Card>
+
+      {detailJv && (() => {
+        const je = journals.find((j) => j.id === detailJv.id) ?? detailJv;
+        const dr = je.lines.reduce((s, l) => s + l.debitSen, 0);
+        const cr = je.lines.reduce((s, l) => s + l.creditSen, 0);
+        const state = je.lifecycleState ?? "ACTIVE";
+        const close = () => setDetailJv(null);
+        return (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={close}>
+            <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between p-5 border-b border-[#E2DDD8]">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-base font-semibold text-[#1F1D1B]">Journal {je.entryNo}</h2>
+                  <Badge variant="status" status={je.status}>{je.status}</Badge>
+                  {state !== "ACTIVE" && <LifecycleBadge state={state} />}
+                </div>
+                <button onClick={close} className="text-[#9CA3AF] hover:text-[#6B7280] text-lg leading-none">✕</button>
+              </div>
+              <div className="p-5 space-y-4 text-sm">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div><p className="text-[#9CA3AF] text-xs">Date</p><p className="font-medium">{formatDateDMY(je.date)}</p></div>
+                  <div className="col-span-2"><p className="text-[#9CA3AF] text-xs">Description</p><p className="font-medium">{je.description || "—"}</p></div>
+                  <div><p className="text-[#9CA3AF] text-xs">Created</p><p className="font-medium">{String(je.createdAt ?? "").slice(0, 10) || "—"}</p></div>
+                </div>
+                <div className="border border-[#E2DDD8] rounded-md overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-[#FAF8F5]">
+                      <tr className="text-xs text-[#6B7280]">
+                        <th className="text-left px-3 py-1.5 font-medium">Account</th>
+                        <th className="text-left px-3 py-1.5 font-medium">Description</th>
+                        <th className="text-right px-3 py-1.5 font-medium">Debit</th>
+                        <th className="text-right px-3 py-1.5 font-medium">Credit</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {je.lines.map((l, i) => (
+                        <tr key={i} className="border-t border-[#F0ECE9]">
+                          <td className="px-3 py-1.5 whitespace-nowrap">{l.accountCode}{l.accountName ? ` · ${l.accountName}` : (accounts.find((a) => a.code === l.accountCode)?.name ? ` · ${accounts.find((a) => a.code === l.accountCode)?.name}` : "")}</td>
+                          <td className="px-3 py-1.5 text-[#6B7280]">{l.description || ""}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">{l.debitSen ? formatCurrency(l.debitSen) : ""}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">{l.creditSen ? formatCurrency(l.creditSen) : ""}</td>
+                        </tr>
+                      ))}
+                      <tr className="border-t-2 border-[#1F1D1B] font-semibold">
+                        <td className="px-3 py-1.5" colSpan={2}>Total{dr !== cr && <span className="ml-2 text-xs font-normal text-[#9A3A2D]">not balanced — DR {formatCurrency(dr)} vs CR {formatCurrency(cr)}</span>}</td>
+                        <td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(dr)}</td>
+                        <td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(cr)}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-[#F0ECE9]">
+                  <Button variant="outline" size="sm" onClick={() => printVoucher(buildJvVoucher(je))}><Printer className="h-4 w-4" /> Print voucher</Button>
+                  {je.status === "DRAFT" && (
+                    <>
+                      <Button variant="outline" size="sm" onClick={() => { close(); setShowForm(false); setEditingJv(je); }}>Edit</Button>
+                      <Button variant="primary" size="sm" onClick={() => { close(); void handlePost(je.id); }}>Post</Button>
+                    </>
+                  )}
+                  {je.status !== "DRAFT" && state === "ACTIVE" && (
+                    <Button variant="outline" size="sm" onClick={() => { close(); void handleLifecycle(je.id, je.entryNo, "void"); }}>Void</Button>
+                  )}
+                  {je.status !== "DRAFT" && state === "VOID" && (
+                    <Button variant="outline" size="sm" onClick={() => { close(); void handleLifecycle(je.id, je.entryNo, "unvoid"); }}>Unvoid</Button>
+                  )}
+                  <Button variant="outline" size="sm" onClick={() => { close(); void handleDuplicate(je); }}>Duplicate as draft</Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -6607,7 +6685,8 @@ function ApInvoicesTab({ accounts }: { accounts: ChartOfAccount[] }) {
   const [ver, setVer] = useState(0);
   const [data, setData] = useState<{ rows: ApInvRow[]; totals: { openSen: number; openCount: number; apOpenSen: number; piOpenSen: number } } | null>(null);
   const [kind, setKind] = useState<"ALL" | "AP" | "PI">("ALL");
-  const [status, setStatus] = useState<"OPEN" | "PAID" | "CANCELLED" | "ALL">("OPEN");
+  // Owner 2026-09-22: default ALL (the mirror is for looking things up, not only chasing).
+  const [status, setStatus] = useState<"OPEN" | "PAID" | "CANCELLED" | "ALL">("ALL");
   const [q, setQ] = useState("");
   useEffect(() => {
     let dead = false;
@@ -6650,7 +6729,7 @@ function ApInvoicesTab({ accounts }: { accounts: ChartOfAccount[] }) {
           <option value="ALL">AP + PI</option><option value="AP">AP bills only</option><option value="PI">Purchase invoices only</option>
         </select>
         <select value={status} onChange={(e) => setStatus(e.target.value as typeof status)} className="rounded-md border border-[#E2DDD8] px-2 py-1.5 text-sm">
-          <option value="OPEN">Open</option><option value="PAID">Paid</option><option value="CANCELLED">Cancelled</option><option value="ALL">All</option>
+          <option value="ALL">All</option><option value="OPEN">Open</option><option value="PAID">Paid</option><option value="CANCELLED">Cancelled</option>
         </select>
         <span className="ml-auto text-xs text-[#6B7280]">Shown outstanding <span className="font-semibold tabular-nums text-[#1F1D1B]">{formatCurrency(shownSen)}</span></span>
       </div>
@@ -9683,7 +9762,7 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
                         if ((r.advanceOpenSen ?? 0) > 0) return chip(`Approved · advance open ${formatCurrency(r.advanceOpenSen ?? 0)}`, "bg-[#FBF3E4] text-[#7A5B12]", "Unapplied supplier advance — knock it off on the Supplier Payment page");
                         return r.accrued === 1 && !r.settledAt ? chip("Approved · accrued, unpaid", "bg-[#F7E5E1] text-[#9A3A2D]") : chip("Approved · paid", "bg-[#EAF3DE] text-[#27500A]");
                       })()}
-                      {(r.rejectReason ?? r.reject_reason) && apState(r) === "DRAFT" && (
+                      {(r.rejectReason ?? r.reject_reason) && apState(r) === "DRAFT" && r.status !== "VOID" && (
                         <div className="text-[10px] text-[#9A3A2D] mt-0.5 max-w-[16rem] truncate" title={r.rejectReason ?? r.reject_reason ?? ""}>↩ {r.rejectReason ?? r.reject_reason}</div>
                       )}
                     </td>

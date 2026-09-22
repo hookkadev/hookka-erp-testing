@@ -391,7 +391,7 @@ authoritative current detail.** New here? Start with [ONBOARDING-PATH.md](ONBOAR
   - MAIN PAGE (tab host / nav) — L322-426. **FINANCE sidebar slimmed 2026-09-22** (`src/components/layout/sidebar.tsx`, groups Reports / Daily / Monthly / Debtors / Creditors / e-Invoice / Setup, 32 entries): Customer Payment, Supplier Payment, Other Creditor Payments, Other Debtor Receipts, Other Debtor/Creditor names, Other Creditor Bills, Monthly P&L, Cost Structure retired from the MENU only — every tab key / route still answers its URL. Hosts: `PlHubTab` (P&L / Monthly P&L / Cost Structure as one entry, `?tab=plmonthly|coststruct` still land on their view), `OtherPartyBillsTab` folds the names list + settle manager (`FoldSection`), `ApInvoicesTab` raises/edits other-creditor bills inline, Payment Vouchers links the Supplier Payment page for FX / advance knock-off / TF. Guard `tests/finance-sidebar.test.mjs`.
   - Overview tab + cards (Cleanup, Contra, LandedCost, DocNumbering, GstRate, Fye, StockMap, Aging) — L427-1320
   - Chart of Accounts tab (COATab) — L1321-1905
-  - Journal Entries tab + JournalEntryForm — L1906-2332
+  - Journal Entries tab + JournalEntryForm (`JournalsTab`, anchor by name) — DataGrid list (single click selects for the batch bar; **double-click or ⋮ › View detail opens the line-level modal** with DR/CR totals + the same actions as the menu, 2026-09-22), JournalEntryForm for new / draft edit. Guard `tests/jv-detail-view.test.mjs`.
   - Accounts Receivable tab (ARControlPanel + ARTab) — L2333-2661
   - Accounts Payable tab (APControlPanel + APTab) — L2662-3081
   - P&L report tabs (CostStructure, CostExpenseClasses, MonthlyTrend, MonthlyPl, PLStatement + ExportButtons) — L3082-3806
