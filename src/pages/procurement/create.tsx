@@ -29,17 +29,16 @@ import { useToast } from "@/components/ui/toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { useCachedJson, invalidateCachePrefix } from "@/lib/cached-fetch";
 import { formatCurrency, formatRM } from "@/lib/utils";
 import {
   roundUnitPriceSen,
   lineTotalSen,
-  formatUnitPriceInput,
 } from "@/lib/unit-price";
 import type { Supplier, SupplierMaterialBinding, RawMaterial } from "@/types";
 import { ArrowLeft, Plus, Save, Trash2 } from "lucide-react";
-import { parseMoneyInput } from "@/lib/parse-money";
 
 // Same shape used by the modal in procurement/index.tsx — kept identical
 // so the POST payload matches what the existing /api/purchase-orders
@@ -1011,19 +1010,15 @@ function CreatePurchaseOrderPage() {
                           </td>
                           {/* Price (RM) */}
                           <td className="px-3 py-2 text-right">
-                            {/* A unit price is a RATE: step="0.01" made the
-                                browser refuse RM 0.055 outright. */}
-                            <Input
-                              className="h-8 text-sm text-right"
-                              type="number"
-                              step="0.0001"
-                              inputMode="decimal"
-                              onFocus={(e) => e.currentTarget.select()}
-                              min={0}
-                              value={item.unitPriceSen === 0 ? "" : formatUnitPriceInput(item.unitPriceSen)}
-                              onChange={(e) => {
-                                // BUG-2026-08-13-095 - one money parser. `type="number"`, so the browser blocked the comma and this was never the live bug; converted so one parser owns money, and so an unreadable value can no longer be written as NaN.
-                                const rm = parseMoneyInput(e.target.value);
+                            {/* MoneyInput: raw text while focused, formatted on blur (BUG-2026-09-22-179).
+                                A raw Input whose value was formatUnitPriceInput(sen) re-rendered "1" as
+                                "1.00" after the first keystroke, so typing "18" produced "1.008".
+                                Same family as BUG-2026-08-31-171. */}
+                            <MoneyInput
+                              className="h-8 text-sm"
+                              value={item.unitPriceSen === 0 ? null : item.unitPriceSen / 100}
+                              onChange={(rm) => {
+                                // A RATE — keep the sub-cent digits (RM 0.055).
                                 const sen = rm !== null && rm >= 0 ? roundUnitPriceSen(rm * 100) : 0;
                                 updateItemPrice(idx, sen);
                               }}
