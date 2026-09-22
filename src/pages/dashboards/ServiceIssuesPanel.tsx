@@ -3,7 +3,7 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } f
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { TAUPE, TEAL, AMBER, GREEN, MUTED, BORDER, CHART_GOLD, fmtN, type Period } from "./dashboard-shared-lib";
 import {
-  NONE_KEY, byCause, byUnit, byPrevention, topProducts, causeTrend, causeLabel,
+  NONE_KEY, byCause, topCauses, byUnit, byPrevention, topProducts, causeTrend, causeLabel,
   type IssueCase, type TallyRow,
 } from "../../api/lib/service-issue-stats";
 
@@ -58,7 +58,7 @@ export function ServiceIssuesPanel({
   const units = useMemo(() => byUnit(cases), [cases]);
   const prevention = useMemo(() => byPrevention(cases), [cases]);
   const products = useMemo(() => topProducts(cases, 10), [cases]);
-  const top3 = useMemo(() => causes.filter((r) => r.key !== NONE_KEY && r.count > 0).slice(0, 3), [causes]);
+  const top3 = useMemo(() => topCauses(causes, 3), [causes]);
   const ytd = period.mode === "ytd";
   const trend = useMemo(
     () => causeTrend(cases, top3.map((r) => r.key), (d) => (ytd ? d.slice(0, 7) : d.slice(5))),
