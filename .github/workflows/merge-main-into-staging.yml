@@ -1,0 +1,87 @@
+name: Merge main → staging
+
+# Keeps the long-lived `staging` branch current with `main` so nobody has to
+# follow up by hand. Every push to main (a merged PR or a direct commit)
+# merges main into staging and pushes; staging's deploy.yml then redeploys
+# https://staging.hookka-erp-testing.pages.dev.
+#
+# Two gotchas this file works around:
+#   * Pushes made with GITHUB_TOKEN do NOT fire `on: push` in other workflows,
+#     so the staging deploy is dispatched explicitly after the push.
+#   * On a merge conflict nothing is pushed. A scratch branch
+#     `chore/sync-staging-from-main` is created from main and a PR into
+#     staging is opened, so a human resolves it there. (A PR directly from
+#     `main` is NOT used: GitHub's web conflict resolver commits the merge to
+#     the PR's head branch, which would push staging's features into main.)
+#     The run fails so the red X is the reminder. It resumes automatically
+#     once that PR is merged.
+#
+# No secrets required. Also runnable by hand from the Actions tab.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+concurrency:
+  group: merge-main-into-staging
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: staging
+          fetch-depth: 0
+
+      - name: Merge main into staging
+        id: merge
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git merge-base --is-ancestor origin/main HEAD; then
+            echo "staging already contains main — nothing to do."
+            echo "result=noop" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git merge --no-edit -m "chore: merge main into staging (auto, ${GITHUB_SHA::7})" origin/main; then
+            git push origin HEAD:staging
+            echo "result=merged" >> "$GITHUB_OUTPUT"
+          else
+            git diff --name-only --diff-filter=U
+            git merge --abort
+            echo "result=conflict" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Redeploy staging
+        if: steps.merge.outputs.result == 'merged'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run deploy.yml --ref staging
+
+      - name: Open PR for a human to resolve conflicts
+        if: steps.merge.outputs.result == 'conflict'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SCRATCH: chore/sync-staging-from-main
+        run: |
+          existing=$(gh pr list --base staging --head "$SCRATCH" --state open --json number --jq '.[0].number')
+          if [ -n "$existing" ]; then
+            echo "::error::main → staging still conflicts and PR #$existing is already open — resolve and merge it."
+            exit 1
+          fi
+          # Fresh scratch branch at main; force is safe because no open PR uses it.
+          git push --force origin origin/main:refs/heads/"$SCRATCH"
+          gh pr create --base staging --head "$SCRATCH" \
+            --title "chore: merge main into staging (conflicts — resolve manually)" \
+            --body "Automatic merge of main (${GITHUB_SHA}) into staging hit conflicts. Resolve them on this PR (web editor or locally) and merge it. The auto-merge workflow resumes on the next push to main."
+          echo "::error::merge conflict — PR opened for manual resolution."
+          exit 1
