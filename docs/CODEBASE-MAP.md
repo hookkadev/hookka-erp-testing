@@ -40,7 +40,7 @@
 > section gains the `attendance_records` warning — that table carries no production or
 > efficiency data and never has (BUG-2026-08-13-103).
 >
-> **Last verified: 2026-09-22 on branch `fix/scan-queue-client-driven`** — the Scan-queue rows only (`scan-queue.ts` row, its route table, its Internals paragraph): re-anchored after BUG-2026-09-22-178 made the OCR browser-driven; the machine gate `check-codebase-map.mjs` still reports 18 drifted refs on rows this branch did not touch.
+> **Last verified: 2026-09-22 on branch `fix/scan-queue-client-driven`** — the Scan-queue rows only (`scan-queue.ts` row, its route table, its Internals paragraph): re-anchored after BUG-2026-09-22-178 made the OCR browser-driven; the machine gate `check-codebase-map.mjs` exits 0 (its only errors were these rows); its 17 advisories about unmapped `src/pages/m/**` and production-component files predate this branch and are unchanged.
 
 > **Last verified: 2026-09-22** (dashboard-prototype.tsx / dashboard-shared.tsx / dashboard-shared-lib.ts rows: Day/Month/YTD nav redesign) / 2026-09-21 (URL navigation state) / 2026-08-14 — re-checked mechanically by `node scripts/check-codebase-map.mjs`,
 > which validates that every cited path resolves, every `file:LINE` is in range, and every symbol
