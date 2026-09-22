@@ -1,5 +1,10 @@
 # Production & BOM — Module Guide
 
+> **Last verified: 2026-09-22** (branch `fix/production-overview-tablet`) — the three
+> `src/pages/production/index.tsx` anchors in the symbol table re-verified; `/production` now
+> renders the `/m` card list (`src/pages/m/screens/ProductionScreen.tsx`) at ≤1280px — see
+> `src/pages/production/overview.tsx`. Earlier stamp below still covers the rest.
+>
 > **Last verified: 2026-08-14** (branch `docs/docs-vs-code-audit`) — corrected against the
 > source by the prose audit; the row(s) touched here are itemised in
 > [`docs/DOCS-VS-CODE-AUDIT.md`](../DOCS-VS-CODE-AUDIT.md). Only the claims listed there were
@@ -15,7 +20,7 @@ Owns the shop floor: a **dept-tabbed WIP board** (one production_order per confi
 
 ## Entry points
 - Pages
-  - `/production` → `src/pages/production/index.tsx:548` (`ProductionPage` — dept-tabbed WIP board; `activeTab` ∈ ALL/UPHOLSTERY/PACKING/FOAM/FAB_CUT/FAB_SEW)
+  - `/production` → `src/pages/production/index.tsx:549` (`ProductionPage` — dept-tabbed WIP board; `activeTab` ∈ ALL/UPHOLSTERY/PACKING/FOAM/FAB_CUT/FAB_SEW)
   - `/production/folders` → `src/pages/production/folders.tsx:39` (`ProductionFoldersPage`) · `/folder-detail` → `src/pages/production/folder-detail.tsx`
   - `/production/tracker` → redirect to `/planning?tab=tracker` (`src/dashboard-routes.tsx`). The Master Tracker lives as a TAB of the Planning page; the standalone `production/tracker.tsx` was deleted 2026-08-13 — unreachable since the route became a redirect, imported nowhere. **`PlanningPage` does not read `?tab=` yet** (`activeTab` is local state), so this redirect and the Production page's own "Master Tracker" button both land on Capacity Overview.
   - `/production/scan` → `src/pages/production/scan.tsx` (shop-floor dept scan) · `/production/fg-scan` → `src/pages/production/fg-scan.tsx`
@@ -49,9 +54,9 @@ Owns the shop floor: a **dept-tabbed WIP board** (one production_order per confi
 ## Key functions / sections (locate-to-function)
 | Symbol / section | file:line | Role |
 |---|---|---|
-| `ProductionPage` | `src/pages/production/index.tsx:548` | WIP board; every column/row branches on `activeTab` |
-| `filteredOrders` (memo) | `src/pages/production/index.tsx:2825` | Dept-narrow + overdue-set grid filter |
-| `loadFgStickers` / `packingStickerUrl` | `src/pages/production/index.tsx:5506 / 5465` | FG sticker set (immediate paint → /p/ token upgrade) |
+| `ProductionPage` | `src/pages/production/index.tsx:549` | WIP board; every column/row branches on `activeTab` |
+| `filteredOrders` (memo) | `src/pages/production/index.tsx:2869` | Dept-narrow + overdue-set grid filter |
+| `loadFgStickers` / `packingStickerUrl` | `src/pages/production/index.tsx:5550 / 5509` | FG sticker set (immediate paint → /p/ token upgrade) |
 | `BOMManagementPage` | `src/pages/bom.tsx:6245` | BOM page shell (tabs, list) |
 | `EditBOMDialog` / `MasterTemplatesDialog` | `src/pages/bom.tsx:3070 / 4001` | L1+WIP editor / master variants |
 | `rowToPO` | `production-orders/_helpers.ts:905` | PO row → API shape (dual-keyed reads) |
