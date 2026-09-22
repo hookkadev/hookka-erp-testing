@@ -1,5 +1,10 @@
 # Delivery & Consignment — Module Guide
 
+> **Last verified: 2026-09-22** (branch `fix/delivery-loading-gate-po-paging`, BUG-2026-09-22-004) — the page's
+> `loading` gates on the CURRENT tab's rows only (`delivery/index.tsx:~1262`); Planning / Pending Delivery
+> page client-side via `pageSlice` (50/page, bypassed while searching) with the shared `PagerFooter`
+> (declared at the END of the file, ~L7533); summary cards gate on `/stats`. Anchors below re-derived.
+>
 > **Last verified: 2026-09-22** (branch `fix/delivery-tab-switch-pagination`) — DO list
 > pagination is now PER STAGE TAB: `doBrowseUrl` (`delivery/index.tsx:~562`) sends
 > `GET /api/delivery-orders?status=<tab statuses>&page&limit=50`, bound in the route's
@@ -89,13 +94,13 @@ deliver write `stock_movements` and read `fg_units`, and fire idempotent custome
 ## Key functions / sections (locate-to-function)
 | Symbol / section | file:line | Role |
 |---|---|---|
-| `DeliveryPage` | `src/pages/delivery/index.tsx:899` | DO workbench + 3PL + agent, `pageTab` toggle |
-| `runBulkDoTransition` | `src/pages/delivery/index.tsx:3027` | FE bulk status move (all guards/cascades) |
-| `resendCustomerNotice` / `warnIfNoCustomerEmail` | `delivery/index.tsx:2916 / :2898` | Feature A per-DO resend / Feature B no-email warning |
+| `DeliveryPage` | `src/pages/delivery/index.tsx:901` | DO workbench + 3PL + agent, `pageTab` toggle |
+| `runBulkDoTransition` | `src/pages/delivery/index.tsx:3051` | FE bulk status move (all guards/cascades) |
+| `resendCustomerNotice` / `warnIfNoCustomerEmail` | `delivery/index.tsx:2940 / :2922` | Feature A per-DO resend / Feature B no-email warning |
 | `columns` (DataGrid) | `src/pages/delivery/index.tsx` (~3.9k) | DO grid column defs |
 | `getContextMenuItems` | `src/pages/delivery/index.tsx` (~4.4k) | THE DO status table — row menu **and** the drawer's action bar |
-| `detailLive` | `src/pages/delivery/index.tsx:3678` | Drawer's document re-read from the list; its bar filtered from the row menu |
-| `lineSpec` | `src/pages/delivery/index.tsx:3711` | One-line build spec per DO line, via the shared `buildSpec` |
+| `detailLive` | `src/pages/delivery/index.tsx:3702` | Drawer's document re-read from the list; its bar filtered from the row menu |
+| `lineSpec` | `src/pages/delivery/index.tsx:3735` | One-line build spec per DO line, via the shared `buildSpec` |
 | `drawerActionBar` / `drawerLineSpec` / `DRAWER_DOC_CONFIG` | `src/lib/document-drawer.ts` | Drawer model: full-page route, action-bar filter, spec-line delegation |
 | `DocumentDetailDrawer` | `src/components/ui/document-detail-drawer.tsx` | Shared slide-over chrome (chrome only, no domain knowledge) |
 | 3PL Providers block | `src/pages/delivery/index.tsx` (~6.5k) | `pageTab==="3pl"` list + Create/Edit dialog |
