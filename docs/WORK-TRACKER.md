@@ -1,6 +1,6 @@
 # Hookka ERP — Work Tracker
 
-> **Last verified: 2026-09-22** — branch `fix/delivery-tab-switch-pagination` added below (open, its entry is the newest). Previously: branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
+> **Last verified: 2026-09-22** — branch `fix/delivery-loading-gate-po-paging` added below (open, its entry is the newest). Previously: branch `fix/delivery-tab-switch-pagination` (MERGED as #467). Previously: branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
 > **Last verified: 2026-09-22** — branch `feat/po-supplier-searchable-select` added below (open, pushed, no PR). NOTE: the 2026-09-22 Houzs entry below still carries committed merge-conflict markers (`<<<<<<< HEAD` … `>>>>>>> 85e58b40`) on `main`; left for its owner to resolve.
 > **Last verified: 2026-09-22** — branch `feat/service-dashboard-root-cause-graph` added below (stacked on the staging sync PR).
 > **Last verified: 2026-09-22** — branch `fix/service-dashboard-other-catch-all` added below (open, pushed, no PR).
@@ -18,6 +18,20 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
 ---
+
+## 2026-09-22 — 🔵 Delivery page: loading gate + Planning/Pending Delivery paging (branch `fix/delivery-loading-gate-po-paging`)
+
+Owner, prod screenshot after #467 shipped: Planning grid all skeletons with "335 total records",
+cards "-", one 504 in the console — "check the code base again that you actually have paging,
+and also loading issue … is it a cache issue or website issue?" Measured: prod bundle already
+carries #467; the blank page was the five-way `loading` OR (BUG-2026-09-22-004), not cache.
+
+- [x] `loading` = current tab's rows only; cards gate on `/stats`.
+- [x] Planning / Pending Delivery paged client-side (`pageSlice`, 50/page, whole list while
+  searching) with the shared `PagerFooter` (also replaces the DO tabs' inline footer).
+- [x] Tests extended; anchors re-pointed; docs restamped. `tsc` exit 0.
+- [ ] PR → `main`; cherry-pick onto the staging PR #474 branch so staging can be tested.
+- [ ] The 504 endpoint is UNMEASURED — owner to read its URL from DevTools → Network.
 
 ## 2026-09-22 — 🔵 Delivery page: tab switch "stuck" + per-status pagination (branch `fix/delivery-tab-switch-pagination`)
 

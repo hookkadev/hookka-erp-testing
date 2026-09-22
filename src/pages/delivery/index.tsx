@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useUrlState, useUrlStateNumber, useUrlBatch } from "@/lib/use-url-state";
+import { pageSlice } from "@/lib/delivery-list-filters";
 import { useToast } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -551,21 +552,22 @@ const TAB_DO_STATUSES: Record<string, DOStatus[]> = {
 const PO_TABS = new Set(["planning", "pending_delivery"]);
 
 // The DO rows each tab fetches (2026-09-22). A stage tab pages through ITS OWN
-// statuses, server-side, DO_PAGE_SIZE at a time. Packing List takes the newest
+// statuses, server-side, LIST_PAGE_SIZE at a time (the PO tabs page the same
+// size client-side — see pageSlice). Packing List takes the newest
 // 200 LIVE DOs — the only ones its PL-level bulk buttons can move
 // (runPlBulkTransition: DRAFT → LOADED, LOADED/IN_TRANSIT → DELIVERED). The PO
 // tabs show production orders, so they fetch no DOs at all (null = no request).
 // Before this, every tab read the newest 200 DOs of EVERY status and filtered
 // them in the browser: "Delivered" showed only the delivered rows that fell in
 // that window, and "Page 1 / 3" paged across all statuses at once.
-const DO_PAGE_SIZE = 50;
+const LIST_PAGE_SIZE = 50;
 function doBrowseUrl(tab: string, page: number): string | null {
   if (tab === "packing_list") {
     return "/api/delivery-orders?page=1&limit=200&status=DRAFT,LOADED,IN_TRANSIT";
   }
   const statuses = TAB_DO_STATUSES[tab];
   if (!statuses) return null;
-  return `/api/delivery-orders?page=${page}&limit=${DO_PAGE_SIZE}&status=${statuses.join(",")}`;
+  return `/api/delivery-orders?page=${page}&limit=${LIST_PAGE_SIZE}&status=${statuses.join(",")}`;
 }
 
 // Identifier keys that must stay searchable on every delivery grid even when
@@ -910,7 +912,6 @@ export default function DeliveryPage() {
   const [searchResults, setSearchResults] = useState<DeliveryOrderRow[]>([]);
   const [planningPOs, setPlanningPOs] = useState<ReadyPORow[]>([]);
   const [readyPOs, setReadyPOs] = useState<ReadyPORow[]>([]);
-  const [loading, setLoading] = useState(true);
   // Active inner tab — URL-synced for the same reason as pageTab above.
   const [activeTab] = useUrlState<string>("tab", "planning");
   const setUrl = useUrlBatch();
@@ -1205,7 +1206,6 @@ export default function DeliveryPage() {
   }>("/api/delivery-orders/stats");
   // Per-tab: the server counts only the statuses this tab fetches.
   const totalDOsServer = doRaw?.total ?? (doRaw?.data?.length ?? 0);
-  const totalPages = Math.max(1, Math.ceil(totalDOsServer / DO_PAGE_SIZE));
 
   // Scroll position restoration — keyed per active tab so each tab remembers
   // its own scroll position independently. sessionStorage directly, NOT React
@@ -1252,6 +1252,32 @@ export default function DeliveryPage() {
   // /api/production-orders?fields=minimal&include=jobCards payload just to derive
   // these two lists — it fetches the small { ready, planning } result instead.
   const { data: rpRaw, loading: poLoading, refresh: refreshPOs } = useCachedJson<{ success?: boolean; ready?: ReadyPORow[]; planning?: ReadyPORow[] }>("/api/delivery-orders/ready-planning");
+  // What "loading" means on this page (2026-09-22, BUG-2026-09-22-004): the
+  // rows THIS tab shows have not arrived yet. It used to be ANY of five fetches
+  // (DOs, ready-planning, sales orders, customers, products) — so one slow
+  // /api/customers painted skeletons over a Planning grid that already held all
+  // 335 rows, and a 504 there kept the whole page blank until the 30 s abort.
+  // SO / customer / product data only ENRICH rows (refs, hub, m³); they may
+  // land late without hiding the grid. The summary cards gate on /stats.
+  const loading = PO_TABS.has(activeTab)
+    ? poLoading
+    : activeTab === "packing_list"
+      ? false
+      : doLoading;
+  // Planning / Pending Delivery page client-side: the rows are one server
+  // payload already in memory, so a page is a slice (owner 2026-09-22: "335 of
+  // 335 records" read as "loads everything every time"). Same 50-row page and
+  // the same footer as the DO tabs; bypassed while searching, so a term always
+  // spans the whole list (search-safe rule).
+  const searching = !!search.trim();
+  const planningPage = useMemo(
+    () => pageSlice(planningPOs, page, LIST_PAGE_SIZE, searching),
+    [planningPOs, page, searching],
+  );
+  const readyPage = useMemo(
+    () => pageSlice(readyPOs, page, LIST_PAGE_SIZE, searching),
+    [readyPOs, page, searching],
+  );
   // Slim projection: this page joins Customer PO/SO + reference + expected-DD
   // onto DO rows, plus a per-SO {productCode → unitPriceSen} price map for the
   // PO-based Planning / Pending Delivery Sales-Figure fallback. ?fields=
@@ -1259,7 +1285,7 @@ export default function DeliveryPage() {
   // scalars + SLIM items (product code + unit price only — no scan image, no
   // other line fields) — the full list was ~1.4MB; the slim variant is a
   // fraction of that.
-  const { data: soRaw, loading: soLoading, refresh: refreshSOs } = useCachedJson<{ success?: boolean; data?: { id: string; hookkaExpectedDD?: string; companySOId?: string; customerId?: string; customerSO?: string; customerSOId?: string; customerPO?: string; customerPOId?: string; reference?: string; items?: { productCode?: string; unitPriceSen?: number }[] }[] }>("/api/sales-orders?fields=delivery-refs");
+  const { data: soRaw, refresh: refreshSOs } = useCachedJson<{ success?: boolean; data?: { id: string; hookkaExpectedDD?: string; companySOId?: string; customerId?: string; customerSO?: string; customerSOId?: string; customerPO?: string; customerPOId?: string; reference?: string; items?: { productCode?: string; unitPriceSen?: number }[] }[] }>("/api/sales-orders?fields=delivery-refs");
   // Exact per-PO Sales Figure from the server (same resolver the DO /
   // invoice path uses) so Planning / Pending Delivery reconcile to the
   // cent instead of the page guessing price by product code.
@@ -1269,13 +1295,13 @@ export default function DeliveryPage() {
   // older off-page DOs, so they wrongly resurfaced as Pending Delivery
   // (BUG-2026-06-27, e.g. SO-2603-157 delivered on March DOs).
   const { data: linkedRaw } = useCachedJson<{ success?: boolean; poIds?: string[] }>("/api/delivery-orders/linked-po-ids");
-  const { data: custRaw, loading: custLoading, refresh: refreshCustomers } = useCachedJson<{ success?: boolean; data?: Customer[] }>("/api/customers");
+  const { data: custRaw, refresh: refreshCustomers } = useCachedJson<{ success?: boolean; data?: Customer[] }>("/api/customers");
   // Pull product master data so each Planning / Pending Delivery row can
   // surface its per-unit m³ next to the qty. Source-of-truth is the
   // Products page (`unitM3` column) — fetching the same /api/products
   // payload here keeps the value in lockstep with whatever the user last
   // edited there.
-  const { data: prodRaw, loading: prodLoading, refresh: refreshProducts } =
+  const { data: prodRaw, refresh: refreshProducts } =
     useCachedJson<{ success?: boolean; data?: { code: string; unitM3: number }[] }>("/api/products");
   // Saved packing lists (one per truck run, grouping several DOs). Populates
   // the "Packing List" tab. Defaults to empty if the endpoint/table isn't
@@ -1343,8 +1369,6 @@ export default function DeliveryPage() {
 
   /* eslint-disable react-hooks/set-state-in-effect -- mirror SWR data into mutable local state for optimistic UI */
   useEffect(() => {
-    const anyLoading = doLoading || poLoading || soLoading || custLoading || prodLoading;
-    setLoading(anyLoading);
     const dRes = doRaw || { success: false };
     const sRes = doSearchRaw || { success: false };
     // Planning + Ready come from the server now (rpRaw). The old client-side
@@ -1632,7 +1656,7 @@ export default function DeliveryPage() {
         }
       }
     }
-  }, [doRaw, doSearchRaw, rpRaw, soRaw, poValRaw, custRaw, linkedRaw, doLoading, poLoading, soLoading, custLoading]);
+  }, [doRaw, doSearchRaw, rpRaw, soRaw, poValRaw, custRaw, linkedRaw]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   // ----- 3PL Provider helpers -----
@@ -4751,7 +4775,7 @@ export default function DeliveryPage() {
               <Package className="h-5 w-5 text-[#9C6F1E]" />
             </div>
             <div className="min-w-0">
-              <p className="text-2xl font-bold text-[#9C6F1E]">{loading ? "-" : pendingDispatchCount}</p>
+              <p className="text-2xl font-bold text-[#9C6F1E]">{doStatsRaw ? pendingDispatchCount : "-"}</p>
               <p className="text-xs text-[#6B7280]">Pending Dispatch</p>
             </div>
           </CardContent>
@@ -4762,7 +4786,7 @@ export default function DeliveryPage() {
               <Send className="h-5 w-5 text-[#3E6570]" />
             </div>
             <div className="min-w-0">
-              <p className="text-2xl font-bold text-[#3E6570]">{loading ? "-" : dispatchedCount}</p>
+              <p className="text-2xl font-bold text-[#3E6570]">{doStatsRaw ? dispatchedCount : "-"}</p>
               <p className="text-xs text-[#6B7280]">Dispatched</p>
             </div>
           </CardContent>
@@ -4773,7 +4797,7 @@ export default function DeliveryPage() {
               <Truck className="h-5 w-5 text-[#6B4A6D]" />
             </div>
             <div className="min-w-0">
-              <p className="text-2xl font-bold text-[#6B4A6D]">{loading ? "-" : inTransitCount}</p>
+              <p className="text-2xl font-bold text-[#6B4A6D]">{doStatsRaw ? inTransitCount : "-"}</p>
               <p className="text-xs text-[#6B7280]">In Transit</p>
             </div>
           </CardContent>
@@ -4784,7 +4808,7 @@ export default function DeliveryPage() {
               <CheckCircle2 className="h-5 w-5 text-[#4F7C3A]" />
             </div>
             <div className="min-w-0">
-              <p className="text-2xl font-bold text-[#4F7C3A]">{loading ? "-" : deliveredMTD}</p>
+              <p className="text-2xl font-bold text-[#4F7C3A]">{doStatsRaw ? deliveredMTD : "-"}</p>
               <p className="text-xs text-[#6B7280]">Delivered (MTD)</p>
             </div>
           </CardContent>
@@ -4854,7 +4878,7 @@ export default function DeliveryPage() {
           <CardContent>
             <DataGrid<ReadyPORow>
               columns={planningColumns}
-              data={planningPOs}
+              data={planningPage}
               keyField="id"
               // Its own id: a different row type and a different column set
               // from the DO list, so it cannot share that layout.
@@ -4870,6 +4894,15 @@ export default function DeliveryPage() {
               onSearchChange={setSearch}
               alwaysSearchKeys={PO_SEARCH_KEYS}
             />
+            {!search.trim() && (
+              <PagerFooter
+                total={planningPOs.length}
+                noun="production order"
+                page={page}
+                pageSize={LIST_PAGE_SIZE}
+                onPage={setPage}
+              />
+            )}
           </CardContent>
         </Card>
       )}
@@ -4920,7 +4953,7 @@ export default function DeliveryPage() {
           <CardContent>
             <DataGrid<ReadyPORow>
               columns={pendingDeliveryColumns}
-              data={readyPOs}
+              data={readyPage}
               keyField="id"
               gridId="delivery-pending-delivery-pos"
               loading={loading}
@@ -4945,6 +4978,15 @@ export default function DeliveryPage() {
                 )
               }
             />
+            {!search.trim() && (
+              <PagerFooter
+                total={readyPOs.length}
+                noun="production order"
+                page={page}
+                pageSize={LIST_PAGE_SIZE}
+                onPage={setPage}
+              />
+            )}
           </CardContent>
         </Card>
       )}
@@ -5023,34 +5065,15 @@ export default function DeliveryPage() {
               detailExport={{ label: "Detail Listing", build: (rows) => buildDoDetailListingAoa(rows) }}
             />
 
-            {/* Pagination footer */}
-            <div className="flex items-center justify-between border-t border-[#E2DDD8] pt-3 mt-3 text-sm text-[#6B7280] flex-wrap gap-2">
-              <span>
-                {totalDOsServer.toLocaleString()} delivery order
-                {totalDOsServer === 1 ? "" : "s"}
-              </span>
-              <div className="flex items-center gap-3">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setPage(Math.max(1, page - 1))}
-                  disabled={page <= 1 || doLoading}
-                >
-                  ← Prev
-                </Button>
-                <span className="tabular-nums text-[#1F1D1B]">
-                  Page {page} / {totalPages}
-                </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setPage(Math.min(totalPages, page + 1))}
-                  disabled={page >= totalPages || doLoading}
-                >
-                  Next →
-                </Button>
-              </div>
-            </div>
+            {/* Pagination footer — per-tab: total = this tab's statuses only */}
+            <PagerFooter
+              total={totalDOsServer}
+              noun="delivery order"
+              page={page}
+              pageSize={LIST_PAGE_SIZE}
+              busy={doLoading}
+              onPage={setPage}
+            />
           </CardContent>
         </Card>
       )}
@@ -7499,6 +7522,57 @@ export default function DeliveryPage() {
           onClose={() => setQrDialog(null)}
         />
       )}
+    </div>
+  );
+}
+
+// One pagination footer for every list on this page (DO stage tabs server-
+// paged, Planning / Pending Delivery client-sliced): "<N> <noun>s · Prev ·
+// Page p / P · Next". Declared after DeliveryPage on purpose — appending here
+// keeps every docs/CODEBASE-MAP + module-guide anchor above it stable.
+function PagerFooter({
+  total,
+  noun,
+  page,
+  pageSize,
+  busy = false,
+  onPage,
+}: {
+  total: number;
+  noun: string;
+  page: number;
+  pageSize: number;
+  busy?: boolean;
+  onPage: (n: number) => void;
+}) {
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  return (
+    <div className="flex items-center justify-between border-t border-[#E2DDD8] pt-3 mt-3 text-sm text-[#6B7280] flex-wrap gap-2">
+      <span>
+        {total.toLocaleString()} {noun}
+        {total === 1 ? "" : "s"}
+      </span>
+      <div className="flex items-center gap-3">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => onPage(Math.max(1, page - 1))}
+          disabled={page <= 1 || busy}
+        >
+          ← Prev
+        </Button>
+        <span className="tabular-nums text-[#1F1D1B]">
+          Page {page} / {totalPages}
+        </span>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => onPage(Math.min(totalPages, page + 1))}
+          disabled={page >= totalPages || busy}
+        >
+          Next →
+        </Button>
+      </div>
     </div>
   );
 }
