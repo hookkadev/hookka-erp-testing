@@ -1,6 +1,6 @@
 # Hookka ERP — Work Tracker
 
-> **Last verified: 2026-09-22** — branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
+> **Last verified: 2026-09-22** — branch `fix/delivery-tab-switch-pagination` added below (open, its entry is the newest). Previously: branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
 > **Last verified: 2026-08-14** — branch `fix/on-time-delivery-and-decisions` added below (open, not merged, its entry is the newest; its bug ids were renumbered 130-133 → 140-143 because `feat/leave-entitlement` claimed 130-133 and merged to `main` first). Previously: branch `feat/leave-entitlement` (MERGED as #326). Previously: branch `feat/job-card-completed-at` added below (open, not merged). Previously: branch `fix/security-posture` added below (open, not merged). Previously: PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
 > **Last verified: 2026-08-14** — branch `feat/pcb-calculation` added below (open, not merged, its entry is the newest). Previously: branch `feat/job-card-completed-at` added below (open, not merged). Previously: branch `fix/security-posture` added below (open, not merged). Previously: PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
 > **Last verified: 2026-08-14** — restamped on branch `fix/money-input-parsing` (its entry is the newest below, not yet deployed). PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
@@ -14,6 +14,26 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
 ---
+
+## 2026-09-22 — 🔵 Delivery page: tab switch "stuck" + per-status pagination (branch `fix/delivery-tab-switch-pagination`)
+
+Owner ask (screenshot of /delivery on Pending Delivery, 2026-09-22): (1) "when on pending
+delivery and I click to other planning / pending dispatch it stuck"; (2) "implement pagination
+for here instead of loading 335 or 481 stuff every time I press".
+
+- [x] Ask 1 — tab switch: one URL write per click (tab + page reset batched via `useUrlBatch`;
+  the old `setPage(1)` effect fired a SECOND navigation after every tab change), and the
+  page-level scroll-restore no longer holds `window.scrollY` in React state (a full 7k-line
+  page re-render per scroll event, interrupting the tab-switch transition).
+- [x] Ask 2 — DO tabs fetch ONLY their own statuses, 50 per page (`GET /api/delivery-orders?
+  status=A,B&page&limit`); the old browse read the newest 200 DOs of EVERY status and filtered
+  in the browser, so "Delivered" showed whatever delivered rows fell inside that window.
+  Planning / Pending Delivery are one server-computed payload (`/ready-planning`), already
+  virtualized and NOT refetched on tab press — no paging added there.
+- [x] "Delivered (MTD)" card moves server-side (`/stats.deliveredMtd`) — it was counted off
+  the browse page, which no longer holds delivered rows on other tabs.
+- [x] tests + `tsc -p tsconfig.app.json` (exit 0); docs restamped (CODEBASE-MAP delivery index, modules/delivery.md, BUG-HISTORY).
+- [ ] Bug fix → `main`. Live tab-switch timing on prod is UNMEASURED (dev server needs login).
 
 ## 2026-09-22 — 🔵 PO list: search finds a PO by the raw material bought on it (branch `feat/po-search-line-items`)
 
