@@ -68,6 +68,11 @@ import type {
 // split of the ~9.6k-line Accounting page; behaviour-identical, more tabs
 // to follow).
 import { asMutationResponse, useCompanyOptions, orgIdParam, type CompanyOption } from "./shared";
+// The customer-receipt form + its voucher/advance helpers live with the
+// Customer Payment page; the Receipts hub hosts the same form.
+import { CustomerReceiptForm } from "../invoices/payments";
+import { buildCustomerPaymentVoucher, hasUnallocated, unallocatedSen } from "@/lib/customer-receipt";
+import type { PaymentRecord } from "@/types";
 import { AuditLogTab } from "./tabs/AuditLogTab";
 import { TradeFinanceBlock } from "./tabs/TradeFinanceBlock";
 import { bestMatch } from "@/lib/party-fuzzy-match";
@@ -632,7 +637,7 @@ export default function AccountingPage() {
           {tab === "corrections" && <CorrectionsTab />}
           {tab === "ocreditorpay" && <OtherPartyPaymentsTab accounts={accounts} side="CREDITOR" />}
           {tab === "payments" && <PaymentsTab accounts={accounts} />}
-          {tab === "receipts" && <ReceiptsTab accounts={accounts} />}
+          {tab === "receipts" && <ReceiptsHubTab accounts={accounts} />}
           {tab === "transfer" && <FundTransferTab accounts={accounts} />}
           {tab === "dailycash" && <DailyCashTab />}
           {tab === "cashbook" && <CashBookTab accounts={accounts} />}
@@ -7288,45 +7293,46 @@ type PaymentGroup = {
   lines: { billId: string; billNo: string; amountSen: number }[];
 };
 
-function OtherPartyPaymentsManager({ parties, accounts, side }: { parties: OtherParty[]; accounts: ChartOfAccount[]; side: "DEBTOR" | "CREDITOR" }) {
+// The settle-bills form on its own (owner 2026-09-22, Receipts hub): pick the
+// party, tick / part-pay its open bills, post. `editing` = re-state that
+// payment in place (same number) — remount with a key so the state seeds
+// once; the bills it paid come back into the list at their pre-payment
+// outstanding so they stay re-allocatable.
+function OtherPartyPaymentForm({ parties, accounts, side, editing, onSaved, onCancelEdit }: {
+  parties: OtherParty[]; accounts: ChartOfAccount[]; side: "DEBTOR" | "CREDITOR";
+  editing: PaymentGroup | null; onSaved: () => void; onCancelEdit: () => void;
+}) {
   const { toast } = useToast();
-  const { confirm } = useConfirm();
   const today = new Date().toISOString().slice(0, 10);
   const banks = accounts.filter((a) => a.specialAccountType === "SBK" || a.specialAccountType === "SCH");
-  const [partyId, setPartyId] = useState("");
-  const [bankAccountSel, setBankAccountSel] = useState("");
+  const [partyId, setPartyId] = useState(editing?.partyId ?? "");
+  const [bankAccountSel, setBankAccountSel] = useState(editing?.bankAccount ?? "");
   const bankAccount = bankAccountSel || defaultBankCode(banks);
-  const [date, setDate] = useState(today);
+  const [date, setDate] = useState(editing?.date || today);
   const [reference, setReference] = useState("");
-  const [openBills, setOpenBills] = useState<OpenBill[]>([]);
-  const [rows, setRows] = useState<Record<string, { amountStr: string; full: boolean }>>({});
-  const [history, setHistory] = useState<PaymentGroup[] | null>(null);
-  const [detail, setDetail] = useState<PaymentGroup | null>(null);
+  // openBills carries the party it was loaded for; a mismatch = loading.
+  const [openBills, setOpenBills] = useState<{ forParty: string; bills: OpenBill[] }>({ forParty: "", bills: [] });
+  const [rows, setRows] = useState<Record<string, { amountStr: string; full: boolean }>>(() => {
+    const seeded: Record<string, { amountStr: string; full: boolean }> = {};
+    for (const l of editing?.lines ?? []) if (l.amountSen > 0) seeded[l.billId] = { amountStr: (l.amountSen / 100).toFixed(2), full: false };
+    return seeded;
+  });
   const [posting, setPosting] = useState(false);
-  // Edit mode: when set, the form is editing this payment in place (same number).
-  const [editingNo, setEditingNo] = useState<string | null>(null);
+  const editingNo = editing?.paymentNo ?? null;
 
   const sideParties = parties.filter((p) => p.type === side && p.isActive);
   const verb = side === "CREDITOR" ? "Payment" : "Receipt";
 
-  const loadHistory = () => {
-    fetch(`/api/accounting/other-party-payments?type=${side}`)
-      .then((r) => r.json() as Promise<{ success?: boolean; data?: PaymentGroup[] }>)
-      .then((j) => { if (j?.success) setHistory(j.data ?? []); })
-      .catch(() => {});
-  };
-  useEffect(loadHistory, [side]);
-
-  const loadOpenBills = (
-    pid: string,
-    editLines?: { billId: string; billNo: string; amountSen: number }[],
-  ) => {
-    setPartyId(pid); setRows({});
-    if (!pid) { setOpenBills([]); return; }
-    fetch(`/api/accounting/other-party-bills?type=${side}&partyId=${pid}`)
+  // The party's open bills — reloaded whenever the party changes (and once
+  // for the payment being edited, whose own lines are added back).
+  useEffect(() => {
+    if (!partyId) return;
+    let dead = false;
+    const editLines = editing && editing.partyId === partyId ? editing.lines : undefined;
+    fetch(`/api/accounting/other-party-bills?type=${side}&partyId=${partyId}`)
       .then((r) => r.json() as Promise<{ success?: boolean; data?: { id: string; billNo: string; outstandingSen: number }[] }>)
       .then((j) => {
-        if (!j?.success) return;
+        if (dead || !j?.success) return;
         // Edit flow: add the receipt-being-edited's amount back to each bill's
         // outstanding (it'll be reversed on save), and surface any bills it fully
         // paid so they stay re-allocatable.
@@ -7340,17 +7346,13 @@ function OtherPartyPaymentsManager({ parties, accounts, side }: { parties: Other
             open = [...open, { id: l.billId, billNo: l.billNo, outstandingSen: l.amountSen }];
           }
         }
-        setOpenBills(open);
-        if (editLines) {
-          const seeded: Record<string, { amountStr: string; full: boolean }> = {};
-          for (const l of editLines) {
-            if (l.amountSen > 0) seeded[l.billId] = { amountStr: (l.amountSen / 100).toFixed(2), full: false };
-          }
-          setRows(seeded);
-        }
+        setOpenBills({ forParty: partyId, bills: open });
       })
       .catch(() => {});
-  };
+    return () => { dead = true; };
+  }, [partyId, side, editing]);
+  const bills = openBills.forParty === partyId ? openBills.bills : [];
+  const billsLoading = !!partyId && openBills.forParty !== partyId;
 
   // BUG-2026-08-13-095 — a settlement typed "1,500" was allocated as RM 1.00
   // against the bill and the payment posted for that. One parser; unreadable is
@@ -7360,9 +7362,9 @@ function OtherPartyPaymentsManager({ parties, accounts, side }: { parties: Other
   const setRow = (id: string, patch: Partial<{ amountStr: string; full: boolean }>) =>
     setRows((r) => ({ ...r, [id]: { ...getRow(id), ...patch } }));
   const allocSen = (b: OpenBill) => { const row = getRow(b.id); return row.full ? b.outstandingSen : toSen(row.amountStr); };
-  const totalSen = openBills.reduce((s, b) => s + allocSen(b), 0);
+  const totalSen = bills.reduce((s, b) => s + allocSen(b), 0);
   const allocMoneyError = firstMoneyFieldError(
-    openBills
+    bills
       .filter((b) => !getRow(b.id).full)
       .map((b) => ({ label: `${b.billNo} amount`, value: getRow(b.id).amountStr })),
   );
@@ -7371,7 +7373,7 @@ function OtherPartyPaymentsManager({ parties, accounts, side }: { parties: Other
     if (allocMoneyError) { toast.error(allocMoneyError); return; }
     if (!partyId) { toast.error("Select a party"); return; }
     if (!bankAccount) { toast.error("Select a bank/cash account"); return; }
-    const allocations = openBills
+    const allocations = bills
       .map((b) => ({ billId: b.id, amountSen: allocSen(b) }))
       .filter((a) => a.amountSen > 0);
     if (allocations.length === 0) { toast.error("Enter at least one amount"); return; }
@@ -7390,57 +7392,20 @@ function OtherPartyPaymentsManager({ parties, accounts, side }: { parties: Other
       toast.error(j?.error || `Failed to ${editingNo ? "update" : "post"} ${verb.toLowerCase()}`);
       return;
     }
-    if (editingNo) {
-      setEditingNo(null); setReference(""); setPartyId(""); setOpenBills([]); setRows({});
-      loadHistory();
-      toast.success(`${verb} updated`);
-    } else {
-      setReference(""); loadOpenBills(partyId); loadHistory();
-      toast.success(`${verb} posted`);
-    }
+    toast.success(editingNo ? `${verb} updated` : `${verb} posted`);
+    // Fresh form for the next one (the party stays picked after a post, as before).
+    setReference(""); setRows({});
+    setOpenBills({ forParty: "", bills: [] });
+    if (editingNo) onCancelEdit();
+    onSaved();
   };
-
-  const cancelEdit = () => {
-    setEditingNo(null); setPartyId(""); setOpenBills([]); setRows({}); setReference("");
-  };
-
-  const handleLifecycle = async (paymentNo: string, action: "void" | "delete" | "unvoid") => {
-    const lcVerb = action === "unvoid" ? "Restore" : action === "delete" ? "Delete" : "Void";
-    const extra = action === "delete"
-      ? " It will be hidden from the GL (still visible in the audit log)."
-      : action === "void"
-        ? " A reversal entry will be posted (nothing is deleted)."
-        : "";
-    if (!(await confirm({ title: `${lcVerb} payment?`, message: `${lcVerb} ${paymentNo}?${extra}`, danger: true }))) return;
-    const res = await fetch(`/api/accounting/other-party-payments/${encodeURIComponent(paymentNo)}/lifecycle`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action }),
-    });
-    const j = asMutationResponse(await res.json());
-    if (j?.success) { loadHistory(); if (partyId) loadOpenBills(partyId); }
-    else toast.error(j?.error || `${lcVerb} failed`);
-  };
-
-  // Edit in place: load the payment into the form (no void). Save re-states it
-  // under the same number; the original is untouched until then.
-  const editPayment = (g: PaymentGroup) => {
-    setDetail(null);
-    setEditingNo(g.paymentNo);
-    if (g.bankAccount) setBankAccountSel(g.bankAccount);
-    setDate(g.date || today);
-    setReference("");
-    loadOpenBills(g.partyId, g.lines);
-  };
-
-  const opaySel = useRowSelection(history ?? [], (p) => p.paymentNo);
 
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-[#3E6570]">{editingNo ? `Edit ${verb.toLowerCase()}` : side === "CREDITOR" ? "Payments" : "Receipts"}</h3>
+        <h3 className="text-sm font-semibold text-[#3E6570]">{editingNo ? `Edit ${verb.toLowerCase()} ${editingNo}` : side === "CREDITOR" ? "New payment" : "New other debtor receipt"}</h3>
         <div className="flex items-center gap-2">
-          {editingNo && <Button variant="outline" size="sm" onClick={cancelEdit}>Cancel</Button>}
+          {editingNo && <Button variant="outline" size="sm" onClick={onCancelEdit}>Cancel</Button>}
           <Button variant="primary" size="sm" disabled={posting || !partyId || !bankAccount || totalSen <= 0 || !!allocMoneyError} onClick={handleSave}>
             {editingNo ? `Update ${verb.toLowerCase()}` : `Post ${verb.toLowerCase()}`}
           </Button>
@@ -7452,10 +7417,11 @@ function OtherPartyPaymentsManager({ parties, accounts, side }: { parties: Other
             <label className="text-xs font-medium text-[#6B7280] mb-1 block">{side === "CREDITOR" ? "Creditor" : "Debtor"}</label>
             <SearchableSelect
               value={partyId}
-              onChange={(v) => loadOpenBills(v)}
+              onChange={(v) => { setPartyId(v); setRows({}); }}
               options={sideParties.map((p) => ({ value: p.id, label: p.name }))}
               placeholder={`Type ${side === "CREDITOR" ? "creditor" : "debtor"} name…`}
               allowClear
+              disabled={!!editingNo}
             />
           </div>
           <div>
@@ -7474,7 +7440,7 @@ function OtherPartyPaymentsManager({ parties, accounts, side }: { parties: Other
           </div>
         </div>
 
-        {partyId && openBills.length > 0 && (
+        {partyId && bills.length > 0 && (
           <div className="flex items-center justify-end gap-3 rounded-md border border-[#E2DDD8] bg-[#FAF8F5] px-3 py-2">
             {allocMoneyError && <span className="text-[11px] text-[#9A3A2D] mr-auto">{allocMoneyError}</span>}
             <span className="text-xs font-medium text-[#6B7280]">Total (RM)</span>
@@ -7482,7 +7448,9 @@ function OtherPartyPaymentsManager({ parties, accounts, side }: { parties: Other
           </div>
         )}
 
-        {partyId && (openBills.length === 0 ? (
+        {partyId && (billsLoading ? (
+          <p className="text-xs text-[#9CA3AF]">Loading bills…</p>
+        ) : bills.length === 0 ? (
           <p className="text-xs text-[#9CA3AF]">No outstanding bills for this party.</p>
         ) : (
           <div className="overflow-x-auto">
@@ -7492,7 +7460,7 @@ function OtherPartyPaymentsManager({ parties, accounts, side }: { parties: Other
               <th className="py-1 text-right">{side === "CREDITOR" ? "Pay" : "Receive"} (RM)</th><th className="py-1 text-center">Full</th>
             </tr></thead>
             <tbody>
-              {openBills.map((b) => {
+              {bills.map((b) => {
                 const row = getRow(b.id);
                 return (
                   <tr key={b.id} className="border-t border-[#F0ECE9]">
@@ -7514,8 +7482,66 @@ function OtherPartyPaymentsManager({ parties, accounts, side }: { parties: Other
           </table>
           </div>
         ))}
-
       </CardContent></Card>
+    </div>
+  );
+}
+
+function OtherPartyPaymentsManager({ parties, accounts, side }: { parties: OtherParty[]; accounts: ChartOfAccount[]; side: "DEBTOR" | "CREDITOR" }) {
+  const { toast } = useToast();
+  const { confirm } = useConfirm();
+  const [history, setHistory] = useState<PaymentGroup[] | null>(null);
+  const [detail, setDetail] = useState<PaymentGroup | null>(null);
+  // Edit mode: the payment being re-stated in place (same number).
+  const [editing, setEditing] = useState<PaymentGroup | null>(null);
+  const verb = side === "CREDITOR" ? "Payment" : "Receipt";
+
+  const loadHistory = () => {
+    fetch(`/api/accounting/other-party-payments?type=${side}`)
+      .then((r) => r.json() as Promise<{ success?: boolean; data?: PaymentGroup[] }>)
+      .then((j) => { if (j?.success) setHistory(j.data ?? []); })
+      .catch(() => {});
+  };
+  useEffect(loadHistory, [side]);
+
+  const handleLifecycle = async (paymentNo: string, action: "void" | "delete" | "unvoid") => {
+    const lcVerb = action === "unvoid" ? "Restore" : action === "delete" ? "Delete" : "Void";
+    const extra = action === "delete"
+      ? " It will be hidden from the GL (still visible in the audit log)."
+      : action === "void"
+        ? " A reversal entry will be posted (nothing is deleted)."
+        : "";
+    if (!(await confirm({ title: `${lcVerb} payment?`, message: `${lcVerb} ${paymentNo}?${extra}`, danger: true }))) return;
+    const res = await fetch(`/api/accounting/other-party-payments/${encodeURIComponent(paymentNo)}/lifecycle`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action }),
+    });
+    const j = asMutationResponse(await res.json());
+    if (j?.success) loadHistory();
+    else toast.error(j?.error || `${lcVerb} failed`);
+  };
+
+  // Edit in place: hand the payment to the form (no void). Save re-states it
+  // under the same number; the original is untouched until then.
+  const editPayment = (g: PaymentGroup) => {
+    setDetail(null);
+    setEditing(g);
+  };
+
+  const opaySel = useRowSelection(history ?? [], (p) => p.paymentNo);
+
+  return (
+    <div className="space-y-3">
+      <OtherPartyPaymentForm
+        key={editing?.paymentNo ?? "new"}
+        parties={parties}
+        accounts={accounts}
+        side={side}
+        editing={editing}
+        onSaved={loadHistory}
+        onCancelEdit={() => setEditing(null)}
+      />
 
       <BatchActionsBar
         count={opaySel.count}
@@ -9719,12 +9745,12 @@ type OrRow = {
   lines: { accountCode: string; description: string | null; amountSen: number }[];
 };
 
-function ReceiptsTab({ accounts }: { accounts: ChartOfAccount[] }) {
+// The sundry-income form on its own (owner 2026-09-22, Receipts hub): DR the
+// bank/cash account, CR each income line. Posts immediately (no ladder on
+// money in). Unchanged rules: one money parser, an unreadable amount refuses
+// the post and blanks the Total (BUG-2026-08-13-094/095).
+function OfficialReceiptForm({ accounts, onSaved, onCancel }: { accounts: ChartOfAccount[]; onSaved: () => void; onCancel: () => void }) {
   const { toast } = useToast();
-  const { confirm } = useConfirm();
-  const [rows, setRows] = useState<OrRow[] | null>(null);
-  const [migrationMissing, setMigrationMissing] = useState(false);
-  const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     date: new Date().toISOString().slice(0, 10),
@@ -9746,21 +9772,6 @@ function ReceiptsTab({ accounts }: { accounts: ChartOfAccount[] }) {
       a.specialAccountType !== "SBK" &&
       a.specialAccountType !== "SCH",
   );
-
-  const orSel = useRowSelection(rows ?? [], (r) => r.orNo ?? r.id);
-
-  const load = useCallback(() => {
-    fetch("/api/accounting/official-receipts")
-      .then((r) => r.json() as Promise<{ success?: boolean; data?: OrRow[]; migrationMissing?: boolean }>)
-      .then((j) => {
-        if (j?.success) {
-          setRows(j.data ?? []);
-          setMigrationMissing(!!j.migrationMissing);
-        }
-      })
-      .catch(() => {});
-  }, []);
-  useEffect(() => { load(); }, [load]);
 
   // BUG-2026-08-13-095 — byte-identical trap to the payment voucher above: a
   // receipt line typed "1,200" was banked as RM 1.00. One parser; an amount it
@@ -9800,198 +9811,373 @@ function ReceiptsTab({ accounts }: { accounts: ChartOfAccount[] }) {
       const j = asMutationResponse(await res.json());
       if (j?.success) {
         toast.success("Receipt posted");
-        setShowForm(false);
         setForm({ date: new Date().toISOString().slice(0, 10), receivedFrom: "", description: "", payTo: "" });
         setLines([{ accountCode: "", description: "", amount: "" }]);
-        load();
+        onSaved();
       } else toast.error(j?.error || "Save failed");
     } finally {
       setSaving(false);
     }
   };
 
-  const handleLifecycle = async (id: string, orNo: string, action: "void" | "delete" | "unvoid") => {
+  const selCls = "rounded-md border border-[#E2DDD8] bg-white px-2 py-1.5 text-sm";
+
+  return (
+    <Card>
+      <CardContent className="p-4 space-y-4">
+        <div className="text-sm font-semibold text-[#1F1D1B]">New Official Receipt <span className="text-[11px] font-normal text-[#9CA3AF]">sundry income / recovery — DR bank, CR the income account</span></div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs font-medium text-[#6B7280] mb-1 block">Date</label>
+            <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} className={`${selCls} w-full`} />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-[#6B7280] mb-1 block">
+              Deposit to
+              <span className="ml-1 text-[#B4B2A9] cursor-help" title="Bank / cash account debited (DR)">ⓘ</span>
+            </label>
+            <select value={form.payTo || defaultBankCode(bankCash)} onChange={(e) => setForm({ ...form, payTo: e.target.value })} className={`${selCls} w-full`}>
+              <option value="">— pick bank/cash —</option>
+              {bankCash.map((a) => <option key={a.code} value={a.code}>{a.code} {a.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-[#6B7280] mb-1 block">Received from</label>
+            <input type="text" placeholder="Who paid us" value={form.receivedFrom} onChange={(e) => setForm({ ...form, receivedFrom: e.target.value })} className={`${selCls} w-full`} />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-[#6B7280] mb-1 block">Description</label>
+            <input type="text" placeholder="e.g. Scrap sale" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className={`${selCls} w-full`} />
+          </div>
+        </div>
+
+        <div>
+          <label className="text-xs font-medium text-[#6B7280] mb-1 block">Receipt lines (CR — income account or 305-0000 recovery)</label>
+          <div className="border border-[#E2DDD8] rounded-md">
+            <div className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1.4fr)_7rem_2rem] bg-[#FAF8F5] text-[11px] font-medium text-[#9CA3AF]">
+              <div className="px-2.5 py-1.5">Account</div>
+              <div className="px-2.5 py-1.5">Description</div>
+              <div className="px-2.5 py-1.5 text-right">Amount (RM)</div>
+              <div />
+            </div>
+            {lines.map((l, i) => (
+              <div
+                key={i}
+                className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1.4fr)_7rem_2rem] items-center border-t border-[#F0ECE9]"
+                onKeyDown={(e) => { if (e.key === "Insert") { e.preventDefault(); setLines((prev) => [...prev.slice(0, i + 1), { accountCode: "", description: "", amount: "" }, ...prev.slice(i + 1)]); } }}
+              >
+                <div className="px-1 py-1">
+                  <AccountPicker accounts={lineAccounts} value={l.accountCode} onChange={(code) => setLines(lines.map((x, j) => (j === i ? { ...x, accountCode: code } : x)))} placeholder="Account…" />
+                </div>
+                <input type="text" placeholder="Line description" value={l.description} onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, description: e.target.value } : x)))} className="border-0 bg-transparent px-2.5 py-1.5 text-sm w-full focus:outline-none" />
+                <input type="text" placeholder="0.00" value={l.amount} onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, amount: e.target.value } : x)))} className={`border-0 bg-transparent px-2.5 py-1.5 text-sm w-full text-right tabular-nums focus:outline-none ${isUnreadableMoney(l.amount) ? "text-[#9A3A2D] underline decoration-wavy" : ""}`} />
+                <button onClick={() => setLines(lines.length > 1 ? lines.filter((_, j) => j !== i) : lines)} title="Remove line" className="text-[#B4B2A9] hover:text-[#9A3A2D] text-sm">✕</button>
+              </div>
+            ))}
+          </div>
+          <div className="flex items-center justify-between mt-2">
+            <div className="flex items-center gap-3">
+              <Button variant="outline" size="sm" onClick={() => setLines([...lines, { accountCode: "", description: "", amount: "" }])}>
+                <Plus className="h-4 w-4" /> Add line
+              </Button>
+              <span className="text-[11px] text-[#B4B2A9]">press <span className="font-medium text-[#6B7280]">Insert</span> to add a line below</span>
+            </div>
+            <span className="text-sm text-[#6B7280]">Total <span className="text-lg font-semibold text-[#1F1D1B] tabular-nums">{orMoneyError ? "—" : formatCurrency(totalSen)}</span></span>
+            {orMoneyError && <span className="text-[11px] text-[#9A3A2D]">{orMoneyError}</span>}
+            {droppedLines > 0 && (
+              <span className="text-[11px] text-[#9A3A2D]">{droppedLines} line{droppedLines === 1 ? "" : "s"} with an amount but no account — not counted, and will not be posted.</span>
+            )}
+          </div>
+        </div>
+
+        <div className="flex gap-2 pt-3 border-t border-[#F0ECE9]">
+          <Button variant="primary" size="sm" disabled={saving || totalSen <= 0 || !!orMoneyError || !(form.payTo || defaultBankCode(bankCash))} onClick={handleSave}>
+            {saving ? "Posting…" : "Post receipt"}
+          </Button>
+          <Button variant="outline" size="sm" onClick={onCancel}>Cancel</Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// =============== TAB: RECEIPTS HUB (owner 2026-09-22 「receipts 三门合一」) ===============
+//
+// Every payment IN, one door — the money-in twin of Payment Vouchers:
+//   New Customer Receipt      settles sales invoices   (payment_records, /api/payments)
+//   New Other Debtor Receipt  settles other-debtor bills (other_party_payments)
+//   New Official Receipt      sundry income / recovery (official_receipts)
+// One list of all three (Kind badge), each row printing / voiding through
+// its own document's endpoint. The three documents and their engines are
+// untouched; this page only hosts the three forms and merges the lists.
+type ReceiptKind = "CUSTOMER" | "OTHER" | "OFFICIAL";
+type ReceiptHubRow = {
+  kind: ReceiptKind; key: string; no: string; date: string; from: string; via: string; totalSen: number;
+  lifecycleState: string; note: string;
+  cust?: PaymentRecord; od?: PaymentGroup; or?: OrRow;
+};
+type ReceiptChip = "ALL" | ReceiptKind | "CANCELLED";
+const RECEIPT_CHIPS: { key: ReceiptChip; label: string }[] = [
+  { key: "ALL", label: "All" }, { key: "CUSTOMER", label: "Customer" }, { key: "OTHER", label: "Other debtor" },
+  { key: "OFFICIAL", label: "Official" }, { key: "CANCELLED", label: "Cancelled" },
+];
+
+function ReceiptsHubTab({ accounts }: { accounts: ChartOfAccount[] }) {
+  const { toast } = useToast();
+  const { confirm } = useConfirm();
+  const parties = useOtherPartiesList();
+  const [cust, setCust] = useState<PaymentRecord[] | null>(null);
+  const [od, setOd] = useState<PaymentGroup[] | null>(null);
+  const [ors, setOrs] = useState<OrRow[] | null>(null);
+  const [ver, setVer] = useState(0);
+  const reload = useCallback(() => {
+    invalidateCachePrefix("/api/payments");
+    invalidateCachePrefix("/api/invoices");
+    invalidateCachePrefix("/api/customers");
+    setVer((v) => v + 1);
+  }, []);
+  useEffect(() => {
+    let dead = false;
+    const bust = `x=${Date.now()}`;
+    fetch(`/api/payments?${bust}`, { cache: "no-store" }).then((r) => r.json() as Promise<{ success?: boolean; data?: PaymentRecord[] } | PaymentRecord[]>)
+      .then((j) => { if (!dead) setCust(Array.isArray(j) ? j : (j?.success ? j.data ?? [] : [])); }).catch(() => { if (!dead) setCust([]); });
+    fetch(`/api/accounting/other-party-payments?type=DEBTOR&${bust}`, { cache: "no-store" }).then((r) => r.json() as Promise<{ success?: boolean; data?: PaymentGroup[] }>)
+      .then((j) => { if (!dead) setOd(j?.success ? j.data ?? [] : []); }).catch(() => { if (!dead) setOd([]); });
+    fetch(`/api/accounting/official-receipts?${bust}`, { cache: "no-store" }).then((r) => r.json() as Promise<{ success?: boolean; data?: OrRow[] }>)
+      .then((j) => { if (!dead) setOrs(j?.success ? j.data ?? [] : []); }).catch(() => { if (!dead) setOrs([]); });
+    return () => { dead = true; };
+  }, [ver]);
+
+  // Which form is open: one at a time, like the Payment Vouchers page.
+  const [door, setDoor] = useState<ReceiptKind | null>(null);
+  const [custEditing, setCustEditing] = useState<PaymentRecord | null>(null);
+  const [odEditing, setOdEditing] = useState<PaymentGroup | null>(null);
+  const openDoor = (k: ReceiptKind) => { setCustEditing(null); setOdEditing(null); setDoor(door === k ? null : k); };
+  const closeDoor = () => { setDoor(null); setCustEditing(null); setOdEditing(null); };
+
+  const rows: ReceiptHubRow[] = [
+    ...(cust ?? []).map((p): ReceiptHubRow => ({
+      kind: "CUSTOMER", key: `c:${p.id}`, no: p.receiptNumber, date: String(p.date ?? "").slice(0, 10), from: p.customerName ?? "",
+      via: String(p.method ?? "").replace(/_/g, " "), totalSen: Number(p.amount) || 0, lifecycleState: p.lifecycleState ?? "ACTIVE",
+      note: [p.reference, p.allocations.length === 0 ? "unallocated (on account)" : hasUnallocated(p) ? `${formatCurrency(unallocatedSen(p))} still on account` : ""].filter(Boolean).join(" · "), cust: p,
+    })),
+    ...(od ?? []).map((g): ReceiptHubRow => ({
+      kind: "OTHER", key: `o:${g.paymentNo}`, no: g.paymentNo, date: String(g.date ?? "").slice(0, 10), from: g.partyName,
+      via: g.bankAccount ?? "", totalSen: g.totalSen, lifecycleState: g.lifecycleState ?? "ACTIVE",
+      note: `${g.lines.length} bill${g.lines.length === 1 ? "" : "s"}`, od: g,
+    })),
+    ...(ors ?? []).map((r): ReceiptHubRow => ({
+      kind: "OFFICIAL", key: `r:${r.id}`, no: r.orNo, date: String(r.date ?? "").slice(0, 10), from: r.receivedFrom ?? "",
+      via: r.payTo ?? "", totalSen: r.totalSen, lifecycleState: r.status === "VOID" ? "VOID" : (r.lifecycleState ?? "ACTIVE"),
+      note: r.description ?? "", or: r,
+    })),
+  ].sort((a, b) => b.date.localeCompare(a.date) || b.no.localeCompare(a.no));
+  const loading = cust === null || od === null || ors === null;
+
+  const [chip, setChip] = useState<ReceiptChip>("ALL");
+  const [q, setQ] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const matches = (r: ReceiptHubRow, c: ReceiptChip) => c === "ALL" ? true : c === "CANCELLED" ? r.lifecycleState !== "ACTIVE" : r.kind === c;
+  const chipCount = (c: ReceiptChip) => rows.filter((r) => matches(r, c)).length;
+  const visible = rows.filter((r) => {
+    if (!matches(r, chip)) return false;
+    if (q.trim()) { const kw = q.toLowerCase(); if (![r.no, r.from, r.note, r.via].some((s) => s.toLowerCase().includes(kw))) return false; }
+    if (dateFrom && r.date < dateFrom) return false;
+    if (dateTo && r.date > dateTo) return false;
+    return true;
+  });
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const sel = useRowSelection(visible, (r) => r.key);
+
+  const voucherOf = (r: ReceiptHubRow): VoucherSpec =>
+    r.cust ? buildCustomerPaymentVoucher(r.cust) : r.od ? buildOtherPartyPaymentVoucher(r.od, accounts) : buildOrVoucher(r.or!, accounts);
+
+  // Each document voids through its own endpoint — the hub just routes.
+  const lifecycle = async (r: ReceiptHubRow, action: "void" | "delete" | "unvoid") => {
     const verb = action === "unvoid" ? "Restore" : action === "delete" ? "Delete" : "Void";
     const extra = action === "delete"
       ? " It will be hidden from the GL (still visible in the audit log)."
       : action === "void"
         ? " A reversal entry will be posted (nothing is deleted)."
         : "";
-    if (!(await confirm({ title: `${verb} receipt?`, message: `${verb} ${orNo}?${extra}`, danger: true }))) return;
-    const res = await fetch(`/api/accounting/official-receipts/${id}/lifecycle`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action }),
-    });
+    if (!(await confirm({ title: `${verb} receipt?`, message: `${verb} ${r.no}?${extra}`, danger: true }))) return;
+    const url = r.cust
+      ? `/api/payments/${encodeURIComponent(r.cust.id)}/lifecycle`
+      : r.od
+        ? `/api/accounting/other-party-payments/${encodeURIComponent(r.od.paymentNo)}/lifecycle`
+        : `/api/accounting/official-receipts/${r.or!.id}/lifecycle`;
+    const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action }) });
     const j = asMutationResponse(await res.json());
-    if (j?.success) {
-      toast.success(`${orNo} ${action === "unvoid" ? "restored" : action === "delete" ? "deleted" : "voided"}`);
-      load();
-    } else toast.error(j?.error || `${verb} failed`);
+    if (j?.success) { toast.success(`${r.no} ${action === "unvoid" ? "restored" : action === "delete" ? "deleted" : "voided"}`); reload(); }
+    else toast.error(j?.error || `${verb} failed`);
   };
-
-  const selCls = "rounded-md border border-[#E2DDD8] bg-white px-2 py-1.5 text-sm";
+  const startEdit = (r: ReceiptHubRow) => {
+    if (r.cust) { setOdEditing(null); setCustEditing(r.cust); setDoor("CUSTOMER"); }
+    else if (r.od) { setCustEditing(null); setOdEditing(r.od); setDoor("OTHER"); }
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+  const kindChip = (k: ReceiptKind) =>
+    k === "CUSTOMER" ? <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold bg-[#EAF3DE] text-[#27500A]" title="Customer receipt — settles sales invoices">CUST</span>
+    : k === "OTHER" ? <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold bg-[#EEF2FB] text-[#2C4170]" title="Other debtor receipt — settles other-debtor bills">OD</span>
+    : <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold bg-[#F6F1E7] text-[#6B5C32]" title="Official receipt — sundry income">OR</span>;
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-between items-center">
-        <h2 className="text-lg font-semibold text-[#1F1D1B]">Official Receipt</h2>
-        <Button variant="primary" size="sm" onClick={() => setShowForm(!showForm)}>
-          <Plus className="h-4 w-4" /> New Receipt
-        </Button>
+      <div className="flex justify-between items-center flex-wrap gap-2">
+        <div>
+          <h2 className="text-lg font-semibold text-[#1F1D1B]">Receipts</h2>
+          <p className="text-[11px] text-[#9CA3AF]">Every payment in, one door. <b>Customer Receipt</b> settles sales invoices; <b>Other Debtor Receipt</b> settles other-debtor bills; <b>Official Receipt</b> books sundry income. Each posts on save.</p>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap justify-end">
+          <Button variant="primary" size="sm" onClick={() => openDoor("CUSTOMER")}><Plus className="h-4 w-4" /> New Customer Receipt</Button>
+          <Button variant="outline" size="sm" onClick={() => openDoor("OTHER")}><Plus className="h-4 w-4" /> New Other Debtor Receipt</Button>
+          <Button variant="outline" size="sm" onClick={() => openDoor("OFFICIAL")}><Plus className="h-4 w-4" /> New Official Receipt</Button>
+        </div>
       </div>
-      {migrationMissing && (
-        <Card><CardContent className="p-4 text-sm text-[#9A3A2D]">Migration 0159 not applied yet — run the paste-version SQL first.</CardContent></Card>
+
+      {door === "CUSTOMER" && (
+        <CustomerReceiptForm key={custEditing?.id ?? "new"} editing={custEditing} onSaved={reload} onCancelEdit={closeDoor} />
+      )}
+      {door === "OTHER" && (
+        <OtherPartyPaymentForm key={odEditing?.paymentNo ?? "new"} parties={parties} accounts={accounts} side="DEBTOR" editing={odEditing} onSaved={reload} onCancelEdit={closeDoor} />
+      )}
+      {door === "OFFICIAL" && (
+        <OfficialReceiptForm accounts={accounts} onSaved={() => { reload(); closeDoor(); }} onCancel={closeDoor} />
       )}
 
-      {showForm && (
-        <Card>
-          <CardContent className="p-4 space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs font-medium text-[#6B7280] mb-1 block">Date</label>
-                <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} className={`${selCls} w-full`} />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-[#6B7280] mb-1 block">
-                  Deposit to
-                  <span className="ml-1 text-[#B4B2A9] cursor-help" title="Bank / cash account debited (DR)">ⓘ</span>
-                </label>
-                <select value={form.payTo || defaultBankCode(bankCash)} onChange={(e) => setForm({ ...form, payTo: e.target.value })} className={`${selCls} w-full`}>
-                  <option value="">— pick bank/cash —</option>
-                  {bankCash.map((a) => <option key={a.code} value={a.code}>{a.code} {a.name}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="text-xs font-medium text-[#6B7280] mb-1 block">Received from</label>
-                <input type="text" placeholder="Who paid us" value={form.receivedFrom} onChange={(e) => setForm({ ...form, receivedFrom: e.target.value })} className={`${selCls} w-full`} />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-[#6B7280] mb-1 block">Description</label>
-                <input type="text" placeholder="e.g. Scrap sale" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className={`${selCls} w-full`} />
-              </div>
-            </div>
-
-            <div>
-              <label className="text-xs font-medium text-[#6B7280] mb-1 block">Receipt lines (CR — income account or 305-0000 recovery)</label>
-              <div className="border border-[#E2DDD8] rounded-md">
-                <div className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1.4fr)_7rem_2rem] bg-[#FAF8F5] text-[11px] font-medium text-[#9CA3AF]">
-                  <div className="px-2.5 py-1.5">Account</div>
-                  <div className="px-2.5 py-1.5">Description</div>
-                  <div className="px-2.5 py-1.5 text-right">Amount (RM)</div>
-                  <div />
-                </div>
-                {lines.map((l, i) => (
-                  <div
-                    key={i}
-                    className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1.4fr)_7rem_2rem] items-center border-t border-[#F0ECE9]"
-                    onKeyDown={(e) => { if (e.key === "Insert") { e.preventDefault(); setLines((prev) => [...prev.slice(0, i + 1), { accountCode: "", description: "", amount: "" }, ...prev.slice(i + 1)]); } }}
-                  >
-                    <div className="px-1 py-1">
-                      <AccountPicker accounts={lineAccounts} value={l.accountCode} onChange={(code) => setLines(lines.map((x, j) => (j === i ? { ...x, accountCode: code } : x)))} placeholder="Account…" />
-                    </div>
-                    <input type="text" placeholder="Line description" value={l.description} onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, description: e.target.value } : x)))} className="border-0 bg-transparent px-2.5 py-1.5 text-sm w-full focus:outline-none" />
-                    <input type="text" placeholder="0.00" value={l.amount} onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, amount: e.target.value } : x)))} className={`border-0 bg-transparent px-2.5 py-1.5 text-sm w-full text-right tabular-nums focus:outline-none ${isUnreadableMoney(l.amount) ? "text-[#9A3A2D] underline decoration-wavy" : ""}`} />
-                    <button onClick={() => setLines(lines.length > 1 ? lines.filter((_, j) => j !== i) : lines)} title="Remove line" className="text-[#B4B2A9] hover:text-[#9A3A2D] text-sm">✕</button>
-                  </div>
-                ))}
-              </div>
-              <div className="flex items-center justify-between mt-2">
-                <div className="flex items-center gap-3">
-                  <Button variant="outline" size="sm" onClick={() => setLines([...lines, { accountCode: "", description: "", amount: "" }])}>
-                    <Plus className="h-4 w-4" /> Add line
-                  </Button>
-                  <span className="text-[11px] text-[#B4B2A9]">press <span className="font-medium text-[#6B7280]">Insert</span> to add a line below</span>
-                </div>
-                <span className="text-sm text-[#6B7280]">Total <span className="text-lg font-semibold text-[#1F1D1B] tabular-nums">{orMoneyError ? "—" : formatCurrency(totalSen)}</span></span>
-                {orMoneyError && <span className="text-[11px] text-[#9A3A2D]">{orMoneyError}</span>}
-                {droppedLines > 0 && (
-                  <span className="text-[11px] text-[#9A3A2D]">{droppedLines} line{droppedLines === 1 ? "" : "s"} with an amount but no account — not counted, and will not be posted.</span>
-                )}
-              </div>
-            </div>
-
-            <div className="flex gap-2 pt-3 border-t border-[#F0ECE9]">
-              <Button variant="primary" size="sm" disabled={saving || totalSen <= 0 || !!orMoneyError || !(form.payTo || defaultBankCode(bankCash))} onClick={handleSave}>
-                {saving ? "Posting…" : "Post receipt"}
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => setShowForm(false)}>Cancel</Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      {!loading && <div className="text-[11px] uppercase tracking-wide text-[#9CA3AF]">{rows.length} receipt{rows.length === 1 ? "" : "s"}</div>}
+      <div className="inline-flex flex-wrap rounded-md border border-[#E2DDD8] bg-white overflow-hidden text-xs">
+        {RECEIPT_CHIPS.map((ch) => {
+          const n = chipCount(ch.key);
+          const on = chip === ch.key;
+          return (
+            <button key={ch.key} type="button" onClick={() => setChip(ch.key)}
+              className={`px-3 py-1.5 font-semibold uppercase tracking-wide cursor-pointer ${on ? "bg-[#6B5C32] text-white" : "text-[#6B7280] hover:bg-[#FAF8F5]"} ${ch.key !== "ALL" ? "border-l border-[#F0ECE9]" : ""}`}>
+              {ch.label}{ch.key !== "ALL" && n > 0 && <span className={`ml-1 tabular-nums ${on ? "text-white/80" : "text-[#9CA3AF]"}`}>{n}</span>}
+            </button>
+          );
+        })}
+      </div>
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <input type="text" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search no / from / reference" className="rounded-md border border-[#E2DDD8] px-3 py-1.5 text-sm w-64" />
+        <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="rounded-md border border-[#E2DDD8] px-2 py-1.5 text-sm" />
+        <span className="text-xs text-[#9CA3AF]">→</span>
+        <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="rounded-md border border-[#E2DDD8] px-2 py-1.5 text-sm" />
+      </div>
 
       <BatchActionsBar
-        count={orSel.count}
-        onClear={orSel.clear}
-        onPrint={() => printVouchers(orSel.selectedRows.map((r) => buildOrVoucher(r, accounts)))}
-        exportName="official-receipts"
+        count={sel.count}
+        onClear={sel.clear}
+        onPrint={() => printVouchers(sel.selectedRows.map(voucherOf))}
+        exportName="receipts"
         exportAoa={() => [
-          ["OR No", "Date", "Received From", "Deposited To", "Status", "Remarks", "Voucher Total (RM)", "Account Code", "Account Name", "Line Description", "Amount (RM)"],
-          ...orSel.selectedRows.flatMap((r) =>
-            r.lines.map((l) => [
-              r.orNo ?? r.id,
-              r.date ?? "",
-              r.receivedFrom ?? "",
-              r.payTo ? accountLabel(accounts, r.payTo) : "",
-              r.status ?? "",
-              r.description ?? "",
-              (Number(r.totalSen ?? 0) / 100).toFixed(2),
-              l.accountCode,
-              accounts.find((a) => a.code === l.accountCode)?.name ?? "",
-              l.description ?? "",
-              (Number(l.amountSen ?? 0) / 100).toFixed(2),
-            ]),
-          ),
+          ["Kind", "No", "Date", "From", "Via / Deposit To", "Status", "Note", "Total (RM)", "Detail", "Amount (RM)"],
+          ...sel.selectedRows.flatMap((r) => {
+            const head = [r.kind, r.no, r.date, r.from, r.via, r.lifecycleState, r.note, (r.totalSen / 100).toFixed(2)];
+            if (r.cust) return r.cust.allocations.length ? r.cust.allocations.map((a) => [...head, a.invoiceNumber, (a.amount / 100).toFixed(2)]) : [[...head, "unallocated", (r.totalSen / 100).toFixed(2)]];
+            if (r.od) return r.od.lines.map((l) => [...head, l.billNo, (l.amountSen / 100).toFixed(2)]);
+            return r.or!.lines.map((l) => [...head, `${l.accountCode} ${accounts.find((a) => a.code === l.accountCode)?.name ?? ""} ${l.description ?? ""}`.trim(), (l.amountSen / 100).toFixed(2)]);
+          }),
         ]}
       />
 
       <Card>
         <CardContent className="p-0 overflow-x-auto">
-          {rows === null ? (
+          {loading ? (
             <div className="py-12 text-center text-[#6B7280] text-sm">Loading…</div>
           ) : (
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-[#E2DDD8] text-xs text-[#6B7280]">
-                  <th className="px-3 py-2 w-8"><input type="checkbox" checked={orSel.allSelected} onChange={orSel.toggleAll} className="h-3.5 w-3.5 accent-[#6B5C32]" /></th>
-                  <th className="px-3 py-2 text-left">OR No</th>
+                  <th className="px-3 py-2 w-8"><input type="checkbox" checked={sel.allSelected} onChange={sel.toggleAll} className="h-3.5 w-3.5 accent-[#6B5C32]" /></th>
+                  <th className="px-3 py-2 text-left">No</th>
                   <th className="px-3 py-2 text-left">Date</th>
-                  <th className="px-3 py-2 text-left">From / Description</th>
-                  <th className="px-3 py-2 text-left">Deposit To</th>
+                  <th className="px-3 py-2 text-left">From</th>
+                  <th className="px-3 py-2 text-left">Via / Deposit to</th>
+                  <th className="px-3 py-2 text-left">Note</th>
                   <th className="px-3 py-2 text-right">Total</th>
                   <th className="px-3 py-2 text-left">Status</th>
                   <th className="px-3 py-2" />
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r) => (
-                  <tr key={r.id} className={`border-b border-[#F0ECE9] ${r.status === "VOID" ? "opacity-50" : ""}`}>
-                    <td className="px-3 py-1.5 w-8">
-                      <input type="checkbox" checked={orSel.isSelected(r.orNo ?? r.id)} onChange={() => orSel.toggle(r.orNo ?? r.id)} className="h-3.5 w-3.5 accent-[#6B5C32]" />
-                    </td>
-                    <td className="px-3 py-1.5 tabular-nums text-xs">{r.orNo}</td>
-                    <td className="px-3 py-1.5 text-xs text-[#6B7280] whitespace-nowrap">{r.date}</td>
-                    <td className="px-3 py-1.5">{[r.receivedFrom, r.description].filter(Boolean).join(" · ")}</td>
-                    <td className="px-3 py-1.5 text-xs">{r.payTo}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(r.totalSen)}</td>
-                    <td className="px-3 py-1.5 text-xs">
-                      <LifecycleBadge state={r.lifecycleState} />
-                      {(r.lifecycleState ?? "ACTIVE") === "ACTIVE" && r.status}
-                    </td>
-                    <td className="px-3 py-1.5 text-right">
-                      <button onClick={() => printVoucher(buildOrVoucher(r, accounts))} title="Print official receipt" className="inline-flex items-center gap-1 text-[#6B5C32] hover:text-[#1F1D1B] text-xs underline decoration-dotted cursor-pointer mr-3"><Printer className="h-3 w-3" />print</button>
-                      <LifecycleActions
-                        state={r.lifecycleState}
-                        onVoid={() => handleLifecycle(r.id, r.orNo, "void")}
-                        onDelete={() => handleLifecycle(r.id, r.orNo, "delete")}
-                        onUnvoid={() => handleLifecycle(r.id, r.orNo, "unvoid")}
-                      />
-                    </td>
-                  </tr>
+                {visible.map((r) => (
+                  <React.Fragment key={r.key}>
+                    <tr
+                      className={`border-b border-[#F0ECE9] cursor-pointer hover:bg-[#FAF8F5] ${r.lifecycleState !== "ACTIVE" ? "opacity-50" : r.cust && hasUnallocated(r.cust) ? "text-blue-600" : ""}`}
+                      onClick={() => setExpanded((m) => ({ ...m, [r.key]: !m[r.key] }))}
+                    >
+                      <td className="px-3 py-1.5 w-8" onClick={(e) => e.stopPropagation()}>
+                        <input type="checkbox" checked={sel.isSelected(r.key)} onChange={() => sel.toggle(r.key)} className="h-3.5 w-3.5 accent-[#6B5C32]" />
+                      </td>
+                      <td className="px-3 py-1.5 tabular-nums text-xs whitespace-nowrap"><span className="inline-block w-3 text-[#9CA3AF]">{expanded[r.key] ? "▾" : "▸"}</span> {r.no} <span className="ml-1.5">{kindChip(r.kind)}</span></td>
+                      <td className="px-3 py-1.5 text-xs text-[#6B7280] whitespace-nowrap">{r.date}</td>
+                      <td className="px-3 py-1.5">{r.from}</td>
+                      <td className="px-3 py-1.5 text-xs">{r.via}</td>
+                      <td className="px-3 py-1.5 text-xs text-[#6B7280]">{r.note}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(r.totalSen)}</td>
+                      <td className="px-3 py-1.5 text-xs"><LifecycleBadge state={r.lifecycleState} />{r.lifecycleState === "ACTIVE" && (r.cust ? r.cust.status : "POSTED")}</td>
+                      <td className="px-3 py-1.5 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                        <button onClick={() => printVoucher(voucherOf(r))} title="Print receipt" className="inline-flex items-center gap-1 text-[#6B5C32] hover:text-[#1F1D1B] text-xs underline decoration-dotted cursor-pointer mr-3"><Printer className="h-3 w-3" />print</button>
+                        {r.lifecycleState === "ACTIVE" && (r.cust || r.od) && (
+                          <button onClick={() => startEdit(r)} className="text-[#6B5C32] hover:text-[#1F1D1B] text-xs underline decoration-dotted cursor-pointer mr-3">edit</button>
+                        )}
+                        <LifecycleActions
+                          state={r.lifecycleState}
+                          onVoid={() => lifecycle(r, "void")}
+                          onDelete={() => lifecycle(r, "delete")}
+                          onUnvoid={() => lifecycle(r, "unvoid")}
+                        />
+                      </td>
+                    </tr>
+                    {expanded[r.key] && (
+                      <tr className="bg-[#FAF8F5] border-b border-[#F0ECE9]">
+                        <td colSpan={9} className="px-8 py-2">
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr className="text-[#9CA3AF] text-left">
+                                <th className="py-1 pr-4 font-medium">{r.cust ? "Invoice" : r.od ? "Bill" : "Account"}</th>
+                                <th className="py-1 pr-4 font-medium">{r.cust ? "Invoice date" : "Description"}</th>
+                                <th className="py-1 font-medium text-right">Amount</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {r.cust && r.cust.allocations.map((a) => (
+                                <tr key={a.invoiceId} className="border-t border-[#F0ECE9]">
+                                  <td className="py-1 pr-4 font-mono">{a.invoiceNumber || <span className="text-[#9A3A2D]">(invoice missing)</span>}</td>
+                                  <td className="py-1 pr-4 text-[#6B7280]">{a.invoiceDate ? formatDateDMY(a.invoiceDate) : "-"}</td>
+                                  <td className="py-1 text-right tabular-nums">{formatCurrency(a.amount)}</td>
+                                </tr>
+                              ))}
+                              {r.cust && r.cust.allocations.length === 0 && <tr><td colSpan={3} className="py-1 text-[#6B7280]">Unallocated — money on account, not knocked off yet.</td></tr>}
+                              {r.cust && r.cust.allocations.length > 0 && unallocatedSen(r.cust) > 0 && <tr><td colSpan={3} className="py-1 text-blue-600">{formatCurrency(unallocatedSen(r.cust))} still on account — not knocked off yet</td></tr>}
+                              {r.od && r.od.lines.map((l) => (
+                                <tr key={l.billId} className="border-t border-[#F0ECE9]">
+                                  <td className="py-1 pr-4 font-mono">{l.billNo}</td>
+                                  <td className="py-1 pr-4" />
+                                  <td className="py-1 text-right tabular-nums">{formatCurrency(l.amountSen)}</td>
+                                </tr>
+                              ))}
+                              {r.or && r.or.lines.map((l, i) => {
+                                const nm = accounts.find((a) => a.code === l.accountCode)?.name;
+                                return (
+                                  <tr key={i} className="border-t border-[#F0ECE9]">
+                                    <td className="py-1 pr-4 whitespace-nowrap">{l.accountCode}{nm ? ` · ${nm}` : ""}</td>
+                                    <td className="py-1 pr-4">{l.description ?? ""}</td>
+                                    <td className="py-1 text-right tabular-nums">{formatCurrency(l.amountSen)}</td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
                 ))}
-                {rows.length === 0 && (
-                  <tr><td colSpan={8} className="px-3 py-8 text-center text-sm text-[#9CA3AF]">No receipts yet</td></tr>
+                {visible.length === 0 && (
+                  <tr><td colSpan={9} className="px-3 py-8 text-center text-sm text-[#9CA3AF]">No receipts match</td></tr>
                 )}
               </tbody>
             </table>
@@ -10001,6 +10187,7 @@ function ReceiptsTab({ accounts }: { accounts: ChartOfAccount[] }) {
     </div>
   );
 }
+
 
 // =============== TAB: FUND TRANSFER (Phase 3) ===============
 //
