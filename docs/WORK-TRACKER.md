@@ -1,6 +1,13 @@
 # Hookka ERP — Work Tracker
 
+<<<<<<< HEAD
 > **Last verified: 2026-09-22** — branch `fix/delivery-tab-switch-pagination` added below (open, its entry is the newest). Previously: branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
+=======
+> **Last verified: 2026-09-22** — branch `feat/po-supplier-searchable-select` added below (open, pushed, no PR). NOTE: the 2026-09-22 Houzs entry below still carries committed merge-conflict markers (`<<<<<<< HEAD` … `>>>>>>> 85e58b40`) on `main`; left for its owner to resolve.
+> **Last verified: 2026-09-22** — branch `feat/service-dashboard-root-cause-graph` added below (stacked on the staging sync PR).
+> **Last verified: 2026-09-22** — branch `fix/service-dashboard-other-catch-all` added below (open, pushed, no PR).
+> **Last verified: 2026-09-22** — branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
+>>>>>>> origin/main
 > **Last verified: 2026-08-14** — branch `fix/on-time-delivery-and-decisions` added below (open, not merged, its entry is the newest; its bug ids were renumbered 130-133 → 140-143 because `feat/leave-entitlement` claimed 130-133 and merged to `main` first). Previously: branch `feat/leave-entitlement` (MERGED as #326). Previously: branch `feat/job-card-completed-at` added below (open, not merged). Previously: branch `fix/security-posture` added below (open, not merged). Previously: PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
 > **Last verified: 2026-08-14** — branch `feat/pcb-calculation` added below (open, not merged, its entry is the newest). Previously: branch `feat/job-card-completed-at` added below (open, not merged). Previously: branch `fix/security-posture` added below (open, not merged). Previously: PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
 > **Last verified: 2026-08-14** — restamped on branch `fix/money-input-parsing` (its entry is the newest below, not yet deployed). PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
@@ -15,6 +22,7 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
+<<<<<<< HEAD
 ## 2026-09-22 — 🔵 Delivery page: tab switch "stuck" + per-status pagination (branch `fix/delivery-tab-switch-pagination`)
 
 Owner ask (screenshot of /delivery on Pending Delivery, 2026-09-22): (1) "when on pending
@@ -34,6 +42,59 @@ for here instead of loading 335 or 481 stuff every time I press".
   the browse page, which no longer holds delivered rows on other tabs.
 - [x] tests + `tsc -p tsconfig.app.json` (exit 0); docs restamped (CODEBASE-MAP delivery index, modules/delivery.md, BUG-HISTORY).
 - [ ] Bug fix → `main`. Live tab-switch timing on prod is UNMEASURED (dev server needs login).
+=======
+## 2026-09-22 晚 — ✅ Payment Vouchers「AP Payment」并入（#465 已上线已验）（owner「Payment voucher 没有包含ap payment?」→ 贴 Houzs 截图「最好是这样」）
+
+**漏项承认**：Houzs 采纳 Phase 1 只把 Expense Payment 改名+装梯子，「ap payment 和 payment voucher 一起」没做——
+付 PI 仍在 /invoices/supplier-payments、付 other creditor bill 仍在 Other Creditor Payments tab，两者都没审批梯子。
+
+**做法（对照截图：New AP Payment / New Payment Voucher 两按钮 + ALL/DRAFT/PREPARED/CHECKED/APPROVED/ADVANCE OPEN/CANCELLED 芯片）**：
+- 后端 `pv_kind='AP'` 凭证：`party_kind` SUPPLIER（PI + 可选 `advance_sen` 预付）| OTHER（other creditor bills），勾的单在新表
+  `payment_voucher_allocs`（self-apply `ensurePvApColumns`，记录 0235/0216）；同一条梯子 Draft→Prepared→Checked→Approved。
+- **Approve / Post now 那一下由付款页原有引擎写结算单**：抽出 `buildSupplierPaymentCreate`（supplier-payments.ts，POST / 也改用它——
+  行为不变的重构）与 `buildOtherPartyPaymentCreate`（accounting.ts），`paymentNo = pvNo`——账龄/对账/GL/Cash Position 看到的就是一张普通付款；
+  凭证本身不写分录。取消 = 结算单自己的 lifecycle core（`buildSupplierPaymentLifecycle` 导出 / `buildOtherPartyPaymentLifecycle`），
+  从 Supplier Payment 页作废的也会在 PV 清单读成 CANCELLED（清单 JOIN 结算单的 document_lifecycle）。已过账 AP 凭证不给就地改（Houzs：cancel 重开）。
+- `GET /payment-vouchers/open-bills`：该债主未付单，**扣掉别的未过账凭证已勾金额**（Houzs「已被别的未过账 voucher 勾走的会扣掉」），
+  编辑中的凭证自身除外；外币 PI 只显示不给勾（付款日汇率在 Supplier Payment 页）；预付只限 supplier。
+- UI：两按钮、七芯片带计数、AP 表单（Supplier/Other 切换 + SearchableSelect 债主 + 未付单勾选/部分金额 + 预付 + Total）、
+  行 AP/PV 标签、展开显示勾的单、ADVANCE OPEN 芯片=已过账 supplier AP 凭证预付未 knock off、打印「Bills settled」直接用勾单、
+  AP Invoices 每行 `pay` 深链 `?pay=<PI|AP>:<id>:<partyId>` 直开表单并勾满该单。
+- 守卫 `tests/pv-ap-payment.test.mjs` 9 断言（两个 builder 各恰好 2 个调用点、AP 不走 pvPostingStatements、reservation 只算未过账、
+  lifecycle 顺序、restate 拒、schema fixture）；money-input 守卫登记 `if (apMoneyError)` 闸 + `apSen` 预算；全套 4706 绿。
+- 顺手：docs/WORK-TRACKER.md 顶部残留的 `<<<<<<< HEAD` 冲突标记（上一轮 rebase 遗留，已在 main）清掉。
+
+**prod 已验（#465 merge cba0fcdb，deploy ✓，1 sen 两条路各走完整梯子后立即作废）**：①other creditor 路（Houzs Century OCB-2606-002）：draft 带勾单、open-bills 立刻显示 reserved 1 sen（available 119,999）、0 分录 0 结算行；prepare→check 铸 HPV-2609-046 仍 0 分录、bill 未动；approve → Other Creditor Payments 出现 HPV-2609-046（ACTIVE，1 sen，310-0010）、bill paid 1/outstanding 119,999、GL DR 405-0000 1 / CR 310-0010 1（sourceType other_party_payment）；从 PV 页 void → 结算单 lifecycle VOID、bill paid 归 0、PV 读 VOID。②supplier 路（OCEAN SKY PI-2608-091）：check 铸 HPV-2609-047 → approve → Supplier Payment 页出现同号（ACTIVE，1 行）、PI paid 1 / PARTIAL_PAID、GL DR 400-0000 1 / CR 310-0010 1；void → PI paid 0 / CONFIRMED、supplier payment VOID、PV VOID。UI：深链 ?pay=AP:opb-ced66add-2:op-1bcbd71b 直开 New AP Payment、债主已选、OCB-2606-002 勾满 1,200.00；芯片 ALL/DRAFT/PREPARED/CHECKED/APPROVED 91/ADVANCE OPEN/CANCELLED 7；两张测试凭证带 AP 标签灰显。
+
+---
+
+## 2026-09-22 — 🔵 Service dashboard: "Issues by category" + new "Root cause" graph (branch `feat/service-dashboard-root-cause-graph-v2`, rebuilt off `main` — the original was stacked on the now-defunct `chore/sync-staging-from-main`)
+
+Ask (owner, screenshots): "first one should be called issues by category, because root cause is inside
+the service case where it labels Root Cause & Prevention — implement a new graph for the root cause".
+The first panel tallies the same field as the list page's Category column, so it is now titled
+**Issues by category** (and "Top 3 categories"). New **Root cause** panel = category + the detail the
+operator recorded under it on the case (department / supplier / 3PL / driver / salesperson / SOP /
+sub-reason; first named field wins, 60 chars). Feed slice adds `rootCauses[{category,detail}]` and
+reads `root_cause_details`; `byRootCause` / `rootCauseDetail` / `parseRootCauses` in
+`service-issue-stats.ts` with tests (17/17). Desktop `ServiceIssuesPanel` + `/m` `ServiceTab`.
+`tsc -p tsconfig.app.json` clean. Not browser-verified. Prod UNMEASURED. Builds on the "Other no
+longer headlines Top issues" fix below (same branch history, both cherry-picked onto `main` cleanly).
+
+## 2026-09-22 — 🔵 Service dashboard: "Other" no longer headlines Top issues (branch `fix/service-dashboard-other-catch-all`, pushed, no PR yet)
+
+Ask (owner): "the dashboard for service cases, the top issue there is category of other 2 please fix".
+Traced create modal → PUT sanitizer → feed slice → `byCause`: nothing defaults a case to OTHER, so the
+two cases were tagged Other by hand and simply out-counted the real causes. **Prod UNMEASURED** (prod
+read denied in this session) — which two cases they are is unknown; click the Other row on the
+dashboard to list them and re-categorise if they are mis-tagged. Code fix: `OTHER` is a catch-all —
+`tally` ranks it below every real cause (above Not yet analysed) and new `topCauses()` excludes it from
+Top 3 on desktop (`ServiceIssuesPanel`) and `/m` (`ServiceTab`). Still counted, still clickable.
+Test added in `tests/service-issue-stats.test.mjs` (14/14), `tsc -p tsconfig.app.json` clean. Bug fix →
+target `main`. Docs: `CODEBASE-MAP.md` ServiceView row restamped.
+
+---
+>>>>>>> origin/main
 
 ## 2026-09-22 — 🔵 PO list: search finds a PO by the raw material bought on it (branch `feat/po-search-line-items`)
 
@@ -48,6 +109,32 @@ global search only saw column values; `items` stringified to `[object Object]`.
   whole dataset (search-safe rule), so every PO is covered, not just the current page.
 - [x] `tests/po-items-search.test.mjs`; `tsc -p tsconfig.app.json` exit 0.
 - [ ] PR → merge → verify live on prod (search `ASC1010F` on /procurement).
+
+## 2026-09-22 — 🔵 Dashboard: Day / Month / YTD period nav redesign (branch `feat/dashboard-date-nav-redesign`, pushed, PR #461 → staging)
+
+Ask (owner): expand the dashboard's Monthly/YTD toggle to Day/Month/YTD, each with its own
+arrow-stepping granularity, center label and click-to-pick popover. Same day as
+BUG-2026-09-22-002 (the Today/Yesterday preset fix, PR #458, merged to `main` first — this
+branch is cut from that tip).
+
+Built entirely on the EXISTING `Period` shape (`dashboard-shared-lib.ts`) — no new mode. Which
+of the three views a period reads as is DERIVED (`mode==="ytd"` → YTD; a range preset or a set
+`day` → Day; else → Month), so every existing `Period` consumer (`inFocus`, `inPeriod`,
+`previousPeriod`, the URL round-trip, ~40 `periodLabel` call sites across the dashboard views)
+needed zero changes. Day steps ±1 calendar day capped at today; Month/YTD keep the unchanged,
+already-tested `stepPeriod`. New: `stepDay`, `yearsWithData` (both `dashboard-shared-lib.ts`),
+`MonthGrid` (`dashboard-shared.tsx`, a year-stepped 12-month picker for the Month view's
+popover — months with no data disabled, same bound the stepper already uses). Mirrored on both
+surfaces that share this logic: the desktop `PeriodPicker` and the `/m` `PeriodChip` sheet.
+Same branch: the experimental-dashboard header subtitle now warns "Data may be inaccurate. Use
+with caution" instead of claiming "Live where noted".
+
+`tests/dashboard-period.test.mjs`: 13/13 pass (7 new). Full `npm test`: 4,700/4,700 pass, 0
+fail. `tsc -p tsconfig.app.json --noEmit`: exit 0. **Not browser-verified** — dev server needs a
+production login this session does not have. **`staging` is currently ~58 commits behind
+`main`**, so PR #461's commit list is noisy (every commit `main` has that `staging` doesn't,
+plus mine) — not a defect in this branch. Docs restamped: `CODEBASE-MAP.md`
+(dashboard-prototype.tsx / dashboard-shared.tsx / dashboard-shared-lib.ts rows).
 
 ## 2026-09-22 — ✅ PO create: searchable supplier picker (branch `feat/po-supplier-searchable-select`, MERGED #459)
 

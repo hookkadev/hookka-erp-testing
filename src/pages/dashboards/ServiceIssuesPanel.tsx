@@ -3,7 +3,7 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } f
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { TAUPE, TEAL, AMBER, GREEN, MUTED, BORDER, CHART_GOLD, fmtN, type Period } from "./dashboard-shared-lib";
 import {
-  NONE_KEY, byCause, byUnit, byPrevention, topProducts, causeTrend, causeLabel,
+  NONE_KEY, byCause, byRootCause, topCauses, byUnit, byPrevention, topProducts, causeTrend, causeLabel,
   type IssueCase, type TallyRow,
 } from "../../api/lib/service-issue-stats";
 
@@ -55,10 +55,11 @@ export function ServiceIssuesPanel({
   cases, period, onPickCause, causeOnly,
 }: { cases: IssueCase[]; period: Period; onPickCause: (key: string) => void; causeOnly?: boolean }) {
   const causes = useMemo(() => byCause(cases), [cases]);
+  const rootCauses = useMemo(() => byRootCause(cases), [cases]);
   const units = useMemo(() => byUnit(cases), [cases]);
   const prevention = useMemo(() => byPrevention(cases), [cases]);
   const products = useMemo(() => topProducts(cases, 10), [cases]);
-  const top3 = useMemo(() => causes.filter((r) => r.key !== NONE_KEY && r.count > 0).slice(0, 3), [causes]);
+  const top3 = useMemo(() => topCauses(causes, 3), [causes]);
   const ytd = period.mode === "ytd";
   const trend = useMemo(
     () => causeTrend(cases, top3.map((r) => r.key), (d) => (ytd ? d.slice(0, 7) : d.slice(5))),
@@ -71,10 +72,11 @@ export function ServiceIssuesPanel({
     <div className="space-y-5 max-md:space-y-4">
       <Card>
         <CardHeader className="pb-1">
-          <CardTitle>Issues by root cause ({fmtN(cases.length)} cases)</CardTitle>
+          <CardTitle>Issues by category ({fmtN(cases.length)} cases)</CardTitle>
           <p className="text-xs text-[#6B7280]">
-            Cases logged in the selected period. A case with several root causes counts once under each, so rows can add up to
-            more than the total. Avg close = average days from logged to closed, closed cases only. Click a row to list those cases.
+            The Category column of the Service Cases list. Cases logged in the selected period; a case with several categories
+            counts once under each, so rows can add up to more than the total. Avg close = average days from logged to closed,
+            closed cases only. Click a row to list those cases.
           </p>
           {cases.length > 0 && (
             <p className="text-xs font-semibold" style={{ color: unanalysed ? AMBER : GREEN }}>
@@ -86,6 +88,19 @@ export function ServiceIssuesPanel({
         </CardHeader>
         <CardContent>
           <TallyList rows={causes} total={cases.length} onPick={onPickCause} empty="No service cases in this period." />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-1">
+          <CardTitle>Root cause</CardTitle>
+          <p className="text-xs text-[#6B7280]">
+            From each case's Root Cause &amp; Prevention panel: the category plus the detail recorded under it (department,
+            supplier, 3PL, salesperson or sub-reason). A category with no detail recorded shows as one row.
+          </p>
+        </CardHeader>
+        <CardContent>
+          <TallyList rows={rootCauses} total={cases.length} empty="No service cases in this period." />
         </CardContent>
       </Card>
 
@@ -125,7 +140,7 @@ export function ServiceIssuesPanel({
 
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle>Top 3 causes — {ytd ? "by month" : "by day"}</CardTitle>
+            <CardTitle>Top 3 categories — {ytd ? "by month" : "by day"}</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="select-none [&_*]:outline-none" style={{ width: "100%", height: 240 }}>

@@ -86,6 +86,10 @@ import {
   type ApReconPi,
   type ApReconPaymentRow,
 } from "../../lib/ap-recon";
+// The Payment Vouchers "AP Payment" road posts a supplier payment at APPROVE
+// through the SAME builders the Supplier Payment page uses (owner 2026-09-22,
+// Houzs adoption: 「ap payment 和 payment voucher 一起」).
+import { buildSupplierPaymentCreate, buildSupplierPaymentLifecycle } from "./supplier-payments";
 
 const app = new Hono<Env>();
 
@@ -4461,20 +4465,21 @@ app.get("/ap-invoices", async (c) => {
   const status = c.req.query("status") || ""; // "", "OPEN", "PAID", "CANCELLED"
   const [ocbRes, piRes] = await Promise.all([
     c.var.DB.prepare(
-      `SELECT b.id, b.billNo, b.partyName, b.billDate, b.referenceNo, b.description, b.totalSen, b.paidAmountSen, b.status,
+      `SELECT b.id, b.billNo, b.partyId, b.partyName, b.billDate, b.referenceNo, b.description, b.totalSen, b.paidAmountSen, b.status,
               dl.state AS lifecycleState
          FROM other_party_bills b
          LEFT JOIN document_lifecycle dl ON dl.orgId = b.orgId AND dl.sourceType = 'other_party_bill' AND dl.sourceId = b.billNo
         WHERE b.orgId = ? AND b.partyType = 'CREDITOR' AND (dl.state IS NULL OR dl.state <> 'DELETED')`,
     ).bind(orgId).all<Record<string, unknown>>(),
     c.var.DB.prepare(
-      `SELECT id, pi_no, supplier_name, supplier_invoice_no, invoice_date, due_date, amount_sen, paid_amount_sen, status, is_opening
+      `SELECT id, pi_no, supplier_id, supplier_name, supplier_invoice_no, invoice_date, due_date, amount_sen, paid_amount_sen, status, is_opening
          FROM purchase_invoices
         WHERE status <> 'DRAFT'`,
     ).all<Record<string, unknown>>().catch(() => ({ results: [] as Record<string, unknown>[] })),
   ]);
+  // partyId feeds the "Pay" deep-link into Payment Vouchers › New AP Payment.
   type ApRow = {
-    kind: "AP" | "PI"; id: string; no: string; supplier: string; supplierRef: string; date: string; dueDate: string | null;
+    kind: "AP" | "PI"; id: string; no: string; supplier: string; partyId: string; supplierRef: string; date: string; dueDate: string | null;
     description: string; totalSen: number; paidSen: number; outstandingSen: number; status: string; opening: boolean;
   };
   const rows: ApRow[] = [];
@@ -4485,6 +4490,7 @@ app.get("/ap-invoices", async (c) => {
     const st = String(b.status ?? "");
     rows.push({
       kind: "AP", id: String(b.id), no: String(b.billNo ?? b.bill_no ?? ""), supplier: String(b.partyName ?? b.party_name ?? ""),
+      partyId: String(b.partyId ?? b.party_id ?? ""),
       supplierRef: String(b.referenceNo ?? b.reference_no ?? ""), date: String(b.billDate ?? b.bill_date ?? "").slice(0, 10), dueDate: null,
       description: String(b.description ?? ""), totalSen: total, paidSen: paid, outstandingSen: total - paid,
       status: lc !== "ACTIVE" ? "CANCELLED" : st === "CANCELLED" || st === "VOID" ? "CANCELLED" : total - paid <= 0 ? "PAID" : "OPEN",
@@ -4497,6 +4503,7 @@ app.get("/ap-invoices", async (c) => {
     const st = String(p.status ?? "");
     rows.push({
       kind: "PI", id: String(p.id), no: String(p.piNo ?? p.pi_no ?? ""), supplier: String(p.supplierName ?? p.supplier_name ?? ""),
+      partyId: String(p.supplierId ?? p.supplier_id ?? ""),
       supplierRef: String(p.supplierInvoiceNo ?? p.supplier_invoice_no ?? ""), date: String(p.invoiceDate ?? p.invoice_date ?? "").slice(0, 10),
       dueDate: (p.dueDate ?? p.due_date) ? String(p.dueDate ?? p.due_date).slice(0, 10) : null,
       description: "", totalSen: total, paidSen: paid, outstandingSen: total - paid,
@@ -4603,6 +4610,80 @@ app.post("/other-party-bills/:billNo/lifecycle", async (c) => {
 // ---------------------------------------------------------------------------
 // D2 — OTHER-PARTY PAYMENTS  POST / GET / void
 // ---------------------------------------------------------------------------
+
+// Every allocated bill must exist, be this party's, sit on the same side and
+// be open; amounts within outstanding (validateAllocations). Shared by the
+// immediate POST below and the Payment Vouchers AP road (create/edit/approve).
+async function validateOtherPartyPaymentAllocs(
+  db: Env["Variables"]["DB"],
+  orgId: string,
+  party: OtherPartyRow,
+  allocs: PaymentAllocInput[],
+): Promise<{ ok: true; outstandingByBill: Record<string, number> } | { ok: false; error: string }> {
+  const outstandingByBill: Record<string, number> = {};
+  for (const a of allocs) {
+    const bill = await db.prepare("SELECT * FROM other_party_bills WHERE id = ? AND orgId = ?")
+      .bind(a.billId, orgId).first<OtherPartyBillRow>();
+    if (!bill) return { ok: false, error: `Bill ${a.billId} not found` };
+    if (bill.partyId !== party.id) return { ok: false, error: "Bill does not belong to this party" };
+    if (bill.partyType !== party.type) return { ok: false, error: "Bill side mismatch" };
+    if (bill.status !== "OPEN" && bill.status !== "PARTIAL_PAID")
+      return { ok: false, error: `Bill ${bill.billNo} is not open` };
+    outstandingByBill[a.billId] = bill.totalSen - bill.paidAmountSen;
+  }
+  const allocErr = validateAllocations(allocs, outstandingByBill);
+  if (allocErr) return { ok: false, error: allocErr };
+  return { ok: true, outstandingByBill };
+}
+
+// The ONE builder of an other-party payment: payment rows per bill, bill
+// paidAmountSen bumps, GL legs (creditor: DR 405-0000 / CR bank). Used by the
+// immediate POST below and by the Payment Vouchers AP road, which posts at
+// APPROVE under the voucher's formal number. Caller mints the number, validates
+// (validateOtherPartyPaymentAllocs) and batches. Throws when the GL build fails.
+async function buildOtherPartyPaymentCreate(
+  db: Env["Variables"]["DB"],
+  input: {
+    orgId: string; actorUserId: string | null; party: OtherPartyRow; bankAccount: string; date: string;
+    reference: string | null; allocs: PaymentAllocInput[]; paymentNo: string;
+  },
+): Promise<D1PreparedStatement[]> {
+  const { orgId, actorUserId, party, bankAccount, date, reference, allocs, paymentNo: payNo } = input;
+  const partyType = party.type as PartyType;
+  const totalSen = computePaymentTotal(allocs);
+  const now = new Date().toISOString();
+  const statements: D1PreparedStatement[] = [];
+  for (const a of allocs) {
+    statements.push(
+      db.prepare(
+        `INSERT INTO other_party_payments
+           (id, paymentNo, partyId, partyType, partyName, billId, date, amountSen, bankAccount, reference, orgId, createdAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(
+        `opp-${crypto.randomUUID().slice(0, 10)}`, payNo, party.id, partyType, party.name,
+        a.billId, date, a.amountSen, bankAccount, reference, orgId, now,
+      ),
+    );
+    statements.push(
+      db.prepare(
+        `UPDATE other_party_bills
+           SET paidAmountSen = paidAmountSen + ?,
+               status = CASE WHEN paidAmountSen + ? >= totalSen THEN 'PAID'
+                             WHEN paidAmountSen + ? > 0 THEN 'PARTIAL_PAID' ELSE status END,
+               updatedAt = ?
+         WHERE id = ?`,
+      ).bind(a.amountSen, a.amountSen, a.amountSen, now, a.billId),
+    );
+  }
+  const legs: LedgerEntryInput[] = buildPaymentLegs({ partyType, paymentNo: payNo, partyName: party.name, bankAccount, totalSen }).map((l) => ({
+    id: `lje-${crypto.randomUUID().slice(0, 12)}`, sourceType: "other_party_payment", sourceId: payNo,
+    legNo: l.legNo, accountCode: l.accountCode, debitSen: l.debitSen, creditSen: l.creditSen, description: l.description, actorUserId, orgId,
+  }));
+  const { statements: ledgerStmts } = await buildJournalEntryStatements(db, orgId, legs);
+  statements.push(...ledgerStmts);
+  return statements;
+}
+
 app.post("/other-party-payments", async (c) => {
   const denied = await requirePermission(c, "accounting", "create");
   if (denied) return denied;
@@ -4636,19 +4717,9 @@ app.post("/other-party-payments", async (c) => {
       if (allocs.length === 0) return c.json({ success: false, error: "Select at least one bill" }, 400);
 
       const partyType = party.type as PartyType;
-      const outstandingByBill: Record<string, number> = {};
-      for (const a of allocs) {
-        const bill = await c.var.DB.prepare("SELECT * FROM other_party_bills WHERE id = ? AND orgId = ?")
-          .bind(a.billId, orgId).first<OtherPartyBillRow>();
-        if (!bill) return c.json({ success: false, error: `Bill ${a.billId} not found` }, 400);
-        if (bill.partyId !== party.id) return c.json({ success: false, error: "Bill does not belong to this party" }, 400);
-        if (bill.partyType !== partyType) return c.json({ success: false, error: "Bill side mismatch" }, 400);
-        if (bill.status !== "OPEN" && bill.status !== "PARTIAL_PAID")
-          return c.json({ success: false, error: `Bill ${bill.billNo} is not open` }, 400);
-        outstandingByBill[a.billId] = bill.totalSen - bill.paidAmountSen;
-      }
-      const allocErr = validateAllocations(allocs, outstandingByBill);
-      if (allocErr) return c.json({ success: false, error: allocErr }, 400);
+      // Validate before the number is minted (a refused payment burns nothing).
+      const check = await validateOtherPartyPaymentAllocs(c.var.DB, orgId, party, allocs);
+      if (!check.ok) return c.json({ success: false, error: check.error }, 400);
 
       const totalSen = computePaymentTotal(allocs);
       const payNo = await issueDocNumber(c.var.DB, {
@@ -4656,40 +4727,13 @@ app.post("/other-party-payments", async (c) => {
         direction: partyType === "CREDITOR" ? "out" : "in",
         dateIso: date,
       });
-      const now = new Date().toISOString();
       const actorUserId = (c as unknown as { get: (k: string) => string | undefined }).get("userId") ?? null;
 
-      const statements: D1PreparedStatement[] = [];
-      for (const a of allocs) {
-        statements.push(
-          c.var.DB.prepare(
-            `INSERT INTO other_party_payments
-               (id, paymentNo, partyId, partyType, partyName, billId, date, amountSen, bankAccount, reference, orgId, createdAt)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          ).bind(
-            `opp-${crypto.randomUUID().slice(0, 10)}`, payNo, party.id, partyType, party.name,
-            a.billId, date, a.amountSen, bankAccount, body.reference ?? null, orgId, now,
-          ),
-        );
-        statements.push(
-          c.var.DB.prepare(
-            `UPDATE other_party_bills
-               SET paidAmountSen = paidAmountSen + ?,
-                   status = CASE WHEN paidAmountSen + ? >= totalSen THEN 'PAID'
-                                 WHEN paidAmountSen + ? > 0 THEN 'PARTIAL_PAID' ELSE status END,
-                   updatedAt = ?
-             WHERE id = ?`,
-          ).bind(a.amountSen, a.amountSen, a.amountSen, now, a.billId),
-        );
-      }
-
+      let statements: D1PreparedStatement[];
       try {
-        const legs: LedgerEntryInput[] = buildPaymentLegs({ partyType, paymentNo: payNo, partyName: party.name, bankAccount, totalSen }).map((l) => ({
-          id: `lje-${crypto.randomUUID().slice(0, 12)}`, sourceType: "other_party_payment", sourceId: payNo,
-          legNo: l.legNo, accountCode: l.accountCode, debitSen: l.debitSen, creditSen: l.creditSen, description: l.description, actorUserId, orgId,
-        }));
-        const { statements: ledgerStmts } = await buildJournalEntryStatements(c.var.DB, orgId, legs);
-        statements.push(...ledgerStmts);
+        statements = await buildOtherPartyPaymentCreate(c.var.DB, {
+          orgId, actorUserId, party, bankAccount, date, reference: body.reference ?? null, allocs, paymentNo: payNo,
+        });
       } catch (e) {
         console.error(`[ledger] other_party_payment ${payNo} GL build failed — aborting:`, e);
         return c.json({ success: false, error: "Failed to build the ledger posting — nothing was saved." }, 500);
@@ -9317,25 +9361,354 @@ function validatePvHeader(
   return { ok: true, accrued: false, accrualAccount: null, payFrom };
 }
 
+// ---------------------------------------------------------------------------
+// PV "AP Payment" (owner 2026-09-22, Houzs adoption — 「ap payment 和 payment
+// voucher 一起」, screenshot: New AP Payment / New Payment Voucher). A voucher of
+// kind AP pays a creditor's bills instead of expense lines: partyKind SUPPLIER
+// → purchase invoices (+ optional unallocated advance), partyKind OTHER →
+// other-creditor bills. It walks the SAME four-tier ladder; at APPROVE (or Post
+// now) the money is posted by the SAME builders the Supplier Payment / Other
+// Creditor Payments pages use, under the voucher's own formal number — so the
+// settlement document (supplier_payments / other_party_payments rows + GL)
+// carries paymentNo = pvNo, and aging / bank reco / Cash Position see exactly
+// what they always saw. The voucher itself writes NO ledger legs of its own.
+// ⚠ Migration files 0235/0216 are the record; THIS self-apply is the mechanism.
+// ---------------------------------------------------------------------------
+let _pendingPvApCols: Promise<void> | null = null;
+function ensurePvApColumns(db: Env["Variables"]["DB"]): Promise<void> {
+  if (!_pendingPvApCols) {
+    _pendingPvApCols = (async () => {
+      for (const col of ["pv_kind TEXT", "party_kind TEXT", "party_id TEXT", "advance_sen INTEGER"]) {
+        await db.prepare(`ALTER TABLE payment_vouchers ADD COLUMN IF NOT EXISTS ${col}`).run().catch(() => {});
+      }
+      await db.prepare(
+        `CREATE TABLE IF NOT EXISTS payment_voucher_allocs (
+           id TEXT PRIMARY KEY,
+           voucher_id TEXT NOT NULL,
+           doc_kind TEXT NOT NULL,
+           doc_id TEXT NOT NULL,
+           amount_sen INTEGER NOT NULL,
+           line_order INTEGER NOT NULL DEFAULT 0
+         )`,
+      ).run();
+      await db.prepare("CREATE INDEX IF NOT EXISTS idx_pv_allocs_voucher ON payment_voucher_allocs (voucher_id)").run().catch(() => {});
+      await db.prepare("CREATE INDEX IF NOT EXISTS idx_pv_allocs_doc ON payment_voucher_allocs (doc_kind, doc_id)").run().catch(() => {});
+    })().catch((e) => {
+      _pendingPvApCols = null;
+      throw e;
+    });
+  }
+  return _pendingPvApCols;
+}
+
+const PV_KIND_AP = "AP";
+type PvPartyKind = "SUPPLIER" | "OTHER";
+type PvAllocDocKind = "PI" | "AP";
+type PvAlloc = { docKind: PvAllocDocKind; docId: string; amountSen: number };
+
+async function loadPvAllocs(db: Env["Variables"]["DB"], voucherId: string): Promise<PvAlloc[]> {
+  const res = await db.prepare(
+    "SELECT doc_kind, doc_id, amount_sen FROM payment_voucher_allocs WHERE voucher_id = ? ORDER BY line_order",
+  ).bind(voucherId).all<Record<string, unknown>>().catch(() => ({ results: [] as Record<string, unknown>[] }));
+  return (res.results ?? []).map((r) => ({
+    docKind: String(r.docKind ?? r.doc_kind) as PvAllocDocKind,
+    docId: String(r.docId ?? r.doc_id),
+    amountSen: Math.round(Number(r.amountSen ?? r.amount_sen) || 0),
+  }));
+}
+
+// Amounts already ticked on OTHER unposted, live AP vouchers (Houzs: 「已被别
+// 的未过账 voucher 勾走的会扣掉」) — a bill cannot be promised twice on the
+// ladder. `exclude` = the voucher being edited (its own ticks don't count).
+async function pvReservedByDoc(
+  db: Env["Variables"]["DB"],
+  exclude: string | null,
+): Promise<Map<string, { sen: number; vouchers: string[] }>> {
+  const res = await db.prepare(
+    `SELECT a.voucher_id, a.doc_kind, a.doc_id, a.amount_sen, v.pvNo
+       FROM payment_voucher_allocs a
+       JOIN payment_vouchers v ON v.id = a.voucher_id
+      WHERE v.status <> 'VOID' AND COALESCE(v.approval_state, 'APPROVED') <> 'APPROVED'`,
+  ).all<Record<string, unknown>>().catch(() => ({ results: [] as Record<string, unknown>[] }));
+  const out = new Map<string, { sen: number; vouchers: string[] }>();
+  for (const r of res.results ?? []) {
+    const no = String(r.pvNo ?? r.pv_no ?? "");
+    if (exclude && (r.voucherId ?? r.voucher_id) === exclude) continue;
+    const key = `${String(r.docKind ?? r.doc_kind)}|${String(r.docId ?? r.doc_id)}`;
+    const cur = out.get(key) ?? { sen: 0, vouchers: [] };
+    cur.sen += Math.round(Number(r.amountSen ?? r.amount_sen) || 0);
+    if (no && !cur.vouchers.includes(no)) cur.vouchers.push(no);
+    out.set(key, cur);
+  }
+  return out;
+}
+
+type PvOpenBill = {
+  docKind: PvAllocDocKind; id: string; no: string; ref: string; date: string; dueDate: string | null;
+  totalSen: number; paidSen: number; outstandingSen: number; reservedSen: number; reservedBy: string[]; availableSen: number;
+  currency: string; foreign: boolean; opening: boolean;
+};
+
+// The creditor's payable documents as the voucher form lists them.
+async function pvOpenBillsFor(
+  db: Env["Variables"]["DB"],
+  orgId: string,
+  partyKind: PvPartyKind,
+  partyId: string,
+  exclude: string | null,
+): Promise<{ partyName: string; bills: PvOpenBill[]; advanceOpenSen: number } | null> {
+  const reserved = await pvReservedByDoc(db, exclude);
+  if (partyKind === "SUPPLIER") {
+    const sup = await db.prepare("SELECT id, name FROM suppliers WHERE id = ?").bind(partyId)
+      .first<{ id: string; name: string }>();
+    if (!sup) return null;
+    const res = await db.prepare(
+      `SELECT id, pi_no, supplier_invoice_no, invoice_date, due_date, amount_sen, paid_amount_sen, status, currency, is_opening
+         FROM purchase_invoices
+        WHERE supplier_id = ? AND status IN ('CONFIRMED','APPROVED','PARTIAL_PAID')
+        ORDER BY invoice_date ASC, pi_no ASC`,
+    ).bind(partyId).all<Record<string, unknown>>();
+    const bills: PvOpenBill[] = [];
+    for (const p of res.results ?? []) {
+      const total = Math.round(Number(p.amountSen ?? p.amount_sen) || 0);
+      const paid = Math.round(Number(p.paidAmountSen ?? p.paid_amount_sen) || 0);
+      const outstanding = total - paid;
+      if (outstanding <= 0) continue;
+      const id = String(p.id);
+      const rsv = reserved.get(`PI|${id}`);
+      const currency = String(p.currency ?? "MYR") || "MYR";
+      bills.push({
+        docKind: "PI", id, no: String(p.piNo ?? p.pi_no ?? ""), ref: String(p.supplierInvoiceNo ?? p.supplier_invoice_no ?? ""),
+        date: String(p.invoiceDate ?? p.invoice_date ?? "").slice(0, 10),
+        dueDate: (p.dueDate ?? p.due_date) ? String(p.dueDate ?? p.due_date).slice(0, 10) : null,
+        totalSen: total, paidSen: paid, outstandingSen: outstanding,
+        reservedSen: rsv?.sen ?? 0, reservedBy: rsv?.vouchers ?? [], availableSen: Math.max(0, outstanding - (rsv?.sen ?? 0)),
+        currency, foreign: currency.toUpperCase() !== "MYR", opening: !!Number(p.isOpening ?? p.is_opening ?? 0),
+      });
+    }
+    // Unapplied advance this supplier already holds (knock-off lives on the
+    // Supplier Payment page) — shown for information on the form.
+    const adv = await db.prepare(
+      `SELECT COALESCE(SUM(sp.amount_sen), 0) AS adv_sen
+         FROM supplier_payments sp
+         LEFT JOIN document_lifecycle dl ON dl.sourceType = 'supplier_payment' AND dl.sourceId = sp.payment_no AND dl.orgId = sp.org_id
+        WHERE sp.supplier_id = ? AND sp.org_id = ? AND sp.purchase_invoice_id IS NULL
+          AND COALESCE(sp.method, '') = 'BANK_TRANSFER' AND (dl.state IS NULL OR dl.state = 'ACTIVE')`,
+    ).bind(partyId, orgId).first<Record<string, unknown>>().catch(() => null);
+    return { partyName: sup.name, bills, advanceOpenSen: Math.round(Number(adv?.advSen ?? adv?.adv_sen) || 0) };
+  }
+  const party = await db.prepare("SELECT * FROM other_parties WHERE id = ? AND orgId = ?").bind(partyId, orgId)
+    .first<OtherPartyRow>();
+  if (!party || party.type !== "CREDITOR") return null;
+  const res = await db.prepare(
+    `SELECT b.id, b.billNo, b.billDate, b.referenceNo, b.totalSen, b.paidAmountSen, b.status, b.is_opening AS is_opening
+       FROM other_party_bills b
+       LEFT JOIN document_lifecycle dl ON dl.orgId = b.orgId AND dl.sourceType = 'other_party_bill' AND dl.sourceId = b.billNo
+      WHERE b.orgId = ? AND b.partyId = ? AND b.partyType = 'CREDITOR'
+        AND b.status IN ('OPEN','PARTIAL_PAID') AND (dl.state IS NULL OR dl.state = 'ACTIVE')
+      ORDER BY b.billDate ASC, b.billNo ASC`,
+  ).bind(orgId, partyId).all<Record<string, unknown>>();
+  const bills: PvOpenBill[] = [];
+  for (const b of res.results ?? []) {
+    const total = Math.round(Number(b.totalSen ?? b.total_sen) || 0);
+    const paid = Math.round(Number(b.paidAmountSen ?? b.paid_amount_sen) || 0);
+    const outstanding = total - paid;
+    if (outstanding <= 0) continue;
+    const id = String(b.id);
+    const rsv = reserved.get(`AP|${id}`);
+    bills.push({
+      docKind: "AP", id, no: String(b.billNo ?? b.bill_no ?? ""), ref: String(b.referenceNo ?? b.reference_no ?? ""),
+      date: String(b.billDate ?? b.bill_date ?? "").slice(0, 10), dueDate: null,
+      totalSen: total, paidSen: paid, outstandingSen: outstanding,
+      reservedSen: rsv?.sen ?? 0, reservedBy: rsv?.vouchers ?? [], availableSen: Math.max(0, outstanding - (rsv?.sen ?? 0)),
+      currency: "MYR", foreign: false, opening: !!Number(b.isOpening ?? b.is_opening ?? 0),
+    });
+  }
+  return { partyName: party.name, bills, advanceOpenSen: 0 };
+}
+
+type PvApValidated = {
+  partyKind: PvPartyKind; partyId: string; partyName: string; payFrom: string;
+  allocs: PvAlloc[]; advanceSen: number; totalSen: number;
+};
+// Create/edit validation for an AP voucher: party exists, Pay From is bank/
+// cash, every ticked bill is the party's, open, and within (outstanding −
+// reserved elsewhere); a supplier may add an unallocated advance.
+async function validatePvAp(
+  db: Env["Variables"]["DB"],
+  orgId: string,
+  coa: Map<string, { type: CoaRow["type"]; specialAccountType: string | null; isPostable: number | null }>,
+  body: Record<string, unknown>,
+  exclude: string | null,
+): Promise<{ ok: true; v: PvApValidated } | { ok: false; error: string }> {
+  const partyKind = body.partyKind === "OTHER" ? "OTHER" : body.partyKind === "SUPPLIER" ? "SUPPLIER" : null;
+  if (!partyKind) return { ok: false, error: "partyKind must be SUPPLIER or OTHER" };
+  const partyId = String(body.partyId ?? "");
+  if (!partyId) return { ok: false, error: "Pick the creditor to pay" };
+  if (body.accrued === true || body.accrued === 1) return { ok: false, error: "An AP payment cannot be accrued — the bill already carries the liability" };
+  const h = validatePvHeader(coa, { payFrom: body.payFrom });
+  if (!h.ok) return h;
+  const payFrom = h.payFrom!;
+  const open = await pvOpenBillsFor(db, orgId, partyKind, partyId, exclude);
+  if (!open) return { ok: false, error: partyKind === "SUPPLIER" ? "Supplier not found" : "Other creditor not found" };
+  const rawAllocs = Array.isArray(body.allocations) ? (body.allocations as Record<string, unknown>[]) : [];
+  const byId = new Map(open.bills.map((b) => [b.id, b] as const));
+  const allocs: PvAlloc[] = [];
+  const seen = new Set<string>();
+  for (const a of rawAllocs) {
+    const docId = String(a.docId ?? "");
+    const amountSen = Math.round(Number(a.amountSen) || 0);
+    if (!docId || amountSen === 0) continue;
+    if (amountSen < 0) return { ok: false, error: "Allocation amounts must be positive" };
+    if (seen.has(docId)) return { ok: false, error: "The same bill is listed twice" };
+    seen.add(docId);
+    const bill = byId.get(docId);
+    if (!bill) return { ok: false, error: `Bill ${docId} is not an open bill of this creditor` };
+    if (bill.foreign) return { ok: false, error: `${bill.no} is in ${bill.currency} — pay foreign-currency invoices on the Supplier Payment page (payment-day rate needed)` };
+    if (amountSen > bill.availableSen) {
+      const why = bill.reservedSen > 0 ? ` (RM ${(bill.reservedSen / 100).toFixed(2)} already ticked on ${bill.reservedBy.join(", ")})` : "";
+      return { ok: false, error: `${bill.no}: RM ${(amountSen / 100).toFixed(2)} exceeds the RM ${(bill.availableSen / 100).toFixed(2)} still payable${why}` };
+    }
+    allocs.push({ docKind: bill.docKind, docId, amountSen });
+  }
+  const advanceSen = Math.max(0, Math.round(Number(body.advanceSen) || 0));
+  if (advanceSen > 0 && partyKind !== "SUPPLIER") return { ok: false, error: "An advance is only for suppliers — other creditors are paid against their bills" };
+  if (allocs.length === 0 && advanceSen <= 0) return { ok: false, error: "Tick at least one bill (or enter an advance)" };
+  const totalSen = allocs.reduce((s, a) => s + a.amountSen, 0) + advanceSen;
+  return { ok: true, v: { partyKind, partyId, partyName: open.partyName, payFrom, allocs, advanceSen, totalSen } };
+}
+
+type PvApHeader = {
+  id: string; pvNo: string; date: string; payFrom: string; partyKind: PvPartyKind; partyId: string;
+  reference: string | null; advanceSen: number;
+};
+// The posting moment of an AP voucher — the settlement document is built by the
+// page-native builders under paymentNo = pvNo. Returns the statements to batch;
+// the caller adds the voucher's own state flip.
+async function pvApSettlementStatements(
+  db: Env["Variables"]["DB"],
+  orgId: string,
+  actorUserId: string | null,
+  pv: PvApHeader,
+  allocs: PvAlloc[],
+): Promise<{ ok: true; statements: D1PreparedStatement[]; totalSen: number } | { ok: false; error: string }> {
+  if (pv.partyKind === "SUPPLIER") {
+    const tfSources = await getTfSources(db).catch(() => [] as TfSource[]);
+    if (tfSources.some((s) => s.lenderSupplierId === pv.partyId)) {
+      return { ok: false, error: "This supplier is a trade-finance lender — record the repayment on the Supplier Payment page" };
+    }
+    const built = await buildSupplierPaymentCreate(db, {
+      orgId, actorUserId, supplierId: pv.partyId, payFrom: pv.payFrom, date: pv.date, reference: pv.reference ?? "",
+      allocations: allocs.filter((a) => a.docKind === "PI").map((a) => ({ piId: a.docId, payMyrSen: a.amountSen })),
+      advanceSen: pv.advanceSen, paymentNo: pv.pvNo,
+    });
+    if (!built.ok) return built;
+    return { ok: true, statements: built.statements, totalSen: built.totalBank };
+  }
+  const party = await db.prepare("SELECT * FROM other_parties WHERE id = ? AND orgId = ?").bind(pv.partyId, orgId)
+    .first<OtherPartyRow>();
+  if (!party) return { ok: false, error: "Other creditor not found" };
+  const allocsIn: PaymentAllocInput[] = allocs.filter((a) => a.docKind === "AP").map((a) => ({ billId: a.docId, amountSen: a.amountSen }));
+  if (allocsIn.length === 0) return { ok: false, error: "This voucher has no bills" };
+  const check = await validateOtherPartyPaymentAllocs(db, orgId, party, allocsIn);
+  if (!check.ok) return check;
+  const statements = await buildOtherPartyPaymentCreate(db, {
+    orgId, actorUserId, party, bankAccount: pv.payFrom, date: pv.date, reference: pv.reference, allocs: allocsIn, paymentNo: pv.pvNo,
+  });
+  return { ok: true, statements, totalSen: computePaymentTotal(allocsIn) };
+}
+
+function pvAllocStatements(db: Env["Variables"]["DB"], voucherId: string, allocs: PvAlloc[]): D1PreparedStatement[] {
+  return allocs.map((a, idx) =>
+    db.prepare(
+      "INSERT INTO payment_voucher_allocs (id, voucher_id, doc_kind, doc_id, amount_sen, line_order) VALUES (?, ?, ?, ?, ?, ?)",
+    ).bind(`pva-${crypto.randomUUID().slice(0, 8)}`, voucherId, a.docKind, a.docId, a.amountSen, idx),
+  );
+}
+
+// What the "New AP Payment" form lists once a creditor is picked.
+app.get("/payment-vouchers/open-bills", async (c) => {
+  const denied = await requirePermission(c, "accounting", "read");
+  if (denied) return denied;
+  const partyKind = c.req.query("partyKind") === "OTHER" ? "OTHER" : "SUPPLIER";
+  const partyId = c.req.query("partyId") || "";
+  const exclude = c.req.query("exclude") || null;
+  if (!partyId) return c.json({ success: false, error: "partyId required" }, 400);
+  await ensurePvApColumns(c.var.DB);
+  const open = await pvOpenBillsFor(c.var.DB, getOrgId(c), partyKind, partyId, exclude);
+  if (!open) return c.json({ success: false, error: "Creditor not found" }, 404);
+  return c.json({ success: true, data: { partyKind, partyId, ...open } });
+});
+
 app.get("/payment-vouchers", async (c) => {
   const denied = await requirePermission(c, "accounting", "read");
   if (denied) return denied;
   try {
-    const [pvRes, lineRes] = await Promise.all([
+    await ensurePvApColumns(c.var.DB).catch(() => {});
+    const orgId = getOrgId(c);
+    // An AP voucher's lifecycle lives on its settlement document (the supplier
+    // / other-party payment that carries paymentNo = pvNo) — that is what a
+    // void from the Supplier Payment page flips, so read it from there.
+    const [pvRes, lineRes, allocRes] = await Promise.all([
       c.var.DB.prepare(
-        `SELECT payment_vouchers.*, dl.state AS lifecycleState
+        `SELECT payment_vouchers.*, dl.state AS lifecycleState, sdl.state AS settlement_state
            FROM payment_vouchers
            LEFT JOIN document_lifecycle dl
              ON dl.sourceType = 'payment_voucher'
             AND dl.sourceId = payment_vouchers.id
+           LEFT JOIN document_lifecycle sdl
+             ON sdl.sourceType IN ('supplier_payment', 'other_party_payment')
+            AND sdl.sourceId = payment_vouchers.pvNo
+            AND payment_vouchers.pv_kind = 'AP'
           WHERE (dl.state IS NULL OR dl.state <> 'DELETED')
+            AND (sdl.state IS NULL OR sdl.state <> 'DELETED')
           ORDER BY date DESC, pvNo DESC LIMIT 500`,
       ).all(),
       c.var.DB.prepare(
         `SELECT * FROM payment_voucher_lines ORDER BY lineOrder`,
       ).all(),
+      c.var.DB.prepare(
+        `SELECT a.voucher_id, a.doc_kind, a.doc_id, a.amount_sen, a.line_order,
+                pi.pi_no AS pi_no, pi.supplier_invoice_no AS pi_ref, b.billNo AS bill_no, b.referenceNo AS bill_ref
+           FROM payment_voucher_allocs a
+           LEFT JOIN purchase_invoices pi ON a.doc_kind = 'PI' AND pi.id = a.doc_id
+           LEFT JOIN other_party_bills b ON a.doc_kind = 'AP' AND b.id = a.doc_id
+          ORDER BY a.line_order`,
+      ).all<Record<string, unknown>>().catch(() => ({ results: [] as Record<string, unknown>[] })),
     ]);
     const lines = (lineRes.results ?? []) as { voucherId: string }[];
+    type AllocOut = { docKind: string; docId: string; docNo: string; docRef: string; amountSen: number };
+    const allocsByVoucher = new Map<string, AllocOut[]>();
+    for (const a of allocRes.results ?? []) {
+      const vid = String(a.voucherId ?? a.voucher_id ?? "");
+      const kind = String(a.docKind ?? a.doc_kind ?? "");
+      const list = allocsByVoucher.get(vid) ?? [];
+      list.push({
+        docKind: kind, docId: String(a.docId ?? a.doc_id ?? ""),
+        docNo: String((kind === "PI" ? (a.piNo ?? a.pi_no) : (a.billNo ?? a.bill_no)) ?? ""),
+        docRef: String((kind === "PI" ? (a.piRef ?? a.pi_ref) : (a.billRef ?? a.bill_ref)) ?? ""),
+        amountSen: Math.round(Number(a.amountSen ?? a.amount_sen) || 0),
+      });
+      allocsByVoucher.set(vid, list);
+    }
+    // Open (unapplied) advance per posted supplier AP voucher — the row's
+    // "ADVANCE OPEN" state; knock-off decrements the advance row in place.
+    const apAdvanceNos = (pvRes.results ?? [])
+      .map((v) => v as Record<string, unknown>)
+      .filter((r) => String(r.pvKind ?? r.pv_kind ?? "") === PV_KIND_AP && Math.round(Number(r.advanceSen ?? r.advance_sen) || 0) > 0)
+      .map((r) => String(r.pvNo ?? r.pv_no ?? ""))
+      .filter(Boolean);
+    const advanceOpenByNo = new Map<string, number>();
+    if (apAdvanceNos.length) {
+      const advRes = await c.var.DB.prepare(
+        `SELECT payment_no, COALESCE(SUM(amount_sen), 0) AS adv_sen
+           FROM supplier_payments
+          WHERE org_id = ? AND purchase_invoice_id IS NULL AND COALESCE(method, '') = 'BANK_TRANSFER'
+            AND payment_no IN (${apAdvanceNos.map(() => "?").join(",")})
+          GROUP BY payment_no`,
+      ).bind(orgId, ...apAdvanceNos).all<Record<string, unknown>>().catch(() => ({ results: [] as Record<string, unknown>[] }));
+      for (const r of advRes.results ?? []) advanceOpenByNo.set(String(r.paymentNo ?? r.payment_no), Math.round(Number(r.advSen ?? r.adv_sen) || 0));
+    }
     // Resolve the ladder actors to display names so the printed voucher can
     // carry "Prepared by / Checked by / Approved by" with real names.
     const actorIds = new Set<string>();
@@ -9355,9 +9728,24 @@ app.get("/payment-vouchers", async (c) => {
     const nm = (r: Record<string, unknown>, a: string, b: string) => { const id = (r[a] ?? r[b]); return typeof id === "string" ? (nameById.get(id) ?? null) : null; };
     const data = (pvRes.results ?? []).map((v) => {
       const r = v as Record<string, unknown>;
+      const id = String(r.id);
+      const isAp = String(r.pvKind ?? r.pv_kind ?? "") === PV_KIND_AP;
+      const pvNo = String(r.pvNo ?? r.pv_no ?? "");
+      const settlementState = (r.settlementState ?? r.settlement_state) as string | null | undefined;
+      // A posted AP voucher voided from its own page (Supplier Payment / Other
+      // Creditor Payments) must read VOID here too — one truth, two doors.
+      const apVoided = isAp && String(r.approvalState ?? r.approval_state ?? "APPROVED") === "APPROVED" && !!settlementState && settlementState !== "ACTIVE";
       return {
         ...(v as object),
-        lines: lines.filter((l) => l.voucherId === (v as { id: string }).id),
+        status: apVoided ? "VOID" : r.status,
+        lifecycleState: isAp ? (String(r.approvalState ?? r.approval_state ?? "APPROVED") === "APPROVED" ? (settlementState ?? "ACTIVE") : (r.status === "VOID" ? "VOID" : "ACTIVE")) : (r.lifecycleState ?? r.lifecycle_state ?? null),
+        pvKind: isAp ? PV_KIND_AP : "EXPENSE",
+        partyKind: (r.partyKind ?? r.party_kind ?? null) as string | null,
+        partyId: (r.partyId ?? r.party_id ?? null) as string | null,
+        advanceSen: Math.round(Number(r.advanceSen ?? r.advance_sen) || 0),
+        advanceOpenSen: isAp && !apVoided ? (advanceOpenByNo.get(pvNo) ?? 0) : 0,
+        allocs: allocsByVoucher.get(id) ?? [],
+        lines: lines.filter((l) => l.voucherId === id),
         preparedByName: nm(r, "preparedBy", "prepared_by"),
         checkedByName: nm(r, "checkedBy", "checked_by"),
         approvedByName: nm(r, "approvedBy", "approved_by"),
@@ -9387,12 +9775,6 @@ app.post("/payment-vouchers", async (c) => {
       "SELECT code, type, specialAccountType, isPostable FROM chart_of_accounts",
     ).all<{ code: string; type: CoaRow["type"]; specialAccountType: string | null; isPostable: number | null }>();
     const coa = new Map((coaRes.results ?? []).map((a) => [a.code, a] as const));
-    const v = validateDocLines(coa, body.lines);
-    if (!v.ok) return c.json({ success: false, error: v.error }, 400);
-    const h = validatePvHeader(coa, body);
-    if (!h.ok) return c.json({ success: false, error: h.error }, 400);
-    const { accrued, accrualAccount, payFrom } = h;
-
     await ensurePvApprovalCols(c.var.DB);
     const id = `pv-${crypto.randomUUID().slice(0, 8)}`;
     const now = new Date().toISOString();
@@ -9402,6 +9784,54 @@ app.post("/payment-vouchers", async (c) => {
     // saveAs "draft" = the four-tier road: no number burned, no ledger legs —
     // the formal number arrives at CHECK, the posting at APPROVE.
     const asDraft = body.saveAs === "draft";
+
+    // ── AP Payment: pays a creditor's bills, no expense lines ──
+    if (body.kind === PV_KIND_AP) {
+      await ensurePvApColumns(c.var.DB);
+      const ap = await validatePvAp(c.var.DB, orgId, coa, body as Record<string, unknown>, null);
+      if (!ap.ok) return c.json({ success: false, error: ap.error }, 400);
+      const pvNo = asDraft
+        ? `${PV_DRAFT_PREFIX}${id.slice(3)}`
+        : await issueDocNumber(c.var.DB, { bankAccountCode: ap.v.payFrom, direction: "out", dateIso: date });
+      const reference = String(body.description ?? body.reference ?? "");
+      const statements: D1PreparedStatement[] = [
+        c.var.DB.prepare(
+          `INSERT INTO payment_vouchers (
+             id, pvNo, date, payee, description, payFrom, accrued,
+             accrualAccount, settledAt, productLine, totalSen, status,
+             approval_state, approved_at, approved_by,
+             createdBy, created_at, updated_at,
+             pv_kind, party_kind, party_id, advance_sen
+           ) VALUES (?, ?, ?, ?, ?, ?, 0, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).bind(
+          id, pvNo, date, ap.v.partyName, reference, ap.v.payFrom,
+          ap.v.totalSen, asDraft ? "DRAFT" : "POSTED",
+          asDraft ? "DRAFT" : "APPROVED",
+          asDraft ? null : now, asDraft ? null : actorUserId,
+          actorUserId, now, now,
+          PV_KIND_AP, ap.v.partyKind, ap.v.partyId, ap.v.advanceSen,
+        ),
+        ...pvAllocStatements(c.var.DB, id, ap.v.allocs),
+      ];
+      if (!asDraft) {
+        // Post now = the settlement document is born in the same batch, under
+        // this voucher's number (same builders as the payment pages).
+        const built = await pvApSettlementStatements(c.var.DB, orgId, actorUserId, {
+          id, pvNo, date, payFrom: ap.v.payFrom, partyKind: ap.v.partyKind, partyId: ap.v.partyId,
+          reference: reference || null, advanceSen: ap.v.advanceSen,
+        }, ap.v.allocs);
+        if (!built.ok) return c.json({ success: false, error: built.error }, 400);
+        statements.push(...built.statements);
+      }
+      await c.var.DB.batch(statements);
+      return c.json({ success: true, data: { id, pvNo } }, 201);
+    }
+
+    const v = validateDocLines(coa, body.lines);
+    if (!v.ok) return c.json({ success: false, error: v.error }, 400);
+    const h = validatePvHeader(coa, body);
+    if (!h.ok) return c.json({ success: false, error: h.error }, 400);
+    const { accrued, accrualAccount, payFrom } = h;
     const pvNo = asDraft
       ? `${PV_DRAFT_PREFIX}${id.slice(3)}`
       : await issueDocNumber(c.var.DB, {
@@ -9461,11 +9891,12 @@ app.put("/payment-vouchers/:id", async (c) => {
   if (denied) return denied;
   try {
     await ensurePvApprovalCols(c.var.DB);
+    await ensurePvApColumns(c.var.DB);
     const id = c.req.param("id");
     const body = await c.req.json();
     const pv = await c.var.DB.prepare(
-      "SELECT id, status, approval_state FROM payment_vouchers WHERE id = ?",
-    ).bind(id).first<{ id: string; status: string; approval_state?: string | null; approvalState?: string | null }>();
+      "SELECT id, status, approval_state, pv_kind FROM payment_vouchers WHERE id = ?",
+    ).bind(id).first<{ id: string; status: string; approval_state?: string | null; approvalState?: string | null; pv_kind?: string | null; pvKind?: string | null }>();
     if (!pv) return c.json({ success: false, error: "Voucher not found" }, 404);
     const state = (pv.approvalState ?? pv.approval_state) ?? "APPROVED";
     if (pv.status === "VOID") return c.json({ success: false, error: "This voucher is cancelled" }, 400);
@@ -9478,11 +9909,27 @@ app.put("/payment-vouchers/:id", async (c) => {
       "SELECT code, type, specialAccountType, isPostable FROM chart_of_accounts",
     ).all<{ code: string; type: CoaRow["type"]; specialAccountType: string | null; isPostable: number | null }>();
     const coa = new Map((coaRes.results ?? []).map((a) => [a.code, a] as const));
+    const now = new Date().toISOString();
+    // ── AP Payment draft: header + ticked bills replaced in place. The kind is
+    // fixed at birth (an AP voucher never turns into an expense one).
+    if (String(pv.pvKind ?? pv.pv_kind ?? "") === PV_KIND_AP) {
+      const ap = await validatePvAp(c.var.DB, getOrgId(c), coa, body as Record<string, unknown>, id);
+      if (!ap.ok) return c.json({ success: false, error: ap.error }, 400);
+      await c.var.DB.batch([
+        c.var.DB.prepare(
+          `UPDATE payment_vouchers SET date = ?, payee = ?, description = ?, payFrom = ?, totalSen = ?,
+                  party_kind = ?, party_id = ?, advance_sen = ?, updated_at = ? WHERE id = ?`,
+        ).bind(date, ap.v.partyName, String(body.description ?? body.reference ?? ""), ap.v.payFrom, ap.v.totalSen,
+          ap.v.partyKind, ap.v.partyId, ap.v.advanceSen, now, id),
+        c.var.DB.prepare("DELETE FROM payment_voucher_allocs WHERE voucher_id = ?").bind(id),
+        ...pvAllocStatements(c.var.DB, id, ap.v.allocs),
+      ]);
+      return c.json({ success: true });
+    }
     const v = validateDocLines(coa, body.lines);
     if (!v.ok) return c.json({ success: false, error: v.error }, 400);
     const h = validatePvHeader(coa, body);
     if (!h.ok) return c.json({ success: false, error: h.error }, 400);
-    const now = new Date().toISOString();
     await c.var.DB.batch([
       c.var.DB.prepare(
         `UPDATE payment_vouchers SET date = ?, payee = ?, description = ?, payFrom = ?, accrued = ?,
@@ -9573,6 +10020,29 @@ async function pvApprovalCore(
   }
   // approve — the posting moment.
   if (state !== "CHECKED") return fail(`Only a checked voucher can be approved (this one is ${state})`);
+  if (String(pv.pvKind ?? pv.pv_kind ?? "") === PV_KIND_AP) {
+    // AP Payment: the settlement document (supplier / other-party payment) is
+    // born HERE under the voucher's formal number — same builders as the
+    // payment pages, so aging, bank reco and the GL see an ordinary payment.
+    await ensurePvApColumns(db);
+    const allocs = await loadPvAllocs(db, id);
+    const partyKind = String(pv.partyKind ?? pv.party_kind ?? "") === "OTHER" ? "OTHER" : "SUPPLIER";
+    const built = await pvApSettlementStatements(db, orgId, actorUserId, {
+      id, pvNo, date: String(pv.date ?? "").slice(0, 10),
+      payFrom: String(pv.payFrom ?? pv.pay_from ?? ""), partyKind,
+      partyId: String(pv.partyId ?? pv.party_id ?? ""),
+      reference: String(pv.description ?? "") || null,
+      advanceSen: Math.round(Number(pv.advanceSen ?? pv.advance_sen) || 0),
+    }, allocs);
+    if (!built.ok) return fail(built.error);
+    await db.batch([
+      db.prepare(
+        "UPDATE payment_vouchers SET approval_state = 'APPROVED', status = 'POSTED', totalSen = ?, approved_at = ?, approved_by = ?, reject_reason = NULL, updated_at = ? WHERE id = ?",
+      ).bind(built.totalSen, now, actorUserId, now, id),
+      ...built.statements,
+    ]);
+    return { ok: true, pvNo, state: "APPROVED" };
+  }
   const lineRes = await db.prepare(
     "SELECT accountCode, description, amountSen FROM payment_voucher_lines WHERE voucherId = ? ORDER BY lineOrder",
   ).bind(id).all<{ accountCode: string; description: string | null; amountSen: number }>();
@@ -9737,7 +10207,8 @@ app.post("/payment-vouchers/:id/lifecycle", async (c) => {
   if (!["void", "delete", "unvoid"].includes(action)) return c.json({ success: false, error: "action must be void|delete|unvoid" }, 400);
 
   await ensurePvApprovalCols(c.var.DB);
-  const pv = await c.var.DB.prepare("SELECT id, pvNo, status, approval_state FROM payment_vouchers WHERE id = ?").bind(id).first<{ id: string; pvNo: string; status: string; approval_state?: string | null; approvalState?: string | null }>();
+  await ensurePvApColumns(c.var.DB);
+  const pv = await c.var.DB.prepare("SELECT id, pvNo, status, approval_state, pv_kind, party_kind FROM payment_vouchers WHERE id = ?").bind(id).first<{ id: string; pvNo: string; status: string; approval_state?: string | null; approvalState?: string | null; pv_kind?: string | null; pvKind?: string | null; party_kind?: string | null; partyKind?: string | null }>();
   if (!pv) return c.json({ success: false, error: "Voucher not found" }, 404);
 
   // A draft-road voucher that never reached APPROVE has no ledger legs —
@@ -9758,6 +10229,37 @@ app.post("/payment-vouchers/:id/lifecycle", async (c) => {
 
   const actorUserId =
     (c as unknown as { get: (k: string) => string | undefined }).get("userId") ?? null;
+
+  // A posted AP voucher owns no legs of its own — its money lives on the
+  // settlement document under the same number. Void/delete/unvoid IS that
+  // document's lifecycle (GL reversal + bill paid roll-back), one core, two
+  // doors; the voucher's status column just follows.
+  if (String(pv.pvKind ?? pv.pv_kind ?? "") === PV_KIND_AP) {
+    const partyKind = String(pv.partyKind ?? pv.party_kind ?? "") === "OTHER" ? "OTHER" : "SUPPLIER";
+    try {
+      const lc = partyKind === "SUPPLIER"
+        ? await buildSupplierPaymentLifecycle(c.var.DB, orgId, pv.pvNo, action, actorUserId)
+        : await buildOtherPartyPaymentLifecycle(c.var.DB, orgId, pv.pvNo, action, actorUserId);
+      await c.var.DB.batch([
+        ...lc.statements,
+        c.var.DB.prepare("UPDATE payment_vouchers SET status = ?, updated_at = ? WHERE id = ?")
+          .bind(lc.newState === "ACTIVE" ? "POSTED" : "VOID", new Date().toISOString(), id),
+      ]);
+      await emitAudit(c, {
+        resource: partyKind === "SUPPLIER" ? "supplier-payments" : "other-party-payments",
+        resourceId: pv.pvNo, action,
+        after: { state: lc.newState, via: "payment-voucher", voucherId: id },
+      });
+      return c.json({ success: true, data: { state: lc.newState } });
+    } catch (e) {
+      const msg = (e as Error).message;
+      if (msg === "PAYMENT_NOT_FOUND") return c.json({ success: false, error: `No settlement found under ${pv.pvNo} — it was never posted` }, 400);
+      if (msg === "TF_DRAW_HAS_REPAYMENTS") return c.json({ success: false, error: "This payment is a trade-finance draw with repayments — void the repayment first." }, 400);
+      if (msg === "TF_DRAW_HAS_INTEREST") return c.json({ success: false, error: "This draw has interest posted — zero it in the aging block first." }, 400);
+      return c.json({ success: false, error: msg || "Lifecycle failed" }, 400);
+    }
+  }
+
   let lc: { statements: D1PreparedStatement[]; newState: string };
   try {
     lc = await applyLifecycle(c.var.DB, { orgId, baseSourceTypes: ["payment_voucher", "payment_voucher_settle"], voidSourceType: "payment_voucher_void", sourceId: id, action, actorUserId, descriptionTag: `${action.toUpperCase()} · ${pv.pvNo}` });
@@ -9791,10 +10293,16 @@ app.post("/payment-vouchers/:id/restate", async (c) => {
   const id = c.req.param("id");
   try {
     await ensurePvApprovalCols(c.var.DB);
-    const pv = await c.var.DB.prepare("SELECT id, pvNo, approval_state FROM payment_vouchers WHERE id = ?").bind(id).first<{ id: string; pvNo: string; approval_state?: string | null; approvalState?: string | null }>();
+    await ensurePvApColumns(c.var.DB);
+    const pv = await c.var.DB.prepare("SELECT id, pvNo, approval_state, pv_kind FROM payment_vouchers WHERE id = ?").bind(id).first<{ id: string; pvNo: string; approval_state?: string | null; approvalState?: string | null; pv_kind?: string | null; pvKind?: string | null }>();
     if (!pv) return c.json({ success: false, error: "Voucher not found" }, 404);
     if (String((pv.approvalState ?? pv.approval_state) ?? "APPROVED") !== "APPROVED") {
       return c.json({ success: false, error: "Not posted yet — edit the draft directly, no restate needed." }, 400);
+    }
+    // A posted AP voucher's money sits on its settlement document (Houzs
+    // semantics for payments: cancel and raise a new one, no in-place edit).
+    if (String(pv.pvKind ?? pv.pv_kind ?? "") === PV_KIND_AP) {
+      return c.json({ success: false, error: "A posted AP payment cannot be edited — cancel it and raise a new one." }, 400);
     }
     const body = await c.req.json();
     const date = String(body.date || "");

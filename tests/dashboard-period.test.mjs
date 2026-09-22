@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  stepPeriod, periodPresets, presetActive, calendarCells, shiftMonth,
+  stepPeriod, stepDay, yearsWithData, periodLabel, periodPresets, presetActive, calendarCells, shiftMonth,
 } from "../src/pages/dashboards/dashboard-shared-lib.ts";
 
 const months = ["2025-11", "2025-12", "2026-06", "2026-08", "2026-09"];
@@ -97,4 +97,28 @@ test("the picker logic survives a period whose month has not loaded yet", () => 
   assert.equal(stepPeriod({ mode: "monthly", month: "" }, [], 1), null);
   assert.equal(stepPeriod({ mode: "ytd", month: "" }, [], -1), null);
   assert.deepEqual(periodPresets("", []), []);
+});
+
+// ---- Day / Month / YTD nav redesign (2026-09-22) --------------------------
+
+test("stepDay moves one calendar day, uncapped going back, never past maxDay going forward", () => {
+  assert.equal(stepDay("2026-08-22", 1, "2026-09-17"), "2026-08-23");
+  assert.equal(stepDay("2026-08-22", -1, "2026-09-17"), "2026-08-21");
+  assert.equal(stepDay("2026-09-01", -1, "2026-09-17"), "2026-08-31", "crosses a month boundary");
+  assert.equal(stepDay("2026-09-17", 1, "2026-09-17"), null, "cannot step into the future");
+  assert.equal(stepDay("2026-01-01", -365, "2026-09-17"), "2025-01-01", "a past day is always a real answer");
+});
+
+test("yearsWithData returns the distinct years, oldest first", () => {
+  assert.deepEqual(yearsWithData(months), ["2025", "2026"]);
+  assert.deepEqual(yearsWithData([]), []);
+});
+
+test("periodLabel: YTD reads '(Jan – Present)' for the real current year, '(Jan – Dec)' for a past one", () => {
+  assert.equal(periodLabel({ mode: "ytd", month: "2026-06" }, "2026-09-17"), "2026 (Jan – Present)");
+  assert.equal(periodLabel({ mode: "ytd", month: "2025-06" }, "2026-09-17"), "2025 (Jan – Dec)");
+  // No `today` passed: every read-only caller across the dashboard views that
+  // never shows the current in-progress year must keep working unchanged.
+  assert.equal(periodLabel({ mode: "ytd", month: "2026-06" }), "2026");
+  assert.equal(periodLabel({ mode: "monthly", month: "2026-08" }, "2026-09-17"), "Aug 2026", "monthly/day untouched by `today`");
 });
