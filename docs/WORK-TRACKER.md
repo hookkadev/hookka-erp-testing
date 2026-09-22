@@ -93,6 +93,12 @@ for here instead of loading 335 or 481 stuff every time I press".
 
 ---
 
+## 2026-09-22 晚 — ✅ 所有单据清单双击弹明细（owner「其他的类似 payment voucher, receipt 这些都要双击点开」；#486 已上线已验）
+
+一个壳 `DocDetailModal`/`DetailField`；单击照旧（勾选/展开）。Payment Vouchers：meta + 梯子轨迹（谁 prepare/check/approve、何时、退回理由）+ 费用行或结算账单(+预付) + 附件块 + 行上全部动作（print / print + files / 梯子 / edit / settle / void / unvoid）；Receipts hub：meta + 与展开区共用的 `detailTable`；Fund Transfer：字段 + 过账说明 + print/void/unvoid；Other Party Bills 双击=开既有整张卡；Other Party Payments 双击=开既有弹窗；AP Invoices 双击：PI→采购页、AP bill→下方编辑器；勾选格不触发。守卫 tests/doc-detail-dblclick.test.mjs。**prod 验**：HPV-2609-043 双击弹出（Approved·paid、900-S002 2,800、附件 0、Print/Edit/Void）。
+
+---
+
 ## 2026-09-22 晚 — ✅ owner 四问（AP Invoices 默认 ALL / 测试单是什么 / 打印带附件? / JV 看不了明细）→「做,全部」（#484 已上线已验）
 
 - ① AP Invoices 默认 ALL（select 里 All 排第一）。② 清单里 HPV-2609-044/045/046/047/049 = 我 prod 冒烟的 1 sen 作废凭证 → 已按 owner 令用 lifecycle delete 藏起（Audit Log 留底）；**顺手修**：未过账的作废草稿按 delete 回「Already cancelled」永远走不掉 → 未过账 delete 现写 document_lifecycle DELETED（unvoid 回 ACTIVE），守卫加进 tests/pv-approval.test.mjs；作废凭证不再显示草稿时的退回理由。③ 打印：print=只印凭证；**print + files**=凭证+全部附件合订（有附件才出现）；批量 Print/PDF 目前不带附件。④ **JV 明细**：双击行（或 ⋮ › View detail）弹窗——逐行科目/描述/借/贷 + 合计（不平衡标红）+ print/edit+post(草稿)/void/unvoid/duplicate；单击仍是勾选。守卫 tests/jv-detail-view.test.mjs。**prod 验**：JE-2609-0001 双击弹出 780-0010 DR 12,500 / 310-0010 CR 12,500；5 张测试单已从清单消失（94 张）。
