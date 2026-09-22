@@ -1,6 +1,6 @@
 # Bug History
 
-> **Last verified: 2026-09-22** — newest entry BUG-2026-09-22-178 (branch `fix/scan-queue-client-driven`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-09-22** — newest entry BUG-2026-09-22-179 (branch `fix/scan-queue-client-driven`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 
 Living log of bugs we've identified, diagnosed, and fixed in Hookka ERP.
 
@@ -33,6 +33,36 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-09-22-179 — PO create / PO detail: typing "18" into Price (RM) produced "1.008" — the field reformatted to "1.00" after the first keystroke `procurement` `ui-frontend` `money-input` 🟢
+
+🟢 **Fixed** · owner-reported on the Purchase Order create page: type "1", the field
+instantly shows "1.00", the next "8" lands after the zeros → "1.008".
+
+**Root cause.** `src/pages/procurement/create.tsx` and `src/pages/procurement/detail.tsx`
+each rendered the unit price as a raw controlled `<Input type="number">` whose `value` was
+`formatUnitPriceInput(item.unitPriceSen)` and whose `onChange` wrote sen back to state on
+every keystroke. Every keypress therefore round-tripped through parent state and came back
+formatted to two decimals, and the caret ended up after the padding. The PO list dialog
+(`index.tsx`) never had the bug because it already used `MoneyInput`. Same reformat family as
+BUG-2026-08-31-171 (JV cells), BUG-2026-08-13-095 and the 2026-06-12 payment dialog — a class
+that keeps coming back one site at a time because the house field exists but pages carry their
+own raw input.
+
+**Fix.** Both pages now render `MoneyInput` (raw draft while focused, format on blur/Enter,
+seed the raw value on focus). The parent still receives sen through `roundUnitPriceSen`, so the
+sub-cent rate rule (RM 0.055) is unchanged. Their own `parseMoneyInput` / `formatUnitPriceInput`
+imports are gone — MoneyInput owns both. `scan-supplier-modal.tsx` still carries a raw price
+input but feeds it `String(v)`, not a formatted string, so it does not exhibit this bug; left
+as is.
+
+**Regression test.** `tests/unit-price-four-decimals.test.mjs` → "no PO form binds a
+FORMATTED unit price to a raw <Input> value (BUG-2026-09-22-179)"; the two pages also moved
+from the "own step" list to the "shared MoneyInput" list in the same file, and
+`tests/money-input-parsing.test.mjs` now accepts a MoneyInput import as being on the shared
+parser.
 
 ---
 
