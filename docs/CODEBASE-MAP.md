@@ -4,6 +4,14 @@
 > `src/pages/procurement/create.tsx` corrected — the Supplier field is the shared `SearchableSelect`
 > (was a native `<select>`); onChange behaviour unchanged.
 
+> **Restamped 2026-09-22 on branch `feat/service-dashboard-root-cause-graph`:** Service > Top issues —
+> first panel renamed "Issues by category", new "Root cause" panel (category + recorded detail) on desktop
+> and `/m`; feed slice carries `rootCauses[]`. Row corrected below.
+
+> **Restamped 2026-09-22 on branch `fix/service-dashboard-other-catch-all`:** Service > Top issues —
+> `OTHER` root cause now ranks as a catch-all (below real causes, out of Top 3) via `catchAllRank` /
+> `topCauses` in `src/api/lib/service-issue-stats.ts`; row corrected below.
+
 > **Restamped 2026-09-18 on branch `fix/pcn-void-status-check-v2`:** Supplier Discount
 > (purchase CN) void was 500ing on prod — `purchase_credit_notes.status` never allowed
 > `CANCELLED` (BUG-2026-09-18-001). Fixed + the entry rewritten in place; the Supplier
@@ -1016,7 +1024,7 @@ the payload's `sales.orders[0].totalSen` is non-zero.
 | `src/lib/service-order-modes.ts` — **per-mode line requirements + tolerant catalogue lookup; shared by the Spawn dialog AND the route** (380) | | `products` / `fg_batches` | `tests/service-order-spawn-product.test.mjs` |
 | `src/pages/service-order/index.tsx` — thin re-export of @/pages/sales in SV mode (18) | | `consignment_orders` / `products` | |
 | `src/pages/service-order/create.tsx` / `detail.tsx` / `edit.tsx` — re-exports of @/pages/sales/* in SV mode | | | |
-| `src/pages/dashboards/ServiceView.tsx` + `ServiceIssuesPanel.tsx` — dashboard Service (Zamri) tab; **Top issues** sub-tab = root cause / responsible unit / prevention / top products, click a cause to filter the Report list | `src/api/lib/dashboard-service-slice.ts` (feed slice: reads `rootcauses` dual-keyed, `responsibleunit`, `prevention_status`, `affected_product_ids`) + `src/api/lib/service-issue-stats.ts` (pure aggregation, shared with the browser) | `service_cases` | `tests/service-issue-stats.test.mjs` |
+| `src/pages/dashboards/ServiceView.tsx` + `ServiceIssuesPanel.tsx` — dashboard Service (Zamri) tab; **Top issues** sub-tab = **Issues by category** (the list page's Category column; was titled "by root cause" until 2026-09-22) / **Root cause** (NEW 2026-09-22, owner: "root cause is inside the service case's Root Cause & Prevention" — one row per category + the detail recorded under it: dept / supplier / 3PL / driver / salesperson / SOP / sub-reason, `rootCauseDetail` picks the first named field, `byRootCause` tallies `CATEGORY::detail`; the slice now sends `rootCauses[{category,detail}]` and SELECTs `root_cause_details`; a 60s-cached payload without it falls back to bare categories) / responsible unit / prevention / top products, click a category to filter the Report list. **`OTHER` is a catch-all, not an issue (2026-09-22):** `tally` ranks it below every real cause (just above the `__NONE__` row) and `topCauses()` keeps it out of the Top 3 trend on desktop AND `/m` — before this the dashboard could headline "Other · 2" | `src/api/lib/dashboard-service-slice.ts` (feed slice: reads `rootcauses` dual-keyed, `responsibleunit`, `prevention_status`, `affected_product_ids`) + `src/api/lib/service-issue-stats.ts` (pure aggregation, shared with the browser) | `service_cases` | `tests/service-issue-stats.test.mjs` |
 | `src/pages/dashboards/ServicePerformancePanel.tsx` — dashboard **Service > Performance** sub-tab (`SERVICE_SUBS` key `performance`): avg case closing + prev-period delta + trend, open now / opened / closed, opened-vs-closed chart, aging split (0-T / T+1-2T+1 / 2T+2+, T = slice `overdueAfterDays` = `SERVICE_OVERDUE_DAYS`), root cause (`ServiceIssuesPanel causeOnly`), prevention breakdown + not-done list | `src/api/lib/service-issue-stats.ts` (`avgClose`, `closeTrend`, `openedVsClosed`, `agingSplit`, `preventionNotDone`) + `dashboard-service-slice.ts` (now also `prevention_owner`, `prevention_action`; optional in the UI so a 60s-cached `dashboard:prototype:<org>:v3` payload still renders) | `service_cases` | `tests/service-issue-stats.test.mjs` |
 
 **Big-file section index**

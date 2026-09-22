@@ -181,7 +181,7 @@ export function ServicePerformancePanel({
       </Card>
 
       <div>
-        <h3 className="text-sm font-semibold text-[#1F1D1B] mb-2">Root cause</h3>
+        <h3 className="text-sm font-semibold text-[#1F1D1B] mb-2">Category and root cause</h3>
         <ServiceIssuesPanel cases={openedInFocus} period={period} onPickCause={() => {}} causeOnly />
       </div>
 
