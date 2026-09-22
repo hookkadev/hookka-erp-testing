@@ -74,6 +74,14 @@ for here instead of loading 335 or 481 stuff every time I press".
 
 ---
 
+## 2026-09-22 晚 — ✅ finance@hookka.com 权限量测（owner「我要确定 finance@hookka.com 的 user 有什么权限？」；#482 探针已上线）
+
+FINANCE 是 0045 种进表的角色，`GET /api/auth/role-permissions/:role` 原本只答 code 角色 → 表角色只能登录进去才知道。#482：探针对非 code 角色跑**跟闸门同一条 join**（rbac.ts loadRolePermissions：roles.name = users.role），回 `source`（role_permissions / no-rows-fallback / join-failed-fallback），零行时照闸门口径报 fallback 而不是空集。只读、users:read 闸。守卫 tests/role-permissions-table-read.test.mjs（两边 join 文本同锚）。
+
+**prod 量测（2026-09-22）**：user-c0594ab0 finance@hookka.com「Finance」部门 Finance，role FINANCE，active，最后登录 2026-08-12。FINANCE 53 个 grant（source=role_permissions）：全权 accounting / invoices(+post,void) / payments / credit-notes / debit-notes / e-invoices / cash-flow / cost-ledger / three-way-match / mail-center / settings；只读 customers / suppliers / sales-orders / purchase-orders / purchase-returns / quotations / sales-pipeline。**没有** accounting:check / accounting:approve（PV 梯子的 Check/Approve 只有 SUPER_ADMIN 能按）、没有 purchase-invoices:*（PI 由采购开；作废走 requireFinance 按角色名放行）、没有 users:*（看不到 Users 页；kv-config PUT 要 users:update → 改不了打印页脚）、没有 dashboard（落地页=/accounting）。owner 待裁：要不要给 finance@ 加 accounting:check（能 Check 不能 Approve）。
+
+---
+
 ## 2026-09-22 晚 — ✅ Cash Position 打勾行收起（owner「这些 tick 了还需要出现吗？」→「做」；#477 已上线已验）
 
 打勾（=网银已见）的行离开 pending 名单，每个户口卡底一行「✓ Ticked as gone through: N · out RM x · in RM y — show」，展开可看/取消勾；同一行渲染器、同一 checkbox、同一 handler；数字（Bank balance est. / Available）从不读 DOM，分毫不变。全勾完显示「Nothing pending — everything booked has gone through the bank.」。守卫 tests/cashpos-ticked-fold.test.mjs。**prod 验**：HLBB 卡只剩 10 条未勾 + 「✓ 44 · out 195,316.54 · in 182,270.60」，Bank balance est. 24,576.65 与 owner 截图一致。顺带：docs-freshness 配对规则要求源码改动配文档改动——第一次红了，补 CODEBASE-MAP 的 Daily Cash Position 条目后绿。
