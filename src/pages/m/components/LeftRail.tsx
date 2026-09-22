@@ -15,6 +15,7 @@
 import { type LucideIcon } from "lucide-react";
 import {
   LayoutDashboard,
+  FlaskConical,
   ShoppingCart,
   Truck,
   Wallet,
@@ -33,14 +34,18 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { M } from "../theme";
 import { useMobileThemeMode } from "../lib/theme-mode";
 import { getCurrentUser, clearAuth } from "@/lib/auth";
+import { usePermissions } from "@/lib/use-permission";
+import { DASHBOARD_NAV_HREF } from "../screens/dashboard/dashboard-m-lib";
 
 type RailEntry =
   | { kind: "section"; label: string }
-  | { kind: "item"; key: string; label: string; icon: LucideIcon; path: string };
+  // navGate: desktop href whose server nav gate also hides this row (as in nav.ts).
+  | { kind: "item"; key: string; label: string; icon: LucideIcon; path: string; navGate?: string };
 
 // dc12 Fold railDefs — same order + section labels.
 const ENTRIES: RailEntry[] = [
   { kind: "section", label: "Workspace" },
+  { kind: "item", key: "dashboard-prototype", label: "Dashboard Prototype", icon: FlaskConical, path: "/m/dashboard", navGate: DASHBOARD_NAV_HREF },
   { kind: "item", key: "home", label: "Dashboard", icon: LayoutDashboard, path: "/m" },
   { kind: "section", label: "Sales & Customers" },
   { kind: "item", key: "sales", label: "Sales Orders", icon: ShoppingCart, path: "/m/sales" },
@@ -65,6 +70,7 @@ function isActive(itemPath: string, pathname: string): boolean {
 export function LeftRail() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
+  const { isNavAllowed } = usePermissions();
   const user = getCurrentUser();
   const initials = (user?.displayName || "U")
     .split(" ")
@@ -132,6 +138,7 @@ export function LeftRail() {
         }}
       >
         {ENTRIES.map((e, i) => {
+          if (e.kind === "item" && e.navGate && !isNavAllowed(e.navGate)) return null;
           if (e.kind === "section") {
             return (
               <div

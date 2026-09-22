@@ -26,7 +26,7 @@ Entries themselves stay newest-first.
 - `delivery-orders` (11) — [BUG-2026-04-29-003](#bug-2026-04-29-003--updateconsignmentnotebyid-silently-dropped-sentdate-and-items-on-put)
 - `sales-orders` (7) — [BUG-2026-04-26-021](#bug-2026-04-26-021-fixsales-drop-wrong-mattress-label-on-sofa-category-option)
 - `pricing-products` (6) — [BUG-2026-04-24-029](#bug-2026-04-24-029-fixcustomers-sofa-seat-prices-now-render-in-customer-products-panel)
-- `data-migration` (9) — [BUG-2026-06-10-001](#bug-2026-06-10-001--punch-selfie-photo-endpoint-500d-an-explicit-camelcase-select-projection-isnt-translated-by-the-d1-compat-adapter) · camelCase/rename-map class recurs — see BUG-2026-06-18-001/-002, BUG-2026-06-30-001 (read-side, P&L historical), BUG-2026-07-01-003 (supplier payments list + PI outstanding)
+- `data-migration` (10) — [BUG-2026-06-10-001](#bug-2026-06-10-001--punch-selfie-photo-endpoint-500d-an-explicit-camelcase-select-projection-isnt-translated-by-the-d1-compat-adapter) · camelCase/rename-map class recurs — see BUG-2026-06-18-001/-002, BUG-2026-06-30-001 (read-side, P&L historical), BUG-2026-07-01-003 (supplier payments list + PI outstanding), BUG-2026-09-15-181 (whole dashboard-prototype route). **Now classed: [C23](BUG-CLASSES.md#c23--sql-says-snake_case-the-row-comes-back-camelcase)**
 - `data-integrity` (4) — [BUG-2026-04-25-008](#bug-2026-04-25-008-stability-add-timeout-abort-propagation-to-fetchjson)
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
@@ -34,6 +34,148 @@ Entries themselves stay newest-first.
 
 ---
 
+## BUG-2026-09-22-002 — dashboard "Today" / "Yesterday" presets could show a different day than the page's own "today" `ui-frontend` `dashboard` 🟢
+
+🟢 **Fixed** · owner-reported ("today and yesterday was wrong").
+
+**Root cause.** `periodPresets()` (`dashboard-shared-lib.ts`) pinned the "Today" and
+"Yesterday" quick-pick buttons to `latestDay` — the newest day the book has an actual sales
+row for — not the real clock. That anchor was added in `93c2b84c` (2026-09-21) to stop "Last
+7 Days" landing on an all-zero window when data had stopped days earlier, and got reused for
+Today/Yesterday too without separately reasoning about what those two labels mean. The SAME
+commit made the page's own default-open day (`resolvePeriod`) use the real clock — so a fresh
+page load and the "Today" button could point at two different actual dates. Whenever today's
+sales hadn't posted yet (a day still in progress — the common case, not an edge case), "Today"
+silently showed yesterday's figures and "Yesterday" showed the day before that.
+
+**Fix.** `periodPresets()` now takes `today` and uses it for Today/Yesterday, matching
+`resolvePeriod`'s default-open day; an empty day is a legitimate state, same as it already is
+on first load. "Last 7 Days" is untouched — still anchored to `latestDay`, since a relative
+multi-day window has no calendar identity of its own to preserve and genuinely does need to
+avoid landing on empty data. Both callers (`dashboard-shared.tsx` desktop picker, `/m`
+`PeriodChip.tsx`) now pass the real clock day.
+
+**Regression test.** `tests/dashboard-period.test.mjs` — "Today / Yesterday follow the real
+calendar day, even when the book's data lags behind it" and the sibling test locking Last 7
+Days to `latestDay` still. `node --test`: 10/10 pass. `tsc -p tsconfig.app.json --noEmit`:
+exit 0.
+
+**Not verified live.** No DB access and no staging login this session — whether `latestDay`
+is currently lagging behind real "today" in prod, and by how much, is **UNMEASURED**.
+
+---
+
+## BUG-2026-09-22-001 — the /m dashboard crashed on first paint: the new period calendar drew a month that had not loaded `ui-frontend` `dashboard` 🟢
+
+🟢 **Fixed** · owner-reported from an iPhone on the PR #443 canary (`canary-443.hookka-erp-testing.pages.dev/m/dashboard`): error boundary, "Array length must be a positive integer of safe magnitude", stack in `dashboard-url-state-lib` / `DashboardScreen`. Never reached `main`; lived one commit (`be7c07bc`).
+
+**Root cause.** `PeriodChip.tsx` gained a day calendar built by `calendarCells(viewMonth)` (`dashboard-shared-lib.ts`). The period's month is `""` until the dashboard feed has loaded, and `calendarCells("")` computed `Array(NaN)` -> `RangeError`. The sheet was closed, but JSX children are evaluated by the parent whether or not `<Sheet>` renders them, so it threw on the very first render. The desktop picker never hit it: it only mounts once `months.length > 0`. The visual check used a harness with the months preloaded, so it could not see the empty first render.
+
+**Fix.** `calendarCells` and `shiftMonth` return `[]` / the input unchanged for anything that is not `YYYY-MM` - one guard where both the desktop picker and the `/m` chip route through, rather than a `months.length` check in each caller.
+
+**Regression test.** `tests/dashboard-period.test.mjs` -> "the picker logic survives a period whose month has not loaded yet" (`""`, `"2026"`, `"2026-13"`, `"nope"`, plus `stepPeriod` / `periodPresets` with no months).
+
+---
+
+## BUG-2026-09-18-001 — Supplier Discount void 500'd: the status CHECK never allowed CANCELLED `accounting` `data-integrity` 🟢
+
+🟢 **Fixed** · owner-reported (`erp.hookka.com/accounting?tab=supplier-discount`, void → `POST .../purchase-credit-notes/pcn-85c380af/void 500 (Internal Server Error)`).
+
+**Root cause.** `purchase_credit_notes` was created in `migrations/0088_purchase_credit_notes.sql`
+/ `migrations-postgres/0156_purchase_credit_notes.sql` with an inline
+`status TEXT NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT','POSTED'))`. `POST
+/purchase-credit-notes/:id/void` (`accounting.ts`) has always written
+`status = 'CANCELLED'` to reverse a posted CN — a value that CHECK has never permitted, so
+every void on prod raised a constraint violation and the request 500'd. This is the exact
+same bug class as **BUG-2026-06-25-001** (`purchase_invoices.status` missing
+`PARTIAL_PAID`/`CANCELLED`): an inline `CHECK` written once at table-creation time, never
+widened as the app grew new lifecycle states, and migrations don't auto-apply on deploy
+(see CLAUDE.md) so a migration file fixing it would not reach prod on its own.
+
+**Fix.** `ensurePcnCancellable` (`accounting.ts`, defined immediately above the void route) —
+a memoized runtime self-apply, same shape as `ensurePartialPaymentColumns` /
+`PI_STATUS_CHECK_SQL` in `ensure-partial-payment.ts` — drops the constraint under both
+possible names (`purchase_credit_notes_status_check`, the Postgres auto-generated inline
+name; `purchase_credit_notes_status_chk`, this fix's own name on a re-run) and re-adds it as
+`CHECK (status IN ('DRAFT','POSTED','CANCELLED'))`. Runs at the top of the void handler,
+before the `UPDATE ... SET status = 'CANCELLED'` is queued.
+
+**Same batch:** the Supplier Discount entry form gained a native `<input type="date">` — the
+CN's `date` was previously hardcoded to `new Date().toISOString().slice(0,10)` (today) with
+no way to back-date a discount. `POST /purchase-credit-notes` now accepts an optional `date`
+body field (validated `/^\d{4}-\d{2}-\d{2}$/`, falls back to today on anything else).
+
+**Verified:** `npx tsc -p tsconfig.app.json --noEmit` clean; full suite 4607 pass / 0 fail /
+3 skipped. **Prod void-path effect is UNMEASURED** — no DB credentials in this session, so
+the live 500 was diagnosed from the schema/migration files and the route code, not by
+querying prod. Verify live after deploy: void a POSTED supplier discount, confirm 200 (not
+500) and that the GL reversal + PI outstanding restore actually land. Regression test:
+`tests/pcn-void-status-check.test.mjs` (static source-inspection, same style as
+`tests/pi-status-check-single-source.test.mjs` — asserts the self-apply exists, drops both
+legacy constraint names, re-adds with `CANCELLED`, and runs before the write).
+
+**Process note, logged for CODEBASE-MAP/BUG-HISTORY hygiene:** the fix first landed on `main`
+directly, was reverted on request, and reopened as a PR (#445) from the same branch — but
+because `git revert` leaves the original commit in `main`'s ancestry, GitHub's PR diff saw
+only the regression test as "new" and silently dropped the code change from the merge. `main`
+briefly carried a failing test for code that was never actually there. Re-fixed via a fresh
+branch (`fix/pcn-void-status-check-v2`) cut from current `main`, carrying only the real diff.
+Lesson: reverting a commit that is about to be re-proposed via PR from the *same* branch
+un-counts it from that PR's diff — cut a fresh branch instead.
+
+---
+
+## BUG-2026-09-15-181 — the experimental dashboard read every column in the wrong case, and rendered the misses as real figures `data-migration` `ui-frontend` `dashboard` 🟢
+
+🟢 Fixed. The owner compared the new `/dashboard-experimental` Sales tab
+against the house Sales page and reported two things: *"the value is slightly
+incorrect"* and *"the revenue is not displayed"* — the house page showed
+**1713 orders / RM 1,976,985.41**, the new page showed a different count and
+**RM 0**.
+
+**Root cause — one bug, every symptom.** `src/api/routes/dashboard-prototype.ts`
+read its result rows in snake_case (`r.total_sen`, `r.is_service_order`,
+`r.created_at`). `getSql` sets `transform: { column: { from: columnFrom } }` on
+both connection branches (`src/api/lib/db-pg.ts:105,118`), which rewrites every
+column through `column-rename-map.json` — so the rows actually carry `totalSen`,
+`isServiceOrder`, `createdAt`. Every snake_case read returned `undefined`, and
+each one was then coerced into a value that looks like data:
+
+| read | value | shown as |
+|---|---|---|
+| `r.total_sen` | `undefined` → `num()` → `0` | Revenue **RM 0** |
+| `r.is_service_order` | `undefined` → `!!` → `false` | no service order filtered → **1804** orders vs 1713 |
+| `r.created_at` | `undefined` → `dayKey()` → `null` | `byDay` empty → **revenue trend blank** |
+
+**The 500 was the same bug.** `/api/dashboard/prototype` had been returning
+`TypeError: Cannot read properties of null (reading 'created')` at `:754` —
+`touchDay(dayKey(r.created_at))!.created++`, where the `!` asserted a value
+`touchDay` returns `null` for. This was first read as "a delivery order with a
+NULL `created_at`" and patched with a null guard matching the two guarded lines
+below it. The guard is correct and stays, but the diagnosis was wrong: there was
+no NULL in the data, only the wrong key. Fixing the casing made `withCreatedAt`
+go from **0 → 1713**.
+
+**Fix.** All 260 reads across 74 identifiers converted to camelCase, driven by
+`column-rename-map.json` rather than by hand — which matters, because
+`postgres.toCamel` is lossy on acronyms and four of them would have been wrong:
+`company_so`→`companySO`, `company_so_id`→`companySOId`,
+`hookka_expected_dd`→`hookkaExpectedDD`, `supplier_sku`→`supplierSKU`. The row
+TYPE declarations were renamed first so `tsc` flagged every remaining read —
+that is what surfaced the 12 inline `.all<{…}>()` generics a regex pass missed.
+SQL strings were left untouched (verified: all 15 `WHERE org_id = ?` intact).
+
+**Verified.** Payload now reconciles exactly with the house Sales page:
+`revenueRM "1976985.41"`, `rows 1713`, `byDay` 95 days, `withCreatedAt` 1713.
+`npm run build:strict` clean.
+
+**Class.** [C23](BUG-CLASSES.md#c23--sql-says-snake_case-the-row-comes-back-camelcase)
+— fifth instance. Every one of the five was found by a person noticing a wrong
+number on a screen, never by a test.
+
+**Gap left open.** No test covers this route, and no test anywhere asserts that
+a money field in a payload is non-zero for a book that has sales. That single
+assertion would have caught all five instances of this class. Logged as C23 row 7.
 ## BUG-2026-09-21-181 — the Dashboard Prototype feed read every row by its SQL name, and the driver had renamed them all `dashboard` `api` 🟢
 
 🟢 Fixed on `staging` (the route is also on `main` — prod impact **UNMEASURED**, no prod
@@ -55,6 +197,13 @@ staging data (`kahx…`) as SUPER_ADMIN: 500 before, 200 after, every section `l
 **Regression test.** `tests/dashboard-prototype-snake-reads.test.mjs` — unit-tests
 `withSnakeKeys` and pins that every `prepare` in the route is inside a `section()`.
 Class: [BUG-CLASSES C23](BUG-CLASSES.md).
+
+**Superseded 2026-09-22 (staging↔main sync, PR #463).** `main` had rewritten the same route
+independently (`/dashboard-experimental`, `src/pages/dashboards/`), reading every row
+camelCased — 0 snake reads — so the sync took that version and the `withSnakeKeys` wrap in
+`section()` no longer exists. `withSnakeKeys` stays in `db-pg.ts`; the guard test now
+asserts the route has no `r.snake_case` read and every `prepare` is inside `section()`.
+Nothing about this entry's root cause changes — it is how the bug is prevented that moved.
 
 ---
 
@@ -249,6 +398,24 @@ live** — repairing balances while the cause is still running just rebuilds the
 damage — and only on the owner's word.
 
 Regression: `tests/wip-settle-once.test.mjs`.
+
+## BUG-2026-09-22-177 — "Save as draft" refused by the payment_vouchers status CHECK `accounting` `payment-voucher` 🟢
+
+First prod smoke of the four-tier ladder (#452/#453): every draft create
+returned 400 "Failed to save the payment — is migration 0159 applied?"
+while the legacy Post-now road succeeded. Migration 0159 created
+`status TEXT … CHECK (status IN ('POSTED','VOID'))`; the draft road inserts
+`status='DRAFT'`, so Postgres rejected the row — the same class as
+BUG-2026-09-18-001 (PCN void writing `CANCELLED` into a two-value check).
+The generic catch text pointed at a migration that WAS applied and hid the
+constraint name, which cost a debugging round.
+
+Fix ([accounting.ts](../src/api/routes/accounting.ts)): `ensurePvApprovalCols`
+now drops and re-creates `payment_vouchers_status_check` with `DRAFT`
+admitted (record: migrations-postgres/0233 tail); the create path returns the
+database's own message (`Failed to save the payment: <cause>`) instead of a
+canned guess. Guards: `tests/pv-approval.test.mjs` (+2). Verified on prod:
+draft → prepare → check (formal No. minted) → approve (legs posted) → void.
 
 ## BUG-2026-09-04-176 — a cross-month match cleared an item for a month it hadn't reached the bank in `accounting` `bank-reco` 🟢
 

@@ -26,6 +26,9 @@ export type VoucherLine = {
 
 export type VoucherSignature = {
   label: string;
+  /** Who signed and when (approval ladder) — printed under the line. */
+  name?: string;
+  on?: string;
 };
 
 export type VoucherSpec = {
@@ -56,6 +59,12 @@ export type VoucherSpec = {
   signatures: VoucherSignature[];
   /** ISO date the document is printed on; shown in the footer. */
   printedOn: string;
+  /** Diagonal watermark across the sheet ("DRAFT", "NOT YET APPROVED", "CANCELLED"). */
+  watermark?: string;
+  /** Sub-table printed under the lines, e.g. the bills this payment settled. */
+  detail?: { heading: string; columns: VoucherColumn[]; lines: VoucherLine[] };
+  /** Multi-line footer text (payment details / terms) — printed above the signatures; empty = not printed. */
+  footerText?: string;
 };
 
 // Minimal HTML-escape for any value interpolated into the voucher. Document
@@ -110,6 +119,14 @@ const VOUCHER_STYLES = `
   .sig-line { border-top: 1px solid #1F1D1B; margin-bottom: 5px; }
   .sig-label { font-size: 11px; color: #444; }
   .printed { margin-top: 28px; text-align: right; font-size: 9.5px; color: #999; }
+  .sig-name { font-size: 10.5px; color: #1F1D1B; font-weight: 600; margin-top: 2px; }
+  .sig-on { font-size: 9.5px; color: #777; }
+  .detail-head { margin-top: 14px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; color: #555; }
+  .detail th { background: #FAF8F5; font-size: 10px; }
+  .detail td { font-size: 11px; padding: 4px 8px; }
+  .sheet { position: relative; }
+  .footer-text { margin-top: 12px; font-size: 10.5px; color: #444; white-space: pre-wrap; border-top: 1px dashed #D8D3CE; padding-top: 8px; }
+  .wm { position: absolute; left: 0; right: 0; top: 40%; text-align: center; font-size: 72px; font-weight: 800; letter-spacing: 6px; color: rgba(154, 58, 45, 0.13); transform: rotate(-24deg); pointer-events: none; user-select: none; }
   @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
   .sheet { page-break-after: always; }
   .sheet:last-child { page-break-after: auto; }
@@ -147,11 +164,23 @@ export function buildVoucherSheet(spec: VoucherSpec): string {
   const sigCols = spec.signatures
     .map(
       (s) =>
-        `<div class="sig"><div class="sig-line"></div><div class="sig-label">${escapeHtml(s.label)}</div></div>`,
+        `<div class="sig"><div class="sig-line"></div><div class="sig-label">${escapeHtml(s.label)}</div>${s.name ? `<div class="sig-name">${escapeHtml(s.name)}</div>` : ""}${s.on ? `<div class="sig-on">${escapeHtml(s.on)}</div>` : ""}</div>`,
     )
     .join("");
 
+  const detailBlock = spec.detail && spec.detail.lines.length
+    ? `<div class="detail-head">${escapeHtml(spec.detail.heading)}</div>
+  <table class="detail">
+    <thead><tr>${renderRow(spec.detail.columns.map((c) => c.label), spec.detail.columns, "th")}</tr></thead>
+    <tbody>${spec.detail.lines.map((ln) => `<tr>${renderRow(ln.cells, spec.detail!.columns, "td")}</tr>`).join("")}</tbody>
+  </table>`
+    : "";
+
+  const wm = spec.watermark ? `<div class="wm">${escapeHtml(spec.watermark)}</div>` : "";
+  const footerText = spec.footerText && spec.footerText.trim() ? `<div class="footer-text">${escapeHtml(spec.footerText.trim())}</div>` : "";
+
   return `<div class="sheet">
+  ${wm}
   <div class="head">
     <div>
       <div class="co-name">${escapeHtml(co.name)}</div>
@@ -168,8 +197,10 @@ export function buildVoucherSheet(spec: VoucherSpec): string {
     <tbody>${bodyRows}${totalRow}</tbody>
   </table>
   ${footerNote}
+  ${detailBlock}
   ${wordsBlock}
   ${remarksBlock}
+  ${footerText}
   <div class="sigs">${sigCols}</div>
   <div class="printed">Printed on ${escapeHtml(spec.printedOn)}</div>
 </div>`;

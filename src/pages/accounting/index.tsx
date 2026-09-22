@@ -48,6 +48,7 @@ import {
   List,
   Users,
   Building2,
+  Calculator,
   BarChart3,
   Scale,
   Wallet,
@@ -115,7 +116,7 @@ function CompanySelect({
 
 // =============== TYPES ===============
 
-type TabKey = "overview" | "coa" | "journals" | "tb" | "gl" | "ar" | "ap" | "supplier-discount" | "debtorledger" | "creditorledger" | "odebtor" | "ocreditor" | "odebtorbills" | "odebtorpay" | "ocreditorbills" | "ocreditorpay" | "pl" | "trend" | "plmonthly" | "ceclass" | "coststruct" | "cashflow" | "bs" | "payments" | "receipts" | "transfer" | "dailycash" | "cashbook" | "assets" | "labor" | "stock" | "stockmap" | "openstock" | "stocktake" | "opening" | "audit" | "maint";
+type TabKey = "overview" | "coa" | "journals" | "tb" | "gl" | "ar" | "ap" | "supplier-discount" | "debtorledger" | "creditorledger" | "odebtor" | "ocreditor" | "odebtorbills" | "odebtorpay" | "ocreditorbills" | "ocreditorpay" | "apinvoices" | "selfcheck" | "corrections" | "pl" | "trend" | "plmonthly" | "ceclass" | "coststruct" | "cashflow" | "bs" | "payments" | "receipts" | "transfer" | "dailycash" | "cashbook" | "assets" | "labor" | "stock" | "stockmap" | "openstock" | "stocktake" | "opening" | "audit" | "maint";
 
 // =============== VOUCHER PRINTING (PV / OR / JV) ===============
 //
@@ -151,6 +152,7 @@ function todayDMY(): string {
 function buildPvVoucher(
   pv: PvRow,
   accounts: ChartOfAccount[],
+  detail?: { supplierName: string; piNo: string | null; opening: boolean; method: string; bookedSen: number }[],
 ): VoucherSpec {
   const lines: VoucherLine[] = pv.lines.map((l) => ({
     cells: [accountLabel(accounts, l.accountCode), l.description ?? "", formatCurrency(l.amountSen)],
@@ -158,6 +160,14 @@ function buildPvVoucher(
   const paidFrom = pv.accrued === 1 && !pv.settledAt
     ? `Accrued to: ${pv.accrualAccount ? accountLabel(accounts, pv.accrualAccount) : "—"}`
     : `Paid from: ${pv.payFrom ? accountLabel(accounts, pv.payFrom) : "—"}`;
+  // Houzs-style voucher (owner 2026-09-22): the ladder's real signatories and
+  // dates print under the signature lines; an unposted voucher carries a
+  // watermark so it can never pass as a paid document; a supplier payment
+  // lists the bills it settled.
+  const st = (pv.approvalState ?? pv.approval_state) ?? "APPROVED";
+  const dmy = (iso?: string | null) => (iso ? formatDateDMY(String(iso).slice(0, 10)) : undefined);
+  const watermark = pv.status === "VOID" ? "CANCELLED" : st === "DRAFT" ? "DRAFT" : st !== "APPROVED" ? "NOT YET APPROVED" : undefined;
+  const pvx = pv as PvRow & { preparedByName?: string | null; checkedByName?: string | null; approvedByName?: string | null; createdByName?: string | null };
   return {
     // A voided voucher must never print as a clean/valid document.
     title: pv.status === "VOID" ? "PAYMENT VOUCHER — VOID" : "PAYMENT VOUCHER",
@@ -172,8 +182,23 @@ function buildPvVoucher(
     totalCells: ["", "Total", formatCurrency(pv.totalSen)],
     amountWords: amountInWords(pv.totalSen),
     remarks: pv.description ?? undefined,
-    signatures: [{ label: "Prepared by" }, { label: "Approved by" }, { label: "Received by" }],
+    signatures: [
+      { label: "Prepared by", name: pvx.preparedByName ?? pvx.createdByName ?? undefined, on: dmy(pv.preparedAt ?? pv.prepared_at) ?? (pvx.preparedByName ? undefined : formatDateDMY(pv.date)) },
+      { label: "Checked by", name: pvx.checkedByName ?? undefined, on: dmy(pv.checkedAt ?? pv.checked_at) },
+      { label: "Approved by", name: pvx.approvedByName ?? undefined, on: dmy(pv.approvedAt ?? pv.approved_at) },
+      { label: "Received by" },
+    ],
     printedOn: todayDMY(),
+    watermark,
+    detail: detail && detail.length
+      ? {
+          heading: "Bills settled by this payment",
+          columns: [{ label: "Supplier" }, { label: "Bill" }, { label: "Amount", align: "right" }],
+          lines: detail.map((d) => ({
+            cells: [d.supplierName, d.piNo ? `${d.piNo}${d.opening ? " (opening)" : ""}` : d.method === "TF_REPAYMENT" ? "Trade finance repayment" : "Advance / unallocated", formatCurrency(d.bookedSen)],
+          })),
+        }
+      : undefined,
   };
 }
 
@@ -485,17 +510,20 @@ const TABS: { key: TabKey; label: string; icon: React.ReactNode; group: string }
   // here restores either instantly).
   { key: "plmonthly", label: "Monthly P&L", icon: <BarChart3 className="h-4 w-4" />, group: "Monthly Report" },
   // Daily Operation
-  { key: "payments", label: "Expense Payment", icon: <BookOpen className="h-4 w-4" />, group: "Daily Operation" },
+  { key: "payments", label: "Payment Vouchers", icon: <BookOpen className="h-4 w-4" />, group: "Daily Operation" },
   { key: "receipts", label: "Receipts", icon: <BookOpen className="h-4 w-4" />, group: "Daily Operation" },
   { key: "transfer", label: "Fund Transfer", icon: <Wallet className="h-4 w-4" />, group: "Daily Operation" },
   { key: "dailycash", label: "Cash Position", icon: <Wallet className="h-4 w-4" />, group: "Daily Operation" },
   // Monthly Operation
   { key: "journals", label: "Journal Entries", icon: <BookOpen className="h-4 w-4" />, group: "Monthly Operation" },
   { key: "cashbook", label: "Cash Book", icon: <BookOpen className="h-4 w-4" />, group: "Monthly Operation" },
+  { key: "selfcheck", label: "Self-check", icon: <Calculator className="h-4 w-4" />, group: "Monthly Operation" },
+  { key: "corrections", label: "Corrections", icon: <BookOpen className="h-4 w-4" />, group: "Monthly Operation" },
   { key: "assets", label: "Fixed Assets", icon: <Building2 className="h-4 w-4" />, group: "Monthly Operation" },
   // Debtor / Creditor
   { key: "ar", label: "Debtor Aging", icon: <Users className="h-4 w-4" />, group: "Debtor / Creditor" },
   { key: "ap", label: "Creditor Aging", icon: <Building2 className="h-4 w-4" />, group: "Debtor / Creditor" },
+  { key: "apinvoices", label: "AP Invoices", icon: <BookOpen className="h-4 w-4" />, group: "Debtor / Creditor" },
   { key: "supplier-discount", label: "Supplier Discount", icon: <CreditCard className="h-4 w-4" />, group: "Debtor / Creditor" },
   { key: "odebtor", label: "Other Debtor", icon: <Users className="h-4 w-4" />, group: "Debtor / Creditor" },
   { key: "odebtorbills", label: "Other Debtor Bills", icon: <BookOpen className="h-4 w-4" />, group: "Debtor / Creditor" },
@@ -599,6 +627,9 @@ export default function AccountingPage() {
           {tab === "odebtorpay" && <OtherPartyPaymentsTab accounts={accounts} side="DEBTOR" />}
           {tab === "ocreditor" && <OtherPartiesTab side="CREDITOR" />}
           {tab === "ocreditorbills" && <OtherPartyBillsTab accounts={accounts} side="CREDITOR" />}
+          {tab === "apinvoices" && <ApInvoicesTab />}
+          {tab === "selfcheck" && <SelfCheckTab />}
+          {tab === "corrections" && <CorrectionsTab />}
           {tab === "ocreditorpay" && <OtherPartyPaymentsTab accounts={accounts} side="CREDITOR" />}
           {tab === "payments" && <PaymentsTab accounts={accounts} />}
           {tab === "receipts" && <ReceiptsTab accounts={accounts} />}
@@ -4163,12 +4194,14 @@ type SDOpenPI = {
 type SDHistoryRow = {
   id: string;
   noteNumber: string;
+  supplierId: string;
   supplierName: string;
   date: string;
   reason: string;
   totalAmount: number;
   status: string;
   piNo?: string;
+  items?: { description: string; quantity: number; unitPriceSen: number; lineType: string }[];
 };
 
 // Per-PI allocation row state: ticked + the raw RM string the operator typed.
@@ -4186,6 +4219,7 @@ function SupplierDiscountTab() {
   const [netRm, setNetRm] = useState("");
   const [sstRm, setSstRm] = useState("");
   const [reason, setReason] = useState("");
+  const [cnDate, setCnDate] = useState(() => new Date().toISOString().slice(0, 10));
 
   // Open PIs for the picked supplier + per-PI allocation rows (keyed by PI id).
   const [openPIs, setOpenPIs] = useState<SDOpenPI[]>([]);
@@ -4193,6 +4227,14 @@ function SupplierDiscountTab() {
   const [allocRows, setAllocRows] = useState<Record<string, SDAllocRow>>({});
 
   const [saving, setSaving] = useState(false);
+
+  // Inline row edit (history table): which row is being edited + its draft
+  // fields. An edit never touches allocations (Cancel + re-create for that).
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDate, setEditDate] = useState("");
+  const [editNet, setEditNet] = useState("");
+  const [editSst, setEditSst] = useState("");
+  const [editReason, setEditReason] = useState("");
 
   // History list.
   const [history, setHistory] = useState<SDHistoryRow[]>([]);
@@ -4204,7 +4246,8 @@ function SupplierDiscountTab() {
       .catch(() => {});
   }, []);
 
-  // Hide orphan DRAFTs (a Save whose post leg failed) — the rows actually shown.
+  // Hide orphan DRAFTs (a Save whose post leg failed). CANCELLED rows stay
+  // visible with their status badge (owner 2026-09-21).
   const visibleHistory = history.filter((n) => n.status !== "DRAFT");
   const sdSel = useRowSelection(visibleHistory, (d) => d.noteNumber ?? d.id);
 
@@ -4277,8 +4320,51 @@ function SupplierDiscountTab() {
     setNetRm("");
     setSstRm("");
     setReason("");
+    setCnDate(new Date().toISOString().slice(0, 10));
     setOpenPIs([]);
     setAllocRows({});
+  };
+
+  // Turn one history row into inputs (date / net / SST / reason).
+  const startEdit = (row: SDHistoryRow) => {
+    const net = row.items?.find((it) => it.lineType !== "TAX");
+    const sst = row.items?.find((it) => it.lineType === "TAX");
+    setEditingId(row.id);
+    setEditDate(row.date);
+    setEditNet(net ? ((net.quantity * net.unitPriceSen) / 100).toFixed(2) : (row.totalAmount / 100).toFixed(2));
+    setEditSst(sst ? ((sst.quantity * sst.unitPriceSen) / 100).toFixed(2) : "");
+    setEditReason(row.reason ?? "");
+  };
+
+  const saveEdit = async () => {
+    if (!editingId) return;
+    const netS = Math.round(Number(editNet) * 100);
+    const sstS = Math.round(Number(editSst) * 100);
+    if (!Number.isFinite(netS) || netS <= 0) { toast.error("Discount amount (net) must be greater than 0"); return; }
+    const items: { description: string; quantity: number; unitPriceSen: number; lineType: string }[] = [
+      { description: editReason || "Discount", quantity: 1, unitPriceSen: netS, lineType: "STOCKED" },
+    ];
+    if (Number.isFinite(sstS) && sstS > 0) items.push({ description: "SST portion", quantity: 1, unitPriceSen: sstS, lineType: "TAX" });
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/accounting/purchase-credit-notes/${encodeURIComponent(editingId)}/restate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date: editDate, reason: editReason, items }),
+      });
+      const j = (await res.json()) as { success?: boolean; error?: string };
+      if (!res.ok || !j.success) {
+        toast.error(j.error || "Failed to update supplier discount");
+        return;
+      }
+      toast.success("Supplier discount updated");
+      setEditingId(null);
+      loadHistory();
+    } catch {
+      toast.error("Failed to update supplier discount");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const canSave = !!supplierId && netSen > 0 && !saving;
@@ -4286,6 +4372,12 @@ function SupplierDiscountTab() {
   const handleSave = async () => {
     if (!supplierId) { toast.error("Select a supplier"); return; }
     if (!(netSen > 0)) { toast.error("Discount amount (net) must be greater than 0"); return; }
+
+    // items = net line (+ SST line if any).
+    const items: { description: string; quantity: number; unitPriceSen: number; lineType: string }[] = [
+      { description: reason || "Discount", quantity: 1, unitPriceSen: netSen, lineType: "STOCKED" },
+    ];
+    if (sstSen > 0) items.push({ description: "SST portion", quantity: 1, unitPriceSen: sstSen, lineType: "TAX" });
 
     // Build the allocations from the ticked rows; cap each at its outstanding.
     const allocations: { piId: string; amountSen: number }[] = [];
@@ -4306,16 +4398,11 @@ function SupplierDiscountTab() {
 
     setSaving(true);
     try {
-      // 1) CREATE the DRAFT credit note. items = net line (+ SST line if any).
-      const items: { description: string; quantity: number; unitPriceSen: number; lineType: string }[] = [
-        { description: reason || "Discount", quantity: 1, unitPriceSen: netSen, lineType: "STOCKED" },
-      ];
-      if (sstSen > 0) items.push({ description: "SST portion", quantity: 1, unitPriceSen: sstSen, lineType: "TAX" });
-
+      // 1) CREATE the DRAFT credit note.
       const createRes = await fetch("/api/accounting/purchase-credit-notes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ supplierId, reason, items }),
+        body: JSON.stringify({ supplierId, date: cnDate, reason, items }),
       });
       const createJson = (await createRes.json()) as { success?: boolean; error?: string; data?: { id?: string } };
       if (!createRes.ok || !createJson.success || !createJson.data?.id) {
@@ -4346,10 +4433,13 @@ function SupplierDiscountTab() {
     }
   };
 
-  const voidNote = async (row: SDHistoryRow) => {
+  // Owner rule (2026-09-21): every action button in this tab reads "Cancel" —
+  // it still calls the same reversal endpoint (GL mirror + PI/supplier
+  // restore) and the row disappears from history once CANCELLED.
+  const cancelNote = async (row: SDHistoryRow) => {
     if (!(await confirm({
-      title: "Void supplier discount?",
-      message: `Void ${row.noteNumber} (${formatCurrency(row.totalAmount)})? This reverses the GL posting and re-opens any invoices it was knocked off.`,
+      title: "Cancel supplier discount?",
+      message: `Cancel ${row.noteNumber} (${formatCurrency(row.totalAmount)})? This reverses the GL posting and re-opens any invoices it was knocked off.`,
       danger: true,
     }))) return;
     try {
@@ -4359,13 +4449,14 @@ function SupplierDiscountTab() {
       });
       const j = asMutationResponse(await res.json());
       if (res.ok && j?.success) {
-        toast.success(`${row.noteNumber} voided`);
+        toast.success(`${row.noteNumber} cancelled`);
+        if (editingId === row.id) setEditingId(null);
         loadHistory();
       } else {
-        toast.error(j?.error || "Failed to void supplier discount");
+        toast.error(j?.error || "Failed to cancel supplier discount");
       }
     } catch {
-      toast.error("Failed to void supplier discount");
+      toast.error("Failed to cancel supplier discount");
     }
   };
 
@@ -4419,15 +4510,26 @@ function SupplierDiscountTab() {
               />
             </div>
           </div>
-          <div>
-            <label className="text-xs font-medium text-[#6B7280] mb-1 block">Reason</label>
-            <input
-              type="text"
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder="e.g. damaged fabric returned"
-              className="w-full rounded-md border border-[#E2DDD8] px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#6B5C32]"
-            />
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label className="text-xs font-medium text-[#6B7280] mb-1 block">Date</label>
+              <input
+                type="date"
+                value={cnDate}
+                onChange={(e) => setCnDate(e.target.value)}
+                className="w-full rounded-md border border-[#E2DDD8] px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#6B5C32]"
+              />
+            </div>
+            <div className="sm:col-span-2">
+              <label className="text-xs font-medium text-[#6B7280] mb-1 block">Reason</label>
+              <input
+                type="text"
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="e.g. damaged fabric returned"
+                className="w-full rounded-md border border-[#E2DDD8] px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#6B5C32]"
+              />
+            </div>
           </div>
 
           {/* Allocation table — only once a supplier is picked. */}
@@ -4555,16 +4657,31 @@ function SupplierDiscountTab() {
                   </tr>
                 </thead>
                 <tbody>
-                  {visibleHistory.map((n) => (
-                    <tr key={n.id} className="border-b border-[#F0ECE9]">
+                  {visibleHistory.map((n) => {
+                    const editing = editingId === n.id;
+                    const inputCls = "rounded-md border border-[#E2DDD8] px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-[#6B5C32]";
+                    return (
+                    <Fragment key={n.id}>
+                    <tr className="border-b border-[#F0ECE9]">
                       <td className="px-3 py-1.5 w-8">
                         <input type="checkbox" checked={sdSel.isSelected(n.noteNumber ?? n.id)} onChange={() => sdSel.toggle(n.noteNumber ?? n.id)} className="h-3.5 w-3.5 accent-[#6B5C32] align-middle" />
                       </td>
                       <td className="px-3 py-1.5 tabular-nums text-xs font-medium">{n.noteNumber}</td>
                       <td className="px-3 py-1.5">{n.supplierName}</td>
-                      <td className="px-3 py-1.5 text-xs text-[#6B7280] whitespace-nowrap">{n.date}</td>
+                      <td className="px-3 py-1.5 text-xs text-[#6B7280] whitespace-nowrap">
+                        {editing ? (
+                          <input type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} className={inputCls} />
+                        ) : n.date}
+                      </td>
                       <td className="px-3 py-1.5 text-xs text-[#6B7280]">{n.piNo || "—"}</td>
-                      <td className="px-3 py-1.5 text-right tabular-nums font-medium">{formatCurrency(n.totalAmount)}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums font-medium">
+                        {editing ? (
+                          <div className="flex items-center justify-end gap-2">
+                            <input type="number" step="0.01" min="0" inputMode="decimal" value={editNet} onFocus={(e) => e.currentTarget.select()} onChange={(e) => setEditNet(e.target.value)} placeholder="Net" className={`${inputCls} w-24 text-right`} />
+                            <input type="number" step="0.01" min="0" inputMode="decimal" value={editSst} onFocus={(e) => e.currentTarget.select()} onChange={(e) => setEditSst(e.target.value)} placeholder="SST" className={`${inputCls} w-20 text-right`} />
+                          </div>
+                        ) : formatCurrency(n.totalAmount)}
+                      </td>
                       <td className="px-3 py-1.5">
                         {n.status === "POSTED" ? (
                           <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-[#EAF3DE] text-[#27500A] border border-[#C0DD97]">POSTED</span>
@@ -4572,13 +4689,31 @@ function SupplierDiscountTab() {
                           <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-[#F3F0EC] text-[#6B7280] border border-[#E2DDD8]">{n.status}</span>
                         )}
                       </td>
-                      <td className="px-3 py-1.5 text-right">
-                        {n.status === "POSTED" && (
-                          <button onClick={() => voidNote(n)} className="text-xs text-[#9A3A2D] hover:text-[#7A2E24] underline decoration-dotted cursor-pointer">Void</button>
-                        )}
+                      <td className="px-3 py-1.5 text-right whitespace-nowrap">
+                        {n.status === "POSTED" && (editing ? (
+                          <>
+                            <button onClick={saveEdit} disabled={saving} className="text-xs text-[#27500A] hover:text-[#1F1D1B] underline decoration-dotted cursor-pointer mr-3 disabled:opacity-50">{saving ? "Saving…" : "Save"}</button>
+                            <button onClick={() => setEditingId(null)} className="text-xs text-[#6B7280] hover:text-[#1F1D1B] underline decoration-dotted cursor-pointer">Discard</button>
+                          </>
+                        ) : (
+                          <>
+                            <button onClick={() => startEdit(n)} className="text-xs text-[#6B5C32] hover:text-[#1F1D1B] underline decoration-dotted cursor-pointer mr-3">Edit</button>
+                            <button onClick={() => cancelNote(n)} className="text-xs text-[#9A3A2D] hover:text-[#7A2E24] underline decoration-dotted cursor-pointer">Cancel</button>
+                          </>
+                        ))}
                       </td>
                     </tr>
-                  ))}
+                    {editing && (
+                      <tr className="border-b border-[#F0ECE9] bg-[#FAF9F7]">
+                        <td />
+                        <td colSpan={7} className="px-3 py-1.5">
+                          <input type="text" value={editReason} onChange={(e) => setEditReason(e.target.value)} placeholder="Reason" className={`${inputCls} w-full`} />
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -6013,6 +6148,128 @@ function ScanPrefillButton({ label, onResult }: { label: string; onResult: (d: S
     </>
   );
 }
+
+// Scan Bills — a STACK of bills at once (Houzs adoption Phase 5, 2026-09-22).
+// Each file is scanned in turn and becomes ONE draft Payment Voucher on the
+// approval ladder (saveAs:"draft" — no number, no GL). The account prefills
+// from the same payee's latest voucher, exactly as the single-scan button
+// does; a bill the AI can't read or that has no usable amount is listed as
+// skipped with the reason, never guessed. The owner then walks the drafts
+// through Prepare → Check → Approve on the Payment Vouchers page.
+function ScanBillsBatch({ rows, bankCash, onDone }: {
+  rows: PvRow[];
+  bankCash: ChartOfAccount[];
+  onDone: () => void;
+}) {
+  const { toast } = useToast();
+  const [open, setOpen] = useState(false);
+  const [queue, setQueue] = useState<{ name: string; state: "queued" | "scanning" | "saved" | "skipped"; note?: string; pvNo?: string }[]>([]);
+  const [busy, setBusy] = useState(false);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const normName = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const runFiles = async (files: File[]) => {
+    if (!files.length) return;
+    setBusy(true);
+    setQueue(files.map((f) => ({ name: f.name, state: "queued" })));
+    const payFrom = defaultBankCode(bankCash);
+    let saved = 0;
+    for (let i = 0; i < files.length; i++) {
+      setQueue((q) => q.map((x, j) => (j === i ? { ...x, state: "scanning" } : x)));
+      try {
+        const fd = new FormData();
+        fd.append("file", files[i]);
+        const res = await fetch("/api/scan-finance/extract", { method: "POST", body: fd });
+        const j = (await res.json()) as { success?: boolean; error?: string; data?: ScanFinanceResult };
+        if (!j?.success || !j.data) throw new Error(j?.error || "scan failed");
+        const d = j.data;
+        const amtLines = d.lines.length ? d.lines : d.totalSen ? [{ description: d.docNo ?? files[i].name, amountSen: d.totalSen }] : [];
+        if (!amtLines.length) throw new Error("no amount read");
+        const prior = d.partyName
+          ? rows.filter((r) => r.status !== "VOID" && r.lines?.length && normName(r.payee ?? "") === normName(d.partyName ?? ""))
+              .sort((a, b) => (b.date || "").localeCompare(a.date || ""))[0]
+          : undefined;
+        const acct = prior?.lines?.[0]?.accountCode ?? "";
+        if (!acct) throw new Error(d.partyName ? `new payee "${d.partyName}" — no account to prefill; key it by hand` : "payee not read");
+        const body = {
+          date: d.docDate ?? new Date().toISOString().slice(0, 10),
+          payee: d.partyName ?? "",
+          description: [d.docType, d.docNo].filter(Boolean).join(" · ") || files[i].name,
+          accrued: false,
+          payFrom,
+          saveAs: "draft",
+          lines: amtLines.map((l) => ({ accountCode: acct, description: l.description, amountSen: l.amountSen })),
+        };
+        const r2 = await fetch("/api/accounting/payment-vouchers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        const j2 = (await r2.json()) as { success?: boolean; error?: string; data?: { pvNo: string } };
+        if (!j2?.success) throw new Error(j2?.error || "save failed");
+        saved++;
+        setQueue((q) => q.map((x, k) => (k === i ? { ...x, state: "saved", pvNo: j2.data?.pvNo, note: `${d.partyName ?? ""} · ${formatCurrency(amtLines.reduce((s, l) => s + l.amountSen, 0))}` } : x)));
+      } catch (e) {
+        setQueue((q) => q.map((x, k) => (k === i ? { ...x, state: "skipped", note: (e as Error).message } : x)));
+      }
+    }
+    setBusy(false);
+    if (saved) { toast.success(`${saved} draft voucher${saved === 1 ? "" : "s"} created — Prepare / Check / Approve them below`); onDone(); }
+  };
+  return (
+    <>
+      <Button variant="outline" size="sm" onClick={() => { setQueue([]); setOpen(true); }} title="Drop a whole stack of bills — one draft voucher each">
+        <Upload className="h-4 w-4 mr-1.5" /> Scan Bills
+      </Button>
+      {open && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => { if (!busy) setOpen(false); }}>
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-5 border-b border-[#E2DDD8]">
+              <div>
+                <h2 className="text-base font-semibold text-[#1F1D1B]">Scan Bills</h2>
+                <p className="text-xs text-[#6B7280] mt-0.5">Drop several bills at once. Each becomes a <b>draft</b> voucher (no number, nothing posted) with the account prefilled from that payee's last voucher. Unreadable ones are listed, not guessed.</p>
+              </div>
+              <button onClick={() => { if (!busy) setOpen(false); }} className="text-[#9CA3AF] hover:text-[#6B7280] text-lg leading-none">✕</button>
+            </div>
+            <div className="p-5 space-y-3">
+              {queue.length === 0 && (
+                <div
+                  className="rounded-lg border-2 border-dashed border-[#E2DDD8] hover:bg-[#FAF8F6] px-6 py-12 text-center cursor-pointer"
+                  onClick={() => inputRef.current?.click()}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => { e.preventDefault(); void runFiles(Array.from(e.dataTransfer?.files ?? [])); }}
+                >
+                  <Upload className="h-8 w-8 mx-auto text-[#B4B2A9]" />
+                  <p className="mt-3 text-sm font-medium text-[#1F1D1B]">Drop PDFs / photos here</p>
+                  <p className="mt-1 text-xs text-[#6B7280]">or click to browse — up to 20 files, each ~30–90s to scan</p>
+                </div>
+              )}
+              {queue.length > 0 && (
+                <table className="w-full text-xs">
+                  <tbody>
+                    {queue.map((q, i) => (
+                      <tr key={i} className="border-t border-[#F0ECE9]">
+                        <td className="py-1.5 pr-3 w-full max-w-0"><div className="truncate">{q.name}</div>{q.note && <div className="text-[10px] text-[#6B7280] truncate">{q.note}</div>}</td>
+                        <td className="py-1.5 whitespace-nowrap text-right">
+                          {q.state === "queued" && <span className="text-[#9CA3AF]">waiting</span>}
+                          {q.state === "scanning" && <span className="text-[#7A5B12]">scanning…</span>}
+                          {q.state === "saved" && <span className="rounded-full bg-[#EAF3DE] text-[#27500A] px-2 py-0.5 font-semibold">draft {q.pvNo}</span>}
+                          {q.state === "skipped" && <span className="rounded-full bg-[#F7E5E1] text-[#9A3A2D] px-2 py-0.5 font-semibold">skipped</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              {queue.length > 0 && !busy && (
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setQueue([])}>Scan more</Button>
+                  <Button variant="primary" size="sm" onClick={() => setOpen(false)}>Done</Button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+      <input ref={inputRef} type="file" accept=".pdf,image/*" multiple className="sr-only" onChange={(e) => { void runFiles(Array.from(e.target.files ?? []).slice(0, 20)); e.target.value = ""; }} />
+    </>
+  );
+}
 // Party match for scan prefill. Same precedence as every other OCR surface
 // (owner 2026-08-01: 「我们的全部OCR都要有这样的功能」):
 //
@@ -6048,6 +6305,350 @@ function scanNameMatch<T extends { id: string; name: string }>(
   // ranking rather than taking whichever happened to be first.
   if (contained.length === 1) return contained[0];
   return bestMatch(list, name)?.party ?? undefined;
+}
+
+// =============== TAB: SELF-CHECK (Houzs adoption Phase 4, 2026-09-22) ===============
+//
+// Every consistency probe the finance module already knows how to run, on
+// ONE page, each card green or red with the number that is off and the
+// place to fix it. Read-only aggregation of existing endpoints — the checks
+// themselves live where they always did (ap/ar-control, ap/ar-reconciliation,
+// trial-balance, bank-reco/chain, payment-vouchers, cash-position).
+type SelfCheckCard = {
+  key: string; title: string; ok: boolean | null; headline: string; detail?: string;
+  items?: { label: string; amount?: number; note?: string }[]; fixHref?: string; fixLabel?: string;
+};
+function SelfCheckTab() {
+  const [cards, setCards] = useState<SelfCheckCard[] | null>(null);
+  const [ranAt, setRanAt] = useState<string | null>(null);
+  const [running, setRunning] = useState(false);
+  // Runs are keyed by a counter; the effect only fetches and commits the
+  // finished result (no synchronous setState inside the effect body).
+  const [runKey, setRunKey] = useState(0);
+  const compute = useCallback(async (): Promise<SelfCheckCard[]> => {
+    const g = async <T,>(p: string): Promise<T | null> => {
+      try { const r = await fetch(p, { cache: "no-store" }); const j = await r.json() as { success?: boolean; data?: T }; return j?.success && j.data ? j.data : null; } catch { return null; }
+    };
+    type Recon = { driftSen: number; items: { kind: string; ref: string; supplierName?: string; customerName?: string; contributionSen: number; note?: string }[]; unexplainedResidualSen: number };
+    type Ctrl = { driftControlVsPiSen?: number; driftControlVsInvoicesSen?: number; tradeControlSen: number; netOutstandingSen: number };
+    type Tb = { totalDr: number; totalCr: number; balanced: boolean };
+    type Pv = { id: string; pvNo: string; date: string; totalSen: number; status: string; approvalState?: string | null; approval_state?: string | null; accrued: number; settledAt: string | null; payee: string | null }[];
+    type Cp = { tickWarnings: { account: string; day: string; sourceId: string; amountSen: number }[]; awaitingApproval?: { pvNo: string; state: string; amountSen: number }[] };
+    type Chain = { months: { month: string }[]; issues: { kind: string; month: string; detail: string }[] };
+    type Coa = { code: string; name: string; specialAccountType: string | null }[];
+    const [apC, arC, apR, arR, tb, pvs, cp, coa] = await Promise.all([
+      g<Ctrl>("/api/accounting/ap-control"), g<Ctrl>("/api/accounting/ar-control"),
+      g<Recon>("/api/accounting/ap-reconciliation"), g<Recon>("/api/accounting/ar-reconciliation"),
+      g<Tb>("/api/accounting/trial-balance"), g<Pv>("/api/accounting/payment-vouchers"),
+      g<Cp>(`/api/accounting/cash-position?date=${new Date().toISOString().slice(0, 10)}`), g<Coa>("/api/accounting/coa"),
+    ]);
+    const banks = (coa ?? []).filter((a) => a.specialAccountType === "SBK" || a.specialAccountType === "SCH");
+    const chains = await Promise.all(banks.map(async (b) => ({ code: b.code, name: b.name, chain: await g<Chain>(`/api/accounting/bank-reco/chain?account=${b.code}`) })));
+    const out: SelfCheckCard[] = [];
+    const drift = (r: Recon | null, c: Ctrl | null, key: string, title: string, href: string) => {
+      const d = r?.driftSen ?? c?.driftControlVsPiSen ?? c?.driftControlVsInvoicesSen ?? null;
+      out.push({
+        key, title,
+        ok: d === null ? null : d === 0,
+        headline: d === null ? "Could not load" : d === 0 ? "Control account = subledger to the sen" : `Off by ${formatCurrency(Math.abs(d))} — control ${d > 0 ? "above" : "below"} subledger`,
+        detail: r && r.items.length ? `${r.items.length} item${r.items.length === 1 ? "" : "s"} explain it${r.unexplainedResidualSen !== 0 ? ` · unexplained residual ${formatCurrency(Math.abs(r.unexplainedResidualSen))}` : ""}` : undefined,
+        items: r?.items.slice(0, 12).map((i) => ({ label: `${i.kind.replace(/_/g, " ")} · ${i.ref}${i.supplierName ? ` · ${i.supplierName}` : ""}${i.customerName ? ` · ${i.customerName}` : ""}`, amount: i.contributionSen, note: i.note })),
+        fixHref: href, fixLabel: "Open the aging / reconciliation",
+      });
+    };
+    drift(apR, apC, "ap", "Creditor control (400-0000) vs supplier bills", "/accounting?tab=ap");
+    drift(arR, arC, "ar", "Debtor control (300-0000) vs customer invoices", "/accounting?tab=ar");
+    out.push({
+      key: "tb", title: "Trial balance",
+      ok: tb ? tb.balanced : null,
+      headline: !tb ? "Could not load" : tb.balanced ? `ΣDR = ΣCR = ${formatCurrency(tb.totalDr)}` : `ΣDR ${formatCurrency(tb.totalDr)} ≠ ΣCR ${formatCurrency(tb.totalCr)} — off by ${formatCurrency(Math.abs(tb.totalDr - tb.totalCr))}`,
+      fixHref: "/accounting?tab=tb", fixLabel: "Open Trial Balance",
+    });
+    const pending = (pvs ?? []).filter((v) => v.status !== "VOID" && ((v.approvalState ?? v.approval_state) ?? "APPROVED") !== "APPROVED");
+    const stale = pending.filter((v) => v.date < new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10));
+    out.push({
+      key: "pv", title: "Payment vouchers waiting on the approval ladder",
+      ok: pending.length === 0 ? true : stale.length === 0 ? null : false,
+      headline: pending.length === 0 ? "Nothing waiting" : `${pending.length} not posted yet · ${formatCurrency(pending.reduce((s, v) => s + v.totalSen, 0))}${stale.length ? ` · ${stale.length} older than 7 days` : ""}`,
+      items: pending.slice(0, 12).map((v) => ({ label: `${v.pvNo} · ${v.date} · ${v.payee ?? ""} · ${((v.approvalState ?? v.approval_state) ?? "").toLowerCase()}`, amount: v.totalSen })),
+      fixHref: "/accounting?tab=payments", fixLabel: "Open Payment Vouchers",
+    });
+    const accruedOpen = (pvs ?? []).filter((v) => v.status !== "VOID" && v.accrued === 1 && !v.settledAt && ((v.approvalState ?? v.approval_state) ?? "APPROVED") === "APPROVED");
+    out.push({
+      key: "accrued", title: "Accrued vouchers not yet paid",
+      ok: accruedOpen.length === 0 ? true : null,
+      headline: accruedOpen.length === 0 ? "None outstanding" : `${accruedOpen.length} accrued, unpaid · ${formatCurrency(accruedOpen.reduce((s, v) => s + v.totalSen, 0))}`,
+      items: accruedOpen.slice(0, 12).map((v) => ({ label: `${v.pvNo} · ${v.date} · ${v.payee ?? ""}`, amount: v.totalSen })),
+      fixHref: "/accounting?tab=payments", fixLabel: "Settle on Payment Vouchers",
+    });
+    const tw = cp?.tickWarnings ?? [];
+    out.push({
+      key: "ticks", title: "Board ticks the bank statement did not confirm",
+      ok: cp ? tw.length === 0 : null,
+      headline: !cp ? "Could not load" : tw.length === 0 ? "Every tick was confirmed by a statement" : `${tw.length} ticked item${tw.length === 1 ? "" : "s"} missing from the imported statement`,
+      items: tw.slice(0, 12).map((w) => ({ label: `${w.account} · ${w.day} · ${w.sourceId}`, amount: w.amountSen })),
+      fixHref: "/accounting?tab=dailycash", fixLabel: "Open Cash Position",
+    });
+    for (const b of chains) {
+      const ch = b.chain;
+      if (!ch || ch.months.length === 0) continue;
+      out.push({
+        key: `chain-${b.code}`, title: `Statement chain · ${b.code} ${b.name}`,
+        ok: ch.issues.length === 0,
+        headline: ch.issues.length === 0 ? `${ch.months.length} month${ch.months.length === 1 ? "" : "s"} imported, chain clean` : `${ch.issues.length} issue${ch.issues.length === 1 ? "" : "s"}`,
+        items: ch.issues.slice(0, 12).map((i) => ({ label: `${i.kind} · ${i.month}`, note: i.detail })),
+        fixHref: "/accounting?tab=cashbook", fixLabel: "Open Cash Book",
+      });
+    }
+    return out;
+  }, []);
+  useEffect(() => {
+    let dead = false;
+    compute().then((out) => {
+      if (dead) return;
+      setCards(out);
+      setRanAt(new Date().toLocaleTimeString());
+      setRunning(false);
+    });
+    return () => { dead = true; };
+  }, [compute, runKey]);
+  const run = () => { setRunning(true); setRunKey((k) => k + 1); };
+  const tone = (ok: boolean | null) => ok === true ? "border-[#B7D9A8] bg-[#EAF3DE]/50" : ok === false ? "border-[#D9A79C] bg-[#F7E5E1]/50" : "border-[#E0C989] bg-[#FBF3E4]/50";
+  const dot = (ok: boolean | null) => ok === true ? "bg-[#27500A]" : ok === false ? "bg-[#9A3A2D]" : "bg-[#C9A227]";
+  const red = (cards ?? []).filter((k) => k.ok === false).length;
+  const amber = (cards ?? []).filter((k) => k.ok === null).length;
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-between items-start flex-wrap gap-2">
+        <div>
+          <h2 className="text-lg font-semibold text-[#1F1D1B]">Self-check</h2>
+          <p className="text-[11px] text-[#9CA3AF]">Every consistency probe on one page. Green = ties to the sen · Red = something to fix · Amber = needs a look. Read-only; each card links to where the fix lives.</p>
+        </div>
+        <div className="flex items-center gap-3">
+          {cards && <span className="text-xs text-[#6B7280]">{red === 0 && amber === 0 ? <span className="text-[#27500A] font-semibold">All clear ✓</span> : <>{red > 0 && <span className="text-[#9A3A2D] font-semibold">{red} red</span>}{red > 0 && amber > 0 && " · "}{amber > 0 && <span className="text-[#7A5B12] font-semibold">{amber} amber</span>}</>}{ranAt && <span className="ml-2 text-[#9CA3AF]">checked {ranAt}</span>}</span>}
+          <Button variant="outline" size="sm" disabled={running} onClick={run}>{running ? "Checking…" : "Run again"}</Button>
+        </div>
+      </div>
+      {cards === null ? (
+        <Card><CardContent className="py-12 text-center text-[#6B7280] text-sm">Running checks…</CardContent></Card>
+      ) : (
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+          {cards.map((k) => (
+            <Card key={k.key} className={`border ${tone(k.ok)}`}>
+              <CardContent className="p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-2 min-w-0">
+                    <span className={`mt-1.5 h-2.5 w-2.5 rounded-full shrink-0 ${dot(k.ok)}`} />
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-[#1F1D1B]">{k.title}</div>
+                      <div className={`text-sm mt-0.5 ${k.ok === false ? "text-[#9A3A2D] font-medium" : "text-[#4B5563]"}`}>{k.headline}</div>
+                      {k.detail && <div className="text-[11px] text-[#6B7280] mt-0.5">{k.detail}</div>}
+                    </div>
+                  </div>
+                  {k.fixHref && k.ok !== true && <Link to={k.fixHref} className="shrink-0"><Button variant="outline" size="sm">{k.fixLabel ?? "Open"}</Button></Link>}
+                </div>
+                {k.items && k.items.length > 0 && (
+                  <table className="w-full text-xs mt-2">
+                    <tbody>
+                      {k.items.map((it, i) => (
+                        <tr key={i} className="border-t border-[#F0ECE9]">
+                          <td className="py-1 pr-3 w-full max-w-0"><div className="truncate" title={it.note ?? it.label}>{it.label}</div>{it.note && <div className="text-[10px] text-[#9CA3AF] truncate" title={it.note}>{it.note}</div>}</td>
+                          {it.amount !== undefined && <td className={`py-1 text-right tabular-nums whitespace-nowrap ${it.amount < 0 ? "text-[#9A3A2D]" : ""}`}>{formatCurrency(it.amount)}</td>}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// =============== TAB: CORRECTIONS (Houzs adoption Phase 4, 2026-09-22) ===============
+//
+// Who changed what, after it was posted: every restate (edit-in-place),
+// void (cancel) and bank-reconciliation re-open, dug out of the ledger's
+// own leg families — the trail a reviewer asks for.
+type CorrRow = { kind: "edit" | "cancel" | "opening" | "reopen"; docType: string; docId: string; docNo: string; at: string; actor: string; reason: string; reversedSen: number; repostedSen: number };
+function CorrectionsTab() {
+  const [month, setMonth] = useState("");
+  const [data, setData] = useState<{ since: string; rows: CorrRow[] } | null>(null);
+  useEffect(() => {
+    let dead = false;
+    fetch(`/api/accounting/corrections${month ? `?month=${month}` : ""}`)
+      .then((r) => r.json() as Promise<{ success?: boolean; data?: typeof data }>)
+      .then((j) => { if (!dead && j?.success && j.data) setData(j.data); })
+      .catch(() => {});
+    return () => { dead = true; };
+  }, [month]);
+  const kindChip = (k: CorrRow["kind"]) =>
+    k === "edit" ? ["Edited", "bg-[#EEF2FB] text-[#2C4170]"] : k === "cancel" ? ["Cancelled", "bg-[#F7E5E1] text-[#9A3A2D]"] : k === "reopen" ? ["Reco re-opened", "bg-[#FBF3E4] text-[#7A5B12]"] : ["Opening re-posted", "bg-[#F0ECE9] text-[#6B7280]"];
+  const docLabel = (t: string) => t.replace(/_/g, " ");
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-between items-start flex-wrap gap-2">
+        <div>
+          <h2 className="text-lg font-semibold text-[#1F1D1B]">Corrections</h2>
+          <p className="text-[11px] text-[#9CA3AF]">Every posted document that was later edited or cancelled, and every reconciliation month re-opened — who, when, how much reversed and re-posted. Read from the ledger itself.</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="rounded-md border border-[#E2DDD8] bg-white px-2 py-1.5 text-sm" />
+          {month && <Button variant="outline" size="sm" onClick={() => setMonth("")}>Last 90 days</Button>}
+          <ExportButtons build={() => [["When", "Kind", "Document", "No.", "By", "Reason", "Reversed (RM)", "Re-posted (RM)"], ...(data?.rows ?? []).map((r) => [r.at.slice(0, 16).replace("T", " "), r.kind, docLabel(r.docType), r.docNo, r.actor, r.reason, (r.reversedSen / 100).toFixed(2), (r.repostedSen / 100).toFixed(2)])]} filenameBase={`Corrections-${month || "recent"}`} title="Corrections" subtitle={month ? `Month: ${month}` : "Last 90 days"} />
+        </div>
+      </div>
+      <Card>
+        <CardContent className="p-0 overflow-x-auto">
+          {data === null ? (
+            <div className="py-12 text-center text-[#6B7280] text-sm">Loading…</div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-[#E2DDD8] text-xs text-[#6B7280]">
+                  <th className="px-3 py-2 text-left">When</th>
+                  <th className="px-3 py-2 text-left">Kind</th>
+                  <th className="px-3 py-2 text-left">Document</th>
+                  <th className="px-3 py-2 text-left">By</th>
+                  <th className="px-3 py-2 text-left">Reason</th>
+                  <th className="px-3 py-2 text-right">Reversed</th>
+                  <th className="px-3 py-2 text-right">Re-posted</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.rows.map((r, i) => {
+                  const [label, cls] = kindChip(r.kind);
+                  return (
+                    <tr key={i} className="border-b border-[#F0ECE9] hover:bg-[#FAF8F5]">
+                      <td className="px-3 py-1.5 text-xs text-[#6B7280] whitespace-nowrap">{r.at.slice(0, 16).replace("T", " ")}</td>
+                      <td className="px-3 py-1.5"><span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${cls}`}>{label}</span></td>
+                      <td className="px-3 py-1.5 text-xs"><span className="text-[#6B7280]">{docLabel(r.docType)}</span> · <span className="tabular-nums">{r.docNo}</span></td>
+                      <td className="px-3 py-1.5 text-xs">{r.actor || <span className="text-[#9CA3AF]">system</span>}</td>
+                      <td className="px-3 py-1.5 text-xs w-full max-w-0"><div className="truncate" title={r.reason}>{r.reason || <span className="text-[#C7C1BA]">—</span>}</div></td>
+                      <td className="px-3 py-1.5 text-right tabular-nums text-[#9A3A2D]">{r.reversedSen ? formatCurrency(r.reversedSen) : "—"}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums">{r.repostedSen ? formatCurrency(r.repostedSen) : "—"}</td>
+                    </tr>
+                  );
+                })}
+                {data.rows.length === 0 && <tr><td colSpan={7} className="px-3 py-8 text-center text-sm text-[#9CA3AF]">No corrections in this window</td></tr>}
+              </tbody>
+            </table>
+          )}
+        </CardContent>
+      </Card>
+      <p className="text-[11px] text-[#9CA3AF]">Reasons are recorded where the action asks for one (voucher reject, reconciliation re-open). Edits and cancels of other documents show the trail without a reason for now.</p>
+    </div>
+  );
+}
+
+// =============== TAB: AP INVOICES (Houzs adoption Phase 2, 2026-09-22) ===============
+//
+// One list of everything owed on paper: other-creditor bills (kind AP) beside
+// a READ-ONLY mirror of purchase invoices (kind PI). Owner ruling: 「只是多一份
+// 出来罢了…purchase invoice 那边要保留」— Procurement's PI page is untouched and
+// stays the only place to create/edit/post a PI; the PI rows here link back.
+type ApInvRow = {
+  kind: "AP" | "PI"; id: string; no: string; supplier: string; supplierRef: string; date: string; dueDate: string | null;
+  description: string; totalSen: number; paidSen: number; outstandingSen: number; status: "OPEN" | "PAID" | "CANCELLED"; opening: boolean;
+};
+function ApInvoicesTab() {
+  const [data, setData] = useState<{ rows: ApInvRow[]; totals: { openSen: number; openCount: number; apOpenSen: number; piOpenSen: number } } | null>(null);
+  const [kind, setKind] = useState<"ALL" | "AP" | "PI">("ALL");
+  const [status, setStatus] = useState<"OPEN" | "PAID" | "CANCELLED" | "ALL">("OPEN");
+  const [q, setQ] = useState("");
+  useEffect(() => {
+    let dead = false;
+    fetch(`/api/accounting/ap-invoices${status === "ALL" ? "" : `?status=${status}`}`)
+      .then((r) => r.json() as Promise<{ success?: boolean; data?: typeof data }>)
+      .then((j) => { if (!dead && j?.success && j.data) setData(j.data); })
+      .catch(() => {});
+    return () => { dead = true; };
+  }, [status]);
+  const rows = (data?.rows ?? []).filter((r) => {
+    if (kind !== "ALL" && r.kind !== kind) return false;
+    if (q.trim()) { const kw = q.toLowerCase(); if (![r.no, r.supplier, r.supplierRef, r.description].some((s) => s.toLowerCase().includes(kw))) return false; }
+    return true;
+  });
+  const shownSen = rows.reduce((s, r) => s + r.outstandingSen, 0);
+  const chip = (r: ApInvRow) =>
+    r.status === "PAID" ? "bg-[#EAF3DE] text-[#27500A]" : r.status === "CANCELLED" ? "bg-[#F0ECE9] text-[#9CA3AF]" : "bg-[#FBF3E4] text-[#7A5B12]";
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-between items-start flex-wrap gap-2">
+        <div>
+          <h2 className="text-lg font-semibold text-[#1F1D1B]">AP Invoices</h2>
+          <p className="text-[11px] text-[#9CA3AF]">Everything owed on paper in one list. <b>AP</b> = other-creditor bills (raise / edit them on Other Creditor Bills); <b>PI</b> = purchase invoices, read-only mirror — Procurement's page is where they are created and posted.</p>
+        </div>
+        <div className="flex gap-2">
+          <Link to="/accounting?tab=ocreditorbills"><Button variant="outline" size="sm">New AP bill</Button></Link>
+          <Link to="/accounting?tab=payments"><Button variant="primary" size="sm">Pay (Payment Vouchers)</Button></Link>
+        </div>
+      </div>
+      {data && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <Card><CardContent className="p-3"><div className="text-[11px] text-[#6B7280]">Open · all</div><div className="text-lg font-semibold tabular-nums">{formatCurrency(data.totals.openSen)}</div><div className="text-[11px] text-[#9CA3AF]">{data.totals.openCount} invoice{data.totals.openCount === 1 ? "" : "s"}</div></CardContent></Card>
+          <Card><CardContent className="p-3"><div className="text-[11px] text-[#6B7280]">Open · AP bills</div><div className="text-lg font-semibold tabular-nums">{formatCurrency(data.totals.apOpenSen)}</div></CardContent></Card>
+          <Card><CardContent className="p-3"><div className="text-[11px] text-[#6B7280]">Open · purchase invoices</div><div className="text-lg font-semibold tabular-nums">{formatCurrency(data.totals.piOpenSen)}</div></CardContent></Card>
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-2">
+        <input type="text" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search no / supplier / ref" className="rounded-md border border-[#E2DDD8] px-3 py-1.5 text-sm w-64" />
+        <select value={kind} onChange={(e) => setKind(e.target.value as typeof kind)} className="rounded-md border border-[#E2DDD8] px-2 py-1.5 text-sm">
+          <option value="ALL">AP + PI</option><option value="AP">AP bills only</option><option value="PI">Purchase invoices only</option>
+        </select>
+        <select value={status} onChange={(e) => setStatus(e.target.value as typeof status)} className="rounded-md border border-[#E2DDD8] px-2 py-1.5 text-sm">
+          <option value="OPEN">Open</option><option value="PAID">Paid</option><option value="CANCELLED">Cancelled</option><option value="ALL">All</option>
+        </select>
+        <span className="ml-auto text-xs text-[#6B7280]">Shown outstanding <span className="font-semibold tabular-nums text-[#1F1D1B]">{formatCurrency(shownSen)}</span></span>
+      </div>
+      <Card>
+        <CardContent className="p-0 overflow-x-auto">
+          {data === null ? (
+            <div className="py-12 text-center text-[#6B7280] text-sm">Loading…</div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-[#E2DDD8] text-xs text-[#6B7280]">
+                  <th className="px-3 py-2 text-left">Kind</th>
+                  <th className="px-3 py-2 text-left">No.</th>
+                  <th className="px-3 py-2 text-left">Supplier</th>
+                  <th className="px-3 py-2 text-left">Supplier ref</th>
+                  <th className="px-3 py-2 text-left">Date</th>
+                  <th className="px-3 py-2 text-left">Due</th>
+                  <th className="px-3 py-2 text-right">Total</th>
+                  <th className="px-3 py-2 text-right">Paid</th>
+                  <th className="px-3 py-2 text-right">Outstanding</th>
+                  <th className="px-3 py-2 text-left">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={`${r.kind}-${r.id}`} className={`border-b border-[#F0ECE9] hover:bg-[#FAF8F5] ${r.status === "CANCELLED" ? "opacity-50" : ""}`}>
+                    <td className="px-3 py-1.5"><span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${r.kind === "PI" ? "bg-[#EEF2FB] text-[#2C4170]" : "bg-[#F6F1E7] text-[#6B5C32]"}`}>{r.kind}</span>{r.opening && <span className="ml-1 text-[10px] text-[#9CA3AF]">opening</span>}</td>
+                    <td className="px-3 py-1.5 tabular-nums text-xs whitespace-nowrap">
+                      {r.kind === "PI" ? <Link to="/procurement/pi" className="underline decoration-dotted text-[#6B5C32]" title="Open on Procurement › Purchase Invoices">{r.no}</Link> : <Link to="/accounting?tab=ocreditorbills" className="underline decoration-dotted text-[#6B5C32]">{r.no}</Link>}
+                    </td>
+                    <td className="px-3 py-1.5">{r.supplier}</td>
+                    <td className="px-3 py-1.5 text-xs text-[#6B7280]">{r.supplierRef}</td>
+                    <td className="px-3 py-1.5 text-xs text-[#6B7280] whitespace-nowrap">{r.date}</td>
+                    <td className="px-3 py-1.5 text-xs text-[#6B7280] whitespace-nowrap">{r.dueDate ?? "—"}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(r.totalSen)}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums text-[#6B7280]">{r.paidSen ? formatCurrency(r.paidSen) : "—"}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums font-medium">{r.outstandingSen ? formatCurrency(r.outstandingSen) : "—"}</td>
+                    <td className="px-3 py-1.5"><span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${chip(r)}`}>{r.status}</span></td>
+                  </tr>
+                ))}
+                {rows.length === 0 && <tr><td colSpan={10} className="px-3 py-8 text-center text-sm text-[#9CA3AF]">Nothing matches</td></tr>}
+              </tbody>
+            </table>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
 }
 
 function OtherPartyBillsTab({ accounts, side }: { accounts: ChartOfAccount[]; side: "DEBTOR" | "CREDITOR" }) {
@@ -7874,12 +8475,19 @@ function GeneralLedgerTab({ accounts }: { accounts: ChartOfAccount[] }) {
 // an accrual account (410-x / 405-0000) instead and clears it on Settle.
 // Optional SOFA/BEDFRAME tag overrides the split-P&L allocation later.
 
+type PvApprovalState = "DRAFT" | "PREPARED" | "CHECKED" | "APPROVED";
 type PvRow = {
   id: string; pvNo: string; date: string; payee: string | null;
   description: string | null; payFrom: string | null; accrued: number;
   accrualAccount: string | null; settledAt: string | null;
   productLine: string | null; totalSen: number; status: string;
   lifecycleState?: string;
+  // Four-tier approval (2026-09-22). Legacy rows read APPROVED (backfilled).
+  approvalState?: PvApprovalState | null; approval_state?: PvApprovalState | null;
+  rejectReason?: string | null; reject_reason?: string | null;
+  preparedAt?: string | null; prepared_at?: string | null;
+  checkedAt?: string | null; checked_at?: string | null;
+  approvedAt?: string | null; approved_at?: string | null;
   lines: { accountCode: string; description: string | null; amountSen: number }[];
 };
 
@@ -7905,10 +8513,12 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
   ]);
 
   const [q, setQ] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"ALL" | "PAID" | "UNPAID" | "VOID">("ALL");
+  const [statusFilter, setStatusFilter] = useState<"ALL" | "PENDING" | "PAID" | "UNPAID" | "VOID">("ALL");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [bankFilter, setBankFilter] = useState("");
+  // Ladder actions in flight (single or batch) — buttons disable meanwhile.
+  const [ladderBusy, setLadderBusy] = useState(false);
 
   const bankCash = accounts.filter(
     (a) => a.specialAccountType === "SBK" || a.specialAccountType === "SCH",
@@ -7962,10 +8572,14 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
   const droppedLines = lines.filter((l) => !pvLineWillPost(l) && toSen(l.amount) > 0).length;
   const pvMoneyError = firstMoneyFieldError(lines.map((l, i) => ({ label: `Line ${i + 1} amount`, value: l.amount })));
 
-  const statusOf = (r: PvRow) => r.status === "VOID" ? "VOID" : (r.accrued === 1 && !r.settledAt ? "UNPAID" : "PAID");
+  // Ladder position (Houzs four tiers). Legacy rows carry no state → APPROVED.
+  const apState = (r: PvRow): PvApprovalState => (r.approvalState ?? r.approval_state) ?? "APPROVED";
+  const isPosted = (r: PvRow) => r.status !== "VOID" && apState(r) === "APPROVED";
+  const statusOf = (r: PvRow) =>
+    r.status === "VOID" ? "VOID" : !isPosted(r) ? apState(r) : (r.accrued === 1 && !r.settledAt ? "UNPAID" : "PAID");
   const visibleRows = (rows ?? []).filter((r) => {
     if (q.trim()) { const kw = q.toLowerCase(); if (![r.pvNo, r.payee ?? "", r.description ?? ""].some((s) => s.toLowerCase().includes(kw))) return false; }
-    if (statusFilter !== "ALL" && statusOf(r) !== statusFilter) return false;
+    if (statusFilter === "PENDING" ? isPosted(r) || r.status === "VOID" : statusFilter !== "ALL" && statusOf(r) !== statusFilter) return false;
     if (dateFrom && r.date < dateFrom) return false;
     if (dateTo && r.date > dateTo) return false;
     if (bankFilter && (r.payFrom ?? "") !== bankFilter) return false;
@@ -7975,8 +8589,20 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
   const pvSel = useRowSelection(visibleRows, (r) => r.pvNo ?? r.id);
 
   const [editingId, setEditingId] = useState<string | null>(null);
+  // Editing a not-yet-posted voucher goes to PUT (plain replace); editing a
+  // posted one goes to /restate (reverse + re-post under the same number).
+  const [editingPosted, setEditingPosted] = useState(true);
 
-  const handleSave = async () => {
+  const resetForm = () => {
+    setShowForm(false);
+    setEditingId(null);
+    setForm({ date: new Date().toISOString().slice(0, 10), payee: "", description: "", accrued: false, payFrom: "", accrualAccount: "", productLine: "" });
+    setLines([{ accountCode: "", description: "", amount: "" }]);
+  };
+
+  // mode: "draft" saves onto the four-tier ladder (no number, no GL yet);
+  // "post" is the legacy one-click road — number + GL immediately.
+  const handleSave = async (mode: "draft" | "post") => {
     if (pvMoneyError) { toast.error(pvMoneyError); return; }
     const body = {
       date: form.date,
@@ -7986,6 +8612,7 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
       payFrom: form.accrued ? undefined : (form.payFrom || defaultBankCode(bankCash)),
       accrualAccount: form.accrued ? form.accrualAccount : undefined,
       productLine: form.productLine || undefined,
+      saveAs: mode === "draft" && !editingId ? "draft" : undefined,
       lines: postableLines
         .map((l) => ({ accountCode: l.accountCode, description: l.description, amountSen: toSen(l.amount) })),
     };
@@ -7995,17 +8622,18 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
     }
     setSaving(true);
     try {
-      const res = await fetch(
-        editingId ? `/api/accounting/payment-vouchers/${editingId}/restate` : "/api/accounting/payment-vouchers",
-        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
-      );
+      const url = editingId
+        ? (editingPosted ? `/api/accounting/payment-vouchers/${editingId}/restate` : `/api/accounting/payment-vouchers/${editingId}`)
+        : "/api/accounting/payment-vouchers";
+      const res = await fetch(url, {
+        method: editingId && !editingPosted ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
       const j = asMutationResponse(await res.json());
       if (j?.success) {
-        toast.success(editingId ? "Payment updated" : "Payment posted");
-        setShowForm(false);
-        setEditingId(null);
-        setForm({ date: new Date().toISOString().slice(0, 10), payee: "", description: "", accrued: false, payFrom: "", accrualAccount: "", productLine: "" });
-        setLines([{ accountCode: "", description: "", amount: "" }]);
+        toast.success(editingId ? "Voucher updated" : mode === "draft" ? "Draft saved — Prepare it when ready" : "Payment posted");
+        resetForm();
         load();
       } else toast.error(j?.error || (editingId ? "Update failed" : "Save failed"));
     } finally {
@@ -8013,6 +8641,82 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
     }
   };
 
+  // One rung of the ladder for one voucher. Reject asks for its reason.
+  const handleLadder = async (r: PvRow, action: "prepare" | "withdraw" | "reject" | "check" | "approve") => {
+    let reason = "";
+    if (action === "reject") {
+      const v = window.prompt(`Reject ${r.pvNo} back to draft — reason (required):`, "");
+      if (v === null) return;
+      reason = v.trim();
+      if (!reason) { toast.error("A reject needs a reason"); return; }
+    }
+    if (action === "approve" && !(await confirm({ title: "Approve & post?", message: `${r.pvNo} · ${formatCurrency(r.totalSen)} will be posted to the ledger${r.accrued === 1 ? " (accrued)" : ` from ${r.payFrom ?? ""}`}.` }))) return;
+    setLadderBusy(true);
+    try {
+      const res = await fetch(`/api/accounting/payment-vouchers/${r.id}/approval`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, reason }),
+      });
+      const j = (await res.json()) as { success?: boolean; error?: string; data?: { pvNo: string; state: string } };
+      if (j?.success) {
+        toast.success(action === "check" ? `Checked — formal No. ${j.data?.pvNo}` : action === "approve" ? `${j.data?.pvNo} approved & posted` : `${r.pvNo} → ${j.data?.state}`);
+        load();
+      } else toast.error(j?.error || "Action failed");
+    } finally { setLadderBusy(false); }
+  };
+
+  // Batch rung over the ticked vouchers (date order on the server).
+  const handleLadderBatch = async (action: "prepare" | "check" | "approve") => {
+    const ids = pvSel.selectedRows.map((r) => r.id);
+    if (!ids.length) return;
+    if (action === "approve" && !(await confirm({ title: "Approve & post all?", message: `${ids.length} voucher${ids.length === 1 ? "" : "s"} will be posted to the ledger.` }))) return;
+    setLadderBusy(true);
+    try {
+      const res = await fetch("/api/accounting/payment-vouchers/approval-batch", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, ids }),
+      });
+      const j = (await res.json()) as { success?: boolean; error?: string; data?: { done: number; results: { id: string; ok: boolean; error?: string }[] } };
+      if (j?.success && j.data) {
+        const failed = j.data.results.filter((x) => !x.ok);
+        if (failed.length === 0) toast.success(`${j.data.done} voucher${j.data.done === 1 ? "" : "s"} ${action === "approve" ? "approved & posted" : action === "check" ? "checked" : "prepared"}`);
+        else toast.error(`${j.data.done} done · ${failed.length} skipped — ${failed[0].error ?? ""}`);
+        pvSel.clear();
+        load();
+      } else toast.error(j?.error || "Batch failed");
+    } finally { setLadderBusy(false); }
+  };
+
+  // Print footer (payment details / terms) — kv finance_print_footer.pv,
+  // editable from the small card below the header (Houzs adoption Phase 5).
+  const [printFooter, setPrintFooter] = useState("");
+  const [footerOpen, setFooterOpen] = useState(false);
+  const [footerDraft, setFooterDraft] = useState("");
+  useEffect(() => {
+    let dead = false;
+    fetch("/api/kv-config/finance_print_footer").then((r) => r.json() as Promise<{ data?: { pv?: string } | null }>)
+      .then((j) => { if (!dead) setPrintFooter(String(j?.data?.pv ?? "")); }).catch(() => {});
+    return () => { dead = true; };
+  }, []);
+  const saveFooter = async () => {
+    const res = await fetch("/api/kv-config/finance_print_footer", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pv: footerDraft }) });
+    const j = asMutationResponse(await res.json());
+    if (j?.success) { setPrintFooter(footerDraft); setFooterOpen(false); toast.success("Print footer saved"); }
+    else toast.error(j?.error || "Save failed");
+  };
+  // Print with the settled-bills detail when the voucher is a supplier payment
+  // (its lines hit the AP control) — fetched on demand so the list stays light.
+  const printPvWithDetail = async (r: PvRow) => {
+    let detail: { supplierName: string; piNo: string | null; opening: boolean; method: string; bookedSen: number }[] | undefined;
+    if (r.lines.some((l) => l.accountCode.startsWith("400") || l.accountCode.startsWith("405"))) {
+      try {
+        const res = await fetch(`/api/accounting/bank-reco/payment-detail?paymentNo=${encodeURIComponent(r.pvNo)}`);
+        const j = await res.json() as { success?: boolean; data?: { rows: typeof detail } };
+        if (j?.success && j.data?.rows?.length) detail = j.data.rows;
+      } catch { /* print without detail */ }
+    }
+    printVoucher({ ...buildPvVoucher(r, accounts, detail), footerText: printFooter });
+  };
   const handleSettle = async (row: PvRow) => {
     const payFrom = window.prompt(
       `Settle ${row.pvNo} (${formatCurrency(row.totalSen)}) — pay from which account?\n\n${bankCash.map((a) => `${a.code}  ${a.name}`).join("\n")}\n\nEnter account code:`,
@@ -8053,6 +8757,7 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
   // under the same PV number; the original is untouched until then.
   const startEdit = (r: PvRow) => {
     setEditingId(r.id);
+    setEditingPosted(isPosted(r));
     setForm({ date: r.date, payee: r.payee ?? "", description: r.description ?? "", accrued: r.accrued === 1, payFrom: r.payFrom ?? "", accrualAccount: r.accrualAccount ?? "", productLine: r.productLine ?? "" });
     setLines(r.lines.length ? r.lines.map((l) => ({ accountCode: l.accountCode, description: l.description ?? "", amount: (l.amountSen / 100).toFixed(2) })) : [{ accountCode: "", description: "", amount: "" }]);
     setShowForm(true);
@@ -8099,24 +8804,40 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center">
-        <h2 className="text-lg font-semibold text-[#1F1D1B]">Payment / Expense</h2>
+        <div>
+          <h2 className="text-lg font-semibold text-[#1F1D1B]">Payment Vouchers</h2>
+          <p className="text-[11px] text-[#9CA3AF]">Draft → Prepared → Checked → Approved (posted). Save as draft to walk the ladder, or Post now for the one-click road.</p>
+        </div>
         <div className="flex items-center gap-2">
+          <ScanBillsBatch rows={rows ?? []} bankCash={bankCash} onDone={load} />
           <ScanPrefillButton label="Scan Receipt" onResult={applyScan} />
           <Button variant="primary" size="sm" onClick={() => {
-            if (showForm) { setShowForm(false); setEditingId(null); }
-            else {
-              setEditingId(null);
-              setForm({ date: new Date().toISOString().slice(0, 10), payee: "", description: "", accrued: false, payFrom: "", accrualAccount: "", productLine: "" });
-              setLines([{ accountCode: "", description: "", amount: "" }]);
-              setShowForm(true);
-            }
+            if (showForm) resetForm();
+            else { resetForm(); setShowForm(true); }
           }}>
-            <Plus className="h-4 w-4" /> New Payment
+            <Plus className="h-4 w-4" /> New Voucher
           </Button>
         </div>
       </div>
       {migrationMissing && (
         <Card><CardContent className="p-4 text-sm text-[#9A3A2D]">Migration 0159 not applied yet — run the paste-version SQL first.</CardContent></Card>
+      )}
+      <div className="text-[11px] text-[#9CA3AF] flex items-center gap-2">
+        <span>Print footer{printFooter ? `: ${printFooter.split(/\r?\n/)[0].slice(0, 60)}${printFooter.length > 60 || /\n/.test(printFooter) ? "…" : ""}` : ": (none — nothing extra printed)"}</span>
+        <button onClick={() => { setFooterDraft(printFooter); setFooterOpen(true); }} className="underline decoration-dotted text-[#6B5C32] hover:text-[#1F1D1B] cursor-pointer">edit</button>
+      </div>
+      {footerOpen && (
+        <Card>
+          <CardContent className="p-4 space-y-2">
+            <div className="text-sm font-semibold text-[#1F1D1B]">Print footer — payment details / terms on every voucher</div>
+            <p className="text-[11px] text-[#6B7280]">Printed above the signature lines. Leave empty to print nothing. Line breaks are kept.</p>
+            <textarea value={footerDraft} onChange={(e) => setFooterDraft(e.target.value)} rows={4} className="w-full rounded-md border border-[#E2DDD8] bg-white px-2 py-1.5 text-sm" placeholder={"e.g. Payment by bank transfer — Hong Leong Bank 123-456789-0 / All cheques payable to HOOKKA MANUFACTURING SDN BHD"} />
+            <div className="flex gap-2">
+              <Button variant="primary" size="sm" onClick={() => void saveFooter()}>Save</Button>
+              <Button variant="outline" size="sm" onClick={() => setFooterOpen(false)}>Cancel</Button>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       {showForm && (
@@ -8206,20 +8927,38 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
               </div>
             </div>
 
-            <div className="flex gap-2 pt-3 border-t border-[#F0ECE9]">
-              <Button variant="primary" size="sm" disabled={saving || totalSen <= 0 || !!pvMoneyError || (form.accrued ? !form.accrualAccount : !(form.payFrom || defaultBankCode(bankCash)))} onClick={handleSave}>
-                {saving ? (editingId ? "Updating…" : "Posting…") : editingId ? "Update payment" : form.accrued ? "Post (accrued)" : "Post payment"}
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => { setShowForm(false); setEditingId(null); }}>Cancel</Button>
-            </div>
+            {(() => {
+              const cannot = saving || totalSen <= 0 || !!pvMoneyError || (form.accrued ? !form.accrualAccount : !(form.payFrom || defaultBankCode(bankCash)));
+              return (
+                <div className="flex flex-wrap gap-2 pt-3 border-t border-[#F0ECE9] items-center">
+                  {editingId ? (
+                    <Button variant="primary" size="sm" disabled={cannot} onClick={() => handleSave("post")}>
+                      {saving ? "Updating…" : editingPosted ? "Update posted voucher" : "Save changes"}
+                    </Button>
+                  ) : (
+                    <>
+                      <Button variant="primary" size="sm" disabled={cannot} onClick={() => handleSave("draft")} title="No number, no ledger entry yet — goes onto the approval ladder">
+                        {saving ? "Saving…" : "Save as draft"}
+                      </Button>
+                      <Button variant="outline" size="sm" disabled={cannot} onClick={() => handleSave("post")} title="One click: number issued and posted to the ledger now">
+                        {form.accrued ? "Post now (accrued)" : "Post now"}
+                      </Button>
+                    </>
+                  )}
+                  <Button variant="outline" size="sm" onClick={resetForm}>Cancel</Button>
+                </div>
+              );
+            })()}
           </CardContent>
         </Card>
       )}
 
       <div className="flex flex-wrap items-center gap-2 mb-3">
         <input type="text" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search PV no / payee / description" className="rounded-md border border-[#E2DDD8] px-3 py-1.5 text-sm w-64" />
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as "ALL" | "PAID" | "UNPAID" | "VOID")} className="rounded-md border border-[#E2DDD8] px-2 py-1.5 text-sm">
-          <option value="ALL">All status</option><option value="PAID">Paid</option><option value="UNPAID">Unpaid (accrued)</option><option value="VOID">Void</option>
+        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)} className="rounded-md border border-[#E2DDD8] px-2 py-1.5 text-sm">
+          <option value="ALL">All status</option>
+          <option value="PENDING">Pending approval (Draft / Prepared / Checked)</option>
+          <option value="PAID">Paid</option><option value="UNPAID">Unpaid (accrued)</option><option value="VOID">Void</option>
         </select>
         <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="rounded-md border border-[#E2DDD8] px-2 py-1.5 text-sm" />
         <span className="text-xs text-[#9CA3AF]">→</span>
@@ -8230,11 +8969,28 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
         </select>
       </div>
 
+      {pvSel.count > 0 && (() => {
+        // Ladder batch: offer each rung only when at least one ticked voucher
+        // can take it (the server still re-checks every one).
+        const sel = pvSel.selectedRows;
+        const n = (s: PvApprovalState) => sel.filter((r) => r.status !== "VOID" && apState(r) === s).length;
+        const drafts = n("DRAFT"), prepared = n("PREPARED"), checked = n("CHECKED");
+        if (!drafts && !prepared && !checked) return null;
+        return (
+          <div className="flex flex-wrap items-center gap-2 rounded-md bg-[#FBF3E4] border border-[#E0C989] px-3 py-2 text-xs">
+            <span className="font-semibold text-[#7A5B12]">Approval ladder for the {pvSel.count} ticked:</span>
+            {drafts > 0 && <Button variant="outline" size="sm" disabled={ladderBusy} onClick={() => handleLadderBatch("prepare")}>Prepare {drafts}</Button>}
+            {prepared > 0 && <Button variant="outline" size="sm" disabled={ladderBusy} onClick={() => handleLadderBatch("check")}>Check {prepared}</Button>}
+            {checked > 0 && <Button variant="primary" size="sm" disabled={ladderBusy} onClick={() => handleLadderBatch("approve")}>Approve &amp; post {checked}</Button>}
+          </div>
+        );
+      })()}
+
       <BatchActionsBar
         count={pvSel.count}
         onClear={pvSel.clear}
-        onPrint={() => printVouchers(pvSel.selectedRows.map((r) => buildPvVoucher(r, accounts)))}
-        exportName="expense-vouchers"
+        onPrint={() => printVouchers(pvSel.selectedRows.map((r) => ({ ...buildPvVoucher(r, accounts), footerText: printFooter })))}
+        exportName="payment-vouchers"
         exportAoa={() => [
           ["PV No", "Date", "Pay To", "Paid From", "Status", "Remarks", "Product Line", "Voucher Total (RM)", "Account Code", "Account Name", "Line Description", "Amount (RM)"],
           ...pvSel.selectedRows.flatMap((r) => {
@@ -8299,14 +9055,45 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
                     <td className="px-3 py-1.5 text-xs text-[#6B7280]">{r.productLine ?? "shared"}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(r.totalSen)}</td>
                     <td className="px-3 py-1.5 text-xs">
-                      {r.status === "VOID" ? "VOID" : r.accrued === 1 && !r.settledAt ? "UNPAID (accrued)" : "PAID"}
+                      {(() => {
+                        if (r.status === "VOID") return <span className="text-[#9CA3AF]">VOID</span>;
+                        const st = apState(r);
+                        const chip = (label: string, cls: string, title?: string) => <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${cls}`} title={title}>{label}</span>;
+                        if (st === "DRAFT") return chip("Draft", "bg-[#F0ECE9] text-[#6B7280]", (r.rejectReason ?? r.reject_reason) ? `Rejected: ${r.rejectReason ?? r.reject_reason}` : undefined);
+                        if (st === "PREPARED") return chip("Prepared", "bg-[#EEF2FB] text-[#2C4170]");
+                        if (st === "CHECKED") return chip("Checked · awaiting approval", "bg-[#FBF3E4] text-[#7A5B12]", `Formal No. ${r.pvNo} — pending in Cash Position`);
+                        return r.accrued === 1 && !r.settledAt ? chip("Approved · accrued, unpaid", "bg-[#F7E5E1] text-[#9A3A2D]") : chip("Approved · paid", "bg-[#EAF3DE] text-[#27500A]");
+                      })()}
+                      {(r.rejectReason ?? r.reject_reason) && apState(r) === "DRAFT" && (
+                        <div className="text-[10px] text-[#9A3A2D] mt-0.5 max-w-[16rem] truncate" title={r.rejectReason ?? r.reject_reason ?? ""}>↩ {r.rejectReason ?? r.reject_reason}</div>
+                      )}
                     </td>
                     <td className="px-3 py-1.5 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                      <button onClick={() => printVoucher(buildPvVoucher(r, accounts))} title="Print payment voucher" className="inline-flex items-center gap-1 text-[#6B5C32] hover:text-[#1F1D1B] text-xs underline decoration-dotted cursor-pointer mr-3"><Printer className="h-3 w-3" />print</button>
-                      {r.status === "POSTED" && (
+                      {r.status !== "VOID" && apState(r) === "DRAFT" && (
+                        <>
+                          <button disabled={ladderBusy} onClick={() => startEdit(r)} className="text-[#6B5C32] hover:text-[#1F1D1B] text-xs underline decoration-dotted cursor-pointer mr-3">edit</button>
+                          <button disabled={ladderBusy} onClick={() => void handleLadder(r, "prepare")} className="text-[#2C4170] hover:text-[#1F1D1B] text-xs font-semibold cursor-pointer mr-3">Prepare →</button>
+                        </>
+                      )}
+                      {r.status !== "VOID" && apState(r) === "PREPARED" && (
+                        <>
+                          <button disabled={ladderBusy} onClick={() => startEdit(r)} className="text-[#6B5C32] hover:text-[#1F1D1B] text-xs underline decoration-dotted cursor-pointer mr-3">edit</button>
+                          <button disabled={ladderBusy} onClick={() => void handleLadder(r, "withdraw")} className="text-[#9CA3AF] hover:text-[#1F1D1B] text-xs underline decoration-dotted cursor-pointer mr-3">withdraw</button>
+                          <button disabled={ladderBusy} onClick={() => void handleLadder(r, "reject")} className="text-[#9A3A2D] hover:text-[#791F1F] text-xs underline decoration-dotted cursor-pointer mr-3">reject</button>
+                          <button disabled={ladderBusy} onClick={() => void handleLadder(r, "check")} className="text-[#7A5B12] hover:text-[#1F1D1B] text-xs font-semibold cursor-pointer mr-3">Check →</button>
+                        </>
+                      )}
+                      {r.status !== "VOID" && apState(r) === "CHECKED" && (
+                        <>
+                          <button disabled={ladderBusy} onClick={() => void handleLadder(r, "reject")} className="text-[#9A3A2D] hover:text-[#791F1F] text-xs underline decoration-dotted cursor-pointer mr-3">reject</button>
+                          <button disabled={ladderBusy} onClick={() => void handleLadder(r, "approve")} className="rounded bg-[#6B5C32] text-white px-2 py-0.5 text-xs font-semibold cursor-pointer mr-3">Approve &amp; post</button>
+                        </>
+                      )}
+                      <button onClick={() => void printPvWithDetail(r)} title="Print payment voucher" className="inline-flex items-center gap-1 text-[#6B5C32] hover:text-[#1F1D1B] text-xs underline decoration-dotted cursor-pointer mr-3"><Printer className="h-3 w-3" />print</button>
+                      {isPosted(r) && (
                         <button onClick={() => startEdit(r)} className="text-[#6B5C32] hover:text-[#1F1D1B] text-xs underline decoration-dotted cursor-pointer mr-3">edit</button>
                       )}
-                      {r.status === "POSTED" && r.accrued === 1 && !r.settledAt && (
+                      {isPosted(r) && r.accrued === 1 && !r.settledAt && (
                         <button onClick={() => handleSettle(r)} className="text-[#6B5C32] hover:text-[#1F1D1B] text-xs underline decoration-dotted cursor-pointer mr-3">settle</button>
                       )}
                       <LifecycleActions
@@ -9749,6 +10536,9 @@ type CashPosData = {
   planned: { id: string; partyName: string; ref: string; expectedDate: string; amountSen: number }[];
   tickWarnings: { account: string; day: string; sourceId: string; description: string; amountSen: number }[];
   openingMonth?: string | null;
+  // Vouchers on the approval ladder, not posted yet (2026-09-22).
+  awaitingApproval?: { id: string; pvNo: string; date: string; payee: string; description: string; payFrom: string; amountSen: number; state: "DRAFT" | "PREPARED" | "CHECKED" }[];
+  awaitingCheckedSen?: number;
 };
 
 // Month-grouped breakdown the owner sketched: per month → one row per party
@@ -10264,6 +11054,45 @@ function DailyCashTab() {
               </CardContent>
             </Card>
           )}
+          {(cur.awaitingApproval?.length ?? 0) > 0 && (() => {
+            // Vouchers keyed but not posted yet (2026-09-22): Checked = firm
+            // commitment awaiting the owner's Approve; Draft/Prepared softer.
+            const list = cur.awaitingApproval ?? [];
+            const checkedSen = cur.awaitingCheckedSen ?? 0;
+            const softSen = list.filter((v) => v.state !== "CHECKED").reduce((s, v) => s + v.amountSen, 0);
+            const stateChip = (s: string) =>
+              s === "CHECKED" ? "bg-[#FBF3E4] text-[#7A5B12]" : s === "PREPARED" ? "bg-[#EEF2FB] text-[#2C4170]" : "bg-[#F0ECE9] text-[#6B7280]";
+            return (
+              <Card>
+                <CardContent className="p-4">
+                  <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2">
+                    <div>
+                      <span className="text-sm font-semibold text-[#1F1D1B]">AWAITING APPROVAL — vouchers not posted yet</span>
+                      <span className="ml-2 text-[11px] text-[#9CA3AF]">Approve them on the Payment Vouchers page; posted ones move into pending above.</span>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-lg font-bold tabular-nums text-[#7A5B12]">{formatCurrency(checkedSen)} <span className="text-[11px] font-normal text-[#9CA3AF]">checked, ready to approve</span></div>
+                      {softSen > 0 && <div className="text-[11px] text-[#9CA3AF] tabular-nums">+ {formatCurrency(softSen)} still in draft / prepared</div>}
+                    </div>
+                  </div>
+                  <table className="w-full text-xs">
+                    <tbody>
+                      {list.map((v) => (
+                        <tr key={v.id} className="border-t border-[#F0ECE9]">
+                          <td className="py-1 pr-3 text-[#6B7280] whitespace-nowrap">{v.date}</td>
+                          <td className="py-1 pr-3 tabular-nums whitespace-nowrap">{v.pvNo}</td>
+                          <td className="py-1 pr-3 w-full max-w-0"><div className="truncate">{[v.payee, v.description].filter(Boolean).join(" · ")}</div></td>
+                          <td className="py-1 pr-3 text-[#6B7280] whitespace-nowrap">{v.payFrom}</td>
+                          <td className="py-1 pr-3"><span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${stateChip(v.state)}`}>{v.state === "CHECKED" ? "Checked" : v.state === "PREPARED" ? "Prepared" : "Draft"}</span></td>
+                          <td className="py-1 text-right tabular-nums whitespace-nowrap">{formatCurrency(v.amountSen)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </CardContent>
+              </Card>
+            );
+          })()}
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">
             <CashPosPartyPanel
               title="TO REPAY — Suppliers & creditors"
@@ -10371,6 +11200,62 @@ function CashBookTab({ accounts }: { accounts: ChartOfAccount[] }) {
   const [pdfBusy, setPdfBusy] = useState(false);
   // Combo match selection + expandable payment detail (owner 2026-09-07).
   const [comboSel, setComboSel] = useState<Set<string>>(new Set());
+  // Book-from-bank-line inline form (Houzs adoption Phase 3, 2026-09-22).
+  const [bookLine, setBookLine] = useState<{ id: string; amountSen: number; txnDate: string; description: string; accountCode: string; party: string; note: string } | null>(null);
+  const bookAccounts = accounts.filter(
+    (a) => a.isPostable !== false && a.specialAccountType !== "SDC" && a.specialAccountType !== "SBK" && a.specialAccountType !== "SCH",
+  );
+  // Strict month lock switch (default OFF) + statement chain check (2026-09-22).
+  const [strictLock, setStrictLock] = useState(false);
+  const [chain, setChain] = useState<{ months: { month: string }[]; issues: { kind: string; month: string; detail: string }[] } | null>(null);
+  useEffect(() => {
+    let dead = false;
+    fetch("/api/accounting/bank-reco/strict-lock").then((r) => r.json() as Promise<{ data?: { strict: boolean } }>)
+      .then((j) => { if (!dead) setStrictLock(!!j?.data?.strict); }).catch(() => {});
+    return () => { dead = true; };
+  }, []);
+  useEffect(() => {
+    if (!account) return;
+    let dead = false;
+    fetch(`/api/accounting/bank-reco/chain?account=${account}`).then((r) => r.json() as Promise<{ success?: boolean; data?: typeof chain }>)
+      .then((j) => { if (!dead && j?.success && j.data) setChain(j.data); }).catch(() => {});
+    return () => { dead = true; };
+  }, [account, data]);
+  const toggleStrictLock = async (on: boolean) => {
+    if (on && !window.confirm("Turn strict month lock ON?\n\nA month can then only be finalised when it tallies AND every bank line is booked, and re-opening needs a reason.")) return;
+    const res = await fetch("/api/accounting/bank-reco/strict-lock", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ strict: on }) });
+    const j = asMutationResponse(await res.json());
+    if (j?.success) { setStrictLock(on); toast.success(on ? "Strict lock ON" : "Strict lock off"); }
+    else toast.error(j?.error || "Failed");
+  };
+  // Reverse combo: one bank line → several book legs (2026-09-22).
+  const [splitFor, setSplitFor] = useState<{ id: string; amountSen: number; legIds: Set<string> } | null>(null);
+  const handleSplitMatch = async () => {
+    if (!splitFor || splitFor.legIds.size < 2) return;
+    setBusy(true);
+    try {
+      const res = await fetch("/api/accounting/bank-reco/match-split", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ statementLineId: splitFor.id, legIds: [...splitFor.legIds] }),
+      });
+      const j = (await res.json()) as { success?: boolean; error?: string; data?: { legs: number } };
+      if (j?.success) { toast.success(`Bank line split across ${j.data?.legs} book entries`); setSplitFor(null); load(); }
+      else toast.error(j?.error || "Split match failed");
+    } finally { setBusy(false); }
+  };
+  const handleBookLine = async () => {
+    if (!bookLine?.accountCode) return;
+    setBusy(true);
+    try {
+      const res = await fetch("/api/accounting/bank-reco/book-line", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ statementLineId: bookLine.id, accountCode: bookLine.accountCode, party: bookLine.party, description: bookLine.note }),
+      });
+      const j = (await res.json()) as { success?: boolean; error?: string; data?: { docNo: string; kind: string } };
+      if (j?.success) { toast.success(`${j.data?.kind} ${j.data?.docNo} booked and matched`); setBookLine(null); load(); }
+      else toast.error(j?.error || "Could not book this line");
+    } finally { setBusy(false); }
+  };
   const [payDetail, setPayDetail] = useState<Record<string, "loading" | { supplierName: string; piNo: string | null; opening: boolean; method: string; bookedSen: number }[]>>({});
   const [preview, setPreview] = useState<{
     fileName: string; month: string;
@@ -10651,13 +11536,19 @@ function CashBookTab({ accounts }: { accounts: ChartOfAccount[] }) {
       const gap = formatCurrency(Math.abs((report.computedGlSen ?? 0) - report.glSen));
       if (!window.confirm(`Still out by ${gap}. Finalise anyway? The saved record will carry the difference.`)) return;
     }
-    if (reopen && !window.confirm("Re-open this month? The saved reconciliation record is removed and its lines can be changed again.")) return;
+    let reason = "";
+    if (reopen) {
+      const v = window.prompt("Re-open this month? The saved reconciliation record is removed and its lines can be changed again.\n\nReason (kept on record" + (strictLock ? ", REQUIRED under strict lock" : ", optional") + "):", "");
+      if (v === null) return;
+      reason = v.trim();
+      if (strictLock && !reason) { toast.error("A reason is required to re-open under strict lock"); return; }
+    }
     setBusy(true);
     try {
       const res = await fetch("/api/accounting/bank-reco/finalize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountCode: account, month, reopen }),
+        body: JSON.stringify({ accountCode: account, month, reopen, reason }),
       });
       const j = asMutationResponse(await res.json());
       if (j?.success) {
@@ -10814,6 +11705,22 @@ function CashBookTab({ accounts }: { accounts: ChartOfAccount[] }) {
                   ✓ {m}
                 </button>
               ))}
+            </div>
+          )}
+          {account && (
+            <div className="flex items-center gap-3 flex-wrap w-full pt-1 border-t border-[#F0ECE9] mt-1">
+              <label className="flex items-center gap-1.5 text-[11px] text-[#6B7280] cursor-pointer" title="ON: a month can only be finalised when it tallies AND every bank line is booked; re-open requires a reason. OFF (default): today's behaviour.">
+                <input type="checkbox" checked={strictLock} onChange={(e) => void toggleStrictLock(e.target.checked)} className="h-3.5 w-3.5 accent-[#6B5C32]" />
+                Strict month lock {strictLock ? <span className="rounded bg-[#F7E5E1] text-[#9A3A2D] px-1.5 py-0.5 text-[10px] font-semibold">ON</span> : <span className="text-[#9CA3AF]">(off)</span>}
+              </label>
+              {chain && chain.issues.length > 0 && (
+                <span className="text-[11px] text-[#9A3A2D]" title={chain.issues.map((i) => i.detail).join("\n")}>
+                  ⚠ Statement chain: {chain.issues.length} issue{chain.issues.length === 1 ? "" : "s"} — {chain.issues[0].detail}
+                </span>
+              )}
+              {chain && chain.issues.length === 0 && chain.months.length > 1 && (
+                <span className="text-[11px] text-[#27500A]">✓ Statements chain cleanly {chain.months[0].month} → {chain.months[chain.months.length - 1].month}</span>
+              )}
             </div>
           )}
         </CardContent>
@@ -11072,7 +11979,8 @@ function CashBookTab({ accounts }: { accounts: ChartOfAccount[] }) {
                     const candidates = unmatchedLegs.filter((l) => l.amountSen === s.amountSen);
                     const earlier = s.txnDate.slice(0, 7) < month;
                     return (
-                      <tr key={s.id} className="border-b border-[#F0ECE9]">
+                      <Fragment key={s.id}>
+                      <tr className="border-b border-[#F0ECE9]">
                         <td className="px-3 py-1.5 text-xs text-[#6B7280] whitespace-nowrap">
                           {!isFinalMonth(s.txnDate) && (
                             <input type="checkbox" checked={comboSel.has(s.id)} onChange={() => toggleCombo(s.id)} className="mr-1.5 align-middle" title="Tick several lines that together paid ONE book entry, then combine & match" />
@@ -11098,12 +12006,75 @@ function CashBookTab({ accounts }: { accounts: ChartOfAccount[] }) {
                               ) : (
                                 <span className="text-[11px] text-[#9A3A2D]">not in book</span>
                               )}
+                              {s.txnDate >= (data.openingDate ?? "") && (
+                                <button onClick={() => setBookLine(bookLine?.id === s.id ? null : { id: s.id, amountSen: s.amountSen, txnDate: s.txnDate, description: s.description ?? "", accountCode: "", party: "", note: "" })} className={`ml-2 text-[11px] font-semibold cursor-pointer ${bookLine?.id === s.id ? "text-[#1F1D1B]" : "text-[#27500A] hover:text-[#1F1D1B]"}`} title={s.amountSen < 0 ? "Record this as a payment voucher and match it here" : "Record this as a receipt and match it here"}>
+                                {s.amountSen < 0 ? "book as expense" : "book as receipt"}
+                              </button>
+                              )}
+                              {unmatchedLegs.filter((l) => Math.sign(l.amountSen) === Math.sign(s.amountSen) && Math.abs(l.amountSen) < Math.abs(s.amountSen)).length >= 2 && (
+                                <button onClick={() => setSplitFor(splitFor?.id === s.id ? null : { id: s.id, amountSen: s.amountSen, legIds: new Set() })} className={`ml-2 text-[11px] font-semibold cursor-pointer ${splitFor?.id === s.id ? "text-[#1F1D1B]" : "text-[#2C4170] hover:text-[#1F1D1B]"}`} title="This ONE bank line paid several book entries — pick them">
+                                  split across…
+                                </button>
+                              )}
                               <button onClick={() => handleIgnore(s.id, true)} className="ml-2 text-[#9CA3AF] hover:text-[#1F1D1B] text-[11px] underline decoration-dotted cursor-pointer" title="Leave this line out of the reconciliation">ignore</button>
                               <button onClick={() => handleDeleteLine(s.id)} className="ml-1.5 text-[#9CA3AF] hover:text-[#9A3A2D] text-[11px] underline decoration-dotted cursor-pointer">del</button>
                             </>
                           )}
                         </td>
                       </tr>
+                      {bookLine?.id === s.id && (
+                        <tr className="border-b border-[#F0ECE9] bg-[#EAF3DE]/40">
+                          <td colSpan={5} className="px-3 py-2">
+                            <div className="flex flex-wrap items-end gap-2 text-xs">
+                              <span className="font-semibold text-[#27500A] mr-1">
+                                {s.amountSen < 0 ? "Book as expense" : "Book as receipt"} · {formatCurrency(Math.abs(s.amountSen))} on {s.txnDate}
+                              </span>
+                              <label className="flex flex-col gap-0.5">
+                                <span className="text-[10px] text-[#6B7280]">{s.amountSen < 0 ? "Expense account (DR)" : "Income account (CR)"}</span>
+                                <AccountPicker accounts={bookAccounts} value={bookLine.accountCode} onChange={(code) => setBookLine({ ...bookLine, accountCode: code })} placeholder="Account…" />
+                              </label>
+                              <label className="flex flex-col gap-0.5">
+                                <span className="text-[10px] text-[#6B7280]">{s.amountSen < 0 ? "Payee" : "Received from"}</span>
+                                <input type="text" value={bookLine.party} onChange={(e) => setBookLine({ ...bookLine, party: e.target.value })} className="rounded border border-[#E2DDD8] bg-white px-2 py-1 text-xs w-44" placeholder="Who" />
+                              </label>
+                              <label className="flex flex-col gap-0.5 flex-1 min-w-[12rem]">
+                                <span className="text-[10px] text-[#6B7280]">Description</span>
+                                <input type="text" value={bookLine.note} onChange={(e) => setBookLine({ ...bookLine, note: e.target.value })} className="rounded border border-[#E2DDD8] bg-white px-2 py-1 text-xs w-full" placeholder={s.description ?? ""} />
+                              </label>
+                              <Button variant="primary" size="sm" disabled={!bookLine.accountCode || busy} onClick={() => void handleBookLine()}>Book &amp; match</Button>
+                              <Button variant="outline" size="sm" onClick={() => setBookLine(null)}>Cancel</Button>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                      {splitFor?.id === s.id && (() => {
+                        const cands = unmatchedLegs.filter((l) => Math.sign(l.amountSen) === Math.sign(s.amountSen) && Math.abs(l.amountSen) < Math.abs(s.amountSen));
+                        const picked = cands.filter((l) => splitFor.legIds.has(l.id));
+                        const sum = picked.reduce((t, l) => t + l.amountSen, 0);
+                        const exact = picked.length >= 2 && sum === s.amountSen;
+                        return (
+                          <tr className="border-b border-[#F0ECE9] bg-[#EEF2FB]/50">
+                            <td colSpan={5} className="px-3 py-2 text-xs">
+                              <div className="flex flex-wrap items-center gap-2 mb-1">
+                                <span className="font-semibold text-[#2C4170]">Split {formatCurrency(Math.abs(s.amountSen))} across book entries · picked {formatCurrency(Math.abs(sum))}{exact ? " ✓ exact" : picked.length ? ` (${formatCurrency(Math.abs(s.amountSen - sum))} to go)` : ""}</span>
+                                <Button variant="primary" size="sm" disabled={!exact || busy} onClick={() => void handleSplitMatch()}>Match all {picked.length}</Button>
+                                <Button variant="outline" size="sm" onClick={() => setSplitFor(null)}>Cancel</Button>
+                              </div>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6">
+                                {cands.map((l) => (
+                                  <label key={l.id} className="flex items-center gap-2 py-0.5 cursor-pointer">
+                                    <input type="checkbox" checked={splitFor.legIds.has(l.id)} onChange={() => setSplitFor((cur) => { if (!cur) return cur; const n = new Set(cur.legIds); if (n.has(l.id)) n.delete(l.id); else n.add(l.id); return { ...cur, legIds: n }; })} />
+                                    <span className="text-[#6B7280] whitespace-nowrap">{l.day}</span>
+                                    <span className="truncate flex-1" title={l.description}>{l.description}</span>
+                                    <span className="tabular-nums whitespace-nowrap">{formatCurrency(Math.abs(l.amountSen))}</span>
+                                  </label>
+                                ))}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })()}
+                      </Fragment>
                     );
                   })}
                   {unmatchedStmt.length === 0 && (

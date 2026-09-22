@@ -15,10 +15,18 @@ test('withSnakeKeys restores SQL names, keeps camelCase, honours the rename map'
   assert.equal(r.id, 'x');
 });
 
-test('every prototype query goes through section(), and section() snake-keys its rows', () => {
+test('every prototype query goes through section(), and no row is read by its snake_case SQL name', () => {
   const src = readFileSync('src/api/routes/dashboard-prototype.ts', 'utf8');
-  const prepares = (src.match(/c\.var\.DB\.prepare/g) ?? []).length;
-  const sections = (src.match(/await section\(/g) ?? []).length;
-  assert.equal(prepares, sections, 'a query outside section() would read undefined fields again');
-  assert.match(src, /\.map\(\(r\) => withSnakeKeys\(r as object\) as T\)/);
+  // A DB.prepare outside section() would skip its error isolation; a section may
+  // instead delegate to a lib builder (buildServiceSlice), so counts need not match.
+  const chunks = src.split('await section(');
+  assert.ok(chunks.length > 1, 'section() helper gone?');
+  assert.doesNotMatch(chunks[0], /c\.var\.DB\.prepare/, 'a query before the first section()');
+  for (const ch of chunks.slice(1)) {
+    assert.ok((ch.match(/c\.var\.DB\.prepare/g) ?? []).length <= 1, 'two queries in one section()');
+  }
+  // db-pg.ts hands rows back camelCased (`createdAt`); a read by SQL name
+  // (`r.created_at`) is undefined and takes the whole feed down with a 500.
+  const snakeReads = src.match(/(?:r|row)\.[a-z]+_[a-z_]+/g) ?? [];
+  assert.deepEqual(snakeReads, [], 'row fields read by snake_case SQL name');
 });
