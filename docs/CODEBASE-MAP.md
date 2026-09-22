@@ -1,5 +1,8 @@
 # Hookka ERP — Codebase Map (the single authoritative map)
 
+> **Restamped 2026-09-22 on branch `fix/delivery-tab-switch-pagination`:** Delivery row + the
+> `delivery/index.tsx` big-file index re-derived (file is 7,505 lines); DO list now paginated PER
+> STAGE TAB via `doBrowseUrl` / `GET /api/delivery-orders?status=`; see the delivery gotcha bullet.
 > **Restamped 2026-09-22 on branch `claude/nice-sanderson-27be32`:** Service > Top issues row re-derived —
 > `ServiceIssuesPanel.tsx` redesigned (meters / closed|open split / per-case close-days dots / cause×day heatmap /
 > products table), new pure helpers in `service-issue-stats.ts`; the `/m` twin carries the analysis-progress list.
@@ -311,7 +314,7 @@ authoritative current detail.** New here? Start with [ONBOARDING-PATH.md](ONBOAR
 
 | Frontend page | API route | Primary tables | Tests |
 |---|---|---|---|
-| `src/pages/delivery/index.tsx` — DO workbench + 3PL mgmt (6879) | `src/api/routes/delivery-orders.ts` — DO end-to-end (3010) | `delivery_orders` / `delivery_order_items` | `tests/delivery-pipeline.test.mjs` |
+| `src/pages/delivery/index.tsx` — DO workbench + 3PL mgmt (7505) | `src/api/routes/delivery-orders.ts` — DO end-to-end (3010) | `delivery_orders` / `delivery_order_items` | `tests/delivery-pipeline.test.mjs` |
 | `src/pages/delivery/detail.tsx` — single DO detail | `src/api/routes/packing-lists.ts` — delivery-side truck runs | `packing_lists` | `tests/do-qr-public.test.mjs` |
 | `src/components/ui/document-detail-drawer.tsx` — the SHARED right slide-over chrome (doc no / type / status badge / "Open full page" / close + a pinned action bar); model in `src/lib/document-drawer.ts` | `GET /api/delivery-orders/:id/print-extras` feeds the spec line | — | `tests/document-drawer.test.mjs` |
 | `src/components/ui/status-tab-strip.tsx` — the SHARED status tab strip (per state: count + money); rules in `src/lib/status-tab-strip.ts` (`tabTotals`/`tabValueSen`; a bucket summing to nothing shows its count, never RM 0.00). Used by SO / PO / GRN / PI / Invoices / CO **and DO** lists — `delivery/index.tsx` is the pattern it came from and was folded in on 2026-08-08, so there are no hand-written copies left. Money renders through `formatCurrency` everywhere (`formatRM`'s plain space was the DO page's second spelling of the same amount). | money either from the list rows already fetched, or from that list's `/stats` aggregate (which must carry `customerScopeSql`) | — | `tests/status-tab-strip.test.mjs` |
@@ -324,23 +327,26 @@ authoritative current detail.** New here? Start with [ONBOARDING-PATH.md](ONBOAR
 | `src/pages/consignment/return.tsx` — recorded-returns LIST only; the return itself is recorded from `note.tsx` → `POST /api/consignment-notes/:id/return` | `src/api/routes/three-pl-drivers.ts` / `three-pl-vehicles.ts` / `three-pl-state-rates.ts` | `consignment_items.status='RETURNED'` + `returnedDate` (the only return record) | `tests/cn-packing-list-record.test.mjs`, `tests/cn-value.test.mjs`, `tests/no-fabricated-consignment-returns.test.mjs` |
 
 **Big-file section index**
-- `src/pages/delivery/index.tsx`
-  - EditableExpectedDD helper — L69-280
-  - TABS list (planning/pending_delivery/pending_dispatch/dispatched/delivered/packing_list) — L467-490
-  - DeliveryPage start + pageTab (orders|3pl|agent) URL state — L801-810
-  - 3PL Providers state + vehicles/drivers sub-table state — L911-1090
-  - 3PL Provider helpers (CRUD, rates, fleet, drivers) — L1445-1830
-  - DO status tally / search / transition logic — L2069-2790
+- `src/pages/delivery/index.tsx` (anchors re-derived 2026-09-22)
+  - EditableExpectedDD helper — L84-300
+  - TABS list `ALL_TABS` / `TAB_DO_STATUSES` / `PO_TABS` — L520-552
+  - `doBrowseUrl(tab, page)` — WHICH DO rows each tab fetches (2026-09-22): stage tabs page their OWN statuses server-side (`?status=A,B`, `DO_PAGE_SIZE` 50); Packing List the newest 200 live DOs; PO tabs none (null URL) — L553-569
+  - DeliveryPage start + pageTab (orders|3pl|agent) URL state + `goTab` (the ONLY tab setter: tab + page reset in ONE `useUrlBatch` write) — L899-925
+  - 3PL Providers state + vehicles/drivers sub-table state — L1032-1150
+  - DO browse fetch (`doBrowseUrl`) / search fetch / `/stats` (incl. `deliveredMtd`) / scroll restore (sessionStorage direct, not React state) — L1150-1245
+  - 3PL Provider helpers (CRUD, rates, fleet, drivers) — L1639-2020
+  - DO status tally / search / transition logic — L2178-2830 (`filteredOrders` L2178)
   - Customer-notice helpers: customerEmailFor / warnIfNoCustomerEmail (Feature B no-email warning) / resendCustomerNotice (Feature A per-DO Resend invoice email) — search "Feature A"/"Feature B"
-  - runBulkDoTransition + truck-run bulk dispatch — L2785-2840
-  - DataGrid column defs — L3437-3910
-  - Top-level Orders/3PL tab bar render — L4170-4189
-  - Status sub-tab bar render — L4260-4320
-  - Orders > Planning tab body — L4327-4349
-  - Orders > Pending Delivery tab body — L4350-4517
-  - Orders > Packing List tab body (pending_dispatch/dispatched/delivered share main grid) — L4518-6210
-  - 3PL section: provider list + header — L6211-6320
-  - 3PL Create/Edit Dialog (Info/Rates/Fleet/Drivers sub-tabs) — L6321-6879
+  - runBulkDoTransition + truck-run bulk dispatch — L3028-3090
+  - DataGrid column defs — search `const columns = useMemo<DataGridColumn<DeliveryOrderRow>`
+  - Top-level Orders/3PL tab bar render — L4696-4720
+  - Status sub-tab bar render (`<StatusTabStrip`) — L4801-4825
+  - Orders > Planning tab body — L4852-4877
+  - Orders > Pending Delivery tab body — L4878-4952
+  - Orders > DO-based tabs grid + per-tab pagination footer (pending_dispatch/dispatched/delivered/cancelled share it) — L4953-5058
+  - Orders > Packing List tab body — L5059-6836
+  - 3PL section: provider list + header — L6837-6945
+  - 3PL Create/Edit Dialog (Info/Rates/Fleet/Drivers sub-tabs) — L6946-7505
 - `src/pages/consignment/note.tsx`
   - ConsignmentNotePage start + pageTab/activeTab URL state — L505-690
   - TABS list (planning/pending_cn/pending_dispatch/dispatched/delivered/acknowledged/packing_list) — L261-267
@@ -360,7 +366,8 @@ authoritative current detail.** New here? Start with [ONBOARDING-PATH.md](ONBOAR
 - Notify emails: Dispatch→DO PDF, Delivered→Invoice PDF, idempotent via folded-lowercase dispatchemailat/deliveredemailat (db-pg toCamel does NOT recover these — dual-keyed). CN dispatch email uses dispatchemailat (mig 0163).
 - Hub integrity: DOs/CNs chain through a hubId / service_orders.hubId composition guard shared by create+edit — don't break it when editing line composition.
 - Dispatch/deliver writes movements into stock_movements and reads fg_units; respect production locks (COMPLETED job_cards / non-PENDING fg_units inviolate).
-- delivery/index.tsx holds BOTH the DO workbench and the entire 3PL provider management UI behind one pageTab toggle (orders vs 3pl; 3PL block ~L6211). Status tabs pending_dispatch/dispatched/delivered have NO own activeTab=== blocks — they share the main DataGrid above the explicit planning/pending/packing_list blocks.
+- delivery/index.tsx holds BOTH the DO workbench and the entire 3PL provider management UI behind one pageTab toggle (orders vs 3pl; 3PL block ~L6837). Status tabs pending_dispatch/dispatched/delivered/cancelled have NO own activeTab=== blocks — they share the main DataGrid above the explicit planning/pending/packing_list blocks.
+- **DO list is paginated PER STAGE TAB (2026-09-22, BUG-2026-09-22-003).** `doBrowseUrl` sends `GET /api/delivery-orders?status=<that tab's statuses>&page&limit=50`; the route's paginated branch binds them as `AND status IN (...)`. Before, every tab paged the newest 200 DOs of EVERY status and filtered client-side — "Delivered" showed only the delivered rows inside that window, "Page 1 / 3" counted all statuses, and PO tabs fetched 200 DO rows they never showed. Whole-table figures (tab counts, tab money, **Delivered (MTD) = `/stats.deliveredMtd`**, counted server-side in Malaysian time via `startOfMonthMYT`) never come from the browse page. Tab changes go through ONE `useUrlBatch` write (`goTab`: tab + page reset) — the old `setPage(1)` effect fired a second navigation per click — and scroll restore writes sessionStorage directly instead of re-rendering the page on every scroll event. Helpers: `src/lib/delivery-list-filters.ts`. Tests: `tests/delivery-list-filters.test.mjs`. **The CN mirror (`consignment/note.tsx`) still pages globally** — its API takes a single `?status=`; parity is a follow-up.
 
 **Start here:** Open `src/pages/delivery/index.tsx` first (the DO workbench), and remember its consignment mirror `src/pages/consignment/note.tsx` usually needs the same change.
 
