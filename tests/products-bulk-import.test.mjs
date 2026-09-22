@@ -96,6 +96,16 @@ test('POST /api/products/bulk-import exists, is transactional, and audits the wh
   );
   assert.match(
     src,
+    /bulk-import[\s\S]{0,300}?requirePermission\(c, "products", "update"\)/,
+    'an upsert overwrites/renames existing rows — create alone must not be enough',
+  );
+  assert.match(
+    readFileSync('src/api/routes/raw-materials.ts', 'utf8'),
+    /bulk-import[\s\S]{0,300}?requirePermission\(c, "raw-materials", "update"\)/,
+    'RM bulk-import renames itemCodes too — it needs update as well',
+  );
+  assert.match(
+    src,
     /buildAuditStatement\(c, \{[\s\S]{0,300}?resource: "products"/,
     'must build the audit row as a statement, not fire-and-forget emitAudit',
   );

@@ -18,7 +18,7 @@
 // see src/pages/m/config/modules.ts). L2 detail routes (/m/<slug>/:id) land on
 // a ComingSoon detail until Phase 3 supplies the real detail screen.
 // ===========================================================================
-import { useEffect, type ComponentType, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, type ComponentType, type ReactNode } from "react";
 import { Route, Routes } from "react-router-dom";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { BottomTabBar, LeftRail } from "./components";
@@ -41,6 +41,19 @@ import { MODULE_CONFIGS } from "./config/modules";
 import { preloadMobileCritical } from "./lib/preload";
 import { bootstrapMobileTheme } from "./lib/theme-mode";
 import "./theme-vars.css";
+
+// The dashboard screen is code-split: it is the only /m screen that needs
+// recharts, and most phone sessions never open it.
+const DashboardScreen = lazy(() =>
+  import("./screens/dashboard/DashboardScreen").then((m) => ({ default: m.DashboardScreen })),
+);
+function DashboardRoute() {
+  return (
+    <Suspense fallback={<div style={{ padding: "64px 0", textAlign: "center", color: M.muted, fontSize: 13 }}>Loading…</div>}>
+      <DashboardScreen />
+    </Suspense>
+  );
+}
 
 // Apply persisted dark/light mode BEFORE first paint to avoid a flash. This
 // runs once at module load time (the import side-effect).
@@ -122,6 +135,11 @@ export default function MobileLayout() {
         <Routes>
           <Route path="/" element={<MobileHome />} />
           <Route path="/more" element={<MobileMore />} />
+
+          {/* Dashboard (lazy: pulls in recharts). Tab in the path, period in
+              the query string — see screens/dashboard/DashboardScreen.tsx. */}
+          <Route path="dashboard" element={<DashboardRoute />} />
+          <Route path="dashboard/:tab" element={<DashboardRoute />} />
 
           {/* Config-driven L1 lists + L2 document detail.
               When `detail` is supplied + we're on fold, the L2 route renders

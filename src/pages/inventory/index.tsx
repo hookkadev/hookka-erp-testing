@@ -11,9 +11,10 @@ import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import {
   Boxes, AlertTriangle, Package, Layers, Plus, X,
-  Search, Archive, Upload, Trash2, Pencil, Check,
+  Search, Archive, Upload, Download, Trash2, Pencil, Check,
 } from "lucide-react";
 import { BatchImportDialog, type ImportColumn } from "@/components/ui/batch-import-dialog";
+import { exportImportRows } from "@/components/ui/batch-import-dialog";
 // NOTE: mock arrays were previously imported here and used as the page data
 // source. They are retained only for TYPE imports; all runtime data is now
 // fetched live from D1 via the API. After a D1 clear the UI now correctly
@@ -1698,6 +1699,18 @@ export default function InventoryPage() {
     return data;
   }, [liveRawMaterials, rmSearch, rmCategoryFilter]);
 
+  // Mirrors of the FG/RM DataGrid's OWN internal search + column filters
+  // (separate from fgSearch/fgCategoryFilter above, which only narrow
+  // filteredFG/filteredRM — the grid applies a SECOND filter pass on top of
+  // that data, invisible to the parent unless reported back via
+  // onFilteredDataChange). Export must read these, not filteredFG/filteredRM,
+  // or it silently ignores whatever filter the grid's own search box or
+  // column filters currently have active. Initialised to filteredFG/filteredRM
+  // so Export shows a correct count immediately, before the grid's own effect
+  // fires on mount.
+  const [visibleFGRows, setVisibleFGRows] = useState<FGItem[]>(filteredFG);
+  const [visibleRMRows, setVisibleRMRows] = useState<RawMaterial[]>(filteredRM);
+
   // ---- KPIs ----
   const fgBedframeCount = fgItems.filter(p => p.category === "BEDFRAME").length;
   const fgSofaCount = fgItems.filter(p => p.category === "SOFA").length;
@@ -2130,6 +2143,31 @@ export default function InventoryPage() {
             <Button variant="outline" size="sm" onClick={() => setShowBatchImportFG(true)}>
               <Upload className="h-4 w-4" /> Batch Import
             </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              title="Export the currently filtered rows"
+              onClick={() =>
+                exportImportRows(
+                  fgImportColumns,
+                  visibleFGRows.map((p) => ({
+                    id: p.id,
+                    code: p.code,
+                    name: p.name,
+                    category: p.category,
+                    baseModel: p.baseModel,
+                    sizeCode: p.sizeCode,
+                    sizeLabel: p.sizeLabel,
+                    basePriceSen: (p.basePriceSen ?? 0) / 100,
+                    costPriceSen: (p.costPriceSen ?? 0) / 100,
+                    fabricUsage: p.fabricUsage,
+                  })),
+                  `fg-${new Date().toISOString().slice(0, 10)}.xlsx`,
+                )
+              }
+            >
+              <Download className="h-4 w-4" /> Export ({visibleFGRows.length})
+            </Button>
             <Button variant="primary" size="sm" onClick={() => setShowCreateFG(true)}>
               <Plus className="h-4 w-4" /> Add FG
             </Button>
@@ -2446,6 +2484,7 @@ export default function InventoryPage() {
                 contextMenuItems={fgContextMenu}
                 onRowClick={(row) => openBreakdown(fgBreakdownTarget(row))}
                 onDoubleClick={(row) => { cancelPendingBreakdown(); handleDoubleClickFG(row); }}
+                onFilteredDataChange={setVisibleFGRows}
               />
             </CardContent>
           </Card>
@@ -2564,6 +2603,28 @@ export default function InventoryPage() {
             </Button>
             <Button variant="outline" size="sm" onClick={() => setShowBatchImportRM(true)}>
               <Upload className="h-4 w-4" /> Batch Import
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              title="Export the currently filtered rows"
+              onClick={() =>
+                exportImportRows(
+                  rmImportColumns,
+                  visibleRMRows.map((r) => ({
+                    id: r.id,
+                    itemCode: r.itemCode,
+                    description: r.description,
+                    baseUOM: r.baseUOM,
+                    itemGroup: r.itemGroup,
+                    balanceQty: r.balanceQty,
+                    isActive: r.isActive,
+                  })),
+                  `rm-${new Date().toISOString().slice(0, 10)}.xlsx`,
+                )
+              }
+            >
+              <Download className="h-4 w-4" /> Export ({visibleRMRows.length})
             </Button>
             <Button variant="outline" size="sm" onClick={() => { setMatCatSel(matCatSel || RM_ITEM_GROUPS[0]); setShowMaterialCats(true); }}>
               <Layers className="h-4 w-4" /> Categories
@@ -2809,6 +2870,7 @@ export default function InventoryPage() {
                 contextMenuItems={rmContextMenu}
                 onRowClick={(row) => openBreakdown(rmBreakdownTarget(row))}
                 onDoubleClick={(row) => { cancelPendingBreakdown(); void handleDoubleClickRM(row); }}
+                onFilteredDataChange={setVisibleRMRows}
               />
             </CardContent>
           </Card>
@@ -3377,7 +3439,6 @@ export default function InventoryPage() {
         title="Batch Import Finished Products"
         description="Upload an Excel or CSV file to create or update multiple products at once. Rows are matched by Product Code."
         templateFilename="fg-import-template.xlsx"
-        exportFilename={`fg-${new Date().toISOString().slice(0, 10)}.xlsx`}
         columns={fgImportColumns}
         keyColumn="code"
         onImport={handleImportFG}
@@ -3400,7 +3461,6 @@ export default function InventoryPage() {
         title="Batch Import Raw Materials"
         description="Upload an Excel or CSV file to create or update multiple raw materials at once. Rows are matched by Item Code."
         templateFilename="rm-import-template.xlsx"
-        exportFilename={`rm-${new Date().toISOString().slice(0, 10)}.xlsx`}
         columns={rmImportColumns}
         keyColumn="itemCode"
         onImport={handleImportRM}

@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Dashboard prototype feed — real figures for the /test/dashboard-prototype
+// Dashboard prototype feed — real figures for the /dashboard-experimental
 // page, which until now rendered a seeded sample generator.
 //
 // Mounted at /api/dashboard/prototype. Read-only: every statement here is a
@@ -35,7 +35,7 @@
 // payload therefore carries explicitly rather than leaving to a hardcoded
 // constant on the page:
 //
-//   • The efficiency target is 100%, not 85% — workers.efficiency_threshold_pct
+//   • The efficiency target is 100%, not 85% — workers.efficiencyThresholdPct
 //     is 100 for 39 of 42 (the other three are 0, i.e. unset).
 //   • A working day is 9 hours, not 8 — working_hours_per_day is 9 for 38 of
 //     42 (one is 7.5, three are 0).
@@ -53,11 +53,14 @@
 import { Hono } from "hono";
 import type { Env } from "../worker";
 import { getOrgId } from "../lib/tenant";
-import { withSnakeKeys } from "../lib/db-pg";
 import { requirePermission, hasPermission } from "../lib/rbac";
+import { buildServiceSlice } from "../lib/dashboard-service-slice";
+import { isCustomerScoped } from "../lib/customer-scope";
 import { collectOnTimeDelivery, EMPTY_ON_TIME } from "../lib/on-time-delivery";
 import { poInPlanning, poReadyForDelivery, type PipelinePO } from "../../lib/delivery-pipeline";
 import { loadPoValueMap, loadDoValueMap } from "../lib/do-value";
+import { buildDailySlice } from "../lib/dashboard-daily-slice";
+import { countsToHeadcount } from "../lib/headcount-rule";
 
 const app = new Hono<Env>();
 
@@ -78,52 +81,58 @@ const SO_PIPELINE_ORDER = [
 
 type SoRow = {
   id: string;
-  company_so: string | null;
+  // The OFFICIAL SO date. The house Command Center buckets its monthly revenue
+  // on this, while created_at is when the row was entered — the two disagree
+  // whenever an order is back-dated, which is why the two surfaces can report
+  // different months for the same order. Carried so the difference can be
+  // measured rather than argued about.
+  companySODate: string | null;
+  companySO: string | null;
   // See the DoRow comment above — same drift, same table family. Read this,
   // not company_so, for anything shown as "the SO number."
-  company_so_id: string | null;
-  customer_name: string | null;
+  companySOId: string | null;
+  customerName: string | null;
   status: string | null;
-  total_sen: number | string | null;
-  created_at: string | null;
-  customer_delivery_date: string | null;
-  hookka_expected_dd: string | null;
-  is_service_order: boolean | number | null;
-  customer_state: string | null;
+  totalSen: number | string | null;
+  createdAt: string | null;
+  customerDeliveryDate: string | null;
+  hookkaExpectedDD: string | null;
+  isServiceOrder: boolean | number | null;
+  customerState: string | null;
 };
 
 type SoItemCatRow = {
-  sales_order_id: string;
-  item_category: string | null;
-  product_code: string | null;
-  product_name: string | null;
+  salesOrderId: string;
+  itemCategory: string | null;
+  productCode: string | null;
+  productName: string | null;
   quantity: number | string | null;
-  line_total_sen: number | string | null;
+  lineTotalSen: number | string | null;
 };
 
 type AttRow = {
-  employee_id: string | null;
-  employee_name: string | null;
-  department_code: string | null;
+  employeeId: string | null;
+  employeeName: string | null;
+  departmentCode: string | null;
   date: string | null;
-  clock_in: string | null;
-  clock_out: string | null;
+  clockIn: string | null;
+  clockOut: string | null;
   status: string | null;
-  working_minutes: number | string | null;
-  production_time_minutes: number | string | null;
-  overtime_minutes: number | string | null;
-  efficiency_pct: number | string | null;
+  workingMinutes: number | string | null;
+  productionTimeMinutes: number | string | null;
+  overtimeMinutes: number | string | null;
+  efficiencyPct: number | string | null;
 };
 
 type WorkerRow = {
   id: string;
-  emp_no: string | null;
+  empNo: string | null;
   name: string | null;
-  department_code: string | null;
+  departmentCode: string | null;
   position: string | null;
   status: string | null;
-  efficiency_threshold_pct: number | string | null;
-  working_hours_per_day: number | string | null;
+  efficiencyThresholdPct: number | string | null;
+  workingHoursPerDay: number | string | null;
 };
 
 // The commonest non-zero value across the workforce. A zero in either column
@@ -144,82 +153,83 @@ function modeOf(values: number[], fallback: number): number {
 
 type DoRow = {
   id: string;
-  do_no: string | null;
+  doNo: string | null;
   status: string | null;
-  created_at: string | null;
-  delivery_date: string | null;
-  dispatched_at: string | null;
-  delivered_at: string | null;
-  driver_name: string | null;
-  vehicle_no: string | null;
-  total_items: number | string | null;
-  company_so: string | null;
+  createdAt: string | null;
+  deliveryDate: string | null;
+  dispatchedAt: string | null;
+  deliveredAt: string | null;
+  driverName: string | null;
+  vehicleNo: string | null;
+  totalItems: number | string | null;
+  companySO: string | null;
   // company_so drifted (owner-visible, MEASURED 2026-08-27): recent rows carry
   // a human label there ("Sales Order 303") while company_so_id keeps the
   // strict "SO-2608-303" reference — the real Sales/Delivery pages already
   // read companySOId exclusively for exactly this reason. Prefer it here too.
-  company_so_id: string | null;
-  customer_name: string | null;
+  companySOId: string | null;
+  customerName: string | null;
 };
 
 type PoRow = {
   id: string;
-  po_no: string | null;
-  supplier_name: string | null;
+  poNo: string | null;
+  supplierName: string | null;
   status: string | null;
-  order_date: string | null;
-  expected_date: string | null;
-  received_date: string | null;
-  total_sen: number | string | null;
-  subtotal_sen: number | string | null;
+  orderDate: string | null;
+  expectedDate: string | null;
+  receivedDate: string | null;
+  totalSen: number | string | null;
+  subtotalSen: number | string | null;
   notes: string | null;
 };
 
 type PoItemRow = {
-  purchase_order_id: string;
-  material_code: string | null;
-  supplier_sku: string | null;
-  material_name: string | null;
+  purchaseOrderId: string;
+  materialCode: string | null;
+  supplierSKU: string | null;
+  materialName: string | null;
   unit: string | null;
   quantity: number | string | null;
-  received_qty: number | string | null;
-  unit_price_sen: number | string | null;
-  total_sen: number | string | null;
-  line_no: number | string | null;
+  receivedQty: number | string | null;
+  unitPriceSen: number | string | null;
+  totalSen: number | string | null;
+  lineNo: number | string | null;
 };
 
 type ProdOrdRow = {
   id: string;
-  po_no: string | null;
-  sales_order_id: string | null;
-  customer_name: string | null;
-  product_code: string | null;
-  product_name: string | null;
-  item_category: string | null;
-  size_label: string | null;
+  poNo: string | null;
+  salesOrderId: string | null;
+  customerName: string | null;
+  productCode: string | null;
+  productName: string | null;
+  itemCategory: string | null;
+  sizeLabel: string | null;
   quantity: number | string | null;
   status: string | null;
-  current_department: string | null;
+  currentDepartment: string | null;
   progress: number | string | null;
-  target_end_date: string | null;
+  targetEndDate: string | null;
+  completedDate: string | null;
   // Free text ("HB Fully Cover, Divan Bottom Fully Cover") or "" — NOT a
-  // boolean column. `specialOrder: !!r.special_order` below only cares
+  // boolean column. `specialOrder: !!r.specialOrder` below only cares
   // whether it's non-empty; the pipeline predicates below need the actual
   // text (isHbOnlySpecial checks its wording), so keep the raw string.
-  special_order: string | null;
-  consignment_order_id: string | null;
+  specialOrder: string | null;
+  consignmentOrderId: string | null;
   repairscope: string | null;
 };
 
 type RmRow = {
   id: string;
-  item_code: string | null;
+  itemCode: string | null;
   description: string | null;
-  item_group: string | null;
-  base_uom: string | null;
-  balance_qty: number | string | null;
-  min_stock: number | string | null;
-  is_active: boolean | number | null;
+  itemGroup: string | null;
+  baseUom: string | null;
+  balanceQty: number | string | null;
+  minStock: number | string | null;
+  isActive: boolean | number | null;
 };
 
 // Overdue tiers for the PO register, in the order the risk bar draws them.
@@ -230,6 +240,15 @@ const PO_TIERS: Array<{ key: string; label: string; test: (d: number) => boolean
   { key: "moderate", label: "8-14 days late", test: (d) => d >= 8 && d <= 14 },
   { key: "critical", label: "15+ days late", test: (d) => d >= 15 },
 ];
+
+// What the house Command Center counts as revenue-bearing: every SO except
+// DRAFT / CANCELLED / ON_HOLD (dashboard-overview.ts:516 —
+// `status NOT IN ('DRAFT','CANCELLED','ON_HOLD')`). Kept as one predicate so
+// the count and the money can never drift apart, and so the next person can
+// see WHY these three are out rather than inferring it from a filter.
+const NON_REVENUE_STATUSES = new Set(["DRAFT", "CANCELLED", "ON_HOLD"]);
+const isConfirmed = (status: string | null | undefined): boolean =>
+  !NON_REVENUE_STATUSES.has((status ?? "").toUpperCase());
 
 const num = (v: unknown): number => {
   const n = Number(v);
@@ -253,10 +272,7 @@ async function section<T>(
   run: () => Promise<T[]>,
 ): Promise<{ rows: T[]; error: string | null }> {
   try {
-    // Every read below is by SQL column name (`r.created_at`), but the driver
-    // hands rows back camelCased (`createdAt`, db-pg.ts columnFrom) — so every
-    // field read undefined and the DO loop crashed the whole feed with a 500.
-    return { rows: ((await run()) ?? []).map((r) => withSnakeKeys(r as object) as T), error: null };
+    return { rows: (await run()) ?? [], error: null };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error(`[dashboard-prototype] ${label} failed:`, msg);
@@ -294,8 +310,23 @@ app.get("/", async (c) => {
     hasPermission(c, "production-orders", "read"),
   ]);
 
-  const orgId = getOrgId(c);
+  // Customer-scoped roles (SALES) must not see the whole case book through a
+  // shared, org-wide cached feed, so the slice is dropped for them.
+  const canService =
+    (await hasPermission(c, "service-cases", "read")) && !isCustomerScoped(c);
 
+  const orgId = getOrgId(c);
+  const { cached } = await import("../lib/kv-cache");
+
+  // Whole route is read-only (no mutating handler in this file), so a plain
+  // 60s SWR cache is safe: no write path needs to invalidate it, and it's
+  // the same TTL/mechanism dashboard-overview.ts already uses for the same
+  // "many sequential queries on every page load" problem.
+  // v2 (2026-09-17): payload gained production.productionCost. A pre-bump
+  // body has no such key — exactly what crashed SitiOpsView.tsx on a stale
+  // cache hit — bumping makes that window zero instead of waiting out the
+  // 60s TTL.
+  const rawPayload = await cached(c, `dashboard:prototype:${orgId}:v3`, 60, async () => {
   // ---- Sales ------------------------------------------------------------
   // Whole book, not a window: the prototype owns the month picker, so it
   // needs every month that exists. ~1,500 rows of seven columns is small
@@ -313,8 +344,8 @@ app.get("/", async (c) => {
   const salesSec = await section("sales", () =>
     c.var.DB.prepare(
       `SELECT id, company_so, company_so_id, customer_name, status, total_sen,
-              created_at, customer_delivery_date, hookka_expected_dd,
-              is_service_order, customer_state
+              created_at, company_so_date, customer_delivery_date,
+              hookka_expected_dd, is_service_order, customer_state
          FROM sales_orders
         WHERE org_id = ?
         ORDER BY created_at ASC`,
@@ -328,7 +359,27 @@ app.get("/", async (c) => {
   // Sales tab's own figures (count, revenue, pipeline) use ONLY this subset —
   // `soRows` above stays whole-book because the OTIF join further down needs
   // every order, service or not.
-  const salesTabRows = soRows.filter((r) => !r.is_service_order);
+  // Service orders are INCLUDED (owner 2026-09-15). They were excluded here
+  // while the house Command Center's monthly revenue has never filtered them,
+  // which put this page RM 5,900 below it for Sep 2026 across 11 SV- orders.
+  // `isServiceOrder` still rides on every row, so a consumer that wants them
+  // split can still split them.
+  const salesTabRows = soRows;
+
+  // What the line above THROWS AWAY, published so the exclusion is auditable.
+  // The house Command Center's monthly revenue does NOT filter service orders,
+  // so a figure here will sit below its figure by exactly this much for the
+  // same month — and without this, that difference can only be guessed at.
+  const excludedServiceOrders = soRows
+    .filter((r) => r.isServiceOrder)
+    .map((r) => ({
+      no: r.companySOId ?? r.companySO,
+      customer: r.customerName,
+      status: r.status,
+      totalSen: num(r.totalSen),
+      createdAt: dayKey(r.createdAt),
+      soDate: dayKey(r.companySODate),
+    }));
 
   // Sales Orders view: State x Category x SKU breakdown (Sales Attribution's
   // neighbour, owner 2026-08-28). item_category/product_code/line_total_sen
@@ -358,26 +409,26 @@ app.get("/", async (c) => {
   // it, this aggregate ran 1.44% ahead of the order-level total those three
   // already agree on, entirely from the 75 service-order rows.
   const soStateStatusById = new Map(
-    soRows.map((r) => [r.id, { state: r.customer_state, status: r.status, isService: !!r.is_service_order }]),
+    soRows.map((r) => [r.id, { state: r.customerState, status: r.status, isService: !!r.isServiceOrder }]),
   );
   const stateCategorySkuMap = new Map<
     string,
     { state: string; category: string; sku: string; name: string; qty: number; revenueSen: number }
   >();
   for (const it of soItemCatSec.rows) {
-    const so = soStateStatusById.get(it.sales_order_id);
+    const so = soStateStatusById.get(it.salesOrderId);
     if (!so || so.status === "CANCELLED" || so.isService) continue;
     const state = (so.state ?? "").trim() || "(no state)";
-    const category = it.item_category ?? "(no category)";
-    const sku = it.product_code ?? "(no SKU)";
+    const category = it.itemCategory ?? "(no category)";
+    const sku = it.productCode ?? "(no SKU)";
     const key = `${state}|${category}|${sku}`;
     let e = stateCategorySkuMap.get(key);
     if (!e) {
-      e = { state, category, sku, name: it.product_name ?? sku, qty: 0, revenueSen: 0 };
+      e = { state, category, sku, name: it.productName ?? sku, qty: 0, revenueSen: 0 };
       stateCategorySkuMap.set(key, e);
     }
     e.qty += num(it.quantity);
-    e.revenueSen += num(it.line_total_sen);
+    e.revenueSen += num(it.lineTotalSen);
   }
 
   // Day series. CANCELLED orders are counted but their value is NOT added to
@@ -388,13 +439,19 @@ app.get("/", async (c) => {
     { date: string; orders: number; revenueSen: number; cancelled: number }
   >();
   for (const r of salesTabRows) {
-    const k = dayKey(r.created_at);
+    const k = dayKey(r.createdAt);
     if (!k) continue;
     let e = salesByDay.get(k);
     if (!e) salesByDay.set(k, (e = { date: k, orders: 0, revenueSen: 0, cancelled: 0 }));
-    e.orders++;
-    if (r.status === "CANCELLED") e.cancelled++;
-    else e.revenueSen += num(r.total_sen);
+    // Only confirmed orders reach the count OR the money — a DRAFT is not a
+    // sale yet, and counting it in one place but not the other is how the two
+    // figures on a card start disagreeing.
+    if (isConfirmed(r.status)) {
+      e.orders++;
+      e.revenueSen += num(r.totalSen);
+    } else if ((r.status ?? "").toUpperCase() === "CANCELLED") {
+      e.cancelled++;
+    }
   }
 
   // Pipeline. Known statuses keep their pipeline order; anything the data
@@ -406,7 +463,7 @@ app.get("/", async (c) => {
     let e = byStatus.get(s);
     if (!e) byStatus.set(s, (e = { status: s, count: 0, valueSen: 0 }));
     e.count++;
-    e.valueSen += num(r.total_sen);
+    e.valueSen += num(r.totalSen);
   }
   const pipeline = [
     ...SO_PIPELINE_ORDER.filter((s) => byStatus.has(s)).map((s) => byStatus.get(s)!),
@@ -422,6 +479,9 @@ app.get("/", async (c) => {
         ORDER BY name ASC`,
     ).all<WorkerRow>().then((r) => r.results ?? []),
   );
+
+  // Service (Zamri) tab — own file, see dashboard-service-slice.ts.
+  const serviceSec = await section("service", async () => [await buildServiceSlice(c.var.DB)]);
 
   const attSec = await section("attendance", () =>
     c.var.DB.prepare(
@@ -439,21 +499,21 @@ app.get("/", async (c) => {
 
   const attendance = attSec.rows
     .map((r) => ({
-      employeeId: r.employee_id,
-      employeeName: r.employee_name,
-      dept: r.department_code,
+      employeeId: r.employeeId,
+      employeeName: r.employeeName,
+      dept: r.departmentCode,
       date: dayKey(r.date),
-      clockIn: r.clock_in,
-      clockOut: r.clock_out,
+      clockIn: r.clockIn,
+      clockOut: r.clockOut,
       status: r.status,
-      workingMinutes: num(r.working_minutes),
-      productionMinutes: num(r.production_time_minutes),
-      overtimeMinutes: num(r.overtime_minutes),
+      workingMinutes: num(r.workingMinutes),
+      productionMinutes: num(r.productionTimeMinutes),
+      overtimeMinutes: num(r.overtimeMinutes),
       // Deliberately nullable, not coerced to 0: 12% of live rows have no
       // efficiency recorded, and averaging a missing reading as a zero would
       // drag every mean it touches downward. The prototype already knows how
       // to skip a null efficiency day.
-      efficiencyPct: r.efficiency_pct == null ? null : num(r.efficiency_pct),
+      efficiencyPct: r.efficiencyPct == null ? null : num(r.efficiencyPct),
     }))
     .filter((r) => r.date);
 
@@ -461,7 +521,7 @@ app.get("/", async (c) => {
   // The Employees page's summary cards do NOT come from attendance_records.
   // They come from /api/department-performance, which is
   // `working_hour_entries` (clocked) + completed `job_cards` (earned), and it
-  // is the number the office actually reads. attendance_records.efficiency_pct
+  // is the number the office actually reads. attendance_records.efficiencyPct
   // is a DIFFERENT metric that happens to share the name — averaging it gave
   // 94.1% where the office reads 84%, and no amount of re-averaging converges.
   //
@@ -480,7 +540,7 @@ app.get("/", async (c) => {
       `SELECT code, is_production, sequence
          FROM departments`,
     )
-      .all<{ code: string; is_production: number | boolean | null; sequence: number | string | null }>()
+      .all<{ code: string; isProduction: number | boolean | null; sequence: number | string | null }>()
       .then((r) => r.results ?? []),
   );
   // CANONICAL denominator: isProduction departments only. Warehousing, Repair,
@@ -489,7 +549,7 @@ app.get("/", async (c) => {
   // percentage below what the office sees (MEASURED: 6,179.2h all-departments
   // vs 5,310.3h production-only for Aug 2026, an 869h difference).
   const productionDepts = new Set(
-    deptSec.rows.filter((d) => d.is_production).map((d) => d.code),
+    deptSec.rows.filter((d) => d.isProduction).map((d) => d.code),
   );
 
   const wheSec = await section("working hours", () =>
@@ -499,7 +559,7 @@ app.get("/", async (c) => {
         WHERE org_id = ?`,
     )
       .bind(orgId)
-      .all<{ worker_id: string | null; date: string | null; department_code: string | null; hours: number | string | null }>()
+      .all<{ workerId: string | null; date: string | null; departmentCode: string | null; hours: number | string | null }>()
       .then((r) => r.results ?? []),
   );
 
@@ -514,11 +574,11 @@ app.get("/", async (c) => {
     )
       .bind(orgId)
       .all<{
-        id: string; department_code: string | null;
-        pic1_id: string | null; pic2_id: string | null;
-        completed_date: string | null;
-        est_minutes: number | string | null; actual_minutes: number | string | null;
-        wip_qty: number | string | null;
+        id: string; departmentCode: string | null;
+        pic1Id: string | null; pic2Id: string | null;
+        completedDate: string | null;
+        estMinutes: number | string | null; actualMinutes: number | string | null;
+        wipQty: number | string | null;
       }>()
       .then((r) => r.results ?? []),
   );
@@ -536,13 +596,13 @@ app.get("/", async (c) => {
     )
       .bind(orgId)
       .all<{
-        production_order_id: string | null;
-        department_code: string | null;
+        productionOrderId: string | null;
+        departmentCode: string | null;
         status: string | null;
         sequence: number | string | null;
-        due_date: string | null;
-        wip_type: string | null;
-        completed_date: string | null;
+        dueDate: string | null;
+        wipType: string | null;
+        completedDate: string | null;
       }>()
       .then((r) => r.results ?? []),
   );
@@ -552,7 +612,7 @@ app.get("/", async (c) => {
       `SELECT job_card_id, pic1_id, pic2_id FROM piece_pics WHERE org_id = ?`,
     )
       .bind(orgId)
-      .all<{ job_card_id: string; pic1_id: string | null; pic2_id: string | null }>()
+      .all<{ jobCardId: string; pic1Id: string | null; pic2Id: string | null }>()
       .then((r) => r.results ?? []),
   );
 
@@ -564,9 +624,9 @@ app.get("/", async (c) => {
 
   const picsByJc = new Map<string, Array<{ pic1: string | null; pic2: string | null }>>();
   for (const p of picsSec.rows) {
-    const arr = picsByJc.get(p.job_card_id) ?? [];
-    arr.push({ pic1: p.pic1_id, pic2: p.pic2_id });
-    picsByJc.set(p.job_card_id, arr);
+    const arr = picsByJc.get(p.jobCardId) ?? [];
+    arr.push({ pic1: p.pic1Id, pic2: p.pic2Id });
+    picsByJc.set(p.jobCardId, arr);
   }
 
   // date -> { working, production, allDept } and date -> worker -> { same }.
@@ -603,40 +663,40 @@ app.get("/", async (c) => {
     const mins = Math.round(num(r.hours) * 60);
     const dayEntry = perfDay(d);
     dayEntry.allDeptMinutes += mins;
-    if (r.worker_id) perfWorker(d, r.worker_id).allDeptMinutes += mins;
-    if (!productionDepts.has(r.department_code ?? "")) continue;
+    if (r.workerId) perfWorker(d, r.workerId).allDeptMinutes += mins;
+    if (!productionDepts.has(r.departmentCode ?? "")) continue;
     dayEntry.workingMinutes += mins;
-    if (r.worker_id) {
-      perfWorkerIds.add(r.worker_id);
-      perfWorker(d, r.worker_id).workingMinutes += mins;
+    if (r.workerId) {
+      perfWorkerIds.add(r.workerId);
+      perfWorker(d, r.workerId).workingMinutes += mins;
     }
   }
 
   let perfCards = 0;
   let perfMeasuredCards = 0;
   for (const jc of jcSec.rows) {
-    const d = dayKey(jc.completed_date);
+    const d = dayKey(jc.completedDate);
     if (!d) continue;
     perfCards++;
-    const actual = jc.actual_minutes == null ? null : num(jc.actual_minutes);
+    const actual = jc.actualMinutes == null ? null : num(jc.actualMinutes);
     // A populated actual that EQUALS the standard is a copied estimate, not a
     // measurement — the repo's established provenance test.
-    if (actual !== null && actual > 0 && actual !== num(jc.est_minutes)) perfMeasuredCards++;
+    if (actual !== null && actual > 0 && actual !== num(jc.estMinutes)) perfMeasuredCards++;
 
-    const wipQty = num(jc.wip_qty);
+    const wipQty = num(jc.wipQty);
     // Day total credits the card ONCE, regardless of how many workers are on it.
     perfDay(d).productionMinutes += jcMinutesTotal(
-      actual ?? num(jc.est_minutes), jc.department_code, wipQty,
+      actual ?? num(jc.estMinutes), jc.departmentCode, wipQty,
     );
 
     // Per-worker share is keyed on est ?? actual (note the order — it differs
     // from the day total on purpose; mirrors department-performance.ts).
-    const jcMins = num(jc.est_minutes) || (actual ?? 0);
+    const jcMins = num(jc.estMinutes) || (actual ?? 0);
     const pieces = picsByJc.get(jc.id) ?? [];
     const perWorker = new Map<string, number>();
     if (pieces.length > 0) {
-      const perPiece = (jc.department_code ?? "") === "FAB_CUT"
-        ? jcMinutesTotal(jcMins, jc.department_code, wipQty) / Math.max(1, pieces.length)
+      const perPiece = (jc.departmentCode ?? "") === "FAB_CUT"
+        ? jcMinutesTotal(jcMins, jc.departmentCode, wipQty) / Math.max(1, pieces.length)
         : jcMins;
       for (const s of pieces) {
         const picCount = (s.pic1 ? 1 : 0) + (s.pic2 ? 1 : 0);
@@ -645,10 +705,10 @@ app.get("/", async (c) => {
         if (s.pic2) perWorker.set(s.pic2, (perWorker.get(s.pic2) ?? 0) + share);
       }
     } else {
-      const picCount = (jc.pic1_id ? 1 : 0) + (jc.pic2_id ? 1 : 0);
-      const share = jcMinutesTotal(jcMins, jc.department_code, wipQty) / Math.max(1, picCount);
-      if (jc.pic1_id) perWorker.set(jc.pic1_id, share);
-      if (jc.pic2_id) perWorker.set(jc.pic2_id, share);
+      const picCount = (jc.pic1Id ? 1 : 0) + (jc.pic2Id ? 1 : 0);
+      const share = jcMinutesTotal(jcMins, jc.departmentCode, wipQty) / Math.max(1, picCount);
+      if (jc.pic1Id) perWorker.set(jc.pic1Id, share);
+      if (jc.pic2Id) perWorker.set(jc.pic2Id, share);
     }
     for (const [wid, raw] of perWorker) {
       perfWorkerIds.add(wid);
@@ -684,7 +744,7 @@ app.get("/", async (c) => {
   // DO that was dispatched as part of a trip but never got its own
   // driver_name written — MEASURED 2026-08-28: PL-2606-010 has 4 DOs, 2 driven
   // by JIVA and 2 with driver_name/driver_id/vehicle_id/vehicle_no/lorry_id
-  // ALL empty, found by cross-referencing packing_lists.do_ids against the
+  // ALL empty, found by cross-referencing packing_lists.doIds against the
   // "Unassigned" bucket below. Conservative on purpose: a list is only used
   // to infer when every driver actually named among its OTHER DOs agrees —
   // a list with two different drivers named, or none at all, is left alone
@@ -692,16 +752,16 @@ app.get("/", async (c) => {
   const packingListSec = await section("packing lists", () =>
     c.var.DB.prepare(`SELECT id, do_ids FROM packing_lists WHERE org_id = ?`)
       .bind(orgId)
-      .all<{ id: string; do_ids: string | null }>()
+      .all<{ id: string; doIds: string | null }>()
       .then((r) => r.results ?? []),
   );
   const inferredDriverByDoId = new Map<string, string>();
   {
-    const driverByDoId = new Map(doRows.map((r) => [r.id, r.driver_name || null]));
+    const driverByDoId = new Map(doRows.map((r) => [r.id, r.driverName || null]));
     for (const pl of packingListSec.rows) {
       let ids: string[];
       try {
-        ids = JSON.parse(pl.do_ids ?? "[]");
+        ids = JSON.parse(pl.doIds ?? "[]");
       } catch {
         continue;
       }
@@ -726,7 +786,7 @@ app.get("/", async (c) => {
   // prevents.
   let otif = EMPTY_ON_TIME;
   try {
-    const first = doRows.find((r) => r.created_at)?.created_at;
+    const first = doRows.find((r) => r.createdAt)?.createdAt;
     otif = await collectOnTimeDelivery(
       c.var.DB,
       dayKey(first) ?? "1970-01-01",
@@ -755,25 +815,26 @@ app.get("/", async (c) => {
   const bySo = new Map<string, number>();
 
   for (const r of doRows) {
-    touchDay(dayKey(r.created_at))!.created++;
-    const disp = touchDay(dayKey(r.dispatched_at));
+    const created = touchDay(dayKey(r.createdAt));
+    if (created) created.created++;
+    const disp = touchDay(dayKey(r.dispatchedAt));
     if (disp) disp.dispatched++;
-    const del = touchDay(dayKey(r.delivered_at));
+    const del = touchDay(dayKey(r.deliveredAt));
     if (del) del.delivered++;
-    if (r.dispatched_at && r.delivered_at) {
-      const d = (new Date(r.delivered_at).getTime() - new Date(r.dispatched_at).getTime()) / 86400000;
+    if (r.dispatchedAt && r.deliveredAt) {
+      const d = (new Date(r.deliveredAt).getTime() - new Date(r.dispatchedAt).getTime()) / 86400000;
       if (Number.isFinite(d) && d >= 0) lagDays.push(d);
     }
     // A DO with no driver of its own, and no trip-mate to infer one from, is
     // a real state (3PL, customer collect), so it gets its own bucket rather
     // than being dropped out of the workload total.
-    const who = r.driver_name || inferredDriverByDoId.get(r.id) || "Unassigned";
+    const who = r.driverName || inferredDriverByDoId.get(r.id) || "Unassigned";
     let f = fleet.get(who);
     if (!f) fleet.set(who, (f = { name: who, dos: 0, items: 0, delivered: 0, firstTimeOk: 0, attemptsJudged: 0 }));
     f.dos++;
-    f.items += num(r.total_items);
-    if (r.delivered_at) f.delivered++;
-    const soKey = r.company_so_id ?? r.company_so;
+    f.items += num(r.totalItems);
+    if (r.deliveredAt) f.delivered++;
+    const soKey = r.companySOId ?? r.companySO;
     if (soKey && r.status !== "CANCELLED") {
       bySo.set(soKey, (bySo.get(soKey) ?? 0) + 1);
     }
@@ -791,10 +852,10 @@ app.get("/", async (c) => {
   // "delivered, but the order needed another trip." Needs bySo fully built
   // first, hence a second pass rather than folding into the loop above.
   for (const r of doRows) {
-    const who = r.driver_name || inferredDriverByDoId.get(r.id) || "Unassigned";
+    const who = r.driverName || inferredDriverByDoId.get(r.id) || "Unassigned";
     const f = fleet.get(who);
     if (!f) continue;
-    const soKey = r.company_so_id ?? r.company_so;
+    const soKey = r.companySOId ?? r.companySO;
     if (!soKey || r.status === "CANCELLED") continue;
     f.attemptsJudged++;
     if ((bySo.get(soKey) ?? 0) === 1) f.firstTimeOk++;
@@ -836,16 +897,16 @@ app.get("/", async (c) => {
   );
   const poItemsByPo = new Map<string, PoItemRow[]>();
   for (const it of poItemSec.rows) {
-    const arr = poItemsByPo.get(it.purchase_order_id) ?? [];
+    const arr = poItemsByPo.get(it.purchaseOrderId) ?? [];
     arr.push(it);
-    poItemsByPo.set(it.purchase_order_id, arr);
+    poItemsByPo.set(it.purchaseOrderId, arr);
   }
   const poUnits = new Map<string, { ordered: number; received: number }>();
   for (const it of poItemSec.rows) {
-    let e = poUnits.get(it.purchase_order_id);
-    if (!e) poUnits.set(it.purchase_order_id, (e = { ordered: 0, received: 0 }));
+    let e = poUnits.get(it.purchaseOrderId);
+    if (!e) poUnits.set(it.purchaseOrderId, (e = { ordered: 0, received: 0 }));
     e.ordered += num(it.quantity);
-    e.received += num(it.received_qty);
+    e.received += num(it.receivedQty);
   }
 
   const todayKey = dayKey(new Date().toISOString())!;
@@ -867,14 +928,14 @@ app.get("/", async (c) => {
 
   const mapPoItems = (poId: string) =>
     (poItemsByPo.get(poId) ?? []).map((it) => ({
-      code: it.material_code, supplierSku: it.supplier_sku, name: it.material_name,
-      unit: it.unit, qty: num(it.quantity), received: num(it.received_qty),
-      unitPriceSen: num(it.unit_price_sen), totalSen: num(it.total_sen),
+      code: it.materialCode, supplierSku: it.supplierSKU, name: it.materialName,
+      unit: it.unit, qty: num(it.quantity), received: num(it.receivedQty),
+      unitPriceSen: num(it.unitPriceSen), totalSen: num(it.totalSen),
     }));
 
   for (const r of poRows) {
-    const received = dayKey(r.received_date);
-    const expected = dayKey(r.expected_date);
+    const received = dayKey(r.receivedDate);
+    const expected = dayKey(r.expectedDate);
     // CANCELLED POs are REGISTERED but not AGGREGATED. They belong in the
     // register (a "Total POs" headline that says 180 has to be backed by 180
     // listable rows — MEASURED: 180 total, 23 cancelled, 157 active), but a
@@ -883,47 +944,47 @@ app.get("/", async (c) => {
     if (r.status === "CANCELLED") {
       const uc = poUnits.get(r.id) ?? { ordered: 0, received: 0 };
       poRegister.push({
-        id: r.id, no: r.po_no, supplier: r.supplier_name || "Unnamed supplier",
-        status: r.status, orderDate: dayKey(r.order_date), expectedDate: expected,
-        receivedDate: received, totalSen: num(r.total_sen), daysLate: null,
+        id: r.id, no: r.poNo, supplier: r.supplierName || "Unnamed supplier",
+        status: r.status, orderDate: dayKey(r.orderDate), expectedDate: expected,
+        receivedDate: received, totalSen: num(r.totalSen), daysLate: null,
         tier: "cancelled", cancelled: true,
         unitsOrdered: uc.ordered, unitsReceived: uc.received,
-        subtotalSen: num(r.subtotal_sen), notes: r.notes,
+        subtotalSen: num(r.subtotalSen), notes: r.notes,
         items: mapPoItems(r.id),
       });
       continue;
     }
-    const late = received ? null : daysLate(r.expected_date);
+    const late = received ? null : daysLate(r.expectedDate);
     // A PO with no expected date cannot be aged. It is NOT quietly filed as
     // on-track — that would turn a blind spot into a clean bill of health.
     const tierKey = received ? "received" : late == null ? "undated"
       : (PO_TIERS.find((t) => t.test(late))?.key ?? "ontrack");
     const bucket = tierCounts.get(tierKey);
-    if (bucket) { bucket.count++; bucket.valueSen += num(r.total_sen); }
+    if (bucket) { bucket.count++; bucket.valueSen += num(r.totalSen); }
 
     if (expected && !received) {
       let e = inboundByDay.get(expected);
       if (!e) inboundByDay.set(expected, (e = { date: expected, pos: 0, valueSen: 0, units: 0 }));
       e.pos++;
-      e.valueSen += num(r.total_sen);
+      e.valueSen += num(r.totalSen);
       e.units += (poUnits.get(r.id)?.ordered ?? 0) - (poUnits.get(r.id)?.received ?? 0);
     }
 
-    const sup = r.supplier_name || "Unnamed supplier";
+    const sup = r.supplierName || "Unnamed supplier";
     let sa = supplierAgg.get(sup);
     if (!sa) supplierAgg.set(sup, (sa = { name: sup, pos: 0, valueSen: 0, judged: 0, onTime: 0 }));
     sa.pos++;
-    sa.valueSen += num(r.total_sen);
+    sa.valueSen += num(r.totalSen);
     // Only a PO that has actually arrived can be scored for punctuality.
     if (received && expected) { sa.judged++; if (received <= expected) sa.onTime++; }
 
     const u = poUnits.get(r.id) ?? { ordered: 0, received: 0 };
     poRegister.push({
-      id: r.id, no: r.po_no, supplier: sup, status: r.status,
-      orderDate: dayKey(r.order_date), expectedDate: expected, receivedDate: received,
-      totalSen: num(r.total_sen), daysLate: late, tier: tierKey, cancelled: false,
+      id: r.id, no: r.poNo, supplier: sup, status: r.status,
+      orderDate: dayKey(r.orderDate), expectedDate: expected, receivedDate: received,
+      totalSen: num(r.totalSen), daysLate: late, tier: tierKey, cancelled: false,
       unitsOrdered: u.ordered, unitsReceived: u.received,
-      subtotalSen: num(r.subtotal_sen), notes: r.notes,
+      subtotalSen: num(r.subtotalSen), notes: r.notes,
       items: mapPoItems(r.id),
     });
   }
@@ -938,7 +999,7 @@ app.get("/", async (c) => {
   // FRAMING(6) WEBBING(7) UPHOLSTERY(8) PACKING(9). Hardcoding it would go
   // stale the first time the floor is re-sequenced.
   const stageRows = deptSec.rows
-    .filter((d) => d.is_production)
+    .filter((d) => d.isProduction)
     .map((d) => ({ code: d.code, seq: num(d.sequence) }))
     .sort((a, b) => a.seq - b.seq);
 
@@ -946,8 +1007,8 @@ app.get("/", async (c) => {
     c.var.DB.prepare(
       `SELECT id, po_no, sales_order_id, customer_name, product_code,
               product_name, item_category, size_label, quantity, status,
-              current_department, progress, target_end_date, special_order,
-              consignment_order_id, repairscope
+              current_department, progress, target_end_date, completed_date,
+              special_order, consignment_order_id, repairscope
          FROM production_orders
         WHERE org_id = ?`,
     )
@@ -989,36 +1050,36 @@ app.get("/", async (c) => {
     return c;
   };
   for (const jc of jcAllSec.rows) {
-    if (!jc.production_order_id || !openProdIds.has(jc.production_order_id)) continue;
+    if (!jc.productionOrderId || !openProdIds.has(jc.productionOrderId)) continue;
     const st = (jc.status ?? "").toUpperCase();
     if (st === "CANCELLED") continue;
-    let sp = stageProgress.get(jc.production_order_id);
-    if (!sp) stageProgress.set(jc.production_order_id, (sp = { done: 0, total: 0, nextDept: null, nextSeq: 1e9 }));
+    let sp = stageProgress.get(jc.productionOrderId);
+    if (!sp) stageProgress.set(jc.productionOrderId, (sp = { done: 0, total: 0, nextDept: null, nextSeq: 1e9 }));
     sp.total++;
-    const dept = jc.department_code ?? "";
-    const cell = stageCell(jc.production_order_id, dept);
+    const dept = jc.departmentCode ?? "";
+    const cell = stageCell(jc.productionOrderId, dept);
     cell.total++;
     if (st === "COMPLETED" || st === "TRANSFERRED") {
       sp.done++;
-      const cd = dayKey(jc.completed_date);
+      const cd = dayKey(jc.completedDate);
       cell.done++;
       if (cd && (!cell.latestCompleted || cd > cell.latestCompleted)) cell.latestCompleted = cd;
     } else {
       const b = backlogByDept.get(dept);
-      if (b) { b.cards++; b.orders.add(jc.production_order_id); }
+      if (b) { b.cards++; b.orders.add(jc.productionOrderId); }
       // "Current stage" = the EARLIEST unfinished stage in floor sequence,
       // not whichever row happened to come back first.
       const si = stageIdx.get(dept);
       if (si != null && si < sp.nextSeq) { sp.nextSeq = si; sp.nextDept = dept || null; }
-      const dd = dayKey(jc.due_date);
+      const dd = dayKey(jc.dueDate);
       if (dd && (!cell.earliestDue || dd < cell.earliestDue)) cell.earliestDue = dd;
     }
   }
 
   const soById = new Map(soRows.map((r) => [r.id, r]));
   const prodOrders = openProdOrders.map((r) => {
-    const so = r.sales_order_id ? soById.get(r.sales_order_id) : undefined;
-    const customerDD = dayKey(so?.customer_delivery_date ?? null);
+    const so = r.salesOrderId ? soById.get(r.salesOrderId) : undefined;
+    const customerDD = dayKey(so?.customerDeliveryDate ?? null);
     // Buffer = days from today to the date the CUSTOMER was promised.
     // Negative means already past it while still unfinished.
     const daysToDD = customerDD
@@ -1051,24 +1112,24 @@ app.get("/", async (c) => {
     });
     return {
       id: r.id,
-      poNo: r.po_no,
+      poNo: r.poNo,
       stages,
-      soNo: so?.company_so_id ?? so?.company_so ?? r.sales_order_id ?? null,
-      customer: r.customer_name ?? so?.customer_name ?? null,
-      productCode: r.product_code,
-      productName: r.product_name,
-      sizeLabel: r.size_label,
-      category: r.item_category,
+      soNo: so?.companySOId ?? so?.companySO ?? r.salesOrderId ?? null,
+      customer: r.customerName ?? so?.customerName ?? null,
+      productCode: r.productCode,
+      productName: r.productName,
+      sizeLabel: r.sizeLabel,
+      category: r.itemCategory,
       qty: num(r.quantity),
-      specialOrder: !!r.special_order,
+      specialOrder: !!r.specialOrder,
       customerDD,
-      expectedDD: dayKey(so?.hookka_expected_dd ?? null),
-      targetEndDate: dayKey(r.target_end_date),
+      expectedDD: dayKey(so?.hookkaExpectedDD ?? null),
+      targetEndDate: dayKey(r.targetEndDate),
       daysToDD,
       pctDone,
       stagesDone,
       stagesTotal,
-      currentDept: sp?.nextDept ?? r.current_department ?? null,
+      currentDept: sp?.nextDept ?? r.currentDepartment ?? null,
       status: r.status,
     };
   });
@@ -1087,6 +1148,148 @@ app.get("/", async (c) => {
     (m, x) => (x.cards > (m?.cards ?? -1) ? x : m),
     null as { dept: string; seq: number; cards: number; orders: Set<string> } | null,
   );
+
+  // ---- Siti's list (draft, 2026-09-17) -----------------------------------
+  // Owner's next-up report checklist, handed over on paper. Derived entirely
+  // from data already loaded above — no new queries except the one extra
+  // column (completed_date) added to prodOrdSec's SELECT. Draft-quality by
+  // request: covers what's cheaply and honestly derivable now; Production
+  // Cost needs cost_ledger, which nothing in this route touches yet, so it's
+  // left as an explicit gap below rather than a guessed number.
+
+  // "全部 department 的 overdue" — every OPEN order already past the
+  // customer's promised date (risk === critical, same predicate the
+  // Production tab's risk banding uses), grouped by its current department.
+  const overdueByDept = (() => {
+    const m = new Map<string, number>();
+    for (const o of prodOrdersRisked) {
+      if (o.risk !== "critical") continue;
+      const k = o.currentDept || "(no dept)";
+      m.set(k, (m.get(k) ?? 0) + 1);
+    }
+    return [...m.entries()]
+      .map(([department, count]) => ({ department, count }))
+      .sort((a, b) => b.count - a.count);
+  })();
+
+  // "要 overdue 的 - 3 天前" — early warning: not yet overdue, but the
+  // customer date is within the next 3 days and most stages are still open
+  // (same "at risk" shape riskOf() already uses, narrowed to a 3-day window
+  // instead of 7).
+  const dueSoon3Days = prodOrdersRisked
+    .filter((o) => o.daysToDD != null && o.daysToDD >= 0 && o.daysToDD <= 3)
+    .sort((a, b) => (a.daysToDD ?? 0) - (b.daysToDD ?? 0));
+
+  // "Daily Production Output" — units and orders that finished each day.
+  // Reads the WHOLE prodOrdSec.rows (not openProdOrders, which excludes
+  // anything COMPLETED by definition), so this is the one place in the file
+  // that looks at completed orders' own rows rather than their job cards.
+  const dailyOutput = (() => {
+    const m = new Map<string, { date: string; orders: number; units: number }>();
+    for (const r of prodOrdSec.rows) {
+      if ((r.status ?? "").toUpperCase() !== "COMPLETED") continue;
+      const d = dayKey(r.completedDate);
+      if (!d) continue;
+      let e = m.get(d);
+      if (!e) m.set(d, (e = { date: d, orders: 0, units: 0 }));
+      e.orders++;
+      e.units += num(r.quantity);
+    }
+    return [...m.values()].sort((a, b) => (a.date < b.date ? -1 : 1));
+  })();
+
+  // "Production Plan vs Actual" — for completed orders that carry both
+  // dates: targetEndDate (plan) vs completedDate (actual). Positive
+  // varianceDays = finished late. Orders missing either date are excluded
+  // rather than silently counted as on-time.
+  const planVsActual = (() => {
+    const rows = prodOrdSec.rows
+      .filter((r) => (r.status ?? "").toUpperCase() === "COMPLETED")
+      .map((r) => {
+        const plan = dayKey(r.targetEndDate);
+        const actual = dayKey(r.completedDate);
+        if (!plan || !actual) return null;
+        const varianceDays = Math.round(
+          (Date.parse(actual + "T00:00:00Z") - Date.parse(plan + "T00:00:00Z")) / 86400000,
+        );
+        return {
+          poNo: r.poNo,
+          productName: r.productName,
+          plan,
+          actual,
+          varianceDays,
+        };
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null);
+    return {
+      rows,
+      onTime: rows.filter((r) => r.varianceDays <= 0).length,
+      late: rows.filter((r) => r.varianceDays > 0).length,
+      withBothDates: rows.length,
+      // So the caller can render "N of M completed orders carry both dates"
+      // instead of implying every completed order was judged.
+      completedTotal: prodOrdSec.rows.filter((r) => (r.status ?? "").toUpperCase() === "COMPLETED").length,
+    };
+  })();
+
+  // "Production Cost" — the one genuinely new query for Siti's list. Reads
+  // fg_batches, which carries the real cost basis of what was produced
+  // (materialCostSen/laborCostSen/overheadCostSen, filled in by
+  // po-cost-cascade.ts once the material side settles — see that file's own
+  // "UPDATE fg_batches SET ... costSen" writes). No org_id filter: fg_batches
+  // and cost_ledger carry none anywhere else in this codebase either (see
+  // src/api/routes/cost-ledger.ts), so this follows the same convention
+  // rather than inventing a column that doesn't exist.
+  const fgBatchSec = await section("fg batch cost", () =>
+    c.var.DB.prepare(
+      `SELECT productionOrderId, completedDate, originalQty,
+              unitCostSen, materialCostSen, laborCostSen, overheadCostSen
+         FROM fg_batches
+        WHERE completedDate IS NOT NULL AND completedDate <> ''`,
+    )
+      .all<{
+        productionOrderId: string | null;
+        completedDate: string | null;
+        originalQty: number | string | null;
+        unitCostSen: number | string | null;
+        materialCostSen: number | string | null;
+        laborCostSen: number | string | null;
+        overheadCostSen: number | string | null;
+      }>()
+      .then((r) => r.results ?? []),
+  );
+  const productionCost = (() => {
+    const m = new Map<
+      string,
+      { date: string; materialSen: number; laborSen: number; overheadSen: number; totalSen: number; batches: number }
+    >();
+    let batchesWithCost = 0;
+    for (const b of fgBatchSec.rows) {
+      const d = dayKey(b.completedDate);
+      if (!d) continue;
+      const material = num(b.materialCostSen);
+      const labor = num(b.laborCostSen);
+      const overhead = num(b.overheadCostSen);
+      const total = material + labor + overhead;
+      if (total > 0) batchesWithCost++;
+      let e = m.get(d);
+      if (!e) m.set(d, (e = { date: d, materialSen: 0, laborSen: 0, overheadSen: 0, totalSen: 0, batches: 0 }));
+      e.materialSen += material;
+      e.laborSen += labor;
+      e.overheadSen += overhead;
+      e.totalSen += total;
+      e.batches++;
+    }
+    return {
+      byDay: [...m.values()].sort((a, b) => (a.date < b.date ? -1 : 1)),
+      totalBatches: fgBatchSec.rows.length,
+      // fg_batches are created with every cost column at 0 (fg-completion.ts)
+      // and only gain a real figure once po-cost-cascade.ts settles the
+      // material side. This is published so the UI can say "N of M batches
+      // costed" instead of implying every batch has a real number.
+      batchesWithCost,
+    };
+  })();
 
   // ---- Delivery: "Where DOs are sitting" status strip --------------------
   // The real Delivery page's SIX buckets (src/pages/delivery/index.tsx
@@ -1111,27 +1314,27 @@ app.get("/", async (c) => {
           AND production_order_id IS NOT NULL AND production_order_id <> ''`,
     )
       .bind(orgId)
-      .all<{ delivery_order_id: string; production_order_id: string }>()
+      .all<{ deliveryOrderId: string; productionOrderId: string }>()
       .then((r) => r.results ?? []),
   );
   const doStatusById = new Map(doRows.map((r) => [r.id, r.status]));
   const linkedPOIds = new Set(
     doItemsSec.rows
-      .filter((r) => doStatusById.get(r.delivery_order_id) !== "CANCELLED")
-      .map((r) => r.production_order_id),
+      .filter((r) => doStatusById.get(r.deliveryOrderId) !== "CANCELLED")
+      .map((r) => r.productionOrderId),
   );
 
   const jcByPoAll = new Map<string, PipelinePO["jobCards"]>();
   for (const jc of jcAllSec.rows) {
-    if (!jc.production_order_id) continue;
-    const arr = jcByPoAll.get(jc.production_order_id) ?? [];
+    if (!jc.productionOrderId) continue;
+    const arr = jcByPoAll.get(jc.productionOrderId) ?? [];
     arr.push({
-      departmentCode: jc.department_code ?? "",
+      departmentCode: jc.departmentCode ?? "",
       status: jc.status ?? "",
-      completedDate: jc.completed_date,
-      wipType: jc.wip_type ?? undefined,
+      completedDate: jc.completedDate,
+      wipType: jc.wipType ?? undefined,
     });
-    jcByPoAll.set(jc.production_order_id, arr);
+    jcByPoAll.set(jc.productionOrderId, arr);
   }
 
   let doValMap = new Map<string, number>();
@@ -1186,14 +1389,14 @@ app.get("/", async (c) => {
     const pipe: PipelinePO = {
       id: r.id,
       status: r.status ?? "",
-      consignmentOrderId: r.consignment_order_id ?? undefined,
-      itemCategory: r.item_category ?? undefined,
-      specialOrder: r.special_order ?? undefined,
+      consignmentOrderId: r.consignmentOrderId ?? undefined,
+      itemCategory: r.itemCategory ?? undefined,
+      specialOrder: r.specialOrder ?? undefined,
       repairScope: r.repairscope ?? null,
       jobCards: jcByPoAll.get(r.id) ?? [],
     };
-    const soCreated = r.sales_order_id
-      ? dayKey(soById.get(r.sales_order_id)?.created_at ?? null)
+    const soCreated = r.salesOrderId
+      ? dayKey(soById.get(r.salesOrderId)?.createdAt ?? null)
       : null;
     if (poInPlanning(pipe)) {
       const val = poValMap.get(r.id) ?? 0;
@@ -1222,7 +1425,7 @@ app.get("/", async (c) => {
   let cancelledCount = 0, cancelledSen = 0;
   for (const r of doRows) {
     const val = doValMap.get(r.id) ?? 0;
-    const created = dayKey(r.created_at);
+    const created = dayKey(r.createdAt);
     if (r.status === "DRAFT") {
       pendingDispatchCount++; pendingDispatchSen += val;
       if (created) { const e = dsDay(created); e.pendingDispatchCount++; e.pendingDispatchSen += val; }
@@ -1261,10 +1464,10 @@ app.get("/", async (c) => {
   // will read as "available" here where the real page would show "reserved."
   const doStateByPo = new Map<string, "DRAFT" | "DISPATCHED">();
   for (const item of doItemsSec.rows) {
-    const st = doStatusById.get(item.delivery_order_id);
+    const st = doStatusById.get(item.deliveryOrderId);
     const state: "DRAFT" | "DISPATCHED" = st === "DRAFT" ? "DRAFT" : "DISPATCHED";
-    if (doStateByPo.get(item.production_order_id) === "DISPATCHED") continue;
-    doStateByPo.set(item.production_order_id, state);
+    if (doStateByPo.get(item.productionOrderId) === "DISPATCHED") continue;
+    doStateByPo.set(item.productionOrderId, state);
   }
   const fgByCode = new Map<string, { code: string; name: string; category: string | null; available: number; reserved: number }>();
   for (const po of prodOrdSec.rows) {
@@ -1273,10 +1476,10 @@ app.get("/", async (c) => {
     if (uphCards.length === 0) continue;
     if (!uphCards.every((c) => c.status === "COMPLETED" || c.status === "TRANSFERRED")) continue;
     if (doStateByPo.get(po.id) === "DISPATCHED") continue;
-    const code = po.product_code ?? "";
+    const code = po.productCode ?? "";
     if (!code) continue;
     let fg = fgByCode.get(code);
-    if (!fg) fgByCode.set(code, (fg = { code, name: po.product_name ?? code, category: po.item_category, available: 0, reserved: 0 }));
+    if (!fg) fgByCode.set(code, (fg = { code, name: po.productName ?? code, category: po.itemCategory, available: 0, reserved: 0 }));
     const qty = num(po.quantity);
     if (doStateByPo.get(po.id) === "DRAFT") fg.reserved += qty;
     else fg.available += qty;
@@ -1301,17 +1504,17 @@ app.get("/", async (c) => {
     { group: string; items: number; withStock: number; qty: number }
   >();
   for (const r of rmRows) {
-    const g = r.item_group || "UNGROUPED";
+    const g = r.itemGroup || "UNGROUPED";
     let e = groups.get(g);
     if (!e) groups.set(g, (e = { group: g, items: 0, withStock: 0, qty: 0 }));
     e.items++;
-    const q = num(r.balance_qty);
+    const q = num(r.balanceQty);
     if (q > 0) { e.withStock++; e.qty += q; }
   }
   // MEASURED: min_stock is 0 on all 473 rows, so there is no reorder point to
   // compare anything against. Counted rather than assumed, so the day someone
   // populates it the view starts working without a code change.
-  const withMinStock = rmRows.filter((r) => num(r.min_stock) > 0).length;
+  const withMinStock = rmRows.filter((r) => num(r.minStock) > 0).length;
 
   // Stock VALUE and stock AGE both come from the batch layers — raw_materials
   // carries neither a cost nor a receipt date, so without this join the
@@ -1324,10 +1527,10 @@ app.get("/", async (c) => {
     )
       .bind(orgId)
       .all<{
-        rm_id: string | null;
-        remaining_qty: number | string | null;
-        received_date: string | null;
-        unit_cost_sen: number | string | null;
+        rmId: string | null;
+        remainingQty: number | string | null;
+        receivedDate: string | null;
+        unitCostSen: number | string | null;
       }>()
       .then((r) => r.results ?? []),
   );
@@ -1343,20 +1546,20 @@ app.get("/", async (c) => {
   let batchesWithStock = 0;
   const byMaterial = new Map<string, { qty: number; valueSen: number; oldestDays: number }>();
   for (const b of batchSec.rows) {
-    const q = num(b.remaining_qty);
+    const q = num(b.remainingQty);
     if (q <= 0) continue;
     batchesWithStock++;
-    const v = q * num(b.unit_cost_sen);
+    const v = q * num(b.unitCostSen);
     stockValueSen += v;
-    const rd = dayKey(b.received_date);
+    const rd = dayKey(b.receivedDate);
     const ageDays = rd ? Math.floor((nowMs - Date.parse(rd + "T00:00:00Z")) / 86400000) : null;
     if (ageDays != null) {
       const band = ageing.find((x) => ageDays >= x.lo && ageDays <= x.hi);
       if (band) { band.batches++; band.qty += q; band.valueSen += v; }
     }
-    if (b.rm_id) {
-      let m = byMaterial.get(b.rm_id);
-      if (!m) byMaterial.set(b.rm_id, (m = { qty: 0, valueSen: 0, oldestDays: 0 }));
+    if (b.rmId) {
+      let m = byMaterial.get(b.rmId);
+      if (!m) byMaterial.set(b.rmId, (m = { qty: 0, valueSen: 0, oldestDays: 0 }));
       m.qty += q;
       m.valueSen += v;
       if (ageDays != null && ageDays > m.oldestDays) m.oldestDays = ageDays;
@@ -1386,16 +1589,24 @@ app.get("/", async (c) => {
   const config = {
     // Read from the workforce, not hardcoded. The prototype shipped with 85%
     // and an 8-hour day; both are wrong for this factory.
-    efficiencyTargetPct: modeOf(workerRows.map((w) => num(w.efficiency_threshold_pct)), 100),
-    workingHoursPerDay: modeOf(workerRows.map((w) => num(w.working_hours_per_day)), 9),
+    efficiencyTargetPct: modeOf(workerRows.map((w) => num(w.efficiencyThresholdPct)), 100),
+    workingHoursPerDay: modeOf(workerRows.map((w) => num(w.workingHoursPerDay)), 9),
   };
 
-  const rawPayload = {
+  return {
     success: true,
     meta: {
       orgId,
       generatedAt: new Date().toISOString(),
+      // The UNION — every month the book holds anything at all. Kept as the
+      // broad answer, but it is the wrong list to build a month picker from:
+      // this org has three months (2025-08, 2025-12, 2026-02) carrying a single
+      // attendance row and zero sales, so a picker driven by the union offers
+      // months whose sales views are necessarily empty. A caller that scopes
+      // one section should read that section's own list below.
       months: [...new Set([...monthsWithSales, ...monthsWithAttendance])].sort(),
+      monthsWithSales: [...monthsWithSales].sort(),
+      monthsWithAttendance: [...monthsWithAttendance].sort(),
       config,
       efficiencyCoverage: [...coverageByMonth.values()].sort((a, b) =>
         a.month < b.month ? -1 : 1,
@@ -1412,6 +1623,7 @@ app.get("/", async (c) => {
         rows: salesTabRows.length,
         reason: salesSec.error ?? soItemCatSec.error ?? undefined,
       },
+      service: { live: !serviceSec.error, reason: serviceSec.error ?? undefined },
       employee: {
         live: !attSec.error && !workersSec.error && !wheSec.error && !jcSec.error,
         reason: attSec.error ?? workersSec.error ?? wheSec.error ?? jcSec.error
@@ -1449,6 +1661,15 @@ app.get("/", async (c) => {
         live: !prodOrdSec.error && !jcAllSec.error,
         reason: prodOrdSec.error ?? jcAllSec.error ?? undefined,
         rows: openProdOrders.length,
+        // Separate from `live` above on purpose: a failed fg_batches query
+        // should not mark the whole Production tab dead, only Production
+        // Cost within it (which degrades to empty, not fabricated, on error —
+        // see the `section()` helper).
+        costError: fgBatchSec.error ?? undefined,
+      },
+      lim: {
+        live: !prodOrdSec.error && !jcAllSec.error,
+        reason: prodOrdSec.error ?? jcAllSec.error ?? undefined,
       },
       inventory: {
         live: !inventorySec.error,
@@ -1464,15 +1685,17 @@ app.get("/", async (c) => {
       pipeline,
       orders: salesTabRows.map((r) => ({
         id: r.id,
-        no: r.company_so_id ?? r.company_so,
-        customer: r.customer_name,
+        no: r.companySOId ?? r.companySO,
+        customer: r.customerName,
         status: r.status,
-        totalSen: num(r.total_sen),
-        createdAt: dayKey(r.created_at),
-        deliveryDate: dayKey(r.customer_delivery_date),
-        isServiceOrder: !!r.is_service_order,
+        totalSen: num(r.totalSen),
+        createdAt: dayKey(r.createdAt),
+        soDate: dayKey(r.companySODate),
+        deliveryDate: dayKey(r.customerDeliveryDate),
+        isServiceOrder: !!r.isServiceOrder,
       })),
       byStateCategory: [...stateCategorySkuMap.values()],
+      excludedServiceOrders,
     },
     delivery: {
       otif,
@@ -1551,17 +1774,33 @@ app.get("/", async (c) => {
       // On-time delivery for the header KPI reuses the SAME house figure the
       // Delivery view shows — one number, one definition, two screens.
       onTime: otif,
+      // Siti's list (draft) — see the comment above prodOrdersRisked/bottleneck.
+      overdueByDept,
+      dueSoon3Days,
+      dailyOutput,
+      planVsActual,
+      productionCost,
     },
+    // "Daily (Lim)" tab — see ../lib/dashboard-daily-slice.ts for definitions.
+    lim: buildDailySlice(prodOrdSec.rows, jcAllSec.rows, doValueError ? null : poValMap, doValueError),
     inventory: {
       groups: [...groups.values()].sort((a, b) => b.items - a.items),
       totals: {
         items: rmRows.length,
-        active: rmRows.filter((r) => !!r.is_active).length,
-        withStock: rmRows.filter((r) => num(r.balance_qty) > 0).length,
+        active: rmRows.filter((r) => !!r.isActive).length,
+        withStock: rmRows.filter((r) => num(r.balanceQty) > 0).length,
         withMinStock,
         stockValueSen: Math.round(stockValueSen),
         batchesWithStock,
       },
+      // Siti's list (draft): "Material Shortage". `min_stock` is 0 on every
+      // row (MEASURED, see the file header), so there is no real reorder
+      // point to compare against — this is a cheaper proxy, active raw
+      // materials sitting at zero or negative balance right now. Once a
+      // genuine reorder point exists somewhere, replace this with that.
+      materialShortage: rmRows
+        .filter((r) => !!r.isActive && num(r.balanceQty) <= 0)
+        .map((r) => ({ code: r.itemCode, description: r.description, group: r.itemGroup, balanceQty: num(r.balanceQty) })),
       ageing,
       // The WHOLE book, ordered by the value actually sitting on the floor.
       // It was capped at 50, which made the item list disagree with the
@@ -1570,34 +1809,34 @@ app.get("/", async (c) => {
       // whole, and agreeing with itself matters more than the bytes.
       items: rmRows
         .map((r) => {
-          // rm_batches.rm_id references raw_materials.id, NOT item_code —
+          // rm_batches.rmId references raw_materials.id, NOT item_code —
           // VERIFIED: 1,344 of 1,344 batches match on id and 0 match on
           // item_code, so keying this on the code would value every item at 0.
           const m = byMaterial.get(r.id);
           return {
-            code: r.item_code, description: r.description, group: r.item_group,
-            uom: r.base_uom, balanceQty: num(r.balance_qty),
+            code: r.itemCode, description: r.description, group: r.itemGroup,
+            uom: r.baseUom, balanceQty: num(r.balanceQty),
             valueSen: Math.round(m?.valueSen ?? 0), oldestDays: m?.oldestDays ?? null,
           };
         })
         .sort((a, b) => b.valueSen - a.valueSen),
       finishedGoods: finishedGoods.sort((a, b) => (b.available + b.reserved) - (a.available + a.reserved)),
     },
+    service: serviceSec.rows[0] ?? null,
     employee: {
       workers: workerRows.map((w) => ({
         id: w.id,
-        empNo: w.emp_no,
+        empNo: w.empNo,
         name: w.name,
-        dept: w.department_code,
+        dept: w.departmentCode,
         role: w.position,
         status: w.status,
-        targetPct: num(w.efficiency_threshold_pct) || null,
-        hoursPerDay: num(w.working_hours_per_day) || null,
+        targetPct: num(w.efficiencyThresholdPct) || null,
+        hoursPerDay: num(w.workingHoursPerDay) || null,
         // Headcount rule copied from the real Employees page: ACTIVE only,
         // and TEST* accounts excluded (owner 2026-07-11, same rule Payroll
         // uses so headcount tallies system-wide).
-        countsToHeadcount:
-          w.status === "ACTIVE" && !/^TEST/i.test(w.emp_no ?? ""),
+        countsToHeadcount: countsToHeadcount(w.status, w.empNo),
       })),
       attendance,
       // The house workforce metric. `attendance` above is kept for clock-in /
@@ -1615,6 +1854,7 @@ app.get("/", async (c) => {
       },
     },
   };
+  });
 
   // Redact at the response boundary, not by skipping the queries above — the
   // sections cross-reference each other too much to gate mid-computation
@@ -1630,7 +1870,9 @@ app.get("/", async (c) => {
     purchase: canPurchase ? rawPayload.purchase : null,
     inventory: canInventory ? rawPayload.inventory : null,
     employee: canWorkers ? rawPayload.employee : null,
+    service: canService ? rawPayload.service : null,
     production: canProduction ? rawPayload.production : null,
+    lim: canProduction ? rawPayload.lim : null,
     availability: {
       ...rawPayload.availability,
       delivery: canDelivery
@@ -1645,9 +1887,15 @@ app.get("/", async (c) => {
       inventory: canInventory
         ? rawPayload.availability.inventory
         : { live: false, rows: 0, reason: "insufficient permission: inventory:read" },
+      service: canService
+        ? rawPayload.availability.service
+        : { live: false, reason: "insufficient permission: service-cases:read" },
       employee: canWorkers
         ? rawPayload.availability.employee
         : { live: false, workers: 0, attendanceRows: 0, reason: "insufficient permission: workers:read" },
+      lim: canProduction
+        ? rawPayload.availability.lim
+        : { live: false, reason: "insufficient permission: production-orders:read" },
       production: canProduction
         ? rawPayload.availability.production
         : { live: false, rows: 0, reason: "insufficient permission: production-orders:read" },

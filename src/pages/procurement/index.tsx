@@ -19,6 +19,7 @@ import { useUrlState, useUrlBatch } from "@/lib/use-url-state";
 import { useSessionState } from "@/lib/use-session-state";
 import { matchesCompanyFilter } from "@/lib/company-dimension";
 import { buildPoDetailListingAoa } from "@/lib/doc-detail-listings";
+import { poItemsSearchText } from "@/lib/po-items-search";
 import {
   Plus, ShoppingBag, Truck, Trash2, X, Package,
   FileText, Download, Filter, AlertTriangle,
@@ -791,6 +792,10 @@ function POFormDialog({
 // ============================================================
 // PO STATUS OPTIONS
 // ============================================================
+// Searched even though there is no column for it: a PO must stay findable by
+// the raw material it bought (internal code / supplier SKU / description).
+const PO_ALWAYS_SEARCH_KEYS = ["itemsSearchText"];
+
 const ALL_PO_STATUSES = [
   { value: "", label: "All Statuses" },
   { value: "DRAFT", label: "Draft" },
@@ -907,8 +912,14 @@ export default function ProcurementPage() {
     () => (supResp?.success ? supResp.data ?? [] : Array.isArray(supResp) ? supResp : []),
     [supResp]
   );
+  // `itemsSearchText` flattens each PO's line items (internal code / supplier
+  // SKU / description) so the grid's global search finds the PO a raw material
+  // was bought under — see `alwaysSearchKeys` on the DataGrid below.
   const purchaseOrders: PurchaseOrder[] = useMemo(
-    () => (poResp?.success ? poResp.data ?? [] : Array.isArray(poResp) ? poResp : []),
+    () => {
+      const rows: PurchaseOrder[] = poResp?.success ? poResp.data ?? [] : Array.isArray(poResp) ? poResp : [];
+      return rows.map((po) => ({ ...po, itemsSearchText: poItemsSearchText(po.items) }));
+    },
     [poResp]
   );
   // Whole-dataset PO header rows for the summary widgets (counts + aging), so a
@@ -2125,6 +2136,7 @@ export default function ProcurementPage() {
             maxHeight="calc(100vh - 300px)"
             emptyMessage={tab === "DRAFT" ? "No draft purchase orders." : "No purchase orders found."}
             onSearchChange={setGridSearch}
+            alwaysSearchKeys={PO_ALWAYS_SEARCH_KEYS}
             gridId="purchase-orders-list"
             exportName="purchase-orders"
             exportSheetLabel="Purchase Orders"

@@ -1,5 +1,9 @@
 # Service & Repair — Module Guide
 
+> **Addendum 2026-09-21:** only the "Dashboard Top issues" gotcha was added and checked, against
+> `src/api/lib/{dashboard-service-slice,service-issue-stats}.ts`, `src/api/routes/service-cases.ts`
+> L34-60 / L241-288 and `tests/db-schema.json`; everything else keeps the stamp below.
+>
 > **Last verified: 2026-08-19** against `src/api/routes/{service-cases,service-orders,sales-orders,stock-adjustments}.ts`,
 > `src/lib/{repair-scope,so-mode}.ts`, `src/api/lib/bom-wip-breakdown.ts`,
 > `src/api/routes/sales-orders/_helpers.ts`, all four `src/pages/service-order*/` trees
@@ -87,7 +91,7 @@ legacy path) plus component-level picks on `affectedProducts[].components`, all 
 5. **Repair scope resolution** — component picks canonicalized (`canonicalizeComponentPicks` `repair-scope.ts:524`),
    validated write-side (`validateRepairScopeInput` `:292`), and job-card WIPs filtered by scope
    (`filterWipsByRepairScope` `:410` / `filterWipsByRepairComponents` `:443`) using `deriveTopLevelWipKey`.
-6. **Return → scrap** — `app.post("/:id/returns")` `service-orders.ts:1468` records a return;
+6. **Return → scrap** — `app.post("/:id/returns")` `service-orders.ts:1481` records a return;
    `app.post("/:id/returns/:rid/scrap")` `:1669` scraps it, writing `stock_movements` / `cost_ledger` (mind idempotency).
 
 ## Key functions / sections (locate-to-function)
@@ -108,14 +112,15 @@ legacy path) plus component-level picks on `affectedProducts[].components`, all 
 | `sanitizeRootCauses` / `synthesizeRootCauses` | `src/api/routes/service-cases.ts:178 / 208` | RCA normalization |
 | `app.post("/")` (SV-order create) | `src/api/routes/service-orders.ts:556` | Plural SV order create (`ensureServiceOrderMigrations` `:531`) |
 | `app.put("/:id/mode")` | `src/api/routes/service-orders.ts:1214` | Set SV-order mode/scope |
-| `app.post("/:id/returns")` | `src/api/routes/service-orders.ts:1468` | Record a return line |
-| `app.post("/:id/returns/:rid/scrap")` | `src/api/routes/service-orders.ts:1669` | Scrap a return → `stock_movements`/`cost_ledger` |
+| `app.post("/:id/returns")` | `src/api/routes/service-orders.ts:1481` | Record a return line |
+| `app.post("/:id/returns/:rid/scrap")` | `src/api/routes/service-orders.ts:1682` | Scrap a return → `stock_movements`/`cost_ledger` |
 | `deriveTopLevelWipKey` | `src/api/lib/bom-wip-breakdown.ts:125` | THE shared WIP-key formula (repair scope + job cards) |
 | `validateRepairScopeInput` | `src/lib/repair-scope.ts:292` | Strict write-side repair-scope validator |
 | `filterWipsByRepairScope` / `filterWipsByRepairComponents` | `src/lib/repair-scope.ts:410 / 443` | Job-card WIP filter by scope/components |
 | SV-order pricing skip | `src/api/routes/sales-orders.ts:1926` | Service orders keep the operator-typed price (0 = free); flag read at `:1841` |
 
 ## Gotchas
+- **Dashboard "Top issues" (2026-09-21).** `src/api/lib/service-issue-stats.ts` is the single definition: a case with several root causes counts once per distinct cause (rows can sum past the case total; % = share of cases); no cause = the always-shown "Not yet analysed" row; avg close = whole days created to closed over CLOSED cases; prevention values are `PENDING`(shown "Planned")/`IN_PROGRESS`/`DONE`/`NOT_NEEDED`, none = "No prevention recorded". The slice self-applies `rootcauses`/`responsibleunit` (same idempotent ALTER as `service-cases.ts` `ensureCaseLinkColumns`) and falls back to legacy `root_cause_category`. How many live cases actually have a root cause is UNMEASURED.
 - **Two directories, near-identical names.** `service-order/*` (SINGULAR) = re-exports of Sales pages in SV mode via
   `useSOMode()` (`src/lib/so-mode.ts`); `service-orders/*` (PLURAL) = the real returns/repair module. Don't confuse them.
 - **The singular pages have NO own data model** — the four files under `src/pages/service-order/` are 6–18 lines each and are literally `export { default } from "@/pages/sales…"`. They hit `/api/sales-orders` with `isServiceOrder:true`. Changing service-order behavior usually means editing `src/pages/sales/*` (NOT a fork) or `sales-orders.ts`. Never fork the sales list — it is now **2,181 lines** (the in-code comment still says ~1,400).
