@@ -5,6 +5,7 @@
 > **Last verified: 2026-09-22** — branch `feat/service-dashboard-root-cause-graph` added below (stacked on the staging sync PR).
 > **Last verified: 2026-09-22** — branch `fix/service-dashboard-other-catch-all` added below (open, pushed, no PR).
 > **Last verified: 2026-09-22** — branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
+> **Last verified: 2026-09-22** — branch `claude/nice-sanderson-27be32` (dashboard Service > Top issues redesign) added below (open, its entry is the newest). Previously: branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
 > **Last verified: 2026-08-14** — branch `fix/on-time-delivery-and-decisions` added below (open, not merged, its entry is the newest; its bug ids were renumbered 130-133 → 140-143 because `feat/leave-entitlement` claimed 130-133 and merged to `main` first). Previously: branch `feat/leave-entitlement` (MERGED as #326). Previously: branch `feat/job-card-completed-at` added below (open, not merged). Previously: branch `fix/security-posture` added below (open, not merged). Previously: PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
 > **Last verified: 2026-08-14** — branch `feat/pcb-calculation` added below (open, not merged, its entry is the newest). Previously: branch `feat/job-card-completed-at` added below (open, not merged). Previously: branch `fix/security-posture` added below (open, not merged). Previously: PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
 > **Last verified: 2026-08-14** — restamped on branch `fix/money-input-parsing` (its entry is the newest below, not yet deployed). PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
@@ -38,6 +39,26 @@ for here instead of loading 335 or 481 stuff every time I press".
   the browse page, which no longer holds delivered rows on other tabs.
 - [x] tests + `tsc -p tsconfig.app.json` (exit 0); docs restamped (CODEBASE-MAP delivery index, modules/delivery.md, BUG-HISTORY).
 - [ ] Bug fix → `main`. Live tab-switch timing on prod is UNMEASURED (dev server needs login).
+## 2026-09-22 — 🔵 Dashboard Service > Top issues: charts that fit the question (branch `claude/nice-sanderson-27be32`, feature → `staging`)
+
+Owner (screenshot of the sub-panel): "see what graph you can produce better than the current one … maybe don't use all bar chart".
+
+**What was wrong.** Four identical bar tables (cause / unit / prevention / products) answered four different questions with one
+picture; the bar only repeated the Cases column. Customer (5 open) and Production (0 open) drew the same bar. The "Top 3 causes by day"
+line smoothed counts of 0/1/3 into curves between days that never happened. Products charted bars for counts of 1. The most actionable
+fact ("7 of 18 have no root cause") was a sentence.
+
+**Done.** `src/pages/dashboards/ServiceIssuesPanel.tsx` rewritten (no recharts): **Analysis progress** meters (root cause recorded → unit
+set → prevention recorded → prevention done; amber = the missing share), **Cases by cause** bar split closed|open (rows still click to
+filter the Report list), **Days to close** one dot per closed case + an avg tick (inline SVG), **cause × day heatmap** on the period's fixed
+day/month grid (empty days visible), **products** as a table with the top recorded cause. Pure helpers in `src/api/lib/service-issue-stats.ts`:
+`analysisProgress`, `closeDaysByCause`, `causeGrid`, `dayBuckets`, `monthBuckets`, `topCauseByProduct` (+5 tests, suite 18/18).
+`TallyList` and `causeOnly` kept for the Performance panel. `/m` twin: unit + prevention lists became one Analysis-progress list.
+`tsc -p tsconfig.app.json --noEmit`: exit 0. Docs: CODEBASE-MAP Service row + `modules/service-repair.md` gotcha restamped.
+
+**Not verified in a browser.** The dev server proxies `/api` to prod behind a login the agent cannot enter; the panel was server-rendered
+with 18 sample cases across monthly / ytd / range periods and the empty + `causeOnly` states (all markers present). **Look at it on
+staging before merging** — label collisions in the heatmap at 31 day columns on a narrow window are the thing to check.
 
 ---
 

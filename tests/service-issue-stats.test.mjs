@@ -189,3 +189,81 @@ test("preventionNotDone: drops done / not-needed / cancelled / unanalysed-open; 
     ["2026-09-01", 6], ["2026-09-04", 3], ["2026-09-05", 2], ["2026-09-06", 3],
   ]);
 });
+
+// ---- 2026-09-22 redesign: meters, per-case close days, cause × day grid ----
+import {
+  analysisProgress, closeDaysByCause, causeGrid, dayBuckets, monthBuckets, topCauseByProduct,
+} from "../src/api/lib/service-issue-stats.ts";
+
+test("analysisProgress: one ratio per step; 'Planned' prevention is recorded but not done", () => {
+  const steps = analysisProgress([
+    c({ causes: ["PRODUCTION"], unit: "QC", prevention: "DONE" }),
+    c({ causes: ["CUSTOMER"], prevention: "PENDING" }),
+    c({ prevention: "PENDING" }),
+    c({}),
+  ]);
+  const get = (k) => steps.find((s) => s.key === k);
+  assert.deepEqual(steps.map((s) => s.key), ["cause", "unit", "prevention", "done"]);
+  assert.equal(get("cause").done, 2);
+  assert.equal(get("cause").pct, 50);
+  assert.equal(get("unit").done, 1);
+  assert.equal(get("prevention").done, 3);
+  assert.equal(get("done").done, 1);
+  assert.equal(analysisProgress([])[0].pct, 0, "empty input is 0%, not NaN");
+});
+
+test("closeDaysByCause: every closed case's days under each of its causes, sorted; open cases add none", () => {
+  const rows = closeDaysByCause([
+    c({ causes: ["PRODUCTION", "DESIGN"], status: "CLOSED", closedDate: "2026-09-11" }), // 10
+    c({ causes: ["PRODUCTION"], status: "CLOSED", closedDate: "2026-09-04" }),           // 3
+    c({ causes: ["PRODUCTION"] }),                                                        // open
+    c({ status: "CLOSED", closedDate: "2026-09-06" }),                                    // unanalysed, 5
+  ]);
+  const get = (k) => rows.find((r) => r.key === k);
+  assert.deepEqual(get("PRODUCTION").days, [3, 10]);
+  assert.equal(get("PRODUCTION").count, 3);
+  assert.equal(get("PRODUCTION").avg, 6.5);
+  assert.deepEqual(get("DESIGN").days, [10]);
+  assert.deepEqual(get(NONE_KEY).days, [5]);
+  assert.equal(rows.at(-1).key, NONE_KEY);
+});
+
+test("causeGrid: fixed bucket list keeps empty days; a case outside the buckets is ignored; NONE row only when it has cases", () => {
+  const buckets = dayBuckets("2026-09-01", "2026-09-04");
+  assert.deepEqual(buckets, ["2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04"]);
+  const g = causeGrid(
+    [
+      c({ causes: ["CUSTOMER"], createdDate: "2026-09-01" }),
+      c({ causes: ["CUSTOMER", "PRODUCTION"], createdDate: "2026-09-03" }),
+      c({ causes: ["CUSTOMER"], createdDate: "2026-09-03" }),
+      c({ causes: ["CUSTOMER"], createdDate: "2026-08-31" }), // before the window
+    ],
+    buckets,
+    (d) => d,
+  );
+  assert.deepEqual(g.buckets, buckets);
+  assert.deepEqual(g.rows.map((r) => r.key), ["CUSTOMER", "PRODUCTION"], "no unanalysed row when every case has a cause");
+  assert.deepEqual(g.rows[0].cells, [1, 0, 2, 0]);
+  assert.deepEqual(g.rows[1].cells, [0, 0, 1, 0]);
+  assert.equal(g.max, 2);
+  assert.equal(causeGrid([], buckets, (d) => d).rows.length, 0);
+});
+
+test("monthBuckets: January through the given month", () => {
+  assert.deepEqual(monthBuckets(2026, 3), ["2026-01", "2026-02", "2026-03"]);
+  assert.equal(monthBuckets(2026, 0).length, 1, "never empty");
+});
+
+test("topCauseByProduct: most-recorded cause per product; null when none of its cases is analysed", () => {
+  const m = topCauseByProduct([
+    c({ products: ["A", "B"], causes: ["PRODUCTION"] }),
+    c({ products: ["A"], causes: ["PRODUCTION", "DESIGN"] }),
+    c({ products: ["A"], causes: ["PRODUCTION"] }),
+    c({ products: ["D"], causes: ["SALES", "DESIGN"] }), // a tie breaks alphabetically
+    c({ products: ["C"] }),
+  ]);
+  assert.equal(m.get("A"), "PRODUCTION");
+  assert.equal(m.get("B"), "PRODUCTION");
+  assert.equal(m.get("C"), null);
+  assert.equal(m.get("D"), "DESIGN");
+});
