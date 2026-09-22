@@ -391,7 +391,7 @@ authoritative current detail.** New here? Start with [ONBOARDING-PATH.md](ONBOAR
   - MAIN PAGE (tab host / nav) — L322-426. **FINANCE sidebar slimmed 2026-09-22** (`src/components/layout/sidebar.tsx`, groups Reports / Daily / Monthly / Debtors / Creditors / e-Invoice / Setup, 32 entries): Customer Payment, Supplier Payment, Other Creditor Payments, Other Debtor Receipts, Other Debtor/Creditor names, Other Creditor Bills, Monthly P&L, Cost Structure retired from the MENU only — every tab key / route still answers its URL. Hosts: `PlHubTab` (P&L / Monthly P&L / Cost Structure as one entry, `?tab=plmonthly|coststruct` still land on their view), `OtherPartyBillsTab` folds the names list + settle manager (`FoldSection`), `ApInvoicesTab` raises/edits other-creditor bills inline, Payment Vouchers links the Supplier Payment page for FX / advance knock-off / TF. Guard `tests/finance-sidebar.test.mjs`.
   - Overview tab + cards (Cleanup, Contra, LandedCost, DocNumbering, GstRate, Fye, StockMap, Aging) — L427-1320
   - Chart of Accounts tab (COATab) — L1321-1905
-  - Journal Entries tab + JournalEntryForm — L1906-2332
+  - Journal Entries tab + JournalEntryForm (`JournalsTab`, anchor by name) — DataGrid list (single click selects for the batch bar; **double-click or ⋮ › View detail opens the line-level modal** with DR/CR totals + the same actions as the menu, 2026-09-22), JournalEntryForm for new / draft edit. Guard `tests/jv-detail-view.test.mjs`.
   - Accounts Receivable tab (ARControlPanel + ARTab) — L2333-2661
   - Accounts Payable tab (APControlPanel + APTab) — L2662-3081
   - P&L report tabs (CostStructure, CostExpenseClasses, MonthlyTrend, MonthlyPl, PLStatement + ExportButtons) — L3082-3806
@@ -1598,7 +1598,7 @@ you are changing auth behaviour you want L227–417 and nothing else.
 
 | Frontend page | API route | Primary tables | Tests |
 |---|---|---|---|
-| `src/pages/finance-dashboard.tsx` — `/finance-dashboard` (`src/dashboard-routes.tsx:472`; sidebar FORECASTING → "Dashboard"); 6 cards, monthly or calendar-quarterly (1263) | `src/api/routes/accounting.ts` — `GET /dashboard` (`:10109`), SWR-cached | `accounting_dashboard_snapshot` (runtime-created at `accounting.ts:12062`) over the ledger + `kv_config['forecast_pnl']` (`:10192`) | `tests/dashboard-forecast-pct.test.mjs` (BUG-2026-08-06-002 only) |
+| `src/pages/finance-dashboard.tsx` — `/finance-dashboard` (`src/dashboard-routes.tsx:472`; sidebar FORECASTING → "Dashboard"); 6 cards, monthly or calendar-quarterly (1263) | `src/api/routes/accounting.ts` — `GET /dashboard` (`:10109`), SWR-cached | `accounting_dashboard_snapshot` (runtime-created at `accounting.ts:12083`) over the ledger + `kv_config['forecast_pnl']` (`:10192`) | `tests/dashboard-forecast-pct.test.mjs` (BUG-2026-08-06-002 only) |
 | `src/pages/forecast.tsx` — `/forecast` (`src/dashboard-routes.tsx:471`; sidebar FORECASTING → "Forecast P&L"); planning grid, zero contact with the books (575) | `src/api/routes/accounting.ts` — `GET /forecast` (`:10743`), `PUT /forecast` (`:10758`), `GET /coa` (`:829`), `GET /pnl/section-map` (`:9827`), `GET /labor/departments` (`:9561`) | `kv_config` row `key='forecast_pnl'` (`:10789`) — **no forecast table exists**; plus `chart_of_accounts` for the line structure | **NONE** |
 
 > **Name collision — read this before touching either.** `/forecast` (`src/pages/forecast.tsx`,
