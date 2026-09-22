@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-22** — branch `feat/po-search-line-items` added below (open, not merged, its entry is the newest).
 > **Last verified: 2026-08-14** — branch `fix/on-time-delivery-and-decisions` added below (open, not merged, its entry is the newest; its bug ids were renumbered 130-133 → 140-143 because `feat/leave-entitlement` claimed 130-133 and merged to `main` first). Previously: branch `feat/leave-entitlement` (MERGED as #326). Previously: branch `feat/job-card-completed-at` added below (open, not merged). Previously: branch `fix/security-posture` added below (open, not merged). Previously: PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
 > **Last verified: 2026-08-14** — branch `feat/pcb-calculation` added below (open, not merged, its entry is the newest). Previously: branch `feat/job-card-completed-at` added below (open, not merged). Previously: branch `fix/security-posture` added below (open, not merged). Previously: PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
 > **Last verified: 2026-08-14** — restamped on branch `fix/money-input-parsing` (its entry is the newest below, not yet deployed). PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
@@ -13,6 +14,20 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
 ---
+
+## 2026-09-22 — 🔵 PO list: search finds a PO by the raw material bought on it (branch `feat/po-search-line-items`)
+
+Staff ask (screenshots, 2026-09-22): "search a raw material item and see which Purchase
+Order(s) it was purchased under — PO no, supplier, date, qty, status". The PO grid's
+global search only saw column values; `items` stringified to `[object Object]`.
+
+- [x] `src/lib/po-items-search.ts` — `poItemsSearchText(items)` flattens internal code /
+  supplier SKU (dual-keyed) / description per line.
+- [x] `src/pages/procurement/index.tsx` — each row carries `itemsSearchText`; DataGrid gets
+  `alwaysSearchKeys={["itemsSearchText"]}`. Typing a search already flips the fetch to the
+  whole dataset (search-safe rule), so every PO is covered, not just the current page.
+- [x] `tests/po-items-search.test.mjs`; `tsc -p tsconfig.app.json` exit 0.
+- [ ] PR → merge → verify live on prod (search `ASC1010F` on /procurement).
 
 ## 2026-09-22 — ✅ Houzs 财务模块对照采纳计划（owner「开工直接做到完」,五 phase 全部上线 #452-#456）
 
