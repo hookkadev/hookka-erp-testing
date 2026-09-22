@@ -133,7 +133,7 @@ offsets pointing past the end of their own file.
 | `/api/job-cards` | `src/api/routes/job-cards.ts` | `GET /` <sub>:100</sub><br>`GET /summary` <sub>:261</sub><br>`GET /:id/events` <sub>:430</sub><br>`GET /duedate-original-backup` <sub>:536</sub><br>`GET /completion-pic-original-backup` <sub>:688</sub> | gated |
 | `/api/audit-events` | `src/api/routes/audit-events.ts` | `GET /` <sub>:49</sub> | gated |
 | `/api/dashboard/overview` | `src/api/routes/dashboard-overview.ts` | `GET /` <sub>:49</sub> | gated |
-| `/api/dashboard/prototype` | `src/api/routes/dashboard-prototype.ts` | `GET /` <sub>:297</sub> | gated |
+| `/api/dashboard/prototype` | `src/api/routes/dashboard-prototype.ts` | `GET /` <sub>:293</sub> | gated |
 | `/api/dashboard/finance` | `src/api/routes/dashboard-finance.ts` | `GET /` <sub>:42</sub><br>`PUT /valuation` <sub>:110</sub> | gated |
 | `/api/kpi` | `src/api/routes/kpi.ts` | `GET /me` <sub>:277</sub><br>`GET /users/:id` <sub>:286</sub><br>`GET /payout/:id` <sub>:301</sub><br>`PUT /payout/:id` <sub>:308</sub><br>`PUT /checklist/:kpiKey` <sub>:380</sub><br>`GET /checklist/:kpiKey` <sub>:444</sub><br>`POST /survey/:kpiKey` <sub>:466</sub><br>`POST /survey/:kpiKey/link` <sub>:523</sub><br>`PUT /rating/:kpiKey` <sub>:590</sub><br>`GET /survey/:kpiKey` <sub>:643</sub><br>`GET /library` <sub>:664</sub><br>`GET /people` <sub>:710</sub><br>`GET /catalog` <sub>:759</sub><br>`GET /assignments/:id` <sub>:771</sub><br>`PUT /assignments/:id` <sub>:784</sub><br>`PUT /kpi/:kpiKey/assignees` <sub>:847</sub> | gated |
 | `/api/mdm` | `src/api/routes/mdm.ts` | `GET /review-queue` <sub>:89</sub><br>`POST /review-queue/:id/dismiss` <sub>:198</sub><br>`POST /review-queue/:id/merge` <sub>:212</sub><br>`POST /detection/run` <sub>:232</sub> | gated |

@@ -198,6 +198,13 @@ staging data (`kahx…`) as SUPER_ADMIN: 500 before, 200 after, every section `l
 `withSnakeKeys` and pins that every `prepare` in the route is inside a `section()`.
 Class: [BUG-CLASSES C23](BUG-CLASSES.md).
 
+**Superseded 2026-09-22 (staging↔main sync, PR #463).** `main` had rewritten the same route
+independently (`/dashboard-experimental`, `src/pages/dashboards/`), reading every row
+camelCased — 0 snake reads — so the sync took that version and the `withSnakeKeys` wrap in
+`section()` no longer exists. `withSnakeKeys` stays in `db-pg.ts`; the guard test now
+asserts the route has no `r.snake_case` read and every `prepare` is inside `section()`.
+Nothing about this entry's root cause changes — it is how the bug is prevented that moved.
+
 ---
 
 ## BUG-2026-09-11-180 — the Production Overview was served another page's payload, and rendered its emptiness as fact `production` `infrastructure` `caching` 🟢
