@@ -9,7 +9,7 @@
 // tests/db-schema.json), so "overdue" = age > SERVICE_OVERDUE_DAYS.
 // ---------------------------------------------------------------------------
 import { ensureApprovalColumns } from "./service-approval";
-import { parseCauses, parseProductLabels } from "./service-issue-stats";
+import { parseProductLabels, parseRootCauses, type RootCauseEntry } from "./service-issue-stats";
 
 /** Open/in-progress cases older than this many days are flagged overdue. */
 export const SERVICE_OVERDUE_DAYS = 3;
@@ -28,6 +28,7 @@ export type ServiceCaseLite = {
   approvalKind: string | null;
   approvalStatus: string | null;
   causes: string[]; // distinct root-cause categories; [] = not yet analysed
+  rootCauses: RootCauseEntry[]; // category + detail per root-cause block (dashboard "Root cause" graph)
   unit: string | null; // responsibleunit
   prevention: string | null; // prevention_status
   preventionOwner: string | null; // prevention_owner
@@ -90,7 +91,7 @@ export async function buildServiceSlice(
     .prepare(
       `SELECT id, case_no, customer_name, status, created_at, closed_at,
               issue_description, approval_kind, approval_status,
-              root_cause_category, rootcauses, responsibleunit,
+              root_cause_category, root_cause_details, rootcauses, responsibleunit,
               prevention_status, prevention_owner, prevention_action, affected_product_ids
          FROM service_cases
         ORDER BY created_at DESC
@@ -102,6 +103,11 @@ export async function buildServiceSlice(
     if (!createdDate) return [];
     const status = String(r.status ?? "");
     const createdRaw = String(r.created_at ?? r.createdAt);
+    const rootCauses = parseRootCauses(
+      r.rootcauses ?? r.rootCauses,
+      r.root_cause_category ?? r.rootCauseCategory,
+      r.root_cause_details ?? r.rootCauseDetails,
+    );
     return [{
       id: String(r.id),
       caseNo: str(r, "case_no", "caseNo"),
@@ -113,7 +119,8 @@ export async function buildServiceSlice(
       approvalKind: str(r, "approval_kind", "approvalKind"),
       approvalStatus: str(r, "approval_status", "approvalStatus"),
       // rootcauses / responsibleunit are runtime-added lowercase columns: read dual-keyed.
-      causes: parseCauses(r.rootcauses ?? r.rootCauses, r.root_cause_category ?? r.rootCauseCategory),
+      causes: [...new Set(rootCauses.map((e) => e.category))],
+      rootCauses,
       unit: str(r, "responsibleunit", "responsibleUnit"),
       prevention: str(r, "prevention_status", "preventionStatus"),
       preventionOwner: str(r, "prevention_owner", "preventionOwner"),
