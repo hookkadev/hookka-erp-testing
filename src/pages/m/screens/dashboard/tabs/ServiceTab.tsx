@@ -22,8 +22,8 @@ import {
 } from "../../../../dashboards/dashboard-shared-lib";
 import { SERVICE_CASES_NAV_HREF, serviceCaseHref, serviceCasesHref } from "../../../../dashboards/service-case-link-lib";
 import {
-  NONE_KEY, agingSplit, avgClose, byCause, byPrevention, byUnit, causeKeys, causeLabel, causeTrend,
-  closeTrend, openedVsClosed, preventionNotDone, topProducts, type TallyRow,
+  NONE_KEY, agingSplit, avgClose, byCause, byPrevention, byRootCause, byUnit, causeKeys, causeLabel, causeTrend,
+  closeTrend, openedVsClosed, preventionNotDone, topCauses, topProducts, type TallyRow,
 } from "../../../../../api/lib/service-issue-stats";
 import { ListRow, MobileCard, StatusPill } from "../../../components";
 import { resolveStatus, SERVICE_CASE_STATUS_MAP } from "../../../config/helpers";
@@ -48,6 +48,7 @@ type ServiceCase = {
   ageDays: number | null;
   daysOverdue: number;
   causes?: string[];
+  rootCauses?: { category: string; detail: string }[];
   unit?: string | null;
   prevention?: string | null;
   products?: string[];
@@ -243,10 +244,11 @@ function Issues({ cases, period, onPickCause, causeOnly }: {
 }) {
   const ytd = period.mode === "ytd";
   const causes = useMemo(() => byCause(cases), [cases]);
+  const rootCauses = useMemo(() => byRootCause(cases), [cases]);
   const units = useMemo(() => byUnit(cases), [cases]);
   const prevention = useMemo(() => byPrevention(cases), [cases]);
   const products = useMemo(() => topProducts(cases, 10), [cases]);
-  const top3 = useMemo(() => causes.filter((r) => r.key !== NONE_KEY && r.count > 0).slice(0, 3), [causes]);
+  const top3 = useMemo(() => topCauses(causes, 3), [causes]);
   const trend = useMemo(
     () => causeTrend(cases, top3.map((r) => r.key), (d) => (ytd ? d.slice(0, 7) : d.slice(5))),
     [cases, top3, ytd],
@@ -256,10 +258,10 @@ function Issues({ cases, period, onPickCause, causeOnly }: {
 
   return (
     <>
-      <MSection title="Issues by root cause" hint={`${fmtN(cases.length)} cases`}>
+      <MSection title="Issues by category" hint={`${fmtN(cases.length)} cases`}>
         <Note>
-          Cases logged in the selected period. A case with several root causes counts once under each, so rows can add up to
-          more than the total. Avg close = average days from logged to closed, closed cases only.
+          The Category column of the Service Cases list. Cases logged in the selected period; a case with several categories
+          counts once under each, so rows can add up to more than the total. Avg close = average days from logged to closed, closed cases only.
           {onPickCause ? " Tap a row to list those cases." : ""}
         </Note>
         {cases.length > 0 ? (
@@ -270,6 +272,14 @@ function Issues({ cases, period, onPickCause, causeOnly }: {
           </div>
         ) : null}
         <MRankList items={tallyItems(causes, cases.length, onPickCause)} valueHeading="Cases" emptyText={empty} />
+      </MSection>
+
+      <MSection title="Root cause">
+        <Note>
+          From each case's Root Cause &amp; Prevention panel: the category plus the detail recorded under it (department, supplier,
+          3PL, salesperson or sub-reason).
+        </Note>
+        <MRankList items={tallyItems(rootCauses, cases.length, null)} valueHeading="Cases" emptyText={empty} />
       </MSection>
 
       {causeOnly ? null : (
@@ -291,7 +301,7 @@ function Issues({ cases, period, onPickCause, causeOnly }: {
         </>
       )}
 
-      <MSection title="Top 3 causes" hint={ytd ? "by month" : "by day"}>
+      <MSection title="Top 3 categories" hint={ytd ? "by month" : "by day"}>
         {top3.length === 0 ? (
           <MobileCard><MState kind="empty" text="No analysed cases in this period." /></MobileCard>
         ) : (

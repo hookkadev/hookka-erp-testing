@@ -1,6 +1,10 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-22** — branch `fix/delivery-tab-switch-pagination` added below (open, its entry is the newest). Previously: branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
 > **Last verified: 2026-09-22** — branch `feat/po-supplier-searchable-select` added below (open, pushed, no PR). NOTE: the 2026-09-22 Houzs entry below still carries committed merge-conflict markers (`<<<<<<< HEAD` … `>>>>>>> 85e58b40`) on `main`; left for its owner to resolve.
+> **Last verified: 2026-09-22** — branch `feat/service-dashboard-root-cause-graph` added below (stacked on the staging sync PR).
+> **Last verified: 2026-09-22** — branch `fix/service-dashboard-other-catch-all` added below (open, pushed, no PR).
+> **Last verified: 2026-09-22** — branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
 > **Last verified: 2026-08-14** — branch `fix/on-time-delivery-and-decisions` added below (open, not merged, its entry is the newest; its bug ids were renumbered 130-133 → 140-143 because `feat/leave-entitlement` claimed 130-133 and merged to `main` first). Previously: branch `feat/leave-entitlement` (MERGED as #326). Previously: branch `feat/job-card-completed-at` added below (open, not merged). Previously: branch `fix/security-posture` added below (open, not merged). Previously: PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
 > **Last verified: 2026-08-14** — branch `feat/pcb-calculation` added below (open, not merged, its entry is the newest). Previously: branch `feat/job-card-completed-at` added below (open, not merged). Previously: branch `fix/security-posture` added below (open, not merged). Previously: PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
 > **Last verified: 2026-08-14** — restamped on branch `fix/money-input-parsing` (its entry is the newest below, not yet deployed). PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
@@ -15,7 +19,132 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
-## 2026-09-22 — 🔵 PO create: searchable supplier picker (branch `feat/po-supplier-searchable-select`, pushed, no PR yet)
+## 2026-09-22 — 🔵 Delivery page: tab switch "stuck" + per-status pagination (branch `fix/delivery-tab-switch-pagination`)
+
+Owner ask (screenshot of /delivery on Pending Delivery, 2026-09-22): (1) "when on pending
+delivery and I click to other planning / pending dispatch it stuck"; (2) "implement pagination
+for here instead of loading 335 or 481 stuff every time I press".
+
+- [x] Ask 1 — tab switch: one URL write per click (tab + page reset batched via `useUrlBatch`;
+  the old `setPage(1)` effect fired a SECOND navigation after every tab change), and the
+  page-level scroll-restore no longer holds `window.scrollY` in React state (a full 7k-line
+  page re-render per scroll event, interrupting the tab-switch transition).
+- [x] Ask 2 — DO tabs fetch ONLY their own statuses, 50 per page (`GET /api/delivery-orders?
+  status=A,B&page&limit`); the old browse read the newest 200 DOs of EVERY status and filtered
+  in the browser, so "Delivered" showed whatever delivered rows fell inside that window.
+  Planning / Pending Delivery are one server-computed payload (`/ready-planning`), already
+  virtualized and NOT refetched on tab press — no paging added there.
+- [x] "Delivered (MTD)" card moves server-side (`/stats.deliveredMtd`) — it was counted off
+  the browse page, which no longer holds delivered rows on other tabs.
+- [x] tests + `tsc -p tsconfig.app.json` (exit 0); docs restamped (CODEBASE-MAP delivery index, modules/delivery.md, BUG-HISTORY).
+- [ ] Bug fix → `main`. Live tab-switch timing on prod is UNMEASURED (dev server needs login).
+
+---
+
+## 2026-09-22 晚 — ✅ 侧栏瘦身 + Receipts 三门合一 + PV 附件/打印合订（owner「全部做」；#468 / #471 / #472 全上线已验）
+
+owner 两问「side bar 很多功能重复是吗？」「能像 2990 那样 export pv with attachment 吗？」→ 只检查报告（真重复：付钱三门、收钱三门、账单清单两处、账龄两处、四个 dashboard；放错组：Stock/Stock Take/Labour 在 Maintenance）→「全部做，包括 receipts 三门合一和 PV 附件」。
+
+- **#468 PV 附件 + 扫描自动附 + 打印合订**：files.ts 上传/删除主体抽成 `storeUploadedFile` / `removeStoredFile`（MIME 白名单+魔数嗅探+Supabase Storage+file_assets+audit 只此一条路，POST/DELETE /api/files 成薄壳）；accounting.ts `GET/POST /payment-vouchers/:id/attachments`、`DELETE …/:fileId`（作废凭证不收新档；Check 起证据锁不给删；删必须属于该凭证）；清单带 attachmentCount。UI：行 📎 计数、展开区 Attachments 块（open/add/remove）、`print + files` 合订（图片原样、PDF 经 pdfjs 逐页转图 → VoucherSpec.appendix 每页一张 A4 带标题；任一附件渲染不了整份拒印）；Scan Bills 扫完自动附到它建的 draft（上传失败留言不丢凭证）；Scan Receipt 存档时附上；printVouchers 等图片解码完才开打印框。**prod 实测**：draft pv-d926fc4e 上传 116B PNG → 列出/计数 1/stream 原样 116B → Prepare→Check 后删被拒「Evidence is locked…」→ reject 回 draft 删成功 → void 后上传被拒「A cancelled voucher takes no attachments」。守卫 tests/pv-attachments.test.mjs。
+- **#471 Receipts 三门合一**：accounting › Receipts = `ReceiptsHubTab`：New Customer Receipt / New Other Debtor Receipt / New Official Receipt 三按钮 + 一张合并清单（CUST/OD/OR 标签、芯片 All/Customer/Other debtor/Official/Cancelled、搜索/日期、批量打印导出、展开看分配/行、print/edit/void 各走各单据端点）。**表单零复制**：`CustomerReceiptForm` 从 /invoices/payments 页抽出并导出（该页也渲染同一组件），`OtherPartyPaymentForm` 从 OtherPartyPaymentsManager 抽出（两个 manager + hub 共用），`OfficialReceiptForm` 从旧 ReceiptsTab 抽出；客户收据 voucher/预付 helper 迁到 src/lib/customer-receipt.ts（react-refresh 不许组件模块导出普通函数；两个旧测试改指向）。**prod 验**：42 receipts（CUSTOMER 40 / OFFICIAL 2 / CANCELLED 5）三门表单都能开。守卫 tests/receipts-hub.test.mjs。
+- **#472 侧栏瘦身 40→32**：Reports(Overview/P&L/Cash Flow/BS/TB/GL/Stock Summary)·Daily(Payment Vouchers/Receipts/Fund Transfer/Cash Position)·Monthly(Journal Entries/Cash Book/Stock Take/Labour/Fixed Assets/Self-check/Corrections)·Debtors(Debtor Aging/Other Debtor Bills/Credit Notes/Debit Notes)·Creditors(Creditor Aging/AP Invoices/Supplier Discount)·e-Invoice·Setup(COA/Stock Mapping/Opening Stock/Opening Balance/Audit Log/Settings)。**只从菜单退下、URL 全保留**：Customer Payment、Supplier Payment（PV 页顶链接，管外币 PI/预付 knock off/TF 还款）、Other Creditor Payments/Other Debtor Receipts（折进 Bills 页 FoldSection）、Other Debtor/Creditor 名单（折进 Bills 页与 AP Invoices）、Other Creditor Bills（AP Invoices「New AP bill」就地开编辑器）、Monthly P&L/Cost Structure（`PlHubTab` 一入口三 view，旧深链落各自 view）。三个 Dashboard 没动（owner 未裁）。守卫 tests/finance-sidebar.test.mjs。**prod 验**：侧栏六组齐、P&L 三 view 齐。
+- 同日早前：#465 AP Payment（见下段）。全套 4733 绿。
+
+---
+
+## 2026-09-22 晚 — ✅ Payment Vouchers「AP Payment」并入（#465 已上线已验）（owner「Payment voucher 没有包含ap payment?」→ 贴 Houzs 截图「最好是这样」）
+
+**漏项承认**：Houzs 采纳 Phase 1 只把 Expense Payment 改名+装梯子，「ap payment 和 payment voucher 一起」没做——
+付 PI 仍在 /invoices/supplier-payments、付 other creditor bill 仍在 Other Creditor Payments tab，两者都没审批梯子。
+
+**做法（对照截图：New AP Payment / New Payment Voucher 两按钮 + ALL/DRAFT/PREPARED/CHECKED/APPROVED/ADVANCE OPEN/CANCELLED 芯片）**：
+- 后端 `pv_kind='AP'` 凭证：`party_kind` SUPPLIER（PI + 可选 `advance_sen` 预付）| OTHER（other creditor bills），勾的单在新表
+  `payment_voucher_allocs`（self-apply `ensurePvApColumns`，记录 0235/0216）；同一条梯子 Draft→Prepared→Checked→Approved。
+- **Approve / Post now 那一下由付款页原有引擎写结算单**：抽出 `buildSupplierPaymentCreate`（supplier-payments.ts，POST / 也改用它——
+  行为不变的重构）与 `buildOtherPartyPaymentCreate`（accounting.ts），`paymentNo = pvNo`——账龄/对账/GL/Cash Position 看到的就是一张普通付款；
+  凭证本身不写分录。取消 = 结算单自己的 lifecycle core（`buildSupplierPaymentLifecycle` 导出 / `buildOtherPartyPaymentLifecycle`），
+  从 Supplier Payment 页作废的也会在 PV 清单读成 CANCELLED（清单 JOIN 结算单的 document_lifecycle）。已过账 AP 凭证不给就地改（Houzs：cancel 重开）。
+- `GET /payment-vouchers/open-bills`：该债主未付单，**扣掉别的未过账凭证已勾金额**（Houzs「已被别的未过账 voucher 勾走的会扣掉」），
+  编辑中的凭证自身除外；外币 PI 只显示不给勾（付款日汇率在 Supplier Payment 页）；预付只限 supplier。
+- UI：两按钮、七芯片带计数、AP 表单（Supplier/Other 切换 + SearchableSelect 债主 + 未付单勾选/部分金额 + 预付 + Total）、
+  行 AP/PV 标签、展开显示勾的单、ADVANCE OPEN 芯片=已过账 supplier AP 凭证预付未 knock off、打印「Bills settled」直接用勾单、
+  AP Invoices 每行 `pay` 深链 `?pay=<PI|AP>:<id>:<partyId>` 直开表单并勾满该单。
+- 守卫 `tests/pv-ap-payment.test.mjs` 9 断言（两个 builder 各恰好 2 个调用点、AP 不走 pvPostingStatements、reservation 只算未过账、
+  lifecycle 顺序、restate 拒、schema fixture）；money-input 守卫登记 `if (apMoneyError)` 闸 + `apSen` 预算；全套 4706 绿。
+- 顺手：docs/WORK-TRACKER.md 顶部残留的 `<<<<<<< HEAD` 冲突标记（上一轮 rebase 遗留，已在 main）清掉。
+
+**prod 已验（#465 merge cba0fcdb，deploy ✓，1 sen 两条路各走完整梯子后立即作废）**：①other creditor 路（Houzs Century OCB-2606-002）：draft 带勾单、open-bills 立刻显示 reserved 1 sen（available 119,999）、0 分录 0 结算行；prepare→check 铸 HPV-2609-046 仍 0 分录、bill 未动；approve → Other Creditor Payments 出现 HPV-2609-046（ACTIVE，1 sen，310-0010）、bill paid 1/outstanding 119,999、GL DR 405-0000 1 / CR 310-0010 1（sourceType other_party_payment）；从 PV 页 void → 结算单 lifecycle VOID、bill paid 归 0、PV 读 VOID。②supplier 路（OCEAN SKY PI-2608-091）：check 铸 HPV-2609-047 → approve → Supplier Payment 页出现同号（ACTIVE，1 行）、PI paid 1 / PARTIAL_PAID、GL DR 400-0000 1 / CR 310-0010 1；void → PI paid 0 / CONFIRMED、supplier payment VOID、PV VOID。UI：深链 ?pay=AP:opb-ced66add-2:op-1bcbd71b 直开 New AP Payment、债主已选、OCB-2606-002 勾满 1,200.00；芯片 ALL/DRAFT/PREPARED/CHECKED/APPROVED 91/ADVANCE OPEN/CANCELLED 7；两张测试凭证带 AP 标签灰显。
+
+---
+
+## 2026-09-22 — 🔵 Service dashboard: "Issues by category" + new "Root cause" graph (branch `feat/service-dashboard-root-cause-graph-v2`, rebuilt off `main` — the original was stacked on the now-defunct `chore/sync-staging-from-main`)
+
+Ask (owner, screenshots): "first one should be called issues by category, because root cause is inside
+the service case where it labels Root Cause & Prevention — implement a new graph for the root cause".
+The first panel tallies the same field as the list page's Category column, so it is now titled
+**Issues by category** (and "Top 3 categories"). New **Root cause** panel = category + the detail the
+operator recorded under it on the case (department / supplier / 3PL / driver / salesperson / SOP /
+sub-reason; first named field wins, 60 chars). Feed slice adds `rootCauses[{category,detail}]` and
+reads `root_cause_details`; `byRootCause` / `rootCauseDetail` / `parseRootCauses` in
+`service-issue-stats.ts` with tests (17/17). Desktop `ServiceIssuesPanel` + `/m` `ServiceTab`.
+`tsc -p tsconfig.app.json` clean. Not browser-verified. Prod UNMEASURED. Builds on the "Other no
+longer headlines Top issues" fix below (same branch history, both cherry-picked onto `main` cleanly).
+
+## 2026-09-22 — 🔵 Service dashboard: "Other" no longer headlines Top issues (branch `fix/service-dashboard-other-catch-all`, pushed, no PR yet)
+
+Ask (owner): "the dashboard for service cases, the top issue there is category of other 2 please fix".
+Traced create modal → PUT sanitizer → feed slice → `byCause`: nothing defaults a case to OTHER, so the
+two cases were tagged Other by hand and simply out-counted the real causes. **Prod UNMEASURED** (prod
+read denied in this session) — which two cases they are is unknown; click the Other row on the
+dashboard to list them and re-categorise if they are mis-tagged. Code fix: `OTHER` is a catch-all —
+`tally` ranks it below every real cause (above Not yet analysed) and new `topCauses()` excludes it from
+Top 3 on desktop (`ServiceIssuesPanel`) and `/m` (`ServiceTab`). Still counted, still clickable.
+Test added in `tests/service-issue-stats.test.mjs` (14/14), `tsc -p tsconfig.app.json` clean. Bug fix →
+target `main`. Docs: `CODEBASE-MAP.md` ServiceView row restamped.
+
+---
+
+## 2026-09-22 — 🔵 PO list: search finds a PO by the raw material bought on it (branch `feat/po-search-line-items`)
+
+Staff ask (screenshots, 2026-09-22): "search a raw material item and see which Purchase
+Order(s) it was purchased under — PO no, supplier, date, qty, status". The PO grid's
+global search only saw column values; `items` stringified to `[object Object]`.
+
+- [x] `src/lib/po-items-search.ts` — `poItemsSearchText(items)` flattens internal code /
+  supplier SKU (dual-keyed) / description per line.
+- [x] `src/pages/procurement/index.tsx` — each row carries `itemsSearchText`; DataGrid gets
+  `alwaysSearchKeys={["itemsSearchText"]}`. Typing a search already flips the fetch to the
+  whole dataset (search-safe rule), so every PO is covered, not just the current page.
+- [x] `tests/po-items-search.test.mjs`; `tsc -p tsconfig.app.json` exit 0.
+- [ ] PR → merge → verify live on prod (search `ASC1010F` on /procurement).
+
+## 2026-09-22 — 🔵 Dashboard: Day / Month / YTD period nav redesign (branch `feat/dashboard-date-nav-redesign`, pushed, PR #461 → staging)
+
+Ask (owner): expand the dashboard's Monthly/YTD toggle to Day/Month/YTD, each with its own
+arrow-stepping granularity, center label and click-to-pick popover. Same day as
+BUG-2026-09-22-002 (the Today/Yesterday preset fix, PR #458, merged to `main` first — this
+branch is cut from that tip).
+
+Built entirely on the EXISTING `Period` shape (`dashboard-shared-lib.ts`) — no new mode. Which
+of the three views a period reads as is DERIVED (`mode==="ytd"` → YTD; a range preset or a set
+`day` → Day; else → Month), so every existing `Period` consumer (`inFocus`, `inPeriod`,
+`previousPeriod`, the URL round-trip, ~40 `periodLabel` call sites across the dashboard views)
+needed zero changes. Day steps ±1 calendar day capped at today; Month/YTD keep the unchanged,
+already-tested `stepPeriod`. New: `stepDay`, `yearsWithData` (both `dashboard-shared-lib.ts`),
+`MonthGrid` (`dashboard-shared.tsx`, a year-stepped 12-month picker for the Month view's
+popover — months with no data disabled, same bound the stepper already uses). Mirrored on both
+surfaces that share this logic: the desktop `PeriodPicker` and the `/m` `PeriodChip` sheet.
+Same branch: the experimental-dashboard header subtitle now warns "Data may be inaccurate. Use
+with caution" instead of claiming "Live where noted".
+
+`tests/dashboard-period.test.mjs`: 13/13 pass (7 new). Full `npm test`: 4,700/4,700 pass, 0
+fail. `tsc -p tsconfig.app.json --noEmit`: exit 0. **Not browser-verified** — dev server needs a
+production login this session does not have. **`staging` is currently ~58 commits behind
+`main`**, so PR #461's commit list is noisy (every commit `main` has that `staging` doesn't,
+plus mine) — not a defect in this branch. Docs restamped: `CODEBASE-MAP.md`
+(dashboard-prototype.tsx / dashboard-shared.tsx / dashboard-shared-lib.ts rows).
+
+## 2026-09-22 — ✅ PO create: searchable supplier picker (branch `feat/po-supplier-searchable-select`, MERGED #459)
 
 Ask (owner, screenshot of New Purchase Order): "the supplier dropdown change to a searchable
 dropdown for more friendly usage". Done in `src/pages/procurement/create.tsx` only — native
@@ -31,7 +160,6 @@ APPROVED、0233/0214 记录、POST 支持 saveAs:"draft"(不铸号不过账)、P
 POST /:id/approval + /approval-batch(prepare/withdraw/reject(要 reason)/check(铸正式号)/approve
 (此刻才过账,复用唯一 pvPostingStatements)、权限键 accounting:check/approve、lifecycle 未过账=
 纯状态翻转、restate 拒未过账;守卫 tests/pv-approval.test.mjs 9 断言)。旧立即过账路径原样保留,
-<<<<<<< HEAD
 新页上线前零破坏。**BUG-2026-09-22-177（#456 热修）**:0159 的 status CHECK 只许 POSTED|VOID → 草稿 DRAFT 被拒;self-apply 放宽 + create 报 DB 原话。**prod 全梯子实测**:draft 0 分录→prepare→reject 无理由被挡→check 铸 HPV-2609-045 仍 0 分录→Checked 锁编辑→板子 AWAITING 出现→approve 过账 CR 1 sen→void 归零 ✓。**Self-check 首跑抓到**:AP 控制高 72,196.03、AR 控制低 168,790(待向 owner 解读)。**PR 1.2**(UI):PaymentsTab 就地升级=「Payment Vouchers」页(tab+侧栏改名):
 表单双按钮 Save as draft / Post now(编辑草稿走 PUT、编辑已过账走 restate);行内梯子按钮
 (Draft: edit/Prepare→;Prepared: edit/withdraw/reject/Check→;Checked: reject/Approve & post)、
@@ -39,9 +167,6 @@ POST /:id/approval + /approval-batch(prepare/withdraw/reject(要 reason)/check(�
 **Cash Position 板新增「AWAITING APPROVAL」卡**(/cash-position 回 awaitingApproval[] +
 awaitingCheckedSen;Checked=硬承诺金额、Draft/Prepared 软显示)= owner 09-03 说的「老板还没
 approve」正式落地。Repo 已迁 hookkadev 组织(remote+gh default 已更新)。**Phase 2 ✅(同 PR)**:新 GET /ap-invoices(OCB CREDITOR 全量 kind=AP + purchase_invoices 非 DRAFT 只读镜像 kind=PI,状态归一 OPEN/PAID/CANCELLED,totals 分 AP/PI)+ 新 tab「AP Invoices」(Debtor / Creditor 组,侧栏同名):三张合计卡、Kind/Status/搜索过滤、PI 行链回 /procurement/pi、AP 行链回 OCB tab、New AP bill / Pay 两按钮直通。**Procurement PI 页零改动**(owner「本身purchase invoice 那边要保留」)。**Phase 3 ③ ✅(同 PR)**:POST /bank-reco/book-line——银行行就地记账:钱出=PV(立即过账路,approval_state=APPROVED)、钱进=OR,金额锁死=行金额,新单据的银行腿同 batch 配对该行(立刻离开 unbooked);拒开账前/已封月/已配/已 ignore。UI:Cash Book 每条 not-in-book 行「book as expense / book as receipt」→ 行下内联表单(科目/对方/描述)→ Book & match。= owner 7 月剩的 5 条工资税费就地一键。**Phase 3 ①②④ ✅(PR 3b)**:①严格月锁——kv bank_reco_strict_lock(GET/PUT /bank-reco/strict-lock,**默认 OFF**=owner「别启动先」),ON 时 finalize 要 balanced 且 unbooked=0、re-open 必填 reason;所有 re-open 无论开关一律写 kv bank_reco_reopen:<acct>:<month>:<ts>(actor/reason/旧快照)留痕;Cash Book 报表卡加开关 checkbox(ON 要确认)。②串链 GET /bank-reco/chain——按 bank_reco_meta 逐月检查 gap(缺月点名)+ mismatch(本月 opening≠上月 closing),卡上红字/绿勾。④反向组合 POST /bank-reco/match-split——一条银行行拆给 N 条腿:新表 bank_line_leg_splits(self-apply,0234/0215 记录)、行 matchedLegId=哨兵 SPLIT、loader 把每 split 行当虚拟 claiming line 喂同一 claim() 闸、report 行侧 SPLIT 行=全部腿月内且清才 booked、match/match-group taken 检查兼看 split 表、unmatch 释放整组、GET /bank-reco matchedLegIds 含 split 腿;UI「split across…」多选腿 Σ=行才亮。守卫 +2(35/35)。**Phase 1 ③ 打印对照 Houzs ✅**:VoucherSpec +watermark/+detail/签名带 name+on;PV 打印=四栏签名(Prepared/Checked/Approved 印梯子真人+日期,Received 空栏)、未过账水印 DRAFT / NOT YET APPROVED、作废 CANCELLED、供应商付款附「Bills settled by this payment」明细表(打印时按需拉 payment-detail);GET /payment-vouchers 回 preparedByName/checkedByName/approvedByName/createdByName。附件合订(print-bundle)待 Phase 5 附件功能一起。**Phase 4 ✅(同 PR)**:①**Self-check** tab(Monthly Operation 组)——纯前端聚合既有探针成一页红/黄/绿卡:AP 控制 vs 供应商单(ap-reconciliation 逐项)、AR 控制 vs 客户发票、试算表、审批梯子上未过账 PV(>7 天变红)、accrued 未付、板子勾了账单没确认、每个银行户口的对账单串链;每卡链到修的地方;Run again 重跑。②**Corrections** tab——GET /corrections 从 ledger 腿家族挖:*_restate_rev/post:<stamp>=Edited(冲/重记金额)、*_void=Cancelled、opening_balance_reversal、kv bank_reco_reopen=Reco re-opened(带 reason);月份筛/最近 90 天,actor 名字解析,CSV/Excel/PDF 导出。③统一 reason:目前 PV reject + reco re-open 必填留痕;其他单据的 edit/cancel 先只显示轨迹(表底注明)。**Phase 5 ✅(PR 5)**:①**Scan Bills 批量**——PV 页新按钮,一次拖 ≤20 张账单,逐张 OCR→每张一张 **draft** PV(走 saveAs:draft 梯子,不铸号不过账),科目从同 payee 上一张凭证带;读不出/新 payee 无科目=skipped 列原因不猜;完成后直接在页面 Prepare/Check/Approve 批量走。②**打印页脚**——kv finance_print_footer.pv(通用 /api/kv-config),PV 页顶「Print footer: … edit」小卡编辑多行文字,印在签名栏上方(空=不印);VoucherSpec +footerText。③ OR 收据簿升级(钱确认才铸正式号)= Hookka 没有卡机/转账待确认流程,现行 OR 立即正式已够——**不做**。④ 清单批量打印 PDF = 既有 BatchActionsBar 已支持——**已有**。
-=======
-新页上线前零破坏。
->>>>>>> 85e58b4097f89dd8cd5aaf1d9daf0a0771e4486e
 
 背景:Houzs(trading)ERP 的 Claude 写了 `Houzs-Finance-Module-User-Guide.md` +
 `Houzs-Trading-Finance-Module-Spec.md`(在 Desktop\Claude\Hookka\,不在 repo),指定用途=

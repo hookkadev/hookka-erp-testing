@@ -2030,6 +2030,7 @@
   "payment_vouchers": [
     "accrual_account",
     "accrued",
+    "advance_sen",
     "approval_state",
     "approved_at",
     "approved_by",
@@ -2040,11 +2041,14 @@
     "date",
     "description",
     "id",
+    "party_id",
+    "party_kind",
     "pay_from",
     "payee",
     "prepared_at",
     "prepared_by",
     "product_line",
+    "pv_kind",
     "pv_no",
     "reject_reason",
     "settled_at",
@@ -3842,5 +3846,13 @@
     "created_at",
     "leg_id",
     "line_id"
+  ],
+  "payment_voucher_allocs": [
+    "amount_sen",
+    "doc_id",
+    "doc_kind",
+    "id",
+    "line_order",
+    "voucher_id"
   ]
 }

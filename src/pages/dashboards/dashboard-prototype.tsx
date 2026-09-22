@@ -124,7 +124,7 @@ export default function DashboardPrototypePage() {
         <PageHeader
           className="max-md:hidden"
           title="Dashboard"
-          subtitle="Live where noted"
+          subtitle="Experimental dashboard: Data may be inaccurate. Use with caution"
           actions={<Tabs tabs={TABS} value={tab} onChange={setTab} variant="pill" />}
         />
 

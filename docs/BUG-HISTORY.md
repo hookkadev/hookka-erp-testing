@@ -34,7 +34,7 @@ Entries themselves stay newest-first.
 
 ---
 
-## BUG-2026-09-22-003 — Efficiency % inflated when Working Hours weren't fully entered (numerator/denominator span mismatch) `employee-performance` `efficiency` 🟡
+## BUG-2026-09-22-004 — Efficiency % inflated when Working Hours weren't fully entered (numerator/denominator span mismatch) `employee-performance` `efficiency` 🟡
 
 🟡 **Fix in progress** (code shipped, prod-impact UNMEASURED — see below) · owner-reported
 ("efficiency rate 要对 — 来上班几小时 vs 产出多少"; non-production hours must be deducted).
@@ -83,6 +83,52 @@ dev session. Shipped `scripts/check-efficiency-day-gate.mjs` (read-only): it pri
 Efficiency % per worker for a range and lists every mover and every >100% row. **The session
 with `HOOKKA_PROD_DB_URL` must run it before this is marked 🟢** — confirm full-data periods are
 a no-op and the movers are exactly the unentered-hours periods.
+
+---
+
+## BUG-2026-09-22-003 — Delivery page: switching stage tabs felt stuck, and every tab paged the newest 200 DOs of every status `ui-frontend` `perf` `delivery` 🟢
+
+🟢 **Fixed** · owner-reported (screenshot on Pending Delivery: "when I click to planning /
+pending dispatch it stuck … implement pagination instead of loading 335 or 481 every time").
+
+**Root cause (two, both on the tab-switch path of `src/pages/delivery/index.tsx`).**
+1. *Two navigations per click.* `setActiveTab(key)` wrote the URL, then a `useEffect` on
+   `activeTab` called `setPage(1)` — a SECOND `setSearchParams` navigation, so every tab
+   click rendered this 7k-line page twice. React Router 7 schedules each navigation as a
+   `startTransition`, so nothing paints until the whole render finishes: the click looks
+   ignored until both renders are done.
+2. *Scroll position held in React state.* `useSessionState` stored `window.scrollY` and the
+   scroll listener called its setter on every scroll event — a full page re-render per
+   event, each one an urgent update that interrupts and restarts the in-flight tab-switch
+   transition.
+   Separately, the DO list was paged GLOBALLY: `GET /api/delivery-orders?page&limit=200`
+   with no status filter, then `filteredOrders` narrowed by tab in the browser. So
+   "Delivered 481" showed only the delivered rows inside the newest-200 window, the footer's
+   "Page 1 / 3" paged across all statuses, and Planning / Pending Delivery fetched 200 DO
+   rows they never display.
+
+**Fix.** `goTab` — the page's only tab setter — writes tab + page reset in ONE
+`useUrlBatch` call (the effect is gone). Scroll restore writes sessionStorage directly
+(rAF-throttled) under the same key, no React state. `doBrowseUrl(tab, page)` fetches only
+what the tab shows: stage tabs → `?status=<their statuses>&limit=50` (new `?status=` comma
+list on the route's paginated branch, bound as `AND status IN (...)`); Packing List → newest
+200 live DOs (DRAFT/LOADED/IN_TRANSIT, the only ones `runPlBulkTransition` can move); PO tabs
+→ no request. The "Delivered (MTD)" card, previously counted off the browse page, is now
+`/stats.deliveredMtd` — one COUNT outside the signature-keyed snapshot (a month rollover never
+changes the signature), in Malaysian time (`startOfMonthMYT`), and it counts INVOICED too,
+the Delivered tab's own rule. Planning / Pending Delivery get no paging: they are one
+server-computed `/ready-planning` payload, already virtualized, and NOT refetched on tab
+press.
+
+**Regression test.** `tests/delivery-list-filters.test.mjs` — status-list parsing, the MYT
+month boundary against ISO `deliveredAt` text, and a source guard that the route binds
+`status IN` and the page sends `&status=` per tab and has no `setPage(1)` effect. Delivery /
+DO / scope / URL-state suites: 213 pass. `tsc -p tsconfig.app.json --noEmit`: exit 0.
+
+**Not verified live.** The dev server proxies to prod behind a login; the click-to-paint
+time before/after is **UNMEASURED**. Verify on prod after deploy: Pending Delivery → Pending
+Dispatch paints at once; Delivered shows "Page 1 / 10" (481 ÷ 50) and the footer count
+matches the tab badge; the MTD card is non-zero if anything was delivered this month.
 
 ---
 

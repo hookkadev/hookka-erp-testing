@@ -4,7 +4,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  NONE_KEY, byCause, byUnit, byPrevention, topProducts, causeTrend, avgClose, closeTrend, openedVsClosed, agingSplit, preventionNotDone, parseCauses, parseProductLabels,
+  NONE_KEY, OTHER_KEY, RC_SEP, topCauses, byCause, byRootCause, rootCauseDetail, parseRootCauses, rootCauseLabel, byUnit, byPrevention, topProducts, causeTrend, avgClose, closeTrend, openedVsClosed, agingSplit, preventionNotDone, parseCauses, parseProductLabels,
 } from "../src/api/lib/service-issue-stats.ts";
 
 const c = (o) => ({ status: "OPEN", createdDate: "2026-09-01", closedDate: null, ...o });
@@ -23,6 +23,59 @@ test("multi-cause case counts once per distinct cause; % is share of cases", () 
   assert.equal(get(NONE_KEY).count, 1);
   assert.equal(get(NONE_KEY).label, "Not yet analysed");
   assert.equal(rows.at(-1).key, NONE_KEY, "unanalysed row is always last");
+});
+
+test("Other is a catch-all: sorts below real causes, above unanalysed, never a Top 3 cause", () => {
+  const rows = byCause([
+    c({ causes: ["OTHER"] }), c({ causes: ["OTHER"] }), c({ causes: ["OTHER"] }),
+    c({ causes: ["PRODUCTION"] }), c({ causes: ["DESIGN"] }),
+    c({ causes: [] }),
+  ]);
+  assert.deepEqual(rows.map((r) => r.key), ["DESIGN", "PRODUCTION", OTHER_KEY, NONE_KEY]);
+  assert.equal(rows.find((r) => r.key === OTHER_KEY).count, 3, "still counted, just not ranked");
+  assert.deepEqual(topCauses(rows, 3).map((r) => r.key), ["DESIGN", "PRODUCTION"]);
+});
+
+test("root cause = category + the detail recorded under it; one row per distinct pair", () => {
+  const rows = byRootCause([
+    c({ rootCauses: [{ category: "TRANSPORT", detail: "GDEX" }] }),
+    c({ rootCauses: [{ category: "TRANSPORT", detail: "GDEX" }, { category: "TRANSPORT", detail: "GDEX" }] }),
+    c({ rootCauses: [{ category: "TRANSPORT", detail: "J&T" }] }),
+    c({ rootCauses: [{ category: "PRODUCTION", detail: "" }] }),
+    c({ rootCauses: [{ category: "OTHER", detail: "" }, { category: "OTHER", detail: "" }, { category: "OTHER", detail: "" }] }),
+    c({ causes: ["CUSTOMER"] }), // feed cached before rootCauses shipped → bare category
+    c({}),
+  ]);
+  assert.deepEqual(rows.map((r) => [r.label, r.count]), [
+    ["Transport — GDEX", 2],
+    ["Customer — no detail recorded", 1],
+    ["Production — no detail recorded", 1],
+    ["Transport — J&T", 1],
+    ["Other — no detail recorded", 1],
+    ["Not yet analysed", 1],
+  ]);
+  assert.equal(rootCauseLabel(`TRANSPORT${RC_SEP}GDEX`), "Transport — GDEX");
+});
+
+test("rootCauseDetail picks the one naming field per category, trims and caps it", () => {
+  assert.equal(rootCauseDetail({ departmentName: " Sewing ", notes: "x" }), "Sewing");
+  assert.equal(rootCauseDetail({ supplierId: "sup-1", supplierName: "HUP LEE" }), "HUP LEE");
+  assert.equal(rootCauseDetail({ threePlCompany: "GDEX", driverName: "Ali" }), "GDEX");
+  assert.equal(rootCauseDetail({ driverName: "Ali" }), "Ali");
+  assert.equal(rootCauseDetail({ notes: "wrong  measurement\n(door)" }), "wrong measurement (door)");
+  assert.equal(rootCauseDetail({ supplierId: "sup-1" }), "", "an id alone is not a label");
+  assert.equal(rootCauseDetail(null), "");
+  assert.equal(rootCauseDetail("{bad json"), "");
+  assert.equal(rootCauseDetail({ notes: "a".repeat(80) }).length, 60);
+});
+
+test("parseRootCauses: multi array with details, legacy single columns as fallback", () => {
+  assert.deepEqual(
+    parseRootCauses('[{"category":"TRANSPORT","details":{"threePlCompany":"GDEX"}},{"category":"OTHER"}]', "PRODUCTION", '{"departmentName":"Sewing"}'),
+    [{ category: "TRANSPORT", detail: "GDEX" }, { category: "OTHER", detail: "" }],
+  );
+  assert.deepEqual(parseRootCauses(null, "PRODUCTION", '{"departmentName":"Sewing"}'), [{ category: "PRODUCTION", detail: "Sewing" }]);
+  assert.deepEqual(parseRootCauses("[]", null, null), []);
 });
 
 test("days-to-close averages CLOSED cases only; open counted separately", () => {

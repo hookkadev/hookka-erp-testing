@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { useUrlState, useUrlStateNumber } from "@/lib/use-url-state";
-import { useSessionState } from "@/lib/use-session-state";
+import { useUrlState, useUrlStateNumber, useUrlBatch } from "@/lib/use-url-state";
 import { useToast } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -551,6 +550,24 @@ const TAB_DO_STATUSES: Record<string, DOStatus[]> = {
 // PO-based tabs (show production orders, not delivery orders)
 const PO_TABS = new Set(["planning", "pending_delivery"]);
 
+// The DO rows each tab fetches (2026-09-22). A stage tab pages through ITS OWN
+// statuses, server-side, DO_PAGE_SIZE at a time. Packing List takes the newest
+// 200 LIVE DOs — the only ones its PL-level bulk buttons can move
+// (runPlBulkTransition: DRAFT → LOADED, LOADED/IN_TRANSIT → DELIVERED). The PO
+// tabs show production orders, so they fetch no DOs at all (null = no request).
+// Before this, every tab read the newest 200 DOs of EVERY status and filtered
+// them in the browser: "Delivered" showed only the delivered rows that fell in
+// that window, and "Page 1 / 3" paged across all statuses at once.
+const DO_PAGE_SIZE = 50;
+function doBrowseUrl(tab: string, page: number): string | null {
+  if (tab === "packing_list") {
+    return "/api/delivery-orders?page=1&limit=200&status=DRAFT,LOADED,IN_TRANSIT";
+  }
+  const statuses = TAB_DO_STATUSES[tab];
+  if (!statuses) return null;
+  return `/api/delivery-orders?page=${page}&limit=${DO_PAGE_SIZE}&status=${statuses.join(",")}`;
+}
+
 // Identifier keys that must stay searchable on every delivery grid even when
 // the operator hides that column via the "Columns" menu. Passed to DataGrid's
 // `alwaysSearchKeys` so a DO/PO is always findable by SO no., customer
@@ -895,7 +912,17 @@ export default function DeliveryPage() {
   const [readyPOs, setReadyPOs] = useState<ReadyPORow[]>([]);
   const [loading, setLoading] = useState(true);
   // Active inner tab — URL-synced for the same reason as pageTab above.
-  const [activeTab, setActiveTab] = useUrlState<string>("tab", "planning");
+  const [activeTab] = useUrlState<string>("tab", "planning");
+  const setUrl = useUrlBatch();
+  // The ONLY way this page changes tab: tab + page reset in ONE URL write.
+  // The old shape — setActiveTab, then a `setPage(1)` effect on activeTab —
+  // fired a second navigation, and with it a second full render of this
+  // 7k-line page, on every click (see useUrlBatch for the race it also risks).
+  // "planning" is the default and lives in the URL as no param at all.
+  const goTab = useCallback(
+    (key: string) => setUrl({ tab: key === "planning" ? null : key, page: null }),
+    [setUrl],
+  );
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [detailDO, setDetailDO] = useState<DeliveryOrderRow | null>(null);
   // Per-line customer PO / SO no. for the open DO. The /api/sales-orders
@@ -1122,12 +1149,10 @@ export default function DeliveryPage() {
   // edits: it commits only on an explicit Save). Nothing shared at this level.
 
   // ---------- Pagination (DO list only) ----------
-  // Server-side pagination for the DO fetch; PO-based tabs (planning,
-  // pending_delivery) and the other sibling fetches (POs, SOs, customers)
-  // remain full-set and unaffected.
-  // 200 — same rationale as sales/invoices: big enough that daily working
-  // set fits on page 1 so search works normally.
-  const PAGE_SIZE = 200;
+  // Server-side, per stage tab (doBrowseUrl): 50 rows of THAT tab's statuses
+  // per page. PO-based tabs (planning, pending_delivery) and the sibling
+  // fetches (POs, SOs, customers) remain full-set and unaffected. The page is
+  // reset to 1 by goTab, in the same URL write as the tab.
   const [page, setPage] = useUrlStateNumber("page", 1);
   // Mirrors the DO grid's global search box (fed via DataGrid onSearchChange).
   // Drives cross-status search: while non-empty, filteredOrders spans every
@@ -1141,17 +1166,18 @@ export default function DeliveryPage() {
   const [search, setSearch] = useState("");
 
   // ---------- Fetch ----------
-  // Browse load — ALWAYS paginated, NEVER search-filtered. This is the set the
-  // page derives from: linkedPOIds (→ Pending Delivery / readyPOs), deliveredMTD,
-  // tab counts. It must stay whole regardless of search, or POs already on
-  // other DOs wrongly resurface as "ready" the moment you type a search term.
+  // Browse load — the DO rows the CURRENT tab shows and nothing more (see
+  // doBrowseUrl). NEVER search-filtered: search has its own fetch below.
+  // Nothing whole-table is derived from this page of rows any more — counts,
+  // tab money and Delivered (MTD) come from /stats, the already-on-a-DO set
+  // from /linked-po-ids.
   const { data: doRaw, loading: doLoading, refresh: refreshDOs } = useCachedJson<{
     success?: boolean;
     data?: DeliveryOrder[];
     page?: number;
     limit?: number;
     total?: number;
-  }>(`/api/delivery-orders?page=${page}&limit=${PAGE_SIZE}`);
+  }>(doBrowseUrl(activeTab, page));
   // Search load — SEPARATE from the browse load so it never disturbs the
   // derivations above. When the operator is searching, hit the server with the
   // term (high limit) so matches come from the WHOLE table across every status,
@@ -1175,34 +1201,45 @@ export default function DeliveryPage() {
     byStatus?: Record<string, number>;
     valueByStatus?: Record<string, number>;
     total?: number;
+    deliveredMtd?: number;
   }>("/api/delivery-orders/stats");
+  // Per-tab: the server counts only the statuses this tab fetches.
   const totalDOsServer = doRaw?.total ?? (doRaw?.data?.length ?? 0);
-  const totalPages = Math.max(1, Math.ceil(totalDOsServer / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(totalDOsServer / DO_PAGE_SIZE));
 
-  // Reset to page 1 when the active tab changes.
+  // Scroll position restoration — keyed per active tab so each tab remembers
+  // its own scroll position independently. sessionStorage directly, NOT React
+  // state: holding window.scrollY in state re-rendered this whole page on
+  // every scroll event, and each of those urgent updates interrupted and
+  // restarted the (transition-scheduled) tab-switch render — the "click a tab
+  // and nothing happens" feel. Same key as the old useSessionState, so saved
+  // positions carry over.
   useEffect(() => {
-    setPage(1);
-    // setPage is stable (memoized inside useUrlStateNumber).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab]);
-
-  // Scroll position restoration — keyed per active tab so each tab
-  // remembers its own scroll position independently.
-  const [savedScroll, setSavedScroll] = useSessionState<number>(
-    `delivery:scrollY:${pageTab}:${activeTab}`,
-    0,
-  );
-  useEffect(() => {
-    if (savedScroll > 0 && window.scrollY === 0) {
-      window.scrollTo(0, savedScroll);
+    const key = `hookka:ss:delivery:scrollY:${pageTab}:${activeTab}`;
+    let saved = 0;
+    try {
+      saved = Number(sessionStorage.getItem(key)) || 0;
+    } catch {
+      /* storage disabled — restore is best-effort */
     }
+    if (saved > 0 && window.scrollY === 0) window.scrollTo(0, saved);
+    let raf = 0;
     const onScroll = () => {
-      setSavedScroll(window.scrollY);
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        try {
+          sessionStorage.setItem(key, String(window.scrollY));
+        } catch {
+          /* quota / disabled — best-effort */
+        }
+      });
     };
     window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
-    // savedScroll is read on mount only.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      if (raf) cancelAnimationFrame(raf);
+    };
   }, [pageTab, activeTab]);
   // 2026-05-12 perf: fields=minimal drops piece_pics + ~20 unused PO fields
   // from the response. include=jobCards keeps the per-PO JC array (DO page
@@ -2249,7 +2286,7 @@ export default function DeliveryPage() {
     }
     if (tabsHit.size === 1) {
       const only = Array.from(tabsHit)[0];
-      if (only !== activeTab) setActiveTab(only);
+      if (only !== activeTab) goTab(only);
     }
     // activeTab intentionally excluded — see comment above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2289,21 +2326,9 @@ export default function DeliveryPage() {
   const pendingDispatchCount = uniqueDOsByStatus.draft;
   const dispatchedCount = uniqueDOsByStatus.dispatched;
   const inTransitCount = uniqueDOsByStatus.inTransit;
-  const deliveredMTD = useMemo(() => {
-    const now = new Date();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    const doIds = new Set(
-      deliveryOrders
-        .filter(
-          (d) =>
-            d.status === "DELIVERED" &&
-            d.receivedDate &&
-            new Date(d.receivedDate) >= startOfMonth
-        )
-        .map((d) => d.id)
-    );
-    return doIds.size;
-  }, [deliveryOrders]);
+  // Server-counted (/stats.deliveredMtd, Malaysian month). Used to be counted
+  // off the browse page, which now holds only the active tab's statuses.
+  const deliveredMTD = doStatsRaw?.deliveredMtd ?? 0;
 
   // ---------- Selection ----------
   const toggleSelect = (id: string) => {
@@ -2566,7 +2591,7 @@ export default function DeliveryPage() {
       setPlFirstDialogOpen(false);
       setSelectedReadyPOs(new Set());
       fetchData();
-      setActiveTab("packing_list");
+      goTab("packing_list");
     } catch (e) {
       toast.error(
         e instanceof Error ? e.message : "Failed to create the packing list",
@@ -2658,7 +2683,7 @@ export default function DeliveryPage() {
       setSelectedIds(new Set());
       invalidateCachePrefix("/api/packing-lists");
       refreshPLs();
-      setActiveTab("packing_list");
+      goTab("packing_list");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to create packing list");
     } finally {
@@ -4782,7 +4807,7 @@ export default function DeliveryPage() {
           // 2026-07-16: "快速切换 tab 很卡顿"). Pure scheduling; no logic
           // change. The real cure is decomposing this 7k-line page.
           React.startTransition(() => {
-            setActiveTab(key);
+            goTab(key);
             setSelectedIds(new Set());
             setSelectedReadyPOs(new Set());
           });
@@ -4808,7 +4833,7 @@ export default function DeliveryPage() {
             <button
               key={t.key}
               type="button"
-              onClick={() => setActiveTab(t.key)}
+              onClick={() => goTab(t.key)}
               className={cn(
                 "inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors",
                 activeTab === t.key

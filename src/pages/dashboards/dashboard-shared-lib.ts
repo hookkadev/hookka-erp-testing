@@ -107,7 +107,14 @@ export function monthLabel(m: string): string {
   return `${MONTH_NAMES[Number(mm) - 1] ?? mm} ${y}`;
 }
 
-export function periodLabel(p: Period): string {
+/**
+ * `today` is optional and only sharpens the YTD label ("2026 (Jan – Present)"
+ * for the real current year vs "(Jan – Dec)" for a past one, since a past
+ * year has no "present" to speak of) - every other case is unaffected, so
+ * the ~40 read-only callers across the dashboard views that only ever show a
+ * PAST period never need to pass it.
+ */
+export function periodLabel(p: Period, today?: string): string {
   if (p.day) return dayLabel(p.day);
   if (p.mode === "range") {
     if (p.label) return p.label;
@@ -115,9 +122,10 @@ export function periodLabel(p: Period): string {
     return p.from === p.to ? dayLabel(p.from) : `${dayLabel(p.from)} – ${dayLabel(p.to)}`;
   }
   if (!p.month) return "—";
-  // The year alone — the window IS the year, so "2026 YTD" would claim a
-  // cut-off that no longer exists.
-  return p.mode === "monthly" ? monthLabel(p.month) : p.month.slice(0, 4);
+  if (p.mode === "monthly") return monthLabel(p.month);
+  const year = p.month.slice(0, 4);
+  if (!today) return year;
+  return `${year} (Jan – ${year === today.slice(0, 4) ? "Present" : "Dec"})`;
 }
 
 export function dayLabel(d: string): string {
@@ -164,6 +172,11 @@ export function opensOnToday(tab: string | undefined): boolean {
 // Shared by the desktop PeriodPicker and the /m PeriodChip so a phone and a
 // desktop step, preset and highlight identically.
 
+/** Distinct YYYY years the book has a month in, oldest first. */
+export function yearsWithData(months: string[]): string[] {
+  return [...new Set(months.map((m) => m.slice(0, 4)))].sort();
+}
+
 /**
  * One step of the < > arrows. They move by whatever the mode MEASURES: a year
  * in YTD (landing on the newest month that year has, so YTD covers all of it),
@@ -173,7 +186,7 @@ export function opensOnToday(tab: string | undefined): boolean {
  */
 export function stepPeriod(period: Period, months: string[], dir: -1 | 1): Period | null {
   if (period.mode === "ytd") {
-    const years = [...new Set(months.map((m) => m.slice(0, 4)))].sort();
+    const years = yearsWithData(months);
     const yi = years.indexOf(period.month.slice(0, 4));
     const target = years[yi + dir];
     if (yi < 0 || !target) return null;
@@ -182,6 +195,19 @@ export function stepPeriod(period: Period, months: string[], dir: -1 | 1): Perio
   }
   const next = months[months.indexOf(period.month) + dir];
   return next ? { mode: "monthly", month: next } : null;
+}
+
+/**
+ * One calendar day, uncapped going back (a past day with nothing sold is a
+ * real answer - see periodPresets), never past `maxDay` going forward (an
+ * unknowable future day is not). Not bounded to `months` - unlike the month
+ * and year steppers, the Day view genuinely means every calendar day, so a
+ * gap in the book should show empty rather than be skipped over.
+ */
+export function stepDay(day: string, delta: number, maxDay: string): string | null {
+  const [y, m, d] = day.split("-").map(Number);
+  const next = ymd(new Date(y, m - 1, d + delta));
+  return next <= maxDay ? next : null;
 }
 
 /**
