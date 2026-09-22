@@ -34,6 +34,59 @@ Entries themselves stay newest-first.
 
 ---
 
+## BUG-2026-09-22-178 — Scan Customer PO: the second file "scanned" for 5+ minutes, then the next, then failed — the OCR worker ran under `waitUntil`, which Cloudflare cancels 30 s after the response `scan-ocr` `scan-queue` `platform` 🟢
+
+**Symptom (owner 2026-09-22, screenshot):** Scan Customer PO with a 9-file batch. The first
+file came back; the second sat at SCANNING for more than five minutes with the rest QUEUED.
+Same on the supplier PI/GRN scanner (same queue).
+
+**Root cause.** `POST /api/scan-queue/upload` returned at once and kicked `processBatch()`
+under `c.executionCtx.waitUntil` — six workers claiming rows and calling Sonnet. The file
+header and the mount comment in `worker.ts` both said waitUntil "keeps the worker alive past
+the response until the promise settles". It does not: Cloudflare's documented limit is **30 s
+after the response is sent, shared across all waitUntil calls of the request, after which the
+promises are cancelled** (Workers Logs prints "waitUntil() tasks did not complete within the
+allowed time after invocation end and have been cancelled"). A Sonnet extraction with the
+catalog prompt takes longer than that for most pages. So: rows claimed → `processing` →
+killed mid-fetch at 30 s → only a page that finished inside the window landed (the first PO)
+→ the rest sat `processing` because workers only claim `queued` → `sweepStuckBatch` (per
+poll) re-queued them only once `started_at` was older than **STUCK_MS = 5 min** → the re-kick
+was another waitUntil from the poll request, cut at 30 s again → each cycle bumped `attempts`
+→ after three cycles (~15 min) the row was `failed` with "worker died before completing
+OCR", and Anthropic billed every cancelled call. BUG-2026-06-30-003 added the timeout, the
+3-strike retry and the sweeper and left its verify line at "live-verify pending"; those all
+worked exactly as designed, which is why the symptom was a clean 5-minute stall and not a hang.
+
+**Fix (branch `fix/scan-queue-client-driven`).** The **browser drives the rows**. New
+`POST /api/scan-queue/batch/:batchId/work` (`scan-queue.ts`) claims ONE queued row, runs the
+existing extract / auto-split via `processOneRow` (the old loop body, now returning
+`processed | skipped | drained | error`), writes the result and returns — the request stays
+open as long as the Sonnet call does, and an HTTP request the client holds has no duration
+limit. `createScanQueueDriver` (`src/lib/scan-queue-client.ts`) keeps up to 3 of those open;
+each worker loops until the server says `drained`, backs off on `busy`, exits on any error.
+The three poll effects (PO modal, PI + GRN in the supplier modal) create the driver, `poke()`
+it whenever a poll shows a `queued` row (a Retry, a sweeper re-queue) and `stop()` it on
+cleanup. **Every waitUntil kick is gone** — upload, retry, `sweepStuckBatch`, `sweepStuckScans`
+— because a claim that gets cancelled blocks its row for STUCK_MS; the sweepers now only
+re-queue. Server-side cap: `/work` answers `busy` once 6 rows of the batch are `processing`,
+so a second tab or a script cannot push past the old concurrency. `/work` is org-scoped and
+behind the same `purchase-orders:create` gate; it creates no work, only drains rows the
+upload already created. Trade-off, stated: processing pauses while the modal is closed (it
+stalled anyway); the sweeper + resume-on-open pick it up.
+
+**Prod: UNMEASURED.** The read-only `scan_queue` query was blocked by the session's
+permission classifier. Expected signature when someone runs it: rows with `attempts` 2-3,
+`started_at`→`completed_at` gaps of exactly 5-6 min, errors "worker died before completing
+OCR". Class **C25**.
+
+**Verified:** `tests/scan-queue-client-driven.test.mjs` (4/4: no `waitUntil(` in
+scan-queue.ts, both modals wire + stop the driver, driver loop drained/busy/error/stop);
+`npx tsc -p tsconfig.app.json --noEmit` exit 0; eslint clean on the five touched files;
+`docs/API.md` regenerated. Live-verify on prod after deploy: a 9-file PO batch must show up
+to 3 rows SCANNING at once and none older than ~150 s.
+
+---
+
 ## BUG-2026-09-22-005 — Pending Delivery tab spun in a render loop; the whole page froze and no navigation completed `ui-frontend` `perf` `delivery` `data-grid` 🟢
 
 🟢 **Fixed** · owner-reported three times in one day, in escalating words: "click to other

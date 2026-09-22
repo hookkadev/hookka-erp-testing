@@ -457,8 +457,8 @@ app.post("/refresh-so-surcharges", async (c) => {
 // forwarding the caller's session cookie and CSRF header. The owner's
 // instruction, satisfied literally: 「记得要用 edit 的功能走正常普通流程」.
 //
-// (Self-calling is an established pattern here: the scan queue's processBatch
-// re-enters /api/scan-po/extract the same way.)
+// (The scan queue used to self-call /api/scan-po/extract the same way; it no
+// longer does — the browser drives it, BUG-2026-09-22-178.)
 //
 // ## Which lines it will and will not move
 //

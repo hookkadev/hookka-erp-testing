@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-22** — branch `fix/scan-queue-client-driven` added below (open, its entry is the newest).
 > **Last verified: 2026-09-22** — branch `fix/datagrid-selection-loop` added below (open, its entry is the newest). Previously: branch `fix/delivery-tab-switch-pagination` (MERGED as #467). Previously: branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
 > **Last verified: 2026-09-22** — branch `fix/delivery-loading-gate-po-paging` added below (open, its entry is the newest). Previously: branch `fix/delivery-tab-switch-pagination` (MERGED as #467). Previously: branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
 > **Last verified: 2026-09-22** — branch `feat/po-supplier-searchable-select` added below (open, pushed, no PR). NOTE: the 2026-09-22 Houzs entry below still carries committed merge-conflict markers (`<<<<<<< HEAD` … `>>>>>>> 85e58b40`) on `main`; left for its owner to resolve.
@@ -17,6 +18,24 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+---
+
+## 2026-09-22 — 🔵 Scan PO / PI / GRN: second file "scanning" 5+ min (branch `fix/scan-queue-client-driven`)
+
+Owner: "under the SO the scan PO function … it takes more than 5 min scanning second PO
+what's the problem?" → BUG-2026-09-22-178, class **C25**. The OCR worker ran under
+`waitUntil`, which Cloudflare cancels 30 s after the response; rows then sat `processing`
+until the 5-min sweeper, were re-kicked the same way, and failed after 3 cycles.
+
+- [x] `scan-queue.ts`: `POST /batch/:batchId/work` processes ONE row in-request; all four
+  waitUntil kicks removed; sweepers only re-queue; per-batch `busy` cap of 6.
+- [x] `scan-queue-client.ts`: `createScanQueueDriver` (3 held-open requests, poke/stop).
+- [x] PO modal + PI/GRN supplier modal: driver created / poked on `queued` / stopped.
+- [x] `tests/scan-queue-client-driven.test.mjs` 4/4; `tsc` strict exit 0; eslint clean;
+  `API.md` regenerated; BUG-HISTORY + BUG-CLASSES C25 + CODEBASE-MAP.
+- [ ] Prod scan_queue read (blocked by the permission classifier here): UNMEASURED.
+- [ ] PR → `main`; live-verify a multi-file PO scan: ≤3 rows SCANNING at once, none > ~150 s.
 
 ---
 
