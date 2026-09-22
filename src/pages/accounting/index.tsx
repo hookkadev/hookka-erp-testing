@@ -6055,7 +6055,9 @@ type ScanFinanceResult = {
   totalSen: number | null;
   extraDocs: number;
 };
-function ScanPrefillButton({ label, onResult }: { label: string; onResult: (d: ScanFinanceResult) => void | Promise<void> }) {
+// `onResult` also receives the scanned file so the caller can keep it as the
+// document's attachment once the form is saved.
+function ScanPrefillButton({ label, onResult }: { label: string; onResult: (d: ScanFinanceResult, file: File) => void | Promise<void> }) {
   const { toast } = useToast();
   const [busy, setBusy] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -6069,7 +6071,7 @@ function ScanPrefillButton({ label, onResult }: { label: string; onResult: (d: S
       const res = await fetch("/api/scan-finance/extract", { method: "POST", body: fd });
       const j = (await res.json()) as { success?: boolean; error?: string; data?: ScanFinanceResult };
       if (j?.success && j.data) {
-        await onResult(j.data);
+        await onResult(j.data, f);
         if (j.data.extraDocs > 0) {
           toast.success(`Heads up: the file contains ${j.data.extraDocs + 1} documents — only the first was used.`);
         }
@@ -6200,10 +6202,18 @@ function ScanBillsBatch({ rows, bankCash, onDone }: {
           lines: amtLines.map((l) => ({ accountCode: acct, description: l.description, amountSen: l.amountSen })),
         };
         const r2 = await fetch("/api/accounting/payment-vouchers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-        const j2 = (await r2.json()) as { success?: boolean; error?: string; data?: { pvNo: string } };
+        const j2 = (await r2.json()) as { success?: boolean; error?: string; data?: { id: string; pvNo: string } };
         if (!j2?.success) throw new Error(j2?.error || "save failed");
         saved++;
-        setQueue((q) => q.map((x, k) => (k === i ? { ...x, state: "saved", pvNo: j2.data?.pvNo, note: `${d.partyName ?? ""} · ${formatCurrency(amtLines.reduce((s, l) => s + l.amountSen, 0))}` } : x)));
+        // The scanned bill IS the voucher's evidence — attach it to the draft
+        // (Houzs: 「扫描页自动附在单据上」). A failed upload keeps the voucher
+        // and says so; the file can be added by hand on the row.
+        let attachNote = "";
+        if (j2.data?.id) {
+          try { await uploadPvAttachment(j2.data.id, files[i]); }
+          catch (e) { attachNote = ` · attachment failed: ${(e as Error).message}`; }
+        }
+        setQueue((q) => q.map((x, k) => (k === i ? { ...x, state: "saved", pvNo: j2.data?.pvNo, note: `${d.partyName ?? ""} · ${formatCurrency(amtLines.reduce((s, l) => s + l.amountSen, 0))}${attachNote}` } : x)));
       } catch (e) {
         setQueue((q) => q.map((x, k) => (k === i ? { ...x, state: "skipped", note: (e as Error).message } : x)));
       }
@@ -8503,8 +8513,74 @@ type PvRow = {
   advanceSen?: number;
   advanceOpenSen?: number;
   allocs?: PvAllocOut[];
+  // Evidence on file (Houzs adoption 2026-09-22): count on the row, the list
+  // loads on expand; print bundle = voucher + every attachment.
+  attachmentCount?: number;
 };
 type PvAllocOut = { docKind: "PI" | "AP"; docId: string; docNo: string; docRef: string; amountSen: number };
+type PvAttachment = { id: string; filename: string; contentType: string; sizeBytes: number; uploadedAt: string };
+type PvAttachmentList = { rows: PvAttachment[]; canAdd: boolean; canDelete: boolean };
+
+async function fetchPvAttachments(pvId: string): Promise<PvAttachmentList> {
+  const res = await fetch(`/api/accounting/payment-vouchers/${pvId}/attachments?x=${Date.now()}`, { cache: "no-store" });
+  const j = (await res.json()) as { success?: boolean; error?: string; data?: PvAttachmentList };
+  if (!j?.success || !j.data) throw new Error(j?.error || "Could not load attachments");
+  return j.data;
+}
+async function uploadPvAttachment(pvId: string, file: File): Promise<void> {
+  const fd = new FormData();
+  fd.append("file", file);
+  const res = await fetch(`/api/accounting/payment-vouchers/${pvId}/attachments`, { method: "POST", body: fd });
+  const j = (await res.json()) as { success?: boolean; error?: string };
+  if (!j?.success) throw new Error(j?.error || "Upload failed");
+}
+const fmtBytes = (n: number) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} B`);
+
+// Turn one stored attachment into printable page images: an image is one
+// page as-is, a PDF is rendered page by page (pdfjs, same worker as the bank
+// statement parser). Throws on anything it cannot render — the bundle refuses
+// rather than prints a hole (Houzs: 「附件列不出来会拒绝打印而不是漏掉」).
+async function attachmentToPages(a: PvAttachment): Promise<string[]> {
+  const res = await fetch(`/api/files/${encodeURIComponent(a.id)}/stream`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`${a.filename}: could not be fetched (${res.status})`);
+  const blob = await res.blob();
+  if (a.contentType === "application/pdf") {
+    const pdfjsLib = await import("pdfjs-dist");
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+    const pdf = await pdfjsLib.getDocument({ data: await blob.arrayBuffer() }).promise;
+    const pages: string[] = [];
+    for (let p = 1; p <= pdf.numPages; p++) {
+      const page = await pdf.getPage(p);
+      const viewport = page.getViewport({ scale: 1.5 });
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.ceil(viewport.width);
+      canvas.height = Math.ceil(viewport.height);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error(`${a.filename}: canvas unavailable`);
+      await page.render({ canvasContext: ctx, viewport, canvas }).promise;
+      pages.push(canvas.toDataURL("image/jpeg", 0.85));
+    }
+    if (!pages.length) throw new Error(`${a.filename}: PDF has no pages`);
+    return pages;
+  }
+  if (a.contentType.startsWith("image/")) {
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(String(fr.result));
+      fr.onerror = () => reject(new Error(`${a.filename}: could not be read`));
+      fr.readAsDataURL(blob);
+    });
+    // The browser must be able to decode it (HEIC etc. cannot print).
+    await new Promise<void>((resolve, reject) => {
+      const im = new Image();
+      im.onload = () => resolve();
+      im.onerror = () => reject(new Error(`${a.filename}: this image format cannot be printed here (convert to JPG/PNG)`));
+      im.src = dataUrl;
+    });
+    return [dataUrl];
+  }
+  throw new Error(`${a.filename}: ${a.contentType} cannot be printed`);
+}
 type PvOpenBill = {
   docKind: "PI" | "AP"; id: string; no: string; ref: string; date: string; dueDate: string | null;
   totalSen: number; paidSen: number; outstandingSen: number; reservedSen: number; reservedBy: string[]; availableSen: number;
@@ -8523,6 +8599,80 @@ function pvApPrintDetail(pv: PvRow): { supplierName: string; piNo: string | null
     (pv.allocs ?? []).map((a) => ({ supplierName: pv.payee ?? "", piNo: a.docNo || a.docId, opening: false, method: "", bookedSen: a.amountSen }));
   if ((pv.advanceSen ?? 0) > 0) rows.push({ supplierName: pv.payee ?? "", piNo: null, opening: false, method: "", bookedSen: pv.advanceSen ?? 0 });
   return rows.length ? rows : undefined;
+}
+
+// Attachments block inside an expanded voucher row: the files on record, add
+// more (not on a cancelled voucher), delete (only while Draft / Prepared —
+// evidence is locked from Check on). The server enforces the same rules.
+function PvAttachmentsBlock({ pv, onChanged }: { pv: PvRow; onChanged: () => void }) {
+  const { toast } = useToast();
+  const { confirm } = useConfirm();
+  const [ver, setVer] = useState(0);
+  const [list, setList] = useState<(PvAttachmentList & { key: string }) | null>(null);
+  const [busy, setBusy] = useState(false);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const key = `${pv.id}|${ver}`;
+  useEffect(() => {
+    let dead = false;
+    fetchPvAttachments(pv.id)
+      .then((d) => { if (!dead) setList({ key, ...d }); })
+      .catch((e: Error) => { if (!dead) { setList({ key, rows: [], canAdd: false, canDelete: false }); toast.error(e.message); } });
+    return () => { dead = true; };
+  }, [key, pv.id, toast]);
+  const loading = list?.key !== key;
+  const addFiles = async (files: File[]) => {
+    if (!files.length) return;
+    setBusy(true);
+    let ok = 0;
+    for (const f of files) {
+      try { await uploadPvAttachment(pv.id, f); ok++; }
+      catch (e) { toast.error(`${f.name}: ${(e as Error).message}`); }
+    }
+    setBusy(false);
+    if (ok) { toast.success(`${ok} file${ok === 1 ? "" : "s"} attached`); setVer((v) => v + 1); onChanged(); }
+    if (inputRef.current) inputRef.current.value = "";
+  };
+  const remove = async (a: PvAttachment) => {
+    if (!(await confirm({ title: "Remove attachment?", message: `${a.filename} will be deleted from ${pv.pvNo}.`, danger: true }))) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/accounting/payment-vouchers/${pv.id}/attachments/${encodeURIComponent(a.id)}`, { method: "DELETE" });
+      const j = asMutationResponse(await res.json());
+      if (j?.success) { toast.success("Attachment removed"); setVer((v) => v + 1); onChanged(); }
+      else toast.error(j?.error || "Delete failed");
+    } finally { setBusy(false); }
+  };
+  return (
+    <div className="mt-3 border-t border-[#F0ECE9] pt-2">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <span className="text-[11px] font-medium text-[#9CA3AF] uppercase tracking-wide">Attachments{list && !loading ? ` · ${list.rows.length}` : ""}</span>
+        {list && !loading && list.canAdd && (
+          <>
+            <button disabled={busy} onClick={() => inputRef.current?.click()} className="text-xs text-[#6B5C32] hover:text-[#1F1D1B] underline decoration-dotted cursor-pointer">{busy ? "Working…" : "+ Add files"}</button>
+            <input ref={inputRef} type="file" multiple accept=".pdf,image/*" className="sr-only" onChange={(e) => void addFiles(Array.from(e.target.files ?? []))} />
+          </>
+        )}
+      </div>
+      {loading ? (
+        <div className="text-xs text-[#9CA3AF] py-1">Loading…</div>
+      ) : list && list.rows.length === 0 ? (
+        <div className="text-xs text-[#9CA3AF] py-1">No files on record.{list.canAdd ? " Drop the bill / receipt here with + Add files." : ""}</div>
+      ) : list ? (
+        <ul className="text-xs divide-y divide-[#F0ECE9]">
+          {list.rows.map((a) => (
+            <li key={a.id} className="flex items-center gap-3 py-1">
+              <a href={`/api/files/${encodeURIComponent(a.id)}/download`} target="_blank" rel="noreferrer" className="text-[#6B5C32] hover:text-[#1F1D1B] underline decoration-dotted truncate max-w-[28rem]" title={a.filename}>{a.filename}</a>
+              <span className="text-[#9CA3AF] whitespace-nowrap">{fmtBytes(a.sizeBytes)} · {String(a.uploadedAt).slice(0, 10)}</span>
+              {list.canDelete && <button disabled={busy} onClick={() => void remove(a)} className="ml-auto text-[#9A3A2D] hover:text-[#791F1F] underline decoration-dotted cursor-pointer">remove</button>}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {list && !loading && !list.canDelete && list.rows.length > 0 && pv.status !== "VOID" && (
+        <div className="text-[10px] text-[#9CA3AF] mt-1">Evidence locked — a checked or approved voucher keeps its files.</div>
+      )}
+    </div>
+  );
 }
 
 // ?pay=<PI|AP>:<docId>:<partyId> — the "Pay" deep-link from AP Invoices.
@@ -8573,6 +8723,9 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
   // or an other creditor (its bills). The ticked bills post at APPROVE through
   // the payment pages' own engines under this voucher's number.
   const [formKind, setFormKind] = useState<"EXPENSE" | "AP">(initialPay ? "AP" : "EXPENSE");
+  // The scanned receipt becomes the voucher's attachment once it is saved
+  // (draft or posted) — held here until then, dropped on Cancel.
+  const [pendingScanFile, setPendingScanFile] = useState<File | null>(null);
   const [apForm, setApForm] = useState({
     date: new Date().toISOString().slice(0, 10),
     payFrom: "",
@@ -8706,6 +8859,7 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
     setShowForm(false);
     setEditingId(null);
     setFormKind("EXPENSE");
+    setPendingScanFile(null);
     setForm({ date: new Date().toISOString().slice(0, 10), payee: "", description: "", accrued: false, payFrom: "", accrualAccount: "", productLine: "" });
     setLines([{ accountCode: "", description: "", amount: "" }]);
     setApForm({ date: new Date().toISOString().slice(0, 10), payFrom: "", partyKind: "SUPPLIER", partyId: "", reference: "", advance: "" });
@@ -8795,8 +8949,15 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      const j = asMutationResponse(await res.json());
+      const raw = (await res.json()) as { data?: { id?: string } };
+      const j = asMutationResponse(raw);
       if (j?.success) {
+        // Scan Receipt → the scanned file rides along as the new voucher's evidence.
+        const newId = !editingId ? raw?.data?.id : undefined;
+        if (newId && pendingScanFile) {
+          try { await uploadPvAttachment(newId, pendingScanFile); }
+          catch (e) { toast.error(`Saved, but the scan could not be attached: ${(e as Error).message}`); }
+        }
         toast.success(editingId ? "Voucher updated" : mode === "draft" ? "Draft saved — Prepare it when ready" : "Payment posted");
         resetForm();
         load();
@@ -8871,7 +9032,7 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
   };
   // Print with the settled-bills detail when the voucher is a supplier payment
   // (its lines hit the AP control) — fetched on demand so the list stays light.
-  const printPvWithDetail = async (r: PvRow) => {
+  const pvPrintSpec = async (r: PvRow): Promise<VoucherSpec> => {
     type DetailRow = { supplierName: string; piNo: string | null; opening: boolean; method: string; bookedSen: number };
     let detail: DetailRow[] | undefined = pvApPrintDetail(r);
     if (!detail && r.lines.some((l) => l.accountCode.startsWith("400") || l.accountCode.startsWith("405"))) {
@@ -8881,8 +9042,25 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
         if (j?.success && j.data?.rows?.length) detail = j.data.rows;
       } catch { /* print without detail */ }
     }
-    printVoucher({ ...buildPvVoucher(r, accounts, detail), footerText: printFooter });
+    return { ...buildPvVoucher(r, accounts, detail), footerText: printFooter };
   };
+  const printPvWithDetail = async (r: PvRow) => { printVoucher(await pvPrintSpec(r)); };
+  // Print bundle: voucher + every attachment as one print job (Save as PDF
+  // gives one file). Any attachment that cannot be rendered stops the print.
+  const [bundleBusy, setBundleBusy] = useState<string | null>(null);
+  const printPvBundle = async (r: PvRow) => {
+    setBundleBusy(r.id);
+    try {
+      const list = await fetchPvAttachments(r.id);
+      if (!list.rows.length) { toast.error("No attachments on this voucher — use print"); return; }
+      const appendix: { title: string; pages: string[] }[] = [];
+      for (const a of list.rows) appendix.push({ title: a.filename, pages: await attachmentToPages(a) });
+      printVoucher({ ...(await pvPrintSpec(r)), appendix });
+    } catch (e) {
+      toast.error(`Bundle not printed — ${(e as Error).message}`);
+    } finally { setBundleBusy(null); }
+  };
+
   const handleSettle = async (row: PvRow) => {
     const payFrom = window.prompt(
       `Settle ${row.pvNo} (${formatCurrency(row.totalSen)}) — pay from which account?\n\n${bankCash.map((a) => `${a.code}  ${a.name}`).join("\n")}\n\nEnter account code:`,
@@ -8948,8 +9126,10 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
   // (same payee almost always books to the same expense account) — blank when
   // the payee is new. Amount = the printed line amounts; single-total docs
   // (petrol slip) prefill one line with the total.
-  const applyScan = (d: ScanFinanceResult) => {
+  const applyScan = (d: ScanFinanceResult, file: File) => {
     setEditingId(null);
+    setFormKind("EXPENSE");
+    setPendingScanFile(file);
     const normName = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, "");
     const prior = d.partyName
       ? (rows ?? [])
@@ -9262,6 +9442,7 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
                     </>
                   )}
                   <Button variant="outline" size="sm" onClick={resetForm}>Cancel</Button>
+                  {pendingScanFile && !editingId && <span className="text-[11px] text-[#6B7280]">📎 {pendingScanFile.name} will be attached on save</span>}
                 </div>
               );
             })()}
@@ -9382,6 +9563,7 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
                     <td className="px-3 py-1.5 tabular-nums text-xs whitespace-nowrap">
                       <span className="inline-block w-3 text-[#9CA3AF]">{expandedPv[r.id] ? "▾" : "▸"}</span> {r.pvNo}
                       <span className={`ml-2 rounded px-1.5 py-0.5 text-[10px] font-semibold ${r.pvKind === "AP" ? "bg-[#EEF2FB] text-[#2C4170]" : "bg-[#F6F1E7] text-[#6B5C32]"}`} title={r.pvKind === "AP" ? "AP Payment — pays creditor bills" : "Payment Voucher — pays an expense"}>{r.pvKind === "AP" ? "AP" : "PV"}</span>
+                      {(r.attachmentCount ?? 0) > 0 && <span className="ml-1.5 text-[10px] text-[#6B7280]" title={`${r.attachmentCount} attachment${r.attachmentCount === 1 ? "" : "s"} — expand to see`}>📎{r.attachmentCount}</span>}
                     </td>
                     <td className="px-3 py-1.5 text-xs text-[#6B7280] whitespace-nowrap">{r.date}</td>
                     <td className="px-3 py-1.5">{[r.payee, r.description].filter(Boolean).join(" · ")}</td>
@@ -9433,6 +9615,9 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
                         </>
                       )}
                       <button onClick={() => void printPvWithDetail(r)} title="Print payment voucher" className="inline-flex items-center gap-1 text-[#6B5C32] hover:text-[#1F1D1B] text-xs underline decoration-dotted cursor-pointer mr-3"><Printer className="h-3 w-3" />print</button>
+                      {(r.attachmentCount ?? 0) > 0 && (
+                        <button disabled={bundleBusy === r.id} onClick={() => void printPvBundle(r)} title="Print the voucher with every attachment as one document" className="inline-flex items-center gap-1 text-[#6B5C32] hover:text-[#1F1D1B] text-xs underline decoration-dotted cursor-pointer mr-3"><Printer className="h-3 w-3" />{bundleBusy === r.id ? "preparing…" : "print + files"}</button>
+                      )}
                       {isPosted(r) && r.pvKind !== "AP" && (
                         <button onClick={() => startEdit(r)} className="text-[#6B5C32] hover:text-[#1F1D1B] text-xs underline decoration-dotted cursor-pointer mr-3">edit</button>
                       )}
@@ -9504,6 +9689,7 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
                             </tbody>
                           </table>
                         )}
+                        <PvAttachmentsBlock pv={r} onChanged={load} />
                       </td>
                     </tr>
                   )}
