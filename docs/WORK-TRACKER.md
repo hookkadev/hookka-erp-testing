@@ -1,5 +1,7 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-22** — branch `feat/po-supplier-searchable-select` added below (open, pushed, no PR). NOTE: the 2026-09-22 Houzs entry below still carries committed merge-conflict markers (`<<<<<<< HEAD` … `>>>>>>> 85e58b40`) on `main`; left for its owner to resolve.
+> **Last verified: 2026-09-22** — branch `fix/service-dashboard-other-catch-all` added below (open, pushed, no PR).
 > **Last verified: 2026-09-22** — branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
 > **Last verified: 2026-08-14** — branch `fix/on-time-delivery-and-decisions` added below (open, not merged, its entry is the newest; its bug ids were renumbered 130-133 → 140-143 because `feat/leave-entitlement` claimed 130-133 and merged to `main` first). Previously: branch `feat/leave-entitlement` (MERGED as #326). Previously: branch `feat/job-card-completed-at` added below (open, not merged). Previously: branch `fix/security-posture` added below (open, not merged). Previously: PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
 > **Last verified: 2026-08-14** — branch `feat/pcb-calculation` added below (open, not merged, its entry is the newest). Previously: branch `feat/job-card-completed-at` added below (open, not merged). Previously: branch `fix/security-posture` added below (open, not merged). Previously: PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
@@ -15,6 +17,19 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
+## 2026-09-22 — 🔵 Service dashboard: "Other" no longer headlines Top issues (branch `fix/service-dashboard-other-catch-all`, pushed, no PR yet)
+
+Ask (owner): "the dashboard for service cases, the top issue there is category of other 2 please fix".
+Traced create modal → PUT sanitizer → feed slice → `byCause`: nothing defaults a case to OTHER, so the
+two cases were tagged Other by hand and simply out-counted the real causes. **Prod UNMEASURED** (prod
+read denied in this session) — which two cases they are is unknown; click the Other row on the
+dashboard to list them and re-categorise if they are mis-tagged. Code fix: `OTHER` is a catch-all —
+`tally` ranks it below every real cause (above Not yet analysed) and new `topCauses()` excludes it from
+Top 3 on desktop (`ServiceIssuesPanel`) and `/m` (`ServiceTab`). Still counted, still clickable.
+Test added in `tests/service-issue-stats.test.mjs` (14/14), `tsc -p tsconfig.app.json` clean. Bug fix →
+target `main`. Docs: `CODEBASE-MAP.md` ServiceView row restamped.
+
+## 2026-09-22 — 🔵 PO create: searchable supplier picker (branch `feat/po-supplier-searchable-select`, pushed, no PR yet)
 ## 2026-09-22 — 🔵 PO list: search finds a PO by the raw material bought on it (branch `feat/po-search-line-items`)
 
 Staff ask (screenshots, 2026-09-22): "search a raw material item and see which Purchase
