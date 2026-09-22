@@ -15,7 +15,7 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
-## 2026-09-22 晚 — 🔵 Payment Vouchers「AP Payment」并入（owner「Payment voucher 没有包含ap payment?」→ 贴 Houzs 截图「最好是这样」）
+## 2026-09-22 晚 — ✅ Payment Vouchers「AP Payment」并入（#465 已上线已验）（owner「Payment voucher 没有包含ap payment?」→ 贴 Houzs 截图「最好是这样」）
 
 **漏项承认**：Houzs 采纳 Phase 1 只把 Expense Payment 改名+装梯子，「ap payment 和 payment voucher 一起」没做——
 付 PI 仍在 /invoices/supplier-payments、付 other creditor bill 仍在 Other Creditor Payments tab，两者都没审批梯子。
@@ -36,7 +36,7 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
   lifecycle 顺序、restate 拒、schema fixture）；money-input 守卫登记 `if (apMoneyError)` 闸 + `apSen` 预算；全套 4706 绿。
 - 顺手：docs/WORK-TRACKER.md 顶部残留的 `<<<<<<< HEAD` 冲突标记（上一轮 rebase 遗留，已在 main）清掉。
 
-**待 prod 验**：1 sen 级 AP 凭证全梯子（draft→check 铸号→approve 结算单出现于 Supplier Payment 页且 PI paid 变动→void 回滚）。
+**prod 已验（#465 merge cba0fcdb，deploy ✓，1 sen 两条路各走完整梯子后立即作废）**：①other creditor 路（Houzs Century OCB-2606-002）：draft 带勾单、open-bills 立刻显示 reserved 1 sen（available 119,999）、0 分录 0 结算行；prepare→check 铸 HPV-2609-046 仍 0 分录、bill 未动；approve → Other Creditor Payments 出现 HPV-2609-046（ACTIVE，1 sen，310-0010）、bill paid 1/outstanding 119,999、GL DR 405-0000 1 / CR 310-0010 1（sourceType other_party_payment）；从 PV 页 void → 结算单 lifecycle VOID、bill paid 归 0、PV 读 VOID。②supplier 路（OCEAN SKY PI-2608-091）：check 铸 HPV-2609-047 → approve → Supplier Payment 页出现同号（ACTIVE，1 行）、PI paid 1 / PARTIAL_PAID、GL DR 400-0000 1 / CR 310-0010 1；void → PI paid 0 / CONFIRMED、supplier payment VOID、PV VOID。UI：深链 ?pay=AP:opb-ced66add-2:op-1bcbd71b 直开 New AP Payment、债主已选、OCB-2606-002 勾满 1,200.00；芯片 ALL/DRAFT/PREPARED/CHECKED/APPROVED 91/ADVANCE OPEN/CANCELLED 7；两张测试凭证带 AP 标签灰显。
 
 ---
 ## 2026-09-22 — 🔵 PO list: search finds a PO by the raw material bought on it (branch `feat/po-search-line-items`)
