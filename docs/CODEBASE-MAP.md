@@ -1,5 +1,9 @@
 # Hookka ERP — Codebase Map (the single authoritative map)
 
+> **Restamped 2026-09-22 on branch `claude/nice-sanderson-27be32`:** Service > Top issues row re-derived —
+> `ServiceIssuesPanel.tsx` redesigned (meters / closed|open split / per-case close-days dots / cause×day heatmap /
+> products table), new pure helpers in `service-issue-stats.ts`; the `/m` twin carries the analysis-progress list.
+
 > **Restamped 2026-09-22 on branch `feat/po-supplier-searchable-select`:** Procurement row for
 > `src/pages/procurement/create.tsx` corrected — the Supplier field is the shared `SearchableSelect`
 > (was a native `<select>`); onChange behaviour unchanged.
@@ -1016,7 +1020,7 @@ the payload's `sales.orders[0].totalSen` is non-zero.
 | `src/lib/service-order-modes.ts` — **per-mode line requirements + tolerant catalogue lookup; shared by the Spawn dialog AND the route** (380) | | `products` / `fg_batches` | `tests/service-order-spawn-product.test.mjs` |
 | `src/pages/service-order/index.tsx` — thin re-export of @/pages/sales in SV mode (18) | | `consignment_orders` / `products` | |
 | `src/pages/service-order/create.tsx` / `detail.tsx` / `edit.tsx` — re-exports of @/pages/sales/* in SV mode | | | |
-| `src/pages/dashboards/ServiceView.tsx` + `ServiceIssuesPanel.tsx` — dashboard Service (Zamri) tab; **Top issues** sub-tab = root cause / responsible unit / prevention / top products, click a cause to filter the Report list | `src/api/lib/dashboard-service-slice.ts` (feed slice: reads `rootcauses` dual-keyed, `responsibleunit`, `prevention_status`, `affected_product_ids`) + `src/api/lib/service-issue-stats.ts` (pure aggregation, shared with the browser) | `service_cases` | `tests/service-issue-stats.test.mjs` |
+| `src/pages/dashboards/ServiceView.tsx` + `ServiceIssuesPanel.tsx` — dashboard Service (Zamri) tab; **Top issues** sub-tab (redesigned 2026-09-22, no recharts): **Analysis progress** meters (root cause → unit → prevention recorded → done, `analysisProgress`), **Cases by cause** bar split closed|open (click → filters the Report list; `causeOnly` renders just this card for the Performance panel), **Days to close** one dot per closed case + avg tick (`closeDaysByCause`, inline SVG), **cause × day heatmap** on the period's FIXED day/month grid (`causeGrid` + `dayBuckets`/`monthBuckets`; empty days stay visible — replaced the smoothed top-3 line), **products** as a table with the top cause (`topCauseByProduct`). `TallyList` (plain bar rows) is still exported for the Performance panel's Prevention block | `src/api/lib/dashboard-service-slice.ts` (feed slice: reads `rootcauses` dual-keyed, `responsibleunit`, `prevention_status`, `affected_product_ids`) + `src/api/lib/service-issue-stats.ts` (pure aggregation, shared with the browser) | `service_cases` | `tests/service-issue-stats.test.mjs` |
 | `src/pages/dashboards/ServicePerformancePanel.tsx` — dashboard **Service > Performance** sub-tab (`SERVICE_SUBS` key `performance`): avg case closing + prev-period delta + trend, open now / opened / closed, opened-vs-closed chart, aging split (0-T / T+1-2T+1 / 2T+2+, T = slice `overdueAfterDays` = `SERVICE_OVERDUE_DAYS`), root cause (`ServiceIssuesPanel causeOnly`), prevention breakdown + not-done list | `src/api/lib/service-issue-stats.ts` (`avgClose`, `closeTrend`, `openedVsClosed`, `agingSplit`, `preventionNotDone`) + `dashboard-service-slice.ts` (now also `prevention_owner`, `prevention_action`; optional in the UI so a 60s-cached `dashboard:prototype:<org>:v3` payload still renders) | `service_cases` | `tests/service-issue-stats.test.mjs` |
 
 **Big-file section index**

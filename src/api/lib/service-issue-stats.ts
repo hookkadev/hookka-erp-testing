@@ -223,3 +223,96 @@ export function parseProductLabels(raw: unknown, max = 10): string[] {
   }
   return [...out].slice(0, max);
 }
+
+// ---- "Top issues" redesign (2026-09-22): meters, per-case close days, cause × day grid ----
+// Four tables of the same bar answered four different questions with one picture.
+// These feed the forms that fit each question: how far analysis has got (meters),
+// open vs closed per cause (byCause already carries it), every case's days to
+// close (dots, not one average over 1-5 cases), and cases per cause per DAY on a
+// fixed grid (a heatmap keeps whole counts whole — the old smoothed line drew
+// values between days that never happened).
+
+export type ProgressStep = { key: string; label: string; done: number; total: number; pct: number };
+
+/** How far the root-cause process has got: one ratio per step over every case given. */
+export function analysisProgress(cases: IssueCase[]): ProgressStep[] {
+  const total = cases.length;
+  const step = (key: string, label: string, ok: (c: IssueCase) => boolean): ProgressStep => {
+    const done = cases.filter(ok).length;
+    return { key, label, done, total, pct: total ? Math.round((done / total) * 100) : 0 };
+  };
+  return [
+    step("cause", "Root cause recorded", (c) => !!c.causes?.length),
+    step("unit", "Responsible unit set", (c) => !!c.unit),
+    step("prevention", "Prevention recorded", (c) => !!c.prevention),
+    step("done", "Prevention done", (c) => c.prevention === "DONE" || c.prevention === "NOT_NEEDED"),
+  ];
+}
+
+export type CloseDaysRow = { key: string; label: string; count: number; days: number[]; avg: number | null };
+
+/** Days-to-close of every CLOSED case per cause (a multi-cause case appears under each). Same row order as byCause. */
+export function closeDaysByCause(cases: IssueCase[]): CloseDaysRow[] {
+  const m = new Map<string, number[]>();
+  for (const c of cases) {
+    const d = daysToClose(c);
+    if (d === null) continue;
+    for (const k of causeKeys(c)) m.set(k, [...(m.get(k) ?? []), d]);
+  }
+  return byCause(cases).map((r) => ({
+    key: r.key, label: r.label, count: r.count, days: (m.get(r.key) ?? []).sort((a, b) => a - b), avg: r.avgCloseDays,
+  }));
+}
+
+export type CauseGrid = {
+  buckets: string[];
+  rows: { key: string; label: string; cells: number[]; total: number }[];
+  max: number;
+};
+
+/** Cases per cause per bucket over a FIXED bucket list (empty buckets stay visible). Rows: causes with a case, NONE last. */
+export function causeGrid(cases: IssueCase[], buckets: string[], bucketOf: (createdDate: string) => string): CauseGrid {
+  const idx = new Map(buckets.map((b, i) => [b, i]));
+  const rows = byCause(cases)
+    .filter((r) => r.count > 0)
+    .map((r) => ({ key: r.key, label: r.label, cells: buckets.map(() => 0), total: r.count }));
+  const byKey = new Map(rows.map((r) => [r.key, r]));
+  for (const c of cases) {
+    const i = idx.get(bucketOf(c.createdDate));
+    if (i === undefined) continue;
+    for (const k of causeKeys(c)) { const row = byKey.get(k); if (row) row.cells[i] += 1; }
+  }
+  return { buckets, rows, max: Math.max(0, ...rows.flatMap((r) => r.cells)) };
+}
+
+/** Every YYYY-MM-DD from `from` to `to` inclusive (UTC arithmetic; inputs are plain dates). */
+export function dayBuckets(from: string, to: string): string[] {
+  const out: string[] = [];
+  for (let t = Date.parse(from + "T00:00:00Z"), end = Date.parse(to + "T00:00:00Z"); t <= end; t += DAY_MS) {
+    out.push(new Date(t).toISOString().slice(0, 10));
+  }
+  return out;
+}
+
+/** Every YYYY-MM of `year` from January through `throughMonth` (1-12). */
+export function monthBuckets(year: number, throughMonth: number): string[] {
+  return Array.from({ length: Math.max(1, Math.min(12, throughMonth)) }, (_, i) => `${year}-${String(i + 1).padStart(2, "0")}`);
+}
+
+/** The cause most often recorded on the cases that list each product (null = none analysed). */
+export function topCauseByProduct(cases: IssueCase[]): Map<string, string | null> {
+  const tallies = new Map<string, Map<string, number>>();
+  for (const c of cases) {
+    for (const p of new Set(c.products ?? [])) {
+      const t = tallies.get(p) ?? new Map<string, number>();
+      for (const k of c.causes?.length ? new Set(c.causes) : []) t.set(k, (t.get(k) ?? 0) + 1);
+      tallies.set(p, t);
+    }
+  }
+  const out = new Map<string, string | null>();
+  for (const [p, t] of tallies) {
+    const best = [...t.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0];
+    out.set(p, best ? best[0] : null);
+  }
+  return out;
+}
