@@ -7,7 +7,8 @@ import { createPortal } from "react-dom";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import type { LucideIcon } from "lucide-react";
 import {
-  CHART_AXIS, monthLabel, periodLabel, ymd, stepPeriod, periodPresets, presetActive, calendarCells, shiftMonth,
+  CHART_AXIS, monthLabel, periodLabel, ymd, stepPeriod, stepDay, yearsWithData, periodPresets, presetActive,
+  calendarCells, shiftMonth,
   type Period,
 } from "./dashboard-shared-lib";
 
@@ -98,17 +99,69 @@ function CalendarGrid({
   );
 }
 
-// `Sep 2026 ▾` — opens a popover with a calendar and the common presets.
+// 12-cell grid for the Month view's popover - "click opens a month/year
+// picker" (redesign spec). Only months the book has data for are pickable,
+// the same bound the < > stepper already uses, so the grid can never suggest
+// a jump the stepper wouldn't also allow.
+const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function MonthGrid({
+  viewYear,
+  months,
+  current,
+  onPick,
+}: {
+  viewYear: string;
+  months: string[];
+  current: string;
+  onPick: (month: string) => void;
+}) {
+  return (
+    <div className="grid grid-cols-3 gap-1">
+      {MONTH_SHORT.map((label, i) => {
+        const m = `${viewYear}-${String(i + 1).padStart(2, "0")}`;
+        const has = months.includes(m);
+        const selected = m === current;
+        return (
+          <button
+            key={m}
+            type="button"
+            disabled={!has}
+            title={has ? undefined : "No data this month"}
+            onClick={() => has && onPick(m)}
+            className={
+              "h-9 max-md:h-11 rounded-md text-xs max-md:text-sm font-medium transition-colors " +
+              (!has
+                ? "text-[#C9C2B6] cursor-not-allowed"
+                : selected
+                  ? "bg-[#6B5C32] text-white font-semibold"
+                  : "text-[#1F1D1B] hover:bg-[#F7F5F3]")
+            }
+          >
+            {label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// The date trigger + its popover. What the popover CONTAINS depends on
+// `view`: Day gets the day calendar + presets (jump to any date), Month gets
+// a year/month grid (jump to any month with data), YTD gets neither - the
+// arrows next to it already cover everything a year selector needs.
+//
 // At phone width (`phone`) the same content opens as a BOTTOM SHEET instead,
-// with `controls` (Monthly/YTD + stepper) on top, so the whole period control
-// is one 44px button in the header. The sheet is portalled to <body>: the
-// page's sticky header has backdrop-blur, and a backdrop-filter ancestor
-// becomes the containing block of `position: fixed` — inside it the sheet
-// would be pinned to the header, not the screen.
+// with `controls` (the Day/Month/YTD toggle + arrows) on top, so the whole
+// period control is one 44px button in the header. The sheet is portalled to
+// <body>: the page's sticky header has backdrop-blur, and a backdrop-filter
+// ancestor becomes the containing block of `position: fixed` — inside it the
+// sheet would be pinned to the header, not the screen.
 function DateTrigger({
   period,
   months,
   latestDay,
+  todayIso,
+  view,
   onChange,
   phone,
   controls,
@@ -116,21 +169,26 @@ function DateTrigger({
   period: Period;
   months: string[];
   latestDay?: string;
+  todayIso: string;
+  view: "day" | "month" | "ytd";
   onChange: (p: Period) => void;
   phone: boolean;
   controls: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const [viewMonth, setViewMonth] = useState(period.month);
+  const [viewYear, setViewYear] = useState(period.month.slice(0, 4));
   const wrapRef = useRef<HTMLDivElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
 
-  // The sheet's stepper changes period.month while it is open; the calendar
-  // follows (state adjusted during render, not in an effect).
+  // The outer arrows / presets change period.month while the popover is
+  // open; its own browse state follows (adjusted during render, not in an
+  // effect).
   const [seenMonth, setSeenMonth] = useState(period.month);
   if (seenMonth !== period.month) {
     setSeenMonth(period.month);
     setViewMonth(period.month);
+    setViewYear(period.month.slice(0, 4));
   }
 
   // Close on outside click / Escape, so the popover behaves like every other
@@ -153,9 +211,8 @@ function DateTrigger({
     };
   }, [open]);
 
-  const todayIso = ymd(new Date());
-
   const presets = useMemo(() => periodPresets(latestDay, months, todayIso), [latestDay, months, todayIso]);
+  const years = useMemo(() => yearsWithData(months), [months]);
 
   // One click HIGHLIGHTS that day: the period stays on the day's month so the
   // trend chart still draws the whole month, and `day` narrows the KPI row and
@@ -165,10 +222,19 @@ function DateTrigger({
     onChange({ mode: "monthly", month: day.slice(0, 7), day });
     setOpen(false);
   };
+  const pickMonth = (month: string) => {
+    onChange({ mode: "monthly", month, day: undefined });
+    setOpen(false);
+  };
 
   const stepView = (delta: number) => setViewMonth(shiftMonth(viewMonth, delta));
+  const yi = years.indexOf(viewYear);
+  const stepViewYear = (delta: number) => {
+    const target = years[yi + delta];
+    if (target) setViewYear(target);
+  };
 
-  const body = (
+  const dayBody = (
     <>
       <div className="flex flex-col gap-1 w-28 shrink-0 max-md:w-full max-md:flex-row max-md:flex-wrap max-md:items-center max-md:gap-2">
         <p className="text-[10px] uppercase tracking-wide pb-0.5 max-md:w-full" style={{ color: CHART_AXIS }}>
@@ -192,10 +258,7 @@ function DateTrigger({
         ))}
         <button
           type="button"
-          onClick={() => {
-            onChange({ mode: "monthly", month: viewMonth });
-            setOpen(false);
-          }}
+          onClick={() => pickMonth(viewMonth)}
           className="mt-1 rounded-md border border-[#E5E0D8] px-2 py-1 text-[11px] font-medium text-[#6B5C32] hover:bg-[#F7F5F3] max-md:mt-0 max-md:h-11 max-md:px-4 max-md:text-sm"
         >
           Whole month
@@ -203,10 +266,7 @@ function DateTrigger({
       </div>
 
       <div className="w-56 max-md:w-full">
-        {/* Phone, monthly: the sheet's stepper above already walks months and
-            the calendar follows it - a second "< Sep 2026 >" row under it read
-            as a duplicate. YTD keeps it (the stepper walks YEARS there). */}
-        <div className={"flex items-center justify-between pb-1.5" + (phone && period.mode !== "ytd" ? " hidden" : "")}>
+        <div className="flex items-center justify-between pb-1.5">
           <button
             type="button"
             aria-label="Previous month"
@@ -241,15 +301,56 @@ function DateTrigger({
     </>
   );
 
+  const monthBody = (
+    <div className="w-48 max-md:w-full">
+      <div className="flex items-center justify-between pb-1.5">
+        <button
+          type="button"
+          aria-label="Previous year"
+          disabled={!years[yi - 1]}
+          onClick={() => stepViewYear(-1)}
+          className="h-6 w-6 max-md:h-11 max-md:w-11 grid place-items-center rounded-md hover:bg-[#F7F5F3] disabled:opacity-40"
+          style={{ color: CHART_AXIS }}
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </button>
+        <span className="text-xs max-md:text-sm font-medium text-[#1F1D1B]">{viewYear}</span>
+        <button
+          type="button"
+          aria-label="Next year"
+          disabled={!years[yi + 1]}
+          onClick={() => stepViewYear(1)}
+          className="h-6 w-6 max-md:h-11 max-md:w-11 grid place-items-center rounded-md hover:bg-[#F7F5F3] disabled:opacity-40"
+          style={{ color: CHART_AXIS }}
+        >
+          <ChevronRight className="h-4 w-4" />
+        </button>
+      </div>
+      <MonthGrid viewYear={viewYear} months={months} current={period.month} onPick={pickMonth} />
+      <p className="pt-1.5 text-[10px]" style={{ color: CHART_AXIS }}>
+        {phone ? "Tap" : "Click"} a month to jump to it · months with no data are disabled
+      </p>
+    </div>
+  );
+
+  // YTD has nothing to click into - the arrows next to the trigger already
+  // cover every move a year selector needs.
+  const body = view === "day" ? dayBody : view === "month" ? monthBody : null;
+  const clickable = view !== "ytd";
+
   return (
     <div className="md:relative max-md:shrink-0" ref={wrapRef}>
       <button
         type="button"
         onClick={() => {
-          // Re-anchor the calendar on the selected month each time it opens.
-          // Done here rather than in an effect — an effect that setStates on
-          // `open` costs an extra render every time the popover toggles.
-          if (!open) setViewMonth(period.month);
+          if (!phone && !clickable) return;
+          // Re-anchor the popover on the selected month/year each time it
+          // opens. Done here rather than in an effect — an effect that
+          // setStates on `open` costs an extra render every toggle.
+          if (!open) {
+            setViewMonth(period.month);
+            setViewYear(period.month.slice(0, 4));
+          }
           setOpen(!open);
         }}
         aria-expanded={open}
@@ -257,15 +358,16 @@ function DateTrigger({
           "flex items-center gap-1 rounded-md border px-2.5 py-1 max-md:h-11 max-md:gap-1.5 max-md:px-3 max-md:whitespace-nowrap text-sm font-medium tabular-nums transition-colors " +
           (open
             ? "border-[#6B5C32] bg-white text-[#1F1D1B]"
-            : "border-transparent max-md:border-[#E2DDD8] max-md:bg-white text-[#1F1D1B] hover:bg-[#F0ECE9]")
+            : "border-transparent max-md:border-[#E2DDD8] max-md:bg-white text-[#1F1D1B] " +
+              (clickable ? "hover:bg-[#F0ECE9]" : "max-md:cursor-default"))
         }
       >
         <CalendarDays className="h-4 w-4 md:hidden" style={{ color: CHART_AXIS }} />
-        {periodLabel(period)}
-        <ChevronDown className="h-3.5 w-3.5" style={{ color: CHART_AXIS }} />
+        {periodLabel(period, todayIso)}
+        {clickable && <ChevronDown className="h-3.5 w-3.5" style={{ color: CHART_AXIS }} />}
       </button>
 
-      {open && !phone && (
+      {open && !phone && body && (
         <div className="absolute right-0 z-50 mt-1 flex gap-3 rounded-lg border border-[#E5E0D8] bg-white p-3 shadow-lg">
           {body}
         </div>
@@ -296,9 +398,17 @@ function DateTrigger({
   );
 }
 
-// The dashboard's global period selector — Monthly/YTD, a month stepper
-// bounded by the months that actually exist in the book, and Today (jump to
-// the newest month). Rendered once, above the tabs.
+/** A single highlighted day stepped by one calendar day, or null past `maxDay` / with no day set. */
+function dayNeighbour(day: string | undefined, delta: number, maxDay: string): Period | null {
+  if (!day) return null;
+  const nd = stepDay(day, delta, maxDay);
+  return nd ? { mode: "monthly", month: nd.slice(0, 7), day: nd } : null;
+}
+
+// The dashboard's global period selector: Day / Month / YTD, arrows that step
+// by whatever the active view measures, and a trigger whose popover matches
+// (a day calendar, a month/year grid, or nothing for YTD). Rendered once,
+// above the tabs.
 export function PeriodPicker({
   period,
   months,
@@ -310,16 +420,48 @@ export function PeriodPicker({
   latestDay?: string;
   onChange: (p: Period) => void;
 }) {
-  const prev = stepPeriod(period, months, -1);
-  const next = stepPeriod(period, months, 1);
+  const todayIso = ymd(new Date());
   const phone = useMediaQuery("(max-width: 767px)");
+
+  // Which of the three views the CURRENT period reads as. A range preset
+  // (Last 7 Days) has no calendar identity of its own to hold a tab for - it
+  // displays and steps like a specific dated window, closest to Day.
+  const view: "day" | "month" | "ytd" =
+    period.mode === "ytd" ? "ytd" : period.mode === "range" || period.day ? "day" : "month";
+
+  const setView = (v: "day" | "month" | "ytd") => {
+    if (v === view) return;
+    if (v === "ytd") { onChange({ mode: "ytd", month: period.month }); return; }
+    if (v === "month") { onChange({ mode: "monthly", month: period.month, day: undefined }); return; }
+    const day = period.day ?? todayIso;
+    onChange({ mode: "monthly", month: day.slice(0, 7), day });
+  };
+
+  // A single highlighted day steps by calendar day; a range (Last 7 Days)
+  // keeps the legacy "step exits to the neighbouring month" behaviour, since
+  // stepping a 7-day window "by 1 day" has no one clear meaning. Month and
+  // YTD are unchanged - they step by whatever they measure, bounded to the
+  // months/years the book actually has.
+  const singleDay = view === "day" && period.mode === "monthly" && !!period.day;
+  const prev = singleDay ? dayNeighbour(period.day, -1, todayIso) : stepPeriod(period, months, -1);
+  const next = singleDay ? dayNeighbour(period.day, 1, todayIso) : stepPeriod(period, months, 1);
+
   const trigger = (controls: ReactNode) => (
-    <DateTrigger period={period} months={months} latestDay={latestDay} onChange={onChange} phone={phone} controls={controls} />
+    <DateTrigger
+      period={period}
+      months={months}
+      latestDay={latestDay}
+      todayIso={todayIso}
+      view={view}
+      onChange={onChange}
+      phone={phone}
+      controls={controls}
+    />
   );
   const arrow = (dir: "Previous" | "Next", to: Period | null) => (
     <button
       type="button"
-      aria-label={`${dir} ${period.mode === "ytd" ? "year" : "month"}`}
+      aria-label={`${dir} ${view}`}
       disabled={!to}
       onClick={() => to && onChange(to)}
       className="h-7 w-7 max-md:h-11 max-md:w-11 grid place-items-center rounded-md border border-[#E2DDD8] text-[#6B7280] disabled:opacity-40 hover:bg-[#F7F5F3]"
@@ -327,39 +469,41 @@ export function PeriodPicker({
       {dir === "Previous" ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
     </button>
   );
-  // Segmented control: the ACTIVE half carries its own border + white fill so
-  // which mode is on is readable at a glance — a background tint alone was too
+  // Segmented control: the ACTIVE third carries its own border + white fill so
+  // which view is on is readable at a glance — a background tint alone was too
   // faint to tell apart on this cream page.
   const modes = (
-    <div className="flex gap-0.5 rounded-lg border border-[#E2DDD8] bg-[#F7F5F3] p-0.5 max-md:grid max-md:grid-cols-2">
-      {(["monthly", "ytd"] as const).map((m) => (
+    <div className="flex gap-0.5 rounded-lg border border-[#E2DDD8] bg-[#F7F5F3] p-0.5 max-md:grid max-md:grid-cols-3">
+      {(["day", "month", "ytd"] as const).map((v) => (
         <button
-          key={m}
+          key={v}
           type="button"
-          aria-pressed={period.mode === m}
-          onClick={() => onChange({ ...period, mode: m })}
+          aria-pressed={view === v}
+          onClick={() => setView(v)}
           className={
             "px-3 py-1 max-md:h-11 max-md:text-sm text-xs font-medium rounded-md border transition-colors " +
-            (period.mode === m
+            (view === v
               ? "bg-white border-[#6B5C32] text-[#1F1D1B] shadow-sm"
               : "bg-transparent border-transparent text-[#6B7280] hover:bg-white/60")
           }
         >
-          {m === "monthly" ? "Monthly" : "YTD"}
+          {v === "day" ? "Day" : v === "month" ? "Month" : "YTD"}
         </button>
       ))}
     </div>
   );
 
-  // Phone: the whole control is ONE button; Monthly/YTD and the stepper move
-  // into the sheet it opens.
+  // Phone: the whole control is ONE button; the Day/Month/YTD toggle and the
+  // stepper move into the sheet it opens.
   if (phone) {
     return trigger(
       <>
         {modes}
         <div className="flex items-center justify-between gap-2">
           {arrow("Previous", prev)}
-          <span className="text-sm font-semibold tabular-nums text-[#1F1D1B]">{periodLabel({ ...period, day: undefined })}</span>
+          <span className="text-sm font-semibold tabular-nums text-[#1F1D1B]">
+            {periodLabel(view === "day" ? period : { ...period, day: undefined }, todayIso)}
+          </span>
           {arrow("Next", next)}
         </div>
       </>,
