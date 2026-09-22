@@ -385,7 +385,7 @@ authoritative current detail.** New here? Start with [ONBOARDING-PATH.md](ONBOAR
   - TYPES — L48-77
   - AccountPicker — L78-212
   - Audit Log tab (document lifecycle trail, F3) — EXTRACTED to `src/pages/accounting/tabs/AuditLogTab.tsx` (no longer inline in index.tsx)
-  - MAIN PAGE (tab host / nav) — L322-426
+  - MAIN PAGE (tab host / nav) — L322-426. **FINANCE sidebar slimmed 2026-09-22** (`src/components/layout/sidebar.tsx`, groups Reports / Daily / Monthly / Debtors / Creditors / e-Invoice / Setup, 32 entries): Customer Payment, Supplier Payment, Other Creditor Payments, Other Debtor Receipts, Other Debtor/Creditor names, Other Creditor Bills, Monthly P&L, Cost Structure retired from the MENU only — every tab key / route still answers its URL. Hosts: `PlHubTab` (P&L / Monthly P&L / Cost Structure as one entry, `?tab=plmonthly|coststruct` still land on their view), `OtherPartyBillsTab` folds the names list + settle manager (`FoldSection`), `ApInvoicesTab` raises/edits other-creditor bills inline, Payment Vouchers links the Supplier Payment page for FX / advance knock-off / TF. Guard `tests/finance-sidebar.test.mjs`.
   - Overview tab + cards (Cleanup, Contra, LandedCost, DocNumbering, GstRate, Fye, StockMap, Aging) — L427-1320
   - Chart of Accounts tab (COATab) — L1321-1905
   - Journal Entries tab + JournalEntryForm — L1906-2332
