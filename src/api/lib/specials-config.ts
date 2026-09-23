@@ -29,12 +29,15 @@ type DbLike = {
 };
 
 /**
- * Load `variants-config.specials` (bedframe specials). Returns null when the
- * config is absent/unreadable — callers then fall back to the static catalog.
- * Never throws.
+ * Load `variants-config.specials` (bedframe specials) — or, with
+ * key "sofaSpecials", the SOFA list (BUG-2026-09-23-183: sofa lines were
+ * priced against the bedframe list, so every sofa-only option derived 0).
+ * Returns null when the config is absent/unreadable — callers then fall back
+ * to the static catalog. Never throws.
  */
 export async function loadSpecialsConfig(
   db: DbLike,
+  key: "specials" | "sofaSpecials" = "specials",
 ): Promise<CfgSpecial[] | null> {
   try {
     const row = await db
@@ -42,10 +45,11 @@ export async function loadSpecialsConfig(
       .bind(KV_CONFIG_KEY)
       .first<{ value: string }>();
     if (!row?.value) return null;
-    const cfg = JSON.parse(row.value) as { specials?: unknown };
-    if (!Array.isArray(cfg.specials)) return null;
+    const cfg = JSON.parse(row.value) as Record<string, unknown>;
+    const list = cfg[key];
+    if (!Array.isArray(list)) return null;
     const out: CfgSpecial[] = [];
-    for (const e of cfg.specials) {
+    for (const e of list) {
       if (!e || typeof e !== "object") continue;
       const { value, priceSen } = e as { value?: unknown; priceSen?: unknown };
       if (typeof value !== "string" || !value) continue;

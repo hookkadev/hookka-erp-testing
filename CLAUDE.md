@@ -44,7 +44,7 @@ measured 2026-09-22; this line said 2,122). Use the map's file:line +
 
 5. **Which endpoint** → [`docs/API.md`](docs/API.md) — **generated** from
    `src/api/worker.ts` + `src/api/routes/*.ts` by `node scripts/gen-api-docs.mjs`
-   (141 mounts, **976** handlers, plus the exact public/auth surface — re-measured 2026-09-22
+   (141 mounts, **978** handlers, plus the exact public/auth surface — re-measured 2026-09-23
    by `--check`; this line said 139 / 936).
    Regenerate it instead of hand-editing; `--check` tells you if it is stale — **it WAS stale
    on `main` on 2026-08-14**, and the committed copy carried four duplicated mount rows with

@@ -186,6 +186,44 @@ export function deriveSpecialOrderSurchargeSen(
 }
 
 /**
+ * BUG-2026-09-23-183 backfill maths for ONE saved line. The old forms dropped
+ * config-only options (added in Settings) from the surcharge, and saved them
+ * as their slug code ("EXTEND_DOWN_5_1A_") instead of their name.
+ *
+ * Returns the text with slugs turned back into names, and the delta to ADD:
+ * the price of the config-only options, capped at (owed − charged) so a line
+ * that was already charged them (the old SOFA edit page priced them right)
+ * gets 0 — never a double charge, never a decrease, and a static-catalog price
+ * that moved in Settings since the order was taken is NOT re-priced.
+ */
+export function repriceSavedSpecialsLine(
+  line: {
+    specialOrder: string | null | undefined;
+    customSpecials?: CustomSpecialInput[] | null;
+    chargedSen: number;
+  },
+  rawCfg: unknown,
+): { text: string; owedSen: number; deltaSen: number } {
+  const cfg = toCfgSpecials(rawCfg);
+  const inCatalog = (t: string) => specialOrderOptions.some((o) => o.name === t);
+  const inCfg = (t: string) => !!cfg?.some((e) => e.value === t);
+  const original = String(line.specialOrder ?? "");
+  const tokens = original.split(/[;,]/).map((s) => s.trim()).filter(Boolean);
+  const fixed = tokens.map((t) =>
+    /^OTHER\s*:/i.test(t) || inCatalog(t) || inCfg(t) ? t : specialNameForCode(t, cfg) ?? t,
+  );
+  const text = fixed.some((t, i) => t !== tokens[i]) ? fixed.join("; ") : original;
+
+  const configOnly = new Set(
+    parseSpecialOrderTokens(text).filter((t) => !inCatalog(t) && inCfg(t)),
+  );
+  const configOnlySen = [...configOnly].reduce((s, t) => s + priceOfSen(t, cfg), 0);
+  const owedSen = deriveSpecialOrderSurchargeSen(text, line.customSpecials, cfg);
+  const deltaSen = Math.max(0, Math.min(configOnlySen, owedSen - line.chargedSen));
+  return { text, owedSen, deltaSen };
+}
+
+/**
  * The write-path decision. Returns the surcharge to STORE for one posted item.
  * Trusts any client-supplied number (see TRUST MODEL above); only derives when
  * the field was omitted entirely.

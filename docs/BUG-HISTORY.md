@@ -79,12 +79,25 @@ BTM = RM 100" combo rule, and wrote the slug (e.g. `EXTEND_DOWN_6_1A_`) into the
 `calcSpecialsSurchargeSen` / `specialCodeForName` / `specialNameForCode`. sales create/edit and
 consignment create/edit all price + label through them; stale copies deleted; collapsed chips
 and price breakdown look up the config list so config-only options show.
+Server write paths (`sales-orders.ts` POST/PUT, `consignment-orders.ts` POST/PUT) priced SOFA
+lines against the BEDFRAME list (`loadSpecialsConfig` only read `specials`) — now
+`loadSpecialsConfig(db, "sofaSpecials")` for sofa lines.
+
+**Existing rows.** `GET/POST /api/admin/backfill-config-only-specials` (super-admin; POST needs
+`{confirm:true}`). Per line (`repriceSavedSpecialsLine`): slug → name in the text, and ADD the
+config-only options' price capped at owed − charged (no double charge for lines the old sofa
+edit page priced right; never decreases; a static option re-priced in Settings since is not
+touched). Unit / line / header totals move by the delta, one transaction, header guarded on the
+planned total (double-POST safe). Only SOs with no invoice and COs with no consignment note;
+issued docs are listed under `issuedNeedOwnerDecision`, never touched. The older
+`/backfill-special-order-surcharge` does NOT catch this bug (only charged-exactly-0 lines, bed
+list only, can't read slugs).
 
 **Verified.** `tests/special-order-surcharge.test.mjs` (config-only options charged by code),
 `tests/special-order-combo-discount.test.mjs` (no form carries its own copy — all four);
-`tsc -p tsconfig.app.json` exit 0. **Prod impact UNMEASURED** — SOs already saved with a
-config-only special were under-billed; the admin special-order audit (`admin.ts`, uses
-`deriveSpecialOrderSurchargeSen`) now counts those options, so it will surface them.
+`tsc -p tsconfig.app.json` exit 0; backfill maths: 6 cases in `special-order-surcharge.test.mjs`.
+**Prod impact UNMEASURED** — no prod DB access from this session. Run the GET dry-run after
+deploy to measure it, review, then POST.
 
 ---
 

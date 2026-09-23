@@ -15,6 +15,7 @@ import {
   calcSpecialsSurchargeSen,
   specialCodeForName,
   specialNameForCode,
+  repriceSavedSpecialsLine,
   HB_DIVAN_TOP_COMBO_DISCOUNT_SEN,
 } from "../src/lib/special-order-surcharge.ts";
 
@@ -235,4 +236,63 @@ test("config price overrides the static catalog for a known option", () => {
   const code = specialCodeForName("Divan Full Cover");
   assert.equal(calcSpecialsSurchargeSen([code], [{ value: "Divan Full Cover", priceSen: 9000 }]), 9000);
   assert.equal(calcSpecialsSurchargeSen([code]), 8000);
+});
+
+// BUG-2026-09-23-183 backfill — correcting lines already SAVED by the old forms.
+const SOFA_CFG = [
+  { value: "Extend Down 5''(1A)", priceSen: 10000 },
+  { value: "Bottom Fully Cover (1s)", priceSen: 11000 },
+  { value: "Nylon Fabric", priceSen: 0 },
+];
+
+test("backfill: slug text is renamed and the dropped price added", () => {
+  const r = repriceSavedSpecialsLine(
+    { specialOrder: "NYLON_FABRIC; EXTEND_DOWN_5_1A_", chargedSen: 0 },
+    SOFA_CFG,
+  );
+  assert.equal(r.text, "Nylon Fabric; Extend Down 5''(1A)");
+  assert.equal(r.deltaSen, 10000);
+});
+
+test("backfill: a line already charged right (old sofa EDIT page) gets 0 — no double charge", () => {
+  const r = repriceSavedSpecialsLine(
+    { specialOrder: "Extend Down 5''(1A); Bottom Fully Cover (1s)", chargedSen: 21000 },
+    SOFA_CFG,
+  );
+  assert.equal(r.deltaSen, 0);
+});
+
+test("backfill: partly charged line (static option + config-only) gets only the dropped part", () => {
+  const cfg = [{ value: "Divan Full Cover", priceSen: 8000 }, { value: "Seat Add 2ft", priceSen: 4000 }];
+  const r = repriceSavedSpecialsLine({ specialOrder: "Divan Full Cover; SEAT_ADD_2FT", chargedSen: 8000 }, cfg);
+  assert.equal(r.text, "Divan Full Cover; Seat Add 2ft");
+  assert.equal(r.deltaSen, 4000);
+});
+
+test("backfill: a static option whose price later moved in Settings is NOT re-priced", () => {
+  const r = repriceSavedSpecialsLine(
+    { specialOrder: "Divan Full Cover", chargedSen: 8000 },
+    [{ value: "Divan Full Cover", priceSen: 9000 }],
+  );
+  assert.equal(r.deltaSen, 0);
+  assert.equal(r.text, "Divan Full Cover");
+});
+
+test("backfill: custom specials already in the charge are not counted as the gap", () => {
+  const r = repriceSavedSpecialsLine(
+    {
+      specialOrder: "EXTEND_DOWN_5_1A_; OTHER: extra stitching",
+      customSpecials: [{ description: "extra stitching", surchargeSen: 5000 }],
+      chargedSen: 5000,
+    },
+    SOFA_CFG,
+  );
+  assert.equal(r.text, "Extend Down 5''(1A); OTHER: extra stitching");
+  assert.equal(r.deltaSen, 10000);
+});
+
+test("backfill: an unknown token is left alone and never priced", () => {
+  const r = repriceSavedSpecialsLine({ specialOrder: "SOMETHING_ELSE", chargedSen: 0 }, SOFA_CFG);
+  assert.equal(r.text, "SOMETHING_ELSE");
+  assert.equal(r.deltaSen, 0);
 });

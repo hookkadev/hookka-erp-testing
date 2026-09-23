@@ -1997,6 +1997,7 @@ app.post("/", async (c) => {
     // specialOrderPriceSen — i.e. the scan-a-customer-PO paths. null degrades
     // to the static catalog in src/lib/pricing-options.ts.
     const cfgSpecialsForPricing = await loadSpecialsConfig(c.var.DB);
+    const cfgSofaSpecialsForPricing = await loadSpecialsConfig(c.var.DB, "sofaSpecials");
     // Owner-editable divan / leg height price lists (2026-07-22). Same
     // one-read-per-order pattern, consulted only for items that omit the price
     // — i.e. the scan-a-customer-PO paths.
@@ -2131,7 +2132,9 @@ app.post("/", async (c) => {
         // (Service Orders are free by design) and a hand-discounted price.
         const specialOrderPriceSen = resolveSpecialOrderPriceSen(
           item,
-          cfgSpecialsForPricing,
+          String(item.itemCategory ?? "") === "SOFA"
+            ? cfgSofaSpecialsForPricing
+            : cfgSpecialsForPricing,
         );
         // 2026-07-23: total-height (gap+divan+leg) now derives server-side like
         // divan/leg — the typed form sends it, the scan/import paths never did,
@@ -3561,6 +3564,7 @@ app.put("/:id", async (c) => {
       // request (BUG-2026-07-17-002). Needed on PUT too — without it, editing a
       // scanned SO would re-store the surcharge as 0.
       const cfgSpecialsForPricing = await loadSpecialsConfig(c.var.DB);
+      const cfgSofaSpecialsForPricing = await loadSpecialsConfig(c.var.DB, "sofaSpecials");
       // Ditto for the divan / leg height price lists (2026-07-22). Same
       // reasoning: an edit that omits the price must not zero a height that the
       // owner's list prices.
@@ -3674,7 +3678,9 @@ app.put("/:id", async (c) => {
         // (Service Orders are free by design) and a hand-discounted price.
         const specialOrderPriceSen = resolveSpecialOrderPriceSen(
           item,
-          cfgSpecialsForPricing,
+          String(item.itemCategory ?? "") === "SOFA"
+            ? cfgSofaSpecialsForPricing
+            : cfgSpecialsForPricing,
         );
         // 2026-07-23 — same as the POST path: derive total-height server-side so
         // an SO EDIT re-prices the line WITH its total-height surcharge (stored
