@@ -25,6 +25,7 @@ import {
   gapHeightOptions,
   SEAT_HEIGHT_OPTIONS,
 } from "@/lib/pricing-options";
+import { calcSpecialsSurchargeSen, specialNameForCode, HB_DIVAN_TOP_COMBO_DISCOUNT_SEN } from "@/lib/special-order-surcharge";
 import { fetchVariantsConfig, getVariantsConfigSync } from "@/lib/kv-config";
 import { useCachedJson, invalidateCachePrefix } from "@/lib/cached-fetch";
 import { useUnsavedChanges } from "@/lib/use-unsaved-changes";
@@ -156,34 +157,6 @@ function generateSofaWIPs(item: LineItem): { code: string; type: string; qty: nu
 function parseInches(h: string): number | null {
   const m = h.match(/^(\d+(?:\.\d+)?)"/);
   return m ? parseFloat(m[1]) : null;
-}
-
-/**
- * Calculate total special order surcharge, applying the combined HB+Divan cover rule:
- * If both HB_FULL_COVER and DIVAN_BTM_COVER are selected, total for that pair = RM100 (10000 sen)
- * instead of RM50 + RM80 = RM130.
- */
-function calcSpecialOrderSurcharge(codes: string[]): number {
-  const hasHBCover = codes.includes("HB_FULL_COVER");
-  const hasDivanBtmCover = codes.includes("DIVAN_BTM_COVER");
-
-  let total = 0;
-  for (const code of codes) {
-    const opt = specialOrderOptions.find(o => o.code === code);
-    if (!opt) continue;
-
-    if (hasHBCover && hasDivanBtmCover) {
-      // Apply combined pricing: skip individual HB + BTM, add combined RM100 once
-      if (code === "HB_FULL_COVER" || code === "DIVAN_BTM_COVER") continue;
-    }
-    total += opt.surcharge;
-  }
-
-  if (hasHBCover && hasDivanBtmCover) {
-    total += 10000; // RM100 combined
-  }
-
-  return total;
 }
 
 export default function CreateConsignmentOrderPageWrapper() {
@@ -686,34 +659,13 @@ function CreateConsignmentOrderPage() {
       ? current.filter(c => c !== code)
       : [...current, code];
 
-    // Try to use maintenance config surcharges first
-    const cfgKey = isSofa ? "sofaSpecials" : "specials";
-    const cfgSpecials = maintenanceConfig?.[cfgKey];
-    let surcharge: number;
-
-    if (cfgSpecials && Array.isArray(cfgSpecials)) {
-      // Calculate from config
-      surcharge = 0;
-      const hasHBCover = next.includes("HB_FULL_COVER");
-      const hasDivanBtmCover = next.includes("DIVAN_BTM_COVER");
-      for (const c of next) {
-        const opt = specialOrderOptions.find(o => o.code === c);
-        if (!opt) continue;
-        if (hasHBCover && hasDivanBtmCover && (c === "HB_FULL_COVER" || c === "DIVAN_BTM_COVER")) continue;
-        // Look up surcharge from config by name
-        const cfgEntry = cfgSpecials.find((e: {value:string; priceSen:number} | string) =>
-          typeof e === "object" && e.value === opt.name
-        );
-        surcharge += (cfgEntry && typeof cfgEntry === "object") ? cfgEntry.priceSen : opt.surcharge;
-      }
-      if (hasHBCover && hasDivanBtmCover) surcharge += 10000;
-    } else {
-      surcharge = calcSpecialOrderSurcharge(next);
-    }
+    // Shared rule (BUG-2026-09-23): config-only options priced, owner's combo.
+    const cfgSpecials = maintenanceConfig?.[isSofa ? "sofaSpecials" : "specials"];
+    const surcharge = calcSpecialsSurchargeSen(next, cfgSpecials);
 
     // Persist as semicolon-separated canonical names; each token is guaranteed
     // to come from the config dropdown, so no free text leaks into specialOrder.
-    const label = next.map(c => specialOrderOptions.find(o => o.code === c)?.name || c).join("; ");
+    const label = next.map(c => specialNameForCode(c, cfgSpecials) || c).join("; ");
     const patch = {
       specialOrders: next,
       specialOrder: label,
@@ -1607,7 +1559,7 @@ function LineItemCard({
         {item.specialOrders.length > 0 && !showSpecialOrders && (
           <div className="flex flex-wrap gap-1 mt-1.5">
             {item.specialOrders.map(code => {
-              const opt = specialOrderOptions.find(o => o.code === code);
+              const opt = availableSpecials.find(o => o.code === code);
               if (!opt) return null;
               const sc = getConfigSurcharge(isSofa ? "sofaSpecials" : "specials", opt.name, opt.surcharge);
               return (
@@ -1754,7 +1706,7 @@ function LineItemCard({
             </div>
           )}
           {item.specialOrders.length > 0 && item.specialOrders.map(code => {
-            const opt = specialOrderOptions.find(o => o.code === code);
+            const opt = availableSpecials.find(o => o.code === code);
             if (!opt) return null;
             const sc = getConfigSurcharge(isSofa ? "sofaSpecials" : "specials", opt.name, opt.surcharge);
             if (sc === 0) return null;
@@ -1767,11 +1719,11 @@ function LineItemCard({
               </div>
             );
           })}
-          {/* Show combined discount note if applicable */}
-          {item.specialOrders.includes("HB_FULL_COVER") && item.specialOrders.includes("DIVAN_BTM_COVER") && (
+          {/* Combo discount — mirrors sales/create.tsx and the shared rule. */}
+          {item.specialOrders.includes("HB_FULL_COVER") && item.specialOrders.includes("DIVAN_TOP_COVER") && (
             <div className="flex justify-between text-[#3E6570]">
-              <span>HB + Divan Cover (combined):</span>
-              <span>RM 100.00</span>
+              <span>HB + Divan Top Cover (combined discount):</span>
+              <span>− RM {(HB_DIVAN_TOP_COMBO_DISCOUNT_SEN / 100).toFixed(2)}</span>
             </div>
           )}
           <div className="flex justify-between border-t border-dashed border-[#D1D5DB] pt-1 mt-1 text-sm font-semibold text-[#1F1D1B]">

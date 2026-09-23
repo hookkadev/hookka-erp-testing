@@ -1,6 +1,6 @@
 # Bug History
 
-> **Last verified: 2026-09-23** — newest entry BUG-2026-09-23-182 (branch `laphii/fix/dashboard-exp-production-revenue`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-09-23** — newest entry BUG-2026-09-23-184 (branch `fix/special-order-config-only-surcharge`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 
 Living log of bugs we've identified, diagnosed, and fixed in Hookka ERP.
 
@@ -33,6 +33,71 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-09-23-184 — After a deploy, open tabs kept running the old code `deploy` `cache` 🟡
+
+🟡 **Fix in progress** · owner-reported: after a deploy "some of the thing is there already but
+it doesn't update" — operators kept seeing pre-fix behaviour.
+
+**Root cause.** HTML is `no-store` and the SW is network-first, so a *fresh load* always gets the
+new build — but nobody reloads an open ERP tab. `useVersionCheck` detected the new build and the
+dashboard showed a ONE-SHOT "Reload?" confirm; dismiss it (or never see it) and `firedRef` meant
+it never asked again — the tab ran the old bundle all day. The phone shell (`/m`,
+`MobileLayout.tsx`) never ran a version check at all. Also: the inline `onNewVersion` arrow was an
+effect dep, so the poll (and its 30s first check) restarted on every render.
+
+**Fix.** `useAutoUpdateOnNavigate` (`src/lib/use-version-check.ts`): once a new build is seen,
+the NEXT route change does a full reload (the user has already left the form, so nothing typed is
+lost). Used by `DashboardLayout` (which keeps the immediate "Reload now" offer) and
+`MobileLayout`. Poll 5 → 2 min; callback held in a ref so the poll isn't restarted.
+WorkerLayout unchanged (already reloads immediately).
+
+**Verified.** `tests/deploy-auto-update.test.mjs`; `tsc -p tsconfig.app.json` exit 0; eslint
+clean. Not browser-verified — the check only fires on a built bundle (dev serves unhashed
+`/src/main.tsx`); verify on prod by keeping a tab open across the deploy and changing page.
+
+---
+
+## BUG-2026-09-23-183 — Ticking a special order showed "+RM 100" but added RM 0 to the SO line `sales` `money` 🟡
+
+🟡 **Fix in progress** · owner-reported (urgent, wrong SO values): on a SOFA line, ticking
+"Extend Down 6"(1A)" (+RM 100) and "Bottom Fully Cover (1s)" (+RM 110) left the line at RM 0.
+
+**Root cause.** Options added in Settings (kv_config `sofaSpecials` / `specials`) that are NOT
+in the static `specialOrderOptions` table get a slugged code in the form's `availableSpecials`.
+The surcharge maths mapped code → name through the static table only, and
+`priceOfSen` (`src/lib/special-order-surcharge.ts`) returned 0 for any name not in the static
+table even when the config priced it. So every config-only option was charged RM 0; the
+checkbox label (priced from config) disagreed with the total. Four forms each had their own
+copy — sales/edit + both consignment forms also still carried the pre-2026-08-02 "HB + Divan
+BTM = RM 100" combo rule, and wrote the slug (e.g. `EXTEND_DOWN_6_1A_`) into the saved
+`specialOrder` text instead of the name.
+
+**Fix.** `special-order-surcharge.ts`: `priceOfSen` honours config-only entries; new shared
+`calcSpecialsSurchargeSen` / `specialCodeForName` / `specialNameForCode`. sales create/edit and
+consignment create/edit all price + label through them; stale copies deleted; collapsed chips
+and price breakdown look up the config list so config-only options show.
+Server write paths (`sales-orders.ts` POST/PUT, `consignment-orders.ts` POST/PUT) priced SOFA
+lines against the BEDFRAME list (`loadSpecialsConfig` only read `specials`) — now
+`loadSpecialsConfig(db, "sofaSpecials")` for sofa lines.
+
+**Existing rows.** `GET/POST /api/admin/backfill-config-only-specials` (super-admin; POST needs
+`{confirm:true}`). Per line (`repriceSavedSpecialsLine`): slug → name in the text, and ADD the
+config-only options' price capped at owed − charged (no double charge for lines the old sofa
+edit page priced right; never decreases; a static option re-priced in Settings since is not
+touched). Unit / line / header totals move by the delta, one transaction, header guarded on the
+planned total (double-POST safe). Only SOs with no invoice and COs with no consignment note;
+issued docs are listed under `issuedNeedOwnerDecision`, never touched. The older
+`/backfill-special-order-surcharge` does NOT catch this bug (only charged-exactly-0 lines, bed
+list only, can't read slugs).
+
+**Verified.** `tests/special-order-surcharge.test.mjs` (config-only options charged by code),
+`tests/special-order-combo-discount.test.mjs` (no form carries its own copy — all four);
+`tsc -p tsconfig.app.json` exit 0; backfill maths: 6 cases in `special-order-surcharge.test.mjs`.
+**Prod impact UNMEASURED** — no prod DB access from this session. Run the GET dry-run after
+deploy to measure it, review, then POST.
 
 ---
 
