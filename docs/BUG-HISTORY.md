@@ -94,10 +94,14 @@ reasons.test.mjs` covers the validation and the one-place permission.
 `tests/import-completion-all-gated.test.mjs` now counts `requireAdmin` as a
 gate. 4,649 tests, 0 failing; `tsc -p tsconfig.app.json --noEmit` clean.
 
-**Still open, on purpose.** R16 (over-blocking of products with no branch
-information) is UNMEASURED — `scripts/measure-sequence-lock-no-branch.mjs` is
-the read-only measurement to run with `HOOKKA_PROD_DB_URL` before merging.
-The three scan endpoints write `piece_pics` rows between the gate and their
+**R16 measured 2026-09-23, against production.** The worry was that a product
+whose cards ALL carry an empty `branch_key` collapses into one linear chain and
+gets over-blocked. `scripts/measure-sequence-lock-no-branch.mjs` (read-only)
+says it does not: that bucket is 773 (order, wipKey) groups, 865 cards, 654 of
+them open, and the lock blocks **0 — 0.0%**. No wood-waits-for-fabric pair
+appears in it, so nothing needs a `branch_key` backfill before this merges.
+
+**Still open, on purpose.** The three scan endpoints write `piece_pics` rows between the gate and their
 job-card UPDATE, so the R13 write-guard is not applied there; the window is
 the same as before this change and is documented in
 `docs/modules/production.md`. The 513 historical negative rows are the

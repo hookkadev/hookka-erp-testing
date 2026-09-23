@@ -72,11 +72,11 @@ Asks, in PRD order — each row flips to done as it lands:
   scan-complete-dept's kept-COMPLETED cards no longer trip "not your turn"
 - 🔵 R15 **done on branch** — `docs/modules/production.md` flow 7 + gotcha + two key-function rows,
   restamped 2026-09-17; `docs/CODEBASE-MAP.md:559` no longer says "refuses nothing today"
-- 🟡 R16 **UNMEASURED** — needs `HOOKKA_PROD_DB_URL`, which this session does not have. Shipped
-  read-only `scripts/measure-sequence-lock-no-branch.mjs` (groups by (order, wipKey), splits
-  no-branch vs branched, counts open cards the lock refuses now, names the dept pairs, flags any
-  wood-waits-for-fabric pair). **Run it before merging PR-A**; if the no-branch bucket shows wrong
-  pairs, the fix is stamping `branch_key` on those cards, not changing the rule
+- 🔵 R16 **MEASURED 2026-09-23 against production** (`scripts/measure-sequence-lock-no-branch.mjs`,
+  read-only, run by the user): the no-branch bucket is **773 (order, wipKey) groups / 865 cards / 654 open**,
+  and the lock blocks **0 of them (0.0%)**. Script's own check: *"No wood-waits-for-fabric pair in the
+  no-branch bucket."* So products with no branch information are NOT over-blocked and no `branch_key`
+  backfill is needed before merging.
 
 Plan: PR-A = R1-R2 (switch the rule on in shadow mode, fast to merge); PR-B = the rest.
 **2026-09-18:** R1–R15 on the branch (`9539c0dc` + docs commit). `docs/API.md` regenerated,
