@@ -886,7 +886,17 @@ app.get("/", async (c) => {
       return { success: true as const, data: data as unknown[], total: data.length };
     }
     const { withSnapshot } = await import("../lib/snapshot");
+    // The version token is NOT decoration. A stored snapshot row is only
+    // rebuilt when a source table changes, so a change to the payload's SHAPE
+    // keeps being served from rows built by the previous code until somebody
+    // happens to touch a production order. v2 (2026-09-23, DEV-05): the
+    // projection gained isStock + stockOriginSoId, and without a bump the
+    // Delivery page kept reading a payload that had neither — the same
+    // BUG-2026-09-23-184 symptom a second time, from a different cause.
+    // Bump this on ANY payload shape change; `overdueCountsCacheKey` carries
+    // its own vN for exactly this reason.
     const snapshotCacheKey =
+      "v2&" +
       new URL(c.req.url).searchParams.toString().split("&").sort().join("&");
     return withSnapshot<{
       success: true;

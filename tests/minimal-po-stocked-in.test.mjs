@@ -256,3 +256,26 @@ test("EVERY row-to-PO mapper emits the pair, not just the minimal one", () => {
   assert.equal(emits.length, 3, "all three construction sites must emit isStock");
   assert.equal(origins.length, 3, "all three construction sites must emit stockOriginSoId");
 });
+
+// ---------------------------------------------------------------------------
+// A payload-shape change has to bypass snapshots built by the previous code.
+//
+// BUG-2026-09-23-184, second cause. The fix that put isStock /
+// stockOriginSoId on the projection deployed correctly and STILL did not
+// reach the screen: production_orders_list_snapshot only rebuilds when a
+// source table changes, so rows built before the deploy kept being served —
+// without the new fields — until somebody happened to touch a production
+// order. `overdueCountsCacheKey` already carries a vN for this reason; the
+// list key did not.
+// ---------------------------------------------------------------------------
+test("the production list snapshot key carries a payload-shape version", () => {
+  const src = readFileSync(
+    resolve(process.cwd(), "src/api/routes/production-orders.ts"),
+    "utf8",
+  );
+  assert.match(
+    src,
+    /const snapshotCacheKey =\s*\n\s*"v\d+&" \+/,
+    "the snapshot cache key must carry a vN token — bump it on any payload SHAPE change, or rows built by the previous code keep being served",
+  );
+});
