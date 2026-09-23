@@ -54,6 +54,7 @@ import { PodSheet } from "../components/PodSheet";
 import { GrnReceiveSheet } from "../components/GrnReceiveSheet";
 import type { ProofOfDelivery } from "@/types";
 import { mutateJson, refreshOne, refreshList } from "../config/mutate";
+import { useIdempotencyKey } from "@/lib/idempotency-key";
 import { str } from "../config/helpers";
 
 /** Leading-glyph map for the "Convert document" action buttons. */
@@ -131,6 +132,9 @@ function Inner({
   const [podOpen, setPodOpen] = useState(false);
   // Goods-receipt sheet (procurement PO "Receive (GRN)").
   const [grnOpen, setGrnOpen] = useState(false);
+  // T-006 R10 — same receipt route as the desktop form, same protection: a
+  // retry on a flaky phone connection must not post the goods twice.
+  const grnIdem = useIdempotencyKey();
   // CTA action state (acknowledge / sign / mark-read) — inline busy + toast.
   const [ctaBusy, setCtaBusy] = useState(false);
   const [toast, setToast] = useState<{ kind: "ok" | "err"; text: string } | null>(
@@ -1162,7 +1166,9 @@ function Inner({
         poId={id}
         onClose={() => setGrnOpen(false)}
         onSubmit={async (body) => {
-          const res = await mutateJson("/api/grn", "POST", body);
+          const res = await grnIdem.withKey((key) =>
+            mutateJson("/api/grn", "POST", body, { "Idempotency-Key": key }),
+          );
           if (!res.ok) return { ok: false, error: res.error };
           refreshOne(`/api/purchase-orders/${encodeURIComponent(id)}`);
           refreshList("/api/grn");

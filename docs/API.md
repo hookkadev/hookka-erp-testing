@@ -1,7 +1,7 @@
 # API — generated reference
 
 > **GENERATED FILE — do not hand-edit.** Regenerate with `node scripts/gen-api-docs.mjs`.
-> **Last generated: 2026-09-22** from `src/api/worker.ts` + `src/api/routes/*.ts`.
+> **Last generated: 2026-09-23** from `src/api/worker.ts` + `src/api/routes/*.ts`.
 
 The backend is a single [Hono](https://hono.dev) app in `src/api/worker.ts`, served
 as a Cloudflare Pages Function via `functions/api/[[route]].ts`. There is no
@@ -81,7 +81,7 @@ offsets pointing past the end of their own file.
 | `/api/organisations` | `src/api/routes/organisations.ts` | `GET /` <sub>:361</sub><br>`POST /` <sub>:417</sub><br>`PATCH /:id` <sub>:511</sub><br>`DELETE /:id` <sub>:619</sub><br>`PUT /` <sub>:646</sub> | gated |
 | `/api/sales-orders` | `src/api/routes/sales-orders.ts` | `GET /` <sub>:165</sub><br>`POST /check-customer-pos` <sub>:757</sub><br>`POST /backfill-hub-by-state` <sub>:819</sub><br>`GET /status-changes` <sub>:952</sub><br>`GET /stats` <sub>:984</sub><br>`GET /delivery-progress` <sub>:1113</sub><br>`GET /missing-original` <sub>:1189</sub><br>`GET /late-to-customer` <sub>:1270</sub><br>`GET /repair-components` <sub>:1305</sub><br>`GET /:id/edit-eligibility` <sub>:1390</sub><br>`POST /:id/override-edit-lock` <sub>:1504</sub><br>`POST /` <sub>:1718</sub><br>`POST /:id/confirm` <sub>:2499</sub><br>`GET /:ref/footprint` <sub>:2842</sub><br>`GET /:id` <sub>:2849</sub><br>`PUT /:id` <sub>:3101</sub><br>`PATCH /:id/hub` <sub>:4539</sub><br>`DELETE /:id` <sub>:5220</sub><br>`POST /copy-for-service-order` <sub>:5326</sub><br>`POST /batch-company` <sub>:5708</sub> | gated |
 | `/api/purchase-orders` | `src/api/routes/purchase-orders.ts` | `GET /` <sub>:323</sub><br>`GET /stats` <sub>:419</sub><br>`POST /` <sub>:434</sub><br>`GET /:id` <sub>:705</sub><br>`PUT /:id` <sub>:764</sub><br>`POST /:id/email` <sub>:1114</sub><br>`DELETE /:id` <sub>:1175</sub> | gated |
-| `/api/purchase-invoices` | `src/api/routes/purchase-invoices.ts` | `GET /` <sub>:790</sub><br>`GET /:id` <sub>:843</sub><br>`POST /` <sub>:1108</sub><br>`POST /repair-gl-visibility` <sub>:1945</sub><br>`POST /backfill-gl-postings` <sub>:1991</sub><br>`PUT /:id` <sub>:2010</sub><br>`DELETE /:id` <sub>:2699</sub><br>`POST /:id/void` <sub>:2836</sub><br>`POST /:id/unvoid` <sub>:2941</sub><br>`POST /:id/resync-gl` <sub>:3048</sub> | gated |
+| `/api/purchase-invoices` | `src/api/routes/purchase-invoices.ts` | `GET /` <sub>:790</sub><br>`GET /:id` <sub>:843</sub><br>`POST /` <sub>:1137</sub><br>`POST /repair-gl-visibility` <sub>:1974</sub><br>`POST /backfill-gl-postings` <sub>:2020</sub><br>`PUT /:id` <sub>:2039</sub><br>`DELETE /:id` <sub>:2728</sub><br>`POST /:id/void` <sub>:2865</sub><br>`POST /:id/unvoid` <sub>:2970</sub><br>`POST /:id/resync-gl` <sub>:3077</sub> | gated |
 | `/api/credit-notes` | `src/api/routes/credit-notes.ts` | `GET /` <sub>:189</sub><br>`POST /` <sub>:204</sub><br>`GET /:id` <sub>:448</sub><br>`PUT /:id` <sub>:471</sub> | gated |
 | `/api/debit-notes` | `src/api/routes/debit-notes.ts` | `GET /` <sub>:122</sub><br>`POST /` <sub>:137</sub><br>`GET /:id` <sub>:282</sub><br>`PUT /:id` <sub>:302</sub> | gated |
 | `/api/e-invoices` | `src/api/routes/e-invoices.ts` | `GET /` <sub>:119</sub><br>`POST /` <sub>:134</sub><br>`GET /:id` <sub>:235</sub><br>`PUT /:id` <sub>:257</sub> | gated |

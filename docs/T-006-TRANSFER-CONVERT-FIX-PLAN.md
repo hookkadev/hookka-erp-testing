@@ -1,9 +1,18 @@
 # T-006 — Transfer / Convert foundation: fix plan
 
-> **Last verified: 2026-09-10** against HEAD `e40d5550` (branch `fix/transfer-convert-duplicate-guard`,
-> forked from `origin/main`). All 10 PRD findings independently re-confirmed against current source —
-> see file:line citations per requirement below. Source PDF: `T-006-Hookka-transfer-convert - wei siang.pdf`
-> (not in repo, user's local Downloads). Nothing in this doc has been implemented yet — plan only.
+> **Last verified: 2026-09-21** against branch `fix/t006-transfer-convert-guards`
+> (`tsc -p tsconfig.app.json --noEmit` clean, `npm test` 4635 pass / 0 fail / 3 pre-existing skips).
+> **R1-R10 are all IMPLEMENTED** — this doc is now the record of WHY each fix looks the way it
+> does, not a to-do list. The header below used to read "nothing implemented yet, plan only"
+> and stayed that way through four commits that implemented all ten; if you are reading a plan
+> whose status line contradicts the git log, believe the code.
+>
+> Source PDF: `T-006-Hookka-transfer-convert - wei siang.pdf` (not in repo, user's local
+> Downloads). Original plan verified 2026-09-10 against HEAD `e40d5550`.
+>
+> **Still open, deliberately (see "What is NOT fixed" at the foot of this doc):** the R2
+> concurrency window, the R7 cancel dead-end, and prod-state verification of the R5 / R8
+> assumptions. Everything else in the requirement table is done and tested.
 
 ## Why this exists
 
@@ -311,3 +320,54 @@ the handler logic — wrapping first would mean re-touching every one of these f
   beyond the ceiling (e.g. GRN PDF display, which BUG-2026-08-13-052 notes is also
   currently blank) — that display concern is explicitly NOT fixed by this plan's R8
   approach and would need its own, separately-scoped decision.
+
+
+---
+
+## What is NOT fixed (2026-09-21) — read before assuming the ticket is closed
+
+Three things in this plan are knowingly incomplete. They are listed here rather than left for
+the next person to rediscover.
+
+### R2's concurrency window is still open
+
+The over-receipt check is now cumulative (it reads `purchase_order_items.receivedQty` and adds
+this document's quantity before comparing against the 110% ceiling), which is what A2 asks for
+and what `tests/purchasing-convert-flow.test.mjs` now proves by driving two real receipts
+through the route. But the read still happens BEFORE `db.batch()`, not inside it, and there is
+no DB constraint on `receivedQty` the way R5 gives `grn_items.invoiced_qty` one. Two receipts
+that interleave between the read and the batch can still both post.
+
+A CHECK constraint is NOT the answer here: over-receipt is a legitimate business path in this
+system ("Requires ADMIN approval"), and the ceiling is 110% of ordered, not ordered — a hard
+constraint would refuse work the business does on purpose. Closing this properly needs either a
+conditional UPDATE that fails loudly when the ceiling is already consumed, or a row lock on the
+PO line. Neither was attempted without a live DB to test against.
+
+The realistic trigger — a double-click or a retry, not two operators — is now covered by R10's
+client half (below) plus the submit buttons' in-flight `disabled`.
+
+### R7's cancel-after-restock is a dead end, on purpose
+
+`POST /:id/cancel` refuses a `RETURNED_TO_STOCK` return, because the restock already credited
+`fg_batches` / `cost_ledger` / `fg_units` and no reversal exists. The refusal is right — a
+silent cancel left stock overstated. What it costs: a return raised in error can no longer be
+cancelled, AND its quantity stays off the delivery order's invoiceable total permanently
+(`computeDoInvoiceLines` subtracts every non-CANCELLED return). There is no in-app recovery.
+
+The message now names the partial way out (a stock adjustment for the phantom credit), but the
+invoiceable quantity cannot be recovered from that screen. Writing the inverse of a FIFO cost
+reversal blind, with no DB to test it against, is a worse risk than the dead end — a
+double-reversal corrupts cost of goods sold silently. **This needs an owner decision** (is an
+erroneous restocked return common enough to warrant a reversal path?) and a DB to verify
+against.
+
+### Two prod-state assumptions are UNMEASURED
+
+- **R5's constraint is `NOT VALID`** precisely because nobody has checked whether existing
+  `grn_items` rows already violate `invoiced_qty <= accepted_qty`. Run
+  `VALIDATE CONSTRAINT chk_grn_items_invoiced_qty` once someone has looked.
+- **R8 now enforces a ceiling on lines that were silently unguarded before.** If historical
+  `invoiced_qty` / `receivedQty` data is dirty, invoices that used to post will start returning
+  409. That is the fix working as intended, but it will look like a regression to whoever hits
+  it first. Nobody has queried production to find out how many lines are affected.
