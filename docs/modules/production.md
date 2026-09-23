@@ -1,7 +1,8 @@
 # Production & BOM — Module Guide
 
 > **Last verified: 2026-09-23** (branch `fix/production-auto-load`) — only the `filteredOrders` and
-> `loadFgStickers` / `packingStickerUrl` anchors, re-derived after the "Load all" gate was removed.
+> `loadFgStickers` / `packingStickerUrl` anchors, re-derived after the "Load all" gate was removed and the
+> Overview virtualizer moved into `OverviewVirtualRows`.
 >
 > **Last verified: 2026-08-14** (branch `docs/docs-vs-code-audit`) — corrected against the
 > source by the prose audit; the row(s) touched here are itemised in
@@ -53,8 +54,8 @@ Owns the shop floor: a **dept-tabbed WIP board** (one production_order per confi
 | Symbol / section | file:line | Role |
 |---|---|---|
 | `ProductionPage` | `src/pages/production/index.tsx:548` | WIP board; every column/row branches on `activeTab` |
-| `filteredOrders` (memo) | `src/pages/production/index.tsx:2833` | Dept-narrow + overdue-set grid filter |
-| `loadFgStickers` / `packingStickerUrl` | `src/pages/production/index.tsx:5514 / 5473` | FG sticker set (immediate paint → /p/ token upgrade) |
+| `filteredOrders` (memo) | `src/pages/production/index.tsx:2841` | Dept-narrow + overdue-set grid filter |
+| `loadFgStickers` / `packingStickerUrl` | `src/pages/production/index.tsx:5513 / 5472` | FG sticker set (immediate paint → /p/ token upgrade) |
 | `BOMManagementPage` | `src/pages/bom.tsx:6245` | BOM page shell (tabs, list) |
 | `EditBOMDialog` / `MasterTemplatesDialog` | `src/pages/bom.tsx:3070 / 4001` | L1+WIP editor / master variants |
 | `rowToPO` | `production-orders/_helpers.ts:905` | PO row → API shape (dual-keyed reads) |
