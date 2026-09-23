@@ -29,6 +29,11 @@ export type DocLineExtra = BuildSpecExtra & {
   salesOrderNo?: string | null;
   customerSO?: string | null;
   customerRef?: string | null;
+  // Invoice print-extras name the same per-line refs differently
+  // (computeInvoicePrintExtras): customerSOLine / customerRefLine / companySO.
+  customerSOLine?: string | null;
+  customerRefLine?: string | null;
+  companySO?: string | null;
   repairNote?: string | null;
   // Invoice price build-up (from computeInvoicePrintExtras) — used to itemise
   // the Price column (Base + Divan + Leg + T.Height + Special). Restores the
@@ -221,12 +226,14 @@ export function buildUnifiedInvoiceData(input: UnifiedInvoiceInput, logoPngBase6
       groups.push(cur);
     }
     totalSets += it.quantity;
-    const ourSO = (ex?.salesOrderNo && String(ex.salesOrderNo).trim()) || "";
-    const custPO = (ex?.customerPOId && String(ex.customerPOId).trim()) || "";
-    const custSO =
-      (ex?.customerSO && String(ex.customerSO).trim()) || (input.fallbackCustomerSO || "");
-    const custRef =
-      (ex?.customerRef && String(ex.customerRef).trim()) || (input.fallbackCustomerRef || "");
+    // Invoice extras carry customerSOLine / customerRefLine / companySO; reading
+    // only the DO names printed the invoice-level SO/REF on every line and a
+    // blank CO SO (BUG-22, INV-2609-067).
+    const t = (v?: string | null) => (v && String(v).trim()) || "";
+    const ourSO = t(ex?.companySO) || t(ex?.salesOrderNo);
+    const custPO = t(ex?.customerPOId);
+    const custSO = t(ex?.customerSOLine) || t(ex?.customerSO) || (input.fallbackCustomerSO || "");
+    const custRef = t(ex?.customerRefLine) || t(ex?.customerRef) || (input.fallbackCustomerRef || "");
     const spec = buildSpec({ fabricCode: it.fabricCode || "", sizeLabel: it.sizeLabel || "" }, ex);
     cur.items.push({
       // Invoice ref order (matches the current jsPDF invoice): PO / SO / REF / CO SO.

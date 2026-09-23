@@ -1,6 +1,6 @@
 # Bug History
 
-> **Last verified: 2026-09-23** — newest entry BUG-2026-09-23-185 (branch `fix/so-duplicate-ref-saves-draft`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-09-23** — newest entry BUG-2026-09-23-186 (branch `fix/invoice-line-so-ref`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 
 Living log of bugs we've identified, diagnosed, and fixed in Hookka ERP.
 
@@ -33,6 +33,29 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-09-23-186 — Invoice PDF printed the same SO / REF ("FAIR ITEM PG") on every line and a blank CO SO; the DO was correct `invoices` `pdf` 🟡
+
+🟡 **Fix in progress** · BUG-22, customer-reported on INV-2609-067 (DO-2609-061, Houzs Century):
+each line's PO was right, but SO and REF were the same invoice-level value on every line and CO SO
+was always `-`.
+
+**Root cause.** `buildUnifiedInvoiceData` (`src/lib/build-unified-doc-data.ts`) — the builder behind
+both the browser invoice download and the backend customer-notice email — read the per-line refs
+under the **DO** print-extras names (`customerSO` / `customerRef` / `salesOrderNo`). The invoice
+print-extras (`computeInvoicePrintExtras`) emit them as `customerSOLine` / `customerRefLine` /
+`companySO`. Every read was `undefined`, so SO/REF fell back to the invoice-level
+`fallbackCustomerSO/Ref` and CO SO printed `-`. PO worked only because both sides call it
+`customerPOId`. The resolver was always right; the jsPDF path and the invoice detail screen read
+the correct names.
+
+**Fix.** The builder reads the invoice names first, DO names second, invoice-level fallback last.
+Class C16 row 8. Regression: `tests/invoice-pdf-line-refs.test.mjs` (fails on the old builder).
+
+**Verify.** Re-download INV-2609-067 after deploy: each line's SO / REF / CO SO must match that
+line's own sales order. UNMEASURED on prod until then.
 
 ---
 

@@ -930,12 +930,14 @@ export default function ProductionPage({
   // Re-sync local mirror when URL state changes externally (Clear all,
   // first-mount seed, deep link, back-button). Skip when the input
   // already matches to dodge a self-loop.
+  /* eslint-disable react-hooks/set-state-in-effect -- intentional mirror of URL state into the typed input */
   useEffect(() => {
     setFltDueFromInput((prev) => (prev === fltDueFrom ? prev : fltDueFrom));
   }, [fltDueFrom]);
   useEffect(() => {
     setFltDueToInput((prev) => (prev === fltDueTo ? prev : fltDueTo));
   }, [fltDueTo]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // F1 cold-start today fallback (2026-05-11).
   //
@@ -1042,7 +1044,13 @@ export default function ProductionPage({
   // by Phase 6 — server-side KV snapshot cache — which gives every
   // repeat fetch a <200ms response instead of trying to optimise the
   // first-fetch parse cost.
-  const { data: ordersResp, loading, failure: ordersFailure, refresh: refreshOrders } = useCachedJson<{ success?: boolean; data?: ProductionOrder[] }>(ordersUrl);
+  const { data: ordersResp, loading, failure: ordersFailure, refresh: refreshOrders } = useCachedJson<{ success?: boolean; data?: ProductionOrder[] }>(
+    ordersUrl,
+    300,
+    // The 8 s poll below usually returns a byte-identical body — reuse the
+    // same object so an unchanged poll costs no re-render (see cached-fetch.ts).
+    { reuseUnchanged: true },
+  );
   // Date-filter-INDEPENDENT fetch used solely by the "Total Overdue SO"
   // header chip + drill-down panel. Pulls ALL POs (no dueFrom/dueTo, no
   // dept narrowing) so the count reflects the system-wide overdue state,
@@ -3230,21 +3238,12 @@ export default function ProductionPage({
   // stay on their existing DataGrid path. estimateSize=36 matches the
   // typical row height (single-line product); rows that wrap (long
   // model + spec line) are auto-measured via `measureElement`.
-  const overviewBodyRef = useRef<HTMLDivElement>(null);
-  const overviewRowVirtualizer = useVirtualizer({
-    count: activeTab === "ALL" ? visibleOrders.length : 0,
-    getScrollElement: () => overviewBodyRef.current,
-    estimateSize: () => 36,
-    overscan: 8,
-  });
-  // When a column filter narrows the matrix, reset the body scroll to the top
-  // so the row virtualizer re-anchors. Without this it can hold a stale scroll
-  // offset whose row indices no longer exist after the filter, leaving the
-  // visible area blank (Wei Siang's "整列变空白" — and different users saw
-  // different empty-row counts depending on their prior scroll position).
-  useEffect(() => {
-    if (overviewBodyRef.current) overviewBodyRef.current.scrollTop = 0;
-  }, [overviewFilters]);
+  // The row virtualizer itself lives in <OverviewVirtualRows> (bottom of this
+  // file), NOT here: a virtualizer re-renders the component that hosts it on
+  // every scroll frame, and hosting it in this ~9.7k-line page re-rendered the
+  // whole page per frame (measured on prod 2026-09-23: 30–60 ms per scroll
+  // step, ~30 fps with only ~20 rows mounted). The scroll-to-top-on-filter
+  // reset moved with it (resetKey={overviewFilters}).
 
   // Unique customer + state options for the filter dropdowns, derived
   // live from the order set so they auto-update when data changes.
@@ -8101,8 +8100,9 @@ export default function ProductionPage({
               : `Orders not shown — ${ordersUnobservedReason}.`}
           </div>
         ) : (
-          <div
-            ref={overviewBodyRef}
+          <OverviewVirtualRows
+            count={visibleOrders.length}
+            resetKey={overviewFilters}
             // overflow-x-hidden: the body only scrolls VERTICALLY. Horizontal
             // scrolling is owned by the outer wrapper (which keeps header +
             // rows aligned). Without this the body grew its own, unsynced
@@ -8110,19 +8110,8 @@ export default function ProductionPage({
             // two left/right scrollbars. — Wei Siang 2026-05-29
             className="overflow-y-auto overflow-x-hidden"
             style={{ maxHeight: "calc(100vh - 320px)", minWidth: overviewMinWidth }}
-          >
-          <div
-            style={{
-              height: `${overviewRowVirtualizer.getTotalSize()}px`,
-              position: "relative",
-              width: "100%",
-            }}
-          >
-          {overviewRowVirtualizer
-            .getVirtualItems()
-            .filter((virtualRow) => virtualRow.index < visibleOrders.length)
-            .map((virtualRow) => {
-            const order = visibleOrders[virtualRow.index];
+            renderRow={(rowIndex, rowStart, measureRef) => {
+            const order = visibleOrders[rowIndex];
             if (!order) return null;
             const isSelected = selectedOverviewIds.has(order.id);
             // Lifecycle row styling — amber background for ON_HOLD, grey +
@@ -8160,8 +8149,8 @@ export default function ProductionPage({
             return (
             <div
               key={order.id}
-              ref={overviewRowVirtualizer.measureElement}
-              data-index={virtualRow.index}
+              ref={measureRef}
+              data-index={rowIndex}
               className={`grid items-stretch border-b border-[#F0EBE3] cursor-pointer ${rowCls}`}
               style={{
                 gridTemplateColumns: overviewTemplate,
@@ -8170,7 +8159,7 @@ export default function ProductionPage({
                 top: 0,
                 left: 0,
                 right: 0,
-                transform: `translateY(${virtualRow.start}px)`,
+                transform: `translateY(${rowStart}px)`,
               }}
               // Single-click anywhere on the row toggles its selection (the
               // operator asked to tick by clicking the row, not just the small
@@ -8318,9 +8307,8 @@ export default function ProductionPage({
               })}
             </div>
             );
-          })}
-          </div>
-          </div>
+          }}
+          />
         )}
         </div>{/* /overflow-x-auto matrix scroll wrapper */}
         </OverviewResizeCtx.Provider>
@@ -9654,6 +9642,57 @@ export default function ProductionPage({
       {/* PatchFailureModal removed 2026-05-12 — failures now surface as
           toast.error from flushDrafts. Cell auto-reverts on failure, so the
           operator sees the value disappear + the toast at the same time. */}
+    </div>
+  );
+}
+
+// Hosts the Overview matrix's row virtualizer so a scroll re-renders only this
+// component and the ~20 mounted rows — never the whole ProductionPage (see the
+// note where `visibleOrders` is built). estimateSize=36 is the typical
+// single-line row; wrapped rows are measured via measureRef. `resetKey`
+// changing (the column filters) scrolls back to the top so the virtualizer
+// never holds an offset whose rows no longer exist (the "整列变空白" bug).
+function OverviewVirtualRows({
+  count,
+  resetKey,
+  className,
+  style,
+  renderRow,
+}: {
+  count: number;
+  resetKey: unknown;
+  className?: string;
+  style?: React.CSSProperties;
+  renderRow: (
+    index: number,
+    start: number,
+    measureRef: (el: Element | null) => void,
+  ) => React.ReactNode;
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({
+    count,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 36,
+    overscan: 8,
+  });
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+  }, [resetKey]);
+  return (
+    <div ref={scrollRef} className={className} style={style}>
+      <div
+        style={{
+          height: `${virtualizer.getTotalSize()}px`,
+          position: "relative",
+          width: "100%",
+        }}
+      >
+        {virtualizer
+          .getVirtualItems()
+          .filter((row) => row.index < count)
+          .map((row) => renderRow(row.index, row.start, virtualizer.measureElement))}
+      </div>
     </div>
   );
 }

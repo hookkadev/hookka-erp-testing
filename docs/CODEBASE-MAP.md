@@ -40,11 +40,13 @@
 > section gains the `attendance_records` warning — that table carries no production or
 > efficiency data and never has (BUG-2026-08-13-103).
 >
+> **Last verified: 2026-09-23 on branch `feat/service-case-customer-po`** — the Service & Repair `service-cases/index.tsx` / `service-cases.ts` row only: line counts re-measured (1691 / 1068) and the Customer PO column (DEV-13) noted.
+>
 > **Last verified: 2026-09-23 on branch `ci/github-deployments-status`** — the Service & Repair `service-cases/index.tsx` row only: line count re-measured (`wc -l`, 1675; was 1522) and the Source-column behaviour noted.
 
 > **Last verified: 2026-09-23 on branch `fix/so-duplicate-ref-saves-draft`** — the Sales rows for `sales-orders.ts` / `sales/create.tsx` and the `scan-po-modal.tsx` row: line counts re-measured (`wc -l`), behaviour of BUG-2026-09-23-185 noted; the `src/api/routes/sales-orders.ts:4003` `lineNo` anchor re-derived.
 
-> **Last verified: 2026-09-23 on branch `fix/production-auto-load`** — the `production/index.tsx` row only: line count re-measured (`wc -l`, was 8888) and the removed "Load all" gate noted.
+> **Last verified: 2026-09-23 on branch `fix/production-auto-load`** — the `production/index.tsx` row only: line count re-measured (`wc -l`, was 8888), the removed "Load all" gate and the Overview scroll/poll perf fix noted.
 
 > **Last verified: 2026-09-22 on branch `fix/scan-queue-client-driven`** — the Scan-queue rows only (`scan-queue.ts` row, its route table, its Internals paragraph): re-anchored after BUG-2026-09-22-178 made the OCR browser-driven; the machine gate `check-codebase-map.mjs` exits 0 (its only errors were these rows); its 17 advisories about unmapped `src/pages/m/**` and production-component files predate this branch and are unchanged.
 
@@ -478,7 +480,7 @@ authoritative current detail.** New here? Start with [ONBOARDING-PATH.md](ONBOAR
 
 | Frontend page | API route | Primary tables | Tests |
 |---|---|---|---|
-| `src/pages/production/index.tsx` — dept-tabbed WIP board; fetches on mount, no "Load all" gate since 2026-09-23 (9659, re-measured 2026-09-23) | `src/api/routes/production-orders.ts` — PO/job-card/WIP backend (7.6k) | `production_orders` / `production_orders_archive` / `production_orders_list_snapshot` | `tests/bom-explosion.test.mjs` |
+| `src/pages/production/index.tsx` — dept-tabbed WIP board; fetches on mount, no "Load all" gate since 2026-09-23; Overview rows virtualized by `OverviewVirtualRows` (bottom of file — keep the virtualizer OUT of `ProductionPage`, it re-renders its host per scroll frame); orders poll opts into `useCachedJson` `reuseUnchanged` (9698, re-measured 2026-09-23) | `src/api/routes/production-orders.ts` — PO/job-card/WIP backend (7.6k) | `production_orders` / `production_orders_archive` / `production_orders_list_snapshot` | `tests/bom-explosion.test.mjs` |
 | `src/pages/production/folders.tsx` — folder list | `src/api/routes/production-folders.ts` — group/ungroup | `job_cards` / `job_cards_archive` / `job_card_events` | `tests/job-card-id.test.mjs` |
 | `src/pages/production/folder-detail.tsx` — folder detail | `src/api/routes/job-cards.ts` — reads + event timeline | `folder_job_cards` / `production_folders` | `tests/production-fresh-po-direct-db.test.mjs` |
 | _(no page)_ `/production/tracker` — redirect only, → `/planning?tab=tracker`. The Master Tracker is a Planning TAB; the standalone `production/tracker.tsx` was deleted 2026-08-13 (unreachable since the route became a redirect, imported nowhere) | `src/api/routes/bom.ts` — bom_templates + bom_versions | `wip_items` / `wip_cascade_log` / `piece_pics` | `tests/production-order-builder.test.mjs` |
@@ -1044,7 +1046,7 @@ the payload's `sales.orders[0].totalSen` is non-zero.
 
 | Frontend page | API route | Primary tables | Tests |
 |---|---|---|---|
-| `src/pages/service-cases/index.tsx` — Service Cases list; Source column shows the full `EXTERNAL (<externalRef>)` for external cases, unclipped (`noClip`) (1675). Last verified 2026-09-23 | `src/api/routes/service-cases.ts` — service_cases CRUD + status + photos + stock top-ups (959) | `service_cases` / `service_orders` / `service_order_lines` / `service_order_returns` | `tests/case-pipeline.test.mjs` |
+| `src/pages/service-cases/index.tsx` — Service Cases list; Source column shows the full `EXTERNAL (<externalRef>)` for external cases, unclipped (`noClip`); Customer PO column = source SO/CO's customer PO, sent only by the list GET (1691). Last verified 2026-09-23 | `src/api/routes/service-cases.ts` — service_cases CRUD + status + photos + stock top-ups; list GET adds `customerPO` via `loadCustomerPoBySource` (1068) | `service_cases` / `service_orders` / `service_order_lines` / `service_order_returns` | `tests/case-pipeline.test.mjs` · `tests/service-case-customer-po.test.mjs` |
 | `src/pages/service-cases/detail.tsx` — Service Case command center (3493) | `src/api/routes/service-orders.ts` — SV-order returns/repair lifecycle + mode/scope (1859) | `sales_orders` (caseid links SV→case; isServiceOrder mode flag) / `sales_order_items` | `tests/repair-scope.test.mjs` |
 | `src/pages/service-orders/index.tsx` — SV-order list + CreateServiceOrderModal (1224) | `src/api/routes/sales-orders.ts` — co-owns the SO MODE (isServiceOrder) for the re-export pages | `production_orders` (repairscope) / `job_cards` / `fg_batches` | `tests/service-cases-rootcauses.test.mjs` |
 | `src/pages/service-orders/detail.tsx` — SV-order detail (returns, repair scope) (961) | | `stock_adjustments` / `stock_movements` / `cost_ledger` | `tests/service-hub-chain.test.mjs` |

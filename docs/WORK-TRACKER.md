@@ -42,9 +42,12 @@ Director: every dashboard's content must also exist on the experimental dashboar
 Owner: "i want the load all button to be remove because its annoying every time i refresh i need
 to click load all". The Overview/full page started empty behind a lazy `shouldFetch` gate
 (armed by a filter or Load all). Gate, button, "No orders loaded yet" callout and "Pick a filter"
-hint removed — every mode fetches on mount. Open: payload / first-load time on the Overview is
-UNMEASURED; the table-virtualization ask (same day) is parked pending the owner naming the
-lagging table.
+hint removed — every mode fetches on mount. Then measured on prod (owner logged in the browser
+pane): 1,426 orders / 11.8 MB decoded / ~0.26 s; only ~20 rows mounted, but (1) the 8 s poll
+re-applied an identical body (~350 ms main-thread block per poll) and (2) the Overview virtualizer
+lived in ProductionPage, so every scroll frame re-rendered the page (~30 fps). Fixed on the same
+branch: `useCachedJson` `reuseUnchanged` opt-in + `OverviewVirtualRows`. Open: re-measure on prod
+after deploy.
 
 ---
 
