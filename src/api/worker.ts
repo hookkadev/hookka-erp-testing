@@ -291,10 +291,16 @@ app.use("*", async (c, next) => {
 // production is `hookka-erp-testing.pages.dev` exactly; preview deploys
 // are `<commit-hash>.hookka-erp-testing.pages.dev` or
 // `<branch-alias>.hookka-erp-testing.pages.dev`. Detect from there.
+//
+// Exception (2026-09-23): PR canaries (`canary-<PR>.…`) use the PRODUCTION
+// DB. On staging data a canary could not answer "are the real figures right"
+// (canary-490, dashboard revenue). A canary write is a real prod write, and
+// its runtime self-apply DDL runs against prod too.
 function isPreviewHostname(requestUrl: string): boolean {
   try {
     const host = new URL(requestUrl).hostname.toLowerCase();
     if (host === "hookka-erp-testing.pages.dev") return false; // prod
+    if (host.startsWith("canary-")) return false; // PR canary → prod DB
     if (host.endsWith(".hookka-erp-testing.pages.dev")) return true; // preview
     return false; // custom domain → treat as prod
   } catch {
@@ -799,7 +805,7 @@ app.post("/api/internal/scan-queue-sweep", async (c) => {
     return c.json({ ok: false, error: "forbidden" }, 403);
   }
   try {
-    const result = await sweepStuckScans(c.var.DB, c.env, c.executionCtx);
+    const result = await sweepStuckScans(c.var.DB);
     return c.json({ ok: true, ...result });
   } catch (err) {
     console.error("[scan-queue-sweep] error:", err);
@@ -1407,9 +1413,10 @@ app.route("/api/scan-supplier", scanSupplier);
 app.route("/api/party-aliases", partyAliases);
 app.route("/api/scan-finance", scanFinance);
 // Background scan queue (async OCR). Upload returns a batchId IMMEDIATELY;
-// processBatch() drives Claude calls under waitUntil() so the user can
-// close the tab while a 100-file batch processes server-side. Same RBAC
-// gate as /api/scan-po + /api/scan-supplier (purchase-orders:create).
+// the modal then drives the rows through POST /batch/:id/work, one row per
+// held-open request (BUG-2026-09-22-178: waitUntil is cancelled 30 s after
+// the response, so it can NOT run a Sonnet call — never re-add it). Same
+// RBAC gate as /api/scan-po + /api/scan-supplier (purchase-orders:create).
 app.route("/api/scan-queue", scanQueue);
 // One-shot historical job_card completion importer. POST
 // /api/import/job-card-completion drives backfill of pre-ERP orders from a

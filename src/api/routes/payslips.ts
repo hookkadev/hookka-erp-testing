@@ -27,6 +27,7 @@ import {
   resolveEfficiencyAllowanceSen,
   monthBounds,
 } from "../lib/efficiency-allowance";
+import { resolveLeadershipAllowanceSen } from "../lib/leadership-allowance";
 import {
   // DEFAULT_PAY_RULES is deliberately NOT imported any more: it used to be
   // calcStatutory's default `rates` argument, and a defaulted rate set is how a
@@ -114,6 +115,9 @@ type WorkerRow = {
   // legacy rows ⇒ no bonus.
   efficiencyAllowanceSen?: number | null;
   efficiencyThresholdPct?: number | null;
+  // Per-worker leadership allowance (migration 0233, DEV-06). Flat bonus (sen)
+  // pro-rated by attendance — no threshold. Default 0 on legacy rows ⇒ no bonus.
+  leadershipAllowanceSen?: number | null;
   // How this worker is paid — the DEFAULT; a payslip may override it per month.
   paymentMethod?: string | null;
   bankName?: string | null;
@@ -729,7 +733,7 @@ app.get("/projected", async (c) => {
 
   // Same worker scope as POST: ACTIVE, plus RESIGNED in their final month.
   const wres = await c.var.DB.prepare(
-    "SELECT id, empNo, name, departmentCode, status, basicSalarySen, workingDaysPerMonth, workingHoursPerDay, otMultiplier, epfEnabled, socsoEnabled, eisEnabled, pcbEnabled, taxResidency, taxCategory, taxChildReliefSen, resignedAt, joinDate, efficiencyAllowanceSen, efficiencyThresholdPct, paymentMethod, bankName, bankAccount, payMode, dailyRateSen FROM workers WHERE (status = 'ACTIVE' OR (status = 'RESIGNED' AND resignedAt LIKE ?)) AND empNo NOT LIKE 'TEST%'",
+    "SELECT id, empNo, name, departmentCode, status, basicSalarySen, workingDaysPerMonth, workingHoursPerDay, otMultiplier, epfEnabled, socsoEnabled, eisEnabled, pcbEnabled, taxResidency, taxCategory, taxChildReliefSen, resignedAt, joinDate, efficiencyAllowanceSen, efficiencyThresholdPct, leadershipAllowanceSen, paymentMethod, bankName, bankAccount, payMode, dailyRateSen FROM workers WHERE (status = 'ACTIVE' OR (status = 'RESIGNED' AND resignedAt LIKE ?)) AND empNo NOT LIKE 'TEST%'",
   )
     .bind(`${period}-%`)
     .all<WorkerRow>();
@@ -895,18 +899,24 @@ app.get("/projected", async (c) => {
       employmentStartDay: joinedDay,
       employmentEndDay: resignedDay,
     });
-    // Pro-rated by days actually worked — the same absentDays that produces
-    // the salary deduction two lines below, so the payslip cannot show one
-    // absence count against the salary and a different one against the bonus.
-    const allowances = resolveEfficiencyAllowanceSen(
+    // Combined non-statutory allowance bucket (efficiency + leadership). Both
+    // are pro-rated by the SAME attendance figure — the same absentDays that
+    // produces the salary deduction two lines below, so the payslip cannot
+    // show one absence count against the salary and a different one against
+    // the bonus — and folded into one amount: the payslip / PDF / reports
+    // show a single "Allowance" line, exactly as they did before leadership
+    // allowance existed.
+    const efficiencyAllowance = resolveEfficiencyAllowanceSen(
       effByWorker.get(worker.id),
       worker.efficiencyAllowanceSen,
       worker.efficiencyThresholdPct,
-      {
-        workingDays: worker.workingDaysPerMonth,
-        absentDays: labor.payroll.absentDays,
-      },
+      { workingDays: worker.workingDaysPerMonth, absentDays: labor.payroll.absentDays },
     );
+    const leadershipAllowance = resolveLeadershipAllowanceSen(worker.leadershipAllowanceSen, {
+      workingDays: worker.workingDaysPerMonth,
+      absentDays: labor.payroll.absentDays,
+    });
+    const allowances = efficiencyAllowance + leadershipAllowance;
     const ytd = ytdPcbInputs.get(worker.id) ?? NO_YTD;
     const stat = calcStatutory(
       effectiveSalarySen,
@@ -1074,7 +1084,7 @@ app.post("/", async (c) => {
       // partial, month) — the existing absence math prorates the days after
       // they left. Later months exclude them because resignedAt no longer
       // matches the period. Earlier months were generated while still ACTIVE.
-      "SELECT id, empNo, name, departmentCode, status, basicSalarySen, workingDaysPerMonth, workingHoursPerDay, otMultiplier, epfEnabled, socsoEnabled, eisEnabled, pcbEnabled, taxResidency, taxCategory, taxChildReliefSen, resignedAt, joinDate, efficiencyAllowanceSen, efficiencyThresholdPct, paymentMethod, bankName, bankAccount, payMode, dailyRateSen FROM workers WHERE (status = 'ACTIVE' OR (status = 'RESIGNED' AND resignedAt LIKE ?)) AND empNo NOT LIKE 'TEST%'",
+      "SELECT id, empNo, name, departmentCode, status, basicSalarySen, workingDaysPerMonth, workingHoursPerDay, otMultiplier, epfEnabled, socsoEnabled, eisEnabled, pcbEnabled, taxResidency, taxCategory, taxChildReliefSen, resignedAt, joinDate, efficiencyAllowanceSen, efficiencyThresholdPct, leadershipAllowanceSen, paymentMethod, bankName, bankAccount, payMode, dailyRateSen FROM workers WHERE (status = 'ACTIVE' OR (status = 'RESIGNED' AND resignedAt LIKE ?)) AND empNo NOT LIKE 'TEST%'",
     )
       .bind(`${period}-%`)
       .all<WorkerRow>();
@@ -1276,15 +1286,20 @@ app.post("/", async (c) => {
       payRuleVersions,
       });
 
-      const allowances = resolveEfficiencyAllowanceSen(
+      // Combined non-statutory allowance bucket (efficiency + leadership) —
+      // see the projected path above for why these are summed rather than
+      // kept as separate payslip lines.
+      const efficiencyAllowance = resolveEfficiencyAllowanceSen(
         effByWorker.get(worker.id),
         worker.efficiencyAllowanceSen,
         worker.efficiencyThresholdPct,
-        {
-          workingDays: worker.workingDaysPerMonth,
-          absentDays: labor.payroll.absentDays,
-        },
+        { workingDays: worker.workingDaysPerMonth, absentDays: labor.payroll.absentDays },
       );
+      const leadershipAllowance = resolveLeadershipAllowanceSen(worker.leadershipAllowanceSen, {
+        workingDays: worker.workingDaysPerMonth,
+        absentDays: labor.payroll.absentDays,
+      });
+      const allowances = efficiencyAllowance + leadershipAllowance;
       // Statutory deductions computed on the month's effective monthly salary
       // (= the worker's salary, day-weighted if it changed mid-month).
       const ytd = ytdPcbInputs.get(worker.id) ?? NO_YTD;

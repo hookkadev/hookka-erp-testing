@@ -1,7 +1,13 @@
 # Recurring bug classes — the index that makes P5 executable
 
 > **Last verified: 2026-09-23** — branch `fix/invoice-line-so-ref` adds **C16 row 8** (invoice PDF read the DO field names for per-line SO/REF/CO SO). Nothing else re-checked.
-
+>
+> **Last verified: 2026-09-23** — restamped on branch `fix/so-duplicate-ref-saves-draft`: only C21 row 11
+> (the SO duplicate-reference guard is now a warning, anchor re-derived to `sales-orders.ts:1795`).
+>
+> **Last verified: 2026-09-22** — restamped on branch `fix/scan-queue-client-driven`, which
+> **adds C25 — long work handed to `ctx.waitUntil`** (BUG-2026-09-22-178). Previously:
+>
 > **Last verified: 2026-09-11** — restamped on branch `fix/po-list-cache-key-collision`,
 > which **adds C22 — a cache key coarser than the handler it names** (BUG-2026-09-11-180:
 > the Production Overview served another page's job-card-less payload and rendered its
@@ -1455,7 +1461,7 @@ IDENTITY or MONEY.
 | 8 | `admin.ts:1229`, `delivery-orders/_helpers.ts:1419` — `inv.salesOrderId ?? soIds[0]` as `priceForItem`'s `fallbackSoId` | a price, but only for lines with **no production-order link** | ⬜ **deliberate, do not "fix" in isolation** — this is `priceForItem`'s documented first-one-wins, whose last resort is `byAnyCode` anyway. Closed as the price half of BUG-2026-07-17-001 (2026-08-07) |
 | 9 | `delivery-orders/_helpers.ts:1741`, `delivery-orders.ts:1651` — `doRow.salesOrderId \|\| soIds[0]` | the **header** SO id on a combined invoice | ✅ benign, and labelled in place: the authoritative link is `deliveryOrderId`, and identity is per-line via `invoice_items.so_item_id` |
 | 10 | `worker/scan.tsx:1107` — `?? wkCards[0]` | which card of a compartment is DISPLAYED | ✅ benign: `wkCards` is already filtered to ONE production order **and** ONE `wipKey`, so every candidate is the same physical compartment, and the server decides the completion from the worker's token |
-| 11 | `purchase-invoices.ts:1178`, `sales-orders.ts:1653` — `?? dupNums[0]` | which reference is **named** in a duplicate-rejection message | ✅ benign: the `.find` covers the real case and the authoritative `duplicateOf` is exact. (Sub-note: their `LIMIT 1` has no `ORDER BY`, so with two duplicates it names an arbitrary one — still a rejection either way) |
+| 11 | `purchase-invoices.ts:1178`, `sales-orders.ts:1795` — `?? dupNums[0]` / `?? soRefs[0]` | which reference is **named** in a duplicate-rejection message (SO: a duplicate-reference *warning* since BUG-2026-09-23-185 — the SO is saved as DRAFT) | ✅ benign: the `.find` covers the real case and the authoritative `duplicateOf` is exact. (Sub-note: their `LIMIT 1` has no `ORDER BY`, so with two duplicates it names an arbitrary one — still a rejection either way) |
 | 12 | `mail-center.ts:401` — `recipients.find(/@hookka\.com/) \|\| recipients[0]` | which mailbox an inbound email is filed under | ✅ low-risk: a stated preference rule, no configured mailbox matched, and the message is stored intact |
 | 13 | UI selection defaults — `default-bank.ts:12`, `bom.tsx` ×6, `procurement/{create,detail,index}.tsx` + `pi/create.tsx` (`bindings.find(isMainSupplier) ?? bindings[0]`), `employees.tsx:5376`, `finance-dashboard.tsx:549`, `leads/index.tsx:402`, `m/FormSheet.tsx:527`, `m/ModuleListScreen.tsx:220-221`, `mail-center/index.tsx:3301`, `maintenance/sofa-combos.tsx:1212`, `inventory/index.tsx:2607`, `scan-supplier-modal.tsx` ×4 (`activeOrgs[0]?.code ?? "HOOKKA"`) | a **pre-filled** value the user sees and can change before saving | ✅ benign — see "Not every `[0]` is this class" above |
 | 14 | `accounting.ts:11043` (`others[0]` + `"+N"`), `delivery-orders.ts:2274` (error text) | display only, and the truncation is visible | ✅ benign |
@@ -1637,3 +1643,66 @@ in both, a read that cannot succeed returns a value that looks like data.
 | 5 | `dashboard-prototype.ts` — 260 reads, whole route | ✅ 2026-09-15 (BUG-2026-09-15-181) — converted from the rename map |
 | 6 | **every other route reading rows from `getSql`** | ⬜ unswept. No test forbids a sixth. The cheap sweep is `grep -oE "\br\.[a-z]+_[a-z_]+" src/api/routes/*.ts` — a hit is not automatically a bug (some are bound params or SQL fragments) but every hit deserves a look |
 | 7 | **no test asserts a payload's money field is non-zero** | ⬜ open. This class has now recurred five times and every instance was found by a human noticing a wrong number on a screen. One assertion per money-bearing endpoint — "this field is not 0 for a book with sales" — would have caught all five |
+
+## C24 — the parent feeds the grid's own output back into the grid's inputs
+
+**Shape.** A shared list component (`DataGrid`) reports something to its parent through a
+callback (`onSelectionChange`, `onFilteredDataChange`, …). The parent stores it as a FRESH
+object (`new Set(rows)`, `[...rows]`, `{…}`), and something the parent passes BACK to the grid
+(`columns`, `data`, a filter) is memoised on that state. Inside the grid the reported value is
+derived from an array that is rebuilt on every recompute (`sortedData = [...filteredData]`),
+so the new input recomputes the output, the output becomes new input, and the page re-renders
+forever. Nothing throws in prod. With React Router 7 every navigation is a transition, so the
+loop's urgent updates starve navigation: the page "freezes" and tab clicks "stick".
+
+**Why it keeps happening.** Each half is locally reasonable. The grid re-emits on
+`sortedData` so a filter cannot leave stale rows in the parent's selection (2026-07-03).
+The parent stores a Set because that is the natural shape. The memo dep is there because
+someone once used the value in a column and later stopped. eslint's `react-hooks/exhaustive-
+deps` DID warn ("unnecessary dependency: selectedReadyPOs") — the warning sat for months
+because warnings do not fail the build.
+
+**The rule.** A callback the grid fires must be idempotent for an unchanged value — the grid
+compares before it emits (identity guard in `data-grid.tsx`). And a parent never lists
+selection state in the deps of anything it hands back to the same grid; if a column must
+know the selection, read it through a ref or the row itself.
+
+**Instances**
+
+| # | grid callback | parent state fed back | state |
+|---|---|---|---|
+| 1 | `onSelectionChange` on `/delivery` Pending Delivery | `selectedReadyPOs` in `pendingDeliveryColumns` deps | ✅ 2026-09-22 (BUG-2026-09-22-005) — both halves fixed |
+| 2 | `onFilteredDataChange` | — | ✅ pre-emptively scoped "to the stable identity of the callback so a non-memoised callback doesn't loop" (comment in `data-grid.tsx`) — the same class, caught earlier |
+| 3 | the other 16 `onSelectionChange=` pages | none rebuilds `columns` from selection (checked 2026-09-22) | ⬜ no test forbids the next one; the grid-side guard now makes it inert |
+
+Test: `tests/datagrid-selection-emit.test.mjs`.
+
+## C25 — long work handed to `ctx.waitUntil`, which is cancelled 30 s after the response
+
+**Shape.** A handler returns fast and hands the real work to `c.executionCtx.waitUntil(...)`,
+with a comment saying the runtime "keeps the worker alive until the promise settles". It
+keeps it alive for **30 seconds** (Cloudflare docs, shared across all waitUntil calls of the
+request), then cancels. Anything that takes longer — an AI call, a big import, a fan-out of
+fetches — dies mid-flight with no exception in our code, so nothing marks the row failed. Any
+"stuck row" recovery then defines the user-visible delay (STUCK_MS = 5 min for the scan
+queue), and if the recovery re-kicks under waitUntil, the cycle repeats until an attempt cap.
+
+**Why it keeps happening.** The doc line is easy to misremember as "no limit", the failure
+leaves no stack trace (the warning is only in Workers Logs), and a page that happens to finish
+under 30 s makes the design look like it works.
+
+**The rule.** `waitUntil` is for work that finishes in seconds (cache write, an email, a
+version bump). Work that can take longer than that is driven by a request the client holds
+open, or by Cloudflare Queues / a cron with its own 15-min budget. Any recovery sweeper only
+re-queues; it never re-kicks under waitUntil.
+
+**Instances**
+
+| # | where | state |
+|---|---|---|
+| 1 | `scan-queue.ts` `processBatch` under waitUntil (upload, retry, both sweepers) | ✅ 2026-09-22 (BUG-2026-09-22-178) — browser-driven `/work`, all kicks removed, guarded |
+| 2 | `fireCustomerNoticeBestEffort` (delivery-orders.ts) — one email under waitUntil | ⬜ fits in 30 s; fine as long as it stays one call |
+| 3 | every other `waitUntil(` in `src/api` | ⬜ not audited for duration; grep and check the slowest |
+
+Test: `tests/scan-queue-client-driven.test.mjs` (no `waitUntil(` in scan-queue.ts).
+

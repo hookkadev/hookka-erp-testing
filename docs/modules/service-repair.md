@@ -1,5 +1,8 @@
 # Service & Repair — Module Guide
 
+> **Addendum 2026-09-23:** only the `ServiceCasesListPage` anchor (`index.tsx:249`, was `:248`) and the
+> list Source-column note under Gotchas were re-checked, against `src/pages/service-cases/index.tsx`.
+>
 > **Addendum 2026-09-21:** only the "Dashboard Top issues" gotcha was added and checked, against
 > `src/api/lib/{dashboard-service-slice,service-issue-stats}.ts`, `src/api/routes/service-cases.ts`
 > L34-60 / L241-288 and `tests/db-schema.json`; everything else keeps the stamp below.
@@ -51,7 +54,7 @@ legacy path) plus component-level picks on `affectedProducts[].components`, all 
 
 ## Entry points
 - Pages
-  - `/service-cases` → `src/pages/service-cases/index.tsx:248` (`ServiceCasesListPage` — case list)
+  - `/service-cases` → `src/pages/service-cases/index.tsx:249` (`ServiceCasesListPage` — case list)
   - `/service-cases/:id` → `src/pages/service-cases/detail.tsx:204` (`ServiceCaseDetailPage` — 3,600-line command center)
   - `/service-orders` → `src/pages/service-orders/index.tsx:119` (`ServiceOrdersListPage`; `CreateServiceOrderModal` at `:314`)
   - `/service-orders/:id` → `src/pages/service-orders/detail.tsx:129` (`ServiceOrderDetailPage` — returns, repair scope; `SetModePanel` `:845`, `LogReturnModal` `:731`)
@@ -97,7 +100,7 @@ legacy path) plus component-level picks on `affectedProducts[].components`, all 
 ## Key functions / sections (locate-to-function)
 | Symbol / section | file:line | Role |
 |---|---|---|
-| `ServiceCasesListPage` | `src/pages/service-cases/index.tsx:248` | Case list |
+| `ServiceCasesListPage` | `src/pages/service-cases/index.tsx:249` | Case list |
 | `ServiceCaseDetailPage` | `src/pages/service-cases/detail.tsx:204` | Case command center (header/tabs/orchestration) |
 | `CasePipeline` | `src/pages/service-cases/detail.tsx:965` | Auto-computed display-only progress stepper |
 | `RootCausePanel` | `src/pages/service-cases/detail.tsx:1052` | Multi root-cause editor (manual Add/Save; verifiedSave ref impl) |
@@ -121,6 +124,7 @@ legacy path) plus component-level picks on `affectedProducts[].components`, all 
 
 ## Gotchas
 - **Dashboard "Top issues" (2026-09-21).** `src/api/lib/service-issue-stats.ts` is the single definition: a case with several root causes counts once per distinct cause (rows can sum past the case total; % = share of cases); no cause = the always-shown "Not yet analysed" row; avg close = whole days created to closed over CLOSED cases; prevention values are `PENDING`(shown "Planned")/`IN_PROGRESS`/`DONE`/`NOT_NEEDED`, none = "No prevention recorded". The slice self-applies `rootcauses`/`responsibleunit` (same idempotent ALTER as `service-cases.ts` `ensureCaseLinkColumns`) and falls back to legacy `root_cause_category`. How many live cases actually have a root cause is UNMEASURED.
+- **List Source column (2026-09-23).** `index.tsx` builds `row.source` once (`sourceNo`, or `EXTERNAL (<externalRef>)` for external cases, same text as the detail header); the grid cell, sort, filter, search and CSV all read that field — change it there, not in the column `render`. The column is `noClip` so a long ref widens it instead of ending in an ellipsis. `externalRef` comes from the list API's `rowToApi`.
 - **Two directories, near-identical names.** `service-order/*` (SINGULAR) = re-exports of Sales pages in SV mode via
   `useSOMode()` (`src/lib/so-mode.ts`); `service-orders/*` (PLURAL) = the real returns/repair module. Don't confuse them.
 - **The singular pages have NO own data model** — the four files under `src/pages/service-order/` are 6–18 lines each and are literally `export { default } from "@/pages/sales…"`. They hit `/api/sales-orders` with `isServiceOrder:true`. Changing service-order behavior usually means editing `src/pages/sales/*` (NOT a fork) or `sales-orders.ts`. Never fork the sales list — it is now **2,181 lines** (the in-code comment still says ~1,400).

@@ -10313,10 +10313,31 @@ app.post("/payment-vouchers/:id/lifecycle", async (c) => {
   const pvApState = String((pv.approvalState ?? pv.approval_state) ?? "APPROVED");
   if (pvApState !== "APPROVED") {
     const now = new Date().toISOString();
+    const actor = (c as unknown as { get: (k: string) => string | undefined }).get("userId") ?? null;
+    // `delete` on an unposted voucher = hide it from the list (the same
+    // document_lifecycle DELETED row the list already filters on for posted
+    // ones); `unvoid` restores it as a draft and clears that row. Found
+    // 2026-09-22 clearing the smoke-test vouchers: a voided draft answered
+    // "Already cancelled" to delete and could never leave the list.
+    const lifecycleRow = (state: string) => c.var.DB.prepare(
+      `INSERT INTO document_lifecycle (id, sourceType, sourceId, state, actionAt, actorUserId, orgId)
+       VALUES (?, 'payment_voucher', ?, ?, ?, ?, ?)
+       ON CONFLICT (orgId, sourceType, sourceId) DO UPDATE SET state = ?, actionAt = ?, actorUserId = ?`,
+    ).bind(`dl-${crypto.randomUUID().slice(0, 10)}`, id, state, now, actor, orgId, state, now, actor);
     if (action === "unvoid") {
       if (pv.status !== "VOID") return c.json({ success: false, error: "This voucher is not cancelled" }, 400);
-      await c.var.DB.prepare("UPDATE payment_vouchers SET status = 'DRAFT', updated_at = ? WHERE id = ?").bind(now, id).run();
+      await c.var.DB.batch([
+        c.var.DB.prepare("UPDATE payment_vouchers SET status = 'DRAFT', updated_at = ? WHERE id = ?").bind(now, id),
+        lifecycleRow("ACTIVE"),
+      ]);
       return c.json({ success: true, data: { state: "ACTIVE" } });
+    }
+    if (action === "delete") {
+      await c.var.DB.batch([
+        c.var.DB.prepare("UPDATE payment_vouchers SET status = 'VOID', updated_at = ? WHERE id = ?").bind(now, id),
+        lifecycleRow("DELETED"),
+      ]);
+      return c.json({ success: true, data: { state: "DELETED" } });
     }
     if (pv.status === "VOID") return c.json({ success: false, error: "Already cancelled" }, 400);
     await c.var.DB.prepare("UPDATE payment_vouchers SET status = 'VOID', updated_at = ? WHERE id = ?").bind(now, id).run();

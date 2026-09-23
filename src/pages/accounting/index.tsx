@@ -1,6 +1,6 @@
 ﻿import * as React from "react";
 import { Fragment, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useCachedJson, invalidateCachePrefix } from "@/lib/cached-fetch";
 import { humanizeError } from "@/lib/humanize-error";
 import { useToast } from "@/components/ui/toast";
@@ -3166,6 +3166,10 @@ function JournalsTab({
   // was removed as a no-op in BUG-2026-08-13-090 and never rebuilt).
   const [editingJv, setEditingJv] = useState<JournalEntry | null>(null);
   const [selectedJvs, setSelectedJvs] = useState<JournalEntry[]>([]);
+  // Detail view (owner 2026-09-22 「JV 无法 view detail … 双击点开」): double-click
+  // a row (or ⋮ › View) to see every line with the DR/CR totals; single click
+  // keeps selecting for the batch bar. The actions inside mirror the ⋮ menu.
+  const [detailJv, setDetailJv] = useState<JournalEntry | null>(null);
 
   // Owner 2026-07-28 (JE-2607-0001): this used to ignore the response entirely
   // — a rejected/aborted Post showed NOTHING and the entry silently stayed
@@ -3322,6 +3326,7 @@ function JournalsTab({
     // fabricated figure — dropped rather than pointed at a page that does not
     // exist (there is no per-journal detail route).
     const items: ContextMenuItem[] = [
+      { label: "View detail", action: (r) => setDetailJv(r) },
       { label: "Print voucher", action: (r) => printVoucher(buildJvVoucher(r)) },
     ];
     if (row.status === "DRAFT") {
@@ -3400,9 +3405,82 @@ function JournalsTab({
             contextMenuItems={contextMenuItems}
             selectable
             onSelectionChange={setSelectedJvs}
+            onDoubleClick={(row) => setDetailJv(row)}
           />
         </CardContent>
       </Card>
+
+      {detailJv && (() => {
+        const je = journals.find((j) => j.id === detailJv.id) ?? detailJv;
+        const dr = je.lines.reduce((s, l) => s + l.debitSen, 0);
+        const cr = je.lines.reduce((s, l) => s + l.creditSen, 0);
+        const state = je.lifecycleState ?? "ACTIVE";
+        const close = () => setDetailJv(null);
+        return (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={close}>
+            <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between p-5 border-b border-[#E2DDD8]">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-base font-semibold text-[#1F1D1B]">Journal {je.entryNo}</h2>
+                  <Badge variant="status" status={je.status}>{je.status}</Badge>
+                  {state !== "ACTIVE" && <LifecycleBadge state={state} />}
+                </div>
+                <button onClick={close} className="text-[#9CA3AF] hover:text-[#6B7280] text-lg leading-none">✕</button>
+              </div>
+              <div className="p-5 space-y-4 text-sm">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div><p className="text-[#9CA3AF] text-xs">Date</p><p className="font-medium">{formatDateDMY(je.date)}</p></div>
+                  <div className="col-span-2"><p className="text-[#9CA3AF] text-xs">Description</p><p className="font-medium">{je.description || "—"}</p></div>
+                  <div><p className="text-[#9CA3AF] text-xs">Created</p><p className="font-medium">{String(je.createdAt ?? "").slice(0, 10) || "—"}</p></div>
+                </div>
+                <div className="border border-[#E2DDD8] rounded-md overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-[#FAF8F5]">
+                      <tr className="text-xs text-[#6B7280]">
+                        <th className="text-left px-3 py-1.5 font-medium">Account</th>
+                        <th className="text-left px-3 py-1.5 font-medium">Description</th>
+                        <th className="text-right px-3 py-1.5 font-medium">Debit</th>
+                        <th className="text-right px-3 py-1.5 font-medium">Credit</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {je.lines.map((l, i) => (
+                        <tr key={i} className="border-t border-[#F0ECE9]">
+                          <td className="px-3 py-1.5 whitespace-nowrap">{l.accountCode}{l.accountName ? ` · ${l.accountName}` : (accounts.find((a) => a.code === l.accountCode)?.name ? ` · ${accounts.find((a) => a.code === l.accountCode)?.name}` : "")}</td>
+                          <td className="px-3 py-1.5 text-[#6B7280]">{l.description || ""}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">{l.debitSen ? formatCurrency(l.debitSen) : ""}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">{l.creditSen ? formatCurrency(l.creditSen) : ""}</td>
+                        </tr>
+                      ))}
+                      <tr className="border-t-2 border-[#1F1D1B] font-semibold">
+                        <td className="px-3 py-1.5" colSpan={2}>Total{dr !== cr && <span className="ml-2 text-xs font-normal text-[#9A3A2D]">not balanced — DR {formatCurrency(dr)} vs CR {formatCurrency(cr)}</span>}</td>
+                        <td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(dr)}</td>
+                        <td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(cr)}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-[#F0ECE9]">
+                  <Button variant="outline" size="sm" onClick={() => printVoucher(buildJvVoucher(je))}><Printer className="h-4 w-4" /> Print voucher</Button>
+                  {je.status === "DRAFT" && (
+                    <>
+                      <Button variant="outline" size="sm" onClick={() => { close(); setShowForm(false); setEditingJv(je); }}>Edit</Button>
+                      <Button variant="primary" size="sm" onClick={() => { close(); void handlePost(je.id); }}>Post</Button>
+                    </>
+                  )}
+                  {je.status !== "DRAFT" && state === "ACTIVE" && (
+                    <Button variant="outline" size="sm" onClick={() => { close(); void handleLifecycle(je.id, je.entryNo, "void"); }}>Void</Button>
+                  )}
+                  {je.status !== "DRAFT" && state === "VOID" && (
+                    <Button variant="outline" size="sm" onClick={() => { close(); void handleLifecycle(je.id, je.entryNo, "unvoid"); }}>Unvoid</Button>
+                  )}
+                  <Button variant="outline" size="sm" onClick={() => { close(); void handleDuplicate(je); }}>Duplicate as draft</Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -6599,6 +6677,7 @@ type ApInvRow = {
   description: string; totalSen: number; paidSen: number; outstandingSen: number; status: "OPEN" | "PAID" | "CANCELLED"; opening: boolean;
 };
 function ApInvoicesTab({ accounts }: { accounts: ChartOfAccount[] }) {
+  const navigate = useNavigate();
   // Raise / edit other-creditor bills right here (sidebar slim-down 2026-09-22:
   // the Other Creditor Bills entry folded into this page). The mirror list
   // reloads when the manager posts (ver bump).
@@ -6607,7 +6686,8 @@ function ApInvoicesTab({ accounts }: { accounts: ChartOfAccount[] }) {
   const [ver, setVer] = useState(0);
   const [data, setData] = useState<{ rows: ApInvRow[]; totals: { openSen: number; openCount: number; apOpenSen: number; piOpenSen: number } } | null>(null);
   const [kind, setKind] = useState<"ALL" | "AP" | "PI">("ALL");
-  const [status, setStatus] = useState<"OPEN" | "PAID" | "CANCELLED" | "ALL">("OPEN");
+  // Owner 2026-09-22: default ALL (the mirror is for looking things up, not only chasing).
+  const [status, setStatus] = useState<"OPEN" | "PAID" | "CANCELLED" | "ALL">("ALL");
   const [q, setQ] = useState("");
   useEffect(() => {
     let dead = false;
@@ -6650,7 +6730,7 @@ function ApInvoicesTab({ accounts }: { accounts: ChartOfAccount[] }) {
           <option value="ALL">AP + PI</option><option value="AP">AP bills only</option><option value="PI">Purchase invoices only</option>
         </select>
         <select value={status} onChange={(e) => setStatus(e.target.value as typeof status)} className="rounded-md border border-[#E2DDD8] px-2 py-1.5 text-sm">
-          <option value="OPEN">Open</option><option value="PAID">Paid</option><option value="CANCELLED">Cancelled</option><option value="ALL">All</option>
+          <option value="ALL">All</option><option value="OPEN">Open</option><option value="PAID">Paid</option><option value="CANCELLED">Cancelled</option>
         </select>
         <span className="ml-auto text-xs text-[#6B7280]">Shown outstanding <span className="font-semibold tabular-nums text-[#1F1D1B]">{formatCurrency(shownSen)}</span></span>
       </div>
@@ -6676,7 +6756,9 @@ function ApInvoicesTab({ accounts }: { accounts: ChartOfAccount[] }) {
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={`${r.kind}-${r.id}`} className={`border-b border-[#F0ECE9] hover:bg-[#FAF8F5] ${r.status === "CANCELLED" ? "opacity-50" : ""}`}>
+                  <tr key={`${r.kind}-${r.id}`} className={`border-b border-[#F0ECE9] hover:bg-[#FAF8F5] ${r.status === "CANCELLED" ? "opacity-50" : ""}`}
+                    onDoubleClick={() => { if (r.kind === "PI") navigate("/procurement/pi"); else setManage(true); }}
+                    title={r.kind === "PI" ? "Double-click: open on Procurement › Purchase Invoices" : "Double-click: open the bill editor below"}>
                     <td className="px-3 py-1.5"><span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${r.kind === "PI" ? "bg-[#EEF2FB] text-[#2C4170]" : "bg-[#F6F1E7] text-[#6B5C32]"}`}>{r.kind}</span>{r.opening && <span className="ml-1 text-[10px] text-[#9CA3AF]">opening</span>}</td>
                     <td className="px-3 py-1.5 tabular-nums text-xs whitespace-nowrap">
                       {r.kind === "PI" ? <Link to="/procurement/pi" className="underline decoration-dotted text-[#6B5C32]" title="Open on Procurement › Purchase Invoices">{r.no}</Link> : <button type="button" onClick={() => setManage(true)} className="underline decoration-dotted text-[#6B5C32] cursor-pointer" title="Edit below (other-creditor bills)">{r.no}</button>}
@@ -6714,6 +6796,40 @@ function ApInvoicesTab({ accounts }: { accounts: ChartOfAccount[] }) {
           <Button variant="outline" size="sm" onClick={() => { setManage(false); setVer((v) => v + 1); }}>Done — refresh the list</Button>
         </div>
       )}
+    </div>
+  );
+}
+
+// Document detail popup (owner 2026-09-22 「其他的类似 payment voucher, receipt
+// 这些都要双击点开」): every document list opens its record on double-click
+// — the same shell for vouchers, receipts, transfers — while single click
+// keeps doing what it did (select / expand). Actions inside mirror the row.
+function DocDetailModal({ title, badges, onClose, children, actions, wide }: {
+  title: string; badges?: React.ReactNode; onClose: () => void; children: React.ReactNode; actions?: React.ReactNode; wide?: boolean;
+}) {
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className={`bg-white rounded-lg shadow-xl w-full ${wide ? "max-w-4xl" : "max-w-3xl"} max-h-[90vh] overflow-y-auto`} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-5 border-b border-[#E2DDD8]">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h2 className="text-base font-semibold text-[#1F1D1B]">{title}</h2>
+            {badges}
+          </div>
+          <button onClick={onClose} className="text-[#9CA3AF] hover:text-[#6B7280] text-lg leading-none" title="Close (Esc)">✕</button>
+        </div>
+        <div className="p-5 space-y-4 text-sm">
+          {children}
+          {actions && <div className="flex flex-wrap items-center justify-end gap-2 pt-3 border-t border-[#F0ECE9]">{actions}</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+function DetailField({ label, children, span }: { label: string; children: React.ReactNode; span?: number }) {
+  return (
+    <div className={span === 2 ? "col-span-2" : span === 3 ? "col-span-3" : undefined}>
+      <p className="text-[#9CA3AF] text-xs">{label}</p>
+      <p className="font-medium">{children}</p>
     </div>
   );
 }
@@ -7226,8 +7342,8 @@ function OtherPartyBillsManager({ parties, accounts, side }: { parties: OtherPar
             <tbody>
               {visibleBills.map((b) => (
                 <React.Fragment key={b.id}>
-                  <tr className="border-b border-[#F0ECE9]">
-                    <td className="px-3 py-1.5 w-8">
+                  <tr className="border-b border-[#F0ECE9]" onDoubleClick={() => setOpenBill(openBill === b.id ? null : b.id)} title="Double-click to open the full bill">
+                    <td className="px-3 py-1.5 w-8" onDoubleClick={(e) => e.stopPropagation()}>
                       <input type="checkbox" checked={billSel.isSelected(b.billNo ?? b.id)} onChange={() => billSel.toggle(b.billNo ?? b.id)} className="h-3.5 w-3.5 accent-[#6B5C32] align-middle" />
                     </td>
                     <td className="px-4 py-1.5 font-mono text-xs">
@@ -7646,7 +7762,7 @@ function OtherPartyPaymentsManager({ parties, accounts, side }: { parties: Other
             </tr></thead>
             <tbody>
               {history.map((g) => (
-                <tr key={g.paymentNo} onClick={() => setDetail(g)} className="border-b border-[#F0ECE9] cursor-pointer hover:bg-[#FAF8F5]">
+                <tr key={g.paymentNo} onClick={() => setDetail(g)} onDoubleClick={() => setDetail(g)} className="border-b border-[#F0ECE9] cursor-pointer hover:bg-[#FAF8F5]">
                   <td className="px-3 py-1.5 w-8" onClick={(e) => e.stopPropagation()}>
                     <input type="checkbox" checked={opaySel.isSelected(g.paymentNo)} onChange={() => opaySel.toggle(g.paymentNo)} className="h-3.5 w-3.5 accent-[#6B5C32] align-middle" />
                   </td>
@@ -8783,6 +8899,9 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
   const [rows, setRows] = useState<PvRow[] | null>(null);
   const [migrationMissing, setMigrationMissing] = useState(false);
   const [expandedPv, setExpandedPv] = useState<Record<string, boolean>>({});
+  // Double-click → the voucher's detail popup (resolved from `rows` by id so
+  // it re-renders after a rung / void / attachment change).
+  const [detailPvId, setDetailPvId] = useState<string | null>(null);
   // A deep-link opens New AP Payment straight away (state seeded, no effect).
   const initialPay = parsePayLink(new URLSearchParams(window.location.search).get("pay"));
   const [showForm, setShowForm] = useState(!!initialPay);
@@ -9650,6 +9769,8 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
                   <tr
                     className={`border-b border-[#F0ECE9] cursor-pointer hover:bg-[#FAF8F5] ${r.status === "VOID" ? "opacity-50" : ""}`}
                     onClick={() => setExpandedPv((m) => ({ ...m, [r.id]: !m[r.id] }))}
+                    onDoubleClick={() => setDetailPvId(r.id)}
+                    title="Click to expand · double-click to open"
                   >
                     <td className="px-3 py-1.5 w-8" onClick={(e) => e.stopPropagation()}>
                       <input type="checkbox" checked={pvSel.isSelected(r.pvNo ?? r.id)} onChange={() => pvSel.toggle(r.pvNo ?? r.id)} className="h-3.5 w-3.5 accent-[#6B5C32]" />
@@ -9683,7 +9804,7 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
                         if ((r.advanceOpenSen ?? 0) > 0) return chip(`Approved · advance open ${formatCurrency(r.advanceOpenSen ?? 0)}`, "bg-[#FBF3E4] text-[#7A5B12]", "Unapplied supplier advance — knock it off on the Supplier Payment page");
                         return r.accrued === 1 && !r.settledAt ? chip("Approved · accrued, unpaid", "bg-[#F7E5E1] text-[#9A3A2D]") : chip("Approved · paid", "bg-[#EAF3DE] text-[#27500A]");
                       })()}
-                      {(r.rejectReason ?? r.reject_reason) && apState(r) === "DRAFT" && (
+                      {(r.rejectReason ?? r.reject_reason) && apState(r) === "DRAFT" && r.status !== "VOID" && (
                         <div className="text-[10px] text-[#9A3A2D] mt-0.5 max-w-[16rem] truncate" title={r.rejectReason ?? r.reject_reason ?? ""}>↩ {r.rejectReason ?? r.reject_reason}</div>
                       )}
                     </td>
@@ -9797,6 +9918,97 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
           )}
         </CardContent>
       </Card>
+
+      {detailPvId && (() => {
+        const r = (rows ?? []).find((x) => x.id === detailPvId);
+        if (!r) return null;
+        const st = apState(r);
+        const close = () => setDetailPvId(null);
+        const dmy = (iso?: string | null) => (iso ? String(iso).slice(0, 10) : "—");
+        const rx = r as PvRow & { preparedByName?: string | null; checkedByName?: string | null; approvedByName?: string | null; createdByName?: string | null };
+        const chip = (label: string, cls: string) => <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${cls}`}>{label}</span>;
+        const statusChip = r.status === "VOID" ? chip("CANCELLED", "bg-[#F0ECE9] text-[#9CA3AF]")
+          : st === "DRAFT" ? chip("Draft", "bg-[#F0ECE9] text-[#6B7280]")
+          : st === "PREPARED" ? chip("Prepared", "bg-[#EEF2FB] text-[#2C4170]")
+          : st === "CHECKED" ? chip("Checked · awaiting approval", "bg-[#FBF3E4] text-[#7A5B12]")
+          : r.accrued === 1 && !r.settledAt ? chip("Approved · accrued, unpaid", "bg-[#F7E5E1] text-[#9A3A2D]") : chip("Approved · paid", "bg-[#EAF3DE] text-[#27500A]");
+        return (
+          <DocDetailModal
+            title={`${r.pvKind === "AP" ? "AP Payment" : "Payment Voucher"} ${r.pvNo}`}
+            badges={<>{chip(r.pvKind === "AP" ? "AP" : "PV", r.pvKind === "AP" ? "bg-[#EEF2FB] text-[#2C4170]" : "bg-[#F6F1E7] text-[#6B5C32]")}{statusChip}</>}
+            onClose={close}
+            wide
+            actions={<>
+              <Button variant="outline" size="sm" onClick={() => void printPvWithDetail(r)}><Printer className="h-4 w-4" /> Print</Button>
+              {(r.attachmentCount ?? 0) > 0 && <Button variant="outline" size="sm" disabled={bundleBusy === r.id} onClick={() => void printPvBundle(r)}><Printer className="h-4 w-4" /> {bundleBusy === r.id ? "Preparing…" : "Print + files"}</Button>}
+              {r.status !== "VOID" && st === "DRAFT" && <>
+                <Button variant="outline" size="sm" disabled={ladderBusy} onClick={() => { close(); startEdit(r); }}>Edit</Button>
+                <Button variant="primary" size="sm" disabled={ladderBusy} onClick={() => void handleLadder(r, "prepare")}>Prepare →</Button>
+              </>}
+              {r.status !== "VOID" && st === "PREPARED" && <>
+                <Button variant="outline" size="sm" disabled={ladderBusy} onClick={() => { close(); startEdit(r); }}>Edit</Button>
+                <Button variant="outline" size="sm" disabled={ladderBusy} onClick={() => void handleLadder(r, "withdraw")}>Withdraw</Button>
+                <Button variant="outline" size="sm" disabled={ladderBusy} onClick={() => void handleLadder(r, "reject")}>Reject</Button>
+                <Button variant="primary" size="sm" disabled={ladderBusy} onClick={() => void handleLadder(r, "check")}>Check →</Button>
+              </>}
+              {r.status !== "VOID" && st === "CHECKED" && <>
+                <Button variant="outline" size="sm" disabled={ladderBusy} onClick={() => void handleLadder(r, "reject")}>Reject</Button>
+                <Button variant="primary" size="sm" disabled={ladderBusy} onClick={() => void handleLadder(r, "approve")}>Approve &amp; post</Button>
+              </>}
+              {isPosted(r) && r.pvKind !== "AP" && <Button variant="outline" size="sm" onClick={() => { close(); startEdit(r); }}>Edit</Button>}
+              {isPosted(r) && r.accrued === 1 && !r.settledAt && <Button variant="outline" size="sm" onClick={() => { close(); void handleSettle(r); }}>Settle</Button>}
+              {(r.lifecycleState ?? "ACTIVE") === "ACTIVE" && r.status !== "VOID"
+                ? <Button variant="outline" size="sm" onClick={() => { close(); void handleLifecycle(r.id, r.pvNo, "void"); }}>Void</Button>
+                : r.status === "VOID" && (r.lifecycleState ?? "VOID") !== "DELETED"
+                  ? <Button variant="outline" size="sm" onClick={() => { close(); void handleLifecycle(r.id, r.pvNo, "unvoid"); }}>Unvoid</Button>
+                  : null}
+            </>}
+          >
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <DetailField label="Date">{r.date}</DetailField>
+              <DetailField label={r.pvKind === "AP" ? (r.partyKind === "OTHER" ? "Other creditor" : "Supplier") : "Payee"} span={2}>{r.payee || "—"}</DetailField>
+              <DetailField label={r.accrued === 1 && !r.settledAt ? "Accrued to" : "Paid from"}>{r.accrued === 1 && !r.settledAt ? (r.accrualAccount ? accountLabel(accounts, r.accrualAccount) : "—") : (r.payFrom ? accountLabel(accounts, r.payFrom) : "—")}</DetailField>
+              <DetailField label={r.pvKind === "AP" ? "Reference" : "Description"} span={3}>{r.description || "—"}</DetailField>
+              <DetailField label="Total"><span className="tabular-nums">{formatCurrency(r.totalSen)}</span></DetailField>
+              {r.pvKind !== "AP" && <DetailField label="Product line">{r.productLine ?? "shared"}</DetailField>}
+            </div>
+            {/* Ladder trail — who did what, when. */}
+            <div className="rounded-md bg-[#FAF8F5] border border-[#F0ECE9] px-3 py-2 text-xs grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <div><span className="text-[#9CA3AF]">Prepared</span><br />{rx.preparedByName ?? rx.createdByName ?? "—"} · {dmy(r.preparedAt ?? r.prepared_at)}</div>
+              <div><span className="text-[#9CA3AF]">Checked</span><br />{rx.checkedByName ?? "—"} · {dmy(r.checkedAt ?? r.checked_at)}</div>
+              <div><span className="text-[#9CA3AF]">Approved</span><br />{rx.approvedByName ?? "—"} · {dmy(r.approvedAt ?? r.approved_at)}</div>
+              <div><span className="text-[#9CA3AF]">Settled</span><br />{r.accrued === 1 ? dmy(r.settledAt) : "n/a"}</div>
+              {(r.rejectReason ?? r.reject_reason) && st === "DRAFT" && r.status !== "VOID" && <div className="col-span-2 sm:col-span-4 text-[#9A3A2D]">↩ Rejected: {r.rejectReason ?? r.reject_reason}</div>}
+            </div>
+            <div className="border border-[#E2DDD8] rounded-md overflow-x-auto">
+              {r.pvKind === "AP" ? (
+                <table className="w-full text-sm">
+                  <thead className="bg-[#FAF8F5]"><tr className="text-xs text-[#6B7280]"><th className="text-left px-3 py-1.5 font-medium">Bill</th><th className="text-left px-3 py-1.5 font-medium">Ref</th><th className="text-right px-3 py-1.5 font-medium">Paid</th></tr></thead>
+                  <tbody>
+                    {(r.allocs ?? []).map((a, i) => (
+                      <tr key={i} className="border-t border-[#F0ECE9]"><td className="px-3 py-1.5 whitespace-nowrap tabular-nums">{a.docNo || a.docId} <span className="text-[10px] text-[#9CA3AF]">{a.docKind === "PI" ? "purchase invoice" : "other-creditor bill"}</span></td><td className="px-3 py-1.5 text-[#6B7280]">{a.docRef}</td><td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(a.amountSen)}</td></tr>
+                    ))}
+                    {(r.advanceSen ?? 0) > 0 && <tr className="border-t border-[#F0ECE9]"><td className="px-3 py-1.5">Advance / unallocated{(r.advanceOpenSen ?? 0) > 0 && isPosted(r) ? <span className="ml-1 text-[10px] text-[#7A5B12]">· {formatCurrency(r.advanceOpenSen ?? 0)} still unapplied</span> : null}</td><td /><td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(r.advanceSen ?? 0)}</td></tr>}
+                    <tr className="border-t-2 border-[#1F1D1B] font-semibold"><td className="px-3 py-1.5" colSpan={2}>Total</td><td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(r.totalSen)}</td></tr>
+                  </tbody>
+                </table>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead className="bg-[#FAF8F5]"><tr className="text-xs text-[#6B7280]"><th className="text-left px-3 py-1.5 font-medium">Account</th><th className="text-left px-3 py-1.5 font-medium">Description</th><th className="text-right px-3 py-1.5 font-medium">Amount</th></tr></thead>
+                  <tbody>
+                    {r.lines.map((l, i) => (
+                      <tr key={i} className="border-t border-[#F0ECE9]"><td className="px-3 py-1.5 whitespace-nowrap">{accountLabel(accounts, l.accountCode)}</td><td className="px-3 py-1.5 text-[#6B7280]">{l.description ?? ""}</td><td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(l.amountSen)}</td></tr>
+                    ))}
+                    {r.lines.length === 0 && <tr><td colSpan={3} className="px-3 py-2 text-xs text-[#9CA3AF]">No line detail.</td></tr>}
+                    <tr className="border-t-2 border-[#1F1D1B] font-semibold"><td className="px-3 py-1.5" colSpan={2}>Total</td><td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(r.totalSen)}</td></tr>
+                  </tbody>
+                </table>
+              )}
+            </div>
+            <PvAttachmentsBlock pv={r} onChanged={load} />
+          </DocDetailModal>
+        );
+      })()}
     </div>
   );
 }
@@ -10056,7 +10268,52 @@ function ReceiptsHubTab({ accounts }: { accounts: ChartOfAccount[] }) {
     return true;
   });
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  // Double-click → detail popup (resolved from `rows` by key so it refreshes).
+  const [detailKey, setDetailKey] = useState<string | null>(null);
   const sel = useRowSelection(visible, (r) => r.key);
+
+  // The lines / allocations of one receipt — shown inline on expand and in
+  // the detail popup.
+  const detailTable = (r: ReceiptHubRow) => (
+    <table className="w-full text-xs">
+      <thead>
+        <tr className="text-[#9CA3AF] text-left">
+          <th className="py-1 pr-4 font-medium">{r.cust ? "Invoice" : r.od ? "Bill" : "Account"}</th>
+          <th className="py-1 pr-4 font-medium">{r.cust ? "Invoice date" : "Description"}</th>
+          <th className="py-1 font-medium text-right">Amount</th>
+        </tr>
+      </thead>
+      <tbody>
+        {r.cust && r.cust.allocations.map((a) => (
+          <tr key={a.invoiceId} className="border-t border-[#F0ECE9]">
+            <td className="py-1 pr-4 font-mono">{a.invoiceNumber || <span className="text-[#9A3A2D]">(invoice missing)</span>}</td>
+            <td className="py-1 pr-4 text-[#6B7280]">{a.invoiceDate ? formatDateDMY(a.invoiceDate) : "-"}</td>
+            <td className="py-1 text-right tabular-nums">{formatCurrency(a.amount)}</td>
+          </tr>
+        ))}
+        {r.cust && r.cust.allocations.length === 0 && <tr><td colSpan={3} className="py-1 text-[#6B7280]">Unallocated — money on account, not knocked off yet.</td></tr>}
+        {r.cust && r.cust.allocations.length > 0 && unallocatedSen(r.cust) > 0 && <tr><td colSpan={3} className="py-1 text-blue-600">{formatCurrency(unallocatedSen(r.cust))} still on account — not knocked off yet</td></tr>}
+        {r.od && r.od.lines.map((l) => (
+          <tr key={l.billId} className="border-t border-[#F0ECE9]">
+            <td className="py-1 pr-4 font-mono">{l.billNo}</td>
+            <td className="py-1 pr-4" />
+            <td className="py-1 text-right tabular-nums">{formatCurrency(l.amountSen)}</td>
+          </tr>
+        ))}
+        {r.or && r.or.lines.map((l, i) => {
+          const nm = accounts.find((a) => a.code === l.accountCode)?.name;
+          return (
+            <tr key={i} className="border-t border-[#F0ECE9]">
+              <td className="py-1 pr-4 whitespace-nowrap">{l.accountCode}{nm ? ` · ${nm}` : ""}</td>
+              <td className="py-1 pr-4">{l.description ?? ""}</td>
+              <td className="py-1 text-right tabular-nums">{formatCurrency(l.amountSen)}</td>
+            </tr>
+          );
+        })}
+        <tr className="border-t-2 border-[#1F1D1B] font-semibold"><td className="py-1 pr-4" colSpan={2}>Total</td><td className="py-1 text-right tabular-nums">{formatCurrency(r.totalSen)}</td></tr>
+      </tbody>
+    </table>
+  );
 
   const voucherOf = (r: ReceiptHubRow): VoucherSpec =>
     r.cust ? buildCustomerPaymentVoucher(r.cust) : r.od ? buildOtherPartyPaymentVoucher(r.od, accounts) : buildOrVoucher(r.or!, accounts);
@@ -10175,6 +10432,8 @@ function ReceiptsHubTab({ accounts }: { accounts: ChartOfAccount[] }) {
                     <tr
                       className={`border-b border-[#F0ECE9] cursor-pointer hover:bg-[#FAF8F5] ${r.lifecycleState !== "ACTIVE" ? "opacity-50" : r.cust && hasUnallocated(r.cust) ? "text-blue-600" : ""}`}
                       onClick={() => setExpanded((m) => ({ ...m, [r.key]: !m[r.key] }))}
+                      onDoubleClick={() => setDetailKey(r.key)}
+                      title="Click to expand · double-click to open"
                     >
                       <td className="px-3 py-1.5 w-8" onClick={(e) => e.stopPropagation()}>
                         <input type="checkbox" checked={sel.isSelected(r.key)} onChange={() => sel.toggle(r.key)} className="h-3.5 w-3.5 accent-[#6B5C32]" />
@@ -10201,45 +10460,7 @@ function ReceiptsHubTab({ accounts }: { accounts: ChartOfAccount[] }) {
                     </tr>
                     {expanded[r.key] && (
                       <tr className="bg-[#FAF8F5] border-b border-[#F0ECE9]">
-                        <td colSpan={9} className="px-8 py-2">
-                          <table className="w-full text-xs">
-                            <thead>
-                              <tr className="text-[#9CA3AF] text-left">
-                                <th className="py-1 pr-4 font-medium">{r.cust ? "Invoice" : r.od ? "Bill" : "Account"}</th>
-                                <th className="py-1 pr-4 font-medium">{r.cust ? "Invoice date" : "Description"}</th>
-                                <th className="py-1 font-medium text-right">Amount</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {r.cust && r.cust.allocations.map((a) => (
-                                <tr key={a.invoiceId} className="border-t border-[#F0ECE9]">
-                                  <td className="py-1 pr-4 font-mono">{a.invoiceNumber || <span className="text-[#9A3A2D]">(invoice missing)</span>}</td>
-                                  <td className="py-1 pr-4 text-[#6B7280]">{a.invoiceDate ? formatDateDMY(a.invoiceDate) : "-"}</td>
-                                  <td className="py-1 text-right tabular-nums">{formatCurrency(a.amount)}</td>
-                                </tr>
-                              ))}
-                              {r.cust && r.cust.allocations.length === 0 && <tr><td colSpan={3} className="py-1 text-[#6B7280]">Unallocated — money on account, not knocked off yet.</td></tr>}
-                              {r.cust && r.cust.allocations.length > 0 && unallocatedSen(r.cust) > 0 && <tr><td colSpan={3} className="py-1 text-blue-600">{formatCurrency(unallocatedSen(r.cust))} still on account — not knocked off yet</td></tr>}
-                              {r.od && r.od.lines.map((l) => (
-                                <tr key={l.billId} className="border-t border-[#F0ECE9]">
-                                  <td className="py-1 pr-4 font-mono">{l.billNo}</td>
-                                  <td className="py-1 pr-4" />
-                                  <td className="py-1 text-right tabular-nums">{formatCurrency(l.amountSen)}</td>
-                                </tr>
-                              ))}
-                              {r.or && r.or.lines.map((l, i) => {
-                                const nm = accounts.find((a) => a.code === l.accountCode)?.name;
-                                return (
-                                  <tr key={i} className="border-t border-[#F0ECE9]">
-                                    <td className="py-1 pr-4 whitespace-nowrap">{l.accountCode}{nm ? ` · ${nm}` : ""}</td>
-                                    <td className="py-1 pr-4">{l.description ?? ""}</td>
-                                    <td className="py-1 text-right tabular-nums">{formatCurrency(l.amountSen)}</td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                        </td>
+                        <td colSpan={9} className="px-8 py-2">{detailTable(r)}</td>
                       </tr>
                     )}
                   </React.Fragment>
@@ -10252,6 +10473,38 @@ function ReceiptsHubTab({ accounts }: { accounts: ChartOfAccount[] }) {
           )}
         </CardContent>
       </Card>
+
+      {detailKey && (() => {
+        const r = rows.find((x) => x.key === detailKey);
+        if (!r) return null;
+        const close = () => setDetailKey(null);
+        const kindLabel = r.kind === "CUSTOMER" ? "Customer Receipt" : r.kind === "OTHER" ? "Other Debtor Receipt" : "Official Receipt";
+        return (
+          <DocDetailModal
+            title={`${kindLabel} ${r.no}`}
+            badges={<>{kindChip(r.kind)}<LifecycleBadge state={r.lifecycleState} /></>}
+            onClose={close}
+            actions={<>
+              <Button variant="outline" size="sm" onClick={() => printVoucher(voucherOf(r))}><Printer className="h-4 w-4" /> Print</Button>
+              {r.lifecycleState === "ACTIVE" && (r.cust || r.od) && <Button variant="outline" size="sm" onClick={() => { close(); startEdit(r); }}>Edit</Button>}
+              {r.lifecycleState === "ACTIVE"
+                ? <Button variant="outline" size="sm" onClick={() => { close(); void lifecycle(r, "void"); }}>Void</Button>
+                : r.lifecycleState === "VOID"
+                  ? <Button variant="outline" size="sm" onClick={() => { close(); void lifecycle(r, "unvoid"); }}>Unvoid</Button>
+                  : null}
+            </>}
+          >
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <DetailField label="Date">{r.date}</DetailField>
+              <DetailField label="From" span={2}>{r.from || "—"}</DetailField>
+              <DetailField label={r.cust ? "Method" : "Deposit to"}>{r.via ? (r.cust ? r.via : accountLabel(accounts, r.via)) : "—"}</DetailField>
+              <DetailField label="Note" span={3}>{r.note || "—"}</DetailField>
+              <DetailField label="Total"><span className="tabular-nums">{formatCurrency(r.totalSen)}</span></DetailField>
+            </div>
+            <div className="border border-[#E2DDD8] rounded-md px-3 py-2">{detailTable(r)}</div>
+          </DocDetailModal>
+        );
+      })()}
     </div>
   );
 }
@@ -10277,6 +10530,8 @@ type FtRow = {
 function FundTransferTab({ accounts }: { accounts: ChartOfAccount[] }) {
   const { toast } = useToast();
   const { confirm } = useConfirm();
+  // Double-click → detail popup (resolved from `rows` by no).
+  const [detailFt, setDetailFt] = useState<string | null>(null);
   const banks = accounts.filter(
     (a) => a.specialAccountType === "SBK" || a.specialAccountType === "SCH",
   );
@@ -10460,8 +10715,8 @@ function FundTransferTab({ accounts }: { accounts: ChartOfAccount[] }) {
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={r.no} className={`border-b border-[#F0ECE9] ${(r.lifecycleState ?? "ACTIVE") !== "ACTIVE" ? "opacity-50" : ""}`}>
-                    <td className="px-3 py-1.5 w-8">
+                  <tr key={r.no} className={`border-b border-[#F0ECE9] ${(r.lifecycleState ?? "ACTIVE") !== "ACTIVE" ? "opacity-50" : ""}`} onDoubleClick={() => setDetailFt(r.no)} title="Double-click to open">
+                    <td className="px-3 py-1.5 w-8" onDoubleClick={(e) => e.stopPropagation()}>
                       <input type="checkbox" checked={ftSel.isSelected(r.no)} onChange={() => ftSel.toggle(r.no)} className="h-3.5 w-3.5 accent-[#6B5C32] align-middle" />
                     </td>
                     <td className="px-3 py-1.5 tabular-nums text-xs">{r.no}</td>
@@ -10500,6 +10755,34 @@ function FundTransferTab({ accounts }: { accounts: ChartOfAccount[] }) {
           )}
         </CardContent>
       </Card>
+
+      {detailFt && (() => {
+        const r = (rows ?? []).find((x) => x.no === detailFt);
+        if (!r) return null;
+        const close = () => setDetailFt(null);
+        const state = r.lifecycleState ?? "ACTIVE";
+        return (
+          <DocDetailModal
+            title={`Fund Transfer ${r.no}`}
+            badges={<LifecycleBadge state={r.lifecycleState} />}
+            onClose={close}
+            actions={<>
+              <Button variant="outline" size="sm" onClick={() => printVoucher(buildFundTransferVoucher(r, accounts))}><Printer className="h-4 w-4" /> Print</Button>
+              {state === "ACTIVE" && <Button variant="outline" size="sm" onClick={() => { close(); void handleLifecycle(r.no, "void"); }}>Void</Button>}
+              {state === "VOID" && <Button variant="outline" size="sm" onClick={() => { close(); void handleLifecycle(r.no, "unvoid"); }}>Unvoid</Button>}
+            </>}
+          >
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <DetailField label="Date">{r.date}</DetailField>
+              <DetailField label="Amount"><span className="tabular-nums">{formatCurrency(r.amountSen)}</span></DetailField>
+              <DetailField label="From" span={2}>{r.fromAccount} · {r.fromName}</DetailField>
+              <DetailField label="To" span={2}>{r.toAccount} · {r.toName}</DetailField>
+              <DetailField label="Description" span={2}>{r.description || "—"}</DetailField>
+            </div>
+            <div className="rounded-md bg-[#FAF8F5] border border-[#F0ECE9] px-3 py-2 text-xs text-[#6B7280]">Posted as DR {r.toAccount} / CR {r.fromAccount} — {formatCurrency(r.amountSen)}.</div>
+          </DocDetailModal>
+        );
+      })()}
     </div>
   );
 }

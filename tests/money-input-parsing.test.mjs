@@ -184,7 +184,9 @@ for (const [file, what] of NO_PARSEFLOAT) {
       `${file} is back on parseFloat. parseFloat("12,000") === 12 — it stops at the comma and returns what it has, silently.`,
     );
     assert.ok(
-      /from "@\/lib\/(money-field|parse-money)"/.test(src),
+      // MoneyInput routes every commit through parseMoneyInput, so a page that
+      // imports it is on the shared parser too (PO create / detail, 2026-09-22).
+      /from "@\/lib\/(money-field|parse-money)"|from "@\/components\/ui\/money-input"/.test(src),
       `${file} must import the shared parser`,
     );
   });

@@ -409,22 +409,24 @@ app.get("/", async (c) => {
   // it, this aggregate ran 1.44% ahead of the order-level total those three
   // already agree on, entirely from the 75 service-order rows.
   const soStateStatusById = new Map(
-    soRows.map((r) => [r.id, { state: r.customerState, status: r.status, isService: !!r.isServiceOrder }]),
+    soRows.map((r) => [r.id, { state: r.customerState, status: r.status, isService: !!r.isServiceOrder, date: dayKey(r.createdAt) }]),
   );
   const stateCategorySkuMap = new Map<
     string,
-    { state: string; category: string; sku: string; name: string; qty: number; revenueSen: number }
+    { date: string | null; state: string; category: string; sku: string; name: string; qty: number; revenueSen: number }
   >();
+  // Keyed by the ORDER's createdAt day too, so the Sales view can scope the
+  // donut / Top SKUs to the period picker like every other Sales card.
   for (const it of soItemCatSec.rows) {
     const so = soStateStatusById.get(it.salesOrderId);
     if (!so || so.status === "CANCELLED" || so.isService) continue;
     const state = (so.state ?? "").trim() || "(no state)";
     const category = it.itemCategory ?? "(no category)";
     const sku = it.productCode ?? "(no SKU)";
-    const key = `${state}|${category}|${sku}`;
+    const key = `${so.date}|${state}|${category}|${sku}`;
     let e = stateCategorySkuMap.get(key);
     if (!e) {
-      e = { state, category, sku, name: it.productName ?? sku, qty: 0, revenueSen: 0 };
+      e = { date: so.date, state, category, sku, name: it.productName ?? sku, qty: 0, revenueSen: 0 };
       stateCategorySkuMap.set(key, e);
     }
     e.qty += num(it.quantity);
@@ -1349,6 +1351,61 @@ app.get("/", async (c) => {
     doValueError = e instanceof Error ? e.message : String(e);
   }
 
+  // Production revenue per day for the Daily (Lim) tab — the SAME definition
+  // and SQL as the main dashboard's Production line (dashboard-overview.ts
+  // prodWeekRes) and the Employee page's /production-revenue: a PO books on
+  // the day its LAST upholstery job card completes, priced SO line → CO line
+  // → product master × qty, SOFA/BEDFRAME/ACCESSORY only. It used to use PO
+  // status COMPLETED + PO completed_date, which lands days later (after
+  // packing) and drifted ~RM 6k/day from the main dashboard.
+  const prodRevSec = await section("production revenue", () =>
+    c.var.DB.prepare(
+      `WITH per_po AS (
+         SELECT production_order_id,
+                MAX(CASE WHEN status IN ('COMPLETED','TRANSFERRED')
+                              AND completed_date IS NOT NULL
+                         THEN completed_date END) AS unit_completed_at
+           FROM job_cards
+          WHERE department_code = 'UPHOLSTERY'
+          GROUP BY production_order_id
+         HAVING COUNT(*) > 0
+            AND SUM(CASE WHEN status IN ('COMPLETED','TRANSFERRED')
+                              AND completed_date IS NOT NULL
+                         THEN 1 ELSE 0 END) = COUNT(*)
+       ), priced AS (
+         SELECT to_char(per_po.unit_completed_at::date, 'YYYY-MM-DD') AS day,
+                COALESCE(
+                  soi.unit_price_sen,
+                  coi.unit_price_sen,
+                  (SELECT COALESCE(p.base_price_sen, p.price1_sen)
+                     FROM products p
+                    WHERE p.code = po.product_code
+                    ORDER BY p.base_price_sen DESC NULLS LAST, p.id
+                    LIMIT 1),
+                  0
+                ) * po.quantity AS sen
+           FROM per_po
+           JOIN production_orders po ON po.id = per_po.production_order_id
+           LEFT JOIN sales_order_items soi
+                  ON soi.sales_order_id = po.sales_order_id AND soi.line_no = po.line_no
+           LEFT JOIN consignment_order_items coi
+                  ON coi.consignment_order_id = po.consignment_order_id AND coi.line_no = po.line_no
+          WHERE po.org_id = ?
+            AND po.item_category IN ('SOFA','BEDFRAME','ACCESSORY')
+            AND per_po.unit_completed_at IS NOT NULL
+       )
+       SELECT day AS "date",
+              COUNT(*) AS "orders",
+              SUM(CASE WHEN sen > 0 THEN 0 ELSE 1 END) AS "unpricedOrders",
+              COALESCE(SUM(sen), 0) AS "revenueSen"
+         FROM priced
+        GROUP BY day`,
+    )
+      .bind(orgId)
+      .all<{ date: string; orders: number | string; unpricedOrders: number | string; revenueSen: number | string }>()
+      .then((r) => r.results ?? []),
+  );
+
   // Bucketed by day so the frontend can slice "Aug 2026 only" the SAME way
   // it already does for every Sales metric (sum matching day rows; sum ALL
   // days for "Total Overview") — owner 2026-08-27: this panel had been
@@ -1782,7 +1839,7 @@ app.get("/", async (c) => {
       productionCost,
     },
     // "Daily (Lim)" tab — see ../lib/dashboard-daily-slice.ts for definitions.
-    lim: buildDailySlice(prodOrdSec.rows, jcAllSec.rows, doValueError ? null : poValMap, doValueError),
+    lim: buildDailySlice(prodOrdSec.rows, jcAllSec.rows, prodRevSec.error ? null : prodRevSec.rows, prodRevSec.error ?? undefined),
     inventory: {
       groups: [...groups.values()].sort((a, b) => b.items - a.items),
       totals: {

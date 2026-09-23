@@ -1,6 +1,9 @@
 # Hookka ERP — Work Tracker
 
-> **Last verified: 2026-09-22** — branch `fix/delivery-tab-switch-pagination` added below (open, its entry is the newest). Previously: branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
+> **Last verified: 2026-09-23** — branch `fix/so-duplicate-ref-saves-draft` added below (open, its entry is the newest).
+> **Last verified: 2026-09-22** — branch `fix/scan-queue-client-driven` added below (open, its entry is the newest).
+> **Last verified: 2026-09-22** — branch `fix/datagrid-selection-loop` added below (open, its entry is the newest). Previously: branch `fix/delivery-tab-switch-pagination` (MERGED as #467). Previously: branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
+> **Last verified: 2026-09-22** — branch `fix/delivery-loading-gate-po-paging` added below (open, its entry is the newest). Previously: branch `fix/delivery-tab-switch-pagination` (MERGED as #467). Previously: branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
 > **Last verified: 2026-09-22** — branch `feat/po-supplier-searchable-select` added below (open, pushed, no PR). NOTE: the 2026-09-22 Houzs entry below still carries committed merge-conflict markers (`<<<<<<< HEAD` … `>>>>>>> 85e58b40`) on `main`; left for its owner to resolve.
 > **Last verified: 2026-09-22** — branch `feat/service-dashboard-root-cause-graph` added below (stacked on the staging sync PR).
 > **Last verified: 2026-09-22** — branch `fix/service-dashboard-other-catch-all` added below (open, pushed, no PR).
@@ -18,6 +21,66 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
 ---
+
+## 2026-09-23 — 🔵 DEV-12: repeated customer S/O no. blocks the scanned SO (branch `fix/so-duplicate-ref-saves-draft`)
+
+Siti (High): "IF CUST SO NUMBER SAME WITH PREVIOUS PURCHASE ORDER … THE SYSTEM WILL NOT PROCEED
+THE NEW ORDER" (ref HC-SO-013492) → BUG-2026-09-23-185. SO create 409'd on a repeated customer
+PO/SO ref and the scan modal consumed the failed scan. Now saved as DRAFT with a warning; failed
+creates stay in the queue; "Create Order" won't auto-confirm a warned SO. Open: prod verify after
+deploy; mobile form shows no warning (no notice channel).
+
+---
+
+## 2026-09-22 — 🔵 Scan PO / PI / GRN: second file "scanning" 5+ min (branch `fix/scan-queue-client-driven`)
+
+Owner: "under the SO the scan PO function … it takes more than 5 min scanning second PO
+what's the problem?" → BUG-2026-09-22-178, class **C25**. The OCR worker ran under
+`waitUntil`, which Cloudflare cancels 30 s after the response; rows then sat `processing`
+until the 5-min sweeper, were re-kicked the same way, and failed after 3 cycles.
+
+- [x] `scan-queue.ts`: `POST /batch/:batchId/work` processes ONE row in-request; all four
+  waitUntil kicks removed; sweepers only re-queue; per-batch `busy` cap of 6.
+- [x] `scan-queue-client.ts`: `createScanQueueDriver` (3 held-open requests, poke/stop).
+- [x] PO modal + PI/GRN supplier modal: driver created / poked on `queued` / stopped.
+- [x] `tests/scan-queue-client-driven.test.mjs` 4/4; `tsc` strict exit 0; eslint clean;
+  `API.md` regenerated; BUG-HISTORY + BUG-CLASSES C25 + CODEBASE-MAP.
+- [ ] Prod scan_queue read (blocked by the permission classifier here): UNMEASURED.
+- [ ] PR → `main`; live-verify a multi-file PO scan: ≤3 rows SCANNING at once, none > ~150 s.
+
+---
+
+## 2026-09-22 — 🔵 Delivery page FREEZE: Pending Delivery render loop (branch `fix/datagrid-selection-loop`) — the real root cause of the day's first report
+
+Owner: "when I click in pending delivery and after I try to navigate anywhere it is freeze and I
+can't interact anything". Traced to a closed loop between `DataGrid.onSelectionChange` (re-emits
+on every `sortedData` identity, which is `[...filteredData]` and depends on `columns`) and the
+page (`setSelectedReadyPOs(new Set(...))` + `pendingDeliveryColumns` memo listing
+`selectedReadyPOs` in its deps — the eslint warning that sat for months). BUG-2026-09-22-005,
+class **C24**.
+
+- [x] `data-grid.tsx`: emit only when the selection actually changed (same rows, same order,
+  same references) — the guard every caller routes through.
+- [x] `delivery/index.tsx`: `pendingDeliveryColumns` deps = `[updateExpectedDD]`.
+- [x] 16 other `onSelectionChange` pages checked — none rebuilds `columns` from selection.
+- [x] `tests/datagrid-selection-emit.test.mjs`; `tsc` exit 0.
+- [ ] PR → `main` + cherry-pick PR → `staging`. Live: UNMEASURED (no login).
+
+---
+
+## 2026-09-22 — 🔵 Delivery page: loading gate + Planning/Pending Delivery paging (branch `fix/delivery-loading-gate-po-paging`)
+
+Owner, prod screenshot after #467 shipped: Planning grid all skeletons with "335 total records",
+cards "-", one 504 in the console — "check the code base again that you actually have paging,
+and also loading issue … is it a cache issue or website issue?" Measured: prod bundle already
+carries #467; the blank page was the five-way `loading` OR (BUG-2026-09-22-004), not cache.
+
+- [x] `loading` = current tab's rows only; cards gate on `/stats`.
+- [x] Planning / Pending Delivery paged client-side (`pageSlice`, 50/page, whole list while
+  searching) with the shared `PagerFooter` (also replaces the DO tabs' inline footer).
+- [x] Tests extended; anchors re-pointed; docs restamped. `tsc` exit 0.
+- [ ] PR → `main`; cherry-pick onto the staging PR #474 branch so staging can be tested.
+- [ ] The 504 endpoint is UNMEASURED — owner to read its URL from DevTools → Network.
 
 ## 2026-09-22 — 🔵 Delivery page: tab switch "stuck" + per-status pagination (branch `fix/delivery-tab-switch-pagination`)
 
@@ -38,6 +101,35 @@ for here instead of loading 335 or 481 stuff every time I press".
   the browse page, which no longer holds delivered rows on other tabs.
 - [x] tests + `tsc -p tsconfig.app.json` (exit 0); docs restamped (CODEBASE-MAP delivery index, modules/delivery.md, BUG-HISTORY).
 - [ ] Bug fix → `main`. Live tab-switch timing on prod is UNMEASURED (dev server needs login).
+
+---
+
+## 2026-09-22 晚 — ✅ 所有单据清单双击弹明细（owner「其他的类似 payment voucher, receipt 这些都要双击点开」；#486 已上线已验）
+
+一个壳 `DocDetailModal`/`DetailField`；单击照旧（勾选/展开）。Payment Vouchers：meta + 梯子轨迹（谁 prepare/check/approve、何时、退回理由）+ 费用行或结算账单(+预付) + 附件块 + 行上全部动作（print / print + files / 梯子 / edit / settle / void / unvoid）；Receipts hub：meta + 与展开区共用的 `detailTable`；Fund Transfer：字段 + 过账说明 + print/void/unvoid；Other Party Bills 双击=开既有整张卡；Other Party Payments 双击=开既有弹窗；AP Invoices 双击：PI→采购页、AP bill→下方编辑器；勾选格不触发。守卫 tests/doc-detail-dblclick.test.mjs。**prod 验**：HPV-2609-043 双击弹出（Approved·paid、900-S002 2,800、附件 0、Print/Edit/Void）。
+
+---
+
+## 2026-09-22 晚 — ✅ owner 四问（AP Invoices 默认 ALL / 测试单是什么 / 打印带附件? / JV 看不了明细）→「做,全部」（#484 已上线已验）
+
+- ① AP Invoices 默认 ALL（select 里 All 排第一）。② 清单里 HPV-2609-044/045/046/047/049 = 我 prod 冒烟的 1 sen 作废凭证 → 已按 owner 令用 lifecycle delete 藏起（Audit Log 留底）；**顺手修**：未过账的作废草稿按 delete 回「Already cancelled」永远走不掉 → 未过账 delete 现写 document_lifecycle DELETED（unvoid 回 ACTIVE），守卫加进 tests/pv-approval.test.mjs；作废凭证不再显示草稿时的退回理由。③ 打印：print=只印凭证；**print + files**=凭证+全部附件合订（有附件才出现）；批量 Print/PDF 目前不带附件。④ **JV 明细**：双击行（或 ⋮ › View detail）弹窗——逐行科目/描述/借/贷 + 合计（不平衡标红）+ print/edit+post(草稿)/void/unvoid/duplicate；单击仍是勾选。守卫 tests/jv-detail-view.test.mjs。**prod 验**：JE-2609-0001 双击弹出 780-0010 DR 12,500 / 310-0010 CR 12,500；5 张测试单已从清单消失（94 张）。
+- owner 顺问「upload bill 支持读多页?upload 多个文件看多个 PV?」→ **量过代码**：扫描引擎整份 PDF 送模型，一张账单跨几页读成一张（引擎提示词明写）；Scan Bills 一次 ≤20 个文件 = 每文件一张 draft（现在还自动附档）。**缺口**：一个 PDF 里装几张账单 → 只取第一张成草稿，其余只提示 extraDocs（scan-finance.ts 单文件单单契约）。待 owner 裁要不要「一个 PDF 几张账单 → 几张草稿（附件同一份 PDF）」。
+
+---
+
+## 2026-09-22 晚 — ✅ finance@hookka.com 权限量测（owner「我要确定 finance@hookka.com 的 user 有什么权限？」；#482 探针已上线）
+
+FINANCE 是 0045 种进表的角色，`GET /api/auth/role-permissions/:role` 原本只答 code 角色 → 表角色只能登录进去才知道。#482：探针对非 code 角色跑**跟闸门同一条 join**（rbac.ts loadRolePermissions：roles.name = users.role），回 `source`（role_permissions / no-rows-fallback / join-failed-fallback），零行时照闸门口径报 fallback 而不是空集。只读、users:read 闸。守卫 tests/role-permissions-table-read.test.mjs（两边 join 文本同锚）。
+
+**prod 量测（2026-09-22）**：user-c0594ab0 finance@hookka.com「Finance」部门 Finance，role FINANCE，active，最后登录 2026-08-12。FINANCE 53 个 grant（source=role_permissions）：全权 accounting / invoices(+post,void) / payments / credit-notes / debit-notes / e-invoices / cash-flow / cost-ledger / three-way-match / mail-center / settings；只读 customers / suppliers / sales-orders / purchase-orders / purchase-returns / quotations / sales-pipeline。**没有** accounting:check / accounting:approve（PV 梯子的 Check/Approve 只有 SUPER_ADMIN 能按）、没有 purchase-invoices:*（PI 由采购开；作废走 requireFinance 按角色名放行）、没有 users:*（看不到 Users 页；kv-config PUT 要 users:update → 改不了打印页脚）、没有 dashboard（落地页=/accounting）。owner 待裁：要不要给 finance@ 加 accounting:check（能 Check 不能 Approve）。
+
+---
+
+## 2026-09-22 晚 — ✅ Cash Position 打勾行收起（owner「这些 tick 了还需要出现吗？」→「做」；#477 已上线已验）
+
+打勾（=网银已见）的行离开 pending 名单，每个户口卡底一行「✓ Ticked as gone through: N · out RM x · in RM y — show」，展开可看/取消勾；同一行渲染器、同一 checkbox、同一 handler；数字（Bank balance est. / Available）从不读 DOM，分毫不变。全勾完显示「Nothing pending — everything booked has gone through the bank.」。守卫 tests/cashpos-ticked-fold.test.mjs。**prod 验**：HLBB 卡只剩 10 条未勾 + 「✓ 44 · out 195,316.54 · in 182,270.60」，Bank balance est. 24,576.65 与 owner 截图一致。顺带：docs-freshness 配对规则要求源码改动配文档改动——第一次红了，补 CODEBASE-MAP 的 Daily Cash Position 条目后绿。
+
+另：owner 裁「Dashboard 三个留 FORECASTING 那个，其他两个退下」→ 我解释了三个是什么 + 两点前置（/dashboard 是登录落地页要一起改；Experimental 是别的会话在做）→ owner「不需要做任何东西先」。**未动。**
 
 ---
 
