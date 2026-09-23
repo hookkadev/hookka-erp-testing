@@ -275,6 +275,13 @@ export default function InvoiceDetailPage() {
   // A4 invoice. "download" saves the file; "view" opens it on screen.
   const printInvoicePdf = async (mode: "download" | "view" = "download") => {
     if (!invoice) return;
+    // Open the tab now, inside the click — after the awaits below the browser
+    // would treat it as an unsolicited popup and block it.
+    const viewWin = mode === "view" ? window.open("", "_blank") : null;
+    if (mode === "view" && !viewWin) {
+      setToast("Please allow pop-ups to view the invoice.");
+      return;
+    }
     let extras: import("@/lib/generate-invoice-pdf").InvoicePrintExtras = {};
     try {
       const r = await fetch(
@@ -288,9 +295,17 @@ export default function InvoiceDetailPage() {
     } catch {
       /* graceful — PDF still renders without extras */
     }
-    const { downloadUnifiedInvoicePdf } = await import("@/lib/unified-doc-download");
-    void mode; // unified generator saves the file; "view" no longer applicable
-    await downloadUnifiedInvoicePdf(invoice, extras);
+    const { downloadUnifiedInvoicePdf, viewUnifiedInvoicePdf } = await import("@/lib/unified-doc-download");
+    if (viewWin) {
+      try {
+        await viewUnifiedInvoicePdf(invoice, extras, viewWin);
+      } catch (e) {
+        viewWin.close();
+        throw e;
+      }
+    } else {
+      await downloadUnifiedInvoicePdf(invoice, extras);
+    }
   };
 
   const sendInvoice = async () => {
