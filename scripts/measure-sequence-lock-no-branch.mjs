@@ -35,7 +35,16 @@ const DONE = new Set(["COMPLETED", "TRANSFERRED"]);
 const DEAD = new Set(["CANCELLED"]);
 const up = (s) => String(s ?? "").toUpperCase();
 
-const sql = postgres(prodUrl(), { ssl: "require", max: 1, idle_timeout: 5 });
+// `prepare: false` so the SAME url works whether it is the direct connection
+// (db.<ref>.supabase.co:5432) or the pooler (…pooler.supabase.com:6543).
+// Supavisor in transaction mode rejects prepared statements — the same
+// footgun as BUG-2026-04-27-029. This script only reads, so either is fine.
+const sql = postgres(prodUrl(), {
+  ssl: "require",
+  max: 1,
+  idle_timeout: 5,
+  prepare: false,
+});
 
 try {
   const jcs = await sql`
