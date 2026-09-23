@@ -28,14 +28,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// fileURLToPath, not URL.pathname: the latter leaves "%20" in a path with a
-// space (this repo lives under "Internal Project" on the dev machines), and
-// every readFileSync below then fails with ENOENT before a single fact is
-// checked.
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
 /** Read a source file with CRLF normalised away, so every pattern below can be
  *  written with plain "\n" and still match. */

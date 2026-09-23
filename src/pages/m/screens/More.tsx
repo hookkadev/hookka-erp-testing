@@ -14,6 +14,7 @@ import { MORE_GROUPS } from "../nav";
 import { M } from "../theme";
 import { useMobileThemeMode } from "../lib/theme-mode";
 import { getCurrentUser, clearAuth } from "@/lib/auth";
+import { usePermissions } from "@/lib/use-permission";
 
 // POST /api/auth/logout, then clear local state and bounce to /login — the same
 // best-effort flow the desktop top bar uses (a network hiccup must not trap the
@@ -50,6 +51,7 @@ function prettyRole(role: string): string {
 export default function MobileMore() {
   const navigate = useNavigate();
   const { mode, toggle } = useMobileThemeMode();
+  const { isNavAllowed } = usePermissions();
   const user = getCurrentUser();
   const name = user?.displayName || user?.email || "—";
   const role = prettyRole(user?.role || "");
@@ -210,7 +212,12 @@ export default function MobileMore() {
           </button>
         </MobileCard>
 
-        {MORE_GROUPS.map((group) => (
+        {MORE_GROUPS.map((g) => ({
+          ...g,
+          // Rows with a navGate follow the server's nav gate (hidden for roles
+          // that cannot see the desktop equivalent).
+          items: g.items.filter((i) => !i.navGate || isNavAllowed(i.navGate)),
+        })).filter((g) => g.items.length > 0).map((group) => (
           <section key={group.title}>
             <div
               style={{

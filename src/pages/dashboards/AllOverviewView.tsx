@@ -16,9 +16,10 @@ import {
 } from "lucide-react";
 import {
   MUTED, GREEN, RED, AMBER, fmtN,
-  inPeriod, previousPeriod, periodLabel, isConfirmedOrder, type Period,
+  periodLabel, dayLabel, isConfirmedOrder, type Period,
 } from "./dashboard-shared-lib";
 import { LiveBadge } from "./dashboard-shared";
+import { overviewTotals, overviewSalesSnapshot, overviewWorkforce } from "./dashboard-sales-lib";
 
 // All Overview — the dashboard's landing tab, ported from the static design
 // prototype's own first screen. Reads the SAME GET /api/dashboard/prototype
@@ -30,9 +31,12 @@ import { LiveBadge } from "./dashboard-shared";
 // its "Whole book, not a window" comment). Monthly reads one month; YTD reads
 // every month of the selected month's year up to and including it.
 //
-// Only the Sales card links onward on this branch: the other four domain tabs
-// are not mounted here, so their cards show their figures without a dead
-// "Open" button rather than routing somewhere that does not exist.
+// A domain card links onward only when its tab is mounted (Sales, Operations,
+// Employees); the others show their figures without a dead "Open" button.
+//
+// "Needs action" is the reviewer's entry point — there is no per-person tab.
+// Each tile is a count plus a link to the sub-tab that owns the list; the
+// approval queue itself lives once, in Service > Approvals.
 //
 // HONESTY RULE followed here: a figure whose source has no date column is NOT
 // relabelled as if it were period-scoped. Top state / dominant category come
@@ -57,6 +61,8 @@ type Feed = {
   };
   delivery?: { statusBreakdown?: { key: string; label: string; count: number; valueSen: number }[] };
   production?: {
+    overdueByDept?: { department: string; count: number }[];
+    dueSoon3Days?: unknown[];
     totals?: { active: number; critical: number; atRisk: number; backlogCards: number };
     bottleneck?: { dept: string | null; cards: number; orders: number };
   };
@@ -65,7 +71,28 @@ type Feed = {
     attendance?: { employeeName: string | null; date: string | null; status: string | null; efficiencyPct: number | null }[];
   };
   purchase?: { totals?: { active: number; all: number } };
+  // Absent without service-cases:read, or on a feed cached before it shipped.
+  service?: { cases: { approvalStatus: string | null; daysOverdue: number }[] } | null;
 };
+
+function ActionTile({ label, value, hint, onOpen }: { label: string; value: number | null; hint: string; onOpen: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="text-left rounded-lg border border-[#E2DDD8] bg-white shadow-sm p-4 max-md:p-3 min-h-11 hover:bg-[#F7F5F3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#6B5C32]"
+    >
+      <p className="text-2xl max-md:text-xl font-bold tabular-nums" style={{ color: value ? RED : value === 0 ? GREEN : MUTED }}>
+        {value == null ? "—" : fmtN(value)}
+      </p>
+      <p className="text-xs font-medium text-[#1F1D1B] flex items-center gap-1">
+        {label}
+        <ArrowRight className="h-3 w-3 shrink-0" />
+      </p>
+      <p className="text-xs" style={{ color: MUTED }}>{hint}</p>
+    </button>
+  );
+}
 
 function Delta({ pct, vs }: { pct: number | null; vs: string }) {
   if (pct === null) {
@@ -166,22 +193,14 @@ export function AllOverviewView({
 }: {
   period: Period;
   months: string[];
-  onOpenTab: (tab: string) => void;
+  onOpenTab: (tab: string, sub: string | undefined) => void;
 }) {
   const { data, loading, error } = useCachedJson<Feed>("/api/dashboard/prototype");
 
-  const totals = useMemo(() => {
-    const byDay = data?.sales?.byDay ?? [];
-    const days = byDay.filter((d) => inPeriod(period, d.date));
-    const prev = previousPeriod(period, months);
-    const prevDays = prev ? byDay.filter((d) => inPeriod(prev, d.date)) : [];
-    return {
-      revenueSen: days.reduce((s, d) => s + d.revenueSen, 0),
-      orders: days.reduce((s, d) => s + d.orders, 0),
-      prevRevenueSen: prevDays.reduce((s, d) => s + d.revenueSen, 0),
-      prevLabel: prev ? periodLabel(prev) : "",
-    };
-  }, [data, period, months]);
+  const totals = useMemo(
+    () => overviewTotals(data?.sales?.byDay ?? [], period, months),
+    [data, period, months],
+  );
 
   // Whole-book reconciliation. Deliberately ignores the period picker: its job
   // is to be compared against the house Sales page, which shows the book.
@@ -218,57 +237,17 @@ export function AllOverviewView({
     };
   }, [data, months]);
 
-  const deltaPct =
-    totals.prevRevenueSen > 0
-      ? ((totals.revenueSen - totals.prevRevenueSen) / totals.prevRevenueSen) * 100
-      : null;
+  const deltaPct = totals.deltaPct;
 
-  const sales = useMemo(() => {
-    const orders = (data?.sales?.orders ?? []).filter((o) => inPeriod(period, o.createdAt));
-    const byCustomer = new Map<string, number>();
-    for (const o of orders) {
-      const k = o.customer ?? "Unnamed";
-      byCustomer.set(k, (byCustomer.get(k) ?? 0) + o.totalSen);
-    }
-    const total = [...byCustomer.values()].reduce((s, v) => s + v, 0);
-    const top = [...byCustomer.entries()].sort((a, b) => b[1] - a[1])[0];
+  const sales = useMemo(
+    () => overviewSalesSnapshot(data?.sales?.orders ?? [], data?.sales?.byStateCategory ?? [], period),
+    [data, period],
+  );
 
-    // No date column on byStateCategory — these are book-wide, labelled as such.
-    const byState = new Map<string, number>();
-    const byCat = new Map<string, number>();
-    let bookTotal = 0;
-    for (const r of data?.sales?.byStateCategory ?? []) {
-      byState.set(r.state ?? "—", (byState.get(r.state ?? "—") ?? 0) + r.revenueSen);
-      byCat.set(r.category ?? "—", (byCat.get(r.category ?? "—") ?? 0) + r.revenueSen);
-      bookTotal += r.revenueSen;
-    }
-    const pick = (m: Map<string, number>) => {
-      const e = [...m.entries()].sort((a, b) => b[1] - a[1])[0];
-      return e && bookTotal > 0 ? `${e[0]} (${Math.round((e[1] / bookTotal) * 100)}%)` : "—";
-    };
-    return {
-      topCustomer: top && total > 0 ? `${top[0]} (${Math.round((top[1] / total) * 100)}%)` : "—",
-      topState: pick(byState),
-      topCategory: pick(byCat),
-    };
-  }, [data, period]);
-
-  const workforce = useMemo(() => {
-    const rows = data?.employee?.attendance ?? [];
-    const inP = rows.filter((r) => inPeriod(period, r.date));
-    const measured = inP.filter((r) => r.efficiencyPct != null);
-    const avg = measured.length
-      ? measured.reduce((s, r) => s + (r.efficiencyPct ?? 0), 0) / measured.length
-      : null;
-    const latest = rows.reduce((m, r) => (r.date && r.date > m ? r.date : m), "");
-    const today = rows.filter((r) => r.date === latest);
-    const present = today.filter((r) => (r.status ?? "").toUpperCase() !== "ABSENT").length;
-    return {
-      avg,
-      presentLabel: latest ? `${fmtN(present)} / ${fmtN(today.length)}` : "—",
-      measuredDays: measured.length,
-    };
-  }, [data, period]);
+  const workforce = useMemo(
+    () => overviewWorkforce(data?.employee?.attendance ?? [], period, fmtN),
+    [data, period],
+  );
 
   if (loading) {
     return <div className="py-16 text-center text-sm" style={{ color: MUTED }}>Loading…</div>;
@@ -290,11 +269,13 @@ export function AllOverviewView({
     /outstand|pending|open/i.test(s.key + s.label),
   );
   const periodName = periodLabel(period);
+  const svc = data.service?.cases;
+  const overdueByDept = data.production?.overdueByDept;
 
   return (
     <div className="space-y-6 max-md:space-y-4">
-      <div className="flex items-center gap-2">
-        <h2 className="text-lg font-semibold text-[#1F1D1B]">All Overview</h2>
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="text-lg font-semibold text-[#1F1D1B]">Overview</h2>
         <LiveBadge live={!!data.availability?.sales?.live} />
       </div>
 
@@ -303,7 +284,7 @@ export function AllOverviewView({
       </p>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <Hero label={`Total Revenue (${period.mode === "monthly" ? "MTD" : "YTD"})`} value={formatCurrency(totals.revenueSen)} icon={TrendingUp}>
+        <Hero label={`Total Revenue (${period.day ? "day" : period.mode === "monthly" ? "MTD" : "YTD"})`} value={formatCurrency(totals.revenueSen)} icon={TrendingUp}>
           <Delta pct={deltaPct} vs={totals.prevLabel || "—"} />
           <p className="text-xs" style={{ color: MUTED }}>{fmtN(totals.orders)} orders recorded</p>
         </Hero>
@@ -326,6 +307,36 @@ export function AllOverviewView({
           </p>
         </Hero>
       </div>
+
+      <section aria-label="Needs action" className="space-y-2">
+        <h3 className="text-sm font-semibold text-[#1F1D1B]">Needs action</h3>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 max-md:gap-3">
+          <ActionTile
+            label="Pending approvals"
+            value={svc ? svc.filter((c) => c.approvalStatus === "PENDING").length : null}
+            hint={svc ? "service cases and 1-to-1 exchanges" : "no service access"}
+            onOpen={() => onOpenTab("service", "approvals")}
+          />
+          <ActionTile
+            label="Service cases overdue"
+            value={svc ? svc.filter((c) => c.daysOverdue > 0).length : null}
+            hint={svc ? "open past the service deadline" : "no service access"}
+            onOpen={() => onOpenTab("service", "overdue")}
+          />
+          <ActionTile
+            label="Production orders overdue"
+            value={overdueByDept ? overdueByDept.reduce((a, d) => a + d.count, 0) : null}
+            hint={overdueByDept ? "open, past customer date" : "no production feed"}
+            onOpen={() => onOpenTab("operations", undefined)}
+          />
+          <ActionTile
+            label="Due within 3 days"
+            value={data.production?.dueSoon3Days?.length ?? null}
+            hint="production early warning"
+            onOpen={() => onOpenTab("operations", undefined)}
+          />
+        </div>
+      </section>
 
       {/* Whole-book reconciliation — the panel to compare against the house
           Sales page. Ignores the period picker on purpose. */}
@@ -417,12 +428,12 @@ export function AllOverviewView({
           icon={ShoppingCart}
           stats={[
             { label: "Top customer", value: sales.topCustomer },
-            { label: `Revenue ${period.mode === "monthly" ? "this period" : "YTD"}`, value: formatCurrency(totals.revenueSen) },
+            { label: `Revenue ${period.day ? "this day" : period.mode === "monthly" ? "this period" : "YTD"}`, value: formatCurrency(totals.revenueSen) },
             { label: "Top state (all time)", value: sales.topState },
             { label: "Dominant category (all time)", value: sales.topCategory },
           ]}
-          cta="Open Sales Orders"
-          onOpen={() => onOpenTab("sales")}
+          cta="Open Sales"
+          onOpen={() => onOpenTab("sales", undefined)}
         />
 
         <DomainCard
@@ -434,6 +445,8 @@ export function AllOverviewView({
             { label: "Backlog cards", value: prod ? fmtN(prod.backlogCards) : "—" },
             { label: "Critical", value: prod ? fmtN(prod.critical) : "—" },
           ]}
+          cta="Open Operations"
+          onOpen={() => onOpenTab("operations", undefined)}
         />
 
         <DomainCard
@@ -451,13 +464,15 @@ export function AllOverviewView({
           title="Workforce &amp; Attendance"
           icon={Users}
           stats={[
-            { label: "Present (latest day)", value: workforce.presentLabel },
+            { label: workforce.presentDay ? `Present (${dayLabel(workforce.presentDay)})` : "Present", value: workforce.presentLabel },
             { label: "Team efficiency avg", value: workforce.avg == null ? "—" : `${workforce.avg.toFixed(1)}%` },
             { label: "Roster", value: `${fmtN(data.availability?.employee?.workers ?? 0)} active` },
             { label: "Measured days", value: fmtN(workforce.measuredDays) },
           ]}
           note={workforce.avg == null ? "No efficiency recorded in this period — not shown as 0%." : undefined}
           noteTone={AMBER}
+          cta="Open Employees"
+          onOpen={() => onOpenTab("people", "efficiency")}
         />
 
         <DomainCard

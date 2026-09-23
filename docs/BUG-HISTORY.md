@@ -1,5 +1,7 @@
 # Bug History
 
+> **Last verified: 2026-09-23** — newest entry BUG-2026-09-23-184 (branch `fix/special-order-config-only-surcharge`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+
 Living log of bugs we've identified, diagnosed, and fixed in Hookka ERP.
 
 Each entry: ID, status, what happened (user-visible symptom), root cause, fix
@@ -34,7 +36,7 @@ Entries themselves stay newest-first.
 
 ---
 
-## BUG-2026-09-17-182 — the sequence lock refused nothing: the gate was on an unmerged branch, and nine other paths completed cards with no check at all `production` `inventory` `auth-rbac` 🟢
+## BUG-2026-09-23-185 — the sequence lock refused nothing: the gate was on an unmerged branch, and nine other paths completed cards with no check at all `production` `inventory` `auth-rbac` 🟢
 
 🟢 Fixed on branch `feat/t013-sequence-lock` (PRD T-013, tracker BUG-09, owner
 2026-09-07). **Prod impact UNMEASURED until deployed and verified live.**
@@ -71,7 +73,7 @@ recorded as `SHEETS_SYNC`, actor SYSTEM). Inside it: `canSequenceUnlock`
 `UNLOCK_REASON_REQUIRED`), `resolveSequenceActor` (USER with displayName,
 WORKER from the token, SYSTEM only when passed) and `recordSequenceUnlock`
 with `reason_code` / `department_code` / `blocked_by` / `actor_kind`
-(self-applied in `ensurePendingMigrations`; migrations-postgres/0233). The
+(self-applied in `ensurePendingMigrations`; migrations-postgres/0237). The
 gate skips cards already COMPLETED/TRANSFERRED, which is the R14 fix. The
 nine repair endpoints are `requireAdmin` (new in `rbac.ts`: SUPER_ADMIN /
 ADMIN only). bulk-patch runs through `runGroupedInOrder`
@@ -107,6 +109,390 @@ enumerate the population (every status writer in `src/api`) and fail on a
 member it does not recognise — otherwise it certifies exactly the omission it
 exists to catch. Classed with C-series "fixed the instance in front of the
 author" in [`BUG-CLASSES.md`](BUG-CLASSES.md).
+## BUG-2026-09-23-184 — After a deploy, open tabs kept running the old code `deploy` `cache` 🟡
+
+🟡 **Fix in progress** · owner-reported: after a deploy "some of the thing is there already but
+it doesn't update" — operators kept seeing pre-fix behaviour.
+
+**Root cause.** HTML is `no-store` and the SW is network-first, so a *fresh load* always gets the
+new build — but nobody reloads an open ERP tab. `useVersionCheck` detected the new build and the
+dashboard showed a ONE-SHOT "Reload?" confirm; dismiss it (or never see it) and `firedRef` meant
+it never asked again — the tab ran the old bundle all day. The phone shell (`/m`,
+`MobileLayout.tsx`) never ran a version check at all. Also: the inline `onNewVersion` arrow was an
+effect dep, so the poll (and its 30s first check) restarted on every render.
+
+**Fix.** `useAutoUpdateOnNavigate` (`src/lib/use-version-check.ts`): once a new build is seen,
+the NEXT route change does a full reload (the user has already left the form, so nothing typed is
+lost). Used by `DashboardLayout` (which keeps the immediate "Reload now" offer) and
+`MobileLayout`. Poll 5 → 2 min; callback held in a ref so the poll isn't restarted.
+WorkerLayout unchanged (already reloads immediately).
+
+**Verified.** `tests/deploy-auto-update.test.mjs`; `tsc -p tsconfig.app.json` exit 0; eslint
+clean. Not browser-verified — the check only fires on a built bundle (dev serves unhashed
+`/src/main.tsx`); verify on prod by keeping a tab open across the deploy and changing page.
+
+---
+
+## BUG-2026-09-23-183 — Ticking a special order showed "+RM 100" but added RM 0 to the SO line `sales` `money` 🟡
+
+🟡 **Fix in progress** · owner-reported (urgent, wrong SO values): on a SOFA line, ticking
+"Extend Down 6"(1A)" (+RM 100) and "Bottom Fully Cover (1s)" (+RM 110) left the line at RM 0.
+
+**Root cause.** Options added in Settings (kv_config `sofaSpecials` / `specials`) that are NOT
+in the static `specialOrderOptions` table get a slugged code in the form's `availableSpecials`.
+The surcharge maths mapped code → name through the static table only, and
+`priceOfSen` (`src/lib/special-order-surcharge.ts`) returned 0 for any name not in the static
+table even when the config priced it. So every config-only option was charged RM 0; the
+checkbox label (priced from config) disagreed with the total. Four forms each had their own
+copy — sales/edit + both consignment forms also still carried the pre-2026-08-02 "HB + Divan
+BTM = RM 100" combo rule, and wrote the slug (e.g. `EXTEND_DOWN_6_1A_`) into the saved
+`specialOrder` text instead of the name.
+
+**Fix.** `special-order-surcharge.ts`: `priceOfSen` honours config-only entries; new shared
+`calcSpecialsSurchargeSen` / `specialCodeForName` / `specialNameForCode`. sales create/edit and
+consignment create/edit all price + label through them; stale copies deleted; collapsed chips
+and price breakdown look up the config list so config-only options show.
+Server write paths (`sales-orders.ts` POST/PUT, `consignment-orders.ts` POST/PUT) priced SOFA
+lines against the BEDFRAME list (`loadSpecialsConfig` only read `specials`) — now
+`loadSpecialsConfig(db, "sofaSpecials")` for sofa lines.
+
+**Existing rows.** `GET/POST /api/admin/backfill-config-only-specials` (super-admin; POST needs
+`{confirm:true}`). Per line (`repriceSavedSpecialsLine`): slug → name in the text, and ADD the
+config-only options' price capped at owed − charged (no double charge for lines the old sofa
+edit page priced right; never decreases; a static option re-priced in Settings since is not
+touched). Unit / line / header totals move by the delta, one transaction, header guarded on the
+planned total (double-POST safe). Only SOs with no invoice and COs with no consignment note;
+issued docs are listed under `issuedNeedOwnerDecision`, never touched. The older
+`/backfill-special-order-surcharge` does NOT catch this bug (only charged-exactly-0 lines, bed
+list only, can't read slugs).
+
+**Verified.** `tests/special-order-surcharge.test.mjs` (config-only options charged by code),
+`tests/special-order-combo-discount.test.mjs` (no form carries its own copy — all four);
+`tsc -p tsconfig.app.json` exit 0; backfill maths: 6 cases in `special-order-surcharge.test.mjs`.
+**Prod impact UNMEASURED** — no prod DB access from this session. Run the GET dry-run after
+deploy to measure it, review, then POST.
+
+---
+
+## BUG-2026-09-23-182 — Experimental dashboard Operations › Revenue & Cost showed a different Production revenue from the main Dashboard (~RM 6k on 22 Sep) `dashboard` 🟡
+
+🟡 **Fix in progress** · owner-reported: main Dashboard revenue chart tooltip for 09-22 shows
+Production RM 14,134; the experimental dashboard's Operations › Revenue & Cost shows ~RM 6k
+different for the same day.
+
+**Root cause.** Two definitions of "production revenue". The main Dashboard
+(`dashboard-overview.ts` prodRevRes / prodWeekRes) and the Employee page's
+`/production-revenue` book a PO on the day its **last UPHOLSTERY job card** completes, priced
+SO line (by `line_no`) → CO line → product list price × qty, SOFA/BEDFRAME/ACCESSORY only.
+The experimental feed (`dashboard-daily-slice.ts`) booked it on the **PO's own
+`completed_date` with status COMPLETED** (after packing — a later day, and only once the whole
+PO closes), priced via `loadPoValueMap` (no CO / product fallback, every category). Which of
+the three differences made the RM 6k on 22 Sep is **UNMEASURED** — the prod read was not run
+from this session.
+
+**Fix.** `dashboard-prototype.ts` now runs the main Dashboard's per-PO UPHOLSTERY SQL,
+bucketed by `to_char(unit_completed_at::date,'YYYY-MM-DD')` exactly as `bucketExpr` does, and
+`buildDailySlice` passes those per-day rows through. UI copy on desktop + mobile now states
+the upholstery definition. The PO-based "Orders completed" KPI became "Orders upholstered".
+
+**Regression test.** `tests/dashboard-daily-slice.test.mjs` → "revenue: per-day SQL rows
+normalised + sorted …" (also asserts a COMPLETED PO no longer produces revenue on its own).
+**Still to do:** verify live — 22 Sep on both screens must read the same figure.
+
+## BUG-2026-09-22-179 — PO create / PO detail: typing "18" into Price (RM) produced "1.008" — the field reformatted to "1.00" after the first keystroke `procurement` `ui-frontend` `money-input` 🟢
+
+🟢 **Fixed** · owner-reported on the Purchase Order create page: type "1", the field
+instantly shows "1.00", the next "8" lands after the zeros → "1.008".
+
+**Root cause.** `src/pages/procurement/create.tsx` and `src/pages/procurement/detail.tsx`
+each rendered the unit price as a raw controlled `<Input type="number">` whose `value` was
+`formatUnitPriceInput(item.unitPriceSen)` and whose `onChange` wrote sen back to state on
+every keystroke. Every keypress therefore round-tripped through parent state and came back
+formatted to two decimals, and the caret ended up after the padding. The PO list dialog
+(`index.tsx`) never had the bug because it already used `MoneyInput`. Same reformat family as
+BUG-2026-08-31-171 (JV cells), BUG-2026-08-13-095 and the 2026-06-12 payment dialog — a class
+that keeps coming back one site at a time because the house field exists but pages carry their
+own raw input.
+
+**Fix.** Both pages now render `MoneyInput` (raw draft while focused, format on blur/Enter,
+seed the raw value on focus). The parent still receives sen through `roundUnitPriceSen`, so the
+sub-cent rate rule (RM 0.055) is unchanged. Their own `parseMoneyInput` / `formatUnitPriceInput`
+imports are gone — MoneyInput owns both. `scan-supplier-modal.tsx` still carries a raw price
+input but feeds it `String(v)`, not a formatted string, so it does not exhibit this bug; left
+as is.
+
+**Regression test.** `tests/unit-price-four-decimals.test.mjs` → "no PO form binds a
+FORMATTED unit price to a raw <Input> value (BUG-2026-09-22-179)"; the two pages also moved
+from the "own step" list to the "shared MoneyInput" list in the same file, and
+`tests/money-input-parsing.test.mjs` now accepts a MoneyInput import as being on the shared
+parser.
+
+---
+
+## BUG-2026-09-22-178 — Scan Customer PO: the second file "scanned" for 5+ minutes, then the next, then failed — the OCR worker ran under `waitUntil`, which Cloudflare cancels 30 s after the response `scan-ocr` `scan-queue` `platform` 🟢
+
+**Symptom (owner 2026-09-22, screenshot):** Scan Customer PO with a 9-file batch. The first
+file came back; the second sat at SCANNING for more than five minutes with the rest QUEUED.
+Same on the supplier PI/GRN scanner (same queue).
+
+**Root cause.** `POST /api/scan-queue/upload` returned at once and kicked `processBatch()`
+under `c.executionCtx.waitUntil` — six workers claiming rows and calling Sonnet. The file
+header and the mount comment in `worker.ts` both said waitUntil "keeps the worker alive past
+the response until the promise settles". It does not: Cloudflare's documented limit is **30 s
+after the response is sent, shared across all waitUntil calls of the request, after which the
+promises are cancelled** (Workers Logs prints "waitUntil() tasks did not complete within the
+allowed time after invocation end and have been cancelled"). A Sonnet extraction with the
+catalog prompt takes longer than that for most pages. So: rows claimed → `processing` →
+killed mid-fetch at 30 s → only a page that finished inside the window landed (the first PO)
+→ the rest sat `processing` because workers only claim `queued` → `sweepStuckBatch` (per
+poll) re-queued them only once `started_at` was older than **STUCK_MS = 5 min** → the re-kick
+was another waitUntil from the poll request, cut at 30 s again → each cycle bumped `attempts`
+→ after three cycles (~15 min) the row was `failed` with "worker died before completing
+OCR", and Anthropic billed every cancelled call. BUG-2026-06-30-003 added the timeout, the
+3-strike retry and the sweeper and left its verify line at "live-verify pending"; those all
+worked exactly as designed, which is why the symptom was a clean 5-minute stall and not a hang.
+
+**Fix (branch `fix/scan-queue-client-driven`).** The **browser drives the rows**. New
+`POST /api/scan-queue/batch/:batchId/work` (`scan-queue.ts`) claims ONE queued row, runs the
+existing extract / auto-split via `processOneRow` (the old loop body, now returning
+`processed | skipped | drained | error`), writes the result and returns — the request stays
+open as long as the Sonnet call does, and an HTTP request the client holds has no duration
+limit. `createScanQueueDriver` (`src/lib/scan-queue-client.ts`) keeps up to 3 of those open;
+each worker loops until the server says `drained`, backs off on `busy`, exits on any error.
+The three poll effects (PO modal, PI + GRN in the supplier modal) create the driver, `poke()`
+it whenever a poll shows a `queued` row (a Retry, a sweeper re-queue) and `stop()` it on
+cleanup. **Every waitUntil kick is gone** — upload, retry, `sweepStuckBatch`, `sweepStuckScans`
+— because a claim that gets cancelled blocks its row for STUCK_MS; the sweepers now only
+re-queue. Server-side cap: `/work` answers `busy` once 6 rows of the batch are `processing`,
+so a second tab or a script cannot push past the old concurrency. `/work` is org-scoped and
+behind the same `purchase-orders:create` gate; it creates no work, only drains rows the
+upload already created. Trade-off, stated: processing pauses while the modal is closed (it
+stalled anyway); the sweeper + resume-on-open pick it up.
+
+**Prod: UNMEASURED.** The read-only `scan_queue` query was blocked by the session's
+permission classifier. Expected signature when someone runs it: rows with `attempts` 2-3,
+`started_at`→`completed_at` gaps of exactly 5-6 min, errors "worker died before completing
+OCR". Class **C25**.
+
+**Verified:** `tests/scan-queue-client-driven.test.mjs` (4/4: no `waitUntil(` in
+scan-queue.ts, both modals wire + stop the driver, driver loop drained/busy/error/stop);
+`npx tsc -p tsconfig.app.json --noEmit` exit 0; eslint clean on the five touched files;
+`docs/API.md` regenerated. Live-verify on prod after deploy: a 9-file PO batch must show up
+to 3 rows SCANNING at once and none older than ~150 s.
+
+---
+
+## BUG-2026-09-22-005 — Pending Delivery tab spun in a render loop; the whole page froze and no navigation completed `ui-frontend` `perf` `delivery` `data-grid` 🟢
+
+🟢 **Fixed** · owner-reported three times in one day, in escalating words: "click to other
+tab it stuck" → "still no fix" → "when I click Pending Delivery and then navigate anywhere it
+freezes and I can't interact with anything". **This is the real root cause of the first
+report**; #467's two fixes (double navigation, scroll state) were real but secondary.
+
+**Root cause — a closed loop between the page and the shared grid.**
+1. `DataGrid`'s selection effect (`data-grid.tsx`, `[selectedKeys, sortedData]`) calls
+   `onSelectionChange(rows)` whenever `sortedData` changes identity — and `sortedData` is
+   `[...filteredData]`, a FRESH array on every recompute, whose memo depends on `columns`.
+2. The delivery page stores that emission as `setSelectedReadyPOs(new Set(rows…))` — a fresh
+   object every time, even when empty.
+3. `pendingDeliveryColumns` listed `selectedReadyPOs` in its `useMemo` deps although no column
+   reads it (eslint had flagged the dep as unnecessary for months).
+So: emit → new Set → new columns → new `filteredData` → new `sortedData` → effect → emit → …
+Every cycle re-rendered the 7k-line page. React Router 7 schedules every navigation as a
+`startTransition`, and a transition is interrupted by each urgent update — the loop starved
+every tab switch and every route change made from that tab. Nothing threw: React only warns
+about passive-effect loops in dev, and prod spun silently.
+
+**Fix — both halves, at the shared seam first (the ponytail rule: one guard where all
+callers route through).** `DataGrid` now emits only when the selection actually changed:
+same length, same row references, same order ⇒ no call. A data refresh produces new row
+objects, so parents that read fields off the emitted rows still get fresh ones (the
+2026-07-03 invoices stale-selection rule is preserved: rows hidden by a filter shrink the
+emission). And the page's `pendingDeliveryColumns` no longer depends on `selectedReadyPOs`.
+The 16 other `onSelectionChange` callers were checked: their selection-dependent memos derive
+values, none rebuilds `columns`, so the delivery page was the only closed loop — but the grid
+guard now makes the class impossible for the next one.
+
+**Regression test.** `tests/datagrid-selection-emit.test.mjs` — pins the identity guard in
+the grid and the dep list on the page (no DOM runner in this repo, so source guards).
+`tsc -p tsconfig.app.json --noEmit`: exit 0. Class registered: BUG-CLASSES **C24**.
+
+**Not verified live.** No login this session. Expected on prod after deploy: open Pending
+Delivery, then click Planning / Pending Dispatch / the sidebar — each responds at once; the
+CPU graph in DevTools › Performance is flat while idling on Pending Delivery (it was pegged).
+
+---
+
+## BUG-2026-09-22-004 — Delivery page painted skeletons over rows it already had: one slow / 504 sibling fetch blanked every tab `ui-frontend` `perf` `delivery` 🟢
+
+🟢 **Fixed** · owner-reported (prod screenshot 2026-09-22: Planning tab, grid footer says "335
+total records" yet every row is a skeleton and all four summary cards read "-"; console shows
+one `504` on an API resource).
+
+**Root cause.** `src/pages/delivery/index.tsx` kept ONE page-level `loading` flag =
+`doLoading || poLoading || soLoading || custLoading || prodLoading` and passed it to every grid
+and card. The Planning rows come from `/ready-planning` alone and were already in memory; the
+sales-order / customer / product fetches only ENRICH rows (refs, hub, m³). So while any one of
+those five was still in flight — or being held for up to 30 s by an upstream 504 — the grid
+that had its data showed six skeleton rows and the cards showed "-". The user read that as
+"nothing I asked for was deployed". The 504 itself is a SEPARATE, upstream problem
+(**UNMEASURED which endpoint — the console line carried no URL**); this fix stops one slow
+endpoint from hiding a page that is otherwise ready.
+
+**Fix.** `loading` is now the CURRENT tab's rows only: `poLoading` on Planning / Pending
+Delivery, `doLoading` on the DO stage tabs, never on Packing List. The four cards gate on
+`/stats` having answered. Same branch, per the owner's repeated ask: Planning / Pending Delivery
+now page client-side (`pageSlice`, 50 per page, bypassed while a search term is typed so search
+still spans the whole list) through the same `PagerFooter` the DO tabs use — one footer
+component for the three lists.
+
+**Regression test.** `tests/delivery-list-filters.test.mjs` — `pageSlice` bounds / bypass, and
+a source guard that the five-way `loading` OR is gone and both PO grids slice. Anchor guard
+(`tests/docs-module-guide-anchors.test.mjs`) re-pointed. `tsc -p tsconfig.app.json --noEmit`:
+exit 0.
+
+**Not verified live.** No login for either environment in this session. What IS measured:
+the prod bundle served at erp.hookka.com already carries #467 (`doBrowseUrl`), so the
+"nothing changed" impression came from this loading gate, not from a stale bundle or a
+browser cache. Next time it happens: DevTools → Network → filter `504` → the URL names the
+slow endpoint.
+
+---
+
+## BUG-2026-09-22-003 — Delivery page: switching stage tabs felt stuck, and every tab paged the newest 200 DOs of every status `ui-frontend` `perf` `delivery` 🟢
+
+🟢 **Fixed** · owner-reported (screenshot on Pending Delivery: "when I click to planning /
+pending dispatch it stuck … implement pagination instead of loading 335 or 481 every time").
+
+**Root cause (two, both on the tab-switch path of `src/pages/delivery/index.tsx`).**
+1. *Two navigations per click.* `setActiveTab(key)` wrote the URL, then a `useEffect` on
+   `activeTab` called `setPage(1)` — a SECOND `setSearchParams` navigation, so every tab
+   click rendered this 7k-line page twice. React Router 7 schedules each navigation as a
+   `startTransition`, so nothing paints until the whole render finishes: the click looks
+   ignored until both renders are done.
+2. *Scroll position held in React state.* `useSessionState` stored `window.scrollY` and the
+   scroll listener called its setter on every scroll event — a full page re-render per
+   event, each one an urgent update that interrupts and restarts the in-flight tab-switch
+   transition.
+   Separately, the DO list was paged GLOBALLY: `GET /api/delivery-orders?page&limit=200`
+   with no status filter, then `filteredOrders` narrowed by tab in the browser. So
+   "Delivered 481" showed only the delivered rows inside the newest-200 window, the footer's
+   "Page 1 / 3" paged across all statuses, and Planning / Pending Delivery fetched 200 DO
+   rows they never display.
+
+**Fix.** `goTab` — the page's only tab setter — writes tab + page reset in ONE
+`useUrlBatch` call (the effect is gone). Scroll restore writes sessionStorage directly
+(rAF-throttled) under the same key, no React state. `doBrowseUrl(tab, page)` fetches only
+what the tab shows: stage tabs → `?status=<their statuses>&limit=50` (new `?status=` comma
+list on the route's paginated branch, bound as `AND status IN (...)`); Packing List → newest
+200 live DOs (DRAFT/LOADED/IN_TRANSIT, the only ones `runPlBulkTransition` can move); PO tabs
+→ no request. The "Delivered (MTD)" card, previously counted off the browse page, is now
+`/stats.deliveredMtd` — one COUNT outside the signature-keyed snapshot (a month rollover never
+changes the signature), in Malaysian time (`startOfMonthMYT`), and it counts INVOICED too,
+the Delivered tab's own rule. Planning / Pending Delivery get no paging: they are one
+server-computed `/ready-planning` payload, already virtualized, and NOT refetched on tab
+press.
+
+**Regression test.** `tests/delivery-list-filters.test.mjs` — status-list parsing, the MYT
+month boundary against ISO `deliveredAt` text, and a source guard that the route binds
+`status IN` and the page sends `&status=` per tab and has no `setPage(1)` effect. Delivery /
+DO / scope / URL-state suites: 213 pass. `tsc -p tsconfig.app.json --noEmit`: exit 0.
+
+**Not verified live.** The dev server proxies to prod behind a login; the click-to-paint
+time before/after is **UNMEASURED**. Verify on prod after deploy: Pending Delivery → Pending
+Dispatch paints at once; Delivered shows "Page 1 / 10" (481 ÷ 50) and the footer count
+matches the tab badge; the MTD card is non-zero if anything was delivered this month.
+
+---
+
+## BUG-2026-09-22-002 — dashboard "Today" / "Yesterday" presets could show a different day than the page's own "today" `ui-frontend` `dashboard` 🟢
+
+🟢 **Fixed** · owner-reported ("today and yesterday was wrong").
+
+**Root cause.** `periodPresets()` (`dashboard-shared-lib.ts`) pinned the "Today" and
+"Yesterday" quick-pick buttons to `latestDay` — the newest day the book has an actual sales
+row for — not the real clock. That anchor was added in `93c2b84c` (2026-09-21) to stop "Last
+7 Days" landing on an all-zero window when data had stopped days earlier, and got reused for
+Today/Yesterday too without separately reasoning about what those two labels mean. The SAME
+commit made the page's own default-open day (`resolvePeriod`) use the real clock — so a fresh
+page load and the "Today" button could point at two different actual dates. Whenever today's
+sales hadn't posted yet (a day still in progress — the common case, not an edge case), "Today"
+silently showed yesterday's figures and "Yesterday" showed the day before that.
+
+**Fix.** `periodPresets()` now takes `today` and uses it for Today/Yesterday, matching
+`resolvePeriod`'s default-open day; an empty day is a legitimate state, same as it already is
+on first load. "Last 7 Days" is untouched — still anchored to `latestDay`, since a relative
+multi-day window has no calendar identity of its own to preserve and genuinely does need to
+avoid landing on empty data. Both callers (`dashboard-shared.tsx` desktop picker, `/m`
+`PeriodChip.tsx`) now pass the real clock day.
+
+**Regression test.** `tests/dashboard-period.test.mjs` — "Today / Yesterday follow the real
+calendar day, even when the book's data lags behind it" and the sibling test locking Last 7
+Days to `latestDay` still. `node --test`: 10/10 pass. `tsc -p tsconfig.app.json --noEmit`:
+exit 0.
+
+**Not verified live.** No DB access and no staging login this session — whether `latestDay`
+is currently lagging behind real "today" in prod, and by how much, is **UNMEASURED**.
+
+---
+
+## BUG-2026-09-22-001 — the /m dashboard crashed on first paint: the new period calendar drew a month that had not loaded `ui-frontend` `dashboard` 🟢
+
+🟢 **Fixed** · owner-reported from an iPhone on the PR #443 canary (`canary-443.hookka-erp-testing.pages.dev/m/dashboard`): error boundary, "Array length must be a positive integer of safe magnitude", stack in `dashboard-url-state-lib` / `DashboardScreen`. Never reached `main`; lived one commit (`be7c07bc`).
+
+**Root cause.** `PeriodChip.tsx` gained a day calendar built by `calendarCells(viewMonth)` (`dashboard-shared-lib.ts`). The period's month is `""` until the dashboard feed has loaded, and `calendarCells("")` computed `Array(NaN)` -> `RangeError`. The sheet was closed, but JSX children are evaluated by the parent whether or not `<Sheet>` renders them, so it threw on the very first render. The desktop picker never hit it: it only mounts once `months.length > 0`. The visual check used a harness with the months preloaded, so it could not see the empty first render.
+
+**Fix.** `calendarCells` and `shiftMonth` return `[]` / the input unchanged for anything that is not `YYYY-MM` - one guard where both the desktop picker and the `/m` chip route through, rather than a `months.length` check in each caller.
+
+**Regression test.** `tests/dashboard-period.test.mjs` -> "the picker logic survives a period whose month has not loaded yet" (`""`, `"2026"`, `"2026-13"`, `"nope"`, plus `stepPeriod` / `periodPresets` with no months).
+
+---
+
+## BUG-2026-09-18-001 — Supplier Discount void 500'd: the status CHECK never allowed CANCELLED `accounting` `data-integrity` 🟢
+
+🟢 **Fixed** · owner-reported (`erp.hookka.com/accounting?tab=supplier-discount`, void → `POST .../purchase-credit-notes/pcn-85c380af/void 500 (Internal Server Error)`).
+
+**Root cause.** `purchase_credit_notes` was created in `migrations/0088_purchase_credit_notes.sql`
+/ `migrations-postgres/0156_purchase_credit_notes.sql` with an inline
+`status TEXT NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT','POSTED'))`. `POST
+/purchase-credit-notes/:id/void` (`accounting.ts`) has always written
+`status = 'CANCELLED'` to reverse a posted CN — a value that CHECK has never permitted, so
+every void on prod raised a constraint violation and the request 500'd. This is the exact
+same bug class as **BUG-2026-06-25-001** (`purchase_invoices.status` missing
+`PARTIAL_PAID`/`CANCELLED`): an inline `CHECK` written once at table-creation time, never
+widened as the app grew new lifecycle states, and migrations don't auto-apply on deploy
+(see CLAUDE.md) so a migration file fixing it would not reach prod on its own.
+
+**Fix.** `ensurePcnCancellable` (`accounting.ts`, defined immediately above the void route) —
+a memoized runtime self-apply, same shape as `ensurePartialPaymentColumns` /
+`PI_STATUS_CHECK_SQL` in `ensure-partial-payment.ts` — drops the constraint under both
+possible names (`purchase_credit_notes_status_check`, the Postgres auto-generated inline
+name; `purchase_credit_notes_status_chk`, this fix's own name on a re-run) and re-adds it as
+`CHECK (status IN ('DRAFT','POSTED','CANCELLED'))`. Runs at the top of the void handler,
+before the `UPDATE ... SET status = 'CANCELLED'` is queued.
+
+**Same batch:** the Supplier Discount entry form gained a native `<input type="date">` — the
+CN's `date` was previously hardcoded to `new Date().toISOString().slice(0,10)` (today) with
+no way to back-date a discount. `POST /purchase-credit-notes` now accepts an optional `date`
+body field (validated `/^\d{4}-\d{2}-\d{2}$/`, falls back to today on anything else).
+
+**Verified:** `npx tsc -p tsconfig.app.json --noEmit` clean; full suite 4607 pass / 0 fail /
+3 skipped. **Prod void-path effect is UNMEASURED** — no DB credentials in this session, so
+the live 500 was diagnosed from the schema/migration files and the route code, not by
+querying prod. Verify live after deploy: void a POSTED supplier discount, confirm 200 (not
+500) and that the GL reversal + PI outstanding restore actually land. Regression test:
+`tests/pcn-void-status-check.test.mjs` (static source-inspection, same style as
+`tests/pi-status-check-single-source.test.mjs` — asserts the self-apply exists, drops both
+legacy constraint names, re-adds with `CANCELLED`, and runs before the write).
+
+**Process note, logged for CODEBASE-MAP/BUG-HISTORY hygiene:** the fix first landed on `main`
+directly, was reverted on request, and reopened as a PR (#445) from the same branch — but
+because `git revert` leaves the original commit in `main`'s ancestry, GitHub's PR diff saw
+only the regression test as "new" and silently dropped the code change from the merge. `main`
+briefly carried a failing test for code that was never actually there. Re-fixed via a fresh
+branch (`fix/pcn-void-status-check-v2`) cut from current `main`, carrying only the real diff.
+Lesson: reverting a commit that is about to be re-proposed via PR from the *same* branch
+un-counts it from that PR's diff — cut a fresh branch instead.
 
 ---
 
@@ -355,6 +741,24 @@ live** — repairing balances while the cause is still running just rebuilds the
 damage — and only on the owner's word.
 
 Regression: `tests/wip-settle-once.test.mjs`.
+
+## BUG-2026-09-22-177 — "Save as draft" refused by the payment_vouchers status CHECK `accounting` `payment-voucher` 🟢
+
+First prod smoke of the four-tier ladder (#452/#453): every draft create
+returned 400 "Failed to save the payment — is migration 0159 applied?"
+while the legacy Post-now road succeeded. Migration 0159 created
+`status TEXT … CHECK (status IN ('POSTED','VOID'))`; the draft road inserts
+`status='DRAFT'`, so Postgres rejected the row — the same class as
+BUG-2026-09-18-001 (PCN void writing `CANCELLED` into a two-value check).
+The generic catch text pointed at a migration that WAS applied and hid the
+constraint name, which cost a debugging round.
+
+Fix ([accounting.ts](../src/api/routes/accounting.ts)): `ensurePvApprovalCols`
+now drops and re-creates `payment_vouchers_status_check` with `DRAFT`
+admitted (record: migrations-postgres/0233 tail); the create path returns the
+database's own message (`Failed to save the payment: <cause>`) instead of a
+canned guess. Guards: `tests/pv-approval.test.mjs` (+2). Verified on prod:
+draft → prepare → check (formal No. minted) → approve (legs posted) → void.
 
 ## BUG-2026-09-04-176 — a cross-month match cleared an item for a month it hadn't reached the bank in `accounting` `bank-reco` 🟢
 

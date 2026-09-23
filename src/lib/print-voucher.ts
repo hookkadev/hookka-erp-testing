@@ -26,6 +26,9 @@ export type VoucherLine = {
 
 export type VoucherSignature = {
   label: string;
+  /** Who signed and when (approval ladder) — printed under the line. */
+  name?: string;
+  on?: string;
 };
 
 export type VoucherSpec = {
@@ -56,6 +59,20 @@ export type VoucherSpec = {
   signatures: VoucherSignature[];
   /** ISO date the document is printed on; shown in the footer. */
   printedOn: string;
+  /** Diagonal watermark across the sheet ("DRAFT", "NOT YET APPROVED", "CANCELLED"). */
+  watermark?: string;
+  /** Sub-table printed under the lines, e.g. the bills this payment settled. */
+  detail?: { heading: string; columns: VoucherColumn[]; lines: VoucherLine[] };
+  /** Multi-line footer text (payment details / terms) — printed above the signatures; empty = not printed. */
+  footerText?: string;
+  /**
+   * Print bundle (Houzs adoption, 2026-09-22): the voucher's attachments,
+   * each page an image data-URL, printed AFTER the voucher on their own A4
+   * pages with a small caption. The caller composes this from the stored
+   * files (images as-is, PDFs rendered page by page) and refuses to print
+   * when any attachment fails to load — a bundle never silently omits one.
+   */
+  appendix?: { title: string; pages: string[] }[];
 };
 
 // Minimal HTML-escape for any value interpolated into the voucher. Document
@@ -110,10 +127,35 @@ const VOUCHER_STYLES = `
   .sig-line { border-top: 1px solid #1F1D1B; margin-bottom: 5px; }
   .sig-label { font-size: 11px; color: #444; }
   .printed { margin-top: 28px; text-align: right; font-size: 9.5px; color: #999; }
+  .sig-name { font-size: 10.5px; color: #1F1D1B; font-weight: 600; margin-top: 2px; }
+  .sig-on { font-size: 9.5px; color: #777; }
+  .detail-head { margin-top: 14px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; color: #555; }
+  .detail th { background: #FAF8F5; font-size: 10px; }
+  .detail td { font-size: 11px; padding: 4px 8px; }
+  .sheet { position: relative; }
+  .footer-text { margin-top: 12px; font-size: 10.5px; color: #444; white-space: pre-wrap; border-top: 1px dashed #D8D3CE; padding-top: 8px; }
+  .wm { position: absolute; left: 0; right: 0; top: 40%; text-align: center; font-size: 72px; font-weight: 800; letter-spacing: 6px; color: rgba(154, 58, 45, 0.13); transform: rotate(-24deg); pointer-events: none; user-select: none; }
   @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
   .sheet { page-break-after: always; }
   .sheet:last-child { page-break-after: auto; }
+  .appendix-title { font-size: 10.5px; color: #555; border-bottom: 1px solid #E6E1DA; padding-bottom: 4px; margin-bottom: 8px; }
+  .appendix img { display: block; max-width: 100%; max-height: 240mm; margin: 0 auto; object-fit: contain; }
 `;
+
+// One A4 page per attachment page, captioned "Attachment i of n — name (page p/q)".
+function buildAppendixSheets(spec: VoucherSpec): string {
+  const items = spec.appendix ?? [];
+  return items
+    .map((att, i) =>
+      att.pages
+        .map(
+          (src, p) =>
+            `<div class="sheet appendix"><div class="appendix-title">${escapeHtml(spec.docNo)} · Attachment ${i + 1} of ${items.length} — ${escapeHtml(att.title)}${att.pages.length > 1 ? ` (page ${p + 1}/${att.pages.length})` : ""}</div><img src="${escapeHtml(src)}" alt="${escapeHtml(att.title)}"/></div>`,
+        )
+        .join(""),
+    )
+    .join("");
+}
 
 /**
  * Build the inner .sheet HTML for a single voucher (no <html>/<head>/<body>
@@ -147,11 +189,23 @@ export function buildVoucherSheet(spec: VoucherSpec): string {
   const sigCols = spec.signatures
     .map(
       (s) =>
-        `<div class="sig"><div class="sig-line"></div><div class="sig-label">${escapeHtml(s.label)}</div></div>`,
+        `<div class="sig"><div class="sig-line"></div><div class="sig-label">${escapeHtml(s.label)}</div>${s.name ? `<div class="sig-name">${escapeHtml(s.name)}</div>` : ""}${s.on ? `<div class="sig-on">${escapeHtml(s.on)}</div>` : ""}</div>`,
     )
     .join("");
 
+  const detailBlock = spec.detail && spec.detail.lines.length
+    ? `<div class="detail-head">${escapeHtml(spec.detail.heading)}</div>
+  <table class="detail">
+    <thead><tr>${renderRow(spec.detail.columns.map((c) => c.label), spec.detail.columns, "th")}</tr></thead>
+    <tbody>${spec.detail.lines.map((ln) => `<tr>${renderRow(ln.cells, spec.detail!.columns, "td")}</tr>`).join("")}</tbody>
+  </table>`
+    : "";
+
+  const wm = spec.watermark ? `<div class="wm">${escapeHtml(spec.watermark)}</div>` : "";
+  const footerText = spec.footerText && spec.footerText.trim() ? `<div class="footer-text">${escapeHtml(spec.footerText.trim())}</div>` : "";
+
   return `<div class="sheet">
+  ${wm}
   <div class="head">
     <div>
       <div class="co-name">${escapeHtml(co.name)}</div>
@@ -168,11 +222,13 @@ export function buildVoucherSheet(spec: VoucherSpec): string {
     <tbody>${bodyRows}${totalRow}</tbody>
   </table>
   ${footerNote}
+  ${detailBlock}
   ${wordsBlock}
   ${remarksBlock}
+  ${footerText}
   <div class="sigs">${sigCols}</div>
   <div class="printed">Printed on ${escapeHtml(spec.printedOn)}</div>
-</div>`;
+</div>${buildAppendixSheets(spec)}`;
 }
 
 /**
@@ -205,7 +261,20 @@ export function printVouchers(specs: VoucherSpec[]): void {
   w.document.write(buildVouchersDocument(specs));
   w.document.close();
   w.focus();
-  w.print();
+  // A bundle carries attachment images — let every one decode before the
+  // dialog opens, or a slow page prints blank. No images = print at once.
+  const imgs = Array.from(w.document.images);
+  const pending = imgs.filter((im) => !im.complete);
+  if (pending.length === 0) { w.print(); return; }
+  let left = pending.length;
+  let fired = false;
+  const go = () => { if (!fired) { fired = true; w.print(); } };
+  for (const im of pending) {
+    const done = () => { left -= 1; if (left <= 0) go(); };
+    im.addEventListener("load", done, { once: true });
+    im.addEventListener("error", done, { once: true });
+  }
+  w.setTimeout(go, 8000);
 }
 
 /**

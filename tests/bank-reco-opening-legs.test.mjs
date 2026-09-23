@@ -110,7 +110,9 @@ test("shared loader voids pre-opening matches; report floors unbooked at the ope
   const loader = src.slice(start, src.indexOf("async function computeBankRecoReport("));
   // Group-aware clearing (2026-09-07 combo match): void pre-opening claims
   // are skipped, and a leg clears only when its lines sum EXACTLY to it.
-  assert.match(loader, /if \(openingDate && r\.txnDate < openingDate\) continue;/);
+  // (2026-09-22 reverse combo: the void-claim rule moved into the shared
+  // `claim()` helper so plain matches AND split rows go through ONE gate.)
+  assert.match(loader, /if \(openingDate && txnDate < openingDate\) return;/);
   assert.match(loader, /if \(legAmt !== undefined && g\.sumSen === legAmt\) clearedOn\.set\(legId, g\.lastDate\);/);
   assert.match(loader, /legBeforeOpening\(l\.sourceType, l\.day, openingDate\)/);
   assert.match(walkBody(), /if \(obDateRp && r\.txnDate < obDateRp\) continue;/);
@@ -171,6 +173,28 @@ test("combo match validates the exact sum and sweeps before the taken check", ()
   assert.match(body, /l\.txnDate < obDateG/);
   assert.match(body, SWEEP);
   assert.ok(body.search(SWEEP) < body.indexOf("already matched to another statement line"));
+});
+
+// 2026-09-22 reverse combo — ONE bank line paid SEVERAL legs. Pieces live in
+// bank_line_leg_splits; the line carries the SPLIT sentinel; the loader feeds
+// each split row into the same claim() gate; taken checks consult the table.
+test("split match: exact sum, sentinel on the line, one row per leg", () => {
+  const body = handler('app.post("/bank-reco/match-split", async (c) => {');
+  assert.match(body, /sumSen !== lineAmt/);
+  assert.match(body, /SET matchedLegId = \?, matchedAt = \? WHERE id = \?"\)\.bind\(BANK_LINE_SPLIT_SENTINEL/);
+  assert.match(body, /INSERT INTO bank_line_leg_splits/);
+  assert.match(body, /takenPlain \|\| takenSplit/);
+});
+
+test("loader and taken-checks see split rows; unmatch releases a split", () => {
+  const start = src.indexOf("async function loadBankRecoState(");
+  const loader = src.slice(start, src.indexOf("async function computeBankRecoReport("));
+  assert.match(loader, /FROM bank_line_leg_splits s/);
+  assert.match(loader, /if \(r\.matchedLegId === BANK_LINE_SPLIT_SENTINEL\) continue;/);
+  assert.match(handler('app.post("/bank-reco/match", async (c) => {'), /takenBySplit/);
+  assert.match(handler('app.post("/bank-reco/match-group", async (c) => {'), /takenGSplit/);
+  assert.match(handler('app.post("/bank-reco/unmatch", async (c) => {'), /DELETE FROM bank_line_leg_splits WHERE line_id = \?/);
+  assert.match(walkBody(), /if \(r\.matchedLegId === BANK_LINE_SPLIT_SENTINEL\) \{/);
 });
 
 test("unmatch dissolves the whole combo group, never leaves a partial", () => {

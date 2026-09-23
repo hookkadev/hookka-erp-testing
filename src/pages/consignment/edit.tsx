@@ -28,6 +28,7 @@ import {
   legHeightOptions,
   specialOrderOptions,
 } from "@/lib/pricing-options";
+import { calcSpecialsSurchargeSen, specialCodeForName, specialNameForCode } from "@/lib/special-order-surcharge";
 // The fifth price component. Same helper the CO PUT uses to derive it, so the
 // number on screen is the number the server would store.
 import { deriveTotalHeightSurchargeSen } from "@/lib/total-height-surcharge";
@@ -94,19 +95,6 @@ function parseInches(h: string): number | null {
   return m ? parseFloat(m[1]) : null;
 }
 
-function calcSpecialOrderSurcharge(codes: string[]): number {
-  const hasHB = codes.includes("HB_FULL_COVER");
-  const hasBtm = codes.includes("DIVAN_BTM_COVER");
-  let total = 0;
-  for (const code of codes) {
-    const opt = specialOrderOptions.find(o => o.code === code);
-    if (!opt) continue;
-    if (hasHB && hasBtm && (code === "HB_FULL_COVER" || code === "DIVAN_BTM_COVER")) continue;
-    total += opt.surcharge;
-  }
-  if (hasHB && hasBtm) total += 10000;
-  return total;
-}
 
 /** Extract FT portion from sizeLabel, e.g. "Queen 5FT" → "5FT" */
 function extractSizeSuffix(sizeLabel: string): string {
@@ -299,16 +287,11 @@ export default function EditSalesOrderPage() {
     const next = item.specialOrders.includes(code)
       ? item.specialOrders.filter((c) => c !== code)
       : [...item.specialOrders, code];
-    const available = getAvailableSpecials(isSofa);
-    const sumSurcharge = next.reduce((s, c) => {
-      const opt = available.find((o) => o.code === c);
-      if (!opt) return s;
-      return s + getConfigSurcharge(isSofa ? "sofaSpecials" : "specials", opt.name, opt.surcharge);
-    }, 0);
-    const combinedSurcharge = calcSpecialOrderSurcharge(next);
-    const surcharge = isSofa ? sumSurcharge : combinedSurcharge;
+    // Shared rule (BUG-2026-09-23): config-only options priced, owner's combo.
+    const cfg = maintenanceConfig?.[isSofa ? "sofaSpecials" : "specials"];
+    const surcharge = calcSpecialsSurchargeSen(next, cfg);
     const label = next
-      .map((c) => specialOrderOptions.find((o) => o.code === c)?.name || c)
+      .map((c) => specialNameForCode(c, cfg) || c)
       .join("; ");
     updateItem(idx, {
       specialOrders: next,
@@ -390,8 +373,8 @@ export default function EditSalesOrderPage() {
                 const raw = (item.specialOrder as string) || "";
                 const tokens = raw.split(/[;,]+/).map((s) => s.trim()).filter(Boolean);
                 return tokens
-                  .map((tok) => specialOrderOptions.find((o) => o.name === tok)?.code)
-                  .filter((c): c is string => Boolean(c));
+                  .filter((tok) => !/^OTHER\s*:/i.test(tok))
+                  .map((tok) => specialCodeForName(tok));
               })(),
               specialOrder: (item.specialOrder as string) || "",
               specialOrderPriceSen: (item.specialOrderPriceSen as number) || 0,
@@ -1062,7 +1045,7 @@ export default function EditSalesOrderPage() {
                       {item.specialOrders.length > 0 && !isOpen && (
                         <div className="flex flex-wrap gap-1 mt-1.5">
                           {item.specialOrders.map(code => {
-                            const opt = specialOrderOptions.find(o => o.code === code);
+                            const opt = available.find(o => o.code === code);
                             if (!opt) return null;
                             const sc = getConfigSurcharge(isSofa ? "sofaSpecials" : "specials", opt.name, opt.surcharge);
                             return (

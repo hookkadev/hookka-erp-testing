@@ -791,6 +791,7 @@ app.post("/", async (c) => {
     // omits is DERIVED here rather than stored as 0. Same two loaders the SO
     // POST uses; both degrade to null without throwing.
     const cfgSpecialsForPricing = await loadSpecialsConfig(c.var.DB);
+    const cfgSofaSpecialsForPricing = await loadSpecialsConfig(c.var.DB, "sofaSpecials");
     const cfgHeightsForPricing = await loadHeightsConfig(c.var.DB);
     const itemRows: ConsignmentOrderItemRow[] = await Promise.all(
       rawItems.map(
@@ -815,7 +816,9 @@ app.post("/", async (c) => {
             specialOrderPriceSen?: number | string | null;
             specialOrder?: string | null;
           },
-          cfgSpecialsForPricing,
+          String(it.itemCategory ?? "") === "SOFA"
+            ? cfgSofaSpecialsForPricing
+            : cfgSpecialsForPricing,
         );
         // The component this route dropped on the floor. The CO create screen
         // computes it (calcTotalHeightSurcharge), shows it as "+RM x" and posts
@@ -2179,6 +2182,7 @@ app.put("/:id", async (c) => {
       // BUG-CLASS C1 — see the POST. A fix applied only to create leaves every
       // EDIT of an already-correct order re-storing the short price.
       const cfgSpecialsForPricing = await loadSpecialsConfig(c.var.DB);
+      const cfgSofaSpecialsForPricing = await loadSpecialsConfig(c.var.DB, "sofaSpecials");
       const cfgHeightsForPricing = await loadHeightsConfig(c.var.DB);
       const newRows = await Promise.all(
         rawPutItems.map(async (it, idx) => {
@@ -2198,7 +2202,9 @@ app.put("/:id", async (c) => {
               specialOrderPriceSen?: number | string | null;
               specialOrder?: string | null;
             },
-            cfgSpecialsForPricing,
+            String(it.itemCategory ?? "") === "SOFA"
+              ? cfgSofaSpecialsForPricing
+              : cfgSpecialsForPricing,
           );
           const totalHeightPrice = resolveTotalHeightPriceSen(
             it.totalHeightPriceSen as number | string | null | undefined,

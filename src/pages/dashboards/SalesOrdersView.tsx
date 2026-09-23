@@ -17,29 +17,21 @@ import {
 } from "recharts";
 import { useCachedJson } from "@/lib/cached-fetch";
 import { formatCurrency } from "@/lib/utils";
-import {
-  isOutstanding,
-  isPendingDelivery,
-  isCompleted,
-} from "@/lib/so-status";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { ShoppingCart, DollarSign, Truck, CheckCircle, CalendarX2 } from "lucide-react";
 import {
   TAUPE, GREEN, AMBER, TEAL, fmtN, fmtRMAxis, ymd, dayLabel,
   CHART_INK, CHART_GOLD, CHART_AXIS, CARD_BORDER, CARD_BG, CHART_SERIES,
-  inPeriod, previousPeriod, periodLabel, isConfirmedOrder, type Period,
+  inPeriod, inFocus, periodLabel, isConfirmedOrder, type Period,
 } from "./dashboard-shared-lib";
 import { Kpi, LiveBadge } from "./dashboard-shared";
+import { rollingForecast } from "@/lib/revenue-forecast";
+import { pctDelta, buildSalesTrend, previousSalesKpis, computeSalesKpis } from "./dashboard-sales-lib";
 
 // Today, in the app's own local date. Used to cap the zero-fill: a future day
 // has no rows because it has not happened, which is not the same as a day that
 // recorded nothing.
 const todayYmd = ymd(new Date());
-
-const pctDelta = (now: number, prev: number): string => {
-  const d = ((now - prev) / prev) * 100;
-  return `${d >= 0 ? "+" : ""}${d.toFixed(1)}%`;
-};
 
 // Six customers + Other, drawn from the shared warm-industrial series so the
 // attribution chart reads as part of the same system as the trend/forecast.
@@ -113,9 +105,10 @@ type Feed = {
       isServiceOrder: boolean;
     }[];
     pipeline: { status: string; count: number; valueSen: number }[];
-    // One row per (state, category, sku) combination — no date column, so
-    // anything derived from it is book-wide and is labelled that way.
+    // One row per (order day, state, category, sku) — the day is the order's
+    // createdAt, the same date every other Sales card filters on.
     byStateCategory: {
+      date: string | null;
       state: string | null;
       category: string | null;
       sku: string | null;
@@ -150,7 +143,7 @@ export function SalesOrdersView({
   const live = data?.availability?.sales?.live ?? false;
 
   // Everything with a date is scoped to the global period picker above the
-  // tabs. byStateCategory has no date and stays book-wide (labelled as such).
+  // tabs.
   const orders = useMemo(
     () => allOrders.filter((o) => inPeriod(period, o.createdAt)),
     [allOrders, period],
@@ -171,57 +164,11 @@ export function SalesOrdersView({
   // window is generated here and missing ones default to 0, so a quiet day
   // reads as a real zero rather than vanishing. The fill stops at today: days
   // that have not happened yet are not zeros, they are unknown.
-  const chartData = useMemo(() => {
-    const sorted = [...byDay].sort((a, b) => (a.date < b.date ? -1 : 1));
-
-    if (period.mode === "ytd") {
-      const byMonth = new Map<string, { revenueSen: number; orders: number }>();
-      for (const d of sorted) {
-        const m = d.date.slice(0, 7);
-        const e = byMonth.get(m) ?? { revenueSen: 0, orders: 0 };
-        e.revenueSen += d.revenueSen;
-        e.orders += d.orders;
-        byMonth.set(m, e);
-      }
-      return [...byMonth.entries()].map(([m, v]) => ({
-        date: m.slice(5),
-        iso: m,
-        Revenue: Math.round(v.revenueSen / 100),
-        Orders: v.orders,
-      }));
-    }
-
-    const have = new Map(sorted.map((d) => [d.date, d]));
-    let first: string;
-    let last: string;
-    if (period.mode === "range" && period.from && period.to) {
-      first = period.from;
-      last = period.to;
-    } else {
-      const [y, m] = period.month.split("-").map(Number);
-      if (!y || !m) return [];
-      first = `${period.month}-01`;
-      last = `${period.month}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`;
-    }
-    if (last > todayYmd) last = todayYmd;
-    if (first > last) return [];
-
-    const out: { date: string; iso: string; Revenue: number; Orders: number }[] = [];
-    const cursor = new Date(first + "T00:00:00");
-    const end = new Date(last + "T00:00:00");
-    while (cursor <= end) {
-      const iso = ymd(cursor);
-      const hit = have.get(iso);
-      out.push({
-        date: iso.slice(8),
-        iso,
-        Revenue: hit ? Math.round(hit.revenueSen / 100) : 0,
-        Orders: hit ? hit.orders : 0,
-      });
-      cursor.setDate(cursor.getDate() + 1);
-    }
-    return out;
-  }, [byDay, period.mode, period.month, period.from, period.to]);
+  const chartData = useMemo(
+    () => buildSalesTrend(byDay, period, todayYmd),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [byDay, period.mode, period.month, period.from, period.to],
+  );
 
   // Clicking a bar drills in: a month in YTD becomes the selected month; a day
   // anywhere else highlights that day. The highlight lives on `period.day`, the
@@ -258,19 +205,10 @@ export function SalesOrdersView({
   // whole previous month produced "-86.6% vs Aug 2026", which reads as a
   // collapse when it is really just a day-vs-month mismatch. No comparison is
   // better than a wrong one.
-  const prevKpis = useMemo(() => {
-    if (selectedDetail) return null;
-    const prev = previousPeriod(period, months);
-    if (!prev) return null;
-    const rows = allOrders
-      .filter((o) => inPeriod(prev, o.createdAt))
-      .filter((o) => isConfirmedOrder(o.status));
-    return {
-      label: periodLabel(prev),
-      count: rows.length,
-      revenueSen: rows.reduce((s, o) => s + o.totalSen, 0),
-    };
-  }, [allOrders, period, months, selectedDetail]);
+  const prevKpis = useMemo(
+    () => previousSalesKpis(allOrders, period, months, !!selectedDetail),
+    [allOrders, period, months, selectedDetail],
+  );
 
   // Clicking a day in the trend narrows EVERYTHING that is order-scoped —
   // the KPI row, the pipeline and the recent list — to that day, so the cards
@@ -284,25 +222,7 @@ export function SalesOrdersView({
     [orders, selectedDetail],
   );
 
-  const kpis = useMemo(() => {
-    const live = scopedOrders.filter((o) => isConfirmedOrder(o.status));
-    const outstanding = scopedOrders.filter((o) => isOutstanding(o.status));
-    const pending = scopedOrders.filter((o) => isPendingDelivery(o.status));
-    const completed = scopedOrders.filter((o) => isCompleted(o.status));
-    return {
-      // Count and money share ONE definition — confirmed orders only (owner
-      // 2026-09-15). Counting drafts in the headline while excluding them from
-      // revenue is how a card ends up disagreeing with itself. This tracks the
-      // house Command Center rather than the Sales LIST page, which counts
-      // every row; the two house surfaces genuinely differ.
-      soCount: live.length,
-      revenueSen: live.reduce((s, o) => s + o.totalSen, 0),
-      outstandingCount: outstanding.length,
-      outstandingSen: outstanding.reduce((s, o) => s + o.totalSen, 0),
-      pendingDelivery: pending.length,
-      completedCount: completed.length,
-    };
-  }, [scopedOrders]);
+  const kpis = useMemo(() => computeSalesKpis(scopedOrders), [scopedOrders]);
 
   // Sales Attribution — revenue by CUSTOMER over time. Granularity buckets the
   // order's own createdAt, so this one spans the whole book rather than the
@@ -391,43 +311,25 @@ export function SalesOrdersView({
       const m = d.date.slice(0, 7);
       byMonth.set(m, (byMonth.get(m) ?? 0) + d.revenueSen);
     }
-    const rows = [...byMonth.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1));
-    const WINDOW = 3;
-    const PROJECT = 6;
-
-    const out = rows.map(([month, sen], i) => {
-      const prior = rows.slice(Math.max(0, i - WINDOW), i);
-      const target =
-        prior.length === WINDOW
-          ? prior.reduce((t, [, v]) => t + v, 0) / WINDOW
-          : null;
-      return {
-        month: `${month.slice(5)} ${month.slice(2, 4)}`,
-        iso: month,
-        actualSen: sen,
-        Actual: Math.round(sen / 100),
-        Target: target === null ? null : Math.round(target / 100),
-        hit: target === null ? null : sen >= target,
-        projected: false,
-      };
-    });
-
+    const { actual, projected } = rollingForecast([...byMonth.entries()], 6);
+    const out = actual.map((r) => ({
+      month: `${r.ym.slice(5)} ${r.ym.slice(2, 4)}`,
+      iso: r.ym,
+      actualSen: r.sen,
+      Actual: Math.round(r.sen / 100),
+      Target: r.targetSen === null ? null : Math.round(r.targetSen / 100),
+      hit: r.hit,
+      projected: false,
+    }));
     // Carry the trend forward: each projected month's target is the rolling
     // average of the last three known actuals.
-    const tail = rows.slice(-WINDOW).map(([, v]) => v);
-    const avg = tail.length ? tail.reduce((t, v) => t + v, 0) / tail.length : 0;
-    let cursor = rows.length ? rows[rows.length - 1][0] : "";
-    for (let k = 0; k < PROJECT && cursor; k++) {
-      let [y, m] = cursor.split("-").map(Number);
-      m += 1;
-      if (m > 12) { m = 1; y += 1; }
-      cursor = `${y}-${String(m).padStart(2, "0")}`;
+    for (const p of projected) {
       out.push({
-        month: `${String(m).padStart(2, "0")} ${String(y).slice(2)}`,
-        iso: cursor,
+        month: `${p.ym.slice(5)} ${p.ym.slice(2, 4)}`,
+        iso: p.ym,
         actualSen: 0,
         Actual: null as unknown as number,
-        Target: Math.round(avg / 100),
+        Target: Math.round(p.sen / 100),
         hit: null,
         projected: true,
       });
@@ -458,10 +360,14 @@ export function SalesOrdersView({
   const pipelineMax = Math.max(1, ...pipeline.map((p) => p.count));
 
 
-  // State x Category and Top SKUs both come from byStateCategory, which has no
-  // date column — these are whole-book figures, not "this period".
+  // State x Category and Top SKUs follow the picker (and a clicked day), same
+  // as the KPI row and pipeline.
+  const stateCatRows = useMemo(
+    () => (data?.sales?.byStateCategory ?? []).filter((r) => inFocus(period, r.date)),
+    [data, period],
+  );
   const attribution = useMemo(() => {
-    const rows = data?.sales?.byStateCategory ?? [];
+    const rows = stateCatRows;
     const states = new Map<string, { state: string; revenueSen: number; qty: number }>();
     const cats = new Map<string, { category: string; revenueSen: number; qty: number }>();
     const skus = new Map<string, { sku: string; name: string; category: string; revenueSen: number; qty: number }>();
@@ -484,7 +390,7 @@ export function SalesOrdersView({
       allSkus: [...skus.values()].sort(desc),
       total,
     };
-  }, [data]);
+  }, [stateCatRows]);
 
   // Donut: top states, with anything past the 6th folded into "Other" so the
   // outside labels cannot collide into an unreadable fan.
@@ -509,7 +415,7 @@ export function SalesOrdersView({
   // aggregate over every state cannot be narrowed to one afterwards.
   const visibleSkus = useMemo(() => {
     const acc = new Map<string, { sku: string; name: string; category: string; revenueSen: number; qty: number }>();
-    for (const r of data?.sales?.byStateCategory ?? []) {
+    for (const r of stateCatRows) {
       if (stateFilter && (r.state ?? "—") !== stateFilter) continue;
       if (skuCat && (r.category ?? "—") !== skuCat) continue;
       const sk = r.sku ?? "—";
@@ -521,7 +427,7 @@ export function SalesOrdersView({
     return [...acc.values()]
       .sort((a, b) => (skuSort === "revenue" ? b.revenueSen - a.revenueSen : b.qty - a.qty))
       .slice(0, 10);
-  }, [data, stateFilter, skuCat, skuSort]);
+  }, [stateCatRows, stateFilter, skuCat, skuSort]);
 
   const recentOrders = useMemo(
     () =>
@@ -547,14 +453,14 @@ export function SalesOrdersView({
 
   return (
     <div className="space-y-6 max-md:space-y-4">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-lg font-semibold text-[#1F1D1B]">Sales Orders</h2>
         <LiveBadge live={live} />
         {selectedDetail ? (
           <button
             type="button"
             onClick={clearDay}
-            className="text-xs rounded-md border border-[#E5E0D8] bg-[#F7F5F3] px-2 py-0.5 text-[#6B5C32] hover:bg-white"
+            className="text-xs rounded-md border border-[#E5E0D8] bg-[#F7F5F3] px-2 py-0.5 text-[#6B5C32] hover:bg-white max-md:min-h-10 max-md:px-3 max-md:text-left"
           >
             Showing: {selectedDetail.label} — click to go back
           </button>
@@ -830,7 +736,7 @@ export function SalesOrdersView({
                     : `Top customer: ${attrChart.topName} (${attrChart.topPct}% of total) · Whole book: ${formatCurrency(attrChart.grandSen)}`}
                 </p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <div className="flex rounded-lg border border-[#E2DDD8] overflow-hidden">
                   {(["monthly", "quarterly", "yearly"] as const).map((g) => (
                     <button
@@ -838,7 +744,7 @@ export function SalesOrdersView({
                       type="button"
                       onClick={() => setAttrGran(g)}
                       className={
-                        "px-2.5 py-1 text-xs font-medium capitalize " +
+                        "px-2.5 py-1 max-md:py-2.5 text-xs font-medium capitalize " +
                         (attrGran === g ? "bg-[#F0ECE9] text-[#1F1D1B]" : "text-[#6B7280] hover:bg-[#F7F5F3]")
                       }
                     >
@@ -856,7 +762,7 @@ export function SalesOrdersView({
                       type="button"
                       onClick={() => setAttrView(v.k)}
                       className={
-                        "px-2.5 py-1 text-xs font-medium " +
+                        "px-2.5 py-1 max-md:py-2.5 text-xs font-medium " +
                         (attrView === v.k ? "bg-[#F0ECE9] text-[#1F1D1B]" : "text-[#6B7280] hover:bg-[#F7F5F3]")
                       }
                     >
@@ -1087,7 +993,7 @@ export function SalesOrdersView({
           <CardHeader className="pb-3">
             <CardTitle>Sales by state &amp; category</CardTitle>
             <p className="text-xs" style={{ color: CHART_AXIS }}>
-              Share of book-wide revenue · all time (no date on this source) · click a state to filter the SKU list
+              Share of revenue · {selectedDetail ? selectedDetail.label : periodLabel(period)} · click a state to filter the SKU list
             </p>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-2 items-center">
@@ -1165,7 +1071,7 @@ export function SalesOrdersView({
                   {formatCurrency(attribution.total)}
                 </p>
                 <p className="text-[10px] uppercase tracking-wide" style={{ color: CHART_AXIS }}>
-                  Total sales · all time
+                  Total sales · {selectedDetail ? selectedDetail.label : periodLabel(period)}
                 </p>
               </div>
               {attribution.states.slice(0, 7).map((st, i) => {
@@ -1176,7 +1082,7 @@ export function SalesOrdersView({
                     key={st.state}
                     type="button"
                     onClick={() => setStateFilter((cur) => (cur === st.state ? null : st.state))}
-                    className="w-full flex items-center gap-2 text-[12.5px] text-left"
+                    className="w-full flex items-center gap-2 text-[12.5px] text-left max-md:py-1.5"
                     style={{ opacity: on ? 1 : 0.45 }}
                   >
                     <span
@@ -1208,7 +1114,7 @@ export function SalesOrdersView({
               <div>
                 <CardTitle>Top SKUs</CardTitle>
                 <p className="text-xs" style={{ color: CHART_AXIS }}>
-                  Showing top {visibleSkus.length} · ranked by {skuSort === "revenue" ? "revenue" : "units"}
+                  {selectedDetail ? selectedDetail.label : periodLabel(period)} · top {visibleSkus.length} · ranked by {skuSort === "revenue" ? "revenue" : "units"}
                   {stateFilter ? " · " + stateFilter + " only" : ""}
                 </p>
               </div>
@@ -1219,7 +1125,7 @@ export function SalesOrdersView({
                     type="button"
                     onClick={() => setSkuCat(c === "All" ? null : c)}
                     className={
-                      "px-2 py-0.5 text-[11px] font-medium rounded-md border " +
+                      "px-2 py-0.5 max-md:py-2 max-md:px-3 text-[11px] font-medium rounded-md border " +
                       ((c === "All" ? skuCat === null : skuCat === c)
                         ? "bg-[#2A2723] border-[#2A2723] text-white"
                         : "bg-white border-[#E5E0D8] text-[#6B7280] hover:bg-[#F7F5F3]")

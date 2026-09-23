@@ -123,7 +123,7 @@ export function ensurePendingMigrations(db: D1Database): Promise<void> {
       "ALTER TABLE job_cards ADD COLUMN IF NOT EXISTS distributedAt TEXT",
       // Sequence-unlock audit (PRD T-013 R10/R12, 2026-09-17). The weekly
       // review groups by these; `reason` stays the human sentence. Mirrored in
-      // migrations-postgres/0233_scan_override_audit_reason_code.sql for the record
+      // migrations-postgres/0237_scan_override_audit_reason_code.sql for the record
       // — this ensure is what reaches prod.
       "ALTER TABLE scan_override_audit ADD COLUMN IF NOT EXISTS reason_code TEXT",
       "ALTER TABLE scan_override_audit ADD COLUMN IF NOT EXISTS department_code TEXT",

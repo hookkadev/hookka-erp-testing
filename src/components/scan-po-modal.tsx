@@ -15,7 +15,7 @@ import {
 } from "@/lib/so-original";
 import { Upload, FileText, CheckCircle, AlertTriangle, X, ChevronDown, ChevronRight, Loader2, Sparkles, Star, Plus, Trash2 } from "lucide-react";
 import { ReusedScanBadge, CachedScanNotice } from "@/components/scan-cached-hint";
-import { postScanQueueConsume } from "@/lib/scan-queue-client";
+import { postScanQueueConsume, createScanQueueDriver } from "@/lib/scan-queue-client";
 import { resolveScanParty } from "@/lib/scan-party-resolve";
 import { usePartyAliases, teachPartyAlias } from "@/lib/party-alias-client";
 import { moneyFieldToSen } from "@/lib/money-field";
@@ -1319,15 +1319,21 @@ export function ScanPOModal({ open, onClose, onCreated }: Props) {
   useEffect(() => {
     if (!open || !activeBatchId) return;
     let cancelled = false;
+    // The browser drives the OCR (see createScanQueueDriver). Poked on
+    // every poll that still shows a 'queued' row; re-polls after each row.
+    const driver = createScanQueueDriver(activeBatchId, {
+      onProcessed: () => void tick(),
+    });
     const tick = async () => {
       const r = await fetchScanQueueBatch(activeBatchId);
       if (cancelled) return;
       if (!r.ok) {
-         
+
         setErrors([`Queue poll failed: ${r.error}`]);
         return;
       }
-       
+      if (r.data.items.some((it) => it.status === "queued")) driver.poke();
+
       setQueueItems(r.data.items);
       // NOTE the absence of a `!it.consumedAt` test. It used to be here, and it
       // is why POs disappeared: consumed means "a draft was made from this
@@ -1450,6 +1456,7 @@ export function ScanPOModal({ open, onClose, onCreated }: Props) {
     }, QUEUE_POLL_MS);
     return () => {
       cancelled = true;
+      driver.stop();
       window.clearInterval(id);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

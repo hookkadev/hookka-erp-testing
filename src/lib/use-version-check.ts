@@ -8,9 +8,8 @@
 //   2. Every `intervalMs`, refetch `/` (forced past the CDN with a
 //      cache-buster) and parse its first script hash.
 //   3. When the hash differs from the one we remembered, call `onNewVersion`
-//      exactly once. The caller surfaces a toast / banner that offers
-//      "Reload now" — we deliberately do NOT reload automatically because
-//      the user might be mid-form.
+//      exactly once. Callers should use `useAutoUpdateOnNavigate` (below),
+//      which also reloads on the next page change — never mid-form.
 //
 // Why script hash instead of a dedicated /api/version endpoint? No new
 // route to deploy, works with any static-host CDN, and is self-calibrating:
@@ -18,6 +17,7 @@
 // guarantees stable hashing across identical builds.
 
 import { useEffect, useRef } from "react";
+import { useLocation } from "react-router-dom";
 
 function extractFirstScriptHash(html: string): string | null {
   // Matches <script src="/assets/index-<hash>.js"> — both the entry and
@@ -27,7 +27,7 @@ function extractFirstScriptHash(html: string): string | null {
 }
 
 export function useVersionCheck({
-  intervalMs = 5 * 60 * 1000, // 5 min
+  intervalMs = 2 * 60 * 1000, // 2 min
   onNewVersion,
 }: {
   intervalMs?: number;
@@ -35,6 +35,12 @@ export function useVersionCheck({
 }) {
   const baselineRef = useRef<string | null>(null);
   const firedRef = useRef(false);
+  // Latest callback in a ref: callers pass an inline arrow, and having it in
+  // the effect deps restarted the poll (and its 30s first check) every render.
+  const onNewVersionRef = useRef(onNewVersion);
+  useEffect(() => {
+    onNewVersionRef.current = onNewVersion;
+  });
 
   useEffect(() => {
     // Capture the baseline hash from the page that's currently running.
@@ -63,7 +69,7 @@ export function useVersionCheck({
         const current = extractFirstScriptHash(html);
         if (current && baselineRef.current && current !== baselineRef.current) {
           firedRef.current = true;
-          onNewVersion();
+          onNewVersionRef.current();
         }
       } catch {
         // Network hiccup is fine — try again next interval.
@@ -89,5 +95,28 @@ export function useVersionCheck({
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [intervalMs, onNewVersion]);
+  }, [intervalMs]);
+}
+
+/**
+ * Version check that actually lands the new deploy: once a new build is seen,
+ * the NEXT page change does a full reload (the router has already moved to
+ * the new path, so the reload just re-opens it on the new code). The user has
+ * left whatever form they were in by then, so nothing half-typed is lost.
+ * BUG-2026-09-23-184: the old one-shot "Reload?" prompt, once dismissed, left
+ * the tab on old code for the rest of the day — a deployed fix (e.g. a
+ * pricing fix) silently didn't reach that operator.
+ */
+export function useAutoUpdateOnNavigate(onNewVersion?: () => void) {
+  const { pathname } = useLocation();
+  const staleRef = useRef(false);
+  useVersionCheck({
+    onNewVersion: () => {
+      staleRef.current = true;
+      onNewVersion?.();
+    },
+  });
+  useEffect(() => {
+    if (staleRef.current) window.location.reload();
+  }, [pathname]);
 }

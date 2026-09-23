@@ -1,4 +1,4 @@
--- 0233_scan_override_audit_reason_code.sql
+-- 0237_scan_override_audit_reason_code.sql
 --
 -- PRD T-013 (2026-09-17): the weekly sequence-unlock review groups by WHO,
 -- WHICH step and WHY, and "why" has to be a code, not prose — a real skip

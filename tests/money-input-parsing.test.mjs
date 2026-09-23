@@ -184,7 +184,9 @@ for (const [file, what] of NO_PARSEFLOAT) {
       `${file} is back on parseFloat. parseFloat("12,000") === 12 — it stops at the comma and returns what it has, silently.`,
     );
     assert.ok(
-      /from "@\/lib\/(money-field|parse-money)"/.test(src),
+      // MoneyInput routes every commit through parseMoneyInput, so a page that
+      // imports it is on the shared parser too (PO create / detail, 2026-09-22).
+      /from "@\/lib\/(money-field|parse-money)"|from "@\/components\/ui\/money-input"/.test(src),
       `${file} must import the shared parser`,
     );
   });
@@ -256,6 +258,7 @@ const REFUSALS = [
   ["src/pages/rd/detail.tsx", "if (rdMoneyError)", "R&D target selling price / material cost / source price", 1],
   ["src/pages/rd/index.tsx", "if (rdCreateMoneyError)", "R&D project budget", 1],
   ["src/pages/invoices/supplier-payments.tsx", "if (moneyErr)", "Supplier payment voucher", 1],
+  ["src/pages/accounting/index.tsx", "if (apMoneyError)", "Payment Vouchers › AP Payment (bill ticks + advance)", 1],
   ["src/pages/invoices/supplier-payments.tsx", "if (koErr)", "Advance knock-off", 1],
   ["src/pages/purchase-returns/index.tsx", "if (costErr)", "Purchase-return unit cost", 1],
 ];
@@ -306,7 +309,7 @@ test("a form with an unreadable amount does not STATE a total", () => {
 // submit path carrying it is separately gated by a refusal above.
 test("every `?? 0` on a money parse is a listed display fallback, not a payload", () => {
   const ALLOWED = new Map([
-    ["src/pages/accounting/index.tsx", 7],   // 5 form `toSen` helpers + bank-CSV parseAmt + opening-balance toSen
+    ["src/pages/accounting/index.tsx", 8],   // 5 form `toSen` helpers + bank-CSV parseAmt + opening-balance toSen + AP-payment `apSen` (handleSaveAp refuses on apMoneyError first)
     ["src/pages/forecast.tsx", 3],           // calc() sales + amt(), and the derived-% hint
     ["src/pages/invoices/payments.tsx", 1],  // receivedSen preview; `canSubmit` blocks the post
     ["src/pages/invoices/index.tsx", 1],     // the Record Payment button predicate

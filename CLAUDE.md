@@ -1,5 +1,8 @@
 # Hookka ERP — Start Here (read before any task)
 
+> **Last verified: 2026-09-22** (branch `fix/scan-queue-client-driven`) — re-measured the tracked-file
+> count and the API.md mount/handler counts quoted below; nothing else re-checked.
+
 > **Last verified: 2026-08-14** (branch `docs/docs-vs-code-audit`) — corrected against the
 > source by the prose audit; the row(s) touched here are itemised in
 > [`docs/DOCS-VS-CODE-AUDIT.md`](docs/DOCS-VS-CODE-AUDIT.md). Only the claims listed there were
@@ -20,8 +23,8 @@
 
 This repo has a lightweight **ERP Center of Excellence** that keeps work fast / accurate /
 low-token. **Before any development task, consult the map — do NOT `grep`/`glob` the whole
-repo: they TIME OUT on this repo's size — **2,122 tracked files** (`git ls-files | wc -l`,
-measured 2026-08-14; this line said "~1,600"). Use the map's file:line +
+repo: they TIME OUT on this repo's size — **2,289 tracked files** (`git ls-files | wc -l`,
+measured 2026-09-22; this line said 2,122). Use the map's file:line +
 `Read offset/limit` to jump straight in:**
 
 1. **Find the code** → [`docs/CODEBASE-MAP.md`](docs/CODEBASE-MAP.md)
@@ -41,7 +44,8 @@ measured 2026-08-14; this line said "~1,600"). Use the map's file:line +
 
 5. **Which endpoint** → [`docs/API.md`](docs/API.md) — **generated** from
    `src/api/worker.ts` + `src/api/routes/*.ts` by `node scripts/gen-api-docs.mjs`
-   (139 mounts, **936** handlers, 1 unmounted route file, plus the exact public/auth surface).
+   (141 mounts, **978** handlers, plus the exact public/auth surface — re-measured 2026-09-23
+   by `--check`; this line said 139 / 936).
    Regenerate it instead of hand-editing; `--check` tells you if it is stale — **it WAS stale
    on `main` on 2026-08-14**, and the committed copy carried four duplicated mount rows with
    two different line sets for the same handlers. Run `--check` before trusting it.

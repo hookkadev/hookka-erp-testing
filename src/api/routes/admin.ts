@@ -36,7 +36,11 @@ import {
   type SalesOrderRow,
   type SalesOrderItemRow,
 } from "./sales-orders";
-import { deriveSpecialOrderSurchargeSen } from "../../lib/special-order-surcharge";
+import {
+  deriveSpecialOrderSurchargeSen,
+  repriceSavedSpecialsLine,
+  type CustomSpecialInput,
+} from "../../lib/special-order-surcharge";
 import { loadSpecialsConfig } from "../lib/specials-config";
 import { invalidateProductionListCaches } from "../lib/po-list-cache";
 import { emitAudit } from "../lib/audit";
@@ -2035,6 +2039,205 @@ app.post("/backfill-special-order-surcharge", async (c) => {
         ? "Only SOs with no invoice were re-priced. Invoiced SOs were skipped — they need the invoice re-priced + re-sent."
         : "All in-scope SOs re-priced. Their invoices were NOT touched — re-price + re-send those separately.",
   });
+});
+
+// ---------------------------------------------------------------------------
+// GET  /api/admin/backfill-config-only-specials            — DRY RUN (read-only)
+// POST /api/admin/backfill-config-only-specials {confirm:true} — THE WRITE
+//
+// BUG-2026-09-23-183: the SO / CO forms charged RM 0 for any special-order
+// option that exists only in Settings (sofa "Extend Down 5''(1A)" etc.) and
+// saved it as a slug ("EXTEND_DOWN_5_1A_"). The forward fix is in the forms;
+// this corrects the rows already saved, so nobody has to re-tick every order.
+//
+// Differs from /backfill-special-order-surcharge (BUG-2026-07-17-002) on
+// purpose: that one only touches lines charged exactly 0, reads only the
+// bedframe list, and can't read slugs — it misses this bug entirely.
+//
+// SAFETY
+//   • Delta = price of the config-only options, capped at owed − charged
+//     (repriceSavedSpecialsLine). Never decreases a line, never double-charges
+//     a line the old sofa edit page already priced right, never re-prices a
+//     static option whose price moved in Settings since.
+//   • ADDS the delta to unit / line total / SO subtotal + total — never
+//     recomputes from parts (that would erase total-height etc.).
+//   • Only documents nothing has been issued from: SOs with NO invoice, COs
+//     with NO consignment note. The rest are LISTED, never touched — raising
+//     an issued invoice moves the GL and is the owner's call.
+//   • Service orders + cancelled docs excluded. Org-scoped.
+//   • Idempotent: each UPDATE is guarded on the charged value it read, and a
+//     re-run finds delta 0.
+// ---------------------------------------------------------------------------
+async function planConfigOnlySpecials(c: Parameters<typeof requireSuperAdmin>[0]) {
+  const db = c.var.DB;
+  const orgId = getOrgId(c);
+  const cfg = {
+    bed: await loadSpecialsConfig(db),
+    sofa: await loadSpecialsConfig(db, "sofaSpecials"),
+  };
+
+  type Row = {
+    id: string; docId: string; docNo: string; itemCategory: string | null;
+    specialOrder: string | null; customSpecials: unknown;
+    specialOrderPriceSen: number | null; unitPriceSen: number | null;
+    lineTotalSen: number | null; quantity: number | null; docTotalSen: number | null;
+  };
+  const soRes = await db
+    .prepare(
+      `SELECT i.id, i.sales_order_id AS doc_id, s.company_so_id AS doc_no, i.item_category,
+              i.special_order, i.custom_specials, i.special_order_price_sen,
+              i.unit_price_sen, i.line_total_sen, i.quantity, s.total_sen AS doc_total_sen
+         FROM sales_order_items i JOIN sales_orders s ON s.id = i.sales_order_id
+        WHERE i.special_order IS NOT NULL AND i.special_order <> ''
+          AND (s.is_service_order IS NULL OR s.is_service_order = false)
+          AND UPPER(COALESCE(s.company_so_id, '')) NOT LIKE 'SV-%'
+          AND s.status <> 'CANCELLED'
+          AND (s.org_id = ? OR s.org_id IS NULL)`,
+    )
+    .bind(orgId)
+    .all<Row>();
+  const coRes = await db
+    .prepare(
+      `SELECT i.id, i.consignment_order_id AS doc_id, o.company_co_id AS doc_no, i.item_category,
+              i.special_order, NULL AS custom_specials, i.special_order_price_sen,
+              i.unit_price_sen, i.line_total_sen, i.quantity, o.total_sen AS doc_total_sen
+         FROM consignment_order_items i JOIN consignment_orders o ON o.id = i.consignment_order_id
+        WHERE i.special_order IS NOT NULL AND i.special_order <> ''
+          AND o.status <> 'CANCELLED'
+          AND (o.org_id = ? OR o.org_id IS NULL)`,
+    )
+    .bind(orgId)
+    .all<Row>();
+  const issuedSo = new Set(
+    ((await db
+      .prepare("SELECT DISTINCT sales_order_id FROM invoices WHERE sales_order_id IS NOT NULL")
+      .all<{ salesOrderId: string }>()).results ?? []).map((r) => r.salesOrderId),
+  );
+  const issuedCo = new Set(
+    ((await db
+      .prepare("SELECT DISTINCT consignment_order_id FROM consignment_notes WHERE consignment_order_id IS NOT NULL")
+      .all<{ consignmentOrderId: string }>()).results ?? []).map((r) => r.consignmentOrderId),
+  );
+
+  const plan = (kind: "SO" | "CO", rows: Row[], issued: Set<string>) =>
+    rows.flatMap((r) => {
+      let customs: CustomSpecialInput[] | null = null;
+      try {
+        const p = typeof r.customSpecials === "string" ? JSON.parse(r.customSpecials) : r.customSpecials;
+        if (Array.isArray(p)) customs = p;
+      } catch { /* malformed → no customs */ }
+      const charged = Number(r.specialOrderPriceSen) || 0;
+      const fix = repriceSavedSpecialsLine(
+        { specialOrder: r.specialOrder, customSpecials: customs, chargedSen: charged },
+        r.itemCategory === "SOFA" ? cfg.sofa : cfg.bed,
+      );
+      if (fix.deltaSen <= 0 && fix.text === (r.specialOrder ?? "")) return [];
+      const qty = Number(r.quantity) || 1;
+      return [{
+        kind, itemId: r.id, docId: r.docId, docNo: r.docNo ?? "",
+        issued: issued.has(r.docId), qty, chargedSen: charged,
+        deltaSen: fix.deltaSen, lineDeltaSen: fix.deltaSen * qty,
+        textBefore: r.specialOrder ?? "", textAfter: fix.text,
+        unitPriceSen: Number(r.unitPriceSen) || 0, lineTotalSen: Number(r.lineTotalSen) || 0,
+        docTotalSen: Number(r.docTotalSen) || 0,
+      }];
+    });
+  return [
+    ...plan("SO", soRes.results ?? [], issuedSo),
+    ...plan("CO", coRes.results ?? [], issuedCo),
+  ];
+}
+
+function summarizeConfigOnlyPlan(lines: Awaited<ReturnType<typeof planConfigOnlySpecials>>) {
+  const byDoc = new Map<string, { kind: string; docNo: string; issued: boolean; deltaSen: number; lines: number }>();
+  for (const l of lines) {
+    const g = byDoc.get(l.docId) ?? { kind: l.kind, docNo: l.docNo, issued: l.issued, deltaSen: 0, lines: 0 };
+    g.deltaSen += l.lineDeltaSen;
+    g.lines++;
+    byDoc.set(l.docId, g);
+  }
+  const docs = [...byDoc.values()].sort((a, b) => b.deltaSen - a.deltaSen);
+  const sum = (xs: typeof docs) => (xs.reduce((s, d) => s + d.deltaSen, 0) / 100).toFixed(2);
+  const fixable = docs.filter((d) => !d.issued);
+  const issued = docs.filter((d) => d.issued && d.deltaSen > 0);
+  return {
+    totals: {
+      docsToFix: fixable.length,
+      deltaRM: sum(fixable),
+      issuedDocsNotTouched: issued.length,
+      issuedDeltaRM: sum(issued),
+    },
+    fix: fixable,
+    issuedNeedOwnerDecision: issued,
+  };
+}
+
+app.get("/backfill-config-only-specials", async (c) => {
+  const su = requireSuperAdmin(c);
+  if (su) return su;
+  const lines = await planConfigOnlySpecials(c);
+  return c.json({
+    success: true,
+    dryRun: true,
+    note: "Read-only. POST the same path with { confirm: true } to apply the `fix` list. Issued docs (invoice / consignment note exists) are never touched.",
+    ...summarizeConfigOnlyPlan(lines),
+    lines,
+  });
+});
+
+app.post("/backfill-config-only-specials", async (c) => {
+  const su = requireSuperAdmin(c);
+  if (su) return su;
+  const body = await c.req.json().catch(() => ({}));
+  if ((body as { confirm?: unknown })?.confirm !== true) {
+    return c.json({ success: false, error: "Refusing to write without { confirm: true }." }, 400);
+  }
+  const db = c.var.DB;
+  const lines = (await planConfigOnlySpecials(c)).filter((l) => !l.issued);
+  if (lines.length === 0) {
+    return c.json({ success: true, linesUpdated: 0, note: "Nothing to do — already fixed, or nothing in scope." });
+  }
+
+  const itemStmts = lines.map((l) =>
+    db
+      .prepare(
+        `UPDATE ${l.kind === "SO" ? "sales_order_items" : "consignment_order_items"}
+            SET special_order = ?, special_order_price_sen = special_order_price_sen + ?,
+                unit_price_sen = unit_price_sen + ?, line_total_sen = line_total_sen + ?
+          WHERE id = ? AND special_order_price_sen = ?`,
+      )
+      .bind(l.textAfter, l.deltaSen, l.deltaSen, l.lineDeltaSen, l.itemId, l.chargedSen),
+  );
+  const docDelta = new Map<string, { kind: string; sen: number; totalWas: number }>();
+  for (const l of lines) {
+    if (l.lineDeltaSen <= 0) continue;
+    const g = docDelta.get(l.docId) ?? { kind: l.kind, sen: 0, totalWas: l.docTotalSen };
+    g.sen += l.lineDeltaSen;
+    docDelta.set(l.docId, g);
+  }
+  const docStmts = [...docDelta].map(([id, d]) =>
+    db
+      .prepare(
+        `UPDATE ${d.kind === "SO" ? "sales_orders" : "consignment_orders"}
+            SET subtotal_sen = subtotal_sen + ?, total_sen = total_sen + ?
+          WHERE id = ? AND total_sen = ?`,
+      )
+      // Guarded on the total we planned from: a double-clicked POST re-plans
+      // the same lines, finds the header already moved, and changes nothing.
+      .bind(d.sen, d.sen, id, d.totalWas),
+  );
+  // ONE batch = one transaction: a line never moves without its header total.
+  await db.batch([...itemStmts, ...docStmts] as never[]);
+
+  const summary = summarizeConfigOnlyPlan(lines);
+  await emitAudit(c, {
+    resource: "sales-orders",
+    resourceId: "backfill-config-only-specials",
+    action: "backfill-config-only-specials",
+    source: "admin",
+    after: { ...summary.totals, linesUpdated: lines.length, docs: summary.fix, bug: "BUG-2026-09-23-183" },
+  });
+  return c.json({ success: true, linesUpdated: lines.length, ...summary });
 });
 
 export default app;
