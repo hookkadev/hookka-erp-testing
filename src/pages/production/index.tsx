@@ -151,7 +151,6 @@ const OVERVIEW_DEFAULT_WIDTHS: Record<string, number> = {
   soId: 120, product: 220, customer: 110, customerPO: 120, specialOrder: 130, qty: 50, customerDD: 104, ourExpectedDD: 118,
   FAB_CUT: 108, FAB_SEW: 108, FOAM_CUTTING: 108, FOAM: 108, WOOD_CUT: 108, FRAMING: 108, WEBBING: 108, UPHOLSTERY: 108, PACKING: 108,
 };
-let overviewArmed = false;
 const OVERVIEW_COLW_STORAGE = "prod-overview-colwidths-v1";
 // Width (px) of the leading multi-select checkbox gutter prepended to the
 // Overview matrix grid. Kept OUT of OVERVIEW_COL_KEYS so it isn't sortable,
@@ -586,14 +585,7 @@ export default function ProductionPage({
   // shouldFetch needs to live up here because some downstream effects
   // depend on it. baseUrl / dueQueryFrag are deferred to AFTER
   // fltDueFrom/fltDueTo are declared (~line 791) to dodge a TDZ error.
-  // ponytail: module-level flag so a remount keeps "Load all" armed —
-  // overview.tsx swaps this page for the /m card list at <=1280px and back,
-  // and the operator should not have to click Load all again. Promote to
-  // sessionStorage only if it must survive a full reload.
-  const [shouldFetch, setShouldFetch] = useState<boolean>(mode === "dept" || overviewArmed);
-  useEffect(() => {
-    if (shouldFetch && mode !== "dept") overviewArmed = true;
-  }, [shouldFetch, mode]);
+  const [shouldFetch, setShouldFetch] = useState<boolean>(mode === "dept");
   // Date-seed gate for the orders fetch.
   //
   // Before F1 (2026-05-11): this returned false on cold dept-mount when

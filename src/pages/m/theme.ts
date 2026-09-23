@@ -18,12 +18,6 @@ import {
   DANGER,
   NEUTRAL,
 } from "@/lib/design-tokens";
-// The variables live in theme-vars.css. Import it HERE, not only in
-// MobileLayout, so any /m component reused outside the mobile shell (e.g.
-// /production at <=1280px mounts ProductionScreen inside the dashboard) still
-// gets its colours — without this, var(--m-card) resolved to nothing and the
-// cards rendered transparent on the desktop background (2026-09-22).
-import "./theme-vars.css";
 
 /**
  * Brand palette for the phone UI. CHANGELOG (owner 2026-06-29) requires
