@@ -4,6 +4,9 @@
 > **Last verified: 2026-09-22** — branch `fix/delivery-tab-switch-pagination` added below (open, its entry is the newest). Previously: branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
 > **Last verified: 2026-09-22** — branch `claude/nice-sanderson-27be32` (dashboard Service > Top issues redesign) added below (open, its entry is the newest). Previously: branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
 > **Last verified: 2026-09-22** — branch `feat/po-supplier-searchable-select` added below (open, pushed, no PR). NOTE: the 2026-09-22 Houzs entry below still carries committed merge-conflict markers (`<<<<<<< HEAD` … `>>>>>>> 85e58b40`) on `main`; left for its owner to resolve.
+> **Last verified: 2026-09-22** — branch `fix/scan-queue-client-driven` added below (open, its entry is the newest).
+> **Last verified: 2026-09-22** — branch `fix/datagrid-selection-loop` added below (open, its entry is the newest). Previously: branch `fix/delivery-tab-switch-pagination` (MERGED as #467). Previously: branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
+> **Last verified: 2026-09-22** — branch `feat/service-dashboard-root-cause-graph` added below (stacked on the staging sync PR).
 > **Last verified: 2026-09-22** — branch `fix/service-dashboard-other-catch-all` added below (open, pushed, no PR).
 > **Last verified: 2026-09-22** — branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
 > **Last verified: 2026-08-14** — branch `fix/on-time-delivery-and-decisions` added below (open, not merged, its entry is the newest; its bug ids were renumbered 130-133 → 140-143 because `feat/leave-entitlement` claimed 130-133 and merged to `main` first). Previously: branch `feat/leave-entitlement` (MERGED as #326). Previously: branch `feat/job-card-completed-at` added below (open, not merged). Previously: branch `fix/security-posture` added below (open, not merged). Previously: PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
@@ -17,6 +20,42 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+---
+
+## 2026-09-22 — 🔵 Scan PO / PI / GRN: second file "scanning" 5+ min (branch `fix/scan-queue-client-driven`)
+
+Owner: "under the SO the scan PO function … it takes more than 5 min scanning second PO
+what's the problem?" → BUG-2026-09-22-178, class **C25**. The OCR worker ran under
+`waitUntil`, which Cloudflare cancels 30 s after the response; rows then sat `processing`
+until the 5-min sweeper, were re-kicked the same way, and failed after 3 cycles.
+
+- [x] `scan-queue.ts`: `POST /batch/:batchId/work` processes ONE row in-request; all four
+  waitUntil kicks removed; sweepers only re-queue; per-batch `busy` cap of 6.
+- [x] `scan-queue-client.ts`: `createScanQueueDriver` (3 held-open requests, poke/stop).
+- [x] PO modal + PI/GRN supplier modal: driver created / poked on `queued` / stopped.
+- [x] `tests/scan-queue-client-driven.test.mjs` 4/4; `tsc` strict exit 0; eslint clean;
+  `API.md` regenerated; BUG-HISTORY + BUG-CLASSES C25 + CODEBASE-MAP.
+- [ ] Prod scan_queue read (blocked by the permission classifier here): UNMEASURED.
+- [ ] PR → `main`; live-verify a multi-file PO scan: ≤3 rows SCANNING at once, none > ~150 s.
+
+---
+
+## 2026-09-22 — 🔵 Delivery page FREEZE: Pending Delivery render loop (branch `fix/datagrid-selection-loop`) — the real root cause of the day's first report
+
+Owner: "when I click in pending delivery and after I try to navigate anywhere it is freeze and I
+can't interact anything". Traced to a closed loop between `DataGrid.onSelectionChange` (re-emits
+on every `sortedData` identity, which is `[...filteredData]` and depends on `columns`) and the
+page (`setSelectedReadyPOs(new Set(...))` + `pendingDeliveryColumns` memo listing
+`selectedReadyPOs` in its deps — the eslint warning that sat for months). BUG-2026-09-22-005,
+class **C24**.
+
+- [x] `data-grid.tsx`: emit only when the selection actually changed (same rows, same order,
+  same references) — the guard every caller routes through.
+- [x] `delivery/index.tsx`: `pendingDeliveryColumns` deps = `[updateExpectedDD]`.
+- [x] 16 other `onSelectionChange` pages checked — none rebuilds `columns` from selection.
+- [x] `tests/datagrid-selection-emit.test.mjs`; `tsc` exit 0.
+- [ ] PR → `main` + cherry-pick PR → `staging`. Live: UNMEASURED (no login).
 
 ---
 
@@ -77,6 +116,45 @@ day/month grid (empty days visible), **products** as a table with the top record
 **Not verified in a browser.** The dev server proxies `/api` to prod behind a login the agent cannot enter; the panel was server-rendered
 with 18 sample cases across monthly / ytd / range periods and the empty + `causeOnly` states (all markers present). **Look at it on
 staging before merging** — label collisions in the heatmap at 31 day columns on a narrow window are the thing to check.
+---
+
+## 2026-09-22 晚 — ✅ 所有单据清单双击弹明细（owner「其他的类似 payment voucher, receipt 这些都要双击点开」；#486 已上线已验）
+
+一个壳 `DocDetailModal`/`DetailField`；单击照旧（勾选/展开）。Payment Vouchers：meta + 梯子轨迹（谁 prepare/check/approve、何时、退回理由）+ 费用行或结算账单(+预付) + 附件块 + 行上全部动作（print / print + files / 梯子 / edit / settle / void / unvoid）；Receipts hub：meta + 与展开区共用的 `detailTable`；Fund Transfer：字段 + 过账说明 + print/void/unvoid；Other Party Bills 双击=开既有整张卡；Other Party Payments 双击=开既有弹窗；AP Invoices 双击：PI→采购页、AP bill→下方编辑器；勾选格不触发。守卫 tests/doc-detail-dblclick.test.mjs。**prod 验**：HPV-2609-043 双击弹出（Approved·paid、900-S002 2,800、附件 0、Print/Edit/Void）。
+
+---
+
+## 2026-09-22 晚 — ✅ owner 四问（AP Invoices 默认 ALL / 测试单是什么 / 打印带附件? / JV 看不了明细）→「做,全部」（#484 已上线已验）
+
+- ① AP Invoices 默认 ALL（select 里 All 排第一）。② 清单里 HPV-2609-044/045/046/047/049 = 我 prod 冒烟的 1 sen 作废凭证 → 已按 owner 令用 lifecycle delete 藏起（Audit Log 留底）；**顺手修**：未过账的作废草稿按 delete 回「Already cancelled」永远走不掉 → 未过账 delete 现写 document_lifecycle DELETED（unvoid 回 ACTIVE），守卫加进 tests/pv-approval.test.mjs；作废凭证不再显示草稿时的退回理由。③ 打印：print=只印凭证；**print + files**=凭证+全部附件合订（有附件才出现）；批量 Print/PDF 目前不带附件。④ **JV 明细**：双击行（或 ⋮ › View detail）弹窗——逐行科目/描述/借/贷 + 合计（不平衡标红）+ print/edit+post(草稿)/void/unvoid/duplicate；单击仍是勾选。守卫 tests/jv-detail-view.test.mjs。**prod 验**：JE-2609-0001 双击弹出 780-0010 DR 12,500 / 310-0010 CR 12,500；5 张测试单已从清单消失（94 张）。
+- owner 顺问「upload bill 支持读多页?upload 多个文件看多个 PV?」→ **量过代码**：扫描引擎整份 PDF 送模型，一张账单跨几页读成一张（引擎提示词明写）；Scan Bills 一次 ≤20 个文件 = 每文件一张 draft（现在还自动附档）。**缺口**：一个 PDF 里装几张账单 → 只取第一张成草稿，其余只提示 extraDocs（scan-finance.ts 单文件单单契约）。待 owner 裁要不要「一个 PDF 几张账单 → 几张草稿（附件同一份 PDF）」。
+
+---
+
+## 2026-09-22 晚 — ✅ finance@hookka.com 权限量测（owner「我要确定 finance@hookka.com 的 user 有什么权限？」；#482 探针已上线）
+
+FINANCE 是 0045 种进表的角色，`GET /api/auth/role-permissions/:role` 原本只答 code 角色 → 表角色只能登录进去才知道。#482：探针对非 code 角色跑**跟闸门同一条 join**（rbac.ts loadRolePermissions：roles.name = users.role），回 `source`（role_permissions / no-rows-fallback / join-failed-fallback），零行时照闸门口径报 fallback 而不是空集。只读、users:read 闸。守卫 tests/role-permissions-table-read.test.mjs（两边 join 文本同锚）。
+
+**prod 量测（2026-09-22）**：user-c0594ab0 finance@hookka.com「Finance」部门 Finance，role FINANCE，active，最后登录 2026-08-12。FINANCE 53 个 grant（source=role_permissions）：全权 accounting / invoices(+post,void) / payments / credit-notes / debit-notes / e-invoices / cash-flow / cost-ledger / three-way-match / mail-center / settings；只读 customers / suppliers / sales-orders / purchase-orders / purchase-returns / quotations / sales-pipeline。**没有** accounting:check / accounting:approve（PV 梯子的 Check/Approve 只有 SUPER_ADMIN 能按）、没有 purchase-invoices:*（PI 由采购开；作废走 requireFinance 按角色名放行）、没有 users:*（看不到 Users 页；kv-config PUT 要 users:update → 改不了打印页脚）、没有 dashboard（落地页=/accounting）。owner 待裁：要不要给 finance@ 加 accounting:check（能 Check 不能 Approve）。
+
+---
+
+## 2026-09-22 晚 — ✅ Cash Position 打勾行收起（owner「这些 tick 了还需要出现吗？」→「做」；#477 已上线已验）
+
+打勾（=网银已见）的行离开 pending 名单，每个户口卡底一行「✓ Ticked as gone through: N · out RM x · in RM y — show」，展开可看/取消勾；同一行渲染器、同一 checkbox、同一 handler；数字（Bank balance est. / Available）从不读 DOM，分毫不变。全勾完显示「Nothing pending — everything booked has gone through the bank.」。守卫 tests/cashpos-ticked-fold.test.mjs。**prod 验**：HLBB 卡只剩 10 条未勾 + 「✓ 44 · out 195,316.54 · in 182,270.60」，Bank balance est. 24,576.65 与 owner 截图一致。顺带：docs-freshness 配对规则要求源码改动配文档改动——第一次红了，补 CODEBASE-MAP 的 Daily Cash Position 条目后绿。
+
+另：owner 裁「Dashboard 三个留 FORECASTING 那个，其他两个退下」→ 我解释了三个是什么 + 两点前置（/dashboard 是登录落地页要一起改；Experimental 是别的会话在做）→ owner「不需要做任何东西先」。**未动。**
+
+---
+
+## 2026-09-22 晚 — ✅ 侧栏瘦身 + Receipts 三门合一 + PV 附件/打印合订（owner「全部做」；#468 / #471 / #472 全上线已验）
+
+owner 两问「side bar 很多功能重复是吗？」「能像 2990 那样 export pv with attachment 吗？」→ 只检查报告（真重复：付钱三门、收钱三门、账单清单两处、账龄两处、四个 dashboard；放错组：Stock/Stock Take/Labour 在 Maintenance）→「全部做，包括 receipts 三门合一和 PV 附件」。
+
+- **#468 PV 附件 + 扫描自动附 + 打印合订**：files.ts 上传/删除主体抽成 `storeUploadedFile` / `removeStoredFile`（MIME 白名单+魔数嗅探+Supabase Storage+file_assets+audit 只此一条路，POST/DELETE /api/files 成薄壳）；accounting.ts `GET/POST /payment-vouchers/:id/attachments`、`DELETE …/:fileId`（作废凭证不收新档；Check 起证据锁不给删；删必须属于该凭证）；清单带 attachmentCount。UI：行 📎 计数、展开区 Attachments 块（open/add/remove）、`print + files` 合订（图片原样、PDF 经 pdfjs 逐页转图 → VoucherSpec.appendix 每页一张 A4 带标题；任一附件渲染不了整份拒印）；Scan Bills 扫完自动附到它建的 draft（上传失败留言不丢凭证）；Scan Receipt 存档时附上；printVouchers 等图片解码完才开打印框。**prod 实测**：draft pv-d926fc4e 上传 116B PNG → 列出/计数 1/stream 原样 116B → Prepare→Check 后删被拒「Evidence is locked…」→ reject 回 draft 删成功 → void 后上传被拒「A cancelled voucher takes no attachments」。守卫 tests/pv-attachments.test.mjs。
+- **#471 Receipts 三门合一**：accounting › Receipts = `ReceiptsHubTab`：New Customer Receipt / New Other Debtor Receipt / New Official Receipt 三按钮 + 一张合并清单（CUST/OD/OR 标签、芯片 All/Customer/Other debtor/Official/Cancelled、搜索/日期、批量打印导出、展开看分配/行、print/edit/void 各走各单据端点）。**表单零复制**：`CustomerReceiptForm` 从 /invoices/payments 页抽出并导出（该页也渲染同一组件），`OtherPartyPaymentForm` 从 OtherPartyPaymentsManager 抽出（两个 manager + hub 共用），`OfficialReceiptForm` 从旧 ReceiptsTab 抽出；客户收据 voucher/预付 helper 迁到 src/lib/customer-receipt.ts（react-refresh 不许组件模块导出普通函数；两个旧测试改指向）。**prod 验**：42 receipts（CUSTOMER 40 / OFFICIAL 2 / CANCELLED 5）三门表单都能开。守卫 tests/receipts-hub.test.mjs。
+- **#472 侧栏瘦身 40→32**：Reports(Overview/P&L/Cash Flow/BS/TB/GL/Stock Summary)·Daily(Payment Vouchers/Receipts/Fund Transfer/Cash Position)·Monthly(Journal Entries/Cash Book/Stock Take/Labour/Fixed Assets/Self-check/Corrections)·Debtors(Debtor Aging/Other Debtor Bills/Credit Notes/Debit Notes)·Creditors(Creditor Aging/AP Invoices/Supplier Discount)·e-Invoice·Setup(COA/Stock Mapping/Opening Stock/Opening Balance/Audit Log/Settings)。**只从菜单退下、URL 全保留**：Customer Payment、Supplier Payment（PV 页顶链接，管外币 PI/预付 knock off/TF 还款）、Other Creditor Payments/Other Debtor Receipts（折进 Bills 页 FoldSection）、Other Debtor/Creditor 名单（折进 Bills 页与 AP Invoices）、Other Creditor Bills（AP Invoices「New AP bill」就地开编辑器）、Monthly P&L/Cost Structure（`PlHubTab` 一入口三 view，旧深链落各自 view）。三个 Dashboard 没动（owner 未裁）。守卫 tests/finance-sidebar.test.mjs。**prod 验**：侧栏六组齐、P&L 三 view 齐。
+- 同日早前：#465 AP Payment（见下段）。全套 4733 绿。
 
 ---
 
@@ -104,6 +182,20 @@ staging before merging** — label collisions in the heatmap at 31 day columns o
 **prod 已验（#465 merge cba0fcdb，deploy ✓，1 sen 两条路各走完整梯子后立即作废）**：①other creditor 路（Houzs Century OCB-2606-002）：draft 带勾单、open-bills 立刻显示 reserved 1 sen（available 119,999）、0 分录 0 结算行；prepare→check 铸 HPV-2609-046 仍 0 分录、bill 未动；approve → Other Creditor Payments 出现 HPV-2609-046（ACTIVE，1 sen，310-0010）、bill paid 1/outstanding 119,999、GL DR 405-0000 1 / CR 310-0010 1（sourceType other_party_payment）；从 PV 页 void → 结算单 lifecycle VOID、bill paid 归 0、PV 读 VOID。②supplier 路（OCEAN SKY PI-2608-091）：check 铸 HPV-2609-047 → approve → Supplier Payment 页出现同号（ACTIVE，1 行）、PI paid 1 / PARTIAL_PAID、GL DR 400-0000 1 / CR 310-0010 1；void → PI paid 0 / CONFIRMED、supplier payment VOID、PV VOID。UI：深链 ?pay=AP:opb-ced66add-2:op-1bcbd71b 直开 New AP Payment、债主已选、OCB-2606-002 勾满 1,200.00；芯片 ALL/DRAFT/PREPARED/CHECKED/APPROVED 91/ADVANCE OPEN/CANCELLED 7；两张测试凭证带 AP 标签灰显。
 
 ---
+
+## 2026-09-22 — 🔵 Service dashboard: "Issues by category" + new "Root cause" graph (branch `feat/service-dashboard-root-cause-graph-v2`, rebuilt off `main` — the original was stacked on the now-defunct `chore/sync-staging-from-main`)
+
+Ask (owner, screenshots): "first one should be called issues by category, because root cause is inside
+the service case where it labels Root Cause & Prevention — implement a new graph for the root cause".
+The first panel tallies the same field as the list page's Category column, so it is now titled
+**Issues by category** (and "Top 3 categories"). New **Root cause** panel = category + the detail the
+operator recorded under it on the case (department / supplier / 3PL / driver / salesperson / SOP /
+sub-reason; first named field wins, 60 chars). Feed slice adds `rootCauses[{category,detail}]` and
+reads `root_cause_details`; `byRootCause` / `rootCauseDetail` / `parseRootCauses` in
+`service-issue-stats.ts` with tests (17/17). Desktop `ServiceIssuesPanel` + `/m` `ServiceTab`.
+`tsc -p tsconfig.app.json` clean. Not browser-verified. Prod UNMEASURED. Builds on the "Other no
+longer headlines Top issues" fix below (same branch history, both cherry-picked onto `main` cleanly).
+
 ## 2026-09-22 — 🔵 Service dashboard: "Other" no longer headlines Top issues (branch `fix/service-dashboard-other-catch-all`, pushed, no PR yet)
 
 Ask (owner): "the dashboard for service cases, the top issue there is category of other 2 please fix".
@@ -116,7 +208,8 @@ Top 3 on desktop (`ServiceIssuesPanel`) and `/m` (`ServiceTab`). Still counted, 
 Test added in `tests/service-issue-stats.test.mjs` (14/14), `tsc -p tsconfig.app.json` clean. Bug fix →
 target `main`. Docs: `CODEBASE-MAP.md` ServiceView row restamped.
 
-## 2026-09-22 — 🔵 PO create: searchable supplier picker (branch `feat/po-supplier-searchable-select`, pushed, no PR yet)
+---
+
 ## 2026-09-22 — 🔵 PO list: search finds a PO by the raw material bought on it (branch `feat/po-search-line-items`)
 
 Staff ask (screenshots, 2026-09-22): "search a raw material item and see which Purchase

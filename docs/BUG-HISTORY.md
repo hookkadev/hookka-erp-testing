@@ -1,5 +1,7 @@
 # Bug History
 
+> **Last verified: 2026-09-23** — newest entry BUG-2026-09-23-182 (branch `laphii/fix/dashboard-exp-production-revenue`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+
 Living log of bugs we've identified, diagnosed, and fixed in Hookka ERP.
 
 Each entry: ID, status, what happened (user-visible symptom), root cause, fix
@@ -31,6 +33,155 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-09-23-182 — Experimental dashboard Operations › Revenue & Cost showed a different Production revenue from the main Dashboard (~RM 6k on 22 Sep) `dashboard` 🟡
+
+🟡 **Fix in progress** · owner-reported: main Dashboard revenue chart tooltip for 09-22 shows
+Production RM 14,134; the experimental dashboard's Operations › Revenue & Cost shows ~RM 6k
+different for the same day.
+
+**Root cause.** Two definitions of "production revenue". The main Dashboard
+(`dashboard-overview.ts` prodRevRes / prodWeekRes) and the Employee page's
+`/production-revenue` book a PO on the day its **last UPHOLSTERY job card** completes, priced
+SO line (by `line_no`) → CO line → product list price × qty, SOFA/BEDFRAME/ACCESSORY only.
+The experimental feed (`dashboard-daily-slice.ts`) booked it on the **PO's own
+`completed_date` with status COMPLETED** (after packing — a later day, and only once the whole
+PO closes), priced via `loadPoValueMap` (no CO / product fallback, every category). Which of
+the three differences made the RM 6k on 22 Sep is **UNMEASURED** — the prod read was not run
+from this session.
+
+**Fix.** `dashboard-prototype.ts` now runs the main Dashboard's per-PO UPHOLSTERY SQL,
+bucketed by `to_char(unit_completed_at::date,'YYYY-MM-DD')` exactly as `bucketExpr` does, and
+`buildDailySlice` passes those per-day rows through. UI copy on desktop + mobile now states
+the upholstery definition. The PO-based "Orders completed" KPI became "Orders upholstered".
+
+**Regression test.** `tests/dashboard-daily-slice.test.mjs` → "revenue: per-day SQL rows
+normalised + sorted …" (also asserts a COMPLETED PO no longer produces revenue on its own).
+**Still to do:** verify live — 22 Sep on both screens must read the same figure.
+
+## BUG-2026-09-22-179 — PO create / PO detail: typing "18" into Price (RM) produced "1.008" — the field reformatted to "1.00" after the first keystroke `procurement` `ui-frontend` `money-input` 🟢
+
+🟢 **Fixed** · owner-reported on the Purchase Order create page: type "1", the field
+instantly shows "1.00", the next "8" lands after the zeros → "1.008".
+
+**Root cause.** `src/pages/procurement/create.tsx` and `src/pages/procurement/detail.tsx`
+each rendered the unit price as a raw controlled `<Input type="number">` whose `value` was
+`formatUnitPriceInput(item.unitPriceSen)` and whose `onChange` wrote sen back to state on
+every keystroke. Every keypress therefore round-tripped through parent state and came back
+formatted to two decimals, and the caret ended up after the padding. The PO list dialog
+(`index.tsx`) never had the bug because it already used `MoneyInput`. Same reformat family as
+BUG-2026-08-31-171 (JV cells), BUG-2026-08-13-095 and the 2026-06-12 payment dialog — a class
+that keeps coming back one site at a time because the house field exists but pages carry their
+own raw input.
+
+**Fix.** Both pages now render `MoneyInput` (raw draft while focused, format on blur/Enter,
+seed the raw value on focus). The parent still receives sen through `roundUnitPriceSen`, so the
+sub-cent rate rule (RM 0.055) is unchanged. Their own `parseMoneyInput` / `formatUnitPriceInput`
+imports are gone — MoneyInput owns both. `scan-supplier-modal.tsx` still carries a raw price
+input but feeds it `String(v)`, not a formatted string, so it does not exhibit this bug; left
+as is.
+
+**Regression test.** `tests/unit-price-four-decimals.test.mjs` → "no PO form binds a
+FORMATTED unit price to a raw <Input> value (BUG-2026-09-22-179)"; the two pages also moved
+from the "own step" list to the "shared MoneyInput" list in the same file, and
+`tests/money-input-parsing.test.mjs` now accepts a MoneyInput import as being on the shared
+parser.
+
+---
+
+## BUG-2026-09-22-178 — Scan Customer PO: the second file "scanned" for 5+ minutes, then the next, then failed — the OCR worker ran under `waitUntil`, which Cloudflare cancels 30 s after the response `scan-ocr` `scan-queue` `platform` 🟢
+
+**Symptom (owner 2026-09-22, screenshot):** Scan Customer PO with a 9-file batch. The first
+file came back; the second sat at SCANNING for more than five minutes with the rest QUEUED.
+Same on the supplier PI/GRN scanner (same queue).
+
+**Root cause.** `POST /api/scan-queue/upload` returned at once and kicked `processBatch()`
+under `c.executionCtx.waitUntil` — six workers claiming rows and calling Sonnet. The file
+header and the mount comment in `worker.ts` both said waitUntil "keeps the worker alive past
+the response until the promise settles". It does not: Cloudflare's documented limit is **30 s
+after the response is sent, shared across all waitUntil calls of the request, after which the
+promises are cancelled** (Workers Logs prints "waitUntil() tasks did not complete within the
+allowed time after invocation end and have been cancelled"). A Sonnet extraction with the
+catalog prompt takes longer than that for most pages. So: rows claimed → `processing` →
+killed mid-fetch at 30 s → only a page that finished inside the window landed (the first PO)
+→ the rest sat `processing` because workers only claim `queued` → `sweepStuckBatch` (per
+poll) re-queued them only once `started_at` was older than **STUCK_MS = 5 min** → the re-kick
+was another waitUntil from the poll request, cut at 30 s again → each cycle bumped `attempts`
+→ after three cycles (~15 min) the row was `failed` with "worker died before completing
+OCR", and Anthropic billed every cancelled call. BUG-2026-06-30-003 added the timeout, the
+3-strike retry and the sweeper and left its verify line at "live-verify pending"; those all
+worked exactly as designed, which is why the symptom was a clean 5-minute stall and not a hang.
+
+**Fix (branch `fix/scan-queue-client-driven`).** The **browser drives the rows**. New
+`POST /api/scan-queue/batch/:batchId/work` (`scan-queue.ts`) claims ONE queued row, runs the
+existing extract / auto-split via `processOneRow` (the old loop body, now returning
+`processed | skipped | drained | error`), writes the result and returns — the request stays
+open as long as the Sonnet call does, and an HTTP request the client holds has no duration
+limit. `createScanQueueDriver` (`src/lib/scan-queue-client.ts`) keeps up to 3 of those open;
+each worker loops until the server says `drained`, backs off on `busy`, exits on any error.
+The three poll effects (PO modal, PI + GRN in the supplier modal) create the driver, `poke()`
+it whenever a poll shows a `queued` row (a Retry, a sweeper re-queue) and `stop()` it on
+cleanup. **Every waitUntil kick is gone** — upload, retry, `sweepStuckBatch`, `sweepStuckScans`
+— because a claim that gets cancelled blocks its row for STUCK_MS; the sweepers now only
+re-queue. Server-side cap: `/work` answers `busy` once 6 rows of the batch are `processing`,
+so a second tab or a script cannot push past the old concurrency. `/work` is org-scoped and
+behind the same `purchase-orders:create` gate; it creates no work, only drains rows the
+upload already created. Trade-off, stated: processing pauses while the modal is closed (it
+stalled anyway); the sweeper + resume-on-open pick it up.
+
+**Prod: UNMEASURED.** The read-only `scan_queue` query was blocked by the session's
+permission classifier. Expected signature when someone runs it: rows with `attempts` 2-3,
+`started_at`→`completed_at` gaps of exactly 5-6 min, errors "worker died before completing
+OCR". Class **C25**.
+
+**Verified:** `tests/scan-queue-client-driven.test.mjs` (4/4: no `waitUntil(` in
+scan-queue.ts, both modals wire + stop the driver, driver loop drained/busy/error/stop);
+`npx tsc -p tsconfig.app.json --noEmit` exit 0; eslint clean on the five touched files;
+`docs/API.md` regenerated. Live-verify on prod after deploy: a 9-file PO batch must show up
+to 3 rows SCANNING at once and none older than ~150 s.
+
+---
+
+## BUG-2026-09-22-005 — Pending Delivery tab spun in a render loop; the whole page froze and no navigation completed `ui-frontend` `perf` `delivery` `data-grid` 🟢
+
+🟢 **Fixed** · owner-reported three times in one day, in escalating words: "click to other
+tab it stuck" → "still no fix" → "when I click Pending Delivery and then navigate anywhere it
+freezes and I can't interact with anything". **This is the real root cause of the first
+report**; #467's two fixes (double navigation, scroll state) were real but secondary.
+
+**Root cause — a closed loop between the page and the shared grid.**
+1. `DataGrid`'s selection effect (`data-grid.tsx`, `[selectedKeys, sortedData]`) calls
+   `onSelectionChange(rows)` whenever `sortedData` changes identity — and `sortedData` is
+   `[...filteredData]`, a FRESH array on every recompute, whose memo depends on `columns`.
+2. The delivery page stores that emission as `setSelectedReadyPOs(new Set(rows…))` — a fresh
+   object every time, even when empty.
+3. `pendingDeliveryColumns` listed `selectedReadyPOs` in its `useMemo` deps although no column
+   reads it (eslint had flagged the dep as unnecessary for months).
+So: emit → new Set → new columns → new `filteredData` → new `sortedData` → effect → emit → …
+Every cycle re-rendered the 7k-line page. React Router 7 schedules every navigation as a
+`startTransition`, and a transition is interrupted by each urgent update — the loop starved
+every tab switch and every route change made from that tab. Nothing threw: React only warns
+about passive-effect loops in dev, and prod spun silently.
+
+**Fix — both halves, at the shared seam first (the ponytail rule: one guard where all
+callers route through).** `DataGrid` now emits only when the selection actually changed:
+same length, same row references, same order ⇒ no call. A data refresh produces new row
+objects, so parents that read fields off the emitted rows still get fresh ones (the
+2026-07-03 invoices stale-selection rule is preserved: rows hidden by a filter shrink the
+emission). And the page's `pendingDeliveryColumns` no longer depends on `selectedReadyPOs`.
+The 16 other `onSelectionChange` callers were checked: their selection-dependent memos derive
+values, none rebuilds `columns`, so the delivery page was the only closed loop — but the grid
+guard now makes the class impossible for the next one.
+
+**Regression test.** `tests/datagrid-selection-emit.test.mjs` — pins the identity guard in
+the grid and the dep list on the page (no DOM runner in this repo, so source guards).
+`tsc -p tsconfig.app.json --noEmit`: exit 0. Class registered: BUG-CLASSES **C24**.
+
+**Not verified live.** No login this session. Expected on prod after deploy: open Pending
+Delivery, then click Planning / Pending Dispatch / the sidebar — each responds at once; the
+CPU graph in DevTools › Performance is flat while idling on Pending Delivery (it was pegged).
 
 ---
 

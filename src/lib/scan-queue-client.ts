@@ -140,3 +140,97 @@ export async function uploadSourceDoc(
     return null;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Scan-queue DRIVER (2026-09-22, BUG-2026-09-22-178).
+//
+// The browser drives the OCR. Each POST /api/scan-queue/batch/:id/work claims
+// ONE queued row server-side, runs the extract and returns — the request stays
+// open for as long as the Sonnet call takes. It used to be a waitUntil() task
+// kicked after the upload response, but Cloudflare cancels waitUntil 30 s
+// after the response, so every page slower than that was killed mid-call and
+// sat 'processing' until the 5-minute sweeper. See scan-queue.ts header.
+//
+// `poke()` tops the pool up to SCAN_WORK_CONCURRENCY workers; each worker
+// loops "process one row" until the server says the batch is drained, then
+// exits. The modal's poll re-pokes whenever it sees a 'queued' row (a Retry,
+// or a sweeper re-queue), so a drained pool wakes up again. `stop()` aborts
+// every in-flight request — a claimed row whose request is aborted is
+// re-queued by the sweeper after STUCK_MS.
+//
+// On any HTTP / network error the worker EXITS rather than retrying, so a
+// broken server is asked again only when the next poll pokes. `busy` (the
+// server's per-batch concurrency cap is full — another tab is driving)
+// backs off for `backoffMs` and asks again.
+// ---------------------------------------------------------------------------
+export const SCAN_WORK_CONCURRENCY = 3;
+
+export type ScanQueueWorkResult = {
+  processed: string | null;
+  drained: boolean;
+  busy: boolean;
+};
+
+export function createScanQueueDriver(
+  batchId: string,
+  opts: {
+    concurrency?: number;
+    backoffMs?: number;
+    /** Called after every processed row so the modal can poll at once. */
+    onProcessed?: (rowId: string) => void;
+  } = {},
+): { poke: () => void; stop: () => void; active: () => number } {
+  const concurrency = opts.concurrency ?? SCAN_WORK_CONCURRENCY;
+  const backoffMs = opts.backoffMs ?? 5000;
+  const controller = new AbortController();
+  let stopped = false;
+  let active = 0;
+
+  const workOnce = async (): Promise<ScanQueueWorkResult | null> => {
+    let res: Response;
+    try {
+      res = await fetch(
+        `/api/scan-queue/batch/${encodeURIComponent(batchId)}/work`,
+        { method: "POST", credentials: "include", signal: controller.signal },
+      );
+    } catch {
+      return null;
+    }
+    if (!res.ok) return null;
+    const json = (await res.json().catch(() => null)) as {
+      success?: boolean;
+      data?: ScanQueueWorkResult;
+    } | null;
+    return json?.success && json.data ? json.data : null;
+  };
+
+  const worker = async () => {
+    active += 1;
+    try {
+      while (!stopped) {
+        const r = await workOnce();
+        if (stopped || !r) return;
+        if (r.processed) opts.onProcessed?.(r.processed);
+        if (r.drained) return;
+        if (r.busy) {
+          // eslint-disable-next-line no-restricted-syntax -- non-React utility; plain backoff between /work calls
+          await new Promise((resolve) => setTimeout(resolve, backoffMs));
+        }
+      }
+    } finally {
+      active -= 1;
+    }
+  };
+
+  return {
+    poke: () => {
+      if (stopped) return;
+      while (active < concurrency) void worker();
+    },
+    stop: () => {
+      stopped = true;
+      controller.abort();
+    },
+    active: () => active,
+  };
+}

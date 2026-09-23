@@ -90,6 +90,9 @@ import {
 // through the SAME builders the Supplier Payment page uses (owner 2026-09-22,
 // Houzs adoption: 「ap payment 和 payment voucher 一起」).
 import { buildSupplierPaymentCreate, buildSupplierPaymentLifecycle } from "./supplier-payments";
+// PV attachments ride the generic file store (Supabase Storage + file_assets)
+// through its ONE upload/delete path, behind the voucher's own rules.
+import { storeUploadedFile, removeStoredFile } from "./files";
 
 const app = new Hono<Env>();
 
@@ -9640,6 +9643,91 @@ app.get("/payment-vouchers/open-bills", async (c) => {
   return c.json({ success: true, data: { partyKind, partyId, ...open } });
 });
 
+// ---------------------------------------------------------------------------
+// PV attachments (owner 2026-09-22, Houzs: 「附件：Cancelled 的不收；Checked 之后
+// 不能删（证据锁）」). Files live in the generic store under
+// resourceType 'payment_voucher' / resourceId = voucher id; these routes only
+// add the voucher's rules — a cancelled voucher takes no new evidence, and once
+// CHECKED the evidence is locked (nothing deleted). Scan Bills / Scan Receipt
+// attach the scanned file here automatically. Print bundle = voucher + every
+// attachment, composed client-side from this list.
+// ---------------------------------------------------------------------------
+const PV_ATTACH_RESOURCE = "payment_voucher";
+type PvAttachmentRow = {
+  id: string; filename: string; contentType: string; sizeBytes: number; uploadedAt: string; uploadedBy: string | null;
+};
+async function loadPvAttachments(db: Env["Variables"]["DB"], orgId: string, voucherId: string): Promise<PvAttachmentRow[]> {
+  const res = await db.prepare(
+    "SELECT id, filename, contentType, sizeBytes, uploadedAt, uploadedBy FROM file_assets WHERE orgId = ? AND resourceType = ? AND resourceId = ? ORDER BY uploadedAt ASC",
+  ).bind(orgId, PV_ATTACH_RESOURCE, voucherId).all<Record<string, unknown>>().catch(() => ({ results: [] as Record<string, unknown>[] }));
+  return (res.results ?? []).map((r) => ({
+    id: String(r.id), filename: String(r.filename ?? ""), contentType: String(r.contentType ?? r.content_type ?? ""),
+    sizeBytes: Math.round(Number(r.sizeBytes ?? r.size_bytes) || 0), uploadedAt: String(r.uploadedAt ?? r.uploaded_at ?? ""),
+    uploadedBy: (r.uploadedBy ?? r.uploaded_by ?? null) as string | null,
+  }));
+}
+
+app.get("/payment-vouchers/:id/attachments", async (c) => {
+  const denied = await requirePermission(c, "accounting", "read");
+  if (denied) return denied;
+  const id = c.req.param("id");
+  const pv = await c.var.DB.prepare("SELECT id, pvNo, status, approval_state FROM payment_vouchers WHERE id = ?").bind(id)
+    .first<{ id: string; pvNo: string; status: string; approval_state?: string | null; approvalState?: string | null }>();
+  if (!pv) return c.json({ success: false, error: "Voucher not found" }, 404);
+  const state = String((pv.approvalState ?? pv.approval_state) ?? "APPROVED");
+  const rows = await loadPvAttachments(c.var.DB, getOrgId(c), id);
+  return c.json({
+    success: true,
+    data: {
+      rows,
+      // What the client may do — the server re-checks on write.
+      canAdd: pv.status !== "VOID",
+      canDelete: pv.status !== "VOID" && (state === "DRAFT" || state === "PREPARED"),
+    },
+  });
+});
+
+app.post("/payment-vouchers/:id/attachments", async (c) => {
+  const denied = await requirePermission(c, "accounting", "update");
+  if (denied) return denied;
+  const id = c.req.param("id");
+  const pv = await c.var.DB.prepare("SELECT id, pvNo, status FROM payment_vouchers WHERE id = ?").bind(id)
+    .first<{ id: string; pvNo: string; status: string }>();
+  if (!pv) return c.json({ success: false, error: "Voucher not found" }, 404);
+  if (pv.status === "VOID") return c.json({ success: false, error: "A cancelled voucher takes no attachments" }, 400);
+  let form: FormData;
+  try { form = await c.req.formData(); } catch { return c.json({ success: false, error: "invalid multipart body" }, 400); }
+  const file = form.get("file");
+  if (!(file instanceof File)) return c.json({ success: false, error: "file field required" }, 400);
+  const stored = await storeUploadedFile(c, { file, resourceType: PV_ATTACH_RESOURCE, resourceId: id });
+  if (!stored.ok) return c.json({ success: false, error: stored.error }, stored.status);
+  return c.json({ success: true, data: stored.data }, 201);
+});
+
+app.delete("/payment-vouchers/:id/attachments/:fileId", async (c) => {
+  const denied = await requirePermission(c, "accounting", "update");
+  if (denied) return denied;
+  const id = c.req.param("id");
+  const fileId = c.req.param("fileId");
+  await ensurePvApprovalCols(c.var.DB);
+  const pv = await c.var.DB.prepare("SELECT id, pvNo, status, approval_state FROM payment_vouchers WHERE id = ?").bind(id)
+    .first<{ id: string; pvNo: string; status: string; approval_state?: string | null; approvalState?: string | null }>();
+  if (!pv) return c.json({ success: false, error: "Voucher not found" }, 404);
+  const state = String((pv.approvalState ?? pv.approval_state) ?? "APPROVED");
+  if (pv.status === "VOID") return c.json({ success: false, error: "A cancelled voucher's attachments are kept as evidence" }, 400);
+  if (state !== "DRAFT" && state !== "PREPARED") {
+    return c.json({ success: false, error: `Evidence is locked once a voucher is checked (this one is ${state}) — Reject it back to draft to change attachments` }, 400);
+  }
+  // The file must belong to THIS voucher — never delete by id alone.
+  const own = await c.var.DB.prepare(
+    "SELECT id FROM file_assets WHERE id = ? AND orgId = ? AND resourceType = ? AND resourceId = ?",
+  ).bind(fileId, getOrgId(c), PV_ATTACH_RESOURCE, id).first<{ id: string }>();
+  if (!own) return c.json({ success: false, error: "Attachment not found on this voucher" }, 404);
+  const removed = await removeStoredFile(c, fileId);
+  if (!removed.ok) return c.json({ success: false, error: removed.error }, removed.status);
+  return c.json({ success: true });
+});
+
 app.get("/payment-vouchers", async (c) => {
   const denied = await requirePermission(c, "accounting", "read");
   if (denied) return denied;
@@ -9709,6 +9797,13 @@ app.get("/payment-vouchers", async (c) => {
       ).bind(orgId, ...apAdvanceNos).all<Record<string, unknown>>().catch(() => ({ results: [] as Record<string, unknown>[] }));
       for (const r of advRes.results ?? []) advanceOpenByNo.set(String(r.paymentNo ?? r.payment_no), Math.round(Number(r.advSen ?? r.adv_sen) || 0));
     }
+    // Attachment count per voucher (paperclip on the row; the list itself
+    // loads on expand).
+    const attachCountById = new Map<string, number>();
+    const attRes = await c.var.DB.prepare(
+      "SELECT resourceId, COUNT(*) AS n_files FROM file_assets WHERE orgId = ? AND resourceType = ? GROUP BY resourceId",
+    ).bind(orgId, PV_ATTACH_RESOURCE).all<Record<string, unknown>>().catch(() => ({ results: [] as Record<string, unknown>[] }));
+    for (const r of attRes.results ?? []) attachCountById.set(String(r.resourceId ?? r.resource_id ?? ""), Math.round(Number(r.nFiles ?? r.n_files) || 0));
     // Resolve the ladder actors to display names so the printed voucher can
     // carry "Prepared by / Checked by / Approved by" with real names.
     const actorIds = new Set<string>();
@@ -9745,6 +9840,7 @@ app.get("/payment-vouchers", async (c) => {
         advanceSen: Math.round(Number(r.advanceSen ?? r.advance_sen) || 0),
         advanceOpenSen: isAp && !apVoided ? (advanceOpenByNo.get(pvNo) ?? 0) : 0,
         allocs: allocsByVoucher.get(id) ?? [],
+        attachmentCount: attachCountById.get(id) ?? 0,
         lines: lines.filter((l) => l.voucherId === id),
         preparedByName: nm(r, "preparedBy", "prepared_by"),
         checkedByName: nm(r, "checkedBy", "checked_by"),
@@ -10217,10 +10313,31 @@ app.post("/payment-vouchers/:id/lifecycle", async (c) => {
   const pvApState = String((pv.approvalState ?? pv.approval_state) ?? "APPROVED");
   if (pvApState !== "APPROVED") {
     const now = new Date().toISOString();
+    const actor = (c as unknown as { get: (k: string) => string | undefined }).get("userId") ?? null;
+    // `delete` on an unposted voucher = hide it from the list (the same
+    // document_lifecycle DELETED row the list already filters on for posted
+    // ones); `unvoid` restores it as a draft and clears that row. Found
+    // 2026-09-22 clearing the smoke-test vouchers: a voided draft answered
+    // "Already cancelled" to delete and could never leave the list.
+    const lifecycleRow = (state: string) => c.var.DB.prepare(
+      `INSERT INTO document_lifecycle (id, sourceType, sourceId, state, actionAt, actorUserId, orgId)
+       VALUES (?, 'payment_voucher', ?, ?, ?, ?, ?)
+       ON CONFLICT (orgId, sourceType, sourceId) DO UPDATE SET state = ?, actionAt = ?, actorUserId = ?`,
+    ).bind(`dl-${crypto.randomUUID().slice(0, 10)}`, id, state, now, actor, orgId, state, now, actor);
     if (action === "unvoid") {
       if (pv.status !== "VOID") return c.json({ success: false, error: "This voucher is not cancelled" }, 400);
-      await c.var.DB.prepare("UPDATE payment_vouchers SET status = 'DRAFT', updated_at = ? WHERE id = ?").bind(now, id).run();
+      await c.var.DB.batch([
+        c.var.DB.prepare("UPDATE payment_vouchers SET status = 'DRAFT', updated_at = ? WHERE id = ?").bind(now, id),
+        lifecycleRow("ACTIVE"),
+      ]);
       return c.json({ success: true, data: { state: "ACTIVE" } });
+    }
+    if (action === "delete") {
+      await c.var.DB.batch([
+        c.var.DB.prepare("UPDATE payment_vouchers SET status = 'VOID', updated_at = ? WHERE id = ?").bind(now, id),
+        lifecycleRow("DELETED"),
+      ]);
+      return c.json({ success: true, data: { state: "DELETED" } });
     }
     if (pv.status === "VOID") return c.json({ success: false, error: "Already cancelled" }, 400);
     await c.var.DB.prepare("UPDATE payment_vouchers SET status = 'VOID', updated_at = ? WHERE id = ?").bind(now, id).run();

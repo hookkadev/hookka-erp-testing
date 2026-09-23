@@ -25,6 +25,8 @@ const read = (p) => readFileSync(resolve(process.cwd(), p), "utf8").replace(/\r\
 const PAY = read("src/api/routes/payments.ts");
 const ACC = read("src/api/routes/accounting.ts");
 const PAGE = read("src/pages/invoices/payments.tsx");
+// The receipt helpers moved to a lib (2026-09-22, shared with the Receipts hub).
+const LIB = read("src/lib/customer-receipt.ts");
 
 test("the receipt amount is the money received, not the allocation sum", () => {
   // Create sends what the operator entered…
@@ -78,6 +80,6 @@ test("a voided receipt holds nothing — excluded from the advance set", () => {
 });
 
 test("the list still marks a part-applied receipt blue", () => {
-  assert.match(PAGE, /function hasUnallocated/);
+  assert.match(LIB, /export function hasUnallocated/);
   assert.match(PAGE, /text-blue-600/);
 });

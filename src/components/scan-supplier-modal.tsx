@@ -81,6 +81,7 @@ import {
   postScanQueueConsume,
   uploadSourceDoc,
   sourceDocOriginForCard,
+  createScanQueueDriver,
 } from "@/lib/scan-queue-client";
 import { compressScanFile } from "@/lib/compress-scan-pdf";
 import { useIdempotencyKeys } from "@/lib/idempotency-key";
@@ -2240,15 +2241,21 @@ function CreatePIWizard({
   useEffect(() => {
     if (!open || !activeBatchId) return;
     let cancelled = false;
+    // The browser drives the OCR (see createScanQueueDriver). Poked on
+    // every poll that still shows a 'queued' row; re-polls after each row.
+    const driver = createScanQueueDriver(activeBatchId, {
+      onProcessed: () => void tick(),
+    });
     const tick = async () => {
       const r = await fetchScanQueueBatch(activeBatchId);
       if (cancelled) return;
       if (!r.ok) {
-         
+
         setErrors([`Queue poll failed: ${r.error}`]);
         return;
       }
-       
+      if (r.data.items.some((it) => it.status === "queued")) driver.poke();
+
       setQueueItems(r.data.items);
       // Promote freshly-finished, un-consumed rows into preview cards.
       const ready = r.data.items.filter(
@@ -2350,6 +2357,7 @@ function CreatePIWizard({
     }, QUEUE_POLL_MS);
     return () => {
       cancelled = true;
+      driver.stop();
       window.clearInterval(id);
     };
     // queueItems intentionally not a dep — we read it inside the closure for the stop check, which is fine for an interval driver
@@ -4795,15 +4803,21 @@ function CreateGRNWizard({
   useEffect(() => {
     if (!open || !activeBatchId) return;
     let cancelled = false;
+    // The browser drives the OCR (see createScanQueueDriver). Poked on
+    // every poll that still shows a 'queued' row; re-polls after each row.
+    const driver = createScanQueueDriver(activeBatchId, {
+      onProcessed: () => void tick(),
+    });
     const tick = async () => {
       const r = await fetchScanQueueBatch(activeBatchId);
       if (cancelled) return;
       if (!r.ok) {
-         
+
         setErrors([`Queue poll failed: ${r.error}`]);
         return;
       }
-       
+      if (r.data.items.some((it) => it.status === "queued")) driver.poke();
+
       setQueueItems(r.data.items);
       const ready = r.data.items.filter(
         (it) =>
@@ -4881,6 +4895,7 @@ function CreateGRNWizard({
     }, QUEUE_POLL_MS);
     return () => {
       cancelled = true;
+      driver.stop();
       window.clearInterval(id);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

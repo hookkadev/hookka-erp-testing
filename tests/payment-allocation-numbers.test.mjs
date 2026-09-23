@@ -24,6 +24,8 @@ import { resolve } from "node:path";
 const read = (p) => readFileSync(resolve(process.cwd(), p), "utf8").replace(/\r\n/g, "\n");
 const API = read("src/api/routes/payments.ts");
 const UI = read("src/pages/invoices/payments.tsx");
+// The printed-receipt builder moved to a lib (2026-09-22, shared with the Receipts hub).
+const VOUCHER = read("src/lib/customer-receipt.ts");
 
 test("the restate resolves the invoice number itself, not from the client", () => {
   const fn = API.slice(API.indexOf("async function buildCustomerPaymentRestate"));
@@ -74,7 +76,7 @@ test("the detail panel and the printed receipt both show the date", () => {
   assert.match(UI, /<th className="text-left px-3 py-1\.5 font-medium text-gray-600">Date<\/th>/);
   assert.match(UI, /a\.invoiceDate \? formatDateDMY\(a\.invoiceDate\) : "-"/);
   // …and the voucher, whose column list must stay the same width as its rows.
-  assert.match(UI, /cells: \[a\.invoiceDate \? formatDateDMY\(a\.invoiceDate\) : "", a\.invoiceNumber, formatCurrency\(a\.amount\)\]/);
-  assert.match(UI, /columns: \[\{ label: "Date" \}, \{ label: "Invoice" \}, \{ label: "Amount", align: "right" \}\]/);
-  assert.match(UI, /totalCells: \["", "Total", formatCurrency\(p\.amount\)\]/);
+  assert.match(VOUCHER, /cells: \[a\.invoiceDate \? formatDateDMY\(a\.invoiceDate\) : "", a\.invoiceNumber, formatCurrency\(a\.amount\)\]/);
+  assert.match(VOUCHER, /columns: \[\{ label: "Date" \}, \{ label: "Invoice" \}, \{ label: "Amount", align: "right" \}\]/);
+  assert.match(VOUCHER, /totalCells: \["", "Total", formatCurrency\(p\.amount\)\]/);
 });

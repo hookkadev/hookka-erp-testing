@@ -2,7 +2,7 @@ import { useMemo, type ReactNode } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { TAUPE, AMBER, MUTED, CHART_GOLD, fmtN, type Period } from "./dashboard-shared-lib";
 import {
-  NONE_KEY, byCause, topProducts, causeLabel, analysisProgress, closeDaysByCause, causeGrid, dayBuckets, monthBuckets,
+  NONE_KEY, byCause, byRootCause, topProducts, causeLabel, analysisProgress, closeDaysByCause, causeGrid, dayBuckets, monthBuckets,
   topCauseByProduct, type IssueCase, type TallyRow,
 } from "../../api/lib/service-issue-stats";
 
@@ -224,6 +224,7 @@ export function ServiceIssuesPanel({
   cases, period, onPickCause, causeOnly,
 }: { cases: IssueCase[]; period: Period; onPickCause: (key: string) => void; causeOnly?: boolean }) {
   const causes = useMemo(() => byCause(cases), [cases]);
+  const rootCauses = useMemo(() => byRootCause(cases), [cases]);
   const products = useMemo(() => topProducts(cases, 10), [cases]);
   const productCause = useMemo(() => topCauseByProduct(cases), [cases]);
   const ytd = period.mode === "ytd";
@@ -250,6 +251,19 @@ export function ServiceIssuesPanel({
           <Sub>How far the root-cause process has got for the cases logged in this period. Amber is the share still missing.</Sub>
         </CardHeader>
         <CardContent><ProgressMeters cases={cases} /></CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-1">
+          <CardTitle>Root cause</CardTitle>
+          <p className="text-xs text-[#6B7280]">
+            From each case's Root Cause &amp; Prevention panel: the category plus the detail recorded under it (department,
+            supplier, 3PL, salesperson or sub-reason). A category with no detail recorded shows as one row.
+          </p>
+        </CardHeader>
+        <CardContent>
+          <TallyList rows={rootCauses} total={cases.length} empty="No service cases in this period." />
+        </CardContent>
       </Card>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 max-md:gap-4">

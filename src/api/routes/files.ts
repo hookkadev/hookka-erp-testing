@@ -214,55 +214,41 @@ function buildKey(parts: {
 }
 
 // ---------------------------------------------------------------------------
-// POST /api/files — multipart upload
+// storeUploadedFile — the ONE upload path (validation → storage → file_assets
+// row → audit). POST /api/files below is a thin wrapper; document routes that
+// own their own attachment rules (Payment Vouchers: no files on a cancelled
+// voucher, evidence locked after Check) call this after their own guards so
+// the MIME allowlist + magic-byte sniff can never be bypassed by a second
+// upload path. Returns the stored row, or the HTTP status + message to send.
 // ---------------------------------------------------------------------------
-app.post("/", async (c) => {
-  const denied = await requirePermission(c, "files", "create");
-  if (denied) return denied;
+export type StoredFile = {
+  id: string; resourceType: string; resourceId: string; filename: string; contentType: string;
+  sizeBytes: number; r2Key: string; uploadedBy: string | null; uploadedAt: string; orgId: string;
+};
+type FileCtx = Parameters<typeof emitAudit>[0];
+
+export async function storeUploadedFile(
+  c: FileCtx,
+  input: { file: File; resourceType: string; resourceId: string },
+): Promise<{ ok: true; data: StoredFile } | { ok: false; status: 400 | 413 | 500 | 503; error: string }> {
+  const { file, resourceType, resourceId } = input;
   if (!c.env.SUPABASE_PROJECT_REF || !c.env.SUPABASE_SERVICE_KEY) {
-    return c.json({ success: false, error: "file storage unavailable" }, 503);
-  }
-
-  let form: FormData;
-  try {
-    form = await c.req.formData();
-  } catch {
-    return c.json({ success: false, error: "invalid multipart body" }, 400);
-  }
-
-  const file = form.get("file");
-  const resourceType = String(form.get("resourceType") ?? "").trim();
-  const resourceId = String(form.get("resourceId") ?? "").trim();
-
-  if (!(file instanceof File)) {
-    return c.json({ success: false, error: "file field required" }, 400);
+    return { ok: false, status: 503, error: "file storage unavailable" };
   }
   if (!resourceType || !resourceId) {
-    return c.json(
-      { success: false, error: "resourceType and resourceId are required" },
-      400,
-    );
+    return { ok: false, status: 400, error: "resourceType and resourceId are required" };
   }
   if (file.size > MAX_UPLOAD_BYTES) {
     // Human-readable — this string surfaces directly in an operator toast.
-    return c.json(
-      {
-        success: false,
-        error: `File is too large (${Math.round(file.size / 1048576)} MB) — maximum is ${Math.round(MAX_UPLOAD_BYTES / 1048576)} MB`,
-      },
-      413,
-    );
+    return {
+      ok: false, status: 413,
+      error: `File is too large (${Math.round(file.size / 1048576)} MB) — maximum is ${Math.round(MAX_UPLOAD_BYTES / 1048576)} MB`,
+    };
   }
 
   const declaredType = file.type || "application/octet-stream";
   if (!ALLOWED_MIME.has(declaredType)) {
-    return c.json(
-      {
-        success: false,
-        error: `file type not allowed: ${declaredType}`,
-      },
-      400,
-    );
+    return { ok: false, status: 400, error: `file type not allowed: ${declaredType}` };
   }
 
   // Magic-byte sniff on the first 16 bytes. Reject if the declared type
@@ -272,13 +258,7 @@ app.post("/", async (c) => {
   const head = new Uint8Array(await file.slice(0, 16).arrayBuffer());
   const sniffed = sniffMime(head);
   if (!sniffed || !mimeMatches(declaredType, sniffed)) {
-    return c.json(
-      {
-        success: false,
-        error: "file content does not match declared type",
-      },
-      400,
-    );
+    return { ok: false, status: 400, error: "file content does not match declared type" };
   }
 
   const orgId = getOrgId(c);
@@ -319,44 +299,19 @@ app.post("/", async (c) => {
       )
       .run();
 
+    const data: StoredFile = { id, resourceType, resourceId, filename, contentType, sizeBytes: file.size, r2Key, uploadedBy, uploadedAt, orgId };
     // Sprint 2 task 5 — emit one audit_events row on every successful upload.
     // Snapshot only metadata; bytes live in storage and aren't audit-friendly.
     await emitAudit(c, {
       resource: "files",
       resourceId: id,
       action: "create",
-      after: {
-        id,
-        resourceType,
-        resourceId,
-        filename,
-        contentType,
-        sizeBytes: file.size,
-        r2Key,
-        uploadedBy,
-        uploadedAt,
-        orgId,
-      },
+      after: data,
     });
-
-    return c.json({
-      success: true,
-      data: {
-        id,
-        resourceType,
-        resourceId,
-        filename,
-        contentType,
-        sizeBytes: file.size,
-        r2Key,
-        uploadedBy,
-        uploadedAt,
-        orgId,
-      },
-    });
+    return { ok: true, data };
   } catch (err) {
     if (err instanceof SupabaseStorageNotConfiguredError) {
-      return c.json({ success: false, error: "file storage unavailable" }, 503);
+      return { ok: false, status: 503, error: "file storage unavailable" };
     }
     console.error("[files/POST] upload failed:", err);
     // Best-effort cleanup of the storage object since we don't know if put
@@ -366,8 +321,83 @@ app.post("/", async (c) => {
     } catch {
       // Already gone, or storage is transient — sweeper will catch it.
     }
-    return c.json({ success: false, error: "upload failed" }, 500);
+    return { ok: false, status: 500, error: "upload failed" };
   }
+}
+
+// removeStoredFile — the ONE delete path (storage object + row + audit);
+// DELETE /api/files/:id and the document-owned attachment routes share it.
+export async function removeStoredFile(
+  c: FileCtx,
+  id: string,
+): Promise<{ ok: true } | { ok: false; status: 404 | 500; error: string }> {
+  const orgId = getOrgId(c);
+  const row = await c.var.DB.prepare(
+    "SELECT * FROM file_assets WHERE id = ? AND orgId = ?",
+  )
+    .bind(id, orgId)
+    .first<FileAssetRow>();
+  if (!row) return { ok: false, status: 404, error: "Not found" };
+
+  try {
+    await deleteFile(c.env, row.r2Key);
+  } catch (err) {
+    if (err instanceof SupabaseStorageNotConfiguredError) {
+      // Without storage credentials we can't actually delete the bytes;
+      // still drop the DB row so the user-facing list reflects the intent.
+      // The orphan object will get pruned once storage is configured and
+      // the sweeper runs.
+      console.warn(
+        "[files/DELETE] storage unavailable — dropping DB row only, leaving orphan key",
+        row.r2Key,
+      );
+    } else {
+      console.error("[files/DELETE] storage delete failed:", err);
+      return { ok: false, status: 500, error: "delete failed" };
+    }
+  }
+
+  await c.var.DB.prepare("DELETE FROM file_assets WHERE id = ? AND orgId = ?")
+    .bind(id, orgId)
+    .run();
+
+  // Sprint 2 task 5 — emit audit_events row on every successful delete.
+  await emitAudit(c, {
+    resource: "files",
+    resourceId: id,
+    action: "delete",
+    before: row,
+  });
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/files — multipart upload
+// ---------------------------------------------------------------------------
+app.post("/", async (c) => {
+  const denied = await requirePermission(c, "files", "create");
+  if (denied) return denied;
+  if (!c.env.SUPABASE_PROJECT_REF || !c.env.SUPABASE_SERVICE_KEY) {
+    return c.json({ success: false, error: "file storage unavailable" }, 503);
+  }
+
+  let form: FormData;
+  try {
+    form = await c.req.formData();
+  } catch {
+    return c.json({ success: false, error: "invalid multipart body" }, 400);
+  }
+
+  const file = form.get("file");
+  const resourceType = String(form.get("resourceType") ?? "").trim();
+  const resourceId = String(form.get("resourceId") ?? "").trim();
+
+  if (!(file instanceof File)) {
+    return c.json({ success: false, error: "file field required" }, 400);
+  }
+  const stored = await storeUploadedFile(c, { file, resourceType, resourceId });
+  if (!stored.ok) return c.json({ success: false, error: stored.error }, stored.status);
+  return c.json({ success: true, data: stored.data });
 });
 
 // ---------------------------------------------------------------------------
@@ -526,45 +556,8 @@ app.get("/:id/stream", async (c) => {
 app.delete("/:id", async (c) => {
   const denied = await requirePermission(c, "files", "delete");
   if (denied) return denied;
-  const id = c.req.param("id");
-  const orgId = getOrgId(c);
-  const row = await c.var.DB.prepare(
-    "SELECT * FROM file_assets WHERE id = ? AND orgId = ?",
-  )
-    .bind(id, orgId)
-    .first<FileAssetRow>();
-  if (!row) return c.json({ success: false, error: "Not found" }, 404);
-
-  try {
-    await deleteFile(c.env, row.r2Key);
-  } catch (err) {
-    if (err instanceof SupabaseStorageNotConfiguredError) {
-      // Without storage credentials we can't actually delete the bytes;
-      // still drop the DB row so the user-facing list reflects the intent.
-      // The orphan object will get pruned once storage is configured and
-      // the sweeper runs.
-      console.warn(
-        "[files/DELETE] storage unavailable — dropping DB row only, leaving orphan key",
-        row.r2Key,
-      );
-    } else {
-      console.error("[files/DELETE] storage delete failed:", err);
-      return c.json({ success: false, error: "delete failed" }, 500);
-    }
-  }
-
-  await c.var.DB.prepare("DELETE FROM file_assets WHERE id = ? AND orgId = ?")
-    .bind(id, orgId)
-    .run();
-
-  // Sprint 2 task 5 — emit audit_events row on every successful delete.
-  await emitAudit(c, {
-    resource: "files",
-    resourceId: id,
-    action: "delete",
-    before: row,
-  });
-
+  const removed = await removeStoredFile(c, c.req.param("id"));
+  if (!removed.ok) return c.json({ success: false, error: removed.error }, removed.status);
   return c.json({ success: true });
 });
 

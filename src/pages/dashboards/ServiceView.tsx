@@ -35,6 +35,7 @@ type ServiceCase = {
   daysOverdue: number;
   // Added with the Top issues sub-tab — absent on a feed cached before it shipped.
   causes?: string[];
+  rootCauses?: { category: string; detail: string }[];
   unit?: string | null;
   prevention?: string | null;
   products?: string[];
