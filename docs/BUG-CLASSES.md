@@ -1,5 +1,7 @@
 # Recurring bug classes — the index that makes P5 executable
 
+> **Last verified: 2026-09-23** — branch `fix/invoice-line-so-ref` adds **C16 row 8** (invoice PDF read the DO field names for per-line SO/REF/CO SO). Nothing else re-checked.
+
 > **Last verified: 2026-09-11** — restamped on branch `fix/po-list-cache-key-collision`,
 > which **adds C22 — a cache key coarser than the handler it names** (BUG-2026-09-11-180:
 > the Production Overview served another page's job-card-less payload and rendered its
@@ -1148,6 +1150,7 @@ narrowing has to state what it is dropping.
 | 5 | `createdAt` | `rowToMinimalPO` | `production/index.tsx:2862` | ⬜ open — `?axis=created_at` is a silent no-op; URL-only since the dropdown was removed 2026-05-07 |
 | 6 | `finishedGoods` / `finishedProducts` | `/api/inventory` | `suppliers/detail.tsx:214` | ✅ 2026-08-13 (-024) — and note the fix was to DELETE the read, not rename it; the two payload halves are different entities |
 | 7 | `regNo` / `tin` / `address` | the PERMISSION projection on `GET /api/organisations` | `letterheadForPurchaseOrg` → the PO / GRN / PI letterhead | ✅ 2026-08-13 (-100) — caught **before** merge, by looking for this class rather than by an incident |
+| 8 | `customerSOLine` / `customerRefLine` / `companySO` (read as the DO names `customerSO` / `customerRef` / `salesOrderNo`) | `computeInvoicePrintExtras` | `buildUnifiedInvoiceData` → invoice download + customer e-mail PDF | ✅ 2026-09-23 (-186) — a RENAMED field, not a dropped one: the invoice and DO extras share the `DocLineExtra` type, so `tsc` saw every name as optional-and-valid. Every line printed the invoice-level SO/REF and a blank CO SO. Enforced by `tests/invoice-pdf-line-refs.test.mjs` |
 
 **Row 7 adds an axis: a projection can be narrowed by PERMISSION, not only by payload
 size, and it is the more dangerous variant.** The slim-payload kind at least drops the same
