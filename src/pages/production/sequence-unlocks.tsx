@@ -46,7 +46,11 @@ const REASON_LABEL: Record<string, string> = {
   NOT_APPLICABLE: "Step not applicable",
   OTHER: "Other",
   SHEETS_SYNC: "Google Sheets edit",
-  UNCLASSIFIED: "Before 2026-09-17 (no code)",
+  // Rows written before this release: the backfill script and the old
+  // force-scan path, which had no reason_code. Named, not guessed at, and
+  // deliberately without a date — the date it started being written is the
+  // day this deploys, which nothing here can know.
+  UNCLASSIFIED: "Before this release (no code)",
 };
 
 const DAY_OPTIONS = [7, 14, 30, 90];
@@ -225,7 +229,7 @@ export default function SequenceUnlocksPage() {
               </p>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="w-full min-w-[60rem] text-sm">
                   <thead>
                     <tr className="text-left text-xs text-[#6B7280]">
                       <th className="px-4 py-2 font-normal">When</th>
@@ -265,7 +269,7 @@ export default function SequenceUnlocksPage() {
                             {REASON_LABEL[r.reasonCode] ?? r.reasonCode}
                           </span>
                         </td>
-                        <td className="px-4 py-1.5 text-[#4B4741]">{r.reason ?? ""}</td>
+                        <td className="min-w-[20rem] px-4 py-1.5 text-[#4B4741]">{r.reason ?? ""}</td>
                       </tr>
                     ))}
                   </tbody>
