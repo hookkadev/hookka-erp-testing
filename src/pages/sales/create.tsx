@@ -1863,7 +1863,7 @@ function CreateSalesOrderPage() {
           caseId: isServiceOrderMode && linkedCase ? linkedCase.id : undefined,
         }),
       });
-      const data = (await res.json().catch(() => ({}))) as { success?: boolean; error?: string; data?: { id?: string; companySOId?: string } };
+      const data = (await res.json().catch(() => ({}))) as { success?: boolean; error?: string; warning?: string; data?: { id?: string; companySOId?: string } };
 
       if (!res.ok || !data.success) {
         setSaving(false);
@@ -1880,7 +1880,11 @@ function CreateSalesOrderPage() {
       // guard + PO cascade -> the server lands the SO at IN_PRODUCTION.
       // A 422 here leaves the SO as DRAFT on the server — we surface the
       // BOM-incomplete modal and keep the user on the new SO's detail page.
-      if (status === "CONFIRMED" && newId) {
+      // Customer PO/SO ref already on another active SO (DEV-12): the server
+      // saved it as DRAFT with a warning. Don't auto-confirm a likely duplicate
+      // into production — leave it a draft for the operator to check.
+      if (data.warning) toast.warning(data.warning);
+      if (status === "CONFIRMED" && newId && !data.warning) {
         // Switch loading copy from "Creating..." to "Confirming..." so the
         // user sees both phases of the chained call.
         setPendingStatus("CONFIRMING");

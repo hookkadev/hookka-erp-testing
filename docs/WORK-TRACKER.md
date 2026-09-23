@@ -1,6 +1,7 @@
 # Hookka ERP — Work Tracker
 
 > **Last verified: 2026-09-23** — branch `feat/t013-sequence-lock` (PRD T-013 / BUG-09) is the newest entry below, open, not pushed. Previously: branch `fix/on-time-delivery-and-decisions` added below (open, not merged, its entry is the newest; its bug ids were renumbered 130-133 → 140-143 because `feat/leave-entitlement` claimed 130-133 and merged to `main` first). Previously: branch `feat/leave-entitlement` (MERGED as #326). Previously: branch `feat/job-card-completed-at` added below (open, not merged). Previously: branch `fix/security-posture` added below (open, not merged). Previously: PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
+> **Last verified: 2026-09-23** — branch `fix/so-duplicate-ref-saves-draft` added below (open, its entry is the newest).
 > **Last verified: 2026-09-22** — branch `fix/scan-queue-client-driven` added below (open, its entry is the newest).
 > **Last verified: 2026-09-22** — branch `fix/datagrid-selection-loop` added below (open, its entry is the newest). Previously: branch `fix/delivery-tab-switch-pagination` (MERGED as #467). Previously: branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
 > **Last verified: 2026-09-22** — branch `fix/delivery-loading-gate-po-paging` added below (open, its entry is the newest). Previously: branch `fix/delivery-tab-switch-pagination` (MERGED as #467). Previously: branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
@@ -80,11 +81,18 @@ Asks, in PRD order — each row flips to done as it lands:
 Plan: PR-A = R1-R2 (switch the rule on in shadow mode, fast to merge); PR-B = the rest.
 **2026-09-18:** R1–R15 on the branch (`9539c0dc` + docs commit). `docs/API.md` regenerated,
 `docs/modules/production.md` flow 7 rewritten for the one-gate design and restamped, CODEBASE-MAP rows
-for the gate / reasons / ordered-batch / report page, BUG-2026-09-23-185 logged. Full suite 4,649 / 0
+for the gate / reasons / ordered-batch / report page, BUG-2026-09-23-186 logged. Full suite 4,649 / 0
 failing; `tsc` strict clean. **Left:** browser pass (dialog, phone picker, report page), R16 run by the
 user with `HOOKKA_PROD_DB_URL`, then push + PR to `main` and live verification of A1–A7.
 Constraints kept: rule untouched, no fixed dept list, `prerequisiteMet` never read, shadow mode.
 
+## 2026-09-23 — 🔵 DEV-12: repeated customer S/O no. blocks the scanned SO (branch `fix/so-duplicate-ref-saves-draft`)
+
+Siti (High): "IF CUST SO NUMBER SAME WITH PREVIOUS PURCHASE ORDER … THE SYSTEM WILL NOT PROCEED
+THE NEW ORDER" (ref HC-SO-013492) → BUG-2026-09-23-185. SO create 409'd on a repeated customer
+PO/SO ref and the scan modal consumed the failed scan. Now saved as DRAFT with a warning; failed
+creates stay in the queue; "Create Order" won't auto-confirm a warned SO. Open: prod verify after
+deploy; mobile form shows no warning (no notice channel).
 
 ---
 
