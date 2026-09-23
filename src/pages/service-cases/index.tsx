@@ -493,6 +493,9 @@ export default function ServiceCasesListPage() {
         label: "Source",
         width: "150px",
         sortable: true,
+        // Grow to the full value — "EXTERNAL (<externalRef>)" can be long and
+        // an ellipsis hides the ref the operator needs.
+        noClip: true,
         render: (value) => (
           <span className="text-[#6B7280]">{String(value ?? "")}</span>
         ),
