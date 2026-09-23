@@ -1,5 +1,8 @@
 # GitHub Workflow Governance
 
+> **Last verified: 2026-09-22** (branch `ci/auto-merge-main-into-staging`) — added the
+> `merge-main-into-staging.yml` row below; 27 workflows now. Only that row was touched.
+
 > **Last verified: 2026-08-14** (branch `docs/docs-vs-code-audit`) — corrected against the
 > source by the prose audit; the row(s) touched here are itemised in
 > [`docs/DOCS-VS-CODE-AUDIT.md`](DOCS-VS-CODE-AUDIT.md). Only the claims listed there were
@@ -39,6 +42,7 @@ The next improvement is not to move files around for neatness. The next improvem
 | `.github/ISSUE_TEMPLATE/*.md` | Optional later only if GitHub Issues becomes the main intake channel; not needed while `docs/BUG-HISTORY.md` is the working system. |
 | `.github/workflows/deploy.yml` | CI/build/deploy/canary pipeline. |
 | `.github/workflows/sync-staging.yml` | Controlled prod-to-staging refresh. |
+| `.github/workflows/merge-main-into-staging.yml` | On every push to `main`, merges `main` into the `staging` branch and dispatches the staging deploy; on conflict opens a PR from `chore/sync-staging-from-main` into `staging` and fails (added 2026-09-22). |
 | `.github/workflows/*.yml` | One workflow per scheduled/ops job, with header comments explaining purpose, secrets, timing, and safety. |
 
 ## Direct production / canary / staging rule

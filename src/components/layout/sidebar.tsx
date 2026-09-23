@@ -79,7 +79,7 @@ const navigationGroups: NavGroup[] = [
   {
     label: "OVERVIEW",
     items: [
-      { name: "Dashboard Prototype", href: "/test/dashboard-prototype", icon: FlaskConical },
+      { name: "Dashboard Experimental", href: "/dashboard-experimental", icon: FlaskConical },
       { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
       { name: "Hookka Report", href: "/daily-report", icon: ClipboardCheck },
       { name: "Notifications", href: "/notifications", icon: Bell },
@@ -203,67 +203,67 @@ const navigationGroups: NavGroup[] = [
   {
     label: "FINANCE",
     items: [
-      // Owner UI reorg (2026-06): seven expandable groups. Accounting
-      // reports/screens deep-link via /accounting?tab=<key>; standalone
-      // pages (Supplier Payment, Credit/Debit Notes, e-Invoice, Reports)
-      // keep their own routes.
+      // Owner UI reorg (2026-06: seven expandable groups) → slimmed 2026-09-22
+      // (owner: 「很多功能重复」, 40 entries → 28). One door per job: money out
+      // = Payment Vouchers (expense + AP Payment), money in = Receipts
+      // (customer / other debtor / official), bills owed = AP Invoices
+      // (mirror + raise other-creditor bills), P&L = one entry with three
+      // views. Retired from the MENU only — every route / tab still answers
+      // its old URL: /invoices/payments, /invoices/supplier-payments (FX PIs,
+      // advance knock-off, TF repayment — linked from Payment Vouchers),
+      // ?tab=ocreditorpay / odebtorpay / ocreditor / odebtor / ocreditorbills /
+      // plmonthly / coststruct.
       {
-        name: "Monthly Report", href: "/accounting?tab=overview", icon: BarChart3, children: [
+        name: "Reports", href: "/accounting?tab=overview", icon: BarChart3, children: [
           { name: "Overview", href: "/accounting?tab=overview", icon: LayoutDashboard },
           { name: "P&L", href: "/accounting?tab=pl", icon: BarChart3 },
-          { name: "Cost Structure", href: "/accounting?tab=coststruct", icon: Layers },
           { name: "Cash Flow", href: "/accounting?tab=cashflow", icon: Wallet },
           { name: "Balance Sheet", href: "/accounting?tab=bs", icon: Scale },
           { name: "Trial Balance", href: "/accounting?tab=tb", icon: Scale },
           { name: "General Ledger", href: "/accounting?tab=gl", icon: BookOpen },
-          { name: "Monthly P&L", href: "/accounting?tab=plmonthly", icon: BarChart3 },
+          { name: "Stock Summary", href: "/accounting?tab=stock", icon: Boxes },
         ],
       },
       {
-        name: "Daily Operation", href: "/accounting?tab=payments", icon: Wallet, children: [
-          { name: "Expense Payment", href: "/accounting?tab=payments", icon: Wallet },
+        name: "Daily", href: "/accounting?tab=payments", icon: Wallet, children: [
+          { name: "Payment Vouchers", href: "/accounting?tab=payments", icon: Wallet },
           { name: "Receipts", href: "/accounting?tab=receipts", icon: Receipt },
           { name: "Fund Transfer", href: "/accounting?tab=transfer", icon: Wallet },
           { name: "Cash Position", href: "/accounting?tab=dailycash", icon: Wallet },
-          { name: "Customer Payment", href: "/invoices/payments", icon: CreditCard },
-          { name: "Supplier Payment", href: "/invoices/supplier-payments", icon: CreditCard },
+        ],
+      },
+      {
+        name: "Monthly", href: "/accounting?tab=journals", icon: Calculator, children: [
+          { name: "Journal Entries", href: "/accounting?tab=journals", icon: BookOpen },
+          { name: "Cash Book", href: "/accounting?tab=cashbook", icon: Wallet },
+          { name: "Stock Take", href: "/accounting?tab=stocktake", icon: Scale },
+          { name: "Labour", href: "/accounting?tab=labor", icon: Users },
+          { name: "Fixed Assets", href: "/accounting?tab=assets", icon: Building2 },
+          { name: "Self-check", href: "/accounting?tab=selfcheck", icon: Calculator },
+          { name: "Corrections", href: "/accounting?tab=corrections", icon: BookOpen },
+        ],
+      },
+      {
+        name: "Debtors", href: "/accounting?tab=ar", icon: Users, children: [
+          { name: "Debtor Aging", href: "/accounting?tab=ar", icon: Users },
+          { name: "Other Debtor Bills", href: "/accounting?tab=odebtorbills", icon: BookOpen },
           { name: "Credit Notes", href: "/invoices/credit-notes", icon: FileX },
           { name: "Debit Notes", href: "/invoices/debit-notes", icon: FilePlus },
         ],
       },
       {
-        name: "Monthly Operation", href: "/accounting?tab=journals", icon: Calculator, children: [
-          { name: "Journal Entries", href: "/accounting?tab=journals", icon: BookOpen },
-          { name: "Cash Book", href: "/accounting?tab=cashbook", icon: Wallet },
-          { name: "Fixed Assets", href: "/accounting?tab=assets", icon: Building2 },
-        ],
-      },
-      {
-        name: "Debtor / Other Debtor", href: "/accounting?tab=ar", icon: Users, children: [
-          { name: "Debtor Aging", href: "/accounting?tab=ar", icon: Users },
-          { name: "Other Debtor", href: "/accounting?tab=odebtor", icon: Users },
-          { name: "Other Debtor Bills", href: "/accounting?tab=odebtorbills", icon: BookOpen },
-          { name: "Other Debtor Receipts", href: "/accounting?tab=odebtorpay", icon: Wallet },
-        ],
-      },
-      {
-        name: "Creditor / Other Creditor", href: "/accounting?tab=ap", icon: Building2, children: [
+        name: "Creditors", href: "/accounting?tab=ap", icon: Building2, children: [
           { name: "Creditor Aging", href: "/accounting?tab=ap", icon: Building2 },
+          { name: "AP Invoices", href: "/accounting?tab=apinvoices", icon: BookOpen },
           { name: "Supplier Discount", href: "/accounting?tab=supplier-discount", icon: CreditCard },
-          { name: "Other Creditor", href: "/accounting?tab=ocreditor", icon: Building2 },
-          { name: "Other Creditor Bills", href: "/accounting?tab=ocreditorbills", icon: BookOpen },
-          { name: "Other Creditor Payments", href: "/accounting?tab=ocreditorpay", icon: Wallet },
         ],
       },
       { name: "e-Invoice", href: "/invoices/e-invoice", icon: FileCheck },
       {
-        name: "Maintenance", href: "/accounting?tab=coa", icon: Settings, children: [
+        name: "Setup", href: "/accounting?tab=coa", icon: Settings, children: [
           { name: "Chart of Accounts", href: "/accounting?tab=coa", icon: List },
-          { name: "Labour", href: "/accounting?tab=labor", icon: Users },
-          { name: "Stock", href: "/accounting?tab=stock", icon: Boxes },
           { name: "Stock Mapping", href: "/accounting?tab=stockmap", icon: Boxes },
           { name: "Opening Stock", href: "/accounting?tab=openstock", icon: Scale },
-          { name: "Stock Take", href: "/accounting?tab=stocktake", icon: Scale },
           { name: "Opening Balance", href: "/accounting?tab=opening", icon: Scale },
           { name: "Audit Log", href: "/accounting?tab=audit", icon: FileCheck },
           { name: "Settings", href: "/accounting?tab=maint", icon: Wrench },

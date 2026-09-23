@@ -57,6 +57,7 @@ import {
 // of the simplified branded fallback. buildSimpleTablePdf stays the ULTIMATE
 // fallback if the unified render ever throws on Workers.
 import { getOrCreateQrToken, qrScanUrl } from "../lib/do-qr-token";
+import { parseStatusList, startOfMonthMYT } from "../../lib/delivery-list-filters";
 // Company office number — the driver-contact fallback on dispatch notices
 // (owner rule: no driver phone on file → give the company's number).
 
@@ -288,6 +289,17 @@ app.get("/", async (c) => {
       " OR so2.customer_so_id ILIKE ? OR so2.reference ILIKE ?)))";
     dBinds = [like, like, like, like, like, like, like, like, like, like];
   }
+  // ?status=DRAFT,LOADED — the delivery page's stage tabs fetch ONLY their own
+  // statuses (2026-09-22). Before this, every tab paged through the newest 200
+  // DOs of EVERY status and filtered in the browser, so "Delivered" showed just
+  // the delivered rows that happened to fall inside that window, and the page
+  // count counted every status. Bound, never interpolated; an unknown value
+  // simply matches nothing.
+  const statusList = parseStatusList(c.req.query("status"));
+  if (statusList.length > 0) {
+    dWhere += ` AND status IN (${statusList.map(() => "?").join(", ")})`;
+    dBinds.push(...statusList);
+  }
 
   const [countRes, pageRes] = await Promise.all([
     db
@@ -359,6 +371,22 @@ app.get("/stats", async (c) => {
   // tab totals would be everybody's) and must not write into it. Same reason
   // the Sales Orders cards were showing 1,229 over an empty grid.
   const statsScope = await customerScopeSql(c, "customerId");
+  const scopeAnd = statsScope.clause ? ` AND ${statsScope.clause}` : "";
+
+  // "Delivered (MTD)" card (2026-09-22). Deliberately OUTSIDE the snapshot: the
+  // snapshot is keyed by the data signature, not by the date, so a month
+  // rollover would never invalidate it. One COUNT; deliveredAt is ISO TEXT, so
+  // the string compare is exact. INVOICED counts too — an invoiced DO is still
+  // a delivered DO (the Delivered tab's rule). Was counted in the browser off
+  // the paginated browse page, which no longer holds delivered rows on any
+  // other tab.
+  const mtdRow = await c.var.DB.prepare(
+    `SELECT COUNT(*) AS n FROM delivery_orders
+      WHERE orgId = ? AND status IN ('DELIVERED', 'INVOICED') AND deliveredAt >= ?${scopeAnd}`,
+  )
+    .bind(orgId, startOfMonthMYT(), ...statsScope.binds)
+    .first<{ n: number }>();
+  const deliveredMtd = Number(mtdRow?.n ?? 0);
 
   // PR 3 (2026-05-20) — cache-aside snapshot. See lib/delivery-snapshot.ts
   // for the architecture. Mirror of the pattern in routes/dashboard-overview.ts.
@@ -372,7 +400,7 @@ app.get("/stats", async (c) => {
       getDeliveryStatsSignature(c.var.DB),
     ]);
     if (isSnapshotFresh(snap, sig.maxUpdatedAt, sig.rowCount) && snap) {
-      return c.json({ success: true, ...snap.data });
+      return c.json({ success: true, ...snap.data, deliveredMtd });
     }
   }
 
@@ -384,9 +412,7 @@ app.get("/stats", async (c) => {
   // row-per-DO read (exact, no item-join multiplication).
   const [statusRes, valueMap] = await Promise.all([
     c.var.DB.prepare(
-      `SELECT id, status FROM delivery_orders WHERE orgId = ?${
-        statsScope.clause ? ` AND ${statsScope.clause}` : ""
-      }`,
+      `SELECT id, status FROM delivery_orders WHERE orgId = ?${scopeAnd}`,
     )
       .bind(orgId, ...statsScope.binds)
       .all<{ id: string; status: string }>(),
@@ -424,7 +450,7 @@ app.get("/stats", async (c) => {
     console.warn("[delivery-stats-snapshot] write-back failed:", e);
   }
 
-  return c.json({ success: true, ...payload });
+  return c.json({ success: true, ...payload, deliveredMtd });
 });
 
 // ---------------------------------------------------------------------------

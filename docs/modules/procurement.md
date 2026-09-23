@@ -1,5 +1,7 @@
 # Procurement — Module Guide
 
+> **Last verified: 2026-09-22** (`ProcurementPage` anchor re-derived: `index.tsx:812`; grid search now covers line items; `supplier-payments.ts` anchors re-derived after the `buildSupplierPaymentCreate` extraction — `buildSupplierPaymentCreate` :410, `/knock-off` :621, `/un-knock` :782, `buildSupplierPaymentLifecycle` :876). Previously: **Last verified: 2026-08-19** against `src/api/routes/{purchase-orders,grn,purchase-invoices,three-way-match,supplier-payments,supplier-materials}.ts`,
+>
 > **Last verified: 2026-09-11 (later same day)** — QA bug found on GRN create:
 > "column po_id of relation grn_items does not exist" on a fresh database's
 > FIRST DRAFT GRN (any import-in-transit or OCR receipt). `grn_items.po_id`/
@@ -79,7 +81,7 @@ Owns the buy-side document chain: **Purchase Orders** (PO) → **Goods Receipt N
 
 ## Entry points
 - Pages
-  - `/procurement` → `src/pages/procurement/index.tsx:804` (`ProcurementPage` — PO list, filters, grid; `POFormDialog` deep-link prefill at `:63`)
+  - `/procurement` → `src/pages/procurement/index.tsx:812` (`ProcurementPage` — PO list, filters, grid; `POFormDialog` deep-link prefill at `:63`)
   - `/procurement/create` → `src/pages/procurement/create.tsx:71` (`CreatePurchaseOrderPage`, wrapper `:63`; full-page PO create)
   - `/procurement/:id` → `src/pages/procurement/detail.tsx:113` (`PurchaseOrderDetailPage`; status actions + 412-requiresGrn guard; `ThreeWayMatchPanel` defined at `:1392`, rendered at `:1341`)
   - `/procurement/grn` → `src/pages/procurement/grn.tsx:351` (`GRNPage` — GRN list; `GRNFormDialog` at `:49`)
@@ -120,7 +122,7 @@ Owns the buy-side document chain: **Purchase Orders** (PO) → **Goods Receipt N
 ## Key functions / sections (locate-to-function)
 | Symbol / section | file:line | Role |
 |---|---|---|
-| `ProcurementPage` | `src/pages/procurement/index.tsx:804` | PO list, filters, banner, grid |
+| `ProcurementPage` | `src/pages/procurement/index.tsx:812` | PO list, filters, banner, grid |
 | `POFormDialog` | `src/pages/procurement/index.tsx:63` | Create/edit PO modal (deep-link prefill) |
 | `PurchaseOrderDetailPage` | `src/pages/procurement/detail.tsx:113` | PO detail; status actions, 412-requiresGrn guard |
 | `ThreeWayMatchPanel` | `src/pages/procurement/detail.tsx:1392` | PO↔GRN↔PI variance panel (derived) |
@@ -137,8 +139,8 @@ Owns the buy-side document chain: **Purchase Orders** (PO) → **Goods Receipt N
 | `resolveRmForGRNItem` | `src/api/routes/grn.ts:480` | Resolve GRN line → raw_material |
 | `app.post("/")` (GRN create) | `src/api/routes/grn.ts:1383` | GRN create; builds stock+PO-counter statements into ONE batch with header+lines (T-006 R3) |
 | `app.put("/:id/arrival")` | `src/api/routes/grn.ts:2322` | Arrival state transition (gate) |
-| `app.post("/")` (PI create) | `src/api/routes/purchase-invoices.ts:1107` | PI create + convert-chain + GL post |
-| `app.put("/:id")` (PI edit) | `src/api/routes/purchase-invoices.ts:2003` | PI edit (DRAFT/CONFIRMED/legacy APPROVED) + GL correction |
+| `app.post("/")` (PI create) | `src/api/routes/purchase-invoices.ts:1137` | PI create + convert-chain + GL post |
+| `app.put("/:id")` (PI edit) | `src/api/routes/purchase-invoices.ts:2039` | PI edit (DRAFT/CONFIRMED/legacy APPROVED) + GL correction |
 | `checkInvoicedQtyCeilingAfterEdit` | `src/api/routes/purchase-invoices.ts:702` | Ceiling on re-synced invoiced_qty |
 | `checkPoRemaining` | `src/api/routes/purchase-invoices.ts:986` | PO ceiling, matched by po_item_id (T-006 R8), material_code as legacy fallback |
 | `mapPurchaseLinesToAccounts` | `src/api/routes/purchase-invoices.ts:199` | PI lines → GL account buckets |
@@ -146,8 +148,9 @@ Owns the buy-side document chain: **Purchase Orders** (PO) → **Goods Receipt N
 | `isPiEditable` / `checkGrnLineQtyEdit` | `src/lib/purchase-edit-rules.ts:34 / 135` | Shared FE+BE edit gates |
 | `checkConvertAvailability` / `clampDecrement` | `src/lib/convert-chain.ts:81 / 138` | Line-level 409 guard + floor |
 | `app.get("/by-po/:poId")` | `src/api/routes/three-way-match.ts:303` | PO-scoped variance read |
-| `app.post("/")` / `/knock-off` / `/un-knock` | `src/api/routes/supplier-payments.ts:124 / 572 / 733` | Pay PIs, apply/reverse advance |
-| `buildSupplierPaymentLifecycle` | `src/api/routes/supplier-payments.ts:827` | Void/delete/unvoid shared core |
+| `app.post("/")` / `/knock-off` / `/un-knock` | `src/api/routes/supplier-payments.ts:124 / 621 / 782` | Pay PIs, apply/reverse advance |
+| `buildSupplierPaymentCreate` | `src/api/routes/supplier-payments.ts:410` | THE builder (rows + PI bumps + GL) shared by POST / and the Payment Vouchers AP road (2026-09-22) |
+| `buildSupplierPaymentLifecycle` | `src/api/routes/supplier-payments.ts:876` | Void/delete/unvoid shared core (exported — the AP voucher's cancel delegates here) |
 
 ## Gotchas
 - **GRN Post-to-Stock is a cascade, not a label.** Crossing DRAFT/CONFIRMED→POSTED in `grn.ts` writes stock/WIP + `cost_ledger` AND flips the parent PO. Never write stock outside this boundary. `COMMITTED_STATUSES = {CONFIRMED,POSTED}`; POSTED is never born before arrival = ARRIVED (gate structurally honoured).

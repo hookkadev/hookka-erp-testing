@@ -378,6 +378,15 @@ function makeDb() {
       }
       return [...byKey.values()];
     }
+    // raw_materials lookup behind resolveRmForGRNItem — without it every GRN
+    // line resolves to "unresolved" and no stock statements are built, which
+    // would make the A3 single-batch test silently vacuous.
+    if (/FROM raw_materials WHERE (itemCode|description) = \?/i.test(sql)) {
+      const col = /WHERE itemCode/i.test(sql) ? "itemCode" : "description";
+      return tables.raw_materials.filter(
+        (r) => String(getCol(r, col)) === String(binds[0]),
+      );
+    }
     // suppliers / poNo lookups not used here
     if (/FROM purchase_orders WHERE id = \?/i.test(sql)) {
       return tables.purchase_orders.filter((r) => String(r.id) === String(binds[0]));
@@ -1010,4 +1019,196 @@ test("explicit body.status DRAFT forces DRAFT even for arrived goods", async () 
   assert.equal(res.status, 201);
   const data = (await res.json()).data;
   assert.equal(data.status, "DRAFT");
+});
+
+// ---------------------------------------------------------------------------
+// T-006 follow-up — R8's switch from material_code to po_item_id silently
+// dropped the OLD code's aggregation. The pre-R8 ceiling summed every PO line
+// sharing a material_code into one bucket (`prev?.qty ?? 0 + ...`); R8's
+// itemIdByMaterialCode is a plain code→id map, so with the same material on
+// two PO lines the LAST line wins and a PO-direct invoice is measured against
+// that one line's quantity instead of the material's total on the PO.
+// A perfectly legitimate invoice for the whole order then 409s.
+// ---------------------------------------------------------------------------
+function seedPoTwoLinesSameCode(db, { each = 50 } = {}) {
+  db.tables.suppliers.push({ id: "sup-3", code: "S3", name: "TWIN CO", email: null });
+  db.tables.purchase_orders.push({
+    id: "po-3", poNo: "PO-3", supplierId: "sup-3", supplierName: "TWIN CO",
+    subtotalSen: each * 2 * 10000, totalSen: each * 2 * 10000, status: "CONFIRMED",
+    orderDate: "2026-09-01", expectedDate: "", receivedDate: "", notes: "",
+    orgId: "org-test",
+  });
+  // Same material, two lines — a real pattern: two delivery dates, two
+  // sub-locations, or simply the operator adding the line twice.
+  for (const suffix of ["a", "b"]) {
+    db.tables.purchase_order_items.push({
+      id: `poi-3${suffix}`, purchaseOrderId: "po-3", materialCategory: "WOOD",
+      material_code: "WOOD-3", materialName: "WOOD-3 - Oak plank", supplierSKU: "",
+      quantity: each, unitPriceSen: 10000, totalSen: each * 10000, receivedQty: 0,
+      unit: "pcs", orgId: "org-test",
+    });
+  }
+}
+
+test("a PO with the same material on two lines is billable for the full ordered qty", async () => {
+  const db = makeDb();
+  seedPoTwoLinesSameCode(db); // 50 + 50 = 100 ordered of WOOD-3
+  const piRoot = mount(piApp, db);
+
+  // One invoice for the whole purchase order. No GRN, so the line resolves by
+  // material_code — and the material's ceiling on this PO is 100, not 50.
+  const res = await post(piRoot, {
+    purchaseOrderId: "po-3",
+    supplierId: "sup-3",
+    supplierName: "TWIN CO",
+    items: [
+      { materialCode: "WOOD-3", materialName: "WOOD-3 - Oak plank", qty: 100, unitPriceSen: 10000, poId: "po-3" },
+    ],
+  });
+  assert.equal(
+    res.status,
+    200,
+    `billing the full ordered quantity must pass — got ${res.status}: ${JSON.stringify(await res.clone().json())}`,
+  );
+});
+
+test("the same-code PO still refuses more than the two lines add up to", async () => {
+  const db = makeDb();
+  seedPoTwoLinesSameCode(db);
+  const piRoot = mount(piApp, db);
+
+  const res = await post(piRoot, {
+    purchaseOrderId: "po-3",
+    supplierId: "sup-3",
+    supplierName: "TWIN CO",
+    items: [
+      { materialCode: "WOOD-3", materialName: "WOOD-3 - Oak plank", qty: 101, unitPriceSen: 10000, poId: "po-3" },
+    ],
+  });
+  assert.equal(res.status, 409, "101 against a 100 ceiling must still be refused");
+});
+
+// ---------------------------------------------------------------------------
+// T-006 A2 — "Two 100-unit GRNs against a 100-unit PO: the second is refused."
+// The over-receipt tolerance used to compare 110% of the ORDERED quantity
+// against THIS document's receivedQty alone, so two separate receipts each
+// read "under tolerance" and both posted. Until now this was asserted only by
+// grepping grn.ts for the cumulative expression; this drives both receipts
+// through the real route.
+// ---------------------------------------------------------------------------
+test("A2 — a second receipt that busts the PO's tolerance is refused", async () => {
+  const db = makeDb();
+  seedOpenPo(db); // PO-9 line poi-9: 5 ordered, 0 received
+  const grnRoot = mount(grnApp, db);
+
+  const receive = (qty) =>
+    grnRoot.request("/", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        poId: "po-9",
+        receivedBy: "Ahmad",
+        arrival_state: "ARRIVED",
+        items: [{ poItemIndex: 0, receivedQty: qty, acceptedQty: qty, rejectedQty: 0 }],
+      }),
+    });
+
+  // Receipt #1 takes the whole order.
+  assert.equal((await receive(5)).status, 201);
+  assert.equal(Number(db.tables.purchase_order_items.find((r) => r.id === "poi-9").receivedQty), 5);
+
+  // Receipt #2 for the same 5 — on its own it reads "5 <= 5.5", which is how
+  // the same goods used to be received twice. Cumulatively it is 10.
+  const second = await receive(5);
+  assert.equal(second.status, 400, "the second full receipt must be refused");
+  assert.match((await second.json()).error, /already received 5/);
+
+  // And nothing was written: the PO line still reads 5, not 10.
+  assert.equal(
+    Number(db.tables.purchase_order_items.find((r) => r.id === "poi-9").receivedQty),
+    5,
+    "a refused receipt must not draw the PO line down",
+  );
+  assert.equal(db.tables.grns.length, 1, "a refused receipt must not leave a GRN behind");
+});
+
+test("A2 — the tolerance still allows a legitimate split receipt up to 110%", async () => {
+  const db = makeDb();
+  seedOpenPo(db); // 5 ordered → ceiling 5.5
+  const grnRoot = mount(grnApp, db);
+
+  const receive = (qty) =>
+    grnRoot.request("/", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        poId: "po-9",
+        receivedBy: "Ahmad",
+        arrival_state: "ARRIVED",
+        items: [{ poItemIndex: 0, receivedQty: qty, acceptedQty: qty, rejectedQty: 0 }],
+      }),
+    });
+
+  assert.equal((await receive(3)).status, 201);
+  assert.equal((await receive(2)).status, 201, "3 + 2 = 5 against a 5-unit order must pass");
+  assert.equal(Number(db.tables.purchase_order_items.find((r) => r.id === "poi-9").receivedQty), 5);
+});
+
+// ---------------------------------------------------------------------------
+// T-006 A3 — "Killing the worker between GRN batches leaves no posted GRN
+// without stock." R3's answer is that there are no longer separate batches to
+// die between: header + lines + stock + PO counter go into ONE db.batch().
+// The in-memory mock cannot simulate a mid-batch crash (it has no rollback),
+// but it CAN prove the property that makes the crash survivable — that every
+// one of those writes travels in a single batch call, so the database's own
+// atomicity covers them together.
+// ---------------------------------------------------------------------------
+test("A3 — a born-POSTED GRN's header, stock and PO counter go in ONE batch", async () => {
+  const db = makeDb();
+  seedOpenPo(db);
+  // Give the receipt a resolvable raw material so the stock statements are
+  // actually built (an unresolved line posts no rm_batches row).
+  db.tables.raw_materials.push({
+    id: "rm-9", itemCode: "FOAM-9", description: "Foam block", balanceQty: 0,
+  });
+
+  const batches = [];
+  const realBatch = db.batch;
+  db.batch = async (stmts) => {
+    batches.push(stmts.length);
+    return realBatch(stmts);
+  };
+
+  const res = await mount(grnApp, db).request("/", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      poId: "po-9",
+      receivedBy: "Ahmad",
+      arrival_state: "ARRIVED",
+      items: [
+        { poItemIndex: 0, materialCode: "FOAM-9", materialName: "FOAM-9 - Foam block", receivedQty: 5, acceptedQty: 5, rejectedQty: 0, unitPrice: 10000 },
+      ],
+    }),
+  });
+  assert.equal(res.status, 201);
+
+  // The three groups that used to be three separate db.batch() calls —
+  // header+lines, stock, PO counter — now arrive as one.
+  assert.equal(
+    batches.length,
+    1,
+    `a born-POSTED create must issue exactly ONE batch, got ${batches.length}`,
+  );
+
+  // ...and that one batch really did carry all three: a GRN row, a stock
+  // batch row, and the drawn-down PO counter.
+  assert.equal(db.tables.grns.length, 1, "GRN header written");
+  assert.equal(db.tables.grn_items.length, 1, "GRN line written");
+  assert.equal(db.tables.rm_batches.length, 1, "stock posted in the same batch");
+  assert.equal(
+    Number(db.tables.purchase_order_items.find((r) => r.id === "poi-9").receivedQty),
+    5,
+    "PO counter drawn down in the same batch",
+  );
 });

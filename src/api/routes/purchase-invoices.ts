@@ -1018,21 +1018,42 @@ async function checkPoRemaining(
   // draws down purchase_order_items.receivedQty correctly — same match, reused
   // here. material_code stays as the fallback for manual/legacy rows that
   // never carried a po_item_id.
-  const orderedByItemId = new Map<string, { name: string; qty: number }>();
-  const itemIdByMaterialCode = new Map<string, string>();
+  //
+  // The ceiling is measured per BUCKET, not per PO row. A bucket is the
+  // material code when the PO line carries one — which restores the
+  // pre-R8 behaviour of summing every PO line that shares a code into one
+  // ceiling — and the PO line's own id when it does not. Without the
+  // code bucket, a PO listing the same material on two lines (two delivery
+  // dates, or just the operator adding it twice) measured a PO-direct
+  // invoice against ONE of those lines, so billing the full ordered
+  // quantity 409'd. See the two-lines-same-code tests in
+  // tests/purchasing-convert-flow.test.mjs.
+  const bucketKeyForItemId = new Map<string, string>();
+  const bucketKeyForCode = new Map<string, string>();
+  const orderedByBucket = new Map<
+    string,
+    { code: string; name: string; qty: number }
+  >();
   for (const po of poItemsRes.results ?? []) {
     const itemId = String(po.id);
     const code = String(po.material_code ?? po.materialCode ?? "");
-    orderedByItemId.set(itemId, {
-      name: po.materialName ?? code ?? itemId,
+    const key = code ? `code:${code}` : `item:${itemId}`;
+    bucketKeyForItemId.set(itemId, key);
+    if (code) bucketKeyForCode.set(code, key);
+    const prev = orderedByBucket.get(key);
+    orderedByBucket.set(key, {
+      code,
+      name: prev?.name ?? po.materialName ?? code ?? itemId,
       // Ceiling = ordered, or what was actually received when the receipt ran
-      // over the order (accepted goods must stay invoiceable).
-      qty: poInvoiceCeiling(
-        Number(po.quantity) || 0,
-        Number(po.receivedQty ?? po.received_qty ?? 0) || 0,
-      ),
+      // over the order (accepted goods must stay invoiceable). Summed across
+      // every PO line in the bucket.
+      qty:
+        (prev?.qty ?? 0) +
+        poInvoiceCeiling(
+          Number(po.quantity) || 0,
+          Number(po.receivedQty ?? po.received_qty ?? 0) || 0,
+        ),
     });
-    if (code) itemIdByMaterialCode.set(code, itemId);
   }
   // Already-invoiced, resolved to po_item_id via the GRN line it drew from
   // (pii.grn_item_id → grn_items.po_item_id) where resolvable; falls back to
@@ -1052,41 +1073,49 @@ async function checkPoRemaining(
     )
     .bind(...(excludePiId ? [poId, excludePiId] : [poId]))
     .all<{ poItemId?: string | null; mc?: string | null; material_code?: string | null; qty: number }>();
-  const invByItemId = new Map<string, number>();
+  // Resolve a row to its bucket: the GRN line's po_item_id first (survives a
+  // blank material_code, which is R8's whole point), the code second.
+  const bucketFor = (
+    poItemId: string | null | undefined,
+    materialCode: string | null | undefined,
+  ): string | undefined =>
+    (poItemId ? bucketKeyForItemId.get(String(poItemId)) : undefined) ??
+    bucketKeyForCode.get(String(materialCode ?? ""));
+
+  const invByBucket = new Map<string, number>();
   for (const row of invRes.results ?? []) {
     const qty = Number(row.qty) || 0;
-    const itemId = row.poItemId
-      ? String(row.poItemId)
-      : itemIdByMaterialCode.get(String(row.mc ?? row.material_code ?? ""));
-    if (!itemId) continue; // unmatched legacy row — not guarded here, same as before
-    invByItemId.set(itemId, (invByItemId.get(itemId) ?? 0) + qty);
+    const key = bucketFor(row.poItemId, row.mc ?? row.material_code);
+    if (!key) continue; // unmatched legacy row — not guarded here, same as before
+    invByBucket.set(key, (invByBucket.get(key) ?? 0) + qty);
   }
-  // Aggregate the REQUESTED quantity per po_item_id before measuring.
-  const reqByItemId = new Map<string, number>();
+  // Aggregate the REQUESTED quantity per bucket before measuring.
+  const reqByBucket = new Map<string, number>();
   for (const r of rows) {
-    const itemId = r.poItemId
-      ? String(r.poItemId)
-      : itemIdByMaterialCode.get(r.materialCode ?? "");
-    if (!itemId) continue; // fee / tax / unmatched lines don't draw a PO line down
-    reqByItemId.set(itemId, (reqByItemId.get(itemId) ?? 0) + (Number(r.qty) || 0));
+    const key = bucketFor(r.poItemId, r.materialCode);
+    if (!key) continue; // fee / tax / unmatched lines don't draw a PO line down
+    reqByBucket.set(key, (reqByBucket.get(key) ?? 0) + (Number(r.qty) || 0));
   }
   const lines: ConvertLineRequest[] = [];
-  for (const [itemId, requestedQty] of reqByItemId) {
-    const ordered = orderedByItemId.get(itemId);
+  for (const [key, requestedQty] of reqByBucket) {
+    const ordered = orderedByBucket.get(key);
     if (!ordered) continue; // line not matched to a PO line → not guarded here
     lines.push({
-      ref: itemId,
+      ref: key,
       orderedQty: ordered.qty,
-      consumedQty: invByItemId.get(itemId) ?? 0,
+      consumedQty: invByBucket.get(key) ?? 0,
       requestedQty,
     });
   }
   const guard = checkConvertAvailability(lines);
   if (guard.ok) return { ok: true };
   // Only on a block: name the purchase order the operator has to act on.
-  // guard.ref is the po_item_id (a stable key, not a display label) — look
-  // its name back up for the message.
-  const ordered = orderedByItemId.get(guard.ref);
+  // guard.ref is the internal bucket key ("code:FOAM-1" / "item:<uuid>"),
+  // never a display label — resolve it back to something an operator can
+  // find on the document. A blank-code line has no code to show, so its
+  // name carries the label and materialName stays null (printing the raw
+  // PO-line id would be worse than useless).
+  const ordered = orderedByBucket.get(guard.ref);
   const po = await db
     .prepare("SELECT poNo FROM purchase_orders WHERE id = ?")
     .bind(poId)
@@ -1094,13 +1123,13 @@ async function checkPoRemaining(
   return {
     ok: false,
     error: poCeilingError({
-      materialCode: ordered?.name ?? guard.ref,
-      materialName: null,
+      materialCode: ordered?.code || ordered?.name || "this line",
+      materialName: ordered?.code ? ordered.name : null,
       poNo: po?.poNo ?? null,
       requested: guard.requested,
       remaining: guard.available,
       ceiling: ordered?.qty ?? 0,
-      invoiced: invByItemId.get(guard.ref) ?? 0,
+      invoiced: invByBucket.get(guard.ref) ?? 0,
     }),
   };
 }

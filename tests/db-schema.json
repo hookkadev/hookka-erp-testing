@@ -2031,15 +2031,27 @@
   "payment_vouchers": [
     "accrual_account",
     "accrued",
+    "advance_sen",
+    "approval_state",
+    "approved_at",
+    "approved_by",
+    "checked_at",
+    "checked_by",
     "created_at",
     "created_by",
     "date",
     "description",
     "id",
+    "party_id",
+    "party_kind",
     "pay_from",
     "payee",
+    "prepared_at",
+    "prepared_by",
     "product_line",
+    "pv_kind",
     "pv_no",
+    "reject_reason",
     "settled_at",
     "status",
     "total_sen",
@@ -3092,6 +3104,13 @@
   "service_cases": [
     "action_log",
     "affected_product_ids",
+    "approval_kind",
+    "approval_note",
+    "approval_requested_at",
+    "approval_requested_by",
+    "approval_status",
+    "approved_at",
+    "approved_by",
     "case_no",
     "closed_at",
     "created_at",
@@ -3848,5 +3867,19 @@
     "supplier_name",
     "total_sen",
     "updated_at"
+  ],
+  "bank_line_leg_splits": [
+    "amount_sen",
+    "created_at",
+    "leg_id",
+    "line_id"
+  ],
+  "payment_voucher_allocs": [
+    "amount_sen",
+    "doc_id",
+    "doc_kind",
+    "id",
+    "line_order",
+    "voucher_id"
   ]
 }

@@ -1,10 +1,14 @@
-import { useMemo } from "react";
-import { ComposedChart, Area, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import { useMemo, useState } from "react";
+import { ComposedChart, Area, Line, XAxis, YAxis, Tooltip, Legend, ReferenceLine, ResponsiveContainer } from "recharts";
 import { useCachedJson } from "@/lib/cached-fetch";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { TimeAttendancePanels, EfficiencyPanels, type EmployeeSlice } from "./EmployeesInsights";
+import { DeptEfficiencyCard } from "./ProductionDailyPanels";
+import { AttendanceLogCard } from "./AttendanceLogCard";
+import { filterSlice } from "./employee-filter";
 import { Users, Target, Clock, Gauge } from "lucide-react";
-import { TAUPE, TEAL, MUTED, BORDER, fmtN } from "./dashboard-shared-lib";
+import { TAUPE, TEAL, MUTED, BORDER, fmtN, inPeriod, type Period, type PeopleSub } from "./dashboard-shared-lib";
 import { Kpi, LiveBadge, MissingNote } from "./dashboard-shared";
 
 // Real data from GET /api/dashboard/prototype — the `employee` +
@@ -22,6 +26,7 @@ type Feed = {
       id: string; empNo: string | null; name: string | null; dept: string | null; role: string | null;
       status: string | null; targetPct: number | null; hoursPerDay: number | null; countsToHeadcount: boolean;
     }[];
+    attendance: EmployeeSlice["attendance"];
     performance: {
       byDay: { date: string; workingMinutes: number; productionMinutes: number; allDeptMinutes: number }[];
       cards: number;
@@ -30,7 +35,9 @@ type Feed = {
   };
 };
 
-export function EmployeesView() {
+export function EmployeesView({
+  period, sub, onPeriodChange,
+}: { period: Period; sub: Exclude<PeopleSub, "departments">; onPeriodChange: (p: Period) => void }) {
   const { data, loading, error } = useCachedJson<Feed>("/api/dashboard/prototype");
 
   const employee = data?.employee;
@@ -48,19 +55,43 @@ export function EmployeesView() {
     [employee?.workers],
   );
 
+  // Scoped to the global period picker, same as every other dated tab —
+  // headcount/target/hours-per-day above stay book-wide (workers have no
+  // date of their own), only the daily hours series is filtered.
   const { chartData, workingHours, productionHours } = useMemo(() => {
-    const days = [...(employee?.performance.byDay ?? [])].sort((a, b) => (a.date < b.date ? -1 : 1));
-    const rows = days.map((d) => ({
-      date: d.date.slice(5),
-      "Working Hours": Math.round((d.workingMinutes / 60) * 10) / 10,
-      "Production Hours": Math.round((d.productionMinutes / 60) * 10) / 10,
-    }));
-    const w = days.reduce((sum, d) => sum + d.workingMinutes, 0);
-    const p = days.reduce((sum, d) => sum + d.productionMinutes, 0);
+    const days = (employee?.performance.byDay ?? [])
+      .filter((d) => inPeriod(period, d.date))
+      .sort((a, b) => (a.date < b.date ? -1 : 1));
+    // The chart keeps the whole period; the totals narrow to a focused day.
+    const focus = period.day ? days.filter((d) => d.date === period.day) : days;
+    const w = focus.reduce((a, d) => a + d.workingMinutes, 0);
+    const p = focus.reduce((a, d) => a + d.productionMinutes, 0);
+    const rows = days.map((d) => {
+      return {
+        iso: d.date,
+        date: d.date.slice(5),
+        "Working Hours": Math.round((d.workingMinutes / 60) * 10) / 10,
+        "Production Hours": Math.round((d.productionMinutes / 60) * 10) / 10,
+      };
+    });
     return { chartData: rows, workingHours: w / 60, productionHours: p / 60 };
-  }, [employee?.performance.byDay]);
+  }, [employee?.performance.byDay, period]);
 
   const efficiencyPct = workingHours > 0 ? (productionHours / workingHours) * 100 : null;
+
+  // Department / employee filter (Time & attendance and Efficiency tabs). Every
+  // panel downstream reads the filtered slice, so picking a person re-derives
+  // the tiles, pool line, ranking and log for just them.
+  const [dept, setDept] = useState("");
+  const [emp, setEmp] = useState("");
+  const headcountWorkers = useMemo(
+    () => (employee?.workers ?? []).filter((w) => w.countsToHeadcount).sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "")),
+    [employee?.workers],
+  );
+  const depts = useMemo(() => [...new Set(headcountWorkers.map((w) => w.dept).filter((d): d is string => !!d))].sort(), [headcountWorkers]);
+  const empOptions = useMemo(() => headcountWorkers.filter((w) => !dept || w.dept === dept), [headcountWorkers, dept]);
+  const filtered = useMemo(() => (employee ? filterSlice(employee, dept, emp) : undefined), [employee, dept, emp]);
+  const shownCount = emp ? 1 : empOptions.length;
 
   if (loading) {
     return <div className="py-16 text-center text-sm text-[#6B7280]">Loading…</div>;
@@ -69,19 +100,54 @@ export function EmployeesView() {
     return (
       <Card className="border-[#F0D9AE] bg-[#FDF3E4]">
         <CardContent className="p-4 text-sm text-[#B5701A]">
-          Couldn't load Employees: {error ?? "unknown error"}
+          Couldn't load Employees:{error ?? "unknown error"}
         </CardContent>
       </Card>
     );
   }
 
+  const selectCls = "h-9 max-md:h-10 rounded-md border border-[#E2DDD8] bg-[#E8E1D6] px-3 text-sm text-[#1F1D1B] focus:outline-none";
+  const filterBar = (
+    <Card>
+      <CardContent className="p-3 flex flex-wrap items-end gap-3">
+        <label className="text-[11px] text-[#6B7280] space-y-1 block max-md:w-full">
+          Department
+          <select className={`${selectCls} block min-w-[180px] max-md:w-full max-md:min-w-0`} value={dept} onChange={(e) => { setDept(e.target.value); setEmp(""); }}>
+            <option value="">All departments</option>
+            {depts.map((d) => <option key={d} value={d}>{d}</option>)}
+          </select>
+        </label>
+        <label className="text-[11px] text-[#6B7280] space-y-1 block max-md:w-full">
+          Employee
+          <select className={`${selectCls} block min-w-[200px] max-md:w-full max-md:min-w-0`} value={emp} onChange={(e) => setEmp(e.target.value)}>
+            <option value="">All employees</option>
+            {empOptions.map((w) => <option key={w.id} value={w.id}>{w.name ?? w.empNo ?? w.id}</option>)}
+          </select>
+        </label>
+        <button
+          type="button"
+          onClick={() => { setDept(""); setEmp(""); }}
+          className="h-9 max-md:h-10 max-md:w-full rounded-md border border-[#E2DDD8] bg-[#E8E1D6] px-3 text-sm font-medium text-[#1F1D1B] hover:bg-[#DDD5C7]"
+        >
+          Reset
+        </button>
+        <span className="ml-auto max-md:ml-0 text-xs text-[#6B7280]">
+          {shownCount} employee{shownCount === 1 ? "" : "s"} · {dept || "all departments"}
+        </span>
+      </CardContent>
+    </Card>
+  );
+
   return (
     <div className="space-y-6 max-md:space-y-4">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-lg font-semibold text-[#1F1D1B]">Employees</h2>
         <LiveBadge live={live} />
       </div>
       <MissingNote fields={missing} />
+
+      {sub === "overview" && (
+        <>
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
         <Kpi
@@ -124,14 +190,22 @@ export function EmployeesView() {
           <CardTitle>Working vs production hours</CardTitle>
         </CardHeader>
         <CardContent>
-          <div style={{ width: "100%", height: 220 }}>
+          <div className="select-none [&_*]:outline-none [&_.recharts-wrapper]:outline-none" style={{ width: "100%", height: 220 }}>
             {chartData.length === 0 ? (
               <div className="flex items-center justify-center h-full text-xs text-[#6B7280]">
                 No clocked hours in range.
               </div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={chartData} margin={{ top: 6, right: 6, bottom: 0, left: 0 }}>
+                <ComposedChart
+                  data={chartData}
+                  margin={{ top: 6, right: 6, bottom: 0, left: 0 }}
+                  style={{ cursor: "pointer" }}
+                  onClick={(e) => {
+                    const hit = chartData.find((d) => d.date === e?.activeLabel);
+                    if (hit) onPeriodChange({ ...period, day: period.day === hit.iso ? undefined : hit.iso });
+                  }}
+                >
                   <defs>
                     <linearGradient id="empWorkGrad" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="0%" stopColor={TAUPE} stopOpacity={0.22} />
@@ -140,7 +214,8 @@ export function EmployeesView() {
                   </defs>
                   <XAxis dataKey="date" tick={{ fontSize: 10, fill: MUTED }} axisLine={{ stroke: BORDER }} tickLine={false} />
                   <YAxis tick={{ fontSize: 10, fill: MUTED }} axisLine={false} tickLine={false} width={32} />
-                  <Tooltip contentStyle={{ background: "#FFFFFF", border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: 12 }} />
+                  <Tooltip cursor={{ stroke: BORDER }} contentStyle={{ background: "#FFFFFF", border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: 12 }} />
+                  {period.day && <ReferenceLine x={period.day.slice(5)} stroke={TAUPE} strokeDasharray="3 3" />}
                   <Legend wrapperStyle={{ fontSize: 11 }} />
                   <Area type="monotone" dataKey="Working Hours" stroke={TAUPE} fill="url(#empWorkGrad)" strokeWidth={2} />
                   <Line type="monotone" dataKey="Production Hours" stroke={TEAL} strokeWidth={1.5} dot={false} />
@@ -189,6 +264,25 @@ export function EmployeesView() {
           </div>
         </CardContent>
       </Card>
+        </>
+      )}
+
+      {sub === "time" && employee && filtered && (
+        <>
+          {filterBar}
+          <TimeAttendancePanels employee={filtered} period={period} onPeriodChange={onPeriodChange} target={config?.efficiencyTargetPct ?? 100} />
+
+      <AttendanceLogCard employee={filtered ?? employee} period={period} perDay={!!emp} />
+        </>
+      )}
+
+      {sub === "efficiency" && employee && filtered && (
+        <>
+          {filterBar}
+          <DeptEfficiencyCard employee={filtered} period={period} target={config?.efficiencyTargetPct ?? 100} />
+          <EfficiencyPanels employee={filtered} period={period} onPeriodChange={onPeriodChange} onPickEmployee={(id) => setEmp(id)} target={config?.efficiencyTargetPct ?? 100} />
+        </>
+      )}
     </div>
   );
 }

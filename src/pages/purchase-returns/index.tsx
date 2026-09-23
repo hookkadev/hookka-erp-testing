@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Plus, X, Undo2, Trash2 } from "lucide-react";
 import { moneyFieldToSen, firstMoneyFieldError } from "@/lib/money-field";
+import { useIdempotencyKey } from "@/lib/idempotency-key";
 
 type PurchaseReturn = {
   id: string;
@@ -170,6 +171,10 @@ function NewPurchaseReturnDialog({ initialPiId, initialGrnId, onClose, onDone }:
   const [notes, setNotes] = useState("");
   const [resolution, setResolution] = useState("REFUND");
   const [busy, setBusy] = useState(false);
+  // T-006 R10 — the create route is wrapped in withIdempotency server-side; a
+  // retry after a lost response must not raise a second return, which the R6
+  // cap would then reject as an over-return against the GRN line.
+  const createIdem = useIdempotencyKey();
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
@@ -238,9 +243,10 @@ function NewPurchaseReturnDialog({ initialPiId, initialGrnId, onClose, onDone }:
     setBusy(true);
     setErr(null);
     try {
-      const res = await fetch("/api/purchase-returns", {
+      const res = await createIdem.withKey((key) =>
+        fetch("/api/purchase-returns", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Idempotency-Key": key },
         body: JSON.stringify({
           ...(grnMode ? { grnId } : { purchaseInvoiceId: piId }),
           reason,
@@ -257,7 +263,8 @@ function NewPurchaseReturnDialog({ initialPiId, initialGrnId, onClose, onDone }:
             problem: l.problem,
           })),
         }),
-      });
+        }),
+      );
       const j = (await res.json().catch(() => ({}))) as { success?: boolean; error?: string; data?: { returnNo?: string } };
       if (!res.ok || !j.success) { setErr(j.error || `Failed (HTTP ${res.status})`); return; }
       window.alert(`Purchase Return ${j.data?.returnNo ?? ""} created.`);
