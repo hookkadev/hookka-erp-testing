@@ -22,11 +22,13 @@
 //    cards carry no unit count in the feed.
 //
 //  PRODUCTION REVENUE, per day
-//    Value of production orders that COMPLETED that day = PO quantity × the
-//    unit price of its own sales-order line (do-value.ts loadPoValueMap — the
-//    same resolver Delivery/Planning use, integer sen). It is the value of what
-//    production finished, NOT invoiced or delivered revenue. Orders whose price
-//    cannot be resolved (value 0) are counted in `unpricedOrders`, not hidden.
+//    Pre-aggregated in SQL by dashboard-prototype.ts with the main dashboard's
+//    definition (dashboard-overview.ts, Employee /production-revenue): a PO
+//    books on the day its LAST upholstery job card completes, SO line → CO
+//    line → product master price × qty, SOFA/BEDFRAME/ACCESSORY, integer sen.
+//    It is the value of what production finished, NOT invoiced or delivered
+//    revenue. Orders whose price resolves to 0 are counted in
+//    `unpricedOrders`, not hidden.
 // ---------------------------------------------------------------------------
 
 export type DailyPo = {
@@ -41,6 +43,13 @@ export type DailyJc = {
   status: string | null;
   dueDate: string | null;
   completedDate: string | null;
+};
+
+export type DailyRevenueRow = {
+  date: string;
+  orders: number | string;
+  unpricedOrders: number | string;
+  revenueSen: number | string;
 };
 
 export type DailySlice = {
@@ -75,7 +84,7 @@ const up = (s: string | null | undefined) => (s ?? "").toUpperCase();
 export function buildDailySlice(
   pos: DailyPo[],
   cards: DailyJc[],
-  poValueSen: Map<string, number> | null,
+  revenueByDay: DailyRevenueRow[] | null,
   revenueError?: string,
 ): DailySlice {
   const ord = new Map<string, { date: string; planOrders: number; planUnits: number; actualOrders: number; actualUnits: number }>();
@@ -84,10 +93,8 @@ export function buildDailySlice(
     if (!e) ord.set(d, (e = { date: d, planOrders: 0, planUnits: 0, actualOrders: 0, actualUnits: 0 }));
     return e;
   };
-  const rev = new Map<string, { date: string; orders: number; unpricedOrders: number; revenueSen: number }>();
   let withoutTarget = 0;
   let completedTotal = 0;
-  let unpriced = 0;
   for (const p of pos) {
     const st = up(p.status);
     if (st === "CANCELLED") continue;
@@ -105,15 +112,12 @@ export function buildDailySlice(
     const e = o(c);
     e.actualOrders++;
     e.actualUnits += qty;
-    if (poValueSen) {
-      const v = Math.round(poValueSen.get(p.id) ?? 0);
-      let r = rev.get(c);
-      if (!r) rev.set(c, (r = { date: c, orders: 0, unpricedOrders: 0, revenueSen: 0 }));
-      r.orders++;
-      r.revenueSen += v;
-      if (v <= 0) { r.unpricedOrders++; unpriced++; }
-    }
   }
+
+  const rev = (revenueByDay ?? []).flatMap((r) => {
+    const d = day(r.date);
+    return d ? [{ date: d, orders: num(r.orders), unpricedOrders: num(r.unpricedOrders), revenueSen: Math.round(num(r.revenueSen)) }] : [];
+  });
 
   const stg = new Map<string, { date: string; dept: string; plan: number; actual: number }>();
   const s = (d: string, dept: string) => {
@@ -140,7 +144,7 @@ export function buildDailySlice(
   return {
     orders: { byDay: [...ord.values()].sort(byDate), withoutTarget, completedTotal },
     stages: { byDay: [...stg.values()].sort(byDate), cardsWithoutDue },
-    revenue: poValueSen ? { byDay: [...rev.values()].sort(byDate), unpricedOrders: unpriced } : null,
+    revenue: revenueByDay ? { byDay: rev.sort(byDate), unpricedOrders: rev.reduce((a, r) => a + r.unpricedOrders, 0) } : null,
     ...(revenueError ? { revenueError } : {}),
   };
 }

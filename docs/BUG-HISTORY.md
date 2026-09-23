@@ -1,6 +1,6 @@
 # Bug History
 
-> **Last verified: 2026-09-22** — newest entry BUG-2026-09-22-179 (branch `fix/scan-queue-client-driven`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-09-23** — newest entry BUG-2026-09-23-182 (branch `laphii/fix/dashboard-exp-production-revenue`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 
 Living log of bugs we've identified, diagnosed, and fixed in Hookka ERP.
 
@@ -35,6 +35,31 @@ Entries themselves stay newest-first.
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
 
 ---
+
+## BUG-2026-09-23-182 — Experimental dashboard Operations › Revenue & Cost showed a different Production revenue from the main Dashboard (~RM 6k on 22 Sep) `dashboard` 🟡
+
+🟡 **Fix in progress** · owner-reported: main Dashboard revenue chart tooltip for 09-22 shows
+Production RM 14,134; the experimental dashboard's Operations › Revenue & Cost shows ~RM 6k
+different for the same day.
+
+**Root cause.** Two definitions of "production revenue". The main Dashboard
+(`dashboard-overview.ts` prodRevRes / prodWeekRes) and the Employee page's
+`/production-revenue` book a PO on the day its **last UPHOLSTERY job card** completes, priced
+SO line (by `line_no`) → CO line → product list price × qty, SOFA/BEDFRAME/ACCESSORY only.
+The experimental feed (`dashboard-daily-slice.ts`) booked it on the **PO's own
+`completed_date` with status COMPLETED** (after packing — a later day, and only once the whole
+PO closes), priced via `loadPoValueMap` (no CO / product fallback, every category). Which of
+the three differences made the RM 6k on 22 Sep is **UNMEASURED** — the prod read was not run
+from this session.
+
+**Fix.** `dashboard-prototype.ts` now runs the main Dashboard's per-PO UPHOLSTERY SQL,
+bucketed by `to_char(unit_completed_at::date,'YYYY-MM-DD')` exactly as `bucketExpr` does, and
+`buildDailySlice` passes those per-day rows through. UI copy on desktop + mobile now states
+the upholstery definition. The PO-based "Orders completed" KPI became "Orders upholstered".
+
+**Regression test.** `tests/dashboard-daily-slice.test.mjs` → "revenue: per-day SQL rows
+normalised + sorted …" (also asserts a COMPLETED PO no longer produces revenue on its own).
+**Still to do:** verify live — 22 Sep on both screens must read the same figure.
 
 ## BUG-2026-09-22-179 — PO create / PO detail: typing "18" into Price (RM) produced "1.008" — the field reformatted to "1.00" after the first keystroke `procurement` `ui-frontend` `money-input` 🟢
 

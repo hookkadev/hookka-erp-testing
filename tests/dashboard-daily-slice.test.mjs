@@ -1,7 +1,7 @@
 // dashboard-daily-slice.test.mjs — the "Daily (Lim)" feed slice definitions:
 // plan = target_end_date day, actual = COMPLETED on completed_date day, cancelled
-// excluded, revenue = poValueSen of orders completed that day, null when values
-// could not be loaded, unpriced completed orders counted not hidden.
+// excluded, revenue = the SQL's per-day rows (last-UPH-JC day, same as the main
+// dashboard) passed through sorted + numeric, null when the query failed.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildDailySlice } from "../src/api/lib/dashboard-daily-slice.ts";
@@ -17,7 +17,7 @@ test("orders: plan by target day, actual by completion day, cancelled excluded",
       po("d", "COMPLETED", 1, null, "2026-09-02"),
     ],
     [],
-    new Map(),
+    [],
   );
   const d1 = s.orders.byDay.find((d) => d.date === "2026-09-01");
   const d2 = s.orders.byDay.find((d) => d.date === "2026-09-02");
@@ -41,12 +41,21 @@ test("stages: due_date plan vs completed/transferred actual per department", () 
   assert.equal(s.stages.cardsWithoutDue, 1);
 });
 
-test("revenue: sen per completion day, unpriced counted, null without value map", () => {
-  const rows = [po("a", "COMPLETED", 1, null, "2026-09-02"), po("b", "COMPLETED", 1, null, "2026-09-02"), po("c", "PENDING", 1, null, null)];
-  const s = buildDailySlice(rows, [], new Map([["a", 12345.4]]));
-  assert.deepEqual(s.revenue.byDay, [{ date: "2026-09-02", orders: 2, unpricedOrders: 1, revenueSen: 12345 }]);
+test("revenue: per-day SQL rows normalised + sorted, unpriced summed, null on error", () => {
+  // Postgres hands SUM/COUNT back as strings; the slice must not concatenate them.
+  const s = buildDailySlice([], [], [
+    { date: "2026-09-22", orders: "3", unpricedOrders: "1", revenueSen: "1413400" },
+    { date: "2026-09-21T00:00:00", orders: 1, unpricedOrders: 0, revenueSen: 12345.4 },
+  ]);
+  assert.deepEqual(s.revenue.byDay, [
+    { date: "2026-09-21", orders: 1, unpricedOrders: 0, revenueSen: 12345 },
+    { date: "2026-09-22", orders: 3, unpricedOrders: 1, revenueSen: 1413400 },
+  ]);
   assert.equal(s.revenue.unpricedOrders, 1);
-  const n = buildDailySlice(rows, [], null, "boom");
+  // Revenue is NOT derived from PO status/completed_date any more.
+  const byPo = buildDailySlice([po("a", "COMPLETED", 1, null, "2026-09-02")], [], []);
+  assert.deepEqual(byPo.revenue.byDay, []);
+  const n = buildDailySlice([], [], null, "boom");
   assert.equal(n.revenue, null);
   assert.equal(n.revenueError, "boom");
 });

@@ -15,7 +15,7 @@ import type { EmployeeSlice } from "./EmployeesInsights";
 // The day-by-day production panels, mounted by the tab that owns each one:
 //   plan      Operations > Plan vs Actual   (definitions are in the card
 //             subtitles and mirrored in src/api/lib/dashboard-daily-slice.ts)
-//   revenue   Operations > Revenue & Cost   (value of orders completed per day)
+//   revenue   Operations > Revenue & Cost   (value of orders whose upholstery finished per day)
 //   DeptEfficiencyCard   Employees > Efficiency
 // Everything reads the same cached GET /api/dashboard/prototype feed. The
 // slice is optional: a 60s-cached payload from before it existed has no such
@@ -332,16 +332,16 @@ export function ProductionDailyPanels({
         <>
           <div className="grid grid-cols-2 xl:grid-cols-3 gap-3">
             <Kpi label="Production revenue" value={formatCurrency(revTotals.sen)} sub={period.day ? dayLabel(period.day) : periodLabel(period)} icon={Banknote} iconBgClass="bg-[#E6F0F3]" iconColorClass="text-[#3E6570]" valueColorClass="text-[#3E6570]" valueSizeClass="text-xl" />
-            <Kpi label="Orders completed" value={fmtN(revTotals.orders)} icon={PackageCheck} iconBgClass="bg-[#EEF3E4]" iconColorClass="text-[#4F7C3A]" />
+            <Kpi label="Orders upholstered" value={fmtN(revTotals.orders)} icon={PackageCheck} iconBgClass="bg-[#EEF3E4]" iconColorClass="text-[#4F7C3A]" />
             <Kpi label="Completed with no price" value={fmtN(revTotals.unpriced)} sub="value could not be resolved (counted as RM 0)" icon={AlertTriangle} iconBgClass="bg-[#FAEFCB]" iconColorClass="text-[#9C6F1E]" valueColorClass={revTotals.unpriced ? "text-[#9C6F1E]" : undefined} />
           </div>
           <Card>
             <CardHeader className="pb-3">
               <CardTitle>Production revenue · by {unit}</CardTitle>
               <p className="text-xs text-[#6B7280] max-w-3xl">
-                {periodLabel(period)}. Value of production orders that <b>completed</b> on the {unit}: order quantity × the unit price of
-                its own sales-order line (the same resolver Delivery uses). It is the value of what production finished — not invoiced
-                or delivered revenue, and not the sales figure on the Sales Orders tab.
+                {periodLabel(period)}. Value of production orders whose <b>last upholstery job card</b> completed on the {unit}: order
+                quantity × its sales-order line price (consignment line, then product list price, as fallbacks). Sofa, bedframe and
+                accessory only — the same figure as the Production line on the main Dashboard. Not invoiced or delivered revenue.
               </p>
             </CardHeader>
             <CardContent>

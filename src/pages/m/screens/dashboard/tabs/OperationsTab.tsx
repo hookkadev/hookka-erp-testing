@@ -554,7 +554,7 @@ function CostPanel({ data, period, setPeriod }: PanelProps) {
         <>
           <MKpiGrid>
             <MKpi label="Production revenue" value={money(rev.sen)} tone={M_ACCENT.info.fg} sub={periodLabel(period)} />
-            <MKpi label="Orders completed" value={fmtN(rev.orders)} />
+            <MKpi label="Orders upholstered" value={fmtN(rev.orders)} />
             <div style={{ gridColumn: "1 / -1" }}>
               <MKpi
                 label="Completed with no price"
@@ -575,8 +575,8 @@ function CostPanel({ data, period, setPeriod }: PanelProps) {
               emptyText="Nothing recorded in this period."
             />
             <Note>
-              Value of production orders that completed on the {unit}: quantity × the unit price of its own sales-order line.
-              It is what production finished — not invoiced or delivered revenue, and not the Sales tab figure.
+              Value of production orders whose last upholstery job card completed on the {unit}: quantity × its sales-order
+              line price. Sofa, bedframe and accessory only — same as the main Dashboard's Production line. Not invoiced revenue.
             </Note>
           </MSection>
         </>
