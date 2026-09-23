@@ -45,10 +45,12 @@ jobs:
     runs-on: ubuntu-latest
     # Makes each run a GitHub Deployment: the repo home page's "Deployments"
     # sidebar (and every PR) shows it in progress while it builds/deploys,
-    # then Active / Failed, with a link to the site it went to.
+    # then Active / Failed, with a link to the site it went to. PR canaries
+    # are NOT recorded (deployment: false) — only real branch deploys show.
     environment:
       name: ${{ github.ref == 'refs/heads/main' && 'production' || github.ref_name == 'staging' && 'staging' || 'preview' }}
-      url: ${{ github.ref == 'refs/heads/main' && 'https://erp.hookka.com' || github.event_name == 'pull_request' && format('https://canary-{0}.hookka-erp-testing.pages.dev', github.event.pull_request.number) || github.ref_name == 'staging' && 'https://staging.hookka-erp-testing.pages.dev' || 'https://hookka-erp-testing.pages.dev' }}
+      url: ${{ github.ref == 'refs/heads/main' && 'https://erp.hookka.com' || github.ref_name == 'staging' && 'https://staging.hookka-erp-testing.pages.dev' || 'https://hookka-erp-testing.pages.dev' }}
+      deployment: ${{ github.event_name != 'pull_request' }}
     permissions:
       contents: read
       deployments: write
