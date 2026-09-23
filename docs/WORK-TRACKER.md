@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-23** — branch `fix/production-auto-load` added below (open, its entry is the newest).
 > **Last verified: 2026-09-23** — branch `fix/so-duplicate-ref-saves-draft` added below (open, its entry is the newest).
 > **Last verified: 2026-09-22** — branch `fix/scan-queue-client-driven` added below (open, its entry is the newest).
 > **Last verified: 2026-09-22** — branch `fix/datagrid-selection-loop` added below (open, its entry is the newest). Previously: branch `fix/delivery-tab-switch-pagination` (MERGED as #467). Previously: branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
@@ -19,6 +20,17 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+---
+
+## 2026-09-23 — 🔵 /production: remove "Load all" (branch `fix/production-auto-load`)
+
+Owner: "i want the load all button to be remove because its annoying every time i refresh i need
+to click load all". The Overview/full page started empty behind a lazy `shouldFetch` gate
+(armed by a filter or Load all). Gate, button, "No orders loaded yet" callout and "Pick a filter"
+hint removed — every mode fetches on mount. Open: payload / first-load time on the Overview is
+UNMEASURED; the table-virtualization ask (same day) is parked pending the owner naming the
+lagging table.
 
 ---
 

@@ -1,5 +1,8 @@
 # Performance & Correctness Backlog
 
+> **Last verified: 2026-09-23** (branch `fix/production-auto-load`) — only the `/production` row of the
+> client-search table: the page no longer starts empty; it fetches on mount.
+
 > **Last verified: 2026-08-14** (branch `docs/docs-vs-code-audit`) — corrected against the
 > source by the prose audit; the row(s) touched here are itemised in
 > [`docs/DOCS-VS-CODE-AUDIT.md`](DOCS-VS-CODE-AUDIT.md). Only the claims listed there were
@@ -205,7 +208,7 @@ match), but the cost scales with the table:
 | `/sales` | **2,215 KB decoded**, 4,480 ms on the first keystroke | **YES** — pg_trgm, `?search=` returns 164 matches in **172 ms** and already includes `total` |
 | `/procurement` | 0.16 MB / 113 ms (only 165 POs) | no |
 | `/procurement/grn` | not measured | no |
-| `/production` | **fires nothing** — the page starts empty by design ("Pick a filter or Load all") | no |
+| `/production` | loads every production order on mount since 2026-09-23 (the "Load all" gate was removed); payload size **not measured** | no |
 
 `/sales` is the only one that currently hurts. **The trap before swapping in the
 server search:** the client matches **17 visible columns**, the server matches 5 —

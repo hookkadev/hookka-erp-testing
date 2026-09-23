@@ -44,6 +44,8 @@
 
 > **Last verified: 2026-09-23 on branch `fix/so-duplicate-ref-saves-draft`** — the Sales rows for `sales-orders.ts` / `sales/create.tsx` and the `scan-po-modal.tsx` row: line counts re-measured (`wc -l`), behaviour of BUG-2026-09-23-185 noted; the `src/api/routes/sales-orders.ts:4003` `lineNo` anchor re-derived.
 
+> **Last verified: 2026-09-23 on branch `fix/production-auto-load`** — the `production/index.tsx` row only: line count re-measured (`wc -l`, was 8888) and the removed "Load all" gate noted.
+
 > **Last verified: 2026-09-22 on branch `fix/scan-queue-client-driven`** — the Scan-queue rows only (`scan-queue.ts` row, its route table, its Internals paragraph): re-anchored after BUG-2026-09-22-178 made the OCR browser-driven; the machine gate `check-codebase-map.mjs` exits 0 (its only errors were these rows); its 17 advisories about unmapped `src/pages/m/**` and production-component files predate this branch and are unchanged.
 
 > **Last verified: 2026-09-22** (dashboard-prototype.tsx / dashboard-shared.tsx / dashboard-shared-lib.ts rows: Day/Month/YTD nav redesign) / 2026-09-21 (URL navigation state) / 2026-08-14 — re-checked mechanically by `node scripts/check-codebase-map.mjs`,
@@ -476,7 +478,7 @@ authoritative current detail.** New here? Start with [ONBOARDING-PATH.md](ONBOAR
 
 | Frontend page | API route | Primary tables | Tests |
 |---|---|---|---|
-| `src/pages/production/index.tsx` — dept-tabbed WIP board (8888) | `src/api/routes/production-orders.ts` — PO/job-card/WIP backend (7.6k) | `production_orders` / `production_orders_archive` / `production_orders_list_snapshot` | `tests/bom-explosion.test.mjs` |
+| `src/pages/production/index.tsx` — dept-tabbed WIP board; fetches on mount, no "Load all" gate since 2026-09-23 (9659, re-measured 2026-09-23) | `src/api/routes/production-orders.ts` — PO/job-card/WIP backend (7.6k) | `production_orders` / `production_orders_archive` / `production_orders_list_snapshot` | `tests/bom-explosion.test.mjs` |
 | `src/pages/production/folders.tsx` — folder list | `src/api/routes/production-folders.ts` — group/ungroup | `job_cards` / `job_cards_archive` / `job_card_events` | `tests/job-card-id.test.mjs` |
 | `src/pages/production/folder-detail.tsx` — folder detail | `src/api/routes/job-cards.ts` — reads + event timeline | `folder_job_cards` / `production_folders` | `tests/production-fresh-po-direct-db.test.mjs` |
 | _(no page)_ `/production/tracker` — redirect only, → `/planning?tab=tracker`. The Master Tracker is a Planning TAB; the standalone `production/tracker.tsx` was deleted 2026-08-13 (unreachable since the route became a redirect, imported nowhere) | `src/api/routes/bom.ts` — bom_templates + bom_versions | `wip_items` / `wip_cascade_log` / `piece_pics` | `tests/production-order-builder.test.mjs` |
