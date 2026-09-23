@@ -1,5 +1,8 @@
 # Recurring bug classes — the index that makes P5 executable
 
+> **Last verified: 2026-09-23** — restamped on branch `fix/so-duplicate-ref-saves-draft`: only C21 row 11
+> (the SO duplicate-reference guard is now a warning, anchor re-derived to `sales-orders.ts:1795`).
+>
 > **Last verified: 2026-09-22** — restamped on branch `fix/scan-queue-client-driven`, which
 > **adds C25 — long work handed to `ctx.waitUntil`** (BUG-2026-09-22-178). Previously:
 >
@@ -1455,7 +1458,7 @@ IDENTITY or MONEY.
 | 8 | `admin.ts:1229`, `delivery-orders/_helpers.ts:1419` — `inv.salesOrderId ?? soIds[0]` as `priceForItem`'s `fallbackSoId` | a price, but only for lines with **no production-order link** | ⬜ **deliberate, do not "fix" in isolation** — this is `priceForItem`'s documented first-one-wins, whose last resort is `byAnyCode` anyway. Closed as the price half of BUG-2026-07-17-001 (2026-08-07) |
 | 9 | `delivery-orders/_helpers.ts:1741`, `delivery-orders.ts:1651` — `doRow.salesOrderId \|\| soIds[0]` | the **header** SO id on a combined invoice | ✅ benign, and labelled in place: the authoritative link is `deliveryOrderId`, and identity is per-line via `invoice_items.so_item_id` |
 | 10 | `worker/scan.tsx:1107` — `?? wkCards[0]` | which card of a compartment is DISPLAYED | ✅ benign: `wkCards` is already filtered to ONE production order **and** ONE `wipKey`, so every candidate is the same physical compartment, and the server decides the completion from the worker's token |
-| 11 | `purchase-invoices.ts:1178`, `sales-orders.ts:1653` — `?? dupNums[0]` | which reference is **named** in a duplicate-rejection message | ✅ benign: the `.find` covers the real case and the authoritative `duplicateOf` is exact. (Sub-note: their `LIMIT 1` has no `ORDER BY`, so with two duplicates it names an arbitrary one — still a rejection either way) |
+| 11 | `purchase-invoices.ts:1178`, `sales-orders.ts:1795` — `?? dupNums[0]` / `?? soRefs[0]` | which reference is **named** in a duplicate-rejection message (SO: a duplicate-reference *warning* since BUG-2026-09-23-185 — the SO is saved as DRAFT) | ✅ benign: the `.find` covers the real case and the authoritative `duplicateOf` is exact. (Sub-note: their `LIMIT 1` has no `ORDER BY`, so with two duplicates it names an arbitrary one — still a rejection either way) |
 | 12 | `mail-center.ts:401` — `recipients.find(/@hookka\.com/) \|\| recipients[0]` | which mailbox an inbound email is filed under | ✅ low-risk: a stated preference rule, no configured mailbox matched, and the message is stored intact |
 | 13 | UI selection defaults — `default-bank.ts:12`, `bom.tsx` ×6, `procurement/{create,detail,index}.tsx` + `pi/create.tsx` (`bindings.find(isMainSupplier) ?? bindings[0]`), `employees.tsx:5376`, `finance-dashboard.tsx:549`, `leads/index.tsx:402`, `m/FormSheet.tsx:527`, `m/ModuleListScreen.tsx:220-221`, `mail-center/index.tsx:3301`, `maintenance/sofa-combos.tsx:1212`, `inventory/index.tsx:2607`, `scan-supplier-modal.tsx` ×4 (`activeOrgs[0]?.code ?? "HOOKKA"`) | a **pre-filled** value the user sees and can change before saving | ✅ benign — see "Not every `[0]` is this class" above |
 | 14 | `accounting.ts:11043` (`others[0]` + `"+N"`), `delivery-orders.ts:2274` (error text) | display only, and the truncation is visible | ✅ benign |

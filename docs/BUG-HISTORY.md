@@ -1,6 +1,6 @@
 # Bug History
 
-> **Last verified: 2026-09-23** — newest entry BUG-2026-09-23-184 (branch `fix/special-order-config-only-surcharge`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-09-23** — newest entry BUG-2026-09-23-185 (branch `fix/so-duplicate-ref-saves-draft`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 
 Living log of bugs we've identified, diagnosed, and fixed in Hookka ERP.
 
@@ -33,6 +33,38 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-09-23-185 — Scanned PO with a repeated customer S/O no. was rejected and the scan lost `sales` `scan-po` 🟡
+
+🟡 **Fix in progress** · DEV-12 (High, reported by Siti 2026-09-23 13:59, ref HC-SO-013492): when a
+scanned PO carried the same customer S/O no. as an earlier order, the system "will not proceed the new
+order" — it was not saved as a draft.
+
+**Root cause.** `POST /api/sales-orders` had a duplicate-document guard (owner 2026-07) that returned
+**409** when `customerPOId` OR `customerSOId` was already on a non-cancelled SO for the same customer.
+Houzs reuses its S/O no. across POs, so a legitimate new PO was refused. Evidence (owner's Sales
+Orders search, 2026-09-23): HC-PO-2609-025 / `HC-SO-013492` (09/09, INVOICED — not cancelled, so
+it still counted) and HC-PO-2609-070 / **`HC-SO--013492`** (23/09, IN PRODUCTION): after the
+refusal the operator typed a second dash to slip past the guard, so that SO now carries a wrong
+customer S/O no. (data fix left to the owner; other `--` workarounds UNMEASURED). Worse, `scan-po-modal.tsx`
+consumed EVERY selected scan after the create loop — including the failed ones — so the rejected
+order vanished from the queue instead of waiting to be retried. (The supplier scan modal already
+consumed only successfully-created rows; the PO modal was the outlier.)
+
+**Fix.**
+- `sales-orders.ts` create: the guard now records `duplicateWarning` instead of returning 409; the SO
+  is saved as DRAFT (as every new SO is) and the 201 carries `duplicateOf` + `warning`. A true
+  duplicate customer PO still cannot be CONFIRMED — BR-SO-010 in the confirm handler is unchanged.
+- `scan-po-modal.tsx`: only rows whose SO was created are consumed (`createdRows`); a warning shows
+  in a separate amber "Check before confirming" box, not under "failed to create".
+- `sales/create.tsx`: a warned SO is NOT auto-confirmed by "Create Order" — it stays DRAFT with a
+  toast. The mobile form (`m/config/forms.ts`) has no notice channel, so it saves the DRAFT silently.
+
+**Verified.** `tests/so-duplicate-ref-draft.test.mjs`; `tsc -p tsconfig.app.json` exit 0; full
+`npm test` pass. Not browser-verified (needs a login). **Prod state UNMEASURED** — how many scans
+were lost this way was not queried.
 
 ---
 
