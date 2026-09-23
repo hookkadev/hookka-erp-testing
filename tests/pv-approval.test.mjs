@@ -74,6 +74,19 @@ test("lifecycle: an unposted voucher is a plain status flip, never applyLifecycl
   assert.ok(unposted < lifecycle, "unposted branch must return before applyLifecycle");
 });
 
+// 2026-09-22 (clearing the smoke-test vouchers): a voided DRAFT answered
+// "Already cancelled" to delete and could never leave the list. delete on an
+// unposted voucher now writes the DELETED lifecycle row the list filters on;
+// unvoid clears it back to ACTIVE.
+test("delete on an unposted voucher hides it; unvoid restores it — via document_lifecycle", () => {
+  const body = handler('app.post("/payment-vouchers/:id/lifecycle", async (c) => {');
+  const unposted = body.slice(body.indexOf('if (pvApState !== "APPROVED") {'), body.indexOf("applyLifecycle("));
+  assert.match(unposted, /if \(action === "delete"\) \{/);
+  assert.match(unposted, /lifecycleRow\("DELETED"\)/);
+  assert.match(unposted, /lifecycleRow\("ACTIVE"\)/);
+  assert.match(unposted, /VALUES \(\?, 'payment_voucher', \?, \?, \?, \?, \?\)/);
+});
+
 test("restate refuses a voucher that has not posted", () => {
   const body = handler('app.post("/payment-vouchers/:id/restate", async (c) => {');
   assert.match(body, /Not posted yet — edit the draft directly/);

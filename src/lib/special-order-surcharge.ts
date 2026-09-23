@@ -83,18 +83,65 @@ export function parseSpecialOrderTokens(text: string | null | undefined): string
     .filter((s) => s.length > 0 && !/^OTHER\s*:/i.test(s));
 }
 
-/** Catalog price for one option NAME. Owner's kv_config override wins; the
- *  static table is the fallback. Unknown name → 0 (not a priced option). */
+/** Catalog price for one option NAME. Owner's kv_config entry wins — including
+ *  options that exist ONLY in the config (added in Settings, not in the static
+ *  table); the static table is the fallback. Unknown in both → 0.
+ *  BUG-2026-09-23: a config-only option (e.g. sofa "Extend Down 6\"(1A)") used
+ *  to return 0 here, so ticking it showed "+RM 100" but added nothing. */
 function priceOfSen(name: string, cfgSpecials?: CfgSpecial[] | null): number {
-  const known = specialOrderOptions.find((o) => o.name === name);
-  if (!known) return 0;
   if (Array.isArray(cfgSpecials)) {
     const hit = cfgSpecials.find(
       (e) => e && typeof e === "object" && e.value === name,
     );
     if (hit && Number.isFinite(Number(hit.priceSen))) return Number(hit.priceSen);
   }
-  return known.surcharge;
+  return specialOrderOptions.find((o) => o.name === name)?.surcharge ?? 0;
+}
+
+/** The checkbox code for an option name: the static table's code, else the
+ *  name slugged — the same shape every form's `availableSpecials` derives for
+ *  config-only options. */
+export function specialCodeForName(name: string): string {
+  return (
+    specialOrderOptions.find((o) => o.name === name)?.code ??
+    name.toUpperCase().replace(/[^A-Z0-9]+/g, "_")
+  );
+}
+
+/** Reverse of specialCodeForName: code → option name, looking in the static
+ *  table first, then the kv_config entries (config-only options). */
+export function specialNameForCode(code: string, cfgSpecials?: unknown): string | null {
+  const known = specialOrderOptions.find((o) => o.code === code);
+  if (known) return known.name;
+  if (!Array.isArray(cfgSpecials)) return null;
+  for (const e of cfgSpecials) {
+    const v =
+      e && typeof e === "object" && "value" in e
+        ? String((e as { value: unknown }).value)
+        : typeof e === "string" ? e : null;
+    if (v && specialCodeForName(v) === code) return v;
+  }
+  return null;
+}
+
+/** Keep only well-formed {value, priceSen} entries from a raw kv_config list. */
+export function toCfgSpecials(raw: unknown): CfgSpecial[] | null {
+  if (!Array.isArray(raw)) return null;
+  return raw
+    .filter(
+      (e): e is CfgSpecial =>
+        !!e && typeof e === "object" && "value" in e && "priceSen" in e,
+    )
+    .map((e) => ({ value: String(e.value), priceSen: Number(e.priceSen) }));
+}
+
+/** Surcharge (sen) for the ticked checkbox CODES of a line — the one rule every
+ *  SO / CO form uses. `rawCfg` is maintenanceConfig.specials / .sofaSpecials. */
+export function calcSpecialsSurchargeSen(codes: string[], rawCfg?: unknown): number {
+  const names = codes
+    .map((c) => specialNameForCode(c, rawCfg))
+    .filter((n): n is string => !!n);
+  return deriveSpecialOrderSurchargeSen(names.join("; "), null, toCfgSpecials(rawCfg));
 }
 
 /**
@@ -136,6 +183,44 @@ export function deriveSpecialOrderSurchargeSen(
     if (Number.isFinite(v) && v > 0) sen += Math.round(v);
   }
   return sen;
+}
+
+/**
+ * BUG-2026-09-23-183 backfill maths for ONE saved line. The old forms dropped
+ * config-only options (added in Settings) from the surcharge, and saved them
+ * as their slug code ("EXTEND_DOWN_5_1A_") instead of their name.
+ *
+ * Returns the text with slugs turned back into names, and the delta to ADD:
+ * the price of the config-only options, capped at (owed − charged) so a line
+ * that was already charged them (the old SOFA edit page priced them right)
+ * gets 0 — never a double charge, never a decrease, and a static-catalog price
+ * that moved in Settings since the order was taken is NOT re-priced.
+ */
+export function repriceSavedSpecialsLine(
+  line: {
+    specialOrder: string | null | undefined;
+    customSpecials?: CustomSpecialInput[] | null;
+    chargedSen: number;
+  },
+  rawCfg: unknown,
+): { text: string; owedSen: number; deltaSen: number } {
+  const cfg = toCfgSpecials(rawCfg);
+  const inCatalog = (t: string) => specialOrderOptions.some((o) => o.name === t);
+  const inCfg = (t: string) => !!cfg?.some((e) => e.value === t);
+  const original = String(line.specialOrder ?? "");
+  const tokens = original.split(/[;,]/).map((s) => s.trim()).filter(Boolean);
+  const fixed = tokens.map((t) =>
+    /^OTHER\s*:/i.test(t) || inCatalog(t) || inCfg(t) ? t : specialNameForCode(t, cfg) ?? t,
+  );
+  const text = fixed.some((t, i) => t !== tokens[i]) ? fixed.join("; ") : original;
+
+  const configOnly = new Set(
+    parseSpecialOrderTokens(text).filter((t) => !inCatalog(t) && inCfg(t)),
+  );
+  const configOnlySen = [...configOnly].reduce((s, t) => s + priceOfSen(t, cfg), 0);
+  const owedSen = deriveSpecialOrderSurchargeSen(text, line.customSpecials, cfg);
+  const deltaSen = Math.max(0, Math.min(configOnlySen, owedSen - line.chargedSen));
+  return { text, owedSen, deltaSen };
 }
 
 /**

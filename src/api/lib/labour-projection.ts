@@ -3,14 +3,15 @@
 // Owner 2026-08-31 (P&L auto-extract): a month whose payroll has not been
 // generated yet must still show labour on the P&L. This is a DRY RUN of the
 // payslip-generation maths — the same computeMonthlyLabor engine, the same
-// effective-dated salaries/pay rules, the same efficiency allowance and
-// employer statutory — aggregated per department and NEVER stored. When the
-// owner later presses Generate, the stored payslips replace this number with
-// the exact same figures (one engine, no jump).
+// effective-dated salaries/pay rules, the same efficiency + leadership
+// allowances and employer statutory — aggregated per department and NEVER
+// stored. When the owner later presses Generate, the stored payslips replace
+// this number with the exact same figures (one engine, no jump).
 //
 // Deliberately NOT computed here: PCB (employee tax — needs YTD context and
 // affects net pay, not company cost), advances, bank details. Company cost =
-// gross (basic earned + OT + efficiency allowance) + employer EPF/SOCSO/EIS.
+// gross (basic earned + OT + efficiency allowance + leadership allowance) +
+// employer EPF/SOCSO/EIS.
 //
 // Mirrors src/api/routes/payslips.ts GET /projected + POST / — if that loop
 // gains a new cost component, add it here too (grep: labour-projection).
@@ -26,6 +27,7 @@ import {
   resolveEfficiencyAllowanceSen,
   monthBounds,
 } from "./efficiency-allowance";
+import { resolveLeadershipAllowanceSen } from "./leadership-allowance";
 import { resolvePayRulesAsOf } from "../../lib/pay-rules";
 import { loadPayRuleVersions } from "./pay-rules-store";
 import { calcStatutory } from "../routes/payslips";
@@ -56,6 +58,7 @@ type ProjWorkerRow = {
   joinDate: string | null;
   efficiencyAllowanceSen: number | null;
   efficiencyThresholdPct: number | null;
+  leadershipAllowanceSen: number | null;
   payMode: string | null;
   dailyRateSen: number | null;
 };
@@ -69,7 +72,7 @@ export async function projectedLabourByDept(
 
   const wres = await db
     .prepare(
-      "SELECT id, departmentCode, status, basicSalarySen, workingDaysPerMonth, workingHoursPerDay, otMultiplier, epfEnabled, socsoEnabled, eisEnabled, resignedAt, joinDate, efficiencyAllowanceSen, efficiencyThresholdPct, payMode, dailyRateSen FROM workers WHERE (status = 'ACTIVE' OR (status = 'RESIGNED' AND resignedAt LIKE ?)) AND empNo NOT LIKE 'TEST%'",
+      "SELECT id, departmentCode, status, basicSalarySen, workingDaysPerMonth, workingHoursPerDay, otMultiplier, epfEnabled, socsoEnabled, eisEnabled, resignedAt, joinDate, efficiencyAllowanceSen, efficiencyThresholdPct, leadershipAllowanceSen, payMode, dailyRateSen FROM workers WHERE (status = 'ACTIVE' OR (status = 'RESIGNED' AND resignedAt LIKE ?)) AND empNo NOT LIKE 'TEST%'",
     )
     .bind(`${period}-%`)
     .all<ProjWorkerRow>();
@@ -195,12 +198,21 @@ export async function projectedLabourByDept(
       payRuleVersions,
     });
 
-    const allowances = resolveEfficiencyAllowanceSen(
-      effByWorker.get(worker.id),
-      worker.efficiencyAllowanceSen,
-      worker.efficiencyThresholdPct,
-      { workingDays: worker.workingDaysPerMonth, absentDays: labor.payroll.absentDays },
-    );
+    const attendanceForAllowances = {
+      workingDays: worker.workingDaysPerMonth,
+      absentDays: labor.payroll.absentDays,
+    };
+    // Combined non-statutory allowance (efficiency + leadership) — mirrors
+    // payslips.ts's combined `allowances` bucket so this dry-run cost agrees
+    // with the real generated payslip.
+    const allowances =
+      resolveEfficiencyAllowanceSen(
+        effByWorker.get(worker.id),
+        worker.efficiencyAllowanceSen,
+        worker.efficiencyThresholdPct,
+        attendanceForAllowances,
+      ) +
+      resolveLeadershipAllowanceSen(worker.leadershipAllowanceSen, attendanceForAllowances);
 
     // Employer statutory only — pcbEnabled:false keeps the PCB engine (and
     // its YTD context) entirely out of a cost projection.

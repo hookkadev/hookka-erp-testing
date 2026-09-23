@@ -4,7 +4,27 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { parseStatusList, startOfMonthMYT } from "../src/lib/delivery-list-filters.ts";
+import { parseStatusList, startOfMonthMYT, pageSlice } from "../src/lib/delivery-list-filters.ts";
+
+test("pageSlice: 50-row pages of an in-memory list; a search term bypasses the slice", () => {
+  const rows = Array.from({ length: 335 }, (_, i) => i + 1);
+  assert.deepEqual(pageSlice(rows, 1, 50, false).slice(0, 2), [1, 2]);
+  assert.equal(pageSlice(rows, 1, 50, false).length, 50);
+  assert.deepEqual(pageSlice(rows, 7, 50, false), rows.slice(300)); // last page: 35 rows
+  assert.deepEqual(pageSlice(rows, 8, 50, false), []); // past the end → empty, never throws
+  assert.equal(pageSlice(rows, 0, 50, false)[0], 1); // garbage page → page 1
+  assert.equal(pageSlice(rows, 3, 50, true).length, 335); // searching → whole list
+});
+
+test("source guard: the page's loading flag gates on the CURRENT tab's rows only", () => {
+  const page = readFileSync(new URL("../src/pages/delivery/index.tsx", import.meta.url), "utf8");
+  // BUG-2026-09-22-004: one slow /api/customers must not blank a Planning grid
+  // that already holds its rows.
+  assert.doesNotMatch(page, /doLoading \|\| poLoading \|\| soLoading/);
+  assert.match(page, /const loading = PO_TABS\.has\(activeTab\)\s*\? poLoading/);
+  assert.match(page, /pageSlice\(planningPOs, page, LIST_PAGE_SIZE, searching\)/);
+  assert.match(page, /pageSlice\(readyPOs, page, LIST_PAGE_SIZE, searching\)/);
+});
 
 test("parseStatusList: comma list, trimmed, blanks dropped", () => {
   assert.deepEqual(parseStatusList("DRAFT"), ["DRAFT"]);

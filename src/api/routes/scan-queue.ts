@@ -13,16 +13,29 @@
 //   1. POST /api/scan-queue/upload — multipart with `kind=po|supplier`,
 //      `files[]`, optional `supplierId`. Returns IMMEDIATELY with
 //      `{ batchId, items: [{ id, fileName, status, cached }] }`.
-//   2. waitUntil() kicks off processBatch() server-side. The Workers
-//      runtime keeps the worker alive past the response until the promise
-//      settles, so processing continues even after the client disconnects.
-//   3. The browser navigates to /scan-queue/<batchId> which polls
-//      GET /api/scan-queue/batch/:batchId every 5s.
+//   2. The modal DRIVES the work: it keeps up to 3 POST
+//      /api/scan-queue/batch/:batchId/work requests open; each one claims
+//      ONE queued row, runs the extract, writes the result and returns.
+//      (2026-09-22, BUG-2026-09-22-178.) It used to be waitUntil() kicking
+//      processBatch() after the upload response — but Cloudflare cancels
+//      waitUntil tasks 30 s after the response is sent, so any page whose
+//      Sonnet call ran longer was killed mid-fetch, sat 'processing' until
+//      the 5-minute sweeper re-queued it, and was killed again on the
+//      re-kick. Every page cost 5 min per attempt and failed after three.
+//      An HTTP request the client holds open has NO duration limit, so
+//      the row is driven from the browser instead. NEVER re-add a
+//      waitUntil kick here: a claim that gets cancelled blocks its row for
+//      STUCK_MS. Guarded by tests/scan-queue-client-driven.test.mjs.
+//   3. The modal also polls GET /api/scan-queue/batch/:batchId every 5s
+//      to render rows as they land, and re-pokes the driver whenever the
+//      poll shows a 'queued' row (retry / sweep re-queue).
 //   4. Per-file SHA-256 file_hash cache: re-uploading the same bytes
 //      returns the prior 'done' row's raw_json INSTANTLY with no Claude
 //      call. Inserted as a fresh row with status='cached' for audit.
-//   5. Cron sweep at /api/internal/scan-queue-sweep re-queues any
-//      'processing' row older than 5 minutes (worker died mid-batch).
+//   5. Sweepers (per-poll `sweepStuckBatch`, cron `sweepStuckScans`)
+//      re-queue any 'processing' row older than STUCK_MS (the driving
+//      request died — tab closed mid-call). They only re-queue; the next
+//      open modal drives the row.
 //
 // File storage strategy
 // ---------------------
@@ -298,39 +311,32 @@ function hydrateRow(r: Record<string, unknown>): ScanQueueRow {
 }
 
 // ---------------------------------------------------------------------------
-// processBatch — the actual OCR worker. Runs under c.executionCtx.waitUntil
-// so it survives after the upload response is flushed.
+// processOneRow — the actual OCR worker for ONE row. Claims the oldest
+// 'queued' row in the batch, runs the extract (or the auto-split), writes the
+// result, and returns. Called from POST /batch/:batchId/work, which the modal
+// holds open — the request lives as long as the extract does, so the
+// 30-second waitUntil cap never applies (see the header).
 //
-// Sequential per-batch (one Claude call at a time) to stay under Anthropic's
-// 30K tokens/min tier-1 budget. The batch worker iterates queued rows in
-// insertion order; the cron sweeper handles re-kicking stuck batches.
-// ---------------------------------------------------------------------------
 // Owner ruling 2026-06-30: auto-split already chops a 130-page PDF into ~30
-// children, but a SINGLE serial worker still processed them one-at-a-time
-// (30 children × ~30-60s each = 15-30 min wait). Run N processOneRow loops
-// in parallel — each claims a queued row, processes it, loops for the next.
-// 6 concurrent fits comfortably under Cloudflare Workers memory (each row
-// holds ~1-2MB bytes + a Sonnet call's in-flight state). The atomic UPDATE
-// claim guards against two workers grabbing the same row.
+// children; the modal keeps 3 /work requests open so children run in parallel,
+// and this cap bounds how many rows of one batch may be 'processing' at once
+// (a second tab, or a script, cannot push past it). The atomic UPDATE claim
+// guards against two callers grabbing the same row.
+// ---------------------------------------------------------------------------
 const PROCESS_BATCH_CONCURRENCY = 6;
 
-async function processBatch(
-  db: Env["Variables"]["DB"],
-  env: Env["Bindings"],
-  batchId: string,
-): Promise<void> {
-  const workers = Array.from({ length: PROCESS_BATCH_CONCURRENCY }, () =>
-    processOneAtATime(db, env, batchId),
-  );
-  await Promise.allSettled(workers);
-}
+type ProcessOutcome =
+  | { kind: "processed"; id: string }
+  | { kind: "skipped" } // lost the claim race — caller loops
+  | { kind: "drained" } // no 'queued' row left in the batch
+  | { kind: "error"; error: string };
 
-async function processOneAtATime(
+async function processOneRow(
   db: Env["Variables"]["DB"],
   env: Env["Bindings"],
   batchId: string,
-): Promise<void> {
-  while (true) {
+): Promise<ProcessOutcome> {
+  {
     let next: ScanQueueRow | null = null;
     try {
       const res = await db
@@ -345,14 +351,14 @@ async function processOneAtATime(
       next = res ? hydrateRow(res) : null;
     } catch (e) {
       console.error("[scan-queue] poll failed:", (e as Error).message);
-      return;
+      return { kind: "error", error: `Queue read failed: ${(e as Error).message}` };
     }
-    if (!next) return; // batch drained
+    if (!next) return { kind: "drained" };
 
     const nowIso = new Date().toISOString();
     // Claim the row — UPDATE … WHERE status = 'queued' so a parallel
     // sweeper can't double-claim. If the UPDATE matches zero rows the
-    // worker just loops to grab a different one.
+    // caller just loops to grab a different one.
     let claimed = false;
     try {
       const upd = await db
@@ -369,7 +375,7 @@ async function processOneAtATime(
     } catch (e) {
       console.error("[scan-queue] claim failed:", (e as Error).message);
     }
-    if (!claimed) continue;
+    if (!claimed) return { kind: "skipped" };
 
     // Which attempt this is (1-based). The claim above bumped the stored
     // counter; `next` was read pre-bump, so add 1. Drives the retry-vs-fail
@@ -681,8 +687,9 @@ async function processOneAtATime(
       }
     } catch (e) {
       console.error("[scan-queue] result write failed:", (e as Error).message);
-      return;
+      return { kind: "error", error: `Result write failed: ${(e as Error).message}` };
     }
+    return { kind: "processed", id: next.id };
   }
 }
 
@@ -860,14 +867,74 @@ app.post("/upload", async (c) => {
     }
   }
 
-  // Kick off the worker AFTER the response is flushed. waitUntil keeps the
-  // worker alive past the response so the user can close the tab and
-  // processing continues server-side.
-  if (items.some((it) => it.status === "queued")) {
-    c.executionCtx?.waitUntil(processBatch(c.var.DB, c.env, batchId));
+  // No server-side kick here — the modal drives the rows through
+  // POST /batch/:batchId/work (see the header for why waitUntil cannot).
+  return c.json({ success: true, data: { batchId, items } });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/scan-queue/batch/:batchId/work — process ONE queued row of the
+// batch and return. The modal keeps a few of these open until the batch
+// drains. Loops only on a lost claim race; a real outcome returns at once.
+//
+// Response data: { processed: rowId | null, drained: bool, busy: bool }
+//   processed — the row this call finished (any terminal status)
+//   drained   — no 'queued' row left; the driver may stop
+//   busy      — PROCESS_BATCH_CONCURRENCY rows already 'processing';
+//               the driver backs off and asks again
+// ---------------------------------------------------------------------------
+app.post("/batch/:batchId/work", async (c) => {
+  const denied = await requirePermission(c, "purchase-orders", "create");
+  if (denied) return denied;
+
+  await ensureScanQueueTable(c.var.DB);
+  const batchId = c.req.param("batchId");
+  const orgId = getOrgId(c);
+
+  // The batch must be this org's. Rows of one batch share an org (they were
+  // uploaded together), so one existence check covers the claim below.
+  let counts: { total: number; processing: number } | null = null;
+  try {
+    counts = await c.var.DB.prepare(
+      `SELECT COUNT(*) AS total,
+              SUM(CASE WHEN status = 'processing' THEN 1 ELSE 0 END) AS processing
+         FROM scan_queue
+        WHERE batch_id = ? AND (org_id = ? OR org_id IS NULL)`,
+    )
+      .bind(batchId, orgId)
+      .first<{ total: number; processing: number }>();
+  } catch (e) {
+    return c.json(
+      { success: false, error: `Query failed: ${(e as Error).message}` },
+      500,
+    );
+  }
+  if (!counts || Number(counts.total) === 0) {
+    return c.json({ success: false, error: "Batch not found." }, 404);
+  }
+  if (Number(counts.processing) >= PROCESS_BATCH_CONCURRENCY) {
+    return c.json({
+      success: true,
+      data: { processed: null, drained: false, busy: true },
+    });
   }
 
-  return c.json({ success: true, data: { batchId, items } });
+  // Loops only on a lost claim race.
+  while (true) {
+    const r = await processOneRow(c.var.DB, c.env, batchId);
+    if (r.kind === "skipped") continue;
+    if (r.kind === "error") {
+      return c.json({ success: false, error: r.error }, 500);
+    }
+    return c.json({
+      success: true,
+      data: {
+        processed: r.kind === "processed" ? r.id : null,
+        drained: r.kind === "drained",
+        busy: false,
+      },
+    });
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -881,9 +948,9 @@ app.get("/batch/:batchId", async (c) => {
   const batchId = c.req.param("batchId");
   const orgId = getOrgId(c);
 
-  // Self-heal before reading: re-queue + re-kick any row stuck 'processing'
-  // past STUCK_MS so a dead-worker page recovers on this poll tick.
-  await sweepStuckBatch(c.var.DB, c.env, c.executionCtx, batchId);
+  // Self-heal before reading: re-queue any row stuck 'processing' past
+  // STUCK_MS so a dead-driver page recovers on this poll tick.
+  await sweepStuckBatch(c.var.DB, batchId);
 
   let rows;
   try {
@@ -1012,9 +1079,9 @@ app.get("/pending", async (c) => {
     return c.json({ success: true, data: { batchId: null, items: [], summary: null } });
   }
 
-  // Self-heal the resumed batch: re-queue + re-kick any row stuck 'processing'
-  // past STUCK_MS (see sweepStuckBatch) before returning it to the modal.
-  await sweepStuckBatch(c.var.DB, c.env, c.executionCtx, latest.batchId);
+  // Self-heal the resumed batch: re-queue any row stuck 'processing' past
+  // STUCK_MS (see sweepStuckBatch) before returning it to the modal.
+  await sweepStuckBatch(c.var.DB, latest.batchId);
 
   // Now pull every row for that batch (including ones already consumed, so
   // the modal can show the full audit). The modal filters out consumed
@@ -1254,7 +1321,7 @@ app.post("/:id/retry", async (c) => {
       500,
     );
   }
-  c.executionCtx?.waitUntil(processBatch(c.var.DB, c.env, row.batchId));
+  // The modal's next poll sees the 'queued' row and pokes its driver.
   return c.json({ success: true, data: { id, status: "queued" } });
 });
 
@@ -1402,9 +1469,9 @@ app.post("/:id/consume", async (c) => {
 
 // ---------------------------------------------------------------------------
 // Sweeper — internal cron hook. Re-queues any 'processing' row older than
-// STUCK_MS (worker died mid-batch / Workers killed the isolate). Re-kicks
-// processBatch for each affected batchId. Same CRON_SECRET pattern as the
-// rest of /api/internal/*.
+// STUCK_MS (the driving request died — tab closed mid-call). Re-queue ONLY:
+// the next open modal drives the row. Same CRON_SECRET pattern as the rest
+// of /api/internal/*.
 //
 // NOTE: registered separately in worker.ts at /api/internal/scan-queue-sweep
 // (BEFORE the auth middleware) — we EXPORT the handler so worker.ts can
@@ -1413,8 +1480,6 @@ app.post("/:id/consume", async (c) => {
 // ---------------------------------------------------------------------------
 export async function sweepStuckScans(
   db: Env["Variables"]["DB"],
-  env: Env["Bindings"],
-  ctx: ExecutionContext | undefined,
 ): Promise<{ requeued: number; batches: string[] }> {
   await ensureScanQueueTable(db);
   const cutoff = new Date(Date.now() - STUCK_MS).toISOString();
@@ -1474,9 +1539,6 @@ export async function sweepStuckScans(
     return { requeued: 0, batches: [] };
   }
   const batchIds = Array.from(new Set(rows.map((r) => r.batchId)));
-  for (const bId of batchIds) {
-    ctx?.waitUntil(processBatch(db, env, bId));
-  }
   return { requeued: rows.length, batches: batchIds };
 }
 
@@ -1487,15 +1549,13 @@ export async function sweepStuckScans(
 // the primary recovery path on Cloudflare Pages, which can't schedule the
 // CRON_SECRET sweeper (see wrangler.toml — Pages has no [triggers] crons).
 //
-// Re-queues any 'processing' row in this batch older than STUCK_MS (its worker
-// died / the isolate was killed mid-OCR) and re-kicks processBatch only if
-// something was actually freed. Best-effort: a sweep failure is swallowed so
-// it can never break the poll response the modal depends on.
+// Re-queues any 'processing' row in this batch older than STUCK_MS (the
+// driving request died — tab closed mid-call). Re-queue only: the modal's poll
+// sees the 'queued' row and pokes its driver. Best-effort: a sweep failure is
+// swallowed so it can never break the poll response the modal depends on.
 // ---------------------------------------------------------------------------
 async function sweepStuckBatch(
   db: Env["Variables"]["DB"],
-  env: Env["Bindings"],
-  ctx: ExecutionContext | undefined,
   batchId: string,
 ): Promise<void> {
   const cutoff = new Date(Date.now() - STUCK_MS).toISOString();
@@ -1519,7 +1579,7 @@ async function sweepStuckBatch(
       .bind(nowIso, batchId, cutoff, MAX_OCR_ATTEMPTS)
       .run();
     // Still-retriable stuck rows → back to the queue for another go.
-    const upd = await db
+    await db
       .prepare(
         `UPDATE scan_queue
             SET status = 'queued', started_at = NULL
@@ -1530,9 +1590,6 @@ async function sweepStuckBatch(
       )
       .bind(batchId, cutoff, MAX_OCR_ATTEMPTS)
       .run();
-    if ((upd.meta?.changes ?? 0) > 0) {
-      ctx?.waitUntil(processBatch(db, env, batchId));
-    }
   } catch (e) {
     console.error("[scan-queue] batch sweep failed:", (e as Error).message);
   }

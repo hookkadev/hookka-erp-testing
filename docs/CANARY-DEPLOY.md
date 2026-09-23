@@ -1,7 +1,7 @@
 # Canary Deploys on PR — Phase B.5
 
-> **Last verified: 2026-08-13** against `.github/workflows/deploy.yml` (the `Deploy to Cloudflare Pages (canary)` step and its `github-script` comment), `src/api/worker.ts:294-310` (`isPreviewHostname` / `pickDbUrl`), and `wrangler.toml` (`[[hyperdrive]] HYPERDRIVE` + `HYPERDRIVE_STAGING`).
-> Corrected 2026-08-13: the "What canary deploys share with production" section was backwards and listed a binding that no longer exists. Canary URLs are `*.hookka-erp-testing.pages.dev`, which `isPreviewHostname` classifies as PREVIEW, so they hit **staging Supabase, not production**. And there is no D1 binding — it was retired 2026-04-27.
+> **Last verified: 2026-09-23** against `src/api/worker.ts` (`isPreviewHostname` / `pickDbUrl`) and `.github/workflows/deploy.yml` (canary step + PR comment).
+> Changed 2026-09-23 (`fix/canary-prod-db`): PR canaries now use the **PRODUCTION** database. `isPreviewHostname` returns false for any `canary-*` host. Other previews (`staging.`, `claude/**` branch slugs, commit-hash URLs) still use staging.
 
 **Status:** Live as of 2026-04-25 (`feat(ci): canary deploy on PR`).
 
@@ -58,33 +58,29 @@ There is **no D1 binding**. It was removed from `wrangler.toml` on
 so. Any doc or review checklist that tells you to check D1 on a canary is
 out of date.
 
-### The database a canary actually talks to: STAGING
+### The database a canary actually talks to: PRODUCTION
 
-`pickDbUrl` (`src/api/worker.ts:305`) routes on the request **hostname**,
+`pickDbUrl` (`src/api/worker.ts`) routes on the request **hostname**,
 not on an env var — Cloudflare Pages ignores `[env.preview.vars]` and locks
 dashboard vars once `wrangler.toml` defines `[vars]`, so hostname is the
-only reliable signal. `isPreviewHostname` (`worker.ts:294`) returns:
+only reliable signal. `isPreviewHostname` returns:
 
 * `hookka-erp-testing.pages.dev` exactly → production
-* anything else ending in `.hookka-erp-testing.pages.dev` → **preview**
+* `canary-<PR>.hookka-erp-testing.pages.dev` → **production** (since 2026-09-23)
+* anything else ending in `.hookka-erp-testing.pages.dev` → preview → staging
 * a custom domain (`erp.hookka.com`) → production
 
-A canary URL is `https://canary-<PR>.hookka-erp-testing.pages.dev`, which
-matches the second rule. So a canary reads and writes **staging Supabase
-(`HYPERDRIVE_STAGING`)**, not production.
+Why: on staging data a canary could not answer "are the real figures
+right?" (canary-490, dashboard revenue). Consequences:
 
-Consequences — the opposite of what this doc used to say:
-
-* Canary writes do NOT reach production data. Destructive testing on a
-  canary is comparatively safe.
-* But a canary is NOT a production-data test either. "It worked on the
-  canary" says nothing about prod row counts, prod-only data shapes, or
-  prod schema drift. `docs/PRE-DEPLOY-CHECKLIST.md` exists precisely
-  because that gap caused the 2026-04-29 outage.
-* Staging schema can lag prod. A PR depending on a new migration will hit
-  "column not found" on the canary until someone applies it to staging —
-  migrations are never applied automatically by any deploy
-  (`.github/workflows/deploy.yml` only prints a reminder).
+* **A canary write is a real prod write.** Treat the canary like prod.
+* A PR's runtime self-apply (`ALTER TABLE … ADD COLUMN IF NOT EXISTS`)
+  runs against **prod** the first time the canary hits that route — before
+  the PR is merged. Review migrations before clicking around a canary.
+* Only the canary URL gets prod. The same deployment's commit-hash URL
+  (`<hash>.hookka-erp-testing.pages.dev`) still resolves to staging.
+* `/api/health` on a canary reports `isPreview: false` — use it to confirm
+  which DB you are on.
 
 ---
 
@@ -106,9 +102,8 @@ When you click the canary URL, run through:
 Compare side-by-side: open canary in one tab, production
 (`https://erp.hookka.com` — the pages.dev URL also still resolves and is
 in the CORS allowlist) in another, walk the same flow, look for
-behavioral diffs. Remember the two tabs are on **different databases**
-(staging vs prod), so data differences are expected and only *behavioral*
-differences are signal.
+behavioral diffs. Both tabs are on the **same prod database**, so
+figures should match unless the PR changed them.
 
 ---
 

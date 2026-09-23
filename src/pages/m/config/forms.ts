@@ -1470,6 +1470,7 @@ export function editEmployeeSpec(doc: Record<string, unknown>, id: string): Form
       { name: "workingDaysPerMonth", label: "Working Days / Month", kind: "number" as const },
       { name: "otMultiplier", label: "OT Multiplier", kind: "number" as const },
       { name: "efficiencyAllowanceSen", label: "Efficiency Allowance (RM)", kind: "money" as const, full: true },
+      { name: "leadershipAllowanceSen", label: "Leadership Allowance (RM)", kind: "money" as const, full: true },
       { name: "status", label: "Status", kind: "select" as const, options: WORKER_STATUS_OPTS, full: true },
       { name: "resignedAt", label: "Resigned Date (if RESIGNED)", kind: "date" as const, full: true },
     ],
@@ -1483,6 +1484,7 @@ export function editEmployeeSpec(doc: Record<string, unknown>, id: string): Form
       workingDaysPerMonth: n(doc.workingDaysPerMonth) || 26,
       otMultiplier: n(doc.otMultiplier) || 1.5,
       efficiencyAllowanceSen: n(doc.efficiencyAllowanceSen),
+      leadershipAllowanceSen: n(doc.leadershipAllowanceSen),
       status: s(doc.status) || "ACTIVE",
       resignedAt: s(doc.resignedAt),
     },
@@ -1503,6 +1505,7 @@ export function editEmployeeSpec(doc: Record<string, unknown>, id: string): Form
         workingDaysPerMonth: n(v.workingDaysPerMonth) || 26,
         otMultiplier: n(v.otMultiplier) || 1.5,
         efficiencyAllowanceSen: n(v.efficiencyAllowanceSen),
+        leadershipAllowanceSen: n(v.leadershipAllowanceSen),
         status: s(v.status) || "ACTIVE",
         resignedAt: s(v.resignedAt) || null,
         // Preserve existing arrays/flags the backend expects in PUT.

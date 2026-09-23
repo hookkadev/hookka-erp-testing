@@ -2527,6 +2527,7 @@ const employeeDetail: DetailConfig = {
     fld("Join Date", (d) => dateOnly(d, "joinDate")),
     fld("Basic Salary", (d) => money(num(d, "basicSalarySen"))),
     fld("Efficiency Allowance", (d) => money(num(d, "efficiencyAllowanceSen"))),
+    fld("Leadership Allowance", (d) => money(num(d, "leadershipAllowanceSen"))),
     fld("OT Multiplier", (d) => {
       const ot = num(d, "otMultiplier");
       return ot > 0 ? `${ot}×` : "—";

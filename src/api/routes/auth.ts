@@ -1121,12 +1121,42 @@ app.get("/role-permissions/:role", async (c) => {
   const role = (c.req.param("role") || "").trim().toUpperCase();
   const coded = permissionsForRole(role);
   if (!coded) {
+    // A table-defined role (0045-seeded: FINANCE, PROCUREMENT, …): answer with
+    // the SAME join the gate runs (rbac.ts loadRolePermissions — roles.name =
+    // users.role TEXT), so what this reports is what the API enforces. Owner
+    // 2026-09-22 「我要确定 finance@hookka.com 的 user 有什么权限」— before this
+    // the only way to see a table role's grants was to log in as it.
+    let rows: { resource: string; action: string }[] = [];
+    let joinFailed = false;
+    try {
+      const res = await c.var.DB.prepare(
+        `SELECT p.resource AS resource, p.action AS action
+           FROM role_permissions rp
+           JOIN roles r       ON r.id  = rp.roleId
+           JOIN permissions p ON p.id  = rp.permissionId
+          WHERE r.name = ?`,
+      ).bind(role).all<{ resource: string; action: string }>();
+      rows = res.results ?? [];
+    } catch {
+      joinFailed = true;
+    }
+    const permissions = [...new Set(rows.map((r) => `${r.resource}:${r.action}`))].sort();
+    // Zero rows → the gate falls back (SUPER_ADMIN/ADMIN *:*, READ_ONLY *:read,
+    // anything else *:read). Say so rather than report an empty set as "nothing".
+    const fallback = permissions.length === 0
+      ? (role === "SUPER_ADMIN" || role === "ADMIN" ? ["*:*"] : ["*:read"])
+      : null;
     return c.json({
       success: true,
       role,
       codedPolicy: false,
-      permissions: [],
-      note: "No policy in code for this role — its permissions come from the role_permissions table.",
+      permissions: fallback ?? permissions,
+      source: joinFailed ? "join-failed-fallback" : fallback ? "no-rows-fallback" : "role_permissions",
+      note: joinFailed
+        ? "The role_permissions join failed — the gate would fall back to read-only."
+        : fallback
+          ? "No rows in role_permissions for this role — the gate falls back to this default."
+          : "Read from the role_permissions table — the same join the API gate uses.",
     });
   }
   return c.json({
@@ -1134,6 +1164,7 @@ app.get("/role-permissions/:role", async (c) => {
     role,
     codedPolicy: true,
     permissions: [...coded].sort(),
+    source: "code",
   });
 });
 
