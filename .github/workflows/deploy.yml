@@ -44,12 +44,11 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     # Production deploys show in the repo home page's "Deployments" sidebar:
-    # in progress while it builds/deploys, then Active / Failed, linked to the
-    # live site. Only runs on main are recorded (deployment: false otherwise) —
+    # in progress while it builds/deploys, then Active / Failed (no URL shown,
+    # on purpose). Only runs on main are recorded (deployment: false otherwise) —
     # staging / PR canary / branch runs still build + deploy exactly as before.
     environment:
       name: production
-      url: https://erp.hookka.com
       deployment: ${{ github.ref == 'refs/heads/main' }}
     permissions:
       contents: read
