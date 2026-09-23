@@ -1,7 +1,19 @@
 // Stock PO dialog.
-// Lets the factory create a "make-to-stock" production order against a
-// placeholder SOH-YYMM-NNN SO when capacity is free and no real customer
-// order is queued. Two modes:
+// Lets the factory create "make-to-stock" production orders — goods with no
+// customer behind them, booked to the internal Factory Stock customer under an
+// SOH-YYMM-NNN order, when capacity is free and no real customer order is
+// queued.
+//
+// ONE ORDER PER PIECE (DEV-05). Quantity 4 creates FOUR production orders of 1,
+// exactly as a customer order is built. A SOFA set stays one order. This is
+// what lets an arriving order take whole orders out of stock without anything
+// ever being split.
+//
+// The goods are handed over by an ALLOCATION, not by renaming this order. The
+// copy here used to promise "the SO number is replaced in place" — that was
+// never implemented and is not the design.
+//
+// Two modes:
 //   - WIP: build only a sub-assembly (e.g. a Divan group off a bedframe BOM).
 //     Item list is sourced from /historical-wips — distinct wipLabels across
 //     every JobCard the factory has ever run.
@@ -217,8 +229,9 @@ export function CreateStockPODialog({
           <div>
             <h2 className="text-lg font-bold text-[#111827]">Create Stock Production Order</h2>
             <p className="text-xs text-gray-500 mt-0.5">
-              Uses spare capacity to build against a placeholder SOH- SO.
-              When a real order arrives, the SO number is replaced in place.
+              Uses spare capacity to build goods with no customer behind them,
+              booked to Factory Stock under an SOH- number. When a real order
+              arrives the goods are allocated to it — this order stays as it is.
             </p>
           </div>
           <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded">

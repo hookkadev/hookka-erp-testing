@@ -105,6 +105,8 @@ const MINIMAL_KEYS = [
   "companySOId",
   "consignmentOrderId",
   "companyCOId",
+  "isStock",
+  "stockOriginSoId",
   "customerPOId",
   "customerReference",
   "customerSO",
