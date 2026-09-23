@@ -7,6 +7,8 @@
 > `src/api/lib/{dashboard-service-slice,service-issue-stats}.ts`, `src/api/routes/service-cases.ts`
 > L34-60 / L241-288 and `tests/db-schema.json`; everything else keeps the stamp below.
 >
+> **Last verified: 2026-09-23** (branch `feat/service-case-customer-po`) — the `app.post("/")` / `app.put("/:id")` anchors only, re-anchored to `service-cases.ts:650` / `:793` after the list GET gained `loadCustomerPoBySource`.
+>
 > **Last verified: 2026-08-19** against `src/api/routes/{service-cases,service-orders,sales-orders,stock-adjustments}.ts`,
 > `src/lib/{repair-scope,so-mode}.ts`, `src/api/lib/bom-wip-breakdown.ts`,
 > `src/api/routes/sales-orders/_helpers.ts`, all four `src/pages/service-order*/` trees
@@ -80,7 +82,7 @@ legacy path) plus component-level picks on `affectedProducts[].components`, all 
 - Relationships: a case spawns SV orders (`sales_orders.caseid`); confirming a scoped SV order filters WIPs by `repairscope`; replacement parts bypass production entirely and land as stock adjustments backlinked to the case.
 
 ## Core flows
-1. **Create case** — `app.post("/")` `service-cases.ts:614`. Allocates case no (`nextCaseNo` `:366`), sanitizes RCA
+1. **Create case** — `app.post("/")` `service-cases.ts:650`. Allocates case no (`nextCaseNo` `:366`), sanitizes RCA
    (`sanitizeRootCauses` `:178`, `synthesizeRootCauses` `:208`) and `affectedProducts`, stores photos JSON.
 2. **Case status transition** — `app.put("/:id/status")` in `service-cases.ts`, gated by `STATUS_TRANSITIONS` (`:60`).
    Case pipeline is auto-computed display-only in the FE (`CasePipeline` `detail.tsx:965`) from linked SV-order progress.
@@ -109,8 +111,8 @@ legacy path) plus component-level picks on `affectedProducts[].components`, all 
 | `ServiceOrdersListPage` | `src/pages/service-orders/index.tsx:119` | Plural SV-order list |
 | `CreateServiceOrderModal` | `src/pages/service-orders/index.tsx:314` | Create a plural SV order |
 | `ServiceOrderDetailPage` | `src/pages/service-orders/detail.tsx:129` | Plural SV-order detail (returns, repair scope) |
-| `app.post("/")` (case create) | `src/api/routes/service-cases.ts:614` | Create case + RCA/affected-products sanitize |
-| `app.put("/:id")` (case edit) | `src/api/routes/service-cases.ts:757` | Case edit (`ensureCaseLinkColumns` `:239`) |
+| `app.post("/")` (case create) | `src/api/routes/service-cases.ts:650` | Create case + RCA/affected-products sanitize |
+| `app.put("/:id")` (case edit) | `src/api/routes/service-cases.ts:793` | Case edit (`ensureCaseLinkColumns` `:239`) |
 | `STATUS_TRANSITIONS` (case) | `src/api/routes/service-cases.ts:60` | Legal case status moves |
 | `sanitizeRootCauses` / `synthesizeRootCauses` | `src/api/routes/service-cases.ts:178 / 208` | RCA normalization |
 | `app.post("/")` (SV-order create) | `src/api/routes/service-orders.ts:556` | Plural SV order create (`ensureServiceOrderMigrations` `:531`) |
