@@ -23,6 +23,20 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
+## 2026-09-23 — 🔵 /dashboard-experimental: parity with the other dashboards (uncommitted, on `fix/production-auto-load`)
+
+Director: every dashboard's content must also exist on the experimental dashboard. Asks:
+1. ✅ Gap list vs Command Center, /finance-dashboard, Accounting Overview (answered in chat).
+2. 🔵 Same `dashboard:read` gate as /dashboard (route + nav map; `/m` inherits) — done, test added.
+3. 🔵 First batch (the small items): Daily Report tile, Invoices KPI, OCR card (Overview);
+   live Pending Delivery / Outstanding + Order Pipeline with delivered rate (Sales); Department
+   Backlog (Ops > Overview), Completed bedframe/sofa (Ops > Output), Purchasing (Ops > Materials);
+   gross margin / current / quick ratio + AR/AP aging (Finance > Returns).
+   Rule from owner: SAME formula as the source dashboard (shared code, not copies), and NO
+   rounding — truncate to 2 decimals.
+4. ⚪ Remaining (medium): Invoices line on revenue chart, customer AOV/concentration, Top Sellers,
+   Plant Load, Fabric Usage, Finance P&L-vs-forecast / salary / cost structure / cash flow.
+
 ## 2026-09-23 — 🔵 /production: remove "Load all" (branch `fix/production-auto-load`)
 
 Owner: "i want the load all button to be remove because its annoying every time i refresh i need

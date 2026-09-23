@@ -62,12 +62,19 @@ test("the dashboard is management-only, and everyone still has a home", () => {
   // opened to Office without opening Finance with it.
   assert.equal(resourceForNav("/dashboard"), "dashboard");
   assert.equal(resourceForNav("/daily-report"), "dashboard");
+  // Same audience as /dashboard. "/dashboard" does not cover it (prefix match
+  // stops at "/"), so it needs — and has — its own row.
+  assert.equal(resourceForNav("/dashboard-experimental"), "dashboard");
 
   for (const role of ["SALES", "QA", "HR", "R_AND_D"]) {
     const perms = permissionsForRole(role);
     assert.ok(
       hiddenNavPrefixes(perms).includes("/dashboard"),
       `${role} should not see the dashboard`,
+    );
+    assert.ok(
+      hiddenNavPrefixes(perms).includes("/dashboard-experimental"),
+      `${role} should not see the experimental dashboard`,
     );
     const home = homeForPermissions(perms, role);
     assert.notEqual(home, "/dashboard", `${role} must not land on the dashboard`);
@@ -83,6 +90,7 @@ test("the dashboard is management-only, and everyone still has a home", () => {
   const officeHidden = hiddenNavPrefixes(office);
   assert.ok(!officeHidden.includes("/dashboard"), "Office should see the dashboard");
   assert.ok(!officeHidden.includes("/daily-report"), "Office should see the Hookka Report");
+  assert.ok(!officeHidden.includes("/dashboard-experimental"), "Office should see the experimental dashboard");
   assert.ok(officeHidden.includes("/accounting"), "Office must still not see Finance");
 
   const admin = new Set(["*"]);
