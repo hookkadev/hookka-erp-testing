@@ -12,6 +12,9 @@ import {
   deriveSpecialOrderSurchargeSen,
   resolveSpecialOrderPriceSen,
   parseSpecialOrderTokens,
+  calcSpecialsSurchargeSen,
+  specialCodeForName,
+  specialNameForCode,
   HB_DIVAN_TOP_COMBO_DISCOUNT_SEN,
 } from "../src/lib/special-order-surcharge.ts";
 
@@ -209,4 +212,27 @@ test("INV-2607-060 reconstructed: the three missed lines total RM 210", () => {
   ];
   const total = lines.reduce((s, l) => s + resolveSpecialOrderPriceSen(l), 0);
   assert.equal(total, 21000);
+});
+
+// BUG-2026-09-23 — a special that exists ONLY in the Settings config (sofa
+// "Extend Down 6"(1A)", "Bottom Fully Cover (1s)") showed "+RM" on its checkbox
+// but added RM 0 to the line: the code→name lookup and priceOfSen both only
+// knew the static catalog. Every SO/CO form now routes through this helper.
+test("config-only specials are charged, by their checkbox code", () => {
+  const cfg = [
+    { value: 'Extend Down 6"(1A)', priceSen: 10000 },
+    { value: "Bottom Fully Cover (1s)", priceSen: 11000 },
+    { value: "Nylon Fabric", priceSen: 0 },
+  ];
+  const codes = cfg.map((e) => specialCodeForName(e.value));
+  assert.equal(calcSpecialsSurchargeSen(codes, cfg), 21000);
+  assert.equal(specialNameForCode(codes[0], cfg), 'Extend Down 6"(1A)');
+  // Without the config the option is unknown → 0, never a guessed price.
+  assert.equal(calcSpecialsSurchargeSen(codes, undefined), 0);
+});
+
+test("config price overrides the static catalog for a known option", () => {
+  const code = specialCodeForName("Divan Full Cover");
+  assert.equal(calcSpecialsSurchargeSen([code], [{ value: "Divan Full Cover", priceSen: 9000 }]), 9000);
+  assert.equal(calcSpecialsSurchargeSen([code]), 8000);
 });

@@ -31,7 +31,9 @@ import {
 } from "@/lib/pricing-options";
 
 import {
-  deriveSpecialOrderSurchargeSen,
+  calcSpecialsSurchargeSen,
+  specialCodeForName,
+  specialNameForCode,
   HB_DIVAN_TOP_COMBO_DISCOUNT_SEN,
 } from "@/lib/special-order-surcharge";import { fetchVariantsConfig, getVariantsConfigSync, subscribeKvConfig, VARIANTS_CONFIG_KEY } from "@/lib/kv-config";
 import { useCachedJson, invalidateCachePrefix } from "@/lib/cached-fetch";
@@ -196,11 +198,8 @@ function parseInches(h: string): number | null {
  * moment the owner edits a price in Settings. Two implementations of one money
  * rule is how the two sides drift, and a price that drifts is not a display bug.
  */
-function calcSpecialOrderSurcharge(codes: string[]): number {
-  const names = codes
-    .map((c) => specialOrderOptions.find((o) => o.code === c)?.name)
-    .filter((n): n is string => !!n);
-  return deriveSpecialOrderSurchargeSen(names.join("; "));
+function calcSpecialOrderSurcharge(codes: string[], rawCfg?: unknown): number {
+  return calcSpecialsSurchargeSen(codes, rawCfg);
 }
 
 export default function CreateSalesOrderPageWrapper() {
@@ -1131,8 +1130,9 @@ function CreateSalesOrderPage() {
     // uses. Drop any that don't have a known code so the line doesn't
     // carry orphan IDs through to the API.
     const defaultSpecialCodes: string[] = (def.specials ?? [])
-      .map((name) => specialOrderOptions.find((o) => o.name === name)?.code)
-      .filter((c): c is string => !!c);
+      .filter(Boolean)
+      .map((name) => specialCodeForName(name));
+    const specialsCfg = maintenanceConfig?.[isSofa ? "sofaSpecials" : "specials"];
 
     // BF default values (only apply to bedframes — the inputs are hidden
     // for sofa/accessory).
@@ -1152,7 +1152,7 @@ function CreateSalesOrderPage() {
     // handles the HB+Divan combined-cover rule so the prefill matches what
     // toggleSpecialOrder would produce).
     const defaultSpecialSurcharge = defaultSpecialCodes.length > 0
-      ? calcSpecialOrderSurcharge(defaultSpecialCodes)
+      ? calcSpecialOrderSurcharge(defaultSpecialCodes, specialsCfg)
       : 0;
     // Fabric default — resolve by code so downstream fabric picker shows
     // the right selection. Skip if defaults didn't set one.
@@ -1202,7 +1202,7 @@ function CreateSalesOrderPage() {
       specialOrders: defaultSpecialCodes,
       specialOrder: [
         ...defaultSpecialCodes
-          .map((c) => specialOrderOptions.find((o) => o.code === c)?.name ?? "")
+          .map((c) => specialNameForCode(c, specialsCfg) ?? "")
           .filter(Boolean),
         ...items[idx].customSpecials
           .map((cs) => cs.description.trim())
@@ -1428,33 +1428,20 @@ function CreateSalesOrderPage() {
   // the HB+Divan combined-cover rule and the maintenance-config overrides.
   // Pulled out of toggleSpecialOrder so it can be reused when the custom
   // specials list changes (since both feed the same specialOrderPriceSen).
-  const calcPredefinedSurcharge = (codes: string[], isSofa: boolean): number => {
-    const cfgKey = isSofa ? "sofaSpecials" : "specials";
-    const cfgSpecials = maintenanceConfig?.[cfgKey];
-    if (!cfgSpecials || !Array.isArray(cfgSpecials)) {
-      return calcSpecialOrderSurcharge(codes);
-    }
-    // The owner's edited prices go straight into the SHARED rule — this used to
-    // be a third copy of the combo maths, with its own hardcoded RM 100.
-    const names = codes
-      .map((c) => specialOrderOptions.find((o) => o.code === c)?.name)
-      .filter((n): n is string => !!n);
-    const cfg = (cfgSpecials as unknown[])
-      .filter(
-        (e): e is { value: string; priceSen: number } =>
-          !!e && typeof e === "object" && "value" in e && "priceSen" in e,
-      )
-      .map((e) => ({ value: e.value, priceSen: e.priceSen }));
-    return deriveSpecialOrderSurchargeSen(names.join("; "), null, cfg);
-  };
+  // The owner's edited prices go straight into the SHARED rule. Config-only
+  // options (added in Settings) resolve through the config too — they used to
+  // be dropped here, so ticking one added RM 0 (BUG-2026-09-23).
+  const calcPredefinedSurcharge = (codes: string[], isSofa: boolean): number =>
+    calcSpecialOrderSurcharge(codes, maintenanceConfig?.[isSofa ? "sofaSpecials" : "specials"]);
 
   // Build the joined `specialOrder` text column from predefined codes and
   // the custom-special list. Predefined names come first, "OTHER: <desc>"
   // tokens follow — this is the format legacy readers (DO print, invoice,
   // detail page) already render verbatim.
-  const buildSpecialOrderText = (codes: string[], customs: CustomSpecial[]): string => {
+  const buildSpecialOrderText = (codes: string[], customs: CustomSpecial[], isSofa: boolean): string => {
+    const cfg = maintenanceConfig?.[isSofa ? "sofaSpecials" : "specials"];
     const predefinedTokens = codes
-      .map(c => specialOrderOptions.find(o => o.code === c)?.name || c);
+      .map(c => specialNameForCode(c, cfg) || c);
     const customTokens = customs
       .map(c => c.description.trim())
       .filter(Boolean)
@@ -1492,7 +1479,7 @@ function CreateSalesOrderPage() {
     const surcharge = isServiceOrderMode
       ? 0
       : calcTotalSpecialSurcharge(next, item.customSpecials, isSofa);
-    const label = buildSpecialOrderText(next, item.customSpecials);
+    const label = buildSpecialOrderText(next, item.customSpecials, isSofa);
     const patch = {
       specialOrders: next,
       specialOrder: label,
@@ -1519,7 +1506,7 @@ function CreateSalesOrderPage() {
     const surcharge = isServiceOrderMode
       ? 0
       : calcTotalSpecialSurcharge(item.specialOrders, customs, isSofa);
-    const label = buildSpecialOrderText(item.specialOrders, customs);
+    const label = buildSpecialOrderText(item.specialOrders, customs, isSofa);
     const patch: Partial<LineItem> = {
       customSpecials: customs,
       specialOrder: label,
@@ -3480,7 +3467,7 @@ function LineItemCard({
         {item.specialOrders.length > 0 && !showSpecialOrders && (
           <div className="flex flex-wrap gap-1 mt-1.5">
             {item.specialOrders.map(code => {
-              const opt = specialOrderOptions.find(o => o.code === code);
+              const opt = availableSpecials.find(o => o.code === code);
               if (!opt) return null;
               const sc = getConfigSurcharge(isSofa ? "sofaSpecials" : "specials", opt.name, opt.surcharge);
               return (
@@ -3707,7 +3694,7 @@ function LineItemCard({
             </div>
           )}
           {item.specialOrders.length > 0 && item.specialOrders.map(code => {
-            const opt = specialOrderOptions.find(o => o.code === code);
+            const opt = availableSpecials.find(o => o.code === code);
             if (!opt) return null;
             const sc = getConfigSurcharge(isSofa ? "sofaSpecials" : "specials", opt.name, opt.surcharge);
             if (sc === 0) return null;

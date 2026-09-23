@@ -83,18 +83,65 @@ export function parseSpecialOrderTokens(text: string | null | undefined): string
     .filter((s) => s.length > 0 && !/^OTHER\s*:/i.test(s));
 }
 
-/** Catalog price for one option NAME. Owner's kv_config override wins; the
- *  static table is the fallback. Unknown name → 0 (not a priced option). */
+/** Catalog price for one option NAME. Owner's kv_config entry wins — including
+ *  options that exist ONLY in the config (added in Settings, not in the static
+ *  table); the static table is the fallback. Unknown in both → 0.
+ *  BUG-2026-09-23: a config-only option (e.g. sofa "Extend Down 6\"(1A)") used
+ *  to return 0 here, so ticking it showed "+RM 100" but added nothing. */
 function priceOfSen(name: string, cfgSpecials?: CfgSpecial[] | null): number {
-  const known = specialOrderOptions.find((o) => o.name === name);
-  if (!known) return 0;
   if (Array.isArray(cfgSpecials)) {
     const hit = cfgSpecials.find(
       (e) => e && typeof e === "object" && e.value === name,
     );
     if (hit && Number.isFinite(Number(hit.priceSen))) return Number(hit.priceSen);
   }
-  return known.surcharge;
+  return specialOrderOptions.find((o) => o.name === name)?.surcharge ?? 0;
+}
+
+/** The checkbox code for an option name: the static table's code, else the
+ *  name slugged — the same shape every form's `availableSpecials` derives for
+ *  config-only options. */
+export function specialCodeForName(name: string): string {
+  return (
+    specialOrderOptions.find((o) => o.name === name)?.code ??
+    name.toUpperCase().replace(/[^A-Z0-9]+/g, "_")
+  );
+}
+
+/** Reverse of specialCodeForName: code → option name, looking in the static
+ *  table first, then the kv_config entries (config-only options). */
+export function specialNameForCode(code: string, cfgSpecials?: unknown): string | null {
+  const known = specialOrderOptions.find((o) => o.code === code);
+  if (known) return known.name;
+  if (!Array.isArray(cfgSpecials)) return null;
+  for (const e of cfgSpecials) {
+    const v =
+      e && typeof e === "object" && "value" in e
+        ? String((e as { value: unknown }).value)
+        : typeof e === "string" ? e : null;
+    if (v && specialCodeForName(v) === code) return v;
+  }
+  return null;
+}
+
+/** Keep only well-formed {value, priceSen} entries from a raw kv_config list. */
+export function toCfgSpecials(raw: unknown): CfgSpecial[] | null {
+  if (!Array.isArray(raw)) return null;
+  return raw
+    .filter(
+      (e): e is CfgSpecial =>
+        !!e && typeof e === "object" && "value" in e && "priceSen" in e,
+    )
+    .map((e) => ({ value: String(e.value), priceSen: Number(e.priceSen) }));
+}
+
+/** Surcharge (sen) for the ticked checkbox CODES of a line — the one rule every
+ *  SO / CO form uses. `rawCfg` is maintenanceConfig.specials / .sofaSpecials. */
+export function calcSpecialsSurchargeSen(codes: string[], rawCfg?: unknown): number {
+  const names = codes
+    .map((c) => specialNameForCode(c, rawCfg))
+    .filter((n): n is string => !!n);
+  return deriveSpecialOrderSurchargeSen(names.join("; "), null, toCfgSpecials(rawCfg));
 }
 
 /**
