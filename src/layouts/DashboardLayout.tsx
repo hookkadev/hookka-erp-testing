@@ -8,21 +8,20 @@ import { Breadcrumbs } from "@/components/layout/breadcrumbs";
 import { ToastProvider, useToast } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { fetchVariantsConfig } from "@/lib/kv-config";
-import { useVersionCheck } from "@/lib/use-version-check";
+import { useAutoUpdateOnNavigate } from "@/lib/use-version-check";
 import { DASHBOARD_ROUTE_ELEMENTS } from "@/dashboard-routes";
 import { FloatingChatButton } from "@/components/assistant/FloatingChatButton";
 import { MobileBottomNav } from "@/components/layout/mobile-bottom-nav";
 
 // Lives inside ToastProvider so it can pop a toast when a new deploy lands.
-// Polls for a new bundle hash every 5 min + on focus; on change, surfaces a
-// manual confirm() prompt — we deliberately don't auto-reload because the
-// user might be mid-form.
+// Polls for a new bundle hash every 2 min + on focus. On change: offers an
+// immediate reload, and — whatever the answer — reloads on the next page
+// change anyway (never mid-form), so no tab stays on an old deploy.
 function NewVersionWatcher() {
   const { toast } = useToast();
   const { confirm } = useConfirm();
-  useVersionCheck({
-    onNewVersion: () => {
-      toast.info("A new version is available — refresh to update (Ctrl+Shift+R).");
+  useAutoUpdateOnNavigate(() => {
+      toast.info("A new version is available — it will load on your next page change.");
       // After the toast, prompt for reload. Delay so the toast is visible.
       // Fires from useVersionCheck's onNewVersion callback (not a render),
       // so useTimeout doesn't apply — this is a one-shot reaction to an
@@ -39,7 +38,6 @@ function NewVersionWatcher() {
           window.location.reload();
         }
       }, 1500);
-    },
   });
   return null;
 }

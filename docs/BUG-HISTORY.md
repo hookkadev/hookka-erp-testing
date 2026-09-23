@@ -1,6 +1,6 @@
 # Bug History
 
-> **Last verified: 2026-09-23** — newest entry BUG-2026-09-23-183 (branch `fix/special-order-config-only-surcharge`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-09-23** — newest entry BUG-2026-09-23-184 (branch `fix/special-order-config-only-surcharge`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 
 Living log of bugs we've identified, diagnosed, and fixed in Hookka ERP.
 
@@ -33,6 +33,30 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-09-23-184 — After a deploy, open tabs kept running the old code `deploy` `cache` 🟡
+
+🟡 **Fix in progress** · owner-reported: after a deploy "some of the thing is there already but
+it doesn't update" — operators kept seeing pre-fix behaviour.
+
+**Root cause.** HTML is `no-store` and the SW is network-first, so a *fresh load* always gets the
+new build — but nobody reloads an open ERP tab. `useVersionCheck` detected the new build and the
+dashboard showed a ONE-SHOT "Reload?" confirm; dismiss it (or never see it) and `firedRef` meant
+it never asked again — the tab ran the old bundle all day. The phone shell (`/m`,
+`MobileLayout.tsx`) never ran a version check at all. Also: the inline `onNewVersion` arrow was an
+effect dep, so the poll (and its 30s first check) restarted on every render.
+
+**Fix.** `useAutoUpdateOnNavigate` (`src/lib/use-version-check.ts`): once a new build is seen,
+the NEXT route change does a full reload (the user has already left the form, so nothing typed is
+lost). Used by `DashboardLayout` (which keeps the immediate "Reload now" offer) and
+`MobileLayout`. Poll 5 → 2 min; callback held in a ref so the poll isn't restarted.
+WorkerLayout unchanged (already reloads immediately).
+
+**Verified.** `tests/deploy-auto-update.test.mjs`; `tsc -p tsconfig.app.json` exit 0; eslint
+clean. Not browser-verified — the check only fires on a built bundle (dev serves unhashed
+`/src/main.tsx`); verify on prod by keeping a tab open across the deploy and changing page.
 
 ---
 
