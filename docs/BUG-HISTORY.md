@@ -497,6 +497,36 @@ correctness bug in the key, and mixing them into one change would have made the
 
 ---
 
+## BUG-2026-09-23-184 — the stock delivery gate shipped as a no-op: its two fields were not on the payload it reads `production` `delivery` 🟢
+
+🟢 Fixed. **Found by clicking it on staging, not by a test.**
+
+`poReadyForDelivery` keeps an unallocated stock order out of Pending Delivery by
+comparing `salesOrderId` against `stockOriginSoId` (BUG-2026-09-17-183). The
+Delivery page's ready-planning fetch asks for the MINIMAL projection —
+`delivery-orders.ts:592` passes `minimal=true` — and `MinimalPOOut` carried
+neither field. Both read `undefined`, `if (po.isStock && …)` was never true, and
+the gate never fired. The fix for 183 was live and doing nothing.
+
+**Why the tests passed the whole time.** They hand the predicate a PO object
+with the fields already populated. That proves the LOGIC is correct and says
+nothing about whether the DATA reaches it. Two separate claims; only the first
+had ever been tested, and the gap between them is exactly where this lived.
+
+**Same class as the 2026-04-28 CO fix four lines away in the same file**:
+*"previously only `rowToMinimalPO` carried these fields; `rowToPO` silently
+dropped them, leaving CO POs misclassified as SO-source on the FE."* A routing
+field present on one mapper and absent on the other. Ownership is routing too.
+
+**Fix**: both fields declared on `MinimalPOOut` and emitted at all three
+construction sites. Two new guards in `tests/minimal-po-stocked-in.test.mjs` —
+one pins the declarations, one asserts all three mappers emit them — because
+the predicate test could never have caught this and a second copy of it would
+not have either.
+
+Same payload, same missing field, also fixed: the STOCK chip never rendered on
+the production grid.
+
 ## BUG-2026-09-17-183 — a finished stock order walked into Pending Delivery and could ride a customer's delivery note at price zero `production` `delivery` `invoicing` 🟢
 
 🟢 Fixed (DEV-05, PRD T-014 findings 14 + 15). Two halves of one hole.
