@@ -291,10 +291,16 @@ app.use("*", async (c, next) => {
 // production is `hookka-erp-testing.pages.dev` exactly; preview deploys
 // are `<commit-hash>.hookka-erp-testing.pages.dev` or
 // `<branch-alias>.hookka-erp-testing.pages.dev`. Detect from there.
+//
+// Exception (2026-09-23): PR canaries (`canary-<PR>.…`) use the PRODUCTION
+// DB. On staging data a canary could not answer "are the real figures right"
+// (canary-490, dashboard revenue). A canary write is a real prod write, and
+// its runtime self-apply DDL runs against prod too.
 function isPreviewHostname(requestUrl: string): boolean {
   try {
     const host = new URL(requestUrl).hostname.toLowerCase();
     if (host === "hookka-erp-testing.pages.dev") return false; // prod
+    if (host.startsWith("canary-")) return false; // PR canary → prod DB
     if (host.endsWith(".hookka-erp-testing.pages.dev")) return true; // preview
     return false; // custom domain → treat as prod
   } catch {
