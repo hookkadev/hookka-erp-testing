@@ -22,7 +22,7 @@ import { ShoppingCart, DollarSign, Truck, CheckCircle, CalendarX2 } from "lucide
 import {
   TAUPE, GREEN, AMBER, TEAL, fmtN, fmtRMAxis, ymd, dayLabel,
   CHART_INK, CHART_GOLD, CHART_AXIS, CARD_BORDER, CARD_BG, CHART_SERIES,
-  inPeriod, periodLabel, isConfirmedOrder, type Period,
+  inPeriod, inFocus, periodLabel, isConfirmedOrder, type Period,
 } from "./dashboard-shared-lib";
 import { Kpi, LiveBadge } from "./dashboard-shared";
 import { rollingForecast } from "@/lib/revenue-forecast";
@@ -105,9 +105,10 @@ type Feed = {
       isServiceOrder: boolean;
     }[];
     pipeline: { status: string; count: number; valueSen: number }[];
-    // One row per (state, category, sku) combination — no date column, so
-    // anything derived from it is book-wide and is labelled that way.
+    // One row per (order day, state, category, sku) — the day is the order's
+    // createdAt, the same date every other Sales card filters on.
     byStateCategory: {
+      date: string | null;
       state: string | null;
       category: string | null;
       sku: string | null;
@@ -142,7 +143,7 @@ export function SalesOrdersView({
   const live = data?.availability?.sales?.live ?? false;
 
   // Everything with a date is scoped to the global period picker above the
-  // tabs. byStateCategory has no date and stays book-wide (labelled as such).
+  // tabs.
   const orders = useMemo(
     () => allOrders.filter((o) => inPeriod(period, o.createdAt)),
     [allOrders, period],
@@ -359,10 +360,14 @@ export function SalesOrdersView({
   const pipelineMax = Math.max(1, ...pipeline.map((p) => p.count));
 
 
-  // State x Category and Top SKUs both come from byStateCategory, which has no
-  // date column — these are whole-book figures, not "this period".
+  // State x Category and Top SKUs follow the picker (and a clicked day), same
+  // as the KPI row and pipeline.
+  const stateCatRows = useMemo(
+    () => (data?.sales?.byStateCategory ?? []).filter((r) => inFocus(period, r.date)),
+    [data, period],
+  );
   const attribution = useMemo(() => {
-    const rows = data?.sales?.byStateCategory ?? [];
+    const rows = stateCatRows;
     const states = new Map<string, { state: string; revenueSen: number; qty: number }>();
     const cats = new Map<string, { category: string; revenueSen: number; qty: number }>();
     const skus = new Map<string, { sku: string; name: string; category: string; revenueSen: number; qty: number }>();
@@ -385,7 +390,7 @@ export function SalesOrdersView({
       allSkus: [...skus.values()].sort(desc),
       total,
     };
-  }, [data]);
+  }, [stateCatRows]);
 
   // Donut: top states, with anything past the 6th folded into "Other" so the
   // outside labels cannot collide into an unreadable fan.
@@ -410,7 +415,7 @@ export function SalesOrdersView({
   // aggregate over every state cannot be narrowed to one afterwards.
   const visibleSkus = useMemo(() => {
     const acc = new Map<string, { sku: string; name: string; category: string; revenueSen: number; qty: number }>();
-    for (const r of data?.sales?.byStateCategory ?? []) {
+    for (const r of stateCatRows) {
       if (stateFilter && (r.state ?? "—") !== stateFilter) continue;
       if (skuCat && (r.category ?? "—") !== skuCat) continue;
       const sk = r.sku ?? "—";
@@ -422,7 +427,7 @@ export function SalesOrdersView({
     return [...acc.values()]
       .sort((a, b) => (skuSort === "revenue" ? b.revenueSen - a.revenueSen : b.qty - a.qty))
       .slice(0, 10);
-  }, [data, stateFilter, skuCat, skuSort]);
+  }, [stateCatRows, stateFilter, skuCat, skuSort]);
 
   const recentOrders = useMemo(
     () =>
@@ -988,7 +993,7 @@ export function SalesOrdersView({
           <CardHeader className="pb-3">
             <CardTitle>Sales by state &amp; category</CardTitle>
             <p className="text-xs" style={{ color: CHART_AXIS }}>
-              Share of book-wide revenue · all time (no date on this source) · click a state to filter the SKU list
+              Share of revenue · {selectedDetail ? selectedDetail.label : periodLabel(period)} · click a state to filter the SKU list
             </p>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-2 items-center">
@@ -1066,7 +1071,7 @@ export function SalesOrdersView({
                   {formatCurrency(attribution.total)}
                 </p>
                 <p className="text-[10px] uppercase tracking-wide" style={{ color: CHART_AXIS }}>
-                  Total sales · all time
+                  Total sales · {selectedDetail ? selectedDetail.label : periodLabel(period)}
                 </p>
               </div>
               {attribution.states.slice(0, 7).map((st, i) => {
@@ -1109,7 +1114,7 @@ export function SalesOrdersView({
               <div>
                 <CardTitle>Top SKUs</CardTitle>
                 <p className="text-xs" style={{ color: CHART_AXIS }}>
-                  Showing top {visibleSkus.length} · ranked by {skuSort === "revenue" ? "revenue" : "units"}
+                  {selectedDetail ? selectedDetail.label : periodLabel(period)} · top {visibleSkus.length} · ranked by {skuSort === "revenue" ? "revenue" : "units"}
                   {stateFilter ? " · " + stateFilter + " only" : ""}
                 </p>
               </div>
