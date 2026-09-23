@@ -1,5 +1,5 @@
 -- ---------------------------------------------------------------------------
--- 0235_stock_orders_flag_and_internal_customer.sql — make a make-to-stock order
+-- 0236_stock_orders_flag_and_internal_customer.sql — make a make-to-stock order
 -- identifiable by a COLUMN instead of a number prefix, and give it a real
 -- customer to hang off.
 --

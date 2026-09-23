@@ -1368,7 +1368,7 @@ export function ensurePendingMigrations(db: D1Database): Promise<void> {
       // self-apply because deploy.yml does NOT replay migration files.
       "ALTER TABLE sales_orders ADD COLUMN IF NOT EXISTS sales_org_code TEXT NOT NULL DEFAULT 'HOOKKA'",
       "UPDATE sales_orders SET sales_org_code = 'HOOKKA' WHERE sales_org_code IS NULL OR sales_org_code = ''",
-      // 0235 — make-to-stock flag (DEV-05). The SO LIST filters on this column,
+      // 0236 — make-to-stock flag (DEV-05). The SO LIST filters on this column,
       // and the list is a read path that can run before any SO write has ever
       // touched this DB (a fresh preview deploy), so it is ensured here and
       // awaited by GET / too — same reason production-orders ensures the

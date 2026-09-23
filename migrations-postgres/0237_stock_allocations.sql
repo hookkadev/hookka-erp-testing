@@ -1,5 +1,5 @@
 -- ---------------------------------------------------------------------------
--- 0236_stock_allocations.sql — the append-only record of stock handed to a
+-- 0237_stock_allocations.sql — the append-only record of stock handed to a
 -- customer order.
 --
 -- DEV-05 / PRD T-014, R8-R13. RECORD ONLY — deploys do not replay migration

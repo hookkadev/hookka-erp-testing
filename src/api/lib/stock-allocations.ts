@@ -15,15 +15,24 @@
 //   on-hand count. An allocation changes NOTHING about whether we hold the
 //   piece — it is still in the yard, it is merely spoken for. Writing
 //   allocations into that table would corrupt the one invariant it exists to
-//   guarantee. The two compose instead: available = on hand − open allocations.
+//   guarantee.
 //
-// WHY POOLED, NOT PER-PIECE
-//   The stock ledger is already keyed by item code alone — work-in-progress
-//   made for stock lands in the same pool everything else draws from. An
-//   allocation is therefore a CLAIM ON A QUANTITY of a product code, not a
-//   claim on serial number X. A specific piece is only chosen when the delivery
-//   note is built, which is the last honest moment to choose one: until then
-//   any piece of that spec satisfies the claim equally.
+// WHAT ACTUALLY MOVES: A WHOLE PRODUCTION ORDER
+//   An allocation is not a counter. `POST /production-orders/stock` builds one
+//   order per piece, exactly as a customer order is built, so handing goods
+//   over is a whole order changing owner: `sales_order_id` moves from the stock
+//   order to the customer's, and `stock_origin_so_id` remembers where it came
+//   from. Nothing is ever split — splitting would drag job cards, stickered
+//   fg_units and cost rows with it. A SOFA set is one order and goes out whole
+//   (owner 2026-09-17).
+//
+// SO WHAT IS THIS TABLE FOR, THEN?
+//   The WHY, not the WHAT. The production order records who owns a piece now;
+//   these rows record every time that changed, who did it and for what reason.
+//   Availability is RECOMPUTED from the production orders themselves and never
+//   summed from here (see loadAvailability, pinned by a test) — so there is one
+//   source of truth for "is this spoken for", and this ledger can never drift
+//   away from it.
 //
 // WHY NO FOREIGN KEY ON sales_order_id
 //   Archiving a sales order DELETEs the row (it is copied to
@@ -45,7 +54,7 @@
 //     for, and it can never go wrong by someone typing the sign themselves.
 //
 // Deploys do not replay migration files in this repo, so this is the
-// load-bearing copy of migrations-postgres/0236. Keep the two in step.
+// load-bearing copy of migrations-postgres/0237. Keep the two in step.
 // ---------------------------------------------------------------------------
 import type { D1Database, D1PreparedStatement } from "@cloudflare/workers-types";
 import { runSelfApply, memoizeSelfApply } from "./self-apply";

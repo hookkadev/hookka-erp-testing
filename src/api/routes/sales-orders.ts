@@ -219,7 +219,7 @@ app.get("/", async (c) => {
   // Tenant scope — first bind param on every query against soSourceSql.
   // Items are scoped transitively via salesOrderId IN (...) so they don't
   // need their own orgId filter (the archive table doesn't have orgId yet).
-  // 0235 — make-to-stock orders are booked against the internal Factory Stock
+  // 0236 — make-to-stock orders are booked against the internal Factory Stock
   // customer and are not what a salesperson is looking for here. Excluded by
   // default, the way service orders are; ?isStock=all brings them back for
   // admin/reporting. There is deliberately no "stock only" mode — the stock

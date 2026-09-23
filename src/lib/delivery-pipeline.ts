@@ -18,7 +18,7 @@ export type PipelinePO = {
   id: string;
   status: string;
   consignmentOrderId?: string;
-  // 0235 — TRUE when this PO was BUILT for stock. It stays true for life: it
+  // 0236 — TRUE when this PO was BUILT for stock. It stays true for life: it
   // records how the piece came into the world, not who owns it now.
   isStock?: boolean;
   // 0237 — the stock order it was built under. Ownership has moved to a real

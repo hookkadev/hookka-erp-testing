@@ -12,7 +12,7 @@
 //   it, not in a round every production write pays for.
 //
 // Deploys do not replay migration files in this repo, so this is the
-// load-bearing copy of migrations-postgres/0235. Keep the two in step.
+// load-bearing copy of migrations-postgres/0236. Keep the two in step.
 // ---------------------------------------------------------------------------
 import type { D1Database } from "@cloudflare/workers-types";
 import { runSelfApply, memoizeSelfApply } from "./self-apply";

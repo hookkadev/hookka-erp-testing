@@ -299,7 +299,7 @@ export type SalesOrder = {
   preCancelStatus?: SOStatus;
   overdue: string;
   notes: string;
-  /** 0235 — make-to-stock order: goods built with no customer behind them,
+  /** 0236 — make-to-stock order: goods built with no customer behind them,
    *  booked against the internal Factory Stock customer (companySOId uses the
    *  "SOH-" prefix). Hidden from the sales order list by default.
    *
@@ -368,7 +368,7 @@ export type ProductionOrder = {
   // salesOrderId/companySOId empty and carry these instead.
   consignmentOrderId?: string;
   companyCOId?: string;
-  /** 0235 — built for stock, with no customer behind it until it is allocated. */
+  /** 0236 — built for stock, with no customer behind it until it is allocated. */
   isStock?: boolean;
   productId: string;
   productCode: string;

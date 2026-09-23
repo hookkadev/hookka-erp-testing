@@ -1212,7 +1212,7 @@ app.post("/stock", async (c) => {
   if (denied) return denied;
   const db = c.var.DB;
   // is_stock and the cust-factory-stock row reach prod ONLY through this —
-  // migration 0235 is inert on deploy. Awaited before the first write below,
+  // migration 0236 is inert on deploy. Awaited before the first write below,
   // which binds both.
   await ensureStockOrderSchema(db);
   const body = await c.req.json().catch(() => ({}));

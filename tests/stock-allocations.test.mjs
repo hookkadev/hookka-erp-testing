@@ -408,7 +408,7 @@ test("no code path UPDATEs or DELETEs an allocation row", () => {
 });
 
 test("the migration and the runtime self-apply declare the same table", () => {
-  const mig = read("migrations-postgres/0236_stock_allocations.sql");
+  const mig = read("migrations-postgres/0237_stock_allocations.sql");
   const lib = read("src/api/lib/stock-allocations.ts");
   for (const col of [
     "product_code",
@@ -420,7 +420,7 @@ test("the migration and the runtime self-apply declare the same table", () => {
     "reverses_id",
     "occurred_at",
   ]) {
-    assert.ok(mig.includes(col), `0236 is missing ${col}`);
+    assert.ok(mig.includes(col), `0237 is missing ${col}`);
     assert.ok(
       lib.includes(col),
       `the self-apply is missing ${col} — a migration file alone is INERT on deploy here`,
