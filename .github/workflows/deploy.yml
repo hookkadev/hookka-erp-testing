@@ -43,14 +43,14 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    # Makes each run a GitHub Deployment: the repo home page's "Deployments"
-    # sidebar (and every PR) shows it in progress while it builds/deploys,
-    # then Active / Failed, with a link to the site it went to. PR canaries
-    # are NOT recorded (deployment: false) — only real branch deploys show.
+    # Production deploys show in the repo home page's "Deployments" sidebar:
+    # in progress while it builds/deploys, then Active / Failed, linked to the
+    # live site. Only runs on main are recorded (deployment: false otherwise) —
+    # staging / PR canary / branch runs still build + deploy exactly as before.
     environment:
-      name: ${{ github.ref == 'refs/heads/main' && 'production' || github.ref_name == 'staging' && 'staging' || 'preview' }}
-      url: ${{ github.ref == 'refs/heads/main' && 'https://erp.hookka.com' || github.ref_name == 'staging' && 'https://staging.hookka-erp-testing.pages.dev' || 'https://hookka-erp-testing.pages.dev' }}
-      deployment: ${{ github.event_name != 'pull_request' }}
+      name: production
+      url: https://erp.hookka.com
+      deployment: ${{ github.ref == 'refs/heads/main' }}
     permissions:
       contents: read
       deployments: write
