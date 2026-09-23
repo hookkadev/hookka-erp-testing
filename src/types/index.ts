@@ -617,6 +617,9 @@ export type PurchaseOrder = {
   // 3.1 — set by the manual "Email to Supplier" button on detail.tsx.
   // Null until the operator hits send for the first time.
   lastEmailedAt?: string | null;
+  // Client-side only: line items flattened for the PO list's global search
+  // (src/lib/po-items-search.ts). Never sent by the API.
+  itemsSearchText?: string;
   createdAt: string;
   updatedAt: string;
 };

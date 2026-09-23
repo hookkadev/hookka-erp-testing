@@ -86,6 +86,13 @@ import {
   type ApReconPi,
   type ApReconPaymentRow,
 } from "../../lib/ap-recon";
+// The Payment Vouchers "AP Payment" road posts a supplier payment at APPROVE
+// through the SAME builders the Supplier Payment page uses (owner 2026-09-22,
+// Houzs adoption: 「ap payment 和 payment voucher 一起」).
+import { buildSupplierPaymentCreate, buildSupplierPaymentLifecycle } from "./supplier-payments";
+// PV attachments ride the generic file store (Supabase Storage + file_assets)
+// through its ONE upload/delete path, behind the voucher's own rules.
+import { storeUploadedFile, removeStoredFile } from "./files";
 
 const app = new Hono<Env>();
 
@@ -2073,6 +2080,7 @@ app.post("/purchase-credit-notes", async (c) => {
     const body = (await c.req.json()) as {
       supplierId?: string;
       purchaseInvoiceId?: string;
+      date?: string;
       reason?: string;
       reasonDetail?: string;
       items?: Array<{
@@ -2153,6 +2161,9 @@ app.post("/purchase-credit-notes", async (c) => {
     const id = `pcn-${crypto.randomUUID().slice(0, 8)}`;
     const noteNumber = await nextPcnNo(c.var.DB);
     const now = new Date().toISOString();
+    const cnDate = /^\d{4}-\d{2}-\d{2}$/.test(body.date ?? "")
+      ? (body.date as string)
+      : now.slice(0, 10);
     await c.var.DB.prepare(
       `INSERT INTO purchase_credit_notes
          (id, noteNumber, supplierId, supplierName, purchaseInvoiceId, piNo,
@@ -2166,7 +2177,7 @@ app.post("/purchase-credit-notes", async (c) => {
         supplier.name,
         body.purchaseInvoiceId ?? null,
         piNo,
-        now.slice(0, 10),
+        cnDate,
         body.reason ?? "",
         body.reasonDetail ?? "",
         JSON.stringify(items),
@@ -2387,6 +2398,249 @@ app.put("/purchase-credit-notes/:id", async (c) => {
   }
 });
 
+// 0088/0156 created purchase_credit_notes.status CHECK (status IN
+// ('DRAFT','POSTED')) — void writes 'CANCELLED', which that CHECK has always
+// rejected (same class as BUG-2026-06-25-001's purchase_invoices.status
+// CHECK): every void 500s with a raw constraint-violation error. Also carries
+// `ledger_journal_entries.hidden` (mig 0177, applied manually — see
+// migrations-postgres/README.md) as a defensive self-apply: void AND the
+// edit-in-place restate below both rely on it to find whichever GL legs are
+// currently live for a note (original, or the latest restate) without
+// double-counting a prior edit's reversed pair.
+let _pendingPcnStatusMigration: Promise<void> | null = null;
+function ensurePcnCancellable(db: D1Database): Promise<void> {
+  if (_pendingPcnStatusMigration) return _pendingPcnStatusMigration;
+  _pendingPcnStatusMigration = (async () => {
+    await runSelfApply(db, "accounting", [
+      "ALTER TABLE purchase_credit_notes DROP CONSTRAINT IF EXISTS purchase_credit_notes_status_check",
+      "ALTER TABLE purchase_credit_notes DROP CONSTRAINT IF EXISTS purchase_credit_notes_status_chk",
+      "ALTER TABLE purchase_credit_notes ADD CONSTRAINT purchase_credit_notes_status_chk " +
+        "CHECK (status IN ('DRAFT','POSTED','CANCELLED'))",
+      "ALTER TABLE ledger_journal_entries ADD COLUMN IF NOT EXISTS hidden INTEGER NOT NULL DEFAULT 0",
+    ]);
+  })().catch((err) => {
+    _pendingPcnStatusMigration = null;
+    throw err;
+  });
+  return _pendingPcnStatusMigration;
+}
+
+// POST /purchase-credit-notes/:id/restate — edit a POSTED supplier discount IN
+// PLACE, same note number (owner 2026-09-18: void-then-retype was the only way
+// to fix a typo). Same shape as the other-party-bill / payment-voucher restate:
+// reverse whichever GL legs are currently visible (`hidden = 0` always names
+// exactly one live set — the original post, or a prior restate), post
+// corrected legs under a freshly stamped source, hide everything else.
+// Allocations (CREDIT_NOTE markers already knocked off specific PIs) are left
+// UNTOUCHED — the edited gross must still cover them (guard below); to
+// reallocate, Delete and re-create instead.
+app.post("/purchase-credit-notes/:id/restate", async (c) => {
+  const denied = await requirePermission(c, "accounting", "update");
+  if (denied) return denied;
+  await ensurePcnCancellable(c.var.DB);
+  const id = c.req.param("id");
+  const existing = await c.var.DB.prepare(
+    "SELECT * FROM purchase_credit_notes WHERE id = ?",
+  )
+    .bind(id)
+    .first<PcnRow>();
+  if (!existing) {
+    return c.json({ success: false, error: "Purchase CN not found" }, 404);
+  }
+  if (existing.status !== "POSTED") {
+    return c.json(
+      { success: false, error: "Only a posted credit note can be edited" },
+      400,
+    );
+  }
+  try {
+    const body = (await c.req.json()) as {
+      date?: string;
+      reason?: string;
+      reasonDetail?: string;
+      items?: Array<{
+        materialCode?: string;
+        description?: string;
+        quantity?: number;
+        unitPriceSen?: number;
+        lineType?: string;
+      }>;
+    };
+    if (!Array.isArray(body.items) || body.items.length === 0) {
+      return c.json({ success: false, error: "items are required" }, 400);
+    }
+    const items: PcnItem[] = [];
+    for (const raw of body.items) {
+      const quantity = Number(raw.quantity);
+      const unitPriceSen = Number(raw.unitPriceSen);
+      if (!Number.isInteger(unitPriceSen) || unitPriceSen < 0) {
+        return c.json(
+          {
+            success: false,
+            error: `unitPriceSen must be a non-negative integer (got ${raw.unitPriceSen}).`,
+          },
+          400,
+        );
+      }
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        return c.json(
+          { success: false, error: `quantity must be > 0 (got ${raw.quantity}).` },
+          400,
+        );
+      }
+      const lt = String(raw.lineType ?? "STOCKED").toUpperCase();
+      items.push({
+        materialCode: raw.materialCode ?? null,
+        description: String(raw.description ?? ""),
+        quantity,
+        unitPriceSen,
+        lineType: ["STOCKED", "FEE", "TAX", "REBATE", "DISCOUNT", "OTHER"].includes(lt)
+          ? lt
+          : "OTHER",
+      });
+    }
+    const totalAmount = items.reduce(
+      (s, it) => s + Math.round(it.quantity * it.unitPriceSen),
+      0,
+    );
+    if (totalAmount <= 0) {
+      return c.json({ success: false, error: "Total must be > 0" }, 400);
+    }
+    const cnDate = /^\d{4}-\d{2}-\d{2}$/.test(body.date ?? "")
+      ? (body.date as string)
+      : existing.date;
+
+    const orgId = getOrgId(c);
+    // Already-applied PI allocations can't exceed the edited gross — an edit
+    // never touches allocations (Delete + re-create does that instead).
+    const allocRow = await c.var.DB.prepare(
+      "SELECT COALESCE(SUM(booked_sen),0) AS s FROM supplier_payments WHERE paymentNo = ? AND method = 'CREDIT_NOTE' AND orgId = ?",
+    )
+      .bind(existing.noteNumber, orgId)
+      .first<{ s: number }>();
+    const allocatedSen = Number(allocRow?.s) || 0;
+    if (totalAmount < allocatedSen) {
+      return c.json(
+        {
+          success: false,
+          error: `Total (${(totalAmount / 100).toFixed(2)}) can't drop below what's already knocked off invoices (${(allocatedSen / 100).toFixed(2)}). Delete instead if you need to reallocate.`,
+        },
+        400,
+      );
+    }
+
+    const oldGross = Number(existing.totalAmount) || 0;
+    const now = new Date().toISOString();
+    const statements: D1PreparedStatement[] = [
+      c.var.DB.prepare(
+        `UPDATE purchase_credit_notes SET date = ?, reason = ?, reasonDetail = ?, items = ?, totalAmount = ?, updatedAt = ? WHERE id = ?`,
+      ).bind(cnDate, body.reason ?? "", body.reasonDetail ?? "", JSON.stringify(items), totalAmount, now, id),
+      c.var.DB.prepare(
+        "UPDATE suppliers SET outstandingSen = GREATEST(0, outstandingSen + ? - ?) WHERE id = ?",
+      ).bind(oldGross, totalAmount, existing.supplierId),
+    ];
+
+    const { mapPurchaseLinesToAccounts } = await import("./purchase-invoices");
+    const { bucket, pdefault } = await mapPurchaseLinesToAccounts(
+      c.var.DB,
+      items.map((it) => ({
+        mc: it.materialCode ?? null,
+        amt: Math.round(it.quantity * it.unitPriceSen),
+        lt: it.lineType,
+      })),
+    );
+    const sumLines = Object.values(bucket).reduce((s, v) => s + v, 0);
+    if (sumLines !== totalAmount)
+      bucket[pdefault] = (bucket[pdefault] ?? 0) + (totalAmount - sumLines);
+
+    const actorUserId =
+      (c as unknown as { get: (k: string) => string | undefined }).get("userId") ??
+      null;
+    const stamp = Date.now();
+    const postSource = `purchase_credit_note_restate_post:${stamp}`;
+
+    const cur =
+      (
+        await c.var.DB.prepare(
+          `SELECT accountCode, debitSen, creditSen FROM ledger_journal_entries
+            WHERE hidden = 0 AND sourceType LIKE 'purchase_credit_note%' AND sourceId = ? AND orgId = ?`,
+        )
+          .bind(id, orgId)
+          .all<Record<string, unknown>>()
+      ).results ?? [];
+    const legs: LedgerEntryInput[] = cur.map((l, i) => ({
+      id: `lje-${crypto.randomUUID().slice(0, 12)}`,
+      sourceType: `purchase_credit_note_restate_rev:${stamp}`,
+      sourceId: id,
+      legNo: i + 1,
+      accountCode: String(l.accountCode ?? l.account_code ?? ""),
+      debitSen: Number(l.creditSen ?? l.credit_sen) || 0,
+      creditSen: Number(l.debitSen ?? l.debit_sen) || 0,
+      description: `Restate rev · Purchase CN ${existing.noteNumber}`,
+      actorUserId,
+      orgId,
+    }));
+    let legNo = 1;
+    legs.push({
+      id: `lje-${crypto.randomUUID().slice(0, 12)}`,
+      sourceType: postSource,
+      sourceId: id,
+      legNo: legNo++,
+      accountCode: "400-0000",
+      debitSen: totalAmount,
+      creditSen: 0,
+      description: `Purchase CN ${existing.noteNumber} · ${existing.supplierName} (edited)`,
+      actorUserId,
+      orgId,
+    });
+    for (const [acct, amt] of Object.entries(bucket)) {
+      if (amt === 0) continue;
+      legs.push({
+        id: `lje-${crypto.randomUUID().slice(0, 12)}`,
+        sourceType: postSource,
+        sourceId: id,
+        legNo: legNo++,
+        accountCode: acct,
+        debitSen: 0,
+        creditSen: amt,
+        description: `Purchase CN ${existing.noteNumber} · return/credit (edited)`,
+        actorUserId,
+        orgId,
+      });
+    }
+    const { statements: ledgerStmts } = await buildJournalEntryStatements(
+      c.var.DB,
+      orgId,
+      legs,
+    );
+    statements.push(...ledgerStmts);
+    statements.push(
+      c.var.DB.prepare(
+        `UPDATE ledger_journal_entries SET hidden = 1
+          WHERE sourceId = ? AND orgId = ? AND sourceType LIKE 'purchase_credit_note%' AND sourceType <> ?`,
+      ).bind(id, orgId, postSource),
+    );
+
+    await c.var.DB.batch(statements);
+    const updated = await c.var.DB.prepare(
+      "SELECT * FROM purchase_credit_notes WHERE id = ?",
+    )
+      .bind(id)
+      .first<PcnRow>();
+    return c.json({ success: true, data: rowToPcn(updated!) });
+  } catch (e) {
+    console.error(`[ledger] PCN ${id} restate failed:`, e);
+    return c.json(
+      {
+        success: false,
+        error:
+          "Failed to update the supplier discount — nothing was saved. Retry, and report if it persists.",
+      },
+      500,
+    );
+  }
+});
+
 // POST /purchase-credit-notes/:id/void — reverse a posted supplier discount:
 // mirror its GL legs, undo the supplier AP counter, and unwind any PI
 // allocations (add the credited amount back to each PI's outstanding + drop the
@@ -2394,6 +2648,7 @@ app.put("/purchase-credit-notes/:id", async (c) => {
 app.post("/purchase-credit-notes/:id/void", async (c) => {
   const denied = await requirePermission(c, "accounting", "update");
   if (denied) return denied;
+  await ensurePcnCancellable(c.var.DB);
   const id = c.req.param("id");
   const existing = await c.var.DB.prepare(
     "SELECT * FROM purchase_credit_notes WHERE id = ?",
@@ -2420,7 +2675,12 @@ app.post("/purchase-credit-notes/:id/void", async (c) => {
       "UPDATE suppliers SET outstandingSen = outstandingSen + ? WHERE id = ?",
     ).bind(gross, existing.supplierId),
   ];
-  // Reverse the GL once: read the original legs, post their mirror.
+  // Reverse the GL once: read whichever legs are CURRENTLY visible (the
+  // original post, or — if this note was edited via /restate first — the
+  // latest restate; `hidden = 0` always names exactly one live set) and post
+  // their mirror, then hide the lot (both cancel, so nothing of this note's
+  // GL impact stays visible — matches the void/delete convention used
+  // elsewhere, e.g. lifecycle-machine.ts's `hiddenTargets`).
   if (
     (await ledgerHasSource(c.var.DB, orgId, "purchase_credit_note", id)) &&
     !(await ledgerHasSource(c.var.DB, orgId, "purchase_credit_note_void", id))
@@ -2428,7 +2688,7 @@ app.post("/purchase-credit-notes/:id/void", async (c) => {
     const orig =
       (
         await c.var.DB.prepare(
-          "SELECT accountCode, debitSen, creditSen FROM ledger_journal_entries WHERE sourceType = 'purchase_credit_note' AND sourceId = ? AND orgId = ?",
+          "SELECT accountCode, debitSen, creditSen FROM ledger_journal_entries WHERE hidden = 0 AND sourceType LIKE 'purchase_credit_note%' AND sourceId = ? AND orgId = ?",
         )
           .bind(id, orgId)
           .all<Record<string, unknown>>()
@@ -2455,6 +2715,11 @@ app.post("/purchase-credit-notes/:id/void", async (c) => {
       revLegs,
     );
     statements.push(...ls);
+    statements.push(
+      c.var.DB.prepare(
+        `UPDATE ledger_journal_entries SET hidden = 1 WHERE sourceId = ? AND orgId = ? AND sourceType LIKE 'purchase_credit_note%'`,
+      ).bind(id, orgId),
+    );
   }
   // Unwind PI allocations: every CREDIT_NOTE marker under this CN's number.
   const markers =
@@ -4109,6 +4374,157 @@ app.get("/other-party-bills", async (c) => {
   return c.json({ success: true, data, total: data.length });
 });
 
+// Corrections report (Houzs adoption Phase 4, 2026-09-22): every posted
+// document that was later EDITED (restated) or CANCELLED (voided), from the
+// ledger itself — who, when, which document, the reversed amount and the
+// re-posted amount. Restates leave `<doc>_restate_rev:<stamp>` +
+// `<doc>_restate_post:<stamp>` leg families, voids leave `<doc>_void`; the
+// stamp groups one correction. Reasons come from the PV reject trail and the
+// bank-reco re-open journal where they exist. Read-only.
+app.get("/corrections", async (c) => {
+  const denied = await requirePermission(c, "accounting", "read");
+  if (denied) return denied;
+  const orgId = getOrgId(c);
+  const month = c.req.query("month") || ""; // YYYY-MM of the correction (postedAt), blank = last 90 days
+  const since = month && /^\d{4}-\d{2}$/.test(month) ? `${month}-01` : new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
+  const until = month && /^\d{4}-\d{2}$/.test(month) ? `${month}-31T23:59:59` : "9999-12-31";
+  const res = await c.var.DB.prepare(
+    `SELECT sourceType, sourceId, actorUserId, MIN(postedAt) AS posted_at,
+            SUM(debitSen) AS dr_sen, SUM(creditSen) AS cr_sen, COUNT(*) AS legs
+       FROM ledger_journal_entries
+      WHERE orgId = ? AND postedAt >= ? AND postedAt <= ?
+        AND (sourceType LIKE '%\\_restate\\_rev:%' ESCAPE '\\' OR sourceType LIKE '%\\_restate\\_post:%' ESCAPE '\\' OR sourceType LIKE '%\\_void' ESCAPE '\\' OR sourceType = 'opening_balance_reversal')
+      GROUP BY sourceType, sourceId, actorUserId`,
+  ).bind(orgId, since, until).all<Record<string, unknown>>();
+  type Row = { stamp: string; docType: string; docId: string; kind: "edit" | "cancel" | "opening"; actorUserId: string | null; at: string; reversedSen: number; repostedSen: number; legs: number };
+  const byKey = new Map<string, Row>();
+  for (const r of res.results ?? []) {
+    const st = String(r.sourceType ?? r.source_type ?? "");
+    const sid = String(r.sourceId ?? r.source_id ?? "");
+    const at = String(r.postedAt ?? r.posted_at ?? "");
+    const actor = (r.actorUserId ?? r.actor_user_id) as string | null;
+    const dr = Math.round(Number(r.drSen ?? r.dr_sen) || 0);
+    const m = /^(.*)_restate_(rev|post):(.+)$/.exec(st);
+    let key: string, row: Row;
+    if (m) {
+      key = `${m[1]}|${sid}|${m[3]}`;
+      row = byKey.get(key) ?? { stamp: m[3], docType: m[1], docId: sid, kind: "edit", actorUserId: actor, at, reversedSen: 0, repostedSen: 0, legs: 0 };
+      if (m[2] === "rev") row.reversedSen += dr; else row.repostedSen += dr;
+    } else if (st === "opening_balance_reversal") {
+      key = `opening|${sid}|${at}`;
+      row = byKey.get(key) ?? { stamp: at, docType: "opening_balance", docId: sid, kind: "opening", actorUserId: actor, at, reversedSen: 0, repostedSen: 0, legs: 0 };
+      row.reversedSen += dr;
+    } else {
+      key = `${st}|${sid}|${at}`;
+      row = byKey.get(key) ?? { stamp: at, docType: st.replace(/_void$/, ""), docId: sid, kind: "cancel", actorUserId: actor, at, reversedSen: 0, repostedSen: 0, legs: 0 };
+      row.reversedSen += dr;
+    }
+    row.legs += Math.round(Number(r.legs) || 0);
+    if (at < row.at) row.at = at;
+    byKey.set(key, row);
+  }
+  const rows = [...byKey.values()].sort((a, b) => b.at.localeCompare(a.at));
+  // Names for the actors; reasons where a trail exists.
+  const ids = [...new Set(rows.map((r) => r.actorUserId).filter((x): x is string => !!x))];
+  const nameById = new Map<string, string>();
+  if (ids.length) {
+    const u = await c.var.DB.prepare(`SELECT id, displayName FROM users WHERE id IN (${ids.map(() => "?").join(",")})`).bind(...ids).all<Record<string, unknown>>().catch(() => ({ results: [] as Record<string, unknown>[] }));
+    for (const x of u.results ?? []) nameById.set(String(x.id), String(x.displayName ?? x.display_name ?? ""));
+  }
+  const pvIds = rows.filter((r) => r.docType === "payment_voucher").map((r) => r.docId);
+  const pvNo = new Map<string, string>();
+  if (pvIds.length) {
+    const p = await c.var.DB.prepare(`SELECT id, pvNo FROM payment_vouchers WHERE id IN (${pvIds.map(() => "?").join(",")})`).bind(...pvIds).all<Record<string, unknown>>().catch(() => ({ results: [] as Record<string, unknown>[] }));
+    for (const x of p.results ?? []) pvNo.set(String(x.id), String(x.pvNo ?? x.pv_no ?? ""));
+  }
+  const reopens = await c.var.DB.prepare("SELECT key, value, updated_at FROM kv_config WHERE key LIKE 'bank_reco_reopen:%' AND updated_at >= ? AND updated_at <= ?")
+    .bind(since, until).all<{ key: string; value: string | null; updated_at?: string; updatedAt?: string }>().catch(() => ({ results: [] as { key: string; value: string | null; updated_at?: string; updatedAt?: string }[] }));
+  const reopenRows = (reopens.results ?? []).map((r) => {
+    const parts = String(r.key).split(":"); // bank_reco_reopen:<acct>:<month>:<ts>
+    let v: { actorUserId?: string | null; reason?: string } = {};
+    try { v = r.value ? JSON.parse(r.value) : {}; } catch { v = {}; }
+    return { kind: "reopen" as const, docType: "bank_reconciliation", docId: `${parts[1]} ${parts[2]}`, docNo: `${parts[1]} · ${parts[2]}`, at: parts.slice(3).join(":"), actor: v.actorUserId ? (nameById.get(v.actorUserId) ?? v.actorUserId) : "", reason: v.reason ?? "", reversedSen: 0, repostedSen: 0 };
+  });
+  const data = [
+    ...rows.map((r) => ({
+      kind: r.kind, docType: r.docType, docId: r.docId, docNo: pvNo.get(r.docId) ?? r.docId, at: r.at,
+      actor: r.actorUserId ? (nameById.get(r.actorUserId) ?? r.actorUserId) : "", reason: "",
+      reversedSen: r.reversedSen, repostedSen: r.repostedSen,
+    })),
+    ...reopenRows,
+  ].sort((a, b) => b.at.localeCompare(a.at));
+  return c.json({ success: true, data: { since, rows: data } });
+});
+
+// AP Invoices — ONE list of everything the company owes on paper (owner
+// 2026-09-22, Houzs adoption Phase 2): other-creditor bills (kind AP, editable
+// on their own tab) beside a READ-ONLY mirror of purchase invoices (kind PI —
+// Procurement's page stays the place to create/edit/post them). Nothing here
+// writes; the mirror is a view, the PI row links back to its origin.
+app.get("/ap-invoices", async (c) => {
+  const denied = await requirePermission(c, "accounting", "read");
+  if (denied) return denied;
+  const orgId = getOrgId(c);
+  const status = c.req.query("status") || ""; // "", "OPEN", "PAID", "CANCELLED"
+  const [ocbRes, piRes] = await Promise.all([
+    c.var.DB.prepare(
+      `SELECT b.id, b.billNo, b.partyId, b.partyName, b.billDate, b.referenceNo, b.description, b.totalSen, b.paidAmountSen, b.status,
+              dl.state AS lifecycleState
+         FROM other_party_bills b
+         LEFT JOIN document_lifecycle dl ON dl.orgId = b.orgId AND dl.sourceType = 'other_party_bill' AND dl.sourceId = b.billNo
+        WHERE b.orgId = ? AND b.partyType = 'CREDITOR' AND (dl.state IS NULL OR dl.state <> 'DELETED')`,
+    ).bind(orgId).all<Record<string, unknown>>(),
+    c.var.DB.prepare(
+      `SELECT id, pi_no, supplier_id, supplier_name, supplier_invoice_no, invoice_date, due_date, amount_sen, paid_amount_sen, status, is_opening
+         FROM purchase_invoices
+        WHERE status <> 'DRAFT'`,
+    ).all<Record<string, unknown>>().catch(() => ({ results: [] as Record<string, unknown>[] })),
+  ]);
+  // partyId feeds the "Pay" deep-link into Payment Vouchers › New AP Payment.
+  type ApRow = {
+    kind: "AP" | "PI"; id: string; no: string; supplier: string; partyId: string; supplierRef: string; date: string; dueDate: string | null;
+    description: string; totalSen: number; paidSen: number; outstandingSen: number; status: string; opening: boolean;
+  };
+  const rows: ApRow[] = [];
+  for (const b of ocbRes.results ?? []) {
+    const total = Math.round(Number(b.totalSen ?? b.total_sen) || 0);
+    const paid = Math.round(Number(b.paidAmountSen ?? b.paid_amount_sen) || 0);
+    const lc = String(b.lifecycleState ?? b.lifecycle_state ?? "ACTIVE");
+    const st = String(b.status ?? "");
+    rows.push({
+      kind: "AP", id: String(b.id), no: String(b.billNo ?? b.bill_no ?? ""), supplier: String(b.partyName ?? b.party_name ?? ""),
+      partyId: String(b.partyId ?? b.party_id ?? ""),
+      supplierRef: String(b.referenceNo ?? b.reference_no ?? ""), date: String(b.billDate ?? b.bill_date ?? "").slice(0, 10), dueDate: null,
+      description: String(b.description ?? ""), totalSen: total, paidSen: paid, outstandingSen: total - paid,
+      status: lc !== "ACTIVE" ? "CANCELLED" : st === "CANCELLED" || st === "VOID" ? "CANCELLED" : total - paid <= 0 ? "PAID" : "OPEN",
+      opening: false,
+    });
+  }
+  for (const p of piRes.results ?? []) {
+    const total = Math.round(Number(p.amountSen ?? p.amount_sen) || 0);
+    const paid = Math.round(Number(p.paidAmountSen ?? p.paid_amount_sen) || 0);
+    const st = String(p.status ?? "");
+    rows.push({
+      kind: "PI", id: String(p.id), no: String(p.piNo ?? p.pi_no ?? ""), supplier: String(p.supplierName ?? p.supplier_name ?? ""),
+      partyId: String(p.supplierId ?? p.supplier_id ?? ""),
+      supplierRef: String(p.supplierInvoiceNo ?? p.supplier_invoice_no ?? ""), date: String(p.invoiceDate ?? p.invoice_date ?? "").slice(0, 10),
+      dueDate: (p.dueDate ?? p.due_date) ? String(p.dueDate ?? p.due_date).slice(0, 10) : null,
+      description: "", totalSen: total, paidSen: paid, outstandingSen: total - paid,
+      status: st === "CANCELLED" || st === "VOID" ? "CANCELLED" : st === "PAID" || total - paid <= 0 ? "PAID" : "OPEN",
+      opening: !!Number(p.isOpening ?? p.is_opening ?? 0),
+    });
+  }
+  const filtered = status ? rows.filter((r) => r.status === status) : rows;
+  filtered.sort((a, b) => b.date.localeCompare(a.date) || b.no.localeCompare(a.no));
+  const totals = {
+    openSen: rows.filter((r) => r.status === "OPEN").reduce((s, r) => s + r.outstandingSen, 0),
+    openCount: rows.filter((r) => r.status === "OPEN").length,
+    apOpenSen: rows.filter((r) => r.status === "OPEN" && r.kind === "AP").reduce((s, r) => s + r.outstandingSen, 0),
+    piOpenSen: rows.filter((r) => r.status === "OPEN" && r.kind === "PI").reduce((s, r) => s + r.outstandingSen, 0),
+  };
+  return c.json({ success: true, data: { rows: filtered, totals } });
+});
+
 app.delete("/other-party-bills/:billNo", async (c) => {
   const denied = await requirePermission(c, "accounting", "delete");
   if (denied) return denied;
@@ -4197,6 +4613,80 @@ app.post("/other-party-bills/:billNo/lifecycle", async (c) => {
 // ---------------------------------------------------------------------------
 // D2 — OTHER-PARTY PAYMENTS  POST / GET / void
 // ---------------------------------------------------------------------------
+
+// Every allocated bill must exist, be this party's, sit on the same side and
+// be open; amounts within outstanding (validateAllocations). Shared by the
+// immediate POST below and the Payment Vouchers AP road (create/edit/approve).
+async function validateOtherPartyPaymentAllocs(
+  db: Env["Variables"]["DB"],
+  orgId: string,
+  party: OtherPartyRow,
+  allocs: PaymentAllocInput[],
+): Promise<{ ok: true; outstandingByBill: Record<string, number> } | { ok: false; error: string }> {
+  const outstandingByBill: Record<string, number> = {};
+  for (const a of allocs) {
+    const bill = await db.prepare("SELECT * FROM other_party_bills WHERE id = ? AND orgId = ?")
+      .bind(a.billId, orgId).first<OtherPartyBillRow>();
+    if (!bill) return { ok: false, error: `Bill ${a.billId} not found` };
+    if (bill.partyId !== party.id) return { ok: false, error: "Bill does not belong to this party" };
+    if (bill.partyType !== party.type) return { ok: false, error: "Bill side mismatch" };
+    if (bill.status !== "OPEN" && bill.status !== "PARTIAL_PAID")
+      return { ok: false, error: `Bill ${bill.billNo} is not open` };
+    outstandingByBill[a.billId] = bill.totalSen - bill.paidAmountSen;
+  }
+  const allocErr = validateAllocations(allocs, outstandingByBill);
+  if (allocErr) return { ok: false, error: allocErr };
+  return { ok: true, outstandingByBill };
+}
+
+// The ONE builder of an other-party payment: payment rows per bill, bill
+// paidAmountSen bumps, GL legs (creditor: DR 405-0000 / CR bank). Used by the
+// immediate POST below and by the Payment Vouchers AP road, which posts at
+// APPROVE under the voucher's formal number. Caller mints the number, validates
+// (validateOtherPartyPaymentAllocs) and batches. Throws when the GL build fails.
+async function buildOtherPartyPaymentCreate(
+  db: Env["Variables"]["DB"],
+  input: {
+    orgId: string; actorUserId: string | null; party: OtherPartyRow; bankAccount: string; date: string;
+    reference: string | null; allocs: PaymentAllocInput[]; paymentNo: string;
+  },
+): Promise<D1PreparedStatement[]> {
+  const { orgId, actorUserId, party, bankAccount, date, reference, allocs, paymentNo: payNo } = input;
+  const partyType = party.type as PartyType;
+  const totalSen = computePaymentTotal(allocs);
+  const now = new Date().toISOString();
+  const statements: D1PreparedStatement[] = [];
+  for (const a of allocs) {
+    statements.push(
+      db.prepare(
+        `INSERT INTO other_party_payments
+           (id, paymentNo, partyId, partyType, partyName, billId, date, amountSen, bankAccount, reference, orgId, createdAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(
+        `opp-${crypto.randomUUID().slice(0, 10)}`, payNo, party.id, partyType, party.name,
+        a.billId, date, a.amountSen, bankAccount, reference, orgId, now,
+      ),
+    );
+    statements.push(
+      db.prepare(
+        `UPDATE other_party_bills
+           SET paidAmountSen = paidAmountSen + ?,
+               status = CASE WHEN paidAmountSen + ? >= totalSen THEN 'PAID'
+                             WHEN paidAmountSen + ? > 0 THEN 'PARTIAL_PAID' ELSE status END,
+               updatedAt = ?
+         WHERE id = ?`,
+      ).bind(a.amountSen, a.amountSen, a.amountSen, now, a.billId),
+    );
+  }
+  const legs: LedgerEntryInput[] = buildPaymentLegs({ partyType, paymentNo: payNo, partyName: party.name, bankAccount, totalSen }).map((l) => ({
+    id: `lje-${crypto.randomUUID().slice(0, 12)}`, sourceType: "other_party_payment", sourceId: payNo,
+    legNo: l.legNo, accountCode: l.accountCode, debitSen: l.debitSen, creditSen: l.creditSen, description: l.description, actorUserId, orgId,
+  }));
+  const { statements: ledgerStmts } = await buildJournalEntryStatements(db, orgId, legs);
+  statements.push(...ledgerStmts);
+  return statements;
+}
+
 app.post("/other-party-payments", async (c) => {
   const denied = await requirePermission(c, "accounting", "create");
   if (denied) return denied;
@@ -4230,19 +4720,9 @@ app.post("/other-party-payments", async (c) => {
       if (allocs.length === 0) return c.json({ success: false, error: "Select at least one bill" }, 400);
 
       const partyType = party.type as PartyType;
-      const outstandingByBill: Record<string, number> = {};
-      for (const a of allocs) {
-        const bill = await c.var.DB.prepare("SELECT * FROM other_party_bills WHERE id = ? AND orgId = ?")
-          .bind(a.billId, orgId).first<OtherPartyBillRow>();
-        if (!bill) return c.json({ success: false, error: `Bill ${a.billId} not found` }, 400);
-        if (bill.partyId !== party.id) return c.json({ success: false, error: "Bill does not belong to this party" }, 400);
-        if (bill.partyType !== partyType) return c.json({ success: false, error: "Bill side mismatch" }, 400);
-        if (bill.status !== "OPEN" && bill.status !== "PARTIAL_PAID")
-          return c.json({ success: false, error: `Bill ${bill.billNo} is not open` }, 400);
-        outstandingByBill[a.billId] = bill.totalSen - bill.paidAmountSen;
-      }
-      const allocErr = validateAllocations(allocs, outstandingByBill);
-      if (allocErr) return c.json({ success: false, error: allocErr }, 400);
+      // Validate before the number is minted (a refused payment burns nothing).
+      const check = await validateOtherPartyPaymentAllocs(c.var.DB, orgId, party, allocs);
+      if (!check.ok) return c.json({ success: false, error: check.error }, 400);
 
       const totalSen = computePaymentTotal(allocs);
       const payNo = await issueDocNumber(c.var.DB, {
@@ -4250,40 +4730,13 @@ app.post("/other-party-payments", async (c) => {
         direction: partyType === "CREDITOR" ? "out" : "in",
         dateIso: date,
       });
-      const now = new Date().toISOString();
       const actorUserId = (c as unknown as { get: (k: string) => string | undefined }).get("userId") ?? null;
 
-      const statements: D1PreparedStatement[] = [];
-      for (const a of allocs) {
-        statements.push(
-          c.var.DB.prepare(
-            `INSERT INTO other_party_payments
-               (id, paymentNo, partyId, partyType, partyName, billId, date, amountSen, bankAccount, reference, orgId, createdAt)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          ).bind(
-            `opp-${crypto.randomUUID().slice(0, 10)}`, payNo, party.id, partyType, party.name,
-            a.billId, date, a.amountSen, bankAccount, body.reference ?? null, orgId, now,
-          ),
-        );
-        statements.push(
-          c.var.DB.prepare(
-            `UPDATE other_party_bills
-               SET paidAmountSen = paidAmountSen + ?,
-                   status = CASE WHEN paidAmountSen + ? >= totalSen THEN 'PAID'
-                                 WHEN paidAmountSen + ? > 0 THEN 'PARTIAL_PAID' ELSE status END,
-                   updatedAt = ?
-             WHERE id = ?`,
-          ).bind(a.amountSen, a.amountSen, a.amountSen, now, a.billId),
-        );
-      }
-
+      let statements: D1PreparedStatement[];
       try {
-        const legs: LedgerEntryInput[] = buildPaymentLegs({ partyType, paymentNo: payNo, partyName: party.name, bankAccount, totalSen }).map((l) => ({
-          id: `lje-${crypto.randomUUID().slice(0, 12)}`, sourceType: "other_party_payment", sourceId: payNo,
-          legNo: l.legNo, accountCode: l.accountCode, debitSen: l.debitSen, creditSen: l.creditSen, description: l.description, actorUserId, orgId,
-        }));
-        const { statements: ledgerStmts } = await buildJournalEntryStatements(c.var.DB, orgId, legs);
-        statements.push(...ledgerStmts);
+        statements = await buildOtherPartyPaymentCreate(c.var.DB, {
+          orgId, actorUserId, party, bankAccount, date, reference: body.reference ?? null, allocs, paymentNo: payNo,
+        });
       } catch (e) {
         console.error(`[ledger] other_party_payment ${payNo} GL build failed — aborting:`, e);
         return c.json({ success: false, error: "Failed to build the ledger posting — nothing was saved." }, 500);
@@ -7940,6 +8393,120 @@ app.get("/pl-monthly", async (c) => {
   return c.json({ success: true, data: { fyLabel: fy.label, line, anchor: anchorYm, columns: matrix.columns, rows: matrix.rows } });
 });
 
+// Finance dashboard tab feed (routes/dashboard-finance.ts → lib/dashboard-finance.ts).
+// Per month: the P&L's own figures (same per-month window logic as `/pl-monthly`:
+// pre-opening months come from pnl_historical, the rest from computePnlWindow)
+// and the Balance Sheet's month-end totals (same ledger legs, opening floor,
+// account resolver and section map as the `/pl` balanceSheet). Nothing is
+// re-derived: revenue = netSalesSen, labour = direct labour + salary opex lines,
+// net profit = netProfitSen. Equity includes the un-closed current-year earnings
+// line exactly as the Balance Sheet tab shows it.
+export type FinanceMonthRow = {
+  ym: string;
+  revenueSen: number;
+  labourSen: number;
+  netProfitSen: number;
+  assetsSen: number;
+  liabilitiesSen: number;
+  ltLiabilitiesSen: number;
+  equitySen: number;
+};
+export async function loadFinanceSeries(
+  db: Env["Variables"]["DB"],
+  orgId: string,
+  monthsIn: string[],
+): Promise<FinanceMonthRow[]> {
+  const months = [...monthsIn].sort();
+  if (months.length === 0) return [];
+  const last = months[months.length - 1];
+  await ensurePnlHistorical(db);
+  const override = await getPnlSectionMap(db);
+  const matData = await loadMaterialCostData(db, orgId, last);
+  const dc = await loadDocDateResolver(db);
+  const [historical, openingRaw] = await Promise.all([loadHistoricalPnl(db, orgId), getOpeningDate(db)]);
+  const openingMonth = openingRaw ? openingRaw.slice(0, 7) : null;
+  const EMPTY_W: PnlWindow["materialWarnings"] = { negatives: [], unresolved: [] };
+
+  const pnl = new Map<string, { revenueSen: number; labourSen: number; netProfitSen: number }>();
+  for (const ym of months) {
+    const hist = selectHistoricalWindow(historical, openingMonth, ym, "all");
+    // A month before the books opened with no owner-keyed history has no P&L
+    // (the ledger floor drops every pre-opening leg) — skip the heavy window.
+    if (!hist && openingMonth && ym < openingMonth) {
+      pnl.set(ym, { revenueSen: 0, labourSen: 0, netProfitSen: 0 });
+      continue;
+    }
+    const w: PnlWindow = hist
+      ? { ...hist, materialWarnings: EMPTY_W }
+      : await computePnlWindow(db, orgId, ym, ym, "all", matData, dc, override);
+    const salaryOpex = w.expenseLines.filter((l) => l.salary).reduce((s, l) => s + l.amountSen, 0);
+    pnl.set(ym, {
+      revenueSen: w.netSalesSen,
+      labourSen: w.labourSen + salaryOpex,
+      netProfitSen: Math.round(w.netProfitSen),
+    });
+  }
+
+  // Balance sheet at each month-end: cumulative ledger legs up to that month.
+  const [legRes, coaRes, bsOverride, resolveAcct] = await Promise.all([
+    db.prepare("SELECT accountCode, sourceId, debitSen, creditSen, postedAt, sourceType FROM ledger_journal_entries WHERE hidden = 0")
+      .all<{ accountCode: string; sourceId: string; debitSen: number; creditSen: number; postedAt: string; sourceType: string }>(),
+    db.prepare("SELECT code, type FROM chart_of_accounts").all<{ code: string; type: CoaRow["type"] }>(),
+    getBsSectionMap(db),
+    loadAccountResolver(db),
+  ]);
+  const coaType = new Map((coaRes.results ?? []).map((a) => [a.code, a.type] as const));
+  const perYm = new Map<string, Map<string, { dr: number; cr: number }>>();
+  for (const l of legRes.results ?? []) {
+    const dd = dc.docDate(l.sourceType, l.sourceId, l.postedAt);
+    if (legBeforeOpening(l.sourceType, dd, dc.openingDate)) continue;
+    const ym = dd.slice(0, 7);
+    if (ym > last) continue;
+    let m = perYm.get(ym);
+    if (!m) { m = new Map(); perYm.set(ym, m); }
+    const code = resolveAcct(l.accountCode);
+    const e = m.get(code) ?? { dr: 0, cr: 0 };
+    e.dr += Number(l.debitSen) || 0;
+    e.cr += Number(l.creditSen) || 0;
+    m.set(code, e);
+  }
+  const legYms = [...perYm.keys()].sort();
+  const run = new Map<string, { dr: number; cr: number }>();
+  let li = 0;
+  const out: FinanceMonthRow[] = [];
+  for (const ym of months) {
+    while (li < legYms.length && legYms[li] <= ym) {
+      for (const [code, v] of perYm.get(legYms[li])!) {
+        const e = run.get(code) ?? { dr: 0, cr: 0 };
+        e.dr += v.dr;
+        e.cr += v.cr;
+        run.set(code, e);
+      }
+      li++;
+    }
+    let assets = 0, liab = 0, lt = 0, equity = 0, unclosed = 0;
+    for (const [code, v] of run) {
+      const type = coaType.get(code);
+      if (!type) continue;
+      const section = bsSectionFor(code, type, bsOverride);
+      if (section) {
+        const asset = bsSectionClass(section) === "asset";
+        const bal = asset ? v.dr - v.cr : v.cr - v.dr;
+        if (asset) assets += bal;
+        else if (section === "EQUITY") equity += bal;
+        else { liab += bal; if (section === "LONG_TERM_LIABILITY") lt += bal; }
+      }
+      if (type === "REVENUE") unclosed += v.cr - v.dr;
+      else if (type === "COST" || type === "EXPENSE") unclosed -= v.dr - v.cr;
+    }
+    out.push({
+      ym, ...(pnl.get(ym) ?? { revenueSen: 0, labourSen: 0, netProfitSen: 0 }),
+      assetsSen: assets, liabilitiesSen: liab, ltLiabilitiesSen: lt, equitySen: equity + unclosed,
+    });
+  }
+  return out;
+}
+
 // The cash-flow statement computation, shared by GET /cashflow-statement and
 // the dashboard card — one engine, so the two can never disagree.
 async function computeCashflowStatement(
@@ -8686,29 +9253,601 @@ function validateDocLines(
   return { ok: true, lines, totalSen };
 }
 
+// ---------------------------------------------------------------------------
+// PV four-tier approval (owner 2026-09-22, adopted from the Houzs trading
+// ERP): Draft → Prepared → Checked → Approved. A voucher born as a draft
+// carries NO ledger legs until APPROVE; its formal number is minted at CHECK
+// (so the formal sequence = the order money was checked, and a torn-up draft
+// never burns a number). Vouchers created through the legacy immediate path
+// keep posting at birth and are backfilled as APPROVED.
+// ⚠ Migration files 0233/0214 are the record; THIS self-apply is the
+// mechanism.
+let _pendingPvApprovalCols: Promise<void> | null = null;
+function ensurePvApprovalCols(db: Env["Variables"]["DB"]): Promise<void> {
+  if (!_pendingPvApprovalCols) {
+    _pendingPvApprovalCols = (async () => {
+      for (const col of [
+        "approval_state TEXT", "prepared_at TEXT", "prepared_by TEXT",
+        "checked_at TEXT", "checked_by TEXT", "approved_at TEXT",
+        "approved_by TEXT", "reject_reason TEXT",
+      ]) {
+        await db.prepare(`ALTER TABLE payment_vouchers ADD COLUMN IF NOT EXISTS ${col}`).run().catch(() => {});
+      }
+      await db.prepare(
+        "UPDATE payment_vouchers SET approval_state = 'APPROVED' WHERE approval_state IS NULL",
+      ).run().catch(() => {});
+      // Migration 0159 created `status CHECK (status IN ('POSTED','VOID'))`;
+      // a draft-road voucher carries status 'DRAFT' and was refused by the
+      // constraint on prod (2026-09-22, same class as BUG-2026-09-18-001 —
+      // the PCN 'CANCELLED' void). Re-create the check with DRAFT allowed.
+      // Postgres names the auto constraint payment_vouchers_status_check.
+      await db.prepare("ALTER TABLE payment_vouchers DROP CONSTRAINT IF EXISTS payment_vouchers_status_check").run().catch(() => {});
+      await db.prepare(
+        "ALTER TABLE payment_vouchers ADD CONSTRAINT payment_vouchers_status_check CHECK (status IN ('POSTED','VOID','DRAFT'))",
+      ).run().catch(() => {});
+    })().catch((e) => {
+      _pendingPvApprovalCols = null;
+      throw e;
+    });
+  }
+  return _pendingPvApprovalCols;
+}
+
+const PV_DRAFT_PREFIX = "DRAFT-";
+
+type PvHeaderForPost = {
+  id: string; pvNo: string; payee: string | null; description: string | null;
+  accrued: number; accrualAccount: string | null; payFrom: string | null; totalSen: number;
+};
+// The ONE place a voucher's ledger legs are built — used by the legacy
+// immediate-post path and by APPROVE, so the two can never drift.
+async function pvPostingStatements(
+  db: Env["Variables"]["DB"],
+  orgId: string,
+  actorUserId: string | null,
+  pv: PvHeaderForPost,
+  lines: { accountCode: string; description: string; amountSen: number }[],
+): Promise<D1PreparedStatement[]> {
+  const creditAccount = pv.accrued === 1 ? pv.accrualAccount! : pv.payFrom!;
+  const legs: LedgerEntryInput[] = lines.map((l, idx) => ({
+    id: `lje-${crypto.randomUUID().slice(0, 12)}`,
+    sourceType: "payment_voucher",
+    sourceId: pv.id,
+    legNo: idx + 1,
+    accountCode: l.accountCode,
+    debitSen: l.amountSen,
+    creditSen: 0,
+    description: `${pv.pvNo} · ${l.description || pv.description || "Payment"}${pv.accrued === 1 ? " (accrued)" : ""}`,
+    actorUserId,
+    orgId,
+  }));
+  legs.push({
+    id: `lje-${crypto.randomUUID().slice(0, 12)}`,
+    sourceType: "payment_voucher",
+    sourceId: pv.id,
+    legNo: legs.length + 1,
+    accountCode: creditAccount,
+    debitSen: 0,
+    creditSen: pv.totalSen,
+    description: `${pv.pvNo} · ${pv.payee ? `to ${pv.payee}` : "Payment"}${pv.accrued === 1 ? " (accrued)" : ""}`,
+    actorUserId,
+    orgId,
+  });
+  const { statements } = await buildJournalEntryStatements(db, orgId, legs);
+  return statements;
+}
+
+// Shared header validation for create AND draft-edit (same rules as the
+// legacy create path — accrual target must be a postable 410-x liability,
+// otherwise Paid From must be a bank/cash account).
+function validatePvHeader(
+  coa: Map<string, { type: CoaRow["type"]; specialAccountType: string | null; isPostable: number | null }>,
+  body: { accrued?: unknown; accrualAccount?: unknown; payFrom?: unknown },
+): { ok: true; accrued: boolean; accrualAccount: string | null; payFrom: string | null } | { ok: false; error: string } {
+  const accrued = body.accrued === true || body.accrued === 1;
+  if (accrued) {
+    const accrualAccount = String(body.accrualAccount || "");
+    if (accrualAccount.startsWith("405")) {
+      return { ok: false, error: "Expense accrual must use a 410-x accrued-expense account, not 405 Other Creditors. To owe a creditor, raise an Other Creditor bill." };
+    }
+    const acct = coa.get(accrualAccount);
+    if (!acct || acct.type !== "LIABILITY" || (acct.isPostable ?? 1) !== 1) {
+      return { ok: false, error: "Pick a postable LIABILITY accrual account (410-x)" };
+    }
+    return { ok: true, accrued: true, accrualAccount, payFrom: null };
+  }
+  const payFrom = String(body.payFrom || "");
+  const acct = coa.get(payFrom);
+  if (!acct || (acct.specialAccountType !== "SBK" && acct.specialAccountType !== "SCH")) {
+    return { ok: false, error: "Pay From must be a bank (SBK) or cash (SCH) account" };
+  }
+  return { ok: true, accrued: false, accrualAccount: null, payFrom };
+}
+
+// ---------------------------------------------------------------------------
+// PV "AP Payment" (owner 2026-09-22, Houzs adoption — 「ap payment 和 payment
+// voucher 一起」, screenshot: New AP Payment / New Payment Voucher). A voucher of
+// kind AP pays a creditor's bills instead of expense lines: partyKind SUPPLIER
+// → purchase invoices (+ optional unallocated advance), partyKind OTHER →
+// other-creditor bills. It walks the SAME four-tier ladder; at APPROVE (or Post
+// now) the money is posted by the SAME builders the Supplier Payment / Other
+// Creditor Payments pages use, under the voucher's own formal number — so the
+// settlement document (supplier_payments / other_party_payments rows + GL)
+// carries paymentNo = pvNo, and aging / bank reco / Cash Position see exactly
+// what they always saw. The voucher itself writes NO ledger legs of its own.
+// ⚠ Migration files 0235/0216 are the record; THIS self-apply is the mechanism.
+// ---------------------------------------------------------------------------
+let _pendingPvApCols: Promise<void> | null = null;
+function ensurePvApColumns(db: Env["Variables"]["DB"]): Promise<void> {
+  if (!_pendingPvApCols) {
+    _pendingPvApCols = (async () => {
+      for (const col of ["pv_kind TEXT", "party_kind TEXT", "party_id TEXT", "advance_sen INTEGER"]) {
+        await db.prepare(`ALTER TABLE payment_vouchers ADD COLUMN IF NOT EXISTS ${col}`).run().catch(() => {});
+      }
+      await db.prepare(
+        `CREATE TABLE IF NOT EXISTS payment_voucher_allocs (
+           id TEXT PRIMARY KEY,
+           voucher_id TEXT NOT NULL,
+           doc_kind TEXT NOT NULL,
+           doc_id TEXT NOT NULL,
+           amount_sen INTEGER NOT NULL,
+           line_order INTEGER NOT NULL DEFAULT 0
+         )`,
+      ).run();
+      await db.prepare("CREATE INDEX IF NOT EXISTS idx_pv_allocs_voucher ON payment_voucher_allocs (voucher_id)").run().catch(() => {});
+      await db.prepare("CREATE INDEX IF NOT EXISTS idx_pv_allocs_doc ON payment_voucher_allocs (doc_kind, doc_id)").run().catch(() => {});
+    })().catch((e) => {
+      _pendingPvApCols = null;
+      throw e;
+    });
+  }
+  return _pendingPvApCols;
+}
+
+const PV_KIND_AP = "AP";
+type PvPartyKind = "SUPPLIER" | "OTHER";
+type PvAllocDocKind = "PI" | "AP";
+type PvAlloc = { docKind: PvAllocDocKind; docId: string; amountSen: number };
+
+async function loadPvAllocs(db: Env["Variables"]["DB"], voucherId: string): Promise<PvAlloc[]> {
+  const res = await db.prepare(
+    "SELECT doc_kind, doc_id, amount_sen FROM payment_voucher_allocs WHERE voucher_id = ? ORDER BY line_order",
+  ).bind(voucherId).all<Record<string, unknown>>().catch(() => ({ results: [] as Record<string, unknown>[] }));
+  return (res.results ?? []).map((r) => ({
+    docKind: String(r.docKind ?? r.doc_kind) as PvAllocDocKind,
+    docId: String(r.docId ?? r.doc_id),
+    amountSen: Math.round(Number(r.amountSen ?? r.amount_sen) || 0),
+  }));
+}
+
+// Amounts already ticked on OTHER unposted, live AP vouchers (Houzs: 「已被别
+// 的未过账 voucher 勾走的会扣掉」) — a bill cannot be promised twice on the
+// ladder. `exclude` = the voucher being edited (its own ticks don't count).
+async function pvReservedByDoc(
+  db: Env["Variables"]["DB"],
+  exclude: string | null,
+): Promise<Map<string, { sen: number; vouchers: string[] }>> {
+  const res = await db.prepare(
+    `SELECT a.voucher_id, a.doc_kind, a.doc_id, a.amount_sen, v.pvNo
+       FROM payment_voucher_allocs a
+       JOIN payment_vouchers v ON v.id = a.voucher_id
+      WHERE v.status <> 'VOID' AND COALESCE(v.approval_state, 'APPROVED') <> 'APPROVED'`,
+  ).all<Record<string, unknown>>().catch(() => ({ results: [] as Record<string, unknown>[] }));
+  const out = new Map<string, { sen: number; vouchers: string[] }>();
+  for (const r of res.results ?? []) {
+    const no = String(r.pvNo ?? r.pv_no ?? "");
+    if (exclude && (r.voucherId ?? r.voucher_id) === exclude) continue;
+    const key = `${String(r.docKind ?? r.doc_kind)}|${String(r.docId ?? r.doc_id)}`;
+    const cur = out.get(key) ?? { sen: 0, vouchers: [] };
+    cur.sen += Math.round(Number(r.amountSen ?? r.amount_sen) || 0);
+    if (no && !cur.vouchers.includes(no)) cur.vouchers.push(no);
+    out.set(key, cur);
+  }
+  return out;
+}
+
+type PvOpenBill = {
+  docKind: PvAllocDocKind; id: string; no: string; ref: string; date: string; dueDate: string | null;
+  totalSen: number; paidSen: number; outstandingSen: number; reservedSen: number; reservedBy: string[]; availableSen: number;
+  currency: string; foreign: boolean; opening: boolean;
+};
+
+// The creditor's payable documents as the voucher form lists them.
+async function pvOpenBillsFor(
+  db: Env["Variables"]["DB"],
+  orgId: string,
+  partyKind: PvPartyKind,
+  partyId: string,
+  exclude: string | null,
+): Promise<{ partyName: string; bills: PvOpenBill[]; advanceOpenSen: number } | null> {
+  const reserved = await pvReservedByDoc(db, exclude);
+  if (partyKind === "SUPPLIER") {
+    const sup = await db.prepare("SELECT id, name FROM suppliers WHERE id = ?").bind(partyId)
+      .first<{ id: string; name: string }>();
+    if (!sup) return null;
+    const res = await db.prepare(
+      `SELECT id, pi_no, supplier_invoice_no, invoice_date, due_date, amount_sen, paid_amount_sen, status, currency, is_opening
+         FROM purchase_invoices
+        WHERE supplier_id = ? AND status IN ('CONFIRMED','APPROVED','PARTIAL_PAID')
+        ORDER BY invoice_date ASC, pi_no ASC`,
+    ).bind(partyId).all<Record<string, unknown>>();
+    const bills: PvOpenBill[] = [];
+    for (const p of res.results ?? []) {
+      const total = Math.round(Number(p.amountSen ?? p.amount_sen) || 0);
+      const paid = Math.round(Number(p.paidAmountSen ?? p.paid_amount_sen) || 0);
+      const outstanding = total - paid;
+      if (outstanding <= 0) continue;
+      const id = String(p.id);
+      const rsv = reserved.get(`PI|${id}`);
+      const currency = String(p.currency ?? "MYR") || "MYR";
+      bills.push({
+        docKind: "PI", id, no: String(p.piNo ?? p.pi_no ?? ""), ref: String(p.supplierInvoiceNo ?? p.supplier_invoice_no ?? ""),
+        date: String(p.invoiceDate ?? p.invoice_date ?? "").slice(0, 10),
+        dueDate: (p.dueDate ?? p.due_date) ? String(p.dueDate ?? p.due_date).slice(0, 10) : null,
+        totalSen: total, paidSen: paid, outstandingSen: outstanding,
+        reservedSen: rsv?.sen ?? 0, reservedBy: rsv?.vouchers ?? [], availableSen: Math.max(0, outstanding - (rsv?.sen ?? 0)),
+        currency, foreign: currency.toUpperCase() !== "MYR", opening: !!Number(p.isOpening ?? p.is_opening ?? 0),
+      });
+    }
+    // Unapplied advance this supplier already holds (knock-off lives on the
+    // Supplier Payment page) — shown for information on the form.
+    const adv = await db.prepare(
+      `SELECT COALESCE(SUM(sp.amount_sen), 0) AS adv_sen
+         FROM supplier_payments sp
+         LEFT JOIN document_lifecycle dl ON dl.sourceType = 'supplier_payment' AND dl.sourceId = sp.payment_no AND dl.orgId = sp.org_id
+        WHERE sp.supplier_id = ? AND sp.org_id = ? AND sp.purchase_invoice_id IS NULL
+          AND COALESCE(sp.method, '') = 'BANK_TRANSFER' AND (dl.state IS NULL OR dl.state = 'ACTIVE')`,
+    ).bind(partyId, orgId).first<Record<string, unknown>>().catch(() => null);
+    return { partyName: sup.name, bills, advanceOpenSen: Math.round(Number(adv?.advSen ?? adv?.adv_sen) || 0) };
+  }
+  const party = await db.prepare("SELECT * FROM other_parties WHERE id = ? AND orgId = ?").bind(partyId, orgId)
+    .first<OtherPartyRow>();
+  if (!party || party.type !== "CREDITOR") return null;
+  const res = await db.prepare(
+    `SELECT b.id, b.billNo, b.billDate, b.referenceNo, b.totalSen, b.paidAmountSen, b.status, b.is_opening AS is_opening
+       FROM other_party_bills b
+       LEFT JOIN document_lifecycle dl ON dl.orgId = b.orgId AND dl.sourceType = 'other_party_bill' AND dl.sourceId = b.billNo
+      WHERE b.orgId = ? AND b.partyId = ? AND b.partyType = 'CREDITOR'
+        AND b.status IN ('OPEN','PARTIAL_PAID') AND (dl.state IS NULL OR dl.state = 'ACTIVE')
+      ORDER BY b.billDate ASC, b.billNo ASC`,
+  ).bind(orgId, partyId).all<Record<string, unknown>>();
+  const bills: PvOpenBill[] = [];
+  for (const b of res.results ?? []) {
+    const total = Math.round(Number(b.totalSen ?? b.total_sen) || 0);
+    const paid = Math.round(Number(b.paidAmountSen ?? b.paid_amount_sen) || 0);
+    const outstanding = total - paid;
+    if (outstanding <= 0) continue;
+    const id = String(b.id);
+    const rsv = reserved.get(`AP|${id}`);
+    bills.push({
+      docKind: "AP", id, no: String(b.billNo ?? b.bill_no ?? ""), ref: String(b.referenceNo ?? b.reference_no ?? ""),
+      date: String(b.billDate ?? b.bill_date ?? "").slice(0, 10), dueDate: null,
+      totalSen: total, paidSen: paid, outstandingSen: outstanding,
+      reservedSen: rsv?.sen ?? 0, reservedBy: rsv?.vouchers ?? [], availableSen: Math.max(0, outstanding - (rsv?.sen ?? 0)),
+      currency: "MYR", foreign: false, opening: !!Number(b.isOpening ?? b.is_opening ?? 0),
+    });
+  }
+  return { partyName: party.name, bills, advanceOpenSen: 0 };
+}
+
+type PvApValidated = {
+  partyKind: PvPartyKind; partyId: string; partyName: string; payFrom: string;
+  allocs: PvAlloc[]; advanceSen: number; totalSen: number;
+};
+// Create/edit validation for an AP voucher: party exists, Pay From is bank/
+// cash, every ticked bill is the party's, open, and within (outstanding −
+// reserved elsewhere); a supplier may add an unallocated advance.
+async function validatePvAp(
+  db: Env["Variables"]["DB"],
+  orgId: string,
+  coa: Map<string, { type: CoaRow["type"]; specialAccountType: string | null; isPostable: number | null }>,
+  body: Record<string, unknown>,
+  exclude: string | null,
+): Promise<{ ok: true; v: PvApValidated } | { ok: false; error: string }> {
+  const partyKind = body.partyKind === "OTHER" ? "OTHER" : body.partyKind === "SUPPLIER" ? "SUPPLIER" : null;
+  if (!partyKind) return { ok: false, error: "partyKind must be SUPPLIER or OTHER" };
+  const partyId = String(body.partyId ?? "");
+  if (!partyId) return { ok: false, error: "Pick the creditor to pay" };
+  if (body.accrued === true || body.accrued === 1) return { ok: false, error: "An AP payment cannot be accrued — the bill already carries the liability" };
+  const h = validatePvHeader(coa, { payFrom: body.payFrom });
+  if (!h.ok) return h;
+  const payFrom = h.payFrom!;
+  const open = await pvOpenBillsFor(db, orgId, partyKind, partyId, exclude);
+  if (!open) return { ok: false, error: partyKind === "SUPPLIER" ? "Supplier not found" : "Other creditor not found" };
+  const rawAllocs = Array.isArray(body.allocations) ? (body.allocations as Record<string, unknown>[]) : [];
+  const byId = new Map(open.bills.map((b) => [b.id, b] as const));
+  const allocs: PvAlloc[] = [];
+  const seen = new Set<string>();
+  for (const a of rawAllocs) {
+    const docId = String(a.docId ?? "");
+    const amountSen = Math.round(Number(a.amountSen) || 0);
+    if (!docId || amountSen === 0) continue;
+    if (amountSen < 0) return { ok: false, error: "Allocation amounts must be positive" };
+    if (seen.has(docId)) return { ok: false, error: "The same bill is listed twice" };
+    seen.add(docId);
+    const bill = byId.get(docId);
+    if (!bill) return { ok: false, error: `Bill ${docId} is not an open bill of this creditor` };
+    if (bill.foreign) return { ok: false, error: `${bill.no} is in ${bill.currency} — pay foreign-currency invoices on the Supplier Payment page (payment-day rate needed)` };
+    if (amountSen > bill.availableSen) {
+      const why = bill.reservedSen > 0 ? ` (RM ${(bill.reservedSen / 100).toFixed(2)} already ticked on ${bill.reservedBy.join(", ")})` : "";
+      return { ok: false, error: `${bill.no}: RM ${(amountSen / 100).toFixed(2)} exceeds the RM ${(bill.availableSen / 100).toFixed(2)} still payable${why}` };
+    }
+    allocs.push({ docKind: bill.docKind, docId, amountSen });
+  }
+  const advanceSen = Math.max(0, Math.round(Number(body.advanceSen) || 0));
+  if (advanceSen > 0 && partyKind !== "SUPPLIER") return { ok: false, error: "An advance is only for suppliers — other creditors are paid against their bills" };
+  if (allocs.length === 0 && advanceSen <= 0) return { ok: false, error: "Tick at least one bill (or enter an advance)" };
+  const totalSen = allocs.reduce((s, a) => s + a.amountSen, 0) + advanceSen;
+  return { ok: true, v: { partyKind, partyId, partyName: open.partyName, payFrom, allocs, advanceSen, totalSen } };
+}
+
+type PvApHeader = {
+  id: string; pvNo: string; date: string; payFrom: string; partyKind: PvPartyKind; partyId: string;
+  reference: string | null; advanceSen: number;
+};
+// The posting moment of an AP voucher — the settlement document is built by the
+// page-native builders under paymentNo = pvNo. Returns the statements to batch;
+// the caller adds the voucher's own state flip.
+async function pvApSettlementStatements(
+  db: Env["Variables"]["DB"],
+  orgId: string,
+  actorUserId: string | null,
+  pv: PvApHeader,
+  allocs: PvAlloc[],
+): Promise<{ ok: true; statements: D1PreparedStatement[]; totalSen: number } | { ok: false; error: string }> {
+  if (pv.partyKind === "SUPPLIER") {
+    const tfSources = await getTfSources(db).catch(() => [] as TfSource[]);
+    if (tfSources.some((s) => s.lenderSupplierId === pv.partyId)) {
+      return { ok: false, error: "This supplier is a trade-finance lender — record the repayment on the Supplier Payment page" };
+    }
+    const built = await buildSupplierPaymentCreate(db, {
+      orgId, actorUserId, supplierId: pv.partyId, payFrom: pv.payFrom, date: pv.date, reference: pv.reference ?? "",
+      allocations: allocs.filter((a) => a.docKind === "PI").map((a) => ({ piId: a.docId, payMyrSen: a.amountSen })),
+      advanceSen: pv.advanceSen, paymentNo: pv.pvNo,
+    });
+    if (!built.ok) return built;
+    return { ok: true, statements: built.statements, totalSen: built.totalBank };
+  }
+  const party = await db.prepare("SELECT * FROM other_parties WHERE id = ? AND orgId = ?").bind(pv.partyId, orgId)
+    .first<OtherPartyRow>();
+  if (!party) return { ok: false, error: "Other creditor not found" };
+  const allocsIn: PaymentAllocInput[] = allocs.filter((a) => a.docKind === "AP").map((a) => ({ billId: a.docId, amountSen: a.amountSen }));
+  if (allocsIn.length === 0) return { ok: false, error: "This voucher has no bills" };
+  const check = await validateOtherPartyPaymentAllocs(db, orgId, party, allocsIn);
+  if (!check.ok) return check;
+  const statements = await buildOtherPartyPaymentCreate(db, {
+    orgId, actorUserId, party, bankAccount: pv.payFrom, date: pv.date, reference: pv.reference, allocs: allocsIn, paymentNo: pv.pvNo,
+  });
+  return { ok: true, statements, totalSen: computePaymentTotal(allocsIn) };
+}
+
+function pvAllocStatements(db: Env["Variables"]["DB"], voucherId: string, allocs: PvAlloc[]): D1PreparedStatement[] {
+  return allocs.map((a, idx) =>
+    db.prepare(
+      "INSERT INTO payment_voucher_allocs (id, voucher_id, doc_kind, doc_id, amount_sen, line_order) VALUES (?, ?, ?, ?, ?, ?)",
+    ).bind(`pva-${crypto.randomUUID().slice(0, 8)}`, voucherId, a.docKind, a.docId, a.amountSen, idx),
+  );
+}
+
+// What the "New AP Payment" form lists once a creditor is picked.
+app.get("/payment-vouchers/open-bills", async (c) => {
+  const denied = await requirePermission(c, "accounting", "read");
+  if (denied) return denied;
+  const partyKind = c.req.query("partyKind") === "OTHER" ? "OTHER" : "SUPPLIER";
+  const partyId = c.req.query("partyId") || "";
+  const exclude = c.req.query("exclude") || null;
+  if (!partyId) return c.json({ success: false, error: "partyId required" }, 400);
+  await ensurePvApColumns(c.var.DB);
+  const open = await pvOpenBillsFor(c.var.DB, getOrgId(c), partyKind, partyId, exclude);
+  if (!open) return c.json({ success: false, error: "Creditor not found" }, 404);
+  return c.json({ success: true, data: { partyKind, partyId, ...open } });
+});
+
+// ---------------------------------------------------------------------------
+// PV attachments (owner 2026-09-22, Houzs: 「附件：Cancelled 的不收；Checked 之后
+// 不能删（证据锁）」). Files live in the generic store under
+// resourceType 'payment_voucher' / resourceId = voucher id; these routes only
+// add the voucher's rules — a cancelled voucher takes no new evidence, and once
+// CHECKED the evidence is locked (nothing deleted). Scan Bills / Scan Receipt
+// attach the scanned file here automatically. Print bundle = voucher + every
+// attachment, composed client-side from this list.
+// ---------------------------------------------------------------------------
+const PV_ATTACH_RESOURCE = "payment_voucher";
+type PvAttachmentRow = {
+  id: string; filename: string; contentType: string; sizeBytes: number; uploadedAt: string; uploadedBy: string | null;
+};
+async function loadPvAttachments(db: Env["Variables"]["DB"], orgId: string, voucherId: string): Promise<PvAttachmentRow[]> {
+  const res = await db.prepare(
+    "SELECT id, filename, contentType, sizeBytes, uploadedAt, uploadedBy FROM file_assets WHERE orgId = ? AND resourceType = ? AND resourceId = ? ORDER BY uploadedAt ASC",
+  ).bind(orgId, PV_ATTACH_RESOURCE, voucherId).all<Record<string, unknown>>().catch(() => ({ results: [] as Record<string, unknown>[] }));
+  return (res.results ?? []).map((r) => ({
+    id: String(r.id), filename: String(r.filename ?? ""), contentType: String(r.contentType ?? r.content_type ?? ""),
+    sizeBytes: Math.round(Number(r.sizeBytes ?? r.size_bytes) || 0), uploadedAt: String(r.uploadedAt ?? r.uploaded_at ?? ""),
+    uploadedBy: (r.uploadedBy ?? r.uploaded_by ?? null) as string | null,
+  }));
+}
+
+app.get("/payment-vouchers/:id/attachments", async (c) => {
+  const denied = await requirePermission(c, "accounting", "read");
+  if (denied) return denied;
+  const id = c.req.param("id");
+  const pv = await c.var.DB.prepare("SELECT id, pvNo, status, approval_state FROM payment_vouchers WHERE id = ?").bind(id)
+    .first<{ id: string; pvNo: string; status: string; approval_state?: string | null; approvalState?: string | null }>();
+  if (!pv) return c.json({ success: false, error: "Voucher not found" }, 404);
+  const state = String((pv.approvalState ?? pv.approval_state) ?? "APPROVED");
+  const rows = await loadPvAttachments(c.var.DB, getOrgId(c), id);
+  return c.json({
+    success: true,
+    data: {
+      rows,
+      // What the client may do — the server re-checks on write.
+      canAdd: pv.status !== "VOID",
+      canDelete: pv.status !== "VOID" && (state === "DRAFT" || state === "PREPARED"),
+    },
+  });
+});
+
+app.post("/payment-vouchers/:id/attachments", async (c) => {
+  const denied = await requirePermission(c, "accounting", "update");
+  if (denied) return denied;
+  const id = c.req.param("id");
+  const pv = await c.var.DB.prepare("SELECT id, pvNo, status FROM payment_vouchers WHERE id = ?").bind(id)
+    .first<{ id: string; pvNo: string; status: string }>();
+  if (!pv) return c.json({ success: false, error: "Voucher not found" }, 404);
+  if (pv.status === "VOID") return c.json({ success: false, error: "A cancelled voucher takes no attachments" }, 400);
+  let form: FormData;
+  try { form = await c.req.formData(); } catch { return c.json({ success: false, error: "invalid multipart body" }, 400); }
+  const file = form.get("file");
+  if (!(file instanceof File)) return c.json({ success: false, error: "file field required" }, 400);
+  const stored = await storeUploadedFile(c, { file, resourceType: PV_ATTACH_RESOURCE, resourceId: id });
+  if (!stored.ok) return c.json({ success: false, error: stored.error }, stored.status);
+  return c.json({ success: true, data: stored.data }, 201);
+});
+
+app.delete("/payment-vouchers/:id/attachments/:fileId", async (c) => {
+  const denied = await requirePermission(c, "accounting", "update");
+  if (denied) return denied;
+  const id = c.req.param("id");
+  const fileId = c.req.param("fileId");
+  await ensurePvApprovalCols(c.var.DB);
+  const pv = await c.var.DB.prepare("SELECT id, pvNo, status, approval_state FROM payment_vouchers WHERE id = ?").bind(id)
+    .first<{ id: string; pvNo: string; status: string; approval_state?: string | null; approvalState?: string | null }>();
+  if (!pv) return c.json({ success: false, error: "Voucher not found" }, 404);
+  const state = String((pv.approvalState ?? pv.approval_state) ?? "APPROVED");
+  if (pv.status === "VOID") return c.json({ success: false, error: "A cancelled voucher's attachments are kept as evidence" }, 400);
+  if (state !== "DRAFT" && state !== "PREPARED") {
+    return c.json({ success: false, error: `Evidence is locked once a voucher is checked (this one is ${state}) — Reject it back to draft to change attachments` }, 400);
+  }
+  // The file must belong to THIS voucher — never delete by id alone.
+  const own = await c.var.DB.prepare(
+    "SELECT id FROM file_assets WHERE id = ? AND orgId = ? AND resourceType = ? AND resourceId = ?",
+  ).bind(fileId, getOrgId(c), PV_ATTACH_RESOURCE, id).first<{ id: string }>();
+  if (!own) return c.json({ success: false, error: "Attachment not found on this voucher" }, 404);
+  const removed = await removeStoredFile(c, fileId);
+  if (!removed.ok) return c.json({ success: false, error: removed.error }, removed.status);
+  return c.json({ success: true });
+});
+
 app.get("/payment-vouchers", async (c) => {
   const denied = await requirePermission(c, "accounting", "read");
   if (denied) return denied;
   try {
-    const [pvRes, lineRes] = await Promise.all([
+    await ensurePvApColumns(c.var.DB).catch(() => {});
+    const orgId = getOrgId(c);
+    // An AP voucher's lifecycle lives on its settlement document (the supplier
+    // / other-party payment that carries paymentNo = pvNo) — that is what a
+    // void from the Supplier Payment page flips, so read it from there.
+    const [pvRes, lineRes, allocRes] = await Promise.all([
       c.var.DB.prepare(
-        `SELECT payment_vouchers.*, dl.state AS lifecycleState
+        `SELECT payment_vouchers.*, dl.state AS lifecycleState, sdl.state AS settlement_state
            FROM payment_vouchers
            LEFT JOIN document_lifecycle dl
              ON dl.sourceType = 'payment_voucher'
             AND dl.sourceId = payment_vouchers.id
+           LEFT JOIN document_lifecycle sdl
+             ON sdl.sourceType IN ('supplier_payment', 'other_party_payment')
+            AND sdl.sourceId = payment_vouchers.pvNo
+            AND payment_vouchers.pv_kind = 'AP'
           WHERE (dl.state IS NULL OR dl.state <> 'DELETED')
+            AND (sdl.state IS NULL OR sdl.state <> 'DELETED')
           ORDER BY date DESC, pvNo DESC LIMIT 500`,
       ).all(),
       c.var.DB.prepare(
         `SELECT * FROM payment_voucher_lines ORDER BY lineOrder`,
       ).all(),
+      c.var.DB.prepare(
+        `SELECT a.voucher_id, a.doc_kind, a.doc_id, a.amount_sen, a.line_order,
+                pi.pi_no AS pi_no, pi.supplier_invoice_no AS pi_ref, b.billNo AS bill_no, b.referenceNo AS bill_ref
+           FROM payment_voucher_allocs a
+           LEFT JOIN purchase_invoices pi ON a.doc_kind = 'PI' AND pi.id = a.doc_id
+           LEFT JOIN other_party_bills b ON a.doc_kind = 'AP' AND b.id = a.doc_id
+          ORDER BY a.line_order`,
+      ).all<Record<string, unknown>>().catch(() => ({ results: [] as Record<string, unknown>[] })),
     ]);
     const lines = (lineRes.results ?? []) as { voucherId: string }[];
-    const data = (pvRes.results ?? []).map((v) => ({
-      ...(v as object),
-      lines: lines.filter((l) => l.voucherId === (v as { id: string }).id),
-    }));
+    type AllocOut = { docKind: string; docId: string; docNo: string; docRef: string; amountSen: number };
+    const allocsByVoucher = new Map<string, AllocOut[]>();
+    for (const a of allocRes.results ?? []) {
+      const vid = String(a.voucherId ?? a.voucher_id ?? "");
+      const kind = String(a.docKind ?? a.doc_kind ?? "");
+      const list = allocsByVoucher.get(vid) ?? [];
+      list.push({
+        docKind: kind, docId: String(a.docId ?? a.doc_id ?? ""),
+        docNo: String((kind === "PI" ? (a.piNo ?? a.pi_no) : (a.billNo ?? a.bill_no)) ?? ""),
+        docRef: String((kind === "PI" ? (a.piRef ?? a.pi_ref) : (a.billRef ?? a.bill_ref)) ?? ""),
+        amountSen: Math.round(Number(a.amountSen ?? a.amount_sen) || 0),
+      });
+      allocsByVoucher.set(vid, list);
+    }
+    // Open (unapplied) advance per posted supplier AP voucher — the row's
+    // "ADVANCE OPEN" state; knock-off decrements the advance row in place.
+    const apAdvanceNos = (pvRes.results ?? [])
+      .map((v) => v as Record<string, unknown>)
+      .filter((r) => String(r.pvKind ?? r.pv_kind ?? "") === PV_KIND_AP && Math.round(Number(r.advanceSen ?? r.advance_sen) || 0) > 0)
+      .map((r) => String(r.pvNo ?? r.pv_no ?? ""))
+      .filter(Boolean);
+    const advanceOpenByNo = new Map<string, number>();
+    if (apAdvanceNos.length) {
+      const advRes = await c.var.DB.prepare(
+        `SELECT payment_no, COALESCE(SUM(amount_sen), 0) AS adv_sen
+           FROM supplier_payments
+          WHERE org_id = ? AND purchase_invoice_id IS NULL AND COALESCE(method, '') = 'BANK_TRANSFER'
+            AND payment_no IN (${apAdvanceNos.map(() => "?").join(",")})
+          GROUP BY payment_no`,
+      ).bind(orgId, ...apAdvanceNos).all<Record<string, unknown>>().catch(() => ({ results: [] as Record<string, unknown>[] }));
+      for (const r of advRes.results ?? []) advanceOpenByNo.set(String(r.paymentNo ?? r.payment_no), Math.round(Number(r.advSen ?? r.adv_sen) || 0));
+    }
+    // Attachment count per voucher (paperclip on the row; the list itself
+    // loads on expand).
+    const attachCountById = new Map<string, number>();
+    const attRes = await c.var.DB.prepare(
+      "SELECT resourceId, COUNT(*) AS n_files FROM file_assets WHERE orgId = ? AND resourceType = ? GROUP BY resourceId",
+    ).bind(orgId, PV_ATTACH_RESOURCE).all<Record<string, unknown>>().catch(() => ({ results: [] as Record<string, unknown>[] }));
+    for (const r of attRes.results ?? []) attachCountById.set(String(r.resourceId ?? r.resource_id ?? ""), Math.round(Number(r.nFiles ?? r.n_files) || 0));
+    // Resolve the ladder actors to display names so the printed voucher can
+    // carry "Prepared by / Checked by / Approved by" with real names.
+    const actorIds = new Set<string>();
+    for (const v of pvRes.results ?? []) {
+      const r = v as Record<string, unknown>;
+      for (const k of ["preparedBy", "prepared_by", "checkedBy", "checked_by", "approvedBy", "approved_by", "createdBy", "created_by"]) {
+        const id = r[k]; if (typeof id === "string" && id) actorIds.add(id);
+      }
+    }
+    const nameById = new Map<string, string>();
+    if (actorIds.size) {
+      const ids = [...actorIds];
+      const uRes = await c.var.DB.prepare(`SELECT id, displayName FROM users WHERE id IN (${ids.map(() => "?").join(",")})`)
+        .bind(...ids).all<Record<string, unknown>>().catch(() => ({ results: [] as Record<string, unknown>[] }));
+      for (const u of uRes.results ?? []) nameById.set(String(u.id), String(u.displayName ?? u.display_name ?? ""));
+    }
+    const nm = (r: Record<string, unknown>, a: string, b: string) => { const id = (r[a] ?? r[b]); return typeof id === "string" ? (nameById.get(id) ?? null) : null; };
+    const data = (pvRes.results ?? []).map((v) => {
+      const r = v as Record<string, unknown>;
+      const id = String(r.id);
+      const isAp = String(r.pvKind ?? r.pv_kind ?? "") === PV_KIND_AP;
+      const pvNo = String(r.pvNo ?? r.pv_no ?? "");
+      const settlementState = (r.settlementState ?? r.settlement_state) as string | null | undefined;
+      // A posted AP voucher voided from its own page (Supplier Payment / Other
+      // Creditor Payments) must read VOID here too — one truth, two doors.
+      const apVoided = isAp && String(r.approvalState ?? r.approval_state ?? "APPROVED") === "APPROVED" && !!settlementState && settlementState !== "ACTIVE";
+      return {
+        ...(v as object),
+        status: apVoided ? "VOID" : r.status,
+        lifecycleState: isAp ? (String(r.approvalState ?? r.approval_state ?? "APPROVED") === "APPROVED" ? (settlementState ?? "ACTIVE") : (r.status === "VOID" ? "VOID" : "ACTIVE")) : (r.lifecycleState ?? r.lifecycle_state ?? null),
+        pvKind: isAp ? PV_KIND_AP : "EXPENSE",
+        partyKind: (r.partyKind ?? r.party_kind ?? null) as string | null,
+        partyId: (r.partyId ?? r.party_id ?? null) as string | null,
+        advanceSen: Math.round(Number(r.advanceSen ?? r.advance_sen) || 0),
+        advanceOpenSen: isAp && !apVoided ? (advanceOpenByNo.get(pvNo) ?? 0) : 0,
+        allocs: allocsByVoucher.get(id) ?? [],
+        attachmentCount: attachCountById.get(id) ?? 0,
+        lines: lines.filter((l) => l.voucherId === id),
+        preparedByName: nm(r, "preparedBy", "prepared_by"),
+        checkedByName: nm(r, "checkedBy", "checked_by"),
+        approvedByName: nm(r, "approvedBy", "approved_by"),
+        createdByName: nm(r, "createdBy", "created_by"),
+      };
+    });
     return c.json({ success: true, data });
   } catch {
     return c.json({ success: true, data: [], migrationMissing: true });
@@ -8724,7 +9863,6 @@ app.post("/payment-vouchers", async (c) => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return c.json({ success: false, error: "date must be YYYY-MM-DD" }, 400);
     }
-    const accrued = body.accrued === true || body.accrued === 1;
     const productLine =
       body.productLine === "SOFA" || body.productLine === "BEDFRAME"
         ? body.productLine
@@ -8733,90 +9871,86 @@ app.post("/payment-vouchers", async (c) => {
       "SELECT code, type, specialAccountType, isPostable FROM chart_of_accounts",
     ).all<{ code: string; type: CoaRow["type"]; specialAccountType: string | null; isPostable: number | null }>();
     const coa = new Map((coaRes.results ?? []).map((a) => [a.code, a] as const));
-    const v = validateDocLines(coa, body.lines);
-    if (!v.ok) return c.json({ success: false, error: v.error }, 400);
-
-    let payFrom: string | null = null;
-    let accrualAccount: string | null = null;
-    if (accrued) {
-      accrualAccount = String(body.accrualAccount || "");
-      // 405-x (Other Creditors) is not a valid expense-accrual target — record
-      // creditor liabilities via an Other Creditor bill instead (F4 #5).
-      if (accrualAccount.startsWith("405")) {
-        return c.json(
-          { success: false, error: "Expense accrual must use a 410-x accrued-expense account, not 405 Other Creditors. To owe a creditor, raise an Other Creditor bill." },
-          400,
-        );
-      }
-      const acct = coa.get(accrualAccount);
-      if (!acct || acct.type !== "LIABILITY" || (acct.isPostable ?? 1) !== 1) {
-        return c.json(
-          { success: false, error: "Pick a postable LIABILITY accrual account (410-x)" },
-          400,
-        );
-      }
-    } else {
-      payFrom = String(body.payFrom || "");
-      const acct = coa.get(payFrom);
-      if (!acct || (acct.specialAccountType !== "SBK" && acct.specialAccountType !== "SCH")) {
-        return c.json(
-          { success: false, error: "Pay From must be a bank (SBK) or cash (SCH) account" },
-          400,
-        );
-      }
-    }
+    await ensurePvApprovalCols(c.var.DB);
     const id = `pv-${crypto.randomUUID().slice(0, 8)}`;
-    const pvNo = await issueDocNumber(c.var.DB, {
-      bankAccountCode: payFrom ?? "",
-      direction: "out",
-      dateIso: date,
-    });
     const now = new Date().toISOString();
     const orgId = getOrgId(c);
     const actorUserId =
       (c as unknown as { get: (k: string) => string | undefined }).get("userId") ?? null;
-    const creditAccount = accrued ? accrualAccount! : payFrom!;
-    const legs: LedgerEntryInput[] = v.lines.map((l, idx) => ({
-      id: `lje-${crypto.randomUUID().slice(0, 12)}`,
-      sourceType: "payment_voucher",
-      sourceId: id,
-      legNo: idx + 1,
-      accountCode: l.accountCode,
-      debitSen: l.amountSen,
-      creditSen: 0,
-      description: `${pvNo} · ${l.description || body.description || "Payment"}${accrued ? " (accrued)" : ""}`,
-      actorUserId,
-      orgId,
-    }));
-    legs.push({
-      id: `lje-${crypto.randomUUID().slice(0, 12)}`,
-      sourceType: "payment_voucher",
-      sourceId: id,
-      legNo: legs.length + 1,
-      accountCode: creditAccount,
-      debitSen: 0,
-      creditSen: v.totalSen,
-      description: `${pvNo} · ${body.payee ? `to ${body.payee}` : "Payment"}${accrued ? " (accrued)" : ""}`,
-      actorUserId,
-      orgId,
-    });
-    const { statements: ledgerStmts } = await buildJournalEntryStatements(
-      c.var.DB,
-      orgId,
-      legs,
-    );
+    // saveAs "draft" = the four-tier road: no number burned, no ledger legs —
+    // the formal number arrives at CHECK, the posting at APPROVE.
+    const asDraft = body.saveAs === "draft";
+
+    // ── AP Payment: pays a creditor's bills, no expense lines ──
+    if (body.kind === PV_KIND_AP) {
+      await ensurePvApColumns(c.var.DB);
+      const ap = await validatePvAp(c.var.DB, orgId, coa, body as Record<string, unknown>, null);
+      if (!ap.ok) return c.json({ success: false, error: ap.error }, 400);
+      const pvNo = asDraft
+        ? `${PV_DRAFT_PREFIX}${id.slice(3)}`
+        : await issueDocNumber(c.var.DB, { bankAccountCode: ap.v.payFrom, direction: "out", dateIso: date });
+      const reference = String(body.description ?? body.reference ?? "");
+      const statements: D1PreparedStatement[] = [
+        c.var.DB.prepare(
+          `INSERT INTO payment_vouchers (
+             id, pvNo, date, payee, description, payFrom, accrued,
+             accrualAccount, settledAt, productLine, totalSen, status,
+             approval_state, approved_at, approved_by,
+             createdBy, created_at, updated_at,
+             pv_kind, party_kind, party_id, advance_sen
+           ) VALUES (?, ?, ?, ?, ?, ?, 0, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).bind(
+          id, pvNo, date, ap.v.partyName, reference, ap.v.payFrom,
+          ap.v.totalSen, asDraft ? "DRAFT" : "POSTED",
+          asDraft ? "DRAFT" : "APPROVED",
+          asDraft ? null : now, asDraft ? null : actorUserId,
+          actorUserId, now, now,
+          PV_KIND_AP, ap.v.partyKind, ap.v.partyId, ap.v.advanceSen,
+        ),
+        ...pvAllocStatements(c.var.DB, id, ap.v.allocs),
+      ];
+      if (!asDraft) {
+        // Post now = the settlement document is born in the same batch, under
+        // this voucher's number (same builders as the payment pages).
+        const built = await pvApSettlementStatements(c.var.DB, orgId, actorUserId, {
+          id, pvNo, date, payFrom: ap.v.payFrom, partyKind: ap.v.partyKind, partyId: ap.v.partyId,
+          reference: reference || null, advanceSen: ap.v.advanceSen,
+        }, ap.v.allocs);
+        if (!built.ok) return c.json({ success: false, error: built.error }, 400);
+        statements.push(...built.statements);
+      }
+      await c.var.DB.batch(statements);
+      return c.json({ success: true, data: { id, pvNo } }, 201);
+    }
+
+    const v = validateDocLines(coa, body.lines);
+    if (!v.ok) return c.json({ success: false, error: v.error }, 400);
+    const h = validatePvHeader(coa, body);
+    if (!h.ok) return c.json({ success: false, error: h.error }, 400);
+    const { accrued, accrualAccount, payFrom } = h;
+    const pvNo = asDraft
+      ? `${PV_DRAFT_PREFIX}${id.slice(3)}`
+      : await issueDocNumber(c.var.DB, {
+          bankAccountCode: payFrom ?? "",
+          direction: "out",
+          dateIso: date,
+        });
     const statements: D1PreparedStatement[] = [
       c.var.DB.prepare(
         `INSERT INTO payment_vouchers (
            id, pvNo, date, payee, description, payFrom, accrued,
            accrualAccount, settledAt, productLine, totalSen, status,
+           approval_state, approved_at, approved_by,
            createdBy, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 'POSTED', ?, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).bind(
         id, pvNo, date,
         String(body.payee ?? ""), String(body.description ?? ""),
         payFrom, accrued ? 1 : 0, accrualAccount, productLine,
-        v.totalSen, actorUserId, now, now,
+        v.totalSen, asDraft ? "DRAFT" : "POSTED",
+        asDraft ? "DRAFT" : "APPROVED",
+        asDraft ? null : now, asDraft ? null : actorUserId,
+        actorUserId, now, now,
       ),
       ...v.lines.map((l, idx) =>
         c.var.DB.prepare(
@@ -8824,17 +9958,262 @@ app.post("/payment-vouchers", async (c) => {
            VALUES (?, ?, ?, ?, ?, ?)`,
         ).bind(`pvl-${crypto.randomUUID().slice(0, 8)}`, id, l.accountCode, l.description, l.amountSen, idx),
       ),
-      ...ledgerStmts,
     ];
+    if (!asDraft) {
+      statements.push(...await pvPostingStatements(c.var.DB, orgId, actorUserId, {
+        id, pvNo, payee: String(body.payee ?? ""), description: String(body.description ?? ""),
+        accrued: accrued ? 1 : 0, accrualAccount, payFrom, totalSen: v.totalSen,
+      }, v.lines));
+    }
     await c.var.DB.batch(statements);
     return c.json({ success: true, data: { id, pvNo } }, 201);
   } catch (e) {
     console.error("[pv] create failed:", e);
+    // Surface the database's own words — a swallowed cause cost a prod
+    // debugging round (2026-09-22, four-tier rollout).
+    const cause = e instanceof Error ? e.message : String(e);
     return c.json(
-      { success: false, error: "Failed to save the payment — is migration 0159 applied?" },
+      { success: false, error: `Failed to save the payment: ${cause.slice(0, 300)}` },
       400,
     );
   }
+});
+
+// Edit a voucher that has NOT been checked yet (Draft / Prepared) — header
+// and lines replaced in place, no GL involved. After CHECK the voucher is
+// locked; after APPROVE corrections go through /restate.
+app.put("/payment-vouchers/:id", async (c) => {
+  const denied = await requirePermission(c, "accounting", "update");
+  if (denied) return denied;
+  try {
+    await ensurePvApprovalCols(c.var.DB);
+    await ensurePvApColumns(c.var.DB);
+    const id = c.req.param("id");
+    const body = await c.req.json();
+    const pv = await c.var.DB.prepare(
+      "SELECT id, status, approval_state, pv_kind FROM payment_vouchers WHERE id = ?",
+    ).bind(id).first<{ id: string; status: string; approval_state?: string | null; approvalState?: string | null; pv_kind?: string | null; pvKind?: string | null }>();
+    if (!pv) return c.json({ success: false, error: "Voucher not found" }, 404);
+    const state = (pv.approvalState ?? pv.approval_state) ?? "APPROVED";
+    if (pv.status === "VOID") return c.json({ success: false, error: "This voucher is cancelled" }, 400);
+    if (state !== "DRAFT" && state !== "PREPARED") {
+      return c.json({ success: false, error: state === "CHECKED" ? "Checked vouchers are locked — Reject it back to draft to change anything." : "Already posted — use Edit (restate) on the posted voucher instead." }, 400);
+    }
+    const date = String(body.date || "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return c.json({ success: false, error: "date must be YYYY-MM-DD" }, 400);
+    const coaRes = await c.var.DB.prepare(
+      "SELECT code, type, specialAccountType, isPostable FROM chart_of_accounts",
+    ).all<{ code: string; type: CoaRow["type"]; specialAccountType: string | null; isPostable: number | null }>();
+    const coa = new Map((coaRes.results ?? []).map((a) => [a.code, a] as const));
+    const now = new Date().toISOString();
+    // ── AP Payment draft: header + ticked bills replaced in place. The kind is
+    // fixed at birth (an AP voucher never turns into an expense one).
+    if (String(pv.pvKind ?? pv.pv_kind ?? "") === PV_KIND_AP) {
+      const ap = await validatePvAp(c.var.DB, getOrgId(c), coa, body as Record<string, unknown>, id);
+      if (!ap.ok) return c.json({ success: false, error: ap.error }, 400);
+      await c.var.DB.batch([
+        c.var.DB.prepare(
+          `UPDATE payment_vouchers SET date = ?, payee = ?, description = ?, payFrom = ?, totalSen = ?,
+                  party_kind = ?, party_id = ?, advance_sen = ?, updated_at = ? WHERE id = ?`,
+        ).bind(date, ap.v.partyName, String(body.description ?? body.reference ?? ""), ap.v.payFrom, ap.v.totalSen,
+          ap.v.partyKind, ap.v.partyId, ap.v.advanceSen, now, id),
+        c.var.DB.prepare("DELETE FROM payment_voucher_allocs WHERE voucher_id = ?").bind(id),
+        ...pvAllocStatements(c.var.DB, id, ap.v.allocs),
+      ]);
+      return c.json({ success: true });
+    }
+    const v = validateDocLines(coa, body.lines);
+    if (!v.ok) return c.json({ success: false, error: v.error }, 400);
+    const h = validatePvHeader(coa, body);
+    if (!h.ok) return c.json({ success: false, error: h.error }, 400);
+    await c.var.DB.batch([
+      c.var.DB.prepare(
+        `UPDATE payment_vouchers SET date = ?, payee = ?, description = ?, payFrom = ?, accrued = ?,
+                accrualAccount = ?, totalSen = ?, updated_at = ? WHERE id = ?`,
+      ).bind(date, String(body.payee ?? ""), String(body.description ?? ""), h.payFrom, h.accrued ? 1 : 0, h.accrualAccount, v.totalSen, now, id),
+      c.var.DB.prepare("DELETE FROM payment_voucher_lines WHERE voucherId = ?").bind(id),
+      ...v.lines.map((l, idx) =>
+        c.var.DB.prepare(
+          `INSERT INTO payment_voucher_lines (id, voucherId, accountCode, description, amountSen, lineOrder)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        ).bind(`pvl-${crypto.randomUUID().slice(0, 8)}`, id, l.accountCode, l.description, l.amountSen, idx),
+      ),
+    ]);
+    return c.json({ success: true });
+  } catch {
+    return c.json({ success: false, error: "Invalid request body" }, 400);
+  }
+});
+
+// The four-tier ladder. Each rung is its own permission key so the owner can
+// hand Check and Approve to different people later; SUPER_ADMIN passes all.
+//   prepare  DRAFT → PREPARED          (accounting:update)
+//   withdraw PREPARED → DRAFT          (accounting:update)
+//   reject   PREPARED|CHECKED → DRAFT  (accounting:check, reason REQUIRED)
+//   check    PREPARED → CHECKED        (accounting:check, formal No. minted)
+//   approve  CHECKED → APPROVED        (accounting:approve, GL posted HERE)
+const PV_APPROVAL_ACTIONS = ["prepare", "withdraw", "reject", "check", "approve"] as const;
+type PvApprovalAction = (typeof PV_APPROVAL_ACTIONS)[number];
+const PV_APPROVAL_PERM: Record<PvApprovalAction, string> = {
+  prepare: "update", withdraw: "update", reject: "check", check: "check", approve: "approve",
+};
+
+async function pvApprovalCore(
+  db: Env["Variables"]["DB"],
+  orgId: string,
+  actorUserId: string | null,
+  id: string,
+  action: PvApprovalAction,
+  reason: string,
+): Promise<{ ok: true; pvNo: string; state: string } | { ok: false; error: string }> {
+  const pv = await db.prepare("SELECT * FROM payment_vouchers WHERE id = ?").bind(id)
+    .first<Record<string, unknown>>();
+  if (!pv) return { ok: false, error: "Voucher not found" };
+  if (String(pv.status) === "VOID") return { ok: false, error: "This voucher is cancelled" };
+  const state = String((pv.approvalState ?? pv.approval_state) ?? "APPROVED");
+  const pvNo = String(pv.pvNo ?? pv.pv_no ?? "");
+  const now = new Date().toISOString();
+  const fail = (error: string) => ({ ok: false as const, error });
+
+  if (action === "prepare") {
+    if (state !== "DRAFT") return fail(`Only a draft can be prepared (this one is ${state})`);
+    await db.prepare(
+      "UPDATE payment_vouchers SET approval_state = 'PREPARED', prepared_at = ?, prepared_by = ?, reject_reason = NULL, updated_at = ? WHERE id = ?",
+    ).bind(now, actorUserId, now, id).run();
+    return { ok: true, pvNo, state: "PREPARED" };
+  }
+  if (action === "withdraw") {
+    if (state !== "PREPARED") return fail(`Only a prepared voucher can be withdrawn (this one is ${state})`);
+    await db.prepare(
+      "UPDATE payment_vouchers SET approval_state = 'DRAFT', prepared_at = NULL, prepared_by = NULL, updated_at = ? WHERE id = ?",
+    ).bind(now, id).run();
+    return { ok: true, pvNo, state: "DRAFT" };
+  }
+  if (action === "reject") {
+    if (state !== "PREPARED" && state !== "CHECKED") return fail(`Only a prepared or checked voucher can be rejected (this one is ${state})`);
+    if (!reason.trim()) return fail("A reject needs a reason");
+    await db.prepare(
+      "UPDATE payment_vouchers SET approval_state = 'DRAFT', prepared_at = NULL, prepared_by = NULL, checked_at = NULL, checked_by = NULL, reject_reason = ?, updated_at = ? WHERE id = ?",
+    ).bind(reason.trim(), now, id).run();
+    return { ok: true, pvNo, state: "DRAFT" };
+  }
+  if (action === "check") {
+    if (state !== "PREPARED") return fail(`Only a prepared voucher can be checked (this one is ${state})`);
+    // The formal number is minted HERE — the sequence is the order money was
+    // checked, and a torn-up draft never burnt a number.
+    let formalNo = pvNo;
+    if (formalNo.startsWith(PV_DRAFT_PREFIX)) {
+      formalNo = await issueDocNumber(db, {
+        bankAccountCode: String(pv.payFrom ?? pv.pay_from ?? "") || "",
+        direction: "out",
+        dateIso: String(pv.date ?? "").slice(0, 10),
+      });
+    }
+    await db.prepare(
+      "UPDATE payment_vouchers SET approval_state = 'CHECKED', pvNo = ?, checked_at = ?, checked_by = ?, updated_at = ? WHERE id = ?",
+    ).bind(formalNo, now, actorUserId, now, id).run();
+    return { ok: true, pvNo: formalNo, state: "CHECKED" };
+  }
+  // approve — the posting moment.
+  if (state !== "CHECKED") return fail(`Only a checked voucher can be approved (this one is ${state})`);
+  if (String(pv.pvKind ?? pv.pv_kind ?? "") === PV_KIND_AP) {
+    // AP Payment: the settlement document (supplier / other-party payment) is
+    // born HERE under the voucher's formal number — same builders as the
+    // payment pages, so aging, bank reco and the GL see an ordinary payment.
+    await ensurePvApColumns(db);
+    const allocs = await loadPvAllocs(db, id);
+    const partyKind = String(pv.partyKind ?? pv.party_kind ?? "") === "OTHER" ? "OTHER" : "SUPPLIER";
+    const built = await pvApSettlementStatements(db, orgId, actorUserId, {
+      id, pvNo, date: String(pv.date ?? "").slice(0, 10),
+      payFrom: String(pv.payFrom ?? pv.pay_from ?? ""), partyKind,
+      partyId: String(pv.partyId ?? pv.party_id ?? ""),
+      reference: String(pv.description ?? "") || null,
+      advanceSen: Math.round(Number(pv.advanceSen ?? pv.advance_sen) || 0),
+    }, allocs);
+    if (!built.ok) return fail(built.error);
+    await db.batch([
+      db.prepare(
+        "UPDATE payment_vouchers SET approval_state = 'APPROVED', status = 'POSTED', totalSen = ?, approved_at = ?, approved_by = ?, reject_reason = NULL, updated_at = ? WHERE id = ?",
+      ).bind(built.totalSen, now, actorUserId, now, id),
+      ...built.statements,
+    ]);
+    return { ok: true, pvNo, state: "APPROVED" };
+  }
+  const lineRes = await db.prepare(
+    "SELECT accountCode, description, amountSen FROM payment_voucher_lines WHERE voucherId = ? ORDER BY lineOrder",
+  ).bind(id).all<{ accountCode: string; description: string | null; amountSen: number }>();
+  const lines = (lineRes.results ?? []).map((l) => ({
+    accountCode: l.accountCode, description: String(l.description ?? ""), amountSen: Math.round(Number(l.amountSen) || 0),
+  }));
+  if (!lines.length) return fail("This voucher has no lines");
+  const totalSen = lines.reduce((s, l) => s + l.amountSen, 0);
+  const posting = await pvPostingStatements(db, orgId, actorUserId, {
+    id, pvNo, payee: String(pv.payee ?? ""), description: String(pv.description ?? ""),
+    accrued: Number(pv.accrued) === 1 ? 1 : 0,
+    accrualAccount: (pv.accrualAccount ?? pv.accrual_account) as string | null,
+    payFrom: (pv.payFrom ?? pv.pay_from) as string | null,
+    totalSen,
+  }, lines);
+  await db.batch([
+    db.prepare(
+      "UPDATE payment_vouchers SET approval_state = 'APPROVED', status = 'POSTED', totalSen = ?, approved_at = ?, approved_by = ?, reject_reason = NULL, updated_at = ? WHERE id = ?",
+    ).bind(totalSen, now, actorUserId, now, id),
+    ...posting,
+  ]);
+  return { ok: true, pvNo, state: "APPROVED" };
+}
+
+app.post("/payment-vouchers/:id/approval", async (c) => {
+  let action: PvApprovalAction, reason = "";
+  try {
+    const body = (await c.req.json()) as { action?: string; reason?: string };
+    if (!PV_APPROVAL_ACTIONS.includes(body.action as PvApprovalAction)) {
+      return c.json({ success: false, error: "action must be prepare|withdraw|reject|check|approve" }, 400);
+    }
+    action = body.action as PvApprovalAction;
+    reason = String(body.reason ?? "");
+  } catch { return c.json({ success: false, error: "Invalid body" }, 400); }
+  const denied = await requirePermission(c, "accounting", PV_APPROVAL_PERM[action]);
+  if (denied) return denied;
+  await ensurePvApprovalCols(c.var.DB);
+  const actorUserId = (c as unknown as { get: (k: string) => string | undefined }).get("userId") ?? null;
+  const r = await pvApprovalCore(c.var.DB, getOrgId(c), actorUserId, c.req.param("id"), action, reason);
+  if (!r.ok) return c.json({ success: false, error: r.error }, 400);
+  return c.json({ success: true, data: { pvNo: r.pvNo, state: r.state } });
+});
+
+// Batch rungs (owner ticks a stack → Prepare / Check / Approve in one go),
+// executed in voucher-date order like Houzs does. Per-voucher results — one
+// bad voucher never blocks the rest.
+app.post("/payment-vouchers/approval-batch", async (c) => {
+  let action: PvApprovalAction, reason = "", ids: string[] = [];
+  try {
+    const body = (await c.req.json()) as { action?: string; reason?: string; ids?: unknown };
+    if (!PV_APPROVAL_ACTIONS.includes(body.action as PvApprovalAction)) {
+      return c.json({ success: false, error: "action must be prepare|withdraw|reject|check|approve" }, 400);
+    }
+    action = body.action as PvApprovalAction;
+    reason = String(body.reason ?? "");
+    ids = Array.isArray(body.ids) ? [...new Set(body.ids.map((x) => String(x)))] : [];
+    if (ids.length === 0 || ids.length > 100) return c.json({ success: false, error: "Pick 1–100 vouchers" }, 400);
+  } catch { return c.json({ success: false, error: "Invalid body" }, 400); }
+  const denied = await requirePermission(c, "accounting", PV_APPROVAL_PERM[action]);
+  if (denied) return denied;
+  await ensurePvApprovalCols(c.var.DB);
+  const marks = ids.map(() => "?").join(",");
+  const orderRes = await c.var.DB.prepare(
+    `SELECT id FROM payment_vouchers WHERE id IN (${marks}) ORDER BY date ASC, pvNo ASC`,
+  ).bind(...ids).all<{ id: string }>();
+  const ordered = (orderRes.results ?? []).map((r) => r.id);
+  for (const id of ids) if (!ordered.includes(id)) ordered.push(id); // unknown ids still get a per-id error
+  const actorUserId = (c as unknown as { get: (k: string) => string | undefined }).get("userId") ?? null;
+  const orgId = getOrgId(c);
+  const results: { id: string; ok: boolean; pvNo?: string; error?: string }[] = [];
+  for (const id of ordered) {
+    const r = await pvApprovalCore(c.var.DB, orgId, actorUserId, id, action, reason);
+    results.push(r.ok ? { id, ok: true, pvNo: r.pvNo } : { id, ok: false, error: r.error });
+  }
+  return c.json({ success: true, data: { results, done: results.filter((r) => r.ok).length } });
 });
 
 // Clear an accrued voucher against the bank: DR accrual, CR bank/cash.
@@ -8923,11 +10302,81 @@ app.post("/payment-vouchers/:id/lifecycle", async (c) => {
   try { action = ((await c.req.json()) as { action: string }).action as typeof action; } catch { return c.json({ success: false, error: "Invalid body" }, 400); }
   if (!["void", "delete", "unvoid"].includes(action)) return c.json({ success: false, error: "action must be void|delete|unvoid" }, 400);
 
-  const pv = await c.var.DB.prepare("SELECT id, pvNo, status FROM payment_vouchers WHERE id = ?").bind(id).first<{ id: string; pvNo: string; status: string }>();
+  await ensurePvApprovalCols(c.var.DB);
+  await ensurePvApColumns(c.var.DB);
+  const pv = await c.var.DB.prepare("SELECT id, pvNo, status, approval_state, pv_kind, party_kind FROM payment_vouchers WHERE id = ?").bind(id).first<{ id: string; pvNo: string; status: string; approval_state?: string | null; approvalState?: string | null; pv_kind?: string | null; pvKind?: string | null; party_kind?: string | null; partyKind?: string | null }>();
   if (!pv) return c.json({ success: false, error: "Voucher not found" }, 404);
+
+  // A draft-road voucher that never reached APPROVE has no ledger legs —
+  // void/delete is a plain status flip, nothing to reverse; unvoid restores
+  // it as a draft.
+  const pvApState = String((pv.approvalState ?? pv.approval_state) ?? "APPROVED");
+  if (pvApState !== "APPROVED") {
+    const now = new Date().toISOString();
+    const actor = (c as unknown as { get: (k: string) => string | undefined }).get("userId") ?? null;
+    // `delete` on an unposted voucher = hide it from the list (the same
+    // document_lifecycle DELETED row the list already filters on for posted
+    // ones); `unvoid` restores it as a draft and clears that row. Found
+    // 2026-09-22 clearing the smoke-test vouchers: a voided draft answered
+    // "Already cancelled" to delete and could never leave the list.
+    const lifecycleRow = (state: string) => c.var.DB.prepare(
+      `INSERT INTO document_lifecycle (id, sourceType, sourceId, state, actionAt, actorUserId, orgId)
+       VALUES (?, 'payment_voucher', ?, ?, ?, ?, ?)
+       ON CONFLICT (orgId, sourceType, sourceId) DO UPDATE SET state = ?, actionAt = ?, actorUserId = ?`,
+    ).bind(`dl-${crypto.randomUUID().slice(0, 10)}`, id, state, now, actor, orgId, state, now, actor);
+    if (action === "unvoid") {
+      if (pv.status !== "VOID") return c.json({ success: false, error: "This voucher is not cancelled" }, 400);
+      await c.var.DB.batch([
+        c.var.DB.prepare("UPDATE payment_vouchers SET status = 'DRAFT', updated_at = ? WHERE id = ?").bind(now, id),
+        lifecycleRow("ACTIVE"),
+      ]);
+      return c.json({ success: true, data: { state: "ACTIVE" } });
+    }
+    if (action === "delete") {
+      await c.var.DB.batch([
+        c.var.DB.prepare("UPDATE payment_vouchers SET status = 'VOID', updated_at = ? WHERE id = ?").bind(now, id),
+        lifecycleRow("DELETED"),
+      ]);
+      return c.json({ success: true, data: { state: "DELETED" } });
+    }
+    if (pv.status === "VOID") return c.json({ success: false, error: "Already cancelled" }, 400);
+    await c.var.DB.prepare("UPDATE payment_vouchers SET status = 'VOID', updated_at = ? WHERE id = ?").bind(now, id).run();
+    return c.json({ success: true, data: { state: "VOID" } });
+  }
 
   const actorUserId =
     (c as unknown as { get: (k: string) => string | undefined }).get("userId") ?? null;
+
+  // A posted AP voucher owns no legs of its own — its money lives on the
+  // settlement document under the same number. Void/delete/unvoid IS that
+  // document's lifecycle (GL reversal + bill paid roll-back), one core, two
+  // doors; the voucher's status column just follows.
+  if (String(pv.pvKind ?? pv.pv_kind ?? "") === PV_KIND_AP) {
+    const partyKind = String(pv.partyKind ?? pv.party_kind ?? "") === "OTHER" ? "OTHER" : "SUPPLIER";
+    try {
+      const lc = partyKind === "SUPPLIER"
+        ? await buildSupplierPaymentLifecycle(c.var.DB, orgId, pv.pvNo, action, actorUserId)
+        : await buildOtherPartyPaymentLifecycle(c.var.DB, orgId, pv.pvNo, action, actorUserId);
+      await c.var.DB.batch([
+        ...lc.statements,
+        c.var.DB.prepare("UPDATE payment_vouchers SET status = ?, updated_at = ? WHERE id = ?")
+          .bind(lc.newState === "ACTIVE" ? "POSTED" : "VOID", new Date().toISOString(), id),
+      ]);
+      await emitAudit(c, {
+        resource: partyKind === "SUPPLIER" ? "supplier-payments" : "other-party-payments",
+        resourceId: pv.pvNo, action,
+        after: { state: lc.newState, via: "payment-voucher", voucherId: id },
+      });
+      return c.json({ success: true, data: { state: lc.newState } });
+    } catch (e) {
+      const msg = (e as Error).message;
+      if (msg === "PAYMENT_NOT_FOUND") return c.json({ success: false, error: `No settlement found under ${pv.pvNo} — it was never posted` }, 400);
+      if (msg === "TF_DRAW_HAS_REPAYMENTS") return c.json({ success: false, error: "This payment is a trade-finance draw with repayments — void the repayment first." }, 400);
+      if (msg === "TF_DRAW_HAS_INTEREST") return c.json({ success: false, error: "This draw has interest posted — zero it in the aging block first." }, 400);
+      return c.json({ success: false, error: msg || "Lifecycle failed" }, 400);
+    }
+  }
+
   let lc: { statements: D1PreparedStatement[]; newState: string };
   try {
     lc = await applyLifecycle(c.var.DB, { orgId, baseSourceTypes: ["payment_voucher", "payment_voucher_settle"], voidSourceType: "payment_voucher_void", sourceId: id, action, actorUserId, descriptionTag: `${action.toUpperCase()} · ${pv.pvNo}` });
@@ -8960,8 +10409,18 @@ app.post("/payment-vouchers/:id/restate", async (c) => {
   const orgId = getOrgId(c);
   const id = c.req.param("id");
   try {
-    const pv = await c.var.DB.prepare("SELECT id, pvNo FROM payment_vouchers WHERE id = ?").bind(id).first<{ id: string; pvNo: string }>();
+    await ensurePvApprovalCols(c.var.DB);
+    await ensurePvApColumns(c.var.DB);
+    const pv = await c.var.DB.prepare("SELECT id, pvNo, approval_state, pv_kind FROM payment_vouchers WHERE id = ?").bind(id).first<{ id: string; pvNo: string; approval_state?: string | null; approvalState?: string | null; pv_kind?: string | null; pvKind?: string | null }>();
     if (!pv) return c.json({ success: false, error: "Voucher not found" }, 404);
+    if (String((pv.approvalState ?? pv.approval_state) ?? "APPROVED") !== "APPROVED") {
+      return c.json({ success: false, error: "Not posted yet — edit the draft directly, no restate needed." }, 400);
+    }
+    // A posted AP voucher's money sits on its settlement document (Houzs
+    // semantics for payments: cancel and raise a new one, no in-place edit).
+    if (String(pv.pvKind ?? pv.pv_kind ?? "") === PV_KIND_AP) {
+      return c.json({ success: false, error: "A posted AP payment cannot be edited — cancel it and raise a new one." }, 400);
+    }
     const body = await c.req.json();
     const date = String(body.date || "");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return c.json({ success: false, error: "date must be YYYY-MM-DD" }, 400);
@@ -12141,6 +13600,15 @@ app.get("/bank-reco", async (c) => {
     for (const r of allMatched.results ?? []) {
       if (!obDateBr || r.txnDate >= obDateBr) matchedLegIds.add(r.matchedLegId);
     }
+    // Legs consumed by a reverse-combo (SPLIT) line are matched too.
+    await ensureBankLineSplits(c.var.DB);
+    const splitLegs = await c.var.DB.prepare(
+      "SELECT s.leg_id, l.txnDate FROM bank_line_leg_splits s JOIN bank_statement_lines l ON l.id = s.line_id WHERE l.accountCode = ?",
+    ).bind(account).all<Record<string, unknown>>().catch(() => ({ results: [] as Record<string, unknown>[] }));
+    for (const s of splitLegs.results ?? []) {
+      const d = String(s.txnDate ?? s.txn_date ?? "");
+      if (!obDateBr || d >= obDateBr) matchedLegIds.add(String(s.legId ?? s.leg_id ?? ""));
+    }
   } catch {
     migrationMissing = true;
   }
@@ -12264,7 +13732,9 @@ app.post("/bank-reco/match", async (c) => {
     )
       .bind(legId)
       .first();
-    if (taken) return c.json({ success: false, error: "This ledger leg is already matched to another statement line" }, 400);
+    await ensureBankLineSplits(c.var.DB);
+    const takenBySplit = await c.var.DB.prepare("SELECT leg_id FROM bank_line_leg_splits WHERE leg_id = ? LIMIT 1").bind(legId).first().catch(() => null);
+    if (taken || takenBySplit) return c.json({ success: false, error: "This ledger leg is already matched to another statement line" }, 400);
     await c.var.DB.prepare(
       "UPDATE bank_statement_lines SET matchedLegId = ?, matchedAt = ? WHERE id = ?",
     )
@@ -12288,6 +13758,15 @@ app.post("/bank-reco/unmatch", async (c) => {
     if (!umLine) return c.json({ success: false, error: "Statement line not found" }, 404);
     if (await bankRecoMonthFinalized(c.var.DB, umLine.accountCode, umLine.txnDate)) {
       return c.json({ success: false, error: BANK_RECO_FINALIZED_ERR }, 400);
+    }
+    // A reverse-combo (SPLIT) line releases every leg it was divided across.
+    if (umLine.matchedLegId === BANK_LINE_SPLIT_SENTINEL) {
+      await ensureBankLineSplits(c.var.DB);
+      await c.var.DB.batch([
+        c.var.DB.prepare("DELETE FROM bank_line_leg_splits WHERE line_id = ?").bind(lineId),
+        c.var.DB.prepare("UPDATE bank_statement_lines SET matchedLegId = NULL, matchedAt = NULL WHERE id = ?").bind(lineId),
+      ]);
+      return c.json({ success: true, data: { released: "split" } });
     }
     // Unmatching one piece of a combo group dissolves the WHOLE group — a
     // half-matched payment is never left behind (its remaining pieces would
@@ -12375,12 +13854,106 @@ app.post("/bank-reco/match-group", async (c) => {
     const takenG = await c.var.DB.prepare(
       "SELECT id FROM bank_statement_lines WHERE matchedLegId = ? LIMIT 1",
     ).bind(legId).first();
-    if (takenG) return c.json({ success: false, error: "This ledger leg is already matched to another statement line" }, 400);
+    await ensureBankLineSplits(c.var.DB);
+    const takenGSplit = await c.var.DB.prepare("SELECT leg_id FROM bank_line_leg_splits WHERE leg_id = ? LIMIT 1").bind(legId).first().catch(() => null);
+    if (takenG || takenGSplit) return c.json({ success: false, error: "This ledger leg is already matched to another statement line" }, 400);
     const nowG = new Date().toISOString();
     await c.var.DB.prepare(
       `UPDATE bank_statement_lines SET matchedLegId = ?, matchedAt = ? WHERE id IN (${marks})`,
     ).bind(legId, nowG, ...lineIds).run();
     return c.json({ success: true, data: { matched: lineIds.length } });
+  } catch {
+    return c.json({ success: false, error: "Invalid request body" }, 400);
+  }
+});
+
+// Reverse combo (Houzs adoption Phase 3, 2026-09-22): ONE statement line paid
+// SEVERAL book entries — the bank bundled two vouchers into one transfer. The
+// line's matchedLegId becomes the sentinel and one split row per leg records
+// the pieces (Σ pieces = line amount = Σ leg amounts, exact). The shared
+// loader treats each split row as a virtual claiming line for its leg.
+// ⚠ Migration 0234/0215 = record; THIS self-apply = mechanism.
+const BANK_LINE_SPLIT_SENTINEL = "SPLIT";
+let _pendingBankLineSplits: Promise<void> | null = null;
+function ensureBankLineSplits(db: Env["Variables"]["DB"]): Promise<void> {
+  if (!_pendingBankLineSplits) {
+    _pendingBankLineSplits = db.prepare(
+      `CREATE TABLE IF NOT EXISTS bank_line_leg_splits (
+         line_id    TEXT NOT NULL,
+         leg_id     TEXT NOT NULL,
+         amount_sen INTEGER NOT NULL,
+         created_at TEXT NOT NULL,
+         PRIMARY KEY (line_id, leg_id)
+       )`,
+    ).run().then(() => undefined).catch((e) => {
+      _pendingBankLineSplits = null;
+      throw e;
+    });
+  }
+  return _pendingBankLineSplits;
+}
+
+app.post("/bank-reco/match-split", async (c) => {
+  const denied = await requirePermission(c, "accounting", "update");
+  if (denied) return denied;
+  try {
+    await ensureBankRecoCols(c.var.DB);
+    await ensureBankLineSplits(c.var.DB);
+    const body = await c.req.json();
+    const lineId = String(body.statementLineId || "");
+    const legIds: string[] = Array.isArray(body.legIds) ? [...new Set((body.legIds as unknown[]).map((x) => String(x)))] : [];
+    if (legIds.length < 2 || legIds.length > 20) {
+      return c.json({ success: false, error: "Pick 2–20 book entries that this one bank line paid" }, 400);
+    }
+    const line = await c.var.DB.prepare(
+      "SELECT id, accountCode, txnDate, amountSen, matchedLegId, ignored_at FROM bank_statement_lines WHERE id = ?",
+    ).bind(lineId).first<{ id: string; accountCode: string; txnDate: string; amountSen: number; matchedLegId: string | null; ignored_at?: string | null; ignoredAt?: string | null }>();
+    if (!line) return c.json({ success: false, error: "Statement line not found" }, 404);
+    if (line.matchedLegId) return c.json({ success: false, error: "Line already matched" }, 400);
+    if (line.ignoredAt ?? line.ignored_at) return c.json({ success: false, error: "Line is ignored — restore it first" }, 400);
+    const obDateS = await getOpeningDate(c.var.DB);
+    if (obDateS && line.txnDate < obDateS) {
+      return c.json({ success: false, error: `Dated before the opening date (${obDateS}) — inside the opening balance.` }, 400);
+    }
+    if (await bankRecoMonthFinalized(c.var.DB, line.accountCode, line.txnDate)) {
+      return c.json({ success: false, error: BANK_RECO_FINALIZED_ERR }, 400);
+    }
+    const marks = legIds.map(() => "?").join(",");
+    const legRes = await c.var.DB.prepare(
+      `SELECT id, accountCode, sourceType, debitSen, creditSen FROM ledger_journal_entries WHERE id IN (${marks}) AND hidden = 0`,
+    ).bind(...legIds).all<{ id: string; accountCode: string; sourceType: string; debitSen: number; creditSen: number }>();
+    const legs = legRes.results ?? [];
+    if (legs.length !== legIds.length) return c.json({ success: false, error: "Ledger leg not found" }, 404);
+    const resolveS = await loadAccountResolver(c.var.DB);
+    let sumSen = 0;
+    for (const g of legs) {
+      if (resolveS(g.accountCode) !== line.accountCode) return c.json({ success: false, error: "A leg belongs to a different account" }, 400);
+      if (isOpeningSource(g.sourceType)) return c.json({ success: false, error: "Opening-balance legs are never matched" }, 400);
+      sumSen += (Number(g.debitSen) || 0) - (Number(g.creditSen) || 0);
+    }
+    const lineAmt = Math.round(Number(line.amountSen) || 0);
+    if (sumSen !== lineAmt) {
+      return c.json({ success: false, error: `Amounts differ — selected book entries total ${sumSen} sen vs bank line ${lineAmt} sen. A split match must be exact.` }, 400);
+    }
+    // Sweep void pre-opening claims, then no leg may already be taken (by a
+    // plain match OR by another split).
+    if (obDateS) {
+      await c.var.DB.prepare(
+        "UPDATE bank_statement_lines SET matchedLegId = NULL, matchedAt = NULL WHERE accountCode = ? AND matchedLegId IS NOT NULL AND txnDate < ?",
+      ).bind(line.accountCode, obDateS).run();
+    }
+    const takenPlain = await c.var.DB.prepare(`SELECT matchedLegId FROM bank_statement_lines WHERE matchedLegId IN (${marks}) LIMIT 1`).bind(...legIds).first();
+    const takenSplit = await c.var.DB.prepare(`SELECT leg_id FROM bank_line_leg_splits WHERE leg_id IN (${marks}) LIMIT 1`).bind(...legIds).first();
+    if (takenPlain || takenSplit) return c.json({ success: false, error: "One of these book entries is already matched" }, 400);
+    const now = new Date().toISOString();
+    await c.var.DB.batch([
+      c.var.DB.prepare("UPDATE bank_statement_lines SET matchedLegId = ?, matchedAt = ? WHERE id = ?").bind(BANK_LINE_SPLIT_SENTINEL, now, lineId),
+      ...legs.map((g) =>
+        c.var.DB.prepare("INSERT INTO bank_line_leg_splits (line_id, leg_id, amount_sen, created_at) VALUES (?, ?, ?, ?)")
+          .bind(lineId, g.id, (Number(g.debitSen) || 0) - (Number(g.creditSen) || 0), now),
+      ),
+    ]);
+    return c.json({ success: true, data: { legs: legs.length } });
   } catch {
     return c.json({ success: false, error: "Invalid request body" }, 400);
   }
@@ -12663,6 +14236,107 @@ app.post("/bank-reco/ignore", async (c) => {
   }
 });
 
+// Book a bank movement the books don't have — right on the reconciliation page
+// (owner 2026-09-22, Houzs adoption Phase 3 「Book as receipt/expense」). Money
+// OUT → a Payment Voucher (immediate post, legacy road); money IN → an Official
+// Receipt. Amount is LOCKED to the statement line; the new document's bank leg
+// is matched to the line in the same batch, so the row leaves the unbooked
+// list the moment it is booked. Never for pre-opening or finalised months.
+app.post("/bank-reco/book-line", async (c) => {
+  const denied = await requirePermission(c, "accounting", "create");
+  if (denied) return denied;
+  try {
+    await ensureBankRecoCols(c.var.DB);
+    await ensurePvApprovalCols(c.var.DB);
+    const body = await c.req.json() as {
+      statementLineId?: string; accountCode?: string; party?: string; description?: string;
+    };
+    const id = String(body.statementLineId || "");
+    const line = await c.var.DB.prepare(
+      "SELECT id, accountCode, txnDate, amountSen, description, matchedLegId, ignored_at FROM bank_statement_lines WHERE id = ?",
+    ).bind(id).first<{ id: string; accountCode: string; txnDate: string; amountSen: number; description: string | null; matchedLegId: string | null; ignored_at?: string | null; ignoredAt?: string | null }>();
+    if (!line) return c.json({ success: false, error: "Statement line not found" }, 404);
+    if (line.matchedLegId) return c.json({ success: false, error: "This line is already matched" }, 400);
+    if (line.ignoredAt ?? line.ignored_at) return c.json({ success: false, error: "This line is ignored — restore it first" }, 400);
+    const obDateBk = await getOpeningDate(c.var.DB);
+    if (obDateBk && line.txnDate < obDateBk) {
+      return c.json({ success: false, error: `Dated before the opening date (${obDateBk}) — this money is already inside the opening balance.` }, 400);
+    }
+    if (await bankRecoMonthFinalized(c.var.DB, line.accountCode, line.txnDate)) {
+      return c.json({ success: false, error: BANK_RECO_FINALIZED_ERR }, 400);
+    }
+    const amountSen = Math.round(Number(line.amountSen) || 0);
+    if (amountSen === 0) return c.json({ success: false, error: "Zero-amount line" }, 400);
+    const coaRes = await c.var.DB.prepare(
+      "SELECT code, type, specialAccountType, isPostable FROM chart_of_accounts",
+    ).all<{ code: string; type: CoaRow["type"]; specialAccountType: string | null; isPostable: number | null }>();
+    const coa = new Map((coaRes.results ?? []).map((a) => [a.code, a] as const));
+    const bank = coa.get(line.accountCode);
+    if (!bank || (bank.specialAccountType !== "SBK" && bank.specialAccountType !== "SCH")) {
+      return c.json({ success: false, error: "Statement line's account is not a bank/cash account" }, 400);
+    }
+    const v = validateDocLines(coa, [{ accountCode: String(body.accountCode || ""), description: String(body.description ?? ""), amountSen: Math.abs(amountSen) }]);
+    if (!v.ok) return c.json({ success: false, error: v.error }, 400);
+    const party = String(body.party ?? "").trim();
+    const desc = String(body.description ?? "").trim() || String(line.description ?? "").slice(0, 120);
+    const orgId = getOrgId(c);
+    const actorUserId = (c as unknown as { get: (k: string) => string | undefined }).get("userId") ?? null;
+    const now = new Date().toISOString();
+    const isOut = amountSen < 0;
+    const docId = isOut ? `pv-${crypto.randomUUID().slice(0, 8)}` : `or-${crypto.randomUUID().slice(0, 8)}`;
+    const docNo = await issueDocNumber(c.var.DB, { bankAccountCode: line.accountCode, direction: isOut ? "out" : "in", dateIso: line.txnDate });
+    const statements: D1PreparedStatement[] = [];
+    let bankLegId = "";
+    if (isOut) {
+      statements.push(
+        c.var.DB.prepare(
+          `INSERT INTO payment_vouchers (id, pvNo, date, payee, description, payFrom, accrued, accrualAccount, settledAt, productLine, totalSen, status,
+             approval_state, approved_at, approved_by, createdBy, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, 0, NULL, NULL, NULL, ?, 'POSTED', 'APPROVED', ?, ?, ?, ?, ?)`,
+        ).bind(docId, docNo, line.txnDate, party, desc, line.accountCode, v.totalSen, now, actorUserId, actorUserId, now, now),
+        c.var.DB.prepare(
+          "INSERT INTO payment_voucher_lines (id, voucherId, accountCode, description, amountSen, lineOrder) VALUES (?, ?, ?, ?, ?, 0)",
+        ).bind(`pvl-${crypto.randomUUID().slice(0, 8)}`, docId, v.lines[0].accountCode, v.lines[0].description, v.totalSen),
+      );
+      // Build the legs by hand so we know the bank leg's id for the match.
+      bankLegId = `lje-${crypto.randomUUID().slice(0, 12)}`;
+      const legs: LedgerEntryInput[] = [
+        { id: `lje-${crypto.randomUUID().slice(0, 12)}`, sourceType: "payment_voucher", sourceId: docId, legNo: 1, accountCode: v.lines[0].accountCode, debitSen: v.totalSen, creditSen: 0, description: `${docNo} · ${desc || "Payment"}`, actorUserId, orgId },
+        { id: bankLegId, sourceType: "payment_voucher", sourceId: docId, legNo: 2, accountCode: line.accountCode, debitSen: 0, creditSen: v.totalSen, description: `${docNo} · ${party ? `to ${party}` : "Payment"} · booked from bank line`, actorUserId, orgId },
+      ];
+      const { statements: ledger } = await buildJournalEntryStatements(c.var.DB, orgId, legs);
+      statements.push(...ledger);
+    } else {
+      statements.push(
+        c.var.DB.prepare(
+          `INSERT INTO official_receipts (id, orNo, date, receivedFrom, description, payTo, totalSen, status, createdBy, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'POSTED', ?, ?, ?)`,
+        ).bind(docId, docNo, line.txnDate, party, desc, line.accountCode, v.totalSen, actorUserId, now, now),
+        c.var.DB.prepare(
+          "INSERT INTO official_receipt_lines (id, receiptId, accountCode, description, amountSen, lineOrder) VALUES (?, ?, ?, ?, ?, 0)",
+        ).bind(`orl-${crypto.randomUUID().slice(0, 8)}`, docId, v.lines[0].accountCode, v.lines[0].description, v.totalSen),
+      );
+      bankLegId = `lje-${crypto.randomUUID().slice(0, 12)}`;
+      const legs: LedgerEntryInput[] = [
+        { id: bankLegId, sourceType: "official_receipt", sourceId: docId, legNo: 1, accountCode: line.accountCode, debitSen: v.totalSen, creditSen: 0, description: `${docNo} · ${party ? `from ${party}` : "Receipt"} · booked from bank line`, actorUserId, orgId },
+        { id: `lje-${crypto.randomUUID().slice(0, 12)}`, sourceType: "official_receipt", sourceId: docId, legNo: 2, accountCode: v.lines[0].accountCode, debitSen: 0, creditSen: v.totalSen, description: `${docNo} · ${desc || "Receipt"}`, actorUserId, orgId },
+      ];
+      const { statements: ledger } = await buildJournalEntryStatements(c.var.DB, orgId, legs);
+      statements.push(...ledger);
+    }
+    // Match the new bank leg to the line in the same batch.
+    statements.push(
+      c.var.DB.prepare("UPDATE bank_statement_lines SET matchedLegId = ?, matchedAt = ? WHERE id = ? AND matchedLegId IS NULL")
+        .bind(bankLegId, now, id),
+    );
+    await c.var.DB.batch(statements);
+    return c.json({ success: true, data: { docId, docNo, kind: isOut ? "PV" : "OR" } }, 201);
+  } catch (e) {
+    console.error("[bank-reco] book-line failed:", e);
+    return c.json({ success: false, error: "Could not book this line" }, 400);
+  }
+});
+
 // Finalising a month freezes its reconciliation: the figures AND the
 // outstanding-item lists are snapshotted to kv, the month's statement lines
 // refuse further match/unmatch/ignore/delete/import, and the report shows the
@@ -12763,7 +14437,8 @@ async function loadBankRecoState(
     for (const a of aliasRows.results ?? []) if (resolveRp(a.oldCode) === account) equivalents.push(a.oldCode);
   } catch { equivalents = [account]; }
   const marks = equivalents.map(() => "?").join(",");
-  const [legRes, matchedRes] = await Promise.all([
+  await ensureBankLineSplits(db);
+  const [legRes, matchedRes, splitRes] = await Promise.all([
     db.prepare(
       `SELECT id, sourceType, sourceId, debitSen, creditSen, description, postedAt FROM ledger_journal_entries
         WHERE accountCode IN (${marks}) AND hidden = 0`,
@@ -12771,6 +14446,13 @@ async function loadBankRecoState(
     db.prepare(
       "SELECT matchedLegId, txnDate, amountSen FROM bank_statement_lines WHERE accountCode = ? AND matchedLegId IS NOT NULL",
     ).bind(account).all<{ matchedLegId: string; txnDate: string; amountSen: number }>(),
+    // Reverse combo (one bank line → several legs): each split row is a
+    // virtual claiming line for ITS leg, dated on the bank line's day.
+    db.prepare(
+      `SELECT s.leg_id, s.amount_sen, l.txnDate FROM bank_line_leg_splits s
+         JOIN bank_statement_lines l ON l.id = s.line_id
+        WHERE l.accountCode = ?`,
+    ).bind(account).all<Record<string, unknown>>().catch(() => ({ results: [] as Record<string, unknown>[] })),
   ]);
   const { docDate, openingDate } = await loadDocDateResolver(db);
   const legs = (legRes.results ?? [])
@@ -12790,12 +14472,19 @@ async function loadBankRecoState(
   // only when they add EXACTLY to its amount, on the LAST piece's date.
   const legAmtById = new Map(legs.map((l) => [l.id, l.amountSen] as const));
   const grouped = new Map<string, { sumSen: number; lastDate: string }>();
+  const claim = (legId: string, txnDate: string, amountSen: number) => {
+    if (openingDate && txnDate < openingDate) return;
+    const g = grouped.get(legId) ?? { sumSen: 0, lastDate: "" };
+    g.sumSen += Math.round(amountSen || 0);
+    if (txnDate > g.lastDate) g.lastDate = txnDate;
+    grouped.set(legId, g);
+  };
   for (const r of matchedRes.results ?? []) {
-    if (openingDate && r.txnDate < openingDate) continue;
-    const g = grouped.get(r.matchedLegId) ?? { sumSen: 0, lastDate: "" };
-    g.sumSen += Math.round(Number(r.amountSen) || 0);
-    if (r.txnDate > g.lastDate) g.lastDate = r.txnDate;
-    grouped.set(r.matchedLegId, g);
+    if (r.matchedLegId === BANK_LINE_SPLIT_SENTINEL) continue; // its pieces come from the split table
+    claim(r.matchedLegId, r.txnDate, Number(r.amountSen));
+  }
+  for (const s of splitRes.results ?? []) {
+    claim(String(s.legId ?? s.leg_id ?? ""), String(s.txnDate ?? s.txn_date ?? ""), Number(s.amountSen ?? s.amount_sen));
   }
   const clearedOn = new Map<string, string>();
   for (const [legId, g] of grouped) {
@@ -12820,9 +14509,18 @@ async function computeBankRecoReport(
   try { meta = metaRow?.value ? JSON.parse(metaRow.value) : null; } catch { meta = null; }
   const { legs: stateLegs, clearedOn, openingDate: obDateRp } = await loadBankRecoState(db, account);
   const stmtRes = await db.prepare(
-    `SELECT amountSen, txnDate, description, matchedLegId FROM bank_statement_lines
+    `SELECT id, amountSen, txnDate, description, matchedLegId FROM bank_statement_lines
       WHERE accountCode = ? AND ignored_at IS NULL AND txnDate <= ?`,
-  ).bind(account, monthEnd).all<{ amountSen: number; txnDate: string; description: string | null; matchedLegId: string | null }>();
+  ).bind(account, monthEnd).all<{ id: string; amountSen: number; txnDate: string; description: string | null; matchedLegId: string | null }>();
+  // Reverse-combo lines: which legs each SPLIT line was divided across.
+  const splitLegsByLine = new Map<string, string[]>();
+  const splitRowsRp = await db.prepare(
+    `SELECT s.line_id, s.leg_id FROM bank_line_leg_splits s JOIN bank_statement_lines l ON l.id = s.line_id WHERE l.accountCode = ?`,
+  ).bind(account).all<Record<string, unknown>>().catch(() => ({ results: [] as Record<string, unknown>[] }));
+  for (const s of splitRowsRp.results ?? []) {
+    const lid = String(s.lineId ?? s.line_id ?? ""), gid = String(s.legId ?? s.leg_id ?? "");
+    splitLegsByLine.set(lid, [...(splitLegsByLine.get(lid) ?? []), gid]);
+  }
   // A match clears an item only WITHIN the report's month. A June voucher the
   // bank processed on 2 July is matched — correctly — yet as of 30 June it is
   // still in transit, so June must list it as uncleared (and, mirrored, a
@@ -12860,7 +14558,18 @@ async function computeBankRecoReport(
   const unbookedStmt: BankRecoOutstanding[] = [];
   for (const r of stmtRes.results ?? []) {
     if (obDateRp && r.txnDate < obDateRp) continue; // pre-opening: inside the opening balance
-    if (r.matchedLegId) {
+    if (r.matchedLegId === BANK_LINE_SPLIT_SENTINEL) {
+      // Booked when EVERY leg it was split across is dated within the month
+      // and cleared by month end (each leg's clearing date is this line's
+      // day, via the loader's virtual claims). Otherwise still unbooked.
+      const legIds = splitLegsByLine.get(r.id) ?? [];
+      const allIn = legIds.length > 0 && legIds.every((g) => {
+        const d = legDayById.get(g);
+        const cd = clearedOn.get(g);
+        return d !== undefined && d <= monthEnd && cd !== undefined && cd <= monthEnd;
+      });
+      if (allIn) continue;
+    } else if (r.matchedLegId) {
       const legDay = legDayById.get(r.matchedLegId);
       // A missing leg (match target outside the walk) keeps the old
       // semantics: treated as booked, not resurfaced.
@@ -13288,9 +14997,31 @@ app.get("/cash-position", async (c) => {
     amountSen: Math.round(Number(p.amountSen ?? p.amount_sen) || 0),
   }));
   const openingMonth = (obDateCp ?? "").slice(0, 7) || null;
+  // Vouchers on the approval ladder that are not posted yet (owner 2026-09-03:
+  // 「我开pv了，银行还么付款或老板还没有approve」) — the formal "committed but
+  // not yet in the books" queue. Checked ones are the firm commitments;
+  // Draft/Prepared ride along flagged so the board can show them softer.
+  await ensurePvApprovalCols(c.var.DB);
+  const awaitingRes = await c.var.DB.prepare(
+    `SELECT id, pvNo, date, payee, description, payFrom, totalSen, approval_state
+       FROM payment_vouchers
+      WHERE status <> 'VOID' AND approval_state IN ('DRAFT','PREPARED','CHECKED') AND accrued = 0
+      ORDER BY date ASC, pvNo ASC`,
+  ).all<Record<string, unknown>>().catch(() => ({ results: [] as Record<string, unknown>[] }));
+  const awaitingApproval = (awaitingRes.results ?? []).map((v) => ({
+    id: String(v.id),
+    pvNo: String(v.pvNo ?? v.pv_no ?? ""),
+    date: String(v.date ?? "").slice(0, 10),
+    payee: String(v.payee ?? ""),
+    description: String(v.description ?? ""),
+    payFrom: String(v.payFrom ?? v.pay_from ?? ""),
+    amountSen: Math.round(Number(v.totalSen ?? v.total_sen) || 0),
+    state: String(v.approvalState ?? v.approval_state ?? "DRAFT") as "DRAFT" | "PREPARED" | "CHECKED",
+  }));
+  const awaitingCheckedSen = awaitingApproval.filter((v) => v.state === "CHECKED").reduce((s, v) => s + v.amountSen, 0);
   return c.json({
     success: true,
-    data: { date, accounts, totalBankEstSen, totalAvailableSen, repay, receive, planned, tickWarnings, openingMonth },
+    data: { date, accounts, totalBankEstSen, totalAvailableSen, repay, receive, planned, tickWarnings, openingMonth, awaitingApproval, awaitingCheckedSen },
   });
 });
 
@@ -13309,16 +15040,43 @@ app.post("/bank-reco/finalize", async (c) => {
     if (!/^\d{4}-\d{2}$/.test(month)) return c.json({ success: false, error: "month must be YYYY-MM" }, 400);
     await ensureBankRecoCols(c.var.DB);
     const key = `bank_reco_final:${account}:${month}`;
+    const actorUserId = (c as unknown as { get: (k: string) => string | undefined }).get("userId") ?? null;
+    const now = new Date().toISOString();
+    // Strict-lock mode (Houzs adoption Phase 3, owner 2026-09-22 「月锁可以做，
+    // 但是别启动先」): kv bank_reco_strict_lock = "1" turns it ON. Default OFF
+    // keeps today's behaviour exactly. When ON: finalise only when the month
+    // tallies AND has no unbooked statement lines; re-open needs a reason.
+    // Every re-open — strict or not — is journaled to kv so the trail exists.
+    const strictRow = await c.var.DB.prepare("SELECT value FROM kv_config WHERE key = 'bank_reco_strict_lock'")
+      .first<{ value: string | null }>().catch(() => null);
+    const strict = strictRow?.value === "1";
     if (body.reopen) {
-      await c.var.DB.prepare("DELETE FROM kv_config WHERE key = ?").bind(key).run();
+      const reason = String((body as { reason?: string }).reason ?? "").trim();
+      if (strict && !reason) {
+        return c.json({ success: false, error: "Re-opening a finalised month needs a reason (strict lock is on)." }, 400);
+      }
+      const prior = await c.var.DB.prepare("SELECT value FROM kv_config WHERE key = ?").bind(key).first<{ value: string | null }>().catch(() => null);
+      await c.var.DB.batch([
+        c.var.DB.prepare("DELETE FROM kv_config WHERE key = ?").bind(key),
+        c.var.DB.prepare(
+          `INSERT INTO kv_config (key, value, updated_at) VALUES (?, ?, ?)
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+        ).bind(`bank_reco_reopen:${account}:${month}:${now}`, JSON.stringify({ actorUserId, reason, priorSnapshot: prior?.value ? JSON.parse(prior.value) : null }), now),
+      ]);
       return c.json({ success: true, data: { reopened: true } });
     }
     const snap = await computeBankRecoReport(c.var.DB, account, month);
     if (!snap.importedAt) {
       return c.json({ success: false, error: "Import this month's bank statement before finalising" }, 400);
     }
-    const actorUserId = (c as unknown as { get: (k: string) => string | undefined }).get("userId") ?? null;
-    const now = new Date().toISOString();
+    if (strict) {
+      if (!snap.balanced) {
+        return c.json({ success: false, error: `Strict lock: the month does not tally (out by ${(((snap.computedGlSen ?? 0) - snap.glSen) / 100).toFixed(2)}). Fix the reconciliation first.` }, 400);
+      }
+      if (snap.unbookedStmtCount > 0) {
+        return c.json({ success: false, error: `Strict lock: ${snap.unbookedStmtCount} bank line${snap.unbookedStmtCount === 1 ? "" : "s"} still not in the book. Book, match or ignore them first.` }, 400);
+      }
+    }
     const { bookPreSen: _pre, bookByDay: _byDay, ...snapStored } = snap;
     void _pre; void _byDay; // daily view recomputes live — keep the snapshot lean
     await c.var.DB.prepare(
@@ -13331,6 +15089,67 @@ app.post("/bank-reco/finalize", async (c) => {
   } catch {
     return c.json({ success: false, error: "Invalid request body" }, 400);
   }
+});
+
+// Strict-lock switch (default OFF — owner flips it when ready).
+app.get("/bank-reco/strict-lock", async (c) => {
+  const denied = await requirePermission(c, "accounting", "read");
+  if (denied) return denied;
+  const row = await c.var.DB.prepare("SELECT value FROM kv_config WHERE key = 'bank_reco_strict_lock'")
+    .first<{ value: string | null }>().catch(() => null);
+  return c.json({ success: true, data: { strict: row?.value === "1" } });
+});
+app.put("/bank-reco/strict-lock", async (c) => {
+  const denied = await requirePermission(c, "accounting", "update");
+  if (denied) return denied;
+  try {
+    const body = await c.req.json() as { strict?: boolean };
+    await c.var.DB.prepare(
+      `INSERT INTO kv_config (key, value, updated_at) VALUES ('bank_reco_strict_lock', ?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+    ).bind(body.strict ? "1" : "0", new Date().toISOString()).run();
+    return c.json({ success: true, data: { strict: !!body.strict } });
+  } catch { return c.json({ success: false, error: "Invalid body" }, 400); }
+});
+
+// Statement chain check (Houzs adoption Phase 3 「串链」): consecutive months'
+// statements must hand over — this month's opening = last month's closing —
+// and every month between the first import and the latest must be present.
+// A gap or a mismatch is named, so a skipped mid-year upload can't hide.
+app.get("/bank-reco/chain", async (c) => {
+  const denied = await requirePermission(c, "accounting", "read");
+  if (denied) return denied;
+  const account = c.req.query("account") || "";
+  const err = await bankAccountOrError(c.var.DB, account);
+  if (err) return c.json({ success: false, error: err }, 400);
+  const rows = await c.var.DB.prepare("SELECT key, value FROM kv_config WHERE key LIKE ?")
+    .bind(`bank_reco_meta:${account}:%`).all<{ key: string; value: string | null }>();
+  const months: { month: string; openingSen: number | null; closingSen: number | null }[] = [];
+  for (const r of rows.results ?? []) {
+    const m = String(r.key).slice(`bank_reco_meta:${account}:`.length);
+    if (!/^\d{4}-\d{2}$/.test(m)) continue;
+    let meta: { openingSen?: number; closingSen?: number } | null = null;
+    try { meta = r.value ? JSON.parse(r.value) : null; } catch { meta = null; }
+    months.push({ month: m, openingSen: meta?.openingSen ?? null, closingSen: meta?.closingSen ?? null });
+  }
+  months.sort((a, b) => a.month.localeCompare(b.month));
+  const nextMonth = (ym: string) => {
+    const [y, m] = ym.split("-").map(Number);
+    return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;
+  };
+  const issues: { kind: "gap" | "mismatch"; month: string; detail: string }[] = [];
+  for (let i = 1; i < months.length; i++) {
+    const prev = months[i - 1], cur = months[i];
+    let expect = nextMonth(prev.month);
+    while (expect < cur.month) {
+      issues.push({ kind: "gap", month: expect, detail: `No statement imported for ${expect} — between ${prev.month} and ${cur.month}.` });
+      expect = nextMonth(expect);
+    }
+    if (expect === cur.month && prev.closingSen !== null && cur.openingSen !== null && prev.closingSen !== cur.openingSen) {
+      issues.push({ kind: "mismatch", month: cur.month, detail: `${cur.month} opens at ${(cur.openingSen / 100).toFixed(2)} but ${prev.month} closed at ${(prev.closingSen / 100).toFixed(2)} — the statements don't hand over.` });
+    }
+  }
+  return c.json({ success: true, data: { account, months, issues, ok: issues.length === 0 } });
 });
 
 // ---------------------------------------------------------------------------
