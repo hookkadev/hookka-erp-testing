@@ -128,6 +128,7 @@ type ServiceCaseListItem = {
   // derivation can tell SV (sales_orders) from legacy service_orders and
   // date the Service Order stage.
   orders: { id: string; serviceOrderNo: string; status: string; mode: string | null; isSv?: boolean; createdAt?: string }[];
+  externalRef?: string; // operator's free-text ref for EXTERNAL cases ("" when none)
 };
 
 type SourceOrderOption = {
@@ -207,7 +208,7 @@ function categoriesLabel(codes: string[]): string {
 // for those features to see what the cell shows. Same shape feeds the CSV
 // export so the download matches the grid exactly.
 type CaseRow = ServiceCaseListItem & {
-  source: string; // "SO-2605-198" / "EXTERNAL"
+  source: string; // "SO-2605-198" / "EXTERNAL" / "EXTERNAL (art 058-026)"
   rootCause: string; // legacy single rootCauseCategory or "" (back-compat)
   categoryCodes: string[]; // all category codes on the case (multi)
   categoriesText: string; // joined human labels (sort / filter / CSV / search)
@@ -440,8 +441,13 @@ export default function ServiceCasesListPage() {
       return {
         ...c,
         // sourceNo already carries its own prefix (SO-…, CO-…), so show it
-        // alone for SO/CO; EXTERNAL has no number → show the type word.
-        source: c.sourceNo || (c.sourceType === "EXTERNAL" ? "EXTERNAL" : c.sourceType),
+        // alone for SO/CO; EXTERNAL has no number → show the type word plus
+        // the operator's ref, same as the detail header ("EXTERNAL (art 058-026)").
+        source:
+          c.sourceNo ||
+          (c.sourceType === "EXTERNAL"
+            ? `EXTERNAL${c.externalRef ? ` (${c.externalRef})` : ""}`
+            : c.sourceType),
         rootCause: c.rootCauseCategory ?? "",
         categoryCodes,
         categoriesText: categoriesLabel(categoryCodes),
