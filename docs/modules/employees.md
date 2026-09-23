@@ -44,35 +44,35 @@ Owns the whole workforce lifecycle: the **employee master** (workers + effective
 ## Core flows
 1. **PIN login → token** — `worker-auth.ts` `POST /login` **:124**. First login with `firstTimePin` registers the PIN; SHA-256 (`hashPin`, `src/api/lib/auth-utils.ts`); legacy cleartext rows rewritten on match; brute-force throttle 10/15 min; `must_reset` gate forces 6-digit reset. Every worker-app request then carries `X-Worker-Token`, resolved by `resolveWorkerToken` (`worker-auth.ts:337`) via `getWorker` (`worker.ts:160`), which also 403s any non-ACTIVE worker (locks a resigned phone mid-session).
 2. **Clock / dept-scan** — `worker.ts` `POST /clock` **:1067** (CLOCK_IN/OUT, optional geo + selfie), `POST /dept-scan` **:1324**, `GET /today` **:362**. Feeds working-hour capture and attendance.
-3. **Payslip generation (the engine)** — `payslips.ts` `POST /` **:994** calls `computeMonthlyLabor` (`labor-engine.ts:557`) once per worker (`:1246`); `GET /projected` **:710** runs the IDENTICAL engine for all ACTIVE workers (`:855`). Salary resolved via `effectiveSalarySenForMonth` (`labor-engine.ts:408`); statutory via `calcStatutory` (`payslips.ts:295`); per-day absence/OT detail via `buildDayDetailForPeriod` (`:480`). **`payroll.ts POST /` (**:125**) is NOT a run-header guard — it is DISABLED.** After the `payroll:create` RBAC check it returns **501** unconditionally (`payroll.ts:125-139`), because it used to invent overtime hours with a random number generator instead of reading attendance; its own header calls it "a legacy duplicate" and says refusing is the fix. Payroll is generated only by `POST /api/payslips`. `GET`/`PUT` on `/api/payroll` are left working so existing rows stay readable.
+3. **Payslip generation (the engine)** — `payslips.ts` `POST /` **:1012** calls `computeMonthlyLabor` (`labor-engine.ts:557`) once per worker (`:1264`); `GET /projected` **:722** runs the IDENTICAL engine for all ACTIVE workers (`:867`). Salary resolved via `effectiveSalarySenForMonth` (`labor-engine.ts:408`); statutory via `calcStatutory` (`payslips.ts:303`); per-day absence/OT detail via `buildDayDetailForPeriod` (`:488`). **`payroll.ts POST /` (**:125**) is NOT a run-header guard — it is DISABLED.** After the `payroll:create` RBAC check it returns **501** unconditionally (`payroll.ts:125-139`), because it used to invent overtime hours with a random number generator instead of reading attendance; its own header calls it "a legacy duplicate" and says refusing is the fix. Payroll is generated only by `POST /api/payslips`. `GET`/`PUT` on `/api/payroll` are left working so existing rows stay readable.
 4. **Day-typed OT** — inside `computeMonthlyLabor` (`labor-engine.ts:557`), OT hours split into weekday(1.5×)/Sunday(2×)/holiday(3×) buckets; payslips persist `otWeekday/Sunday/HolidayPaySen`. Holidays from `kv_config['public_holidays']`.
 5. **Short-hour dock** — `payroll-hour-deductions.ts` `POST /auto-from-punch` **:149** derives docks from punches; `POST /settle-period` **:211** folds them into the period.
-6. **Effective-dated salary** — `workers.ts` `GET /salary/effective` **:1199** returns each worker's day-weighted rate for a period; `resyncCurrentSalary` (`:1122`) keeps `workers.basicSalarySen` in sync with the latest history row.
+6. **Effective-dated salary** — `workers.ts` `GET /salary/effective` **:1242** returns each worker's day-weighted rate for a period; `resyncCurrentSalary` (`:1165`) keeps `workers.basicSalarySen` in sync with the latest history row.
 
 ## Key functions / sections (locate-to-function)
 | Symbol / section | file:line | Role |
 |---|---|---|
-| `EmployeesPage` (shell + tab switch) | `src/pages/employees.tsx:11615` | 9-tab admin host (default export, at file tail) |
+| `EmployeesPage` (shell + tab switch) | `src/pages/employees.tsx:11643` | 9-tab admin host (default export, at file tail) |
 | `WorkingHoursTab` | `src/pages/employees.tsx:1015` | Tab 1 — flat working-hours grid |
 | `EmployeeMasterTab` | `src/pages/employees.tsx:2407` | Tab 2 — worker master + salary |
-| `EfficiencyOverviewTab` | `src/pages/employees.tsx:3847` | Tab 3 — efficiency overview |
-| `DepartmentLaborTab` | `src/pages/employees.tsx:4412` | Dept labor cost breakdown |
-| `EmployeeDetailTab` | `src/pages/employees.tsx:5389` | Tab 4 — guard-unmounted detail |
-| `PayrollTab` | `src/pages/employees.tsx:6765` | Tab 5 — payroll drafts |
-| `LaborCostTab` | `src/pages/employees.tsx:8613` | Tab 5b — labor cost + DepartmentsManager |
-| `LeaveManagementTab` / `AttendanceTab` | `src/pages/employees.tsx:10256 / 11383` | Leave + attendance tabs |
+| `EfficiencyOverviewTab` | `src/pages/employees.tsx:3871` | Tab 3 — efficiency overview |
+| `DepartmentLaborTab` | `src/pages/employees.tsx:4436` | Dept labor cost breakdown |
+| `EmployeeDetailTab` | `src/pages/employees.tsx:5413` | Tab 4 — guard-unmounted detail |
+| `PayrollTab` | `src/pages/employees.tsx:6789` | Tab 5 — payroll drafts |
+| `LaborCostTab` | `src/pages/employees.tsx:8638` | Tab 5b — labor cost + DepartmentsManager |
+| `LeaveManagementTab` / `AttendanceTab` | `src/pages/employees.tsx:10284 / 11411` | Leave + attendance tabs |
 | `computeMonthlyLabor` | `src/lib/labor-engine.ts:557` | THE payroll + cost engine (both divisors) |
 | `effectiveSalarySenForMonth` / `salaryAsOfSen` | `src/lib/labor-engine.ts:408 / 382` | Day-weighted effective salary |
 | `countElapsedWorkingDays` | `src/lib/labor-engine.ts:135` | Cost-side divisor (real Mon–Sat − holidays) |
 | `countPublicHolidaysInMonth` | `src/lib/labor-engine.ts:109` | Holiday count for both divisors |
 | `computeAttendanceDayDetail` | `src/lib/labor-engine.ts:301` | Per-day absence/OT day-type detail |
 | `laborRatePerMinuteSen` | `src/lib/costing.ts:73` | Per-minute rate for product/BOM costing |
-| `computeMonthlyLabor` call sites | `src/api/routes/payslips.ts:863 / 1254` | Projected (all) + generate (per worker) |
-| `calcStatutory` / `buildDayDetailForPeriod` | `src/api/routes/payslips.ts:295 / 480` | EPF/SOCSO/EIS/PCB + per-day detail |
+| `computeMonthlyLabor` call sites | `src/api/routes/payslips.ts:867 / 1264` | Projected (all) + generate (per worker) |
+| `calcStatutory` / `buildDayDetailForPeriod` | `src/api/routes/payslips.ts:303 / 488` | EPF/SOCSO/EIS/PCB + per-day detail |
 | `POST /login` / `resolveWorkerToken` | `src/api/routes/worker-auth.ts:124 / 337` | PIN login + token resolution |
 | `getWorker` (token gate) | `src/api/routes/worker.ts:160` | X-Worker-Token → ACTIVE worker or 401/403 |
 | `POST /clock` / `POST /dept-scan` | `src/api/routes/worker.ts:1067 / 1324` | Clock in/out + department scan |
-| `GET /salary/effective` | `src/api/routes/workers.ts:1199` | Day-weighted salary per period |
+| `GET /salary/effective` | `src/api/routes/workers.ts:1242` | Day-weighted salary per period |
 | `POST /auto-from-punch` / `settle-period` | `src/api/routes/payroll-hour-deductions.ts:149 / 211` | Short-hour docks |
 
 ## Gotchas

@@ -47,6 +47,8 @@ export type EmployeeDraft = {
   otMultiplier: number;
   efficiencyAllowanceSen: number;
   efficiencyThresholdPct: number;
+  // Leadership allowance (migration 0233, DEV-06) — flat bonus, no threshold.
+  leadershipAllowanceSen: number;
   epfEnabled: boolean;
   socsoEnabled: boolean;
   eisEnabled: boolean;
@@ -437,6 +439,22 @@ export function EmployeeDrawer({
                 max={100}
                 value={draft.efficiencyThresholdPct}
                 onChange={(e) => set("efficiencyThresholdPct", parseFloat(e.target.value) || 0)}
+                className="mt-0.5 h-8 text-xs"
+              />
+            </Field>
+            {/* Leadership allowance (DEV-06) — flat bonus, prorated by attendance
+                only. Deliberately no threshold field: owner decision was "不设
+                门槛,只按出勤比例" (no performance gate, attendance ratio only). */}
+            <Field label="Leader allowance (RM)">
+              <Input
+                type="number"
+                value={rm(draft.leadershipAllowanceSen)}
+                onChange={(e) =>
+                  set(
+                    "leadershipAllowanceSen",
+                    moneyFieldToSen(e.target.value) ?? draft.leadershipAllowanceSen,
+                  )
+                }
                 className="mt-0.5 h-8 text-xs"
               />
             </Field>

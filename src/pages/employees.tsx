@@ -143,6 +143,8 @@ type Worker = {
    *  = bonus in sen paid when efficiency over the period >= threshold. */
   efficiencyAllowanceSen?: number;
   efficiencyThresholdPct?: number;
+  /** Leadership allowance (migration 0233, DEV-06) — flat bonus, no threshold. */
+  leadershipAllowanceSen?: number;
   // How this worker is paid (default; a payroll run snapshots it per month).
   paymentMethod?: string | null;
   bankName?: string | null;
@@ -2307,6 +2309,8 @@ type WorkerFormData = {
   /** Efficiency bonus config — allowance in sen, threshold percent (0–100). */
   efficiencyAllowanceSen: number;
   efficiencyThresholdPct: number;
+  /** Leadership allowance — flat bonus in sen, no threshold. */
+  leadershipAllowanceSen: number;
   paymentMethod: string;
   bankName: string;
   bankAccount: string;
@@ -2358,6 +2362,7 @@ const emptyForm: WorkerFormData = {
   resignedAt: "",
   efficiencyAllowanceSen: 0,
   efficiencyThresholdPct: 0,
+  leadershipAllowanceSen: 0,
   // Bank transfer is the default; the bank fields stay blank until the office
   // fills them, and the payslip then says so rather than printing a made-up
   // account (which is what the old code did).
@@ -2647,6 +2652,7 @@ function EmployeeMasterTab({
       otMultiplier: w.otMultiplier ?? 1.5,
       efficiencyAllowanceSen: w.efficiencyAllowanceSen ?? 0,
       efficiencyThresholdPct: w.efficiencyThresholdPct ?? 0,
+      leadershipAllowanceSen: w.leadershipAllowanceSen ?? 0,
       epfEnabled: w.epfEnabled !== false,
       socsoEnabled: w.socsoEnabled !== false,
       eisEnabled: w.eisEnabled !== false,
@@ -2711,6 +2717,10 @@ function EmployeeMasterTab({
     }
     if (draft.efficiencyAllowanceSen < 0) {
       toast.error("Efficiency allowance cannot be negative.");
+      return;
+    }
+    if (draft.leadershipAllowanceSen < 0) {
+      toast.error("Leadership allowance cannot be negative.");
       return;
     }
     // Backend rejects a non-empty resignedAt unless status is RESIGNED.
@@ -3012,6 +3022,20 @@ function EmployeeMasterTab({
               {pct ? `${pct}%` : "—"}
             </span>;
         },
+      },
+      {
+        // Leadership Allowance amount (sen, shown as RM). Flat bonus paid every
+        // month, pro-rated by attendance — unlike Efficiency Allowance there is
+        // NO threshold/eligibility gate (migration 0233, DEV-06).
+        key: "leadershipAllowanceSen",
+        defaultHidden: true,
+        label: "Leader Allowance (RM)",
+        align: "right",
+        sortable: true,
+        render: (_value, row) =>
+          <span className="font-medium">
+              {row.leadershipAllowanceSen ? formatRM(row.leadershipAllowanceSen) : "—"}
+            </span>,
       },
       {
         // How this worker is paid. Cash hides the bank fields entirely rather
@@ -7479,6 +7503,7 @@ function PayrollTab({ workers }: { workers: Worker[] }) {
         ]),
         s("7. Allowance, statutory & net pay", [
           { item: "Efficiency allowance", rule: "Flat bonus when the month's cumulative efficiency reaches the worker's target, else RM0 (no proration)", example: "RM150 at 100%" },
+          { item: "Leadership allowance", rule: "Flat monthly bonus pro-rated by attendance — no efficiency threshold", example: `27 working days, 2 absent → 25/27 of the configured amount` },
           { item: "Statutory (per-worker toggle)", rule: `EPF ${cfg.epfEmployeePct}% employee / ${cfg.epfEmployerPct}% employer on basic · SOCSO RM${(cfg.socsoEmployeeSen / 100).toFixed(2)}/${(cfg.socsoEmployerSen / 100).toFixed(2)} · EIS RM${(cfg.eisEmployeeSen / 100).toFixed(2)}/${(cfg.eisEmployerSen / 100).toFixed(2)}`, example: "Deducted only when enabled" },
           { item: "Net pay", rule: "Basic − absence − late/short + OT + allowance − employee statutory − salary advances already taken", example: "What the worker receives" },
           { item: "Salary advance", rule: "Cash drawn during the month is paid back out of that same month's pay. It is not an earning and not a statutory deduction, so EPF / SOCSO / EIS / PCB are unaffected", example: "Draw RM300 on the 12th → RM300 less in the pay-out" },
@@ -7667,7 +7692,7 @@ function PayrollTab({ workers }: { workers: Worker[] }) {
                     <th className="h-10 px-2 text-right font-medium text-[#374151] whitespace-nowrap">OT Sun</th>
                     <th className="h-10 px-2 text-right font-medium text-[#374151] whitespace-nowrap">OT PH</th>
                     <th className="h-10 px-3 text-right font-medium text-[#374151] whitespace-nowrap">OT Amt</th>
-                    <th className="h-10 px-3 text-right font-medium text-[#374151] whitespace-nowrap" title="Efficiency allowance — paid when the worker hits their monthly efficiency target">Allowance</th>
+                    <th className="h-10 px-3 text-right font-medium text-[#374151] whitespace-nowrap" title="Efficiency + leadership allowance combined">Allowance</th>
                     <th className="h-10 px-3 text-right font-medium text-[#374151] whitespace-nowrap">Gross</th>
                     <th className="h-10 px-2 text-right font-medium text-[#374151] whitespace-nowrap">EPF EE</th>
                     <th className="h-10 px-2 text-right font-medium text-[#374151] whitespace-nowrap">EPF ER</th>
@@ -8039,7 +8064,7 @@ function PayrollTab({ workers }: { workers: Worker[] }) {
               </div>
               <div>
                 <p className="font-semibold text-[#1F1D1B] mb-1">Allowance & statutory</p>
-                <p>Efficiency allowance: flat amount on target (per worker, Employee Master) · EPF {payRulesToday.epfEmployeePct}%/{payRulesToday.epfEmployerPct}% · SOCSO RM{(payRulesToday.socsoEmployeeSen / 100).toFixed(2)}/{(payRulesToday.socsoEmployerSen / 100).toFixed(2)} · EIS RM{(payRulesToday.eisEmployeeSen / 100).toFixed(2)}/{(payRulesToday.eisEmployerSen / 100).toFixed(2)} (per-worker toggle).</p>
+                <p>Efficiency allowance: flat amount on target · Leadership allowance: flat amount pro-rated by attendance (both per worker, Employee Master) · EPF {payRulesToday.epfEmployeePct}%/{payRulesToday.epfEmployerPct}% · SOCSO RM{(payRulesToday.socsoEmployeeSen / 100).toFixed(2)}/{(payRulesToday.socsoEmployerSen / 100).toFixed(2)} · EIS RM{(payRulesToday.eisEmployeeSen / 100).toFixed(2)}/{(payRulesToday.eisEmployerSen / 100).toFixed(2)} (per-worker toggle).</p>
               </div>
             </div>
             {/* One tidy "where to adjust" strip instead of a 7th box hanging
@@ -9454,9 +9479,10 @@ function LaborCostTab({
           (otAdjustmentByPayslip.get(p.id) ?? 0) -
           // Docked late/short hours bridge — after a Deduct the gap closes to 0.
           (lateDockAdjByPayslip.get(p.id) ?? 0) -
-          // Efficiency allowance is a flat bonus, not logged hours — it has its
-          // OWN reconciliation line, so exclude it here or a fully-logged earner
-          // shows a spurious ~RM150 "under-recorded" gap.
+          // Efficiency + leadership allowance are flat bonuses, not logged
+          // hours — they have their OWN reconciliation line, so exclude the
+          // combined bucket here or a fully-logged earner shows a spurious
+          // ~RM150 "under-recorded" gap.
           (Number(p.allowances) || 0),
       );
       // A production worker fully reconciled (gap ≈ 0) is not a data gap. Use a
@@ -9526,9 +9552,10 @@ function LaborCostTab({
         // Docked late/short hours: the cost-vs-dock rate difference belongs on
         // the worker's department line (same treatment as the absence bridge).
         (lateDockAdjByPayslip.get(p.id) ?? 0) +
-        // Efficiency allowance — folded into the worker's department line
-        // (owner 2026-06-11: "平摊进去就不用单独 show"), matching the
-        // Department Labor tab exactly, so both tabs' production lines agree.
+        // Efficiency + leadership allowance (combined) — folded into the
+        // worker's department line (owner 2026-06-11: "平摊进去就不用单独
+        // show"), matching the Department Labor tab exactly, so both tabs'
+        // production lines agree.
         (Number(p.allowances) || 0);
     }
     return { stat, adj, nonProdGrossSen };
@@ -9549,8 +9576,9 @@ function LaborCostTab({
   // figure the "who & why" panel itemises, so both lines (and Department Labor's
   // Under-recorded column) show the identical number.
   const underRecordedReconSen = employeeResidual.underLoggedSubtotalSen;
-  // Efficiency allowance is folded into each worker's department line via
-  // reconBurden.adj (owner 2026-06-11) — matching the Department Labor tab —
+  // Efficiency + leadership allowance are folded into each worker's
+  // department line via reconBurden.adj (owner 2026-06-11) — matching the
+  // Department Labor tab —
   // so there is no separate allowance line; it is still excluded from the
   // under-recorded gaps so it can't show as a fake data gap.
   const loadedOverheadSen =

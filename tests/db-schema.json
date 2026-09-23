@@ -3650,6 +3650,7 @@
     "id",
     "is_outsource",
     "join_date",
+    "leadership_allowance_sen",
     "medical_leave_entitlement_days",
     "name",
     "nationality",
