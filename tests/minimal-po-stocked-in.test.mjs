@@ -105,6 +105,8 @@ const MINIMAL_KEYS = [
   "companySOId",
   "consignmentOrderId",
   "companyCOId",
+  "isStock",
+  "stockOriginSoId",
   "customerPOId",
   "customerReference",
   "customerSO",
@@ -211,4 +213,46 @@ test("MinimalPOOut declares stockedIn, so a slim-down cannot drop it silently", 
     /\n {2}stockedIn: boolean;/,
     "MinimalPOOut must declare stockedIn — the type is what tsc checks the projection against",
   );
+});
+
+// ---------------------------------------------------------------------------
+// DEV-05 — the Pending Delivery gate reads these two fields OFF THIS PAYLOAD.
+//
+// BUG-2026-09-23-184. `poReadyForDelivery` keeps an unallocated stock order out
+// of Pending Delivery by comparing salesOrderId against stockOriginSoId. The
+// Delivery page's ready-planning fetch asks for the MINIMAL projection
+// (delivery-orders.ts passes minimal=true) and neither field was on it, so both
+// read `undefined`, the gate never fired, and stock could be picked onto a
+// customer's delivery note — the exact thing it exists to stop.
+//
+// The predicate's own unit tests passed throughout: they hand it an object with
+// the fields already set, which proves the LOGIC and says nothing about whether
+// the DATA arrives. This test is the second half — it pins the delivery path's
+// payload, which is where the bug actually lived.
+// ---------------------------------------------------------------------------
+test("the stock gate's two fields survive the minimal projection", () => {
+  const src = readFileSync(resolve(process.cwd(), HELPERS), "utf8");
+  const type = src.slice(
+    src.indexOf("export type MinimalPOOut = {"),
+    src.indexOf("export function rowToMinimalJobCard"),
+  );
+  for (const decl of [/\n {2}isStock: boolean;/, /\n {2}stockOriginSoId: string;/]) {
+    assert.match(
+      type,
+      decl,
+      "MinimalPOOut must declare both — poReadyForDelivery compares them, and an absent field reads as undefined, which is falsy, which silently opens the gate",
+    );
+  }
+});
+
+test("EVERY row-to-PO mapper emits the pair, not just the minimal one", () => {
+  // The 2026-04-28 CO fix in this same file is the precedent: a routing field
+  // present on one mapper and absent on the other left CO POs misclassified on
+  // the FE. Ownership is routing too — whoever reads a PO has to be able to
+  // tell whether it is still the stock order's.
+  const src = readFileSync(resolve(process.cwd(), HELPERS), "utf8");
+  const emits = src.match(/isStock: row\.isStock === true,/g) ?? [];
+  const origins = src.match(/stockOriginSoId: row\.stockOriginSoId \?\? "",/g) ?? [];
+  assert.equal(emits.length, 3, "all three construction sites must emit isStock");
+  assert.equal(origins.length, 3, "all three construction sites must emit stockOriginSoId");
 });
