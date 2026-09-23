@@ -15,7 +15,7 @@ Read-mostly stock visibility across the three stages of manufacturing: **Finishe
 
 ## Entry points
 - **Pages**
-  - `/inventory` → `src/pages/inventory/index.tsx:1034` (`InventoryPage` — 3 tabs FG/WIP/RM off one `activeTab` state)
+  - `/inventory` → `src/pages/inventory/index.tsx:1043` (`InventoryPage` — 3 tabs FG/WIP/RM off one `activeTab` state)
   - `/inventory/fabrics` → `src/pages/inventory/fabrics.tsx` (`FabricsPage` — fabric tracking)
   - `/inventory/stock-value` → `src/pages/inventory/stock-value.tsx` (`StockValuePage` — valuation snapshots)
   - `/inventory/adjustments` → `src/pages/inventory/adjustments.tsx` (`StockAdjustmentsPage`)
@@ -54,7 +54,7 @@ Read-mostly stock visibility across the three stages of manufacturing: **Finishe
 ## Key functions / sections (locate-to-function)
 | Symbol / section | file:line | Role |
 |---|---|---|
-| `InventoryPage` | `src/pages/inventory/index.tsx:1034` | 3-tab grid host |
+| `InventoryPage` | `src/pages/inventory/index.tsx:1043` | 3-tab grid host |
 | `StockBreakdownDrawer` | `src/pages/inventory/StockBreakdownDrawer.tsx` | The per-item panel — opened by a ROW CLICK on any tab |
 | `mergeRmReceipts` / `fgProductDetails` | `src/lib/stock-breakdown.ts` | RM lots+inbound-movements merge; the FG product-details field list |
 | `deriveWIPFromPO` | `src/pages/inventory/index.tsx:325` | Client WIP derivation across dept stages |

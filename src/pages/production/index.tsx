@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useUrlState, useUrlBatch } from "@/lib/use-url-state";
 import { useSessionState } from "@/lib/use-session-state";
+import { usePermissions } from "@/lib/use-permission";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -1805,6 +1806,9 @@ export default function ProductionPage({
   // by product+size+fabric for FG), so the picker only shows SKUs the
   // factory has actually built before — no need to prefill a catalog.
   const [stockDialogOpen, setStockDialogOpen] = useState(false);
+  // R7 — same (resource, action) POST /production-orders/stock enforces.
+  const { hasPermission } = usePermissions();
+  const canCreateStockPO = hasPermission("production-orders", "create");
   // Print Schedule mode toggle. "detailed" → handlePrintSchedule (one row
   // per PO/JC). "total" → handlePrintTotalListing (rows merged on
   // model+spec so the floor sees "make N of X").
@@ -7146,13 +7150,18 @@ export default function ProductionPage({
           <p className="text-xs text-[#6B7280]">Real-time production status across all 8 departments</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button
-            onClick={() => setStockDialogOpen(true)}
-            className="bg-[#6B5C32] hover:bg-[#574A28] text-white gap-1.5"
-          >
-            <Plus className="w-4 h-4" />
-            Create Stock PO
-          </Button>
+          {/* R7 — the button carries the permission its endpoint does
+              (production-orders:create). Offering a button that can only 403
+              is how an operator learns to distrust the screen. */}
+          {canCreateStockPO && (
+            <Button
+              onClick={() => setStockDialogOpen(true)}
+              className="bg-[#6B5C32] hover:bg-[#574A28] text-white gap-1.5"
+            >
+              <Plus className="w-4 h-4" />
+              Create Stock PO
+            </Button>
+          )}
           <Button variant="outline" onClick={() => navigate("/planning?tab=tracker")}>Master Tracker</Button>
           {/* Print Schedule mode picker. Detailed = one row per PO/JC
               (handlePrintSchedule). Total Listing = rows merged by
@@ -8384,7 +8393,17 @@ export default function ProductionPage({
                   </div>
                 )}
               </div>
-              <div className="px-3 py-1.5 text-xs text-[#6B7280] truncate flex items-center">{order.customerName}</div>
+              <div className="px-3 py-1.5 text-xs text-[#6B7280] truncate flex items-center gap-1.5">
+                {/* R16 — a stock PO has no customer behind it until it is
+                    allocated. Marked here so the floor never reads "Factory
+                    Stock" as just another customer name. */}
+                {order.isStock && (
+                  <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-[#6B5C32]/10 text-[#6B5C32]">
+                    Stock
+                  </span>
+                )}
+                <span className="truncate">{order.customerName}</span>
+              </div>
               <div
                 className="px-3 py-1.5 text-xs text-[#1F1D1B] doc-number truncate flex items-center"
                 title={order.customerPOId || ""}

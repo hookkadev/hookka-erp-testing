@@ -11,7 +11,7 @@ import {
   Trash2, Download, Edit, Copy,
   CheckCircle2, Truck, FileText, XCircle, PauseCircle, PlayCircle, X,
   Factory, Clock, DollarSign, AlertTriangle, ChevronDown, ChevronUp,
-  Wrench, Pencil,
+  Wrench, Pencil, Package,
 } from "lucide-react";
 // Phase 3 — Service Orders. Opens a modal pre-filled with this SO's
 // header info so the user can spawn a Service Case directly from the SO
@@ -163,6 +163,227 @@ function overrideReason(c: StatusChange): string {
 }
 
 // --- Status Timeline Component ---
+// ---------------------------------------------------------------------------
+// R15 — allocate finished stock to this order, and give it back.
+//
+// Before this there was no way to point goods built for stock at the customer
+// who turned up: a production order was married to its sales order at birth and
+// no code anywhere changed that link. Allocation happens automatically on
+// confirm; this panel is where a person overrules that — takes more, or hands
+// it back.
+//
+// A release is a counter-row on the ledger, not an edit, so the trail of who
+// promised what to whom survives the change of mind.
+// ---------------------------------------------------------------------------
+type AllocRow = {
+  productCode: string;
+  soItemId: string | null;
+  quantity: number;
+};
+type AvailRow = {
+  productCode: string;
+  onHandQty: number;
+  inProductionQty: number;
+  allocatedQty: number;
+  availableQty: number;
+};
+
+function StockAllocationCard({
+  order,
+  onChanged,
+}: {
+  order: SalesOrder;
+  onChanged: () => void;
+}) {
+  const [held, setHeld] = useState<AllocRow[]>([]);
+  const [avail, setAvail] = useState<Record<string, AvailRow>>({});
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+
+  const codes = useMemo(
+    () => [...new Set(order.items.map((i) => i.productCode).filter(Boolean))],
+    [order.items],
+  );
+
+  const load = useCallback(async () => {
+    try {
+      const [hRes, aRes] = await Promise.all([
+        fetch(`/api/stock-allocations?salesOrderId=${encodeURIComponent(order.id)}`),
+        fetch(
+          `/api/stock-allocations/availability?productCodes=${encodeURIComponent(codes.join(","))}`,
+        ),
+      ]);
+      const h = (await hRes.json().catch(() => ({}))) as { data?: AllocRow[] };
+      const a = (await aRes.json().catch(() => ({}))) as { data?: AvailRow[] };
+      setHeld(h.data ?? []);
+      setAvail(Object.fromEntries((a.data ?? []).map((r) => [r.productCode, r])));
+    } catch {
+      // A panel that cannot read is shown as empty-with-an-error, never as
+      // "nothing is allocated" — those two must not look the same.
+      setError("Could not read stock allocations.");
+    } finally {
+      setLoaded(true);
+    }
+  }, [order.id, codes]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount; every setState inside load() is behind an await, never synchronous with the render
+    void load();
+  }, [load]);
+
+  // A stock order IS the stock — it has nothing to be allocated to it.
+  if (order.isStock) return null;
+  if (!loaded) return null;
+
+  const heldFor = (itemId: string, code: string) =>
+    held
+      .filter((h) => h.productCode === code && (h.soItemId === itemId || h.soItemId === null))
+      .reduce((n, h) => n + h.quantity, 0);
+
+  const act = async (
+    path: "" | "/release",
+    body: Record<string, unknown>,
+    key: string,
+  ) => {
+    setBusy(key);
+    setError(null);
+    try {
+      const res = await fetch(`/api/stock-allocations${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        success?: boolean;
+        error?: string;
+      };
+      if (!res.ok || !data.success) {
+        setError(data.error ?? "That did not work.");
+      } else {
+        await load();
+        onChanged();
+      }
+    } catch {
+      setError("That did not work.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const anyStock = codes.some((c) => (avail[c]?.onHandQty ?? 0) > 0);
+  const anyHeld = held.length > 0;
+  if (!anyStock && !anyHeld) return null;
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Package className="h-5 w-5 text-[#6B5C32]" />
+          Stock Allocation
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {error && (
+          <div className="mb-3 rounded border border-[#E8B4B4] bg-[#FBEDED] px-3 py-2 text-xs text-[#8A2B2B]">
+            {error}
+          </div>
+        )}
+        <div className="rounded-md border border-[#E2DDD8] overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-[#E2DDD8] bg-[#F0ECE9]">
+                <th className="h-10 px-3 text-left font-medium text-[#374151]">Product</th>
+                <th className="h-10 px-3 text-right font-medium text-[#374151]">Ordered</th>
+                <th className="h-10 px-3 text-right font-medium text-[#374151]">Allocated</th>
+                <th className="h-10 px-3 text-right font-medium text-[#374151]">Available</th>
+                <th className="h-10 px-3 text-right font-medium text-[#374151]">In production</th>
+                <th className="h-10 px-3 text-right font-medium text-[#374151]">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {order.items.map((item) => {
+                const a = avail[item.productCode];
+                const mine = heldFor(item.id, item.productCode);
+                const canTake = Math.min(
+                  Math.max(0, item.quantity - mine),
+                  a?.availableQty ?? 0,
+                );
+                const key = `${item.id}`;
+                return (
+                  <tr key={item.id} className="border-b border-[#E2DDD8] last:border-0">
+                    <td className="px-3 py-2">
+                      <div className="font-medium">{item.productCode}</div>
+                      <div className="text-xs text-[#6B7280]">{item.productName}</div>
+                    </td>
+                    <td className="px-3 py-2 text-right">{item.quantity}</td>
+                    <td className="px-3 py-2 text-right font-medium">{mine}</td>
+                    <td className="px-3 py-2 text-right">{a?.availableQty ?? 0}</td>
+                    <td className="px-3 py-2 text-right text-[#6B7280]">
+                      {a?.inProductionQty ?? 0}
+                    </td>
+                    <td className="px-3 py-2 text-right whitespace-nowrap">
+                      {canTake > 0 && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={busy === key}
+                          onClick={() =>
+                            act(
+                              "",
+                              {
+                                productCode: item.productCode,
+                                salesOrderId: order.id,
+                                soItemId: item.id,
+                                soLineNo: item.lineNo,
+                                quantity: canTake,
+                              },
+                              key,
+                            )
+                          }
+                        >
+                          Allocate {canTake}
+                        </Button>
+                      )}
+                      {mine > 0 && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="ml-2"
+                          disabled={busy === key}
+                          onClick={() =>
+                            act(
+                              "/release",
+                              {
+                                productCode: item.productCode,
+                                salesOrderId: order.id,
+                                soItemId: item.id,
+                                quantity: mine,
+                              },
+                              key,
+                            )
+                          }
+                        >
+                          Release {mine}
+                        </Button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <p className="mt-2 text-xs text-[#6B7280]">
+          Allocated pieces are held for this order and drop out of everyone
+          else&apos;s available figure. Releasing writes a reversal — the record of
+          what was promised stays.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
 function StatusTimeline({ history }: { history: StatusChange[] }) {
   if (history.length === 0) return null;
 
@@ -1429,6 +1650,10 @@ export default function SalesOrderDetailPage() {
 
       {/* Order Progress — production + delivery glance card, mobile-first */}
       <OrderProgressCard linkedPOs={linkedPOs} linkedDOs={linkedDOs} />
+
+      {/* R15 — hands finished stock to this order, and takes it back. Renders
+          nothing when there is neither stock nor a holding to show. */}
+      <StockAllocationCard order={order} onChanged={refreshOrder} />
 
       <div className="grid gap-6 grid-cols-1 lg:grid-cols-3">
         <Card className="lg:col-span-2">
