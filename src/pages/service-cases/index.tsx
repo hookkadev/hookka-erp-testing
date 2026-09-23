@@ -129,6 +129,7 @@ type ServiceCaseListItem = {
   // date the Service Order stage.
   orders: { id: string; serviceOrderNo: string; status: string; mode: string | null; isSv?: boolean; createdAt?: string }[];
   externalRef?: string; // operator's free-text ref for EXTERNAL cases ("" when none)
+  customerPO?: string; // source SO/CO's customer PO — list GET only ("" when none)
 };
 
 type SourceOrderOption = {
@@ -501,6 +502,20 @@ export default function ServiceCasesListPage() {
         ),
       },
       {
+        // Source order's customer PO (DEV-13) — customers quote their own PO.
+        key: "customerPO",
+        label: "Customer PO",
+        width: "130px",
+        sortable: true,
+        filterAccessor: (row) => row.customerPO || "—",
+        render: (value) =>
+          value ? (
+            <span className="text-[#6B7280]">{String(value)}</span>
+          ) : (
+            <span className="text-[#9CA3AF]">—</span>
+          ),
+      },
+      {
         // Root Cause category, relabelled "Category" (owner: the category is
         // the root cause). A case can now have several (migration 0169) —
         // show the first 2 as badges + "+N" for the rest. Sort / value-filter
@@ -645,6 +660,7 @@ export default function ServiceCasesListPage() {
         { header: "Case No", accessor: (r) => r.caseNo },
         { header: "Customer", accessor: (r) => r.customerName },
         { header: "Source", accessor: (r) => r.source },
+        { header: "Customer PO", accessor: (r) => r.customerPO ?? "" },
         // Joined human labels for all the case's categories (multi).
         { header: "Category", accessor: (r) => r.categoriesText },
         { header: "Department", accessor: (r) => r.department },

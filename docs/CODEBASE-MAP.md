@@ -40,6 +40,8 @@
 > section gains the `attendance_records` warning — that table carries no production or
 > efficiency data and never has (BUG-2026-08-13-103).
 >
+> **Last verified: 2026-09-23 on branch `feat/service-case-customer-po`** — the Service & Repair `service-cases/index.tsx` / `service-cases.ts` row only: line counts re-measured (1691 / 1068) and the Customer PO column (DEV-13) noted.
+>
 > **Last verified: 2026-09-23 on branch `ci/github-deployments-status`** — the Service & Repair `service-cases/index.tsx` row only: line count re-measured (`wc -l`, 1675; was 1522) and the Source-column behaviour noted.
 
 > **Last verified: 2026-09-23 on branch `fix/so-duplicate-ref-saves-draft`** — the Sales rows for `sales-orders.ts` / `sales/create.tsx` and the `scan-po-modal.tsx` row: line counts re-measured (`wc -l`), behaviour of BUG-2026-09-23-185 noted; the `src/api/routes/sales-orders.ts:4003` `lineNo` anchor re-derived.
@@ -1037,7 +1039,7 @@ the payload's `sales.orders[0].totalSen` is non-zero.
 
 | Frontend page | API route | Primary tables | Tests |
 |---|---|---|---|
-| `src/pages/service-cases/index.tsx` — Service Cases list; Source column shows the full `EXTERNAL (<externalRef>)` for external cases, unclipped (`noClip`) (1675). Last verified 2026-09-23 | `src/api/routes/service-cases.ts` — service_cases CRUD + status + photos + stock top-ups (959) | `service_cases` / `service_orders` / `service_order_lines` / `service_order_returns` | `tests/case-pipeline.test.mjs` |
+| `src/pages/service-cases/index.tsx` — Service Cases list; Source column shows the full `EXTERNAL (<externalRef>)` for external cases, unclipped (`noClip`); Customer PO column = source SO/CO's customer PO, sent only by the list GET (1691). Last verified 2026-09-23 | `src/api/routes/service-cases.ts` — service_cases CRUD + status + photos + stock top-ups; list GET adds `customerPO` via `loadCustomerPoBySource` (1068) | `service_cases` / `service_orders` / `service_order_lines` / `service_order_returns` | `tests/case-pipeline.test.mjs` · `tests/service-case-customer-po.test.mjs` |
 | `src/pages/service-cases/detail.tsx` — Service Case command center (3493) | `src/api/routes/service-orders.ts` — SV-order returns/repair lifecycle + mode/scope (1859) | `sales_orders` (caseid links SV→case; isServiceOrder mode flag) / `sales_order_items` | `tests/repair-scope.test.mjs` |
 | `src/pages/service-orders/index.tsx` — SV-order list + CreateServiceOrderModal (1224) | `src/api/routes/sales-orders.ts` — co-owns the SO MODE (isServiceOrder) for the re-export pages | `production_orders` (repairscope) / `job_cards` / `fg_batches` | `tests/service-cases-rootcauses.test.mjs` |
 | `src/pages/service-orders/detail.tsx` — SV-order detail (returns, repair scope) (961) | | `stock_adjustments` / `stock_movements` / `cost_ledger` | `tests/service-hub-chain.test.mjs` |
