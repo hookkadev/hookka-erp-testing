@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-23** — branch `fix/so-duplicate-ref-saves-draft` added below (open, its entry is the newest).
 > **Last verified: 2026-09-22** — branch `fix/scan-queue-client-driven` added below (open, its entry is the newest).
 > **Last verified: 2026-09-22** — branch `fix/datagrid-selection-loop` added below (open, its entry is the newest). Previously: branch `fix/delivery-tab-switch-pagination` (MERGED as #467). Previously: branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
 > **Last verified: 2026-09-22** — branch `fix/delivery-loading-gate-po-paging` added below (open, its entry is the newest). Previously: branch `fix/delivery-tab-switch-pagination` (MERGED as #467). Previously: branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
@@ -18,6 +19,16 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+---
+
+## 2026-09-23 — 🔵 DEV-12: repeated customer S/O no. blocks the scanned SO (branch `fix/so-duplicate-ref-saves-draft`)
+
+Siti (High): "IF CUST SO NUMBER SAME WITH PREVIOUS PURCHASE ORDER … THE SYSTEM WILL NOT PROCEED
+THE NEW ORDER" (ref HC-SO-013492) → BUG-2026-09-23-185. SO create 409'd on a repeated customer
+PO/SO ref and the scan modal consumed the failed scan. Now saved as DRAFT with a warning; failed
+creates stay in the queue; "Create Order" won't auto-confirm a warned SO. Open: prod verify after
+deploy; mobile form shows no warning (no notice channel).
 
 ---
 
