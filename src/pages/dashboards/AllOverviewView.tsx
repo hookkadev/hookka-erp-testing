@@ -1,5 +1,6 @@
 import { useMemo } from "react";
-import { useCachedJson } from "@/lib/cached-fetch";
+import { Link } from "react-router-dom";
+import { isUnknownOutcome, useCachedJson } from "@/lib/cached-fetch";
 import { formatCurrency } from "@/lib/utils";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,13 +14,16 @@ import {
   Truck,
   Users,
   Package,
+  FileText,
 } from "lucide-react";
 import {
-  MUTED, GREEN, RED, AMBER, fmtN,
+  MUTED, GREEN, RED, AMBER, fmtN, fmtRM2, widgetPeriod, widgetPeriodLabel,
   periodLabel, dayLabel, isConfirmedOrder, type Period,
 } from "./dashboard-shared-lib";
 import { LiveBadge } from "./dashboard-shared";
 import { overviewTotals, overviewSalesSnapshot, overviewWorkforce } from "./dashboard-sales-lib";
+import { complianceSummary, monthWindow, type ComplianceResp, type Overview } from "./dashboard-widgets-lib";
+import { OcrAccuracyCard } from "../dashboard-b/OcrAccuracyCard";
 
 // All Overview — the dashboard's landing tab, ported from the static design
 // prototype's own first screen. Reads the SAME GET /api/dashboard/prototype
@@ -196,6 +200,16 @@ export function AllOverviewView({
   onOpenTab: (tab: string, sub: string | undefined) => void;
 }) {
   const { data, loading, error } = useCachedJson<Feed>("/api/dashboard/prototype");
+  // Invoices KPI + Daily Report tile — the SAME URLs
+  // /dashboard reads, derived with the same formulas (dashboard-widgets-lib.ts).
+  const wp = widgetPeriod(period);
+  const wpLabel = widgetPeriodLabel(period);
+  const { data: ovRaw, loading: ovLoading } = useCachedJson<Overview>(`/api/dashboard/overview?period=${wp}`);
+  const ovData = ovRaw && ovRaw.success !== false ? ovRaw : null;
+  const { data: compRaw, loading: compLoading, failure: compFailure } =
+    useCachedJson<ComplianceResp>("/api/reports/compliance.json");
+  // A dead read is not a clean day (C15): only a 2xx body licenses a number.
+  const comp = complianceSummary(compRaw, isUnknownOutcome(compFailure));
 
   const totals = useMemo(
     () => overviewTotals(data?.sales?.byDay ?? [], period, months),
@@ -283,7 +297,7 @@ export function AllOverviewView({
         {periodName} · Key operational bottlenecks &amp; priority action items
       </p>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
         <Hero label={`Total Revenue (${period.day ? "day" : period.mode === "monthly" ? "MTD" : "YTD"})`} value={formatCurrency(totals.revenueSen)} icon={TrendingUp}>
           <Delta pct={deltaPct} vs={totals.prevLabel || "—"} />
           <p className="text-xs" style={{ color: MUTED }}>{fmtN(totals.orders)} orders recorded</p>
@@ -306,11 +320,23 @@ export function AllOverviewView({
             {prod ? `${fmtN(prod.atRisk)} more at risk` : "no production feed"}
           </p>
         </Hero>
+
+        {/* Invoices KPI (as on /dashboard): Σ invoice totals (excl. cancelled)
+            by invoice date for the month, or all-time. */}
+        <Hero
+          label={`Invoices (${wpLabel})`}
+          value={ovData ? fmtRM2(ovData.invoicesThisMonthSen ?? 0) : ovLoading ? "…" : "—"}
+          icon={FileText}
+        >
+          <p className="text-xs" style={{ color: ovData || ovLoading ? MUTED : AMBER }}>
+            {ovData ? "issued, by invoice date" : ovLoading ? "loading" : "Couldn't load invoices — not shown as zero"}
+          </p>
+        </Hero>
       </div>
 
       <section aria-label="Needs action" className="space-y-2">
         <h3 className="text-sm font-semibold text-[#1F1D1B]">Needs action</h3>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 max-md:gap-3">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 max-md:gap-3">
           <ActionTile
             label="Pending approvals"
             value={svc ? svc.filter((c) => c.approvalStatus === "PENDING").length : null}
@@ -335,6 +361,31 @@ export function AllOverviewView({
             hint="production early warning"
             onOpen={() => onOpenTab("operations", undefined)}
           />
+          {/* Daily Report — process / SOP exceptions, same summary as the
+              /dashboard tile. Failed = "—", partial = a floor ("+"). */}
+          <Link
+            to="/daily-report"
+            className="text-left rounded-lg border border-[#E2DDD8] bg-white shadow-sm p-4 max-md:p-3 min-h-11 hover:bg-[#F7F5F3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#6B5C32]"
+          >
+            <p
+              className="text-2xl max-md:text-xl font-bold tabular-nums"
+              style={{ color: comp.failed || comp.partial ? MUTED : comp.total === 0 ? GREEN : RED }}
+            >
+              {compLoading && !comp.counts ? "…" : comp.failed ? "—" : `${fmtN(comp.total)}${comp.partial ? "+" : ""}`}
+            </p>
+            <p className="text-xs font-medium text-[#1F1D1B] flex items-center gap-1">
+              Daily Report
+              <ArrowRight className="h-3 w-3 shrink-0" />
+            </p>
+            <p className="text-xs" style={{ color: MUTED }}>
+              {compLoading && !comp.counts ? "loading" : comp.caption}
+            </p>
+            {comp.chips.length > 0 && (
+              <p className="mt-1 text-[11px]" style={{ color: RED }}>
+                {comp.chips.map(([l, n]) => `${l} ${fmtN(n)}`).join(" · ")}
+              </p>
+            )}
+          </Link>
         </div>
       </section>
 
@@ -486,6 +537,9 @@ export function AllOverviewView({
           ]}
         />
       </div>
+
+      {/* OCR accuracy — shared with /dashboard, same period rule. */}
+      <OcrAccuracyCard period={wp} range={wp === "all" ? null : monthWindow(wp)} />
     </div>
   );
 }

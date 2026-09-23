@@ -2,6 +2,8 @@
 // dashboard-shared.tsx because a file mixing component exports with
 // constant/function exports breaks Vite Fast Refresh (react-refresh/only-
 // export-components).
+import { formatCurrency } from "../../lib/utils";
+
 export const TAUPE = "#6B5C32";
 export const TEAL = "#3E6570";
 export const MUTED = "#6B7280";
@@ -31,6 +33,38 @@ export function fmtRMAxis(n: number): string {
   if (v >= 1_000_000) return `RM ${(n / 1_000_000).toFixed(v >= 10_000_000 ? 0 : 1)}m`;
   if (v >= 1_000) return `RM ${Math.round(n / 1_000)}k`;
   return `RM ${n}`;
+}
+
+// ---------------------------------------------------------------------------
+// DashboardWidgets.tsx formatters — owner rule 2026-09-23: no
+// rounding, TRUNCATE to 2 decimals (0.299 -> 0.29, -0.001 -> 0.00).
+// toPrecision(15) first so a float like 0.29*100 = 28.999999999999996 is read
+// as the 29 it means before the cut; `|| 0` turns -0 (and NaN) into 0.
+// ---------------------------------------------------------------------------
+export function truncDp(n: number, dp = 2): number {
+  return Math.trunc(Number((n * 10 ** dp).toPrecision(15))) / 10 ** dp || 0;
+}
+export function fmtDec2(n: number): string {
+  return truncDp(n).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+export function fmtPct2(n: number | null | undefined): string {
+  return n == null ? "—" : `${fmtDec2(n)}%`;
+}
+/** Integer sen, truncated (never rounded) — formatCurrency prints 2dp. */
+export function fmtRM2(sen: number | null | undefined): string {
+  return formatCurrency(Math.trunc(sen ?? 0) || 0);
+}
+/** Minutes as "Xh Ym", truncated to the whole minute. */
+export function fmtHM(min: number | null | undefined): string {
+  const m = Math.max(0, Math.trunc(min ?? 0));
+  return `${Math.floor(m / 60).toLocaleString("en-MY")}h ${m % 60}m`;
+}
+/** /dashboard's `period` query value: YTD reads all-time, else the month. */
+export function widgetPeriod(p: Period): string {
+  return p.mode === "ytd" ? "all" : p.month;
+}
+export function widgetPeriodLabel(p: Period): string {
+  return widgetPeriod(p) === "all" ? "All-time" : monthLabel(p.month);
 }
 
 // ---------------------------------------------------------------------------

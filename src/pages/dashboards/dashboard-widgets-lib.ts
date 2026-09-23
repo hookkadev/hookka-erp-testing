@@ -1,11 +1,15 @@
 // ---------------------------------------------------------------------------
-// Command Center figures — ONE copy of each formula, imported by BOTH
-// /dashboard (./index.tsx) and /dashboard-experimental (src/pages/dashboards).
+// Figures for the /dashboard-experimental widgets (DashboardWidgets.tsx).
 //
-// Director 2026-09-23: whatever the dashboards show, the experimental one must
-// show too, with the same value. The way two screens stop agreeing is two
-// copies of a formula, so the derivations live here and nowhere else. Pure (no
-// React) so node --test can import it: tests/command-center-lib.test.mjs.
+// Director 2026-09-23: whatever /dashboard shows, the experimental one must
+// show too, with the same value. Each function MIRRORS the formula inline in
+// src/pages/dashboard-b/index.tsx (/dashboard), which the owner froze — it is NOT edited
+// to import from here. So if a formula changes in index.tsx, change it here
+// too. Pure (no React) so node --test can import it:
+// tests/dashboard-widgets-lib.test.mjs.
+//
+// Percentages and ratios are returned UNROUNDED; the caller truncates to 2dp
+// (owner: no rounding in the new widgets).
 // ---------------------------------------------------------------------------
 
 export type SoStats = {
@@ -176,7 +180,7 @@ export type Overview = {
     productionSen: number;
   }[];
   employee?: { activeHeadcount: number };
-  // Command Center month-awareness. Describes whether the point-in-time
+  // Month-awareness. Describes whether the point-in-time
   // STATE widgets (Backlog, Active Jobs, Workforce) reflect a true
   // historical snapshot, the current live value, or a live value shown for
   // a past month with NO stored history (→ show a muted "live" tag).
@@ -225,7 +229,7 @@ export type ComplianceResp = {
   };
 };
 
-/** The current "YYYY-MM" — the Command Center's default period. */
+/** The current "YYYY-MM" — /dashboard's default period. */
 export const CUR_YM = new Date().toISOString().slice(0, 7);
 
 // Date range for a selected "YYYY-MM": [1st .. month end]. The current
@@ -363,15 +367,30 @@ export function complianceSummary(raw: ComplianceResp | null | undefined, failed
  * never divide by a 1-minute fallback — that painted thousands of fake days
  * (owner audit 2026-07-11). With one category toggled off, the row shows only
  * the visible segments' days.
+ *
+ * `unrounded` (experimental dashboard): the unfiltered row uses
+ * totalMin / dailyCapMin instead of the server's 1dp `backlogDays`, so the
+ * caller can truncate rather than print a rounded figure.
  */
-export function deptBacklogRows(depts: DeptBacklog[], sofaOn: boolean, bedOn: boolean) {
+export function deptBacklogRows(
+  depts: DeptBacklog[],
+  sofaOn: boolean,
+  bedOn: boolean,
+  unrounded = false,
+) {
   const rows = depts.map((d) => {
     const stalled = !(d.dailyCapMin > 0);
     const cap = stalled ? 1 : d.dailyCapMin;
     const sofaDays = sofaOn && !stalled ? d.sofaMin / cap : 0;
     const bedDays = bedOn && !stalled ? d.bedframeMin / cap : 0;
     const filtered = !(sofaOn && bedOn);
-    const showDays = stalled ? null : filtered ? sofaDays + bedDays : d.backlogDays;
+    const showDays = stalled
+      ? null
+      : filtered
+        ? sofaDays + bedDays
+        : unrounded
+          ? d.totalMin / cap
+          : d.backlogDays;
     return { d, sofaDays, bedDays, showDays };
   });
   const mxDays = Math.max(1, ...rows.map((r) => r.showDays ?? 0));
@@ -415,5 +434,169 @@ export function stateTags(ss: StateSnapshot | undefined) {
     reconstructed,
     liveTag: ss?.isHistorical === true && !reconstructed,
     asOf: ss?.source === "snapshot" || reconstructed ? (ss?.asOf ?? null) : null,
+  };
+}
+
+/**
+ * Plant Load gauge: queue days as a share of a 14-day buffer (100% = two full
+ * weeks queued — not a machine/worker utilisation figure). Red > 12d, amber
+ * > 7d. `unrounded` uses backlogMin / dailyCapacityMin instead of the
+ * server's rounded `backlogDays` (falls back to it when capacity is 0).
+ */
+export function plantLoad(prod: Overview["production"] | undefined, unrounded = false) {
+  const cap = prod?.dailyCapacityMin ?? 0;
+  const days =
+    unrounded && cap > 0 ? (prod?.backlogMin ?? 0) / cap : (prod?.backlogDays ?? 0);
+  const util = Math.min(1, days / 14);
+  const tone: "red" | "amber" | "green" = days > 12 ? "red" : days > 7 ? "amber" : "green";
+  return { days, util, bufferPct: util * 100, tone };
+}
+
+/**
+ * Average daily capacity per worker: dailyCapacityMin ÷ average workers/day.
+ * Days with zero credited workers are left out so they don't distort the
+ * average. null when no day has a worker.
+ */
+export function capacityPerWorkerMin(
+  days: { minutes: number; workers: number }[],
+  dailyCapacityMin: number,
+): number | null {
+  const wDays = days.filter((d) => (d.workers ?? 0) > 0);
+  if (wDays.length === 0) return null;
+  const avgWorkers = wDays.reduce((s, d) => s + (d.workers ?? 0), 0) / wDays.length;
+  return avgWorkers > 0 ? dailyCapacityMin / avgWorkers : null;
+}
+
+type FabricMonth = { month: string; meters: number; lateMeters?: number };
+type FabricBlock = NonNullable<Overview["fabric"]>["BEDFRAME"];
+
+// Roll the last-12 monthly fabric series up into the last 8 quarters, newest
+// first. The late share rolls up too.
+export function toQuarterly(
+  monthly: FabricMonth[],
+): { label: string; meters: number; lateMeters: number }[] {
+  const q = new Map<string, { meters: number; lateMeters: number }>();
+  for (const m of monthly) {
+    const [y, mm] = m.month.split("-");
+    const qn = Math.ceil((Number(mm) || 1) / 3);
+    const key = `${y}-Q${qn}`;
+    const e = q.get(key) ?? { meters: 0, lateMeters: 0 };
+    e.meters += m.meters;
+    e.lateMeters += m.lateMeters ?? 0;
+    q.set(key, e);
+  }
+  return [...q.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .slice(-8)
+    .map(([label, v]) => ({ label, ...v }))
+    .reverse();
+}
+
+/**
+ * One category's Fabric Usage block: top 10 fabrics (by next-30-day demand in
+ * "next" mode, by metres used otherwise) and the trend, newest first.
+ */
+export function fabricView(
+  blk: FabricBlock | undefined,
+  mode: "prev" | "next",
+  gran: "month" | "quarter",
+) {
+  const list = blk?.list ?? [];
+  const rows =
+    mode === "next"
+      ? list.filter((f) => f.next30Meters > 0).sort((a, b) => b.next30Meters - a.next30Meters).slice(0, 10)
+      : list.filter((f) => f.meters > 0).sort((a, b) => b.meters - a.meters).slice(0, 10);
+  const trend =
+    gran === "quarter"
+      ? toQuarterly(blk?.monthly ?? [])
+      : (blk?.monthly ?? [])
+          .map((m) => ({ label: m.month, meters: m.meters, lateMeters: m.lateMeters ?? 0 }))
+          .reverse();
+  const max = Math.max(1, ...trend.map((t) => t.meters));
+  return { rows, trend, max };
+}
+
+/**
+ * Concentration shares of TOTAL revenue across all customers, unrounded.
+ * Both null when the period has no revenue — 0% would read as "perfectly
+ * spread", which is a claim.
+ */
+export function concentrationShares(slice: ConcentrationSlice | null | undefined) {
+  if (!slice || !(slice.totalSen > 0)) return { largestPct: null, top10Pct: null };
+  return {
+    largestPct: (slice.largestSen / slice.totalSen) * 100,
+    top10Pct: (slice.top10Sen / slice.totalSen) * 100,
+  };
+}
+
+export type CustCat = "all" | "bedframe" | "sofa";
+
+/**
+ * Sales by Customer. Category revenue per customer (bedframe = avg × units,
+ * sofa = avg × sets, all = totalSen). The denominator is the server's
+ * customerConcentration total over ALL customers — the browser only holds the
+ * top 12, and a share of that subtotal can never fall (BUG-2026-08-13-142).
+ * Falls back to the shown subtotal only for a payload without it.
+ * Composition = top 6 + "Others" (everyone else, incl. customers past the 12).
+ */
+export function customerRevenue(ov: Overview, cat: CustCat) {
+  const rows = (ov.aovByCustomer ?? [])
+    .map((a) => ({
+      ...a,
+      catRevSen:
+        cat === "bedframe"
+          ? a.bedframeAvgSen * a.bedframeUnits
+          : cat === "sofa"
+            ? a.sofaAvgSen * a.sofaSets
+            : a.totalSen,
+    }))
+    .sort((a, b) => (cat === "all" ? 0 : b.catRevSen - a.catRevSen));
+  const slice = ov.customerConcentration?.[cat] ?? null;
+  const totalSen = slice ? slice.totalSen : rows.reduce((s, a) => s + a.catRevSen, 0);
+  const src = (cat === "all" ? rows : rows.filter((a) => a.catRevSen > 0)).map((a) => ({
+    name: a.customerName,
+    valueSen: a.catRevSen,
+  }));
+  const top6 = src.slice(0, 6);
+  const othersSen = Math.max(0, totalSen - top6.reduce((s, a) => s + a.valueSen, 0));
+  const composition = othersSen > 0 ? [...top6, { name: "Others", valueSen: othersSen }] : top6;
+  return {
+    rows,
+    totalSen,
+    slice,
+    shownCount: ov.customerConcentration?.shownCount ?? null,
+    composition,
+    shares: concentrationShares(slice),
+  };
+}
+
+/** One row of GET /api/accounting/dashboard (the fields the ratios read). */
+export type FinanceDashRow = {
+  actual: { sales: number; gross: number } | null;
+  balanceSheet: { currentAssets: number; currentLiabilities: number; inventory: number } | null;
+};
+
+/**
+ * Gross margin / current ratio / quick ratio from /api/accounting/dashboard
+ * rows, unrounded (the server's `ratios` are rounded — not used). P&L sums
+ * over every row in the window; the balance sheet is the LAST row's (a
+ * point-in-time position). null when the denominator is <= 0.
+ */
+export function financeRatios(rows: FinanceDashRow[]) {
+  let sales = 0;
+  let gross = 0;
+  for (const r of rows) {
+    if (!r.actual) continue;
+    sales += r.actual.sales;
+    gross += r.actual.gross;
+  }
+  const bs = rows.length ? rows[rows.length - 1].balanceSheet : null;
+  const cl = bs?.currentLiabilities ?? 0;
+  return {
+    salesSen: sales,
+    grossSen: gross,
+    grossMarginPct: sales > 0 ? (gross / sales) * 100 : null,
+    currentRatio: bs && cl > 0 ? bs.currentAssets / cl : null,
+    quickRatio: bs && cl > 0 ? (bs.currentAssets - bs.inventory) / cl : null,
   };
 }
