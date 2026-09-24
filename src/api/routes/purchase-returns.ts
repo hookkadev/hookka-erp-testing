@@ -18,6 +18,7 @@ import { getOrgId } from "../lib/tenant";
 import {
   ensurePurchaseReturnTables,
   createPurchaseReturn,
+  deletePurchaseReturnRestoreStatements,
   loadPiItemsForReturn,
   loadGrnItemsForReturn,
   applyPurchaseReturnStockOut,
@@ -251,8 +252,12 @@ app.delete("/:id", async (c) => {
   if ((row.status ?? "OPEN") !== "OPEN") {
     return c.json({ success: false, error: "only OPEN returns can be deleted" }, 409);
   }
-  await c.var.DB.prepare("DELETE FROM purchase_return_items WHERE purchase_return_id = ?").bind(id).run();
-  await c.var.DB.prepare("DELETE FROM purchase_returns WHERE id = ?").bind(id).run();
+  // One batch: the PO counter comes back together with the rows going away.
+  await c.var.DB.batch([
+    ...(await deletePurchaseReturnRestoreStatements(c.var.DB, id)),
+    c.var.DB.prepare("DELETE FROM purchase_return_items WHERE purchase_return_id = ?").bind(id),
+    c.var.DB.prepare("DELETE FROM purchase_returns WHERE id = ?").bind(id),
+  ]);
   return c.json({ success: true });
 });
 

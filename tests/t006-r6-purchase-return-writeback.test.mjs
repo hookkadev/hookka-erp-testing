@@ -5,8 +5,9 @@
 //
 // Fix: createPurchaseReturn now (1) caps cumulative returns per GRN line at
 // grn_items.accepted_qty before writing anything, and (2) decrements
-// grn_items.invoiced_qty + purchase_order_items.receivedQty in the SAME batch
-// as the header/item inserts, clamped at 0.
+// purchase_order_items.receivedQty in the SAME batch as the header/item
+// inserts, clamped at 0. (It also lowered grn_items.invoiced_qty until
+// 2026-09-24 — that let returned goods be invoiced twice; removed.)
 // Source-static — no live D1 in CI.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -46,16 +47,19 @@ test("a line with no grnItemId skips the cap (nothing to check it against)", () 
   assert.match(body, /\.filter\(\(v\): v is string => !!v\)/);
 });
 
-test("the batch decrements both counters, clamped at 0", () => {
+test("the batch gives the PO line back its receivedQty, clamped at 0", () => {
   const body = fnBody("createPurchaseReturn");
-  assert.match(
-    body,
-    /UPDATE grn_items SET invoiced_qty = GREATEST\(0, invoiced_qty - \?\) WHERE id = \?/,
-  );
   assert.match(
     body,
     /UPDATE purchase_order_items SET receivedQty = GREATEST\(0, receivedQty - \?\) WHERE id = \?/,
   );
+});
+
+test("the return does NOT lower grn_items.invoiced_qty (the PI still bills those units)", () => {
+  // Lowering it re-opened the GRN line and the returned goods could be billed
+  // again — measured live on staging 2026-09-24. See t006-live-findings.
+  const body = fnBody("createPurchaseReturn");
+  assert.doesNotMatch(body, /UPDATE grn_items SET invoiced_qty/);
 });
 
 test("header, items, and counter updates all land in ONE atomic batch", () => {

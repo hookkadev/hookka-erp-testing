@@ -495,9 +495,16 @@ export async function createPurchaseReturn(
     const grnLine = await db
       .prepare("SELECT accepted_qty, po_item_id FROM grn_items WHERE id = ?")
       .bind(giId)
-      .first<{ accepted_qty: number | null; po_item_id: string | null }>();
+      .first<{
+        acceptedQty?: number | null;
+        accepted_qty?: number | null;
+        poItemId?: string | null;
+        po_item_id?: string | null;
+      }>();
     if (!grnLine) continue; // unresolvable line — nothing to cap or draw down
-    poItemIdByGrnItemId.set(giId, grnLine.po_item_id ?? null);
+    // Dual-keyed: the Postgres client hands rows back camelCased
+    // (accepted_qty → acceptedQty), so a snake-only read is always undefined.
+    poItemIdByGrnItemId.set(giId, grnLine.poItemId ?? grnLine.po_item_id ?? null);
     const alreadyReturned = await db
       .prepare(
         "SELECT COALESCE(SUM(quantity),0) AS qty FROM purchase_return_items WHERE grn_item_id = ?",
@@ -505,7 +512,7 @@ export async function createPurchaseReturn(
       .bind(giId)
       .first<{ qty: number }>();
     const already = Number(alreadyReturned?.qty ?? 0) || 0;
-    const accepted = Number(grnLine.accepted_qty ?? 0) || 0;
+    const accepted = Number(grnLine.acceptedQty ?? grnLine.accepted_qty ?? 0) || 0;
     const thisReturn = validItems
       .filter((it) => it.grnItemId === giId)
       .reduce((s, it) => s + (Number(it.quantity) || 0), 0);
@@ -571,16 +578,16 @@ export async function createPurchaseReturn(
           it.problem ?? "",
         ),
     );
-    // R6 — give back what the receipt/invoice drew down. Clamped at 0 so a
-    // rounding/race edge never drives a counter negative.
+    // R6 — give the PO line back what the receipt drew down, so replacement
+    // goods can be received against it. Clamped at 0 so a rounding/race edge
+    // never drives the counter negative.
+    //
+    // grn_items.invoiced_qty is deliberately NOT written back: the purchase
+    // invoice still bills these units (the supplier's credit comes via the
+    // debit note), so lowering it re-opened the GRN line and the returned
+    // goods could be invoiced a second time (measured live on staging
+    // 2026-09-24). Undoing a return is deletePurchaseReturnRestoreStatements.
     if (it.grnItemId) {
-      stmts.push(
-        db
-          .prepare(
-            "UPDATE grn_items SET invoiced_qty = GREATEST(0, invoiced_qty - ?) WHERE id = ?",
-          )
-          .bind(qty, it.grnItemId),
-      );
       const poItemId = poItemIdByGrnItemId.get(it.grnItemId);
       if (poItemId) {
         stmts.push(
@@ -595,4 +602,32 @@ export async function createPurchaseReturn(
   }
   await db.batch(stmts);
   return { ok: true, id, returnNo };
+}
+
+/**
+ * The inverse of createPurchaseReturn's PO write-back, for deleting an OPEN
+ * return: put back the receivedQty each GRN-linked line took off its PO line.
+ * Without it a deleted return left the PO line permanently under-received,
+ * so the same goods could be received (and stocked) again.
+ */
+export async function deletePurchaseReturnRestoreStatements(
+  db: D1Database,
+  returnId: string,
+): Promise<D1PreparedStatement[]> {
+  const res = await db
+    .prepare(
+      `SELECT gi.po_item_id AS "poItemId", pri.quantity AS qty
+         FROM purchase_return_items pri
+         JOIN grn_items gi ON gi.id::text = pri.grn_item_id
+        WHERE pri.purchase_return_id = ?`,
+    )
+    .bind(returnId)
+    .all<{ poItemId?: string | null; po_item_id?: string | null; qty: number }>();
+  return (res.results ?? [])
+    .filter((r) => (r.poItemId ?? r.po_item_id) && Number(r.qty) > 0)
+    .map((r) =>
+      db
+        .prepare("UPDATE purchase_order_items SET receivedQty = receivedQty + ? WHERE id = ?")
+        .bind(Number(r.qty), r.poItemId ?? r.po_item_id),
+    );
 }

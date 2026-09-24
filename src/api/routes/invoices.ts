@@ -3375,6 +3375,11 @@ app.delete("/:id", async (c) => {
       })),
     );
   }
+  // T-006 R4 — and a CN-sourced draft (convert-to-invoice creates DRAFT) must
+  // hand its consignment note back too. Only the void path did this, so a
+  // deleted draft left the CN stuck at FULLY_SOLD. Built before the batch
+  // runs, so the lookup by convertedInvoiceId still finds the CN.
+  stmts.push(...(await buildInvoiceDeathCnReleaseStatements(c.var.DB, { invoiceId: id })));
   await c.var.DB.batch(stmts);
 
   // Deleting an invoice also reverses the customer's outstanding balance, so

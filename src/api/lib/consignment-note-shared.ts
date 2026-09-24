@@ -436,7 +436,8 @@ export async function ensureCnStatusBeforeConversionColumn(
   cnStatusBeforeConversionColumnReady = true;
 }
 
-// Called from the invoice void handler (invoices.ts). The CN link is
+// Called from BOTH ways an invoice dies in invoices.ts — void (PUT → CANCELLED)
+// and DELETE (a draft thrown away). The CN link is
 // one-way — consignment_notes.convertedInvoiceId points at the invoice, the
 // invoice carries nothing back — so this looks the CN up by that column.
 // Returns [] when the invoice did not come from a CN (the common case).
@@ -450,8 +451,16 @@ export async function buildInvoiceDeathCnReleaseStatements(
       "SELECT id, status_before_conversion FROM consignment_notes WHERE convertedInvoiceId = ?",
     )
     .bind(args.invoiceId)
-    .first<{ id: string; status_before_conversion: string | null }>();
+    .first<{
+      id: string;
+      statusBeforeConversion?: string | null;
+      status_before_conversion?: string | null;
+    }>();
   if (!cn) return [];
+  // Dual-keyed: the Postgres client camelCases the column, so the snake-only
+  // read was always undefined and every release fell back to PARTIALLY_SOLD.
+  const restoreTo =
+    cn.statusBeforeConversion ?? cn.status_before_conversion ?? "PARTIALLY_SOLD";
   return [
     db
       .prepare(
@@ -461,7 +470,7 @@ export async function buildInvoiceDeathCnReleaseStatements(
                 convertedInvoiceId = NULL
           WHERE id = ?`,
       )
-      .bind(cn.status_before_conversion ?? "PARTIALLY_SOLD", cn.id),
+      .bind(restoreTo, cn.id),
   ];
 }
 

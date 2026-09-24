@@ -23,6 +23,21 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
+## 2026-09-24 — 🔵 T-006 live check on staging: fix what the real DB broke (branch `fix/t006-live-findings` → `fix/t006-transfer-convert-guards` + `staging`)
+
+A live run of the T-006 routes against the staging DB (real route code, one rolled-back
+transaction) failed where the mocked tests passed. Asks: fix, push to `staging`, re-test.
+
+- [x] PI create 500s for every PO/GRN-linked invoice — R8 join `bigint = text` (BUG-2026-09-24-182).
+- [x] Purchase return always refused — R6 reads `accepted_qty` / `po_item_id` single-keyed (-183).
+- [x] R4 void restores `PARTIALLY_SOLD`, not the saved status — single-keyed read (-183).
+- [x] R6 re-opens billing of returned goods — `invoiced_qty` write-back removed (-184, **PRD sign-off needed**).
+- [x] Deleting an OPEN purchase return keeps the PO counter it lowered (-184).
+- [x] Deleting a CN-sourced invoice leaves the CN stuck `FULLY_SOLD` (-185).
+- [x] CN → invoice convert 400s on staging: writes `customers.updated_at`, which does not exist (-185, pre-existing).
+- [x] `tsc -p tsconfig.app.json` exit 0; full suite 4779 pass / 0 fail / 3 skips; live re-run on the fixed code: procurement 24/25, sales 16/18 (misses are the pre-existing items below).
+- [ ] Push; PR → `staging`; re-run the live check against deployed `staging`.
+- 🟡 Needs a decision: GRN-sourced return of unbilled goods leaves them billable (needs a returned-qty counter); CN items stay `SOLD` after void; GRN stock resolves by description when `material_code` is blank (wrong raw material); single-line DO fully returned still invoices in full.
 ## 2026-09-22 — 🔵 Scan PO / PI / GRN: second file "scanning" 5+ min (branch `fix/scan-queue-client-driven`)
 
 Owner: "under the SO the scan PO function … it takes more than 5 min scanning second PO

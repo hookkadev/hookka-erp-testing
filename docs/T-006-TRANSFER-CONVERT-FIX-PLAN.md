@@ -1,5 +1,11 @@
 # T-006 — Transfer / Convert foundation: fix plan
 
+> **Last verified: 2026-09-24** against the live staging DB (branch `fix/t006-live-findings`):
+> the real route code run in a rolled-back transaction. R1, R2, R3, R5, R7, R10 held as written.
+> R8/R9/PI-side R10 500'd (`bigint = text` join), R6 refused every return and re-opened
+> billing, R4 restored the wrong status and missed the DELETE path — all fixed, see
+> BUG-2026-09-24-182..185 and "Live check, 2026-09-24" at the foot. **R6 no longer writes back
+> `grn_items.invoiced_qty`** — a deliberate deviation from the PRD wording, needs sign-off.
 > **Last verified: 2026-09-21** against branch `fix/t006-transfer-convert-guards`
 > (`tsc -p tsconfig.app.json --noEmit` clean, `npm test` 4635 pass / 0 fail / 3 pre-existing skips).
 > **R1-R10 are all IMPLEMENTED** — this doc is now the record of WHY each fix looks the way it
@@ -371,3 +377,34 @@ against.
   `invoiced_qty` / `receivedQty` data is dirty, invoices that used to post will start returning
   409. That is the fix working as intended, but it will look like a regression to whoever hits
   it first. Nobody has queried production to find out how many lines are affected.
+  **Staging, measured 2026-09-24:** 0 `grn_items` rows violate the R5 rule, so on staging the
+  constraint could be validated. Production is still unmeasured.
+
+### Live check, 2026-09-24 — what the mocks could not see
+
+Run against the staging DB (real route code, one transaction, always rolled back; staging
+re-read afterwards and unchanged). Fixed on `fix/t006-live-findings`:
+
+| Req | Found live | Fix |
+|---|---|---|
+| R8 / R9 / R10 (PI) | every PO/GRN-linked PI create 500'd — `gi.id = pii.grn_item_id` is `bigint = text` | `gi.id::text` |
+| R6 | every GRN-linked return 409'd "accepted 0" — `accepted_qty` read snake-only (C23) | dual-keyed |
+| R6 | lowering `invoiced_qty` re-opened billing: returned units could be invoiced again | write-back removed |
+| R6 | deleting an OPEN return kept the `receivedQty` it had taken | restored in the delete batch |
+| R4 | void always restored `PARTIALLY_SOLD` — `status_before_conversion` read snake-only (C23) | dual-keyed |
+| R4 | deleting the CN's DRAFT invoice left the CN `FULLY_SOLD` | release on DELETE too |
+| R4 (pre-existing) | convert itself 400'd — `customers.updated_at` does not exist | column write dropped |
+
+**R6 deviates from the PRD** ("writes back `grn_items.invoiced_qty`"): the PI still bills
+returned units and the supplier's credit is the debit note, so the write-back let the same
+goods be billed twice. **Needs the PRD author's sign-off.**
+
+**Still open, needs a decision:**
+- A return raised off the GRN *before* billing leaves those units billable (same on `main`).
+  Closing it needs a returned-qty counter subtracted in every GRN availability read.
+- R4 void/delete restore the CN header only; its items stay `SOLD` and units `DELIVERED`.
+  Re-convert still works (it reads every item).
+- Pre-existing, not T-006: a PO-sourced GRN line has a blank `material_code`, so stock resolves
+  by `description = ? LIMIT 1` (`grn.ts`) — receiving `NLY-D12-6MM` posted to `D12-0.5`, one of
+  five "WHITE SPONGE" materials. And a DO whose only line is fully returned still invoices in
+  full (`computeDoInvoiceLines` falls back to billing the SO).
