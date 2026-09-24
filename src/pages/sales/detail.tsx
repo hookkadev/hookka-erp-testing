@@ -410,7 +410,7 @@ export default function SalesOrderDetailPage() {
     [orderResp],
   );
   // Source PO scan kept as a durable SO attachment (owner 2026-07-15) so
-  // "View original" works even when the inline customerPOImageB64 render is
+  // the clickable Customer PO number works even when the inline customerPOImageB64 render is
   // absent (every scan after the 2026-06 OCR-queue rewrite lost that render).
   const [poOriginalUrl, setPoOriginalUrl] = useState<string | null>(null);
   useEffect(() => {
@@ -435,7 +435,8 @@ export default function SalesOrderDetailPage() {
           ) ??
           files.find((f) => /pdf|image/.test(f.contentType ?? "")) ??
           null;
-        if (alive) setPoOriginalUrl(orig ? `/api/files/${orig.id}/stream` : null);
+        // inline=1 so the PDF / image renders in the tab instead of downloading.
+        if (alive) setPoOriginalUrl(orig ? `/api/files/${orig.id}/download?inline=1` : null);
       } catch {
         /* no attachment — falls back to customerPOImageB64 */
       }
@@ -1463,11 +1464,10 @@ export default function SalesOrderDetailPage() {
               <div>
                 <p className="text-xs text-[#9CA3AF]">Customer PO</p>
                 <p className="font-medium doc-number">
-                  {order.customerPOId || "-"}
-                  {(order.customerPOImageB64 || poOriginalUrl) && (
+                  {order.customerPOImageB64 || poOriginalUrl ? (
                     <button
                       type="button"
-                      className="ml-2 text-xs text-[#6B5C32] underline hover:text-[#4a3f22]"
+                      className="underline hover:text-[#6B5C32]"
                       onClick={() => {
                         // Prefer the durable source attachment (PDF/image kept
                         // on the SO); fall back to the legacy inline render.
@@ -1483,10 +1483,12 @@ export default function SalesOrderDetailPage() {
                           );
                         }
                       }}
-                      title="Open the original customer PO in a new tab"
+                      title="View the original customer PO"
                     >
-                      View original
+                      {order.customerPOId || "View PO"}
                     </button>
+                  ) : (
+                    order.customerPOId || "-"
                   )}
                 </p>
               </div>

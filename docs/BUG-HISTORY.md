@@ -1,6 +1,6 @@
 # Bug History
 
-> **Last verified: 2026-09-24** — newest entry BUG-2026-09-24-190 (branch `fix/health-timestamps-myt`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-09-24** — newest entry BUG-2026-09-24-191 (branch `fix/so-customer-po-view`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 
 Living log of bugs we've identified, diagnosed, and fixed in Hookka ERP.
 
@@ -35,6 +35,38 @@ Entries themselves stay newest-first.
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
 
 ---
+
+## BUG-2026-09-24-191 — SO "View original" returned `{"error":"stream failed"}`; 18–24 Sep uploads were saved to the wrong storage project `infrastructure` `sales-orders` 🟡
+
+🟡 **Fix in progress** · Owner-reported on the SO for HC-PO-2609-172 (file `fa-7920e088-8c9`,
+uploaded 2026-09-24 03:39 UTC). Same failure the catalog-photo session hit on `fa-20cc96eb-723`
+earlier the same day.
+
+**Root cause.** From about 2026-09-18 16:16 to 2026-09-24 12:40 MYT, production's
+`SUPABASE_PROJECT_REF` pointed at another Supabase project (`kahxgvbfanbraazetefr`). Uploads wrote
+their bytes THERE and their `file_assets` row to prod, so each row's `r2Key` was correct but empty
+in prod's `hookka-files` bucket once the setting was corrected. The catalog-photo session counted
+74 such files (55 SO attachments, 17 PI scans, 1 PV, 1 catalog photo).
+
+**Why it read as a crash.** `getFile` (`src/api/lib/supabase-storage.ts:219`) treats only HTTP 404
+as missing; Supabase Storage answers a missing object with 400 + `not_found`, so the route threw and
+returned a generic 500 "stream failed" instead of 404. **Still open** — not changed here.
+
+**Recovery.** `scripts/copy-storage-objects.mjs` copies an explicit list of keys (the `r2_key`s of
+rows uploaded in the window) from the other project to the same path in prod — add-only, dry run by
+default. The owner ran it; this SO's original now opens. **Per-file result UNMEASURED** — the run's
+summary was not captured here.
+
+**UI change on the same page.** The SO detail "View original" button is gone; the Customer PO number
+itself is the underlined link, and it opens `/api/files/:id/download?inline=1` so the PDF renders in
+the tab instead of downloading (`src/pages/sales/detail.tsx:1467`).
+
+**Verify.** `tsc -p tsconfig.app.json` clean; `tests/files-inline-view.test.mjs` 2/2. After deploy:
+click a Customer PO number on an SO with a scanned original — it must open in the tab, not save.
+**Prod UNMEASURED until then.**
+
+---
+
 
 ## BUG-2026-09-24-190 — Every timestamp on System Health read 8 hours early; the Audit feed dated a 10:40 login as 02:40 `audit-logging` `ui-frontend` `platform` 🟡
 
