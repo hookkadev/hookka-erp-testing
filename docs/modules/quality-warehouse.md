@@ -98,8 +98,8 @@ is enforced by hand in the handler, not by the middleware.
 | `GET /me/permissions` | `src/api/routes/auth.ts:521` | Effective permission set for the FE |
 | `authMiddleware` | `src/api/lib/auth-middleware.ts` | Auth gate + double-submit CSRF |
 | `PUBLIC_PREFIXES` | `src/api/lib/auth-middleware.ts:66` | Prefix allow-list that bypasses the gate |
-| `requirePermission` | `src/api/lib/rbac.ts:188` | Per-resource:action RBAC (ADMIN/SUPER_ADMIN bypass) |
-| `requireSuperAdmin` | `src/api/lib/rbac.ts:285` | Hard SUPER_ADMIN-only gate for account mgmt |
+| `requirePermission` | `src/api/lib/rbac.ts:197` | Per-resource:action RBAC (ADMIN/SUPER_ADMIN bypass; fails CLOSED on a thrown lookup) |
+| `requireSuperAdmin` | `src/api/lib/rbac.ts:297` | Hard SUPER_ADMIN-only gate for account mgmt |
 
 ## Gotchas
 - **`public-rack-qr.ts` / `public-rack-write.ts` / `public-do-qr.ts` are auth-BYPASSED** via `PUBLIC_PREFIXES`
