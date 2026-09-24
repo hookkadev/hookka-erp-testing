@@ -573,6 +573,33 @@ correctness bug in the key, and mixing them into one change would have made the
 
 ---
 
+## BUG-2026-09-23-185 — the fix for 184 deployed correctly and still did not reach the screen: the list snapshot had no payload-shape version `production` `caching` 🟢
+
+🟢 Fixed. Same symptom as BUG-2026-09-23-184, second and independent cause —
+caught because the STOCK chip still did not render after 184 shipped, while the
+dialog copy in the same deploy plainly had.
+
+`production_orders_list_snapshot` is rebuilt only when a SOURCE TABLE changes.
+`snapshotCacheKey` was built purely from the URL query params, so it carried no
+notion of what SHAPE the stored payload had. After 184 widened the projection,
+every existing snapshot row kept being served — without the new fields — until
+somebody happened to touch a production order. The code was right and the data
+on the wire was old.
+
+**The repo already had the answer**, one endpoint over: `overdueCountsCacheKey`
+carries a `vN` token whose test says *"Bump the version on any payload SHAPE
+change"* — because that payload's meaning had changed twice before. The list
+key simply never got one.
+
+**Fix**: the key is now `v2&<sorted params>`, with the reason written at the
+call site, and a test pins that a vN token is present.
+
+**The lesson is about verification, not caching.** 184 was found by clicking
+staging; so was this. Both were invisible to a full green test run, and the
+second one was invisible even to a correct deploy of a correct fix. A payload
+that changes shape is not shipped when the code merges — it is shipped when the
+cache holding the old shape is gone.
+
 ## BUG-2026-09-23-184 — the stock delivery gate shipped as a no-op: its two fields were not on the payload it reads `production` `delivery` 🟢
 
 🟢 Fixed. **Found by clicking it on staging, not by a test.**
