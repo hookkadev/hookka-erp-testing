@@ -31,8 +31,14 @@ Ask: continue fixing on staging after #506. All three were on `main` before T-00
 - [x] Fully-returned DO still invoiced the whole SO (-187).
 - [x] CN void/delete left items SOLD / units DELIVERED (-188).
 - [x] tsc exit 0; full suite green; live re-run on staging DB (rolled back): procurement 25/25, sales/delivery/consignment 18/18.
-- [ ] PR → `staging` (needs a human merge); re-verify on the deployed commit.
-- [ ] Carry to `main` (these are `main` bugs too) — needs its own PR.
+- [x] PR → `staging` (#508, merged); deployed `e19db151` re-verified: 25/25 + 18/18.
+- [x] Carried to `main` via #448 (`13d5287e`).
+- [x] Staging-only lifecycle run (edit / confirm / void / cancel / delete / stock-out) + UI
+  click-through (Consignment menu, Sales → Transfer to DO created DO-2609-071, duplicate refused
+  409). Found BUG-2026-09-24-189 (return stock-out moved nothing for PO-sourced lines) — fixed on
+  `fix/staging-return-stockout`, lifecycle 23/23.
+- Note: `/ready-planning` is serve-stale cached, so for ~2-3 min after a DO is created the Sales
+  "Transfer to DO" dialog still offers its production orders; the server refuses the duplicate.
 - 🟡 Open: BOM consumption resolves by shared description (C21 row 17); convert's CO completion cascade is not reopened on void; prod exposure of -186 UNMEASURED.
 
 ---
