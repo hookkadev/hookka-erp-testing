@@ -432,6 +432,16 @@ export type AutoAllocationPlan = {
   statements: D1PreparedStatement[];
   /** One human sentence per allocation, for so_status_changes.autoActions. */
   notes: string[];
+  /**
+   * How many pieces each SO line took from stock, keyed by so_item_id.
+   *
+   * The CALLER MUST SUBTRACT THIS before building production orders. Allocating
+   * four and still producing ten is not a cosmetic slip — it is the waste this
+   * whole feature exists to prevent, and the note above would be claiming "6 to
+   * be produced" while ten were queued. A string is not a guarantee; this map
+   * is what makes the sentence true.
+   */
+  allocatedByItemId: Map<string, number>;
 };
 
 /**
@@ -469,10 +479,10 @@ export async function planAutoAllocation(
 ): Promise<AutoAllocationPlan> {
   // A stock order IS the stock. Allocating to it would be the placeholder
   // problem all over again.
-  if (order.isStock === true) return { statements: [], notes: [] };
+  if (order.isStock === true) return { statements: [], notes: [], allocatedByItemId: new Map() };
 
   const wanted = lines.filter((l) => l.productCode && l.quantity > 0);
-  if (wanted.length === 0) return { statements: [], notes: [] };
+  if (wanted.length === 0) return { statements: [], notes: [], allocatedByItemId: new Map() };
 
   const alreadyHeld = await loadAllocatedPOsForOrder(db, order.id);
   const heldCodes = new Set(alreadyHeld.map((p) => p.productCode));
@@ -486,6 +496,7 @@ export async function planAutoAllocation(
 
   const statements: D1PreparedStatement[] = [];
   const notes: string[] = [];
+  const allocatedByItemId = new Map<string, number>();
   for (const line of wanted) {
     // A manual decision wins: a product this order already holds from stock is
     // left exactly as the operator set it.
@@ -536,12 +547,18 @@ export async function planAutoAllocation(
         }),
       );
     }
+    if (line.soItemId) {
+      allocatedByItemId.set(
+        line.soItemId,
+        (allocatedByItemId.get(line.soItemId) ?? 0) + got,
+      );
+    }
     notes.push(
       `Allocated ${got} x ${line.productCode} from stock` +
         (line.quantity > got ? ` (${line.quantity - got} to be produced)` : ""),
     );
   }
-  return { statements, notes };
+  return { statements, notes, allocatedByItemId };
 }
 
 export type OpenAllocation = {

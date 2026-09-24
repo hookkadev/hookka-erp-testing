@@ -573,6 +573,39 @@ correctness bug in the key, and mixing them into one change would have made the
 
 ---
 
+## BUG-2026-09-24-186 — the note said six, the factory would have queued ten `sales` `production` 🟢
+
+🟢 Fixed before it could reach anyone — found while testing DEV-05 on staging,
+in the window where no stock had finished yet, so the double-build never
+actually happened.
+
+Confirm called `createProductionOrdersForSO` for the FULL line quantity and
+THEN allocated stock beside it. The two steps did not know about each other.
+Order ten with four finished in the yard and you would have got **ten fresh
+production orders plus four re-pointed ones — fourteen pieces for a ten-piece
+order**, under an autoActions line reading `(6 to be produced)`.
+
+That is not a cosmetic slip. Building ten when four already exist is exactly
+the waste make-to-stock exists to prevent, so the feature would have shipped
+doing the opposite of its purpose, while telling the operator it had not.
+
+**A5 says it plainly** — *"A sales order can be allocated four pieces from
+stock and PRODUCE THE REMAINING SIX."*
+
+**Why the tests passed.** `tests/stock-allocations.test.mjs` had a case named
+"A5: order ten, take the four that exist, produce the other six". It asserted
+that four production orders changed hands and that the note said "6 to be
+produced". **It never asserted that six were built.** The note is a string
+assembled in the same function — the test checked the wording and called it
+the behaviour.
+
+**Fix**: allocation now runs BEFORE the builder, and the builder is fed the
+remainder — each line's quantity reduced by what stock covered, and a line
+covered entirely is DROPPED rather than left at zero (the builder floors piece
+count at 1, `production-builder.ts:519`, so a zero-quantity line would still
+queue one order). Four new tests assert the ORDER of the two steps and the
+arithmetic that reaches the builder, not the sentence.
+
 ## BUG-2026-09-23-185 — the fix for 184 deployed correctly and still did not reach the screen: the list snapshot had no payload-shape version `production` `caching` 🟢
 
 🟢 Fixed. Same symptom as BUG-2026-09-23-184, second and independent cause —

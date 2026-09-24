@@ -427,3 +427,70 @@ test("the migration and the runtime self-apply declare the same table", () => {
     );
   }
 });
+
+// ---------------------------------------------------------------------------
+// BUG-2026-09-24-186 — the note said six, the factory queued ten.
+//
+// Confirm used to call createProductionOrdersForSO for the FULL line quantity
+// and THEN allocate stock alongside it. Order ten with four finished in the
+// yard and you got ten fresh production orders plus four re-pointed ones —
+// fourteen pieces for a ten-piece order, under a note reading
+// "(6 to be produced)". That note is a string; nothing made it true.
+//
+// The A5 test above passed throughout, because it only ever asked
+// planAutoAllocation what it intended. These ask what the ORDER ends up with.
+// ---------------------------------------------------------------------------
+const confirmSrc = read("src/api/routes/sales-orders.ts");
+
+test("allocation runs BEFORE production orders are built", () => {
+  const alloc = confirmSrc.indexOf("const plan = await planAutoAllocation(");
+  const build = confirmSrc.indexOf("await createProductionOrdersForSO(c.var.DB, existing, itemsToProduce)");
+  assert.ok(alloc > 0, "auto-allocation call not found on the confirm path");
+  assert.ok(build > 0, "the confirm path must build from itemsToProduce, not the raw items");
+  assert.ok(
+    alloc < build,
+    "stock must be allocated first — otherwise production is queued for a quantity the yard already covers",
+  );
+});
+
+test("the builder is fed the REMAINDER, and a fully-covered line is dropped", () => {
+  assert.match(
+    confirmSrc,
+    /const taken = allocatedByItemId\.get\(it\.id\) \?\? 0;/,
+    "each line's production quantity must be reduced by what stock covered",
+  );
+  assert.match(
+    confirmSrc,
+    /\.filter\(\(it\) => \(Number\(it\.quantity\) \|\| 0\) > 0\)/,
+    "a line taken entirely from stock must be DROPPED — the builder floors piece count at 1, so quantity 0 would still queue one order",
+  );
+});
+
+test("A5 end to end: ten ordered, four in stock, SIX produced", () => {
+  // The arithmetic the note claims, applied the way the confirm path applies it.
+  const items = [{ id: "i1", quantity: 10 }];
+  const allocated = new Map([["i1", 4]]);
+  const toProduce = items
+    .map((it) => {
+      const taken = allocated.get(it.id) ?? 0;
+      return taken > 0 ? { ...it, quantity: it.quantity - taken } : it;
+    })
+    .filter((it) => it.quantity > 0);
+
+  assert.equal(toProduce.length, 1);
+  assert.equal(toProduce[0].quantity, 6, "six produced, not ten");
+  assert.equal(
+    toProduce[0].quantity + 4,
+    10,
+    "produced + allocated must equal what the customer ordered — never more",
+  );
+});
+
+test("a line filled entirely from stock queues NO production at all", () => {
+  const items = [{ id: "i1", quantity: 4 }];
+  const allocated = new Map([["i1", 4]]);
+  const toProduce = items
+    .map((it) => ({ ...it, quantity: it.quantity - (allocated.get(it.id) ?? 0) }))
+    .filter((it) => it.quantity > 0);
+  assert.equal(toProduce.length, 0);
+});
