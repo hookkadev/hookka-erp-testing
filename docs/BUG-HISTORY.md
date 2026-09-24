@@ -36,6 +36,82 @@ Entries themselves stay newest-first.
 
 ---
 
+> **How this batch was found (182-185).** T-006 (#448) passed 4,635 mocked tests and was on
+> `staging`. Nobody could log in to click it, so its real route code was run against the staging
+> DB inside one transaction that was always rolled back (`zz-live` harness, 2026-09-24; staging
+> re-read afterwards and unchanged). Every bug below passed the mocks: they return snake_case
+> keys and have no column types, the real client does neither.
+
+## BUG-2026-09-24-182 — every PO/GRN-linked purchase invoice create 500'd: `bigint = text` `procurement` `data-integrity` 🟢
+
+🟢 **Fixed** · found by the live staging run; `staging` only (T-006 never reached `main`).
+
+**Root cause.** T-006 R8 added `LEFT JOIN grn_items gi ON gi.id = pii.grn_item_id` to
+`checkPoRemaining`. `grn_items.id` is BIGINT, `purchase_invoice_items.grn_item_id` is TEXT;
+Postgres has no such operator (`42883`). `checkPoRemaining` runs for GRN-sourced, PO-direct and
+line-`poId` PIs — so every one of them 500'd, and R8/R9/R10-on-PI could not work at all.
+
+**Fix.** `gi.id::text = pii.grn_item_id` (`purchase-invoices.ts` `checkPoRemaining`).
+
+**Verified.** Live: PI off a GRN 200; R8 PO-direct over ceiling 409; R9 line-only `poId` 409;
+R10 replay returns the same PI id, one row. Test: `t006-live-findings` "no join compares
+grn_items.id (BIGINT) to a TEXT grn_item_id"; `pi-multi-po` pin updated.
+
+---
+
+## BUG-2026-09-24-183 — purchase return always refused, CN void restored the wrong status: snake-only reads `data-migration` `procurement` 🟢
+
+🟢 **Fixed** · [C23](BUG-CLASSES.md#c23--sql-says-snake_case-the-row-comes-back-camelcase) instances 8-9.
+
+**Root cause.** `createPurchaseReturn` read `grnLine.accepted_qty` / `grnLine.po_item_id`; the
+client returns `acceptedQty` / `poItemId`. Accepted read as 0, so **every** GRN-linked return
+409'd "accepted 0", and the PO counter was never given back. `buildInvoiceDeathCnReleaseStatements`
+read `cn.status_before_conversion` → always `undefined` → every voided CN went to
+`PARTIALLY_SOLD`, never the status it had.
+
+**Fix.** Dual-keyed reads (`purchase-return-create.ts`, `consignment-note-shared.ts`).
+
+**Verified.** Live: return of 1 accepted, PO line 154 → 153; CN void → back to `ACTIVE`. Test:
+`t006-live-findings` drives both functions with a fake DB that returns camelCase rows.
+
+---
+
+## BUG-2026-09-24-184 — a purchase return re-opened billing; deleting one kept the PO counter it took `procurement` `data-integrity` 🟢
+
+🟢 **Fixed** · deviates from PRD T-006 R6's literal wording — needs the PRD author's sign-off.
+
+**Root cause.** R6 lowered `grn_items.invoiced_qty` on every return. The PI still bills those
+units (the supplier's credit is the debit note), so the GRN line re-opened and the returned goods
+could be invoiced again — live: 139 of 140 billed, return 2 from the PI, a new PI for 2 went
+through. Separately, `DELETE /purchase-returns/:id` removed the rows but not the `receivedQty`
+the create had taken off the PO line, so the same goods could be received again.
+
+**Fix.** No `invoiced_qty` write-back (`createPurchaseReturn`). New
+`deletePurchaseReturnRestoreStatements` puts `receivedQty` back in the same batch as the delete.
+
+**Verified.** Live: after a PI-sourced return, billing 2 more → 409; delete of an OPEN return →
+`receivedQty` 151 → 152. **Still open (also on `main`):** a return raised off the GRN *before*
+billing leaves those units billable — closing it needs a returned-qty counter in every GRN
+availability read; owner decision, not patched here.
+
+---
+
+## BUG-2026-09-24-185 — CN → invoice convert never worked on staging; deleting the draft stranded the CN `consignment` `data-integrity` 🟢
+
+🟢 **Fixed** · convert bug pre-dates T-006 (`7701e1aa`, 2026-05-04); delete-path gap is T-006 R4.
+
+**Root cause.** Convert (and the CN-edit A/R refund) wrote `customers.updated_at`, a column the
+staging `customers` table does not have — the whole batch failed 400, and no CN on staging had
+ever converted (0 of 21, measured). Prod's `customers` columns are **UNMEASURED**. And R4 hooked
+the CN release into invoice void only; the convert creates a DRAFT, whose natural death is
+DELETE, which left the CN `FULLY_SOLD`.
+
+**Fix.** Dropped `updated_at` from both `UPDATE customers` (`consignment-notes.ts`); invoice
+DELETE now pushes `buildInvoiceDeathCnReleaseStatements` into its batch (`invoices.ts`).
+
+**Verified.** Live: convert 201 → void → CN `ACTIVE` → convert again 201 → delete the draft →
+CN `ACTIVE`. **Still open:** void/delete leave the CN's items `SOLD` and units `DELIVERED`;
+re-convert still works (it reads every item regardless of status).
 ## BUG-2026-09-23-182 — Experimental dashboard Operations › Revenue & Cost showed a different Production revenue from the main Dashboard (~RM 6k on 22 Sep) `dashboard` 🟡
 
 🟡 **Fix in progress** · owner-reported: main Dashboard revenue chart tooltip for 09-22 shows

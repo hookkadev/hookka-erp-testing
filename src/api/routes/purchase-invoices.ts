@@ -1060,12 +1060,14 @@ async function checkPoRemaining(
   // material_code for a PI line invoiced straight off the PO with no GRN in
   // between. Counts lines by their own po_id as well as PIs whose header
   // points here, so a multi-PO invoice still contributes to the right ceiling.
+  // gi.id is BIGINT, pii.grn_item_id is TEXT — Postgres has no bigint = text
+  // operator, so the join must cast (without it every PO-linked PI create 500'd).
   const invRes = await db
     .prepare(
       `SELECT gi.po_item_id AS "poItemId", pii.material_code AS mc, COALESCE(SUM(pii.qty), 0) AS qty
          FROM purchase_invoice_items pii
          JOIN purchase_invoices pi ON pi.id = pii.pi_id
-         LEFT JOIN grn_items gi ON gi.id = pii.grn_item_id
+         LEFT JOIN grn_items gi ON gi.id::text = pii.grn_item_id
         WHERE COALESCE(pii.po_id, pi.purchaseOrderId) = ? AND pi.status != 'CANCELLED'${
           excludePiId ? " AND pii.pi_id != ?" : ""
         }
