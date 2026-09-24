@@ -1,6 +1,7 @@
 # RBAC Remediation — current state and the way through
 
-> **Last verified: 2026-09-15** against `src/api/lib/rbac.ts` (fail-opens closed) and `src/api/routes/{attendance,leaves,files,working-hour-entries,cash-flow,stock-value,forecasts,sessions}.ts`,
+> **Last verified: 2026-09-24** — rebased onto `main` (215 commits of drift, cherry-picked clean) and
+> re-measured: scanner against this branch, plus the PRODUCTION grant counts quoted below. Previously against `src/api/lib/rbac.ts` (fail-opens closed) and `src/api/routes/{attendance,leaves,files,working-hour-entries,cash-flow,stock-value,forecasts,sessions}.ts`,
 > `src/api/lib/{rbac,nav-permissions}.ts`, `src/dashboard-routes.tsx`. Every claim below was
 > read out of the source on that date, not inferred from a plan or a migration.
 
@@ -45,7 +46,42 @@ group by u.role;
 Any row returned is an account that will lose access the moment this deploys. That is the
 correct outcome, but it should be a decision, not a surprise.
 
-## What is already done (2026-09-14, uncommitted)
+## Production blast radius — MEASURED 2026-09-24, before deploying the gates
+
+Closing the fail-opens means a role with **zero** rows in `role_permissions` is refused everything
+instead of silently reading everything. Measured on prod before merging, not assumed:
+
+| Role | Users | Grants | After deploy |
+|---|---|---|---|
+| SUPER_ADMIN | 8 | 284 | unchanged (wildcard short-circuit) |
+| SALES | 3 | 65 | unchanged (code policy) |
+| OFFICE | 2 | 59 | unchanged (code policy, `allExcept`) |
+| QA | 2 | 31 | **loses attendance + leaves** — the intent |
+| R_AND_D | 2 | 49 | **loses attendance + leaves** |
+| FINANCE | 1 | 53 | **loses attendance + leaves** |
+| HR | 1 | 31 | unchanged — holds attendance / leaves / workers read |
+| PRODUCTION | 1 | 46 | **loses attendance + leaves** |
+| READ_ONLY | 1 | 8 | **loses them** — 8 explicit grants, so the legacy `*:read` never applies |
+| PROCUREMENT / WAREHOUSE / WORKER | 0 / 0 / — | 53 / 44 / 12 | WORKER keeps `attendance:read` |
+
+**No role with users has 0 grants**, so the fail-open closure locks nobody out of their own module.
+What changes is cross-module reading of staff personal data — clock-in times, punch selfies, sick
+leave — which every logged-in account could read by typing the URL until now.
+
+`attendance:read` / `leaves:read` in `role_permissions` today: **HR, SUPER_ADMIN**, and WORKER
+(attendance only). FINANCE holds **no** `payroll` / `payslips` / `workers` grant at all, so payroll is
+not run from that role and losing attendance is not a functional regression for it.
+
+If a role does need it back, it is one row, and the 403 body names the exact missing permission:
+
+```sql
+INSERT INTO role_permissions (role_id, permission_id)
+SELECT r.id, p.id FROM roles r, permissions p
+WHERE upper(r.name) = 'FINANCE' AND p.resource = 'attendance' AND p.action = 'read';
+```
+
+
+## What is already done (cherry-picked onto `main` as `fix/rbac-read-gates`, 2026-09-24)
 
 | File | State |
 |---|---|
