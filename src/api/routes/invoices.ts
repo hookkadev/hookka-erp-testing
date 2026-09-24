@@ -24,7 +24,11 @@ import { requirePermission } from "../lib/rbac";
 import { customerScopeSql } from "../lib/customer-scope";
 import { computeInvoicePrintExtras } from "../lib/invoice-print-extras";
 import { invoiceLineUnitSen } from "../../lib/invoice-line-price";
-import { buildInvoiceDeathCnReleaseStatements } from "../lib/consignment-note-shared";
+import {
+  buildInvoiceDeathCnReleaseStatements,
+  consignmentOrderForInvoice,
+  reopenConsignmentOrderAfterRelease,
+} from "../lib/consignment-note-shared";
 // Rollup: S3 won the audit/journal-hash signature change (batched into the
 // invoice txn via buildAuditStatement + buildJournalEntryStatements). S4's
 // pre-S3 emitAudit/appendJournalEntries variants are superseded. S4's
@@ -3072,6 +3076,8 @@ app.put("/:id", async (c) => {
       existing.status === "DRAFT" && nextStatus === "SENT";
     const isVoidTransition =
       nextStatus === "CANCELLED" && existing.status !== "CANCELLED";
+    // Set by the void branch when this invoice came from a consignment note.
+    let releasedCoId: string | null = null;
 
     const afterSnapshot =
       isPostTransition || isVoidTransition
@@ -3258,7 +3264,9 @@ app.put("/:id", async (c) => {
       // all above: buildInvoiceDeathReleaseStatements bails out when
       // deliveryOrderId is falsy. Without this the CN stayed at FULLY_SOLD
       // forever, unable to convert again. No-ops (returns []) for a
-      // non-CN invoice.
+      // non-CN invoice. Its consignment order is read now — the release
+      // clears convertedInvoiceId — and reopened after the batch lands.
+      releasedCoId = await consignmentOrderForInvoice(c.var.DB, id);
       statements.push(
         ...(await buildInvoiceDeathCnReleaseStatements(c.var.DB, {
           invoiceId: id,
@@ -3286,6 +3294,8 @@ app.put("/:id", async (c) => {
     }
 
     await c.var.DB.batch(statements);
+    // A voided CN invoice's consignment order is no longer fully sold.
+    await reopenConsignmentOrderAfterRelease(c.var.DB, releasedCoId);
 
     // Post-batch: success metrics for the audit / ledger writes that
     // landed atomically with the business mutation. Failures swallowed.
@@ -3379,8 +3389,11 @@ app.delete("/:id", async (c) => {
   // hand its consignment note back too. Only the void path did this, so a
   // deleted draft left the CN stuck at FULLY_SOLD. Built before the batch
   // runs, so the lookup by convertedInvoiceId still finds the CN.
+  const releasedCoId = await consignmentOrderForInvoice(c.var.DB, id);
   stmts.push(...(await buildInvoiceDeathCnReleaseStatements(c.var.DB, { invoiceId: id })));
   await c.var.DB.batch(stmts);
+  // …and its consignment order is no longer fully sold (BUG-2026-09-24-191).
+  await reopenConsignmentOrderAfterRelease(c.var.DB, releasedCoId);
 
   // Deleting an invoice also reverses the customer's outstanding balance, so
   // without this the money moved with no record of who moved it or what the

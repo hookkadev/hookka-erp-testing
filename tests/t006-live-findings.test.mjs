@@ -31,7 +31,7 @@ const {
 } = await load(
   "src/api/lib/purchase-return-create.ts",
 );
-const { buildInvoiceDeathCnReleaseStatements } = await load(
+const { buildInvoiceDeathCnReleaseStatements, reopenConsignmentOrderAfterRelease } = await load(
   "src/api/lib/consignment-note-shared.ts",
 );
 
@@ -200,6 +200,28 @@ test("R4 release without a convert stamp touches only the CN header", async () =
   ]);
   const stmts = await buildInvoiceDeathCnReleaseStatements(db, { invoiceId: "inv-1" });
   assert.equal(stmts.length, 1);
+});
+
+test("void AND delete reopen the consignment order: read before the batch, reopen after (BUG-2026-09-24-191)", () => {
+  const src = readFileSync("src/api/routes/invoices.ts", "utf8");
+  const put = src.slice(src.indexOf('app.put("/:id"'), src.indexOf('app.delete("/:id"'));
+  const del = src.slice(src.indexOf('app.delete("/:id"'));
+  for (const [name, body, batch] of [
+    ["void", put, "await c.var.DB.batch(statements)"],
+    ["delete", del, "await c.var.DB.batch(stmts)"],
+  ]) {
+    const read = body.indexOf("consignmentOrderForInvoice(c.var.DB, id)");
+    const b = body.indexOf(batch);
+    const reopen = body.indexOf("reopenConsignmentOrderAfterRelease(c.var.DB, releasedCoId)");
+    assert.ok(read !== -1 && read < b, `${name}: the CO must be read BEFORE the release clears convertedInvoiceId`);
+    assert.ok(reopen > b, `${name}: the CO is reopened AFTER the release has landed`);
+  }
+});
+
+test("reopening the consignment order is best-effort — a failure never fails the void", async () => {
+  const boom = { prepare() { throw new Error("db down"); } };
+  await reopenConsignmentOrderAfterRelease(boom, "co-1"); // must not throw
+  await reopenConsignmentOrderAfterRelease(boom, null); // no CO → no-op
 });
 
 test("deleting a CN-sourced draft invoice releases the CN too, not only a void", () => {
