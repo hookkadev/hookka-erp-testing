@@ -36,6 +36,56 @@ Entries themselves stay newest-first.
 
 ---
 
+## BUG-2026-09-24-191 — voiding a CN's invoice left its consignment order DELIVERED `consignment` `data-integrity` 🟢
+
+🟢 **Fixed** · completes T-006 R4 at the order level (-185 / -188 released the CN and its items).
+
+**Root cause.** Convert-to-invoice runs `cascadeCNCompletionToCO`: once every CN of a
+consignment order is sold, the CO goes `DELIVERED`. The void and delete release put the CN back
+to `ACTIVE` but never ran the existing inverse, `cascadeCNReversalToCO`, so the CO kept reading
+complete — counted under "Completed", not "Outstanding" — with goods still at the branch.
+
+**Fix.** `consignmentOrderForInvoice` reads the CO **before** the void/delete batch (the release
+clears `convertedInvoiceId`); `reopenConsignmentOrderAfterRelease` runs `cascadeCNReversalToCO`
+**after** it lands, best-effort like the completion cascade on convert. The reversal only moves
+a `DELIVERED` CO whose CNs are no longer all sold (→ `READY_TO_SHIP`), so a non-CN invoice or a
+CO with other unsold CNs is untouched. (`consignment-note-shared.ts`, `invoices.ts` PUT void +
+DELETE.)
+
+**Verified.** Live on the staging DB (rolled back; the "last unsold CN on its CO" state was
+created inside the transaction — staging had no such CN): convert → CO `DELIVERED` → void → CO
+`READY_TO_SHIP`; convert again → delete the draft → CO `READY_TO_SHIP`. 8/8 on this branch, 6/8
+on deployed `81c77972` (both CO checks stayed `DELIVERED`). Tests: `t006-live-findings`
+(read-before / reopen-after ordering on both paths; best-effort never throws).
+
+---
+
+## BUG-2026-09-24-190 — goods returned off a GRN before billing stayed billable `procurement` `data-integrity` 🟢
+
+🟢 **Fixed** · pre-existing on `main` (left open by -184, which covered PI-sourced returns only).
+
+**Root cause.** Two ceilings limit a purchase invoice and neither counted returns. The GRN
+line's available was `accepted − invoiced`; the PO ceiling was `max(ordered, received)`, and a
+return lowers `received` but not `ordered`, so it fell back to the full order. Measured on the
+deployed staging commit `81c77972`: receive 140, return 2 off the GRN → the GRN still showed 140
+available, a PI for 139 was accepted, and a further PO-direct PI for 1 was accepted too — 141
+billable against 138 kept.
+
+**Fix.** `loadGrnReturnedQty` / `loadPoReturnedQty` (`purchase-return-create.ts`) sum returns
+raised off the GRN (`purchase_invoice_id` empty — a PI-sourced return is billed goods, credited
+by its debit note, and never counts). Subtracted in the GRN list/detail `availableQty`
+(`grn.ts`, what the invoice-from-GRN picker reads), PI create (GRN branch), PI edit ceiling, PI
+un-void re-draw, and the PO ceiling, now `max(ordered − returned, received)` so a replacement
+receipt becomes billable again. Both helpers fail soft on a DB with no return tables.
+
+**Verified.** Live on the staging DB (rolled back), 16/16: returned 2 → available 138; PI 139
+refused, 138 accepted; PO-direct +1 refused; PI edit up refused, down accepted; replacement
+receipt of 2 billable; un-void refused after 3 more returned; a PI-sourced return is not counted.
+Same run against `81c77972`: 5/15. Tests: `t006-live-findings` (helpers, fail-soft, every site),
+`pi-void` pin updated.
+
+---
+
 ## BUG-2026-09-24-189 — a purchase return of a PO-sourced GRN line never left stock `procurement` `inventory-cascade` 🟢
 
 🟢 **Fixed** · pre-existing on `main`; same root as -186 (blank `material_code` on PO-sourced GRN lines).

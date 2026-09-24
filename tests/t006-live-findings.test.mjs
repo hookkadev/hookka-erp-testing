@@ -26,10 +26,12 @@ const {
   deletePurchaseReturnRestoreStatements,
   applyPurchaseReturnStockOut,
   loadGrnItemsForReturn,
+  loadGrnReturnedQty,
+  loadPoReturnedQty,
 } = await load(
   "src/api/lib/purchase-return-create.ts",
 );
-const { buildInvoiceDeathCnReleaseStatements } = await load(
+const { buildInvoiceDeathCnReleaseStatements, reopenConsignmentOrderAfterRelease } = await load(
   "src/api/lib/consignment-note-shared.ts",
 );
 
@@ -117,6 +119,38 @@ test("a blank-code GRN line is offered for return, with its PO line's code", asy
   assert.equal(items[0].materialCode, "NLY-D12-6MM");
 });
 
+test("returned-before-billing counts only GRN-sourced returns, per GRN line", async () => {
+  const db = camelDb([
+    [/FROM purchase_return_items pri[\s\S]*pri\.grn_item_id IN/, () => [{ grnItemId: "1153", qty: 2 }]],
+  ]);
+  const m = await loadGrnReturnedQty(db, [1153, "1154"]);
+  assert.equal(m.get("1153"), 2);
+  assert.equal(m.get("1154"), undefined);
+  const src = readFileSync("src/api/lib/purchase-return-create.ts", "utf8");
+  const fn = src.slice(src.indexOf("export async function loadGrnReturnedQty"), src.indexOf("export async function loadPoReturnedQty"));
+  assert.match(fn, /COALESCE\(pr\.purchase_invoice_id, ''\) = ''/, "a PI-sourced return is billed goods — it must not count");
+});
+
+test("returned-before-billing fails soft on a DB with no return tables", async () => {
+  const db = { prepare: () => ({ bind: () => ({ all: async () => { throw new Error('relation "purchase_return_items" does not exist'); } }) }) };
+  assert.equal((await loadGrnReturnedQty(db, ["1"])).size, 0);
+  assert.equal((await loadPoReturnedQty(db, "po-1")).size, 0);
+});
+
+test("every GRN billable-qty check subtracts returned-before-billing (BUG-2026-09-24-190)", () => {
+  const pi = readFileSync("src/api/routes/purchase-invoices.ts", "utf8");
+  // create (GRN branch), edit ceiling, un-void re-draw
+  assert.match(pi, /consumedQty: \(Number\(gi\.invoicedQty \?\? gi\.invoiced_qty \?\? 0\) \|\| 0\) \+ returned/);
+  assert.match(pi, /const projected = currentInvoiced - oldThisPi \+ newQty \+ returned;/);
+  assert.match(pi, /if \(invoiced \+ returned \+ qty > accepted\)/);
+  // PO ceiling: ordered less what went back, never below what was received
+  assert.match(pi, /poInvoiceCeiling\(\s*Math\.max\(0, \(Number\(po\.quantity\) \|\| 0\) - \(returnedByPoItem\.get\(itemId\) \?\? 0\)\)/);
+  // what the invoice-from-GRN picker reads
+  const grn = readFileSync("src/api/routes/grn.ts", "utf8");
+  assert.match(grn, /availableQty: computeAvailableQty\(Number\(r\.acceptedQty\) \|\| 0, invoicedQty \+ returnedQty\)/);
+  assert.equal((grn.match(/await attachReturnedQty\(/g) ?? []).length, 2, "GRN detail AND list");
+});
+
 test("deleting an OPEN return puts the PO line's receivedQty back", async () => {
   const db = camelDb([
     [/FROM purchase_return_items pri/, () => [{ poItemId: "poi-1", qty: 2 }]],
@@ -166,6 +200,28 @@ test("R4 release without a convert stamp touches only the CN header", async () =
   ]);
   const stmts = await buildInvoiceDeathCnReleaseStatements(db, { invoiceId: "inv-1" });
   assert.equal(stmts.length, 1);
+});
+
+test("void AND delete reopen the consignment order: read before the batch, reopen after (BUG-2026-09-24-191)", () => {
+  const src = readFileSync("src/api/routes/invoices.ts", "utf8");
+  const put = src.slice(src.indexOf('app.put("/:id"'), src.indexOf('app.delete("/:id"'));
+  const del = src.slice(src.indexOf('app.delete("/:id"'));
+  for (const [name, body, batch] of [
+    ["void", put, "await c.var.DB.batch(statements)"],
+    ["delete", del, "await c.var.DB.batch(stmts)"],
+  ]) {
+    const read = body.indexOf("consignmentOrderForInvoice(c.var.DB, id)");
+    const b = body.indexOf(batch);
+    const reopen = body.indexOf("reopenConsignmentOrderAfterRelease(c.var.DB, releasedCoId)");
+    assert.ok(read !== -1 && read < b, `${name}: the CO must be read BEFORE the release clears convertedInvoiceId`);
+    assert.ok(reopen > b, `${name}: the CO is reopened AFTER the release has landed`);
+  }
+});
+
+test("reopening the consignment order is best-effort — a failure never fails the void", async () => {
+  const boom = { prepare() { throw new Error("db down"); } };
+  await reopenConsignmentOrderAfterRelease(boom, "co-1"); // must not throw
+  await reopenConsignmentOrderAfterRelease(boom, null); // no CO → no-op
 });
 
 test("deleting a CN-sourced draft invoice releases the CN too, not only a void", () => {
