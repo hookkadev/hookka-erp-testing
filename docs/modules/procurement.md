@@ -1,5 +1,10 @@
 # Procurement — Module Guide
 
+> **Last verified: 2026-09-24** — `grn.ts` symbol anchors re-derived after BUG-2026-09-24-186
+> (`resolveRmForGRNItem` :493, `buildGRNStockStatements` :563, `postGRNToStock` :689,
+> `buildPostedGRNStockAdjustment` :754, POST `/` :1427, PUT `/:id/arrival` :2361). GRN stock now
+> resolves through the PO line's item code first; a POSTED-line edit adjusts the raw material its
+> batch was posted to. Line figures in the older stamps and flow prose below are historical.
 > **Last verified: 2026-09-22** (`ProcurementPage` anchor re-derived: `index.tsx:812`; grid search now covers line items).
 >
 > **Last verified: 2026-09-21** (branch `fix/t006-transfer-convert-guards`) — every table
@@ -141,16 +146,16 @@ Owns the buy-side document chain: **Purchase Orders** (PO) → **Goods Receipt N
 | `app.post("/")` (PO create) | `src/api/routes/purchase-orders.ts:434` | PO create; `body.status` verbatim |
 | `app.put("/:id")` (PO edit) | `src/api/routes/purchase-orders.ts:764` | PO edit + status lifecycle |
 | `ensurePendingMigrations` (PO) | `src/api/routes/purchase-orders.ts:1067` | Runtime column self-apply |
-| `buildGRNStockStatements` | `src/api/routes/grn.ts:536` | Pure builder: stock + cost_ledger statements (no execution) |
-| `postGRNToStock` | `src/api/routes/grn.ts:657` | Wrapper: reads GRN, calls builder, executes batch (edit path only) |
-| `buildPostedGRNStockAdjustment` | `src/api/routes/grn.ts:722` | Compensating DELTA for POSTED-line edit |
-| `buildPOCounterStatements` | `src/api/routes/grn.ts:868` | Pure builder: PO receivedQty draw-down statements (no execution) |
-| `cascadePOStatusAfterGRNPost` | `src/api/routes/grn.ts:894` | Wrapper: calls builder, executes batch, recomputes PO status (edit path only) |
-| `cascadePOReceivedQtyDelta` | `src/api/routes/grn.ts:1166` | Move PO line receivedQty by delta |
-| `restorePOReceivedQtyForGRN` | `src/api/routes/grn.ts:1073` | Un-post/cancel/delete: give back PO qty |
-| `resolveRmForGRNItem` | `src/api/routes/grn.ts:481` | Resolve GRN line → raw_material |
-| `app.post("/")` (GRN create) | `src/api/routes/grn.ts:1384` | GRN create; builds stock+PO-counter statements into ONE batch with header+lines (T-006 R3) |
-| `app.put("/:id/arrival")` | `src/api/routes/grn.ts:2315` | Arrival state transition (gate) |
+| `buildGRNStockStatements` | `src/api/routes/grn.ts:563` | Pure builder: stock + cost_ledger statements (no execution) |
+| `postGRNToStock` | `src/api/routes/grn.ts:689` | Wrapper: reads GRN, calls builder, executes batch (edit path only) |
+| `buildPostedGRNStockAdjustment` | `src/api/routes/grn.ts:754` | Compensating DELTA for POSTED-line edit |
+| `buildPOCounterStatements` | `src/api/routes/grn.ts:911` | Pure builder: PO receivedQty draw-down statements (no execution) |
+| `cascadePOStatusAfterGRNPost` | `src/api/routes/grn.ts:937` | Wrapper: calls builder, executes batch, recomputes PO status (edit path only) |
+| `cascadePOReceivedQtyDelta` | `src/api/routes/grn.ts:1209` | Move PO line receivedQty by delta |
+| `restorePOReceivedQtyForGRN` | `src/api/routes/grn.ts:1116` | Un-post/cancel/delete: give back PO qty |
+| `resolveRmForGRNItem` | `src/api/routes/grn.ts:493` | Resolve GRN line → raw_material: PO line's code first; a description shared by several RMs resolves to nothing (BUG-2026-09-24-186) |
+| `app.post("/")` (GRN create) | `src/api/routes/grn.ts:1427` | GRN create; builds stock+PO-counter statements into ONE batch with header+lines (T-006 R3) |
+| `app.put("/:id/arrival")` | `src/api/routes/grn.ts:2361` | Arrival state transition (gate) |
 | `app.post("/")` (PI create) | `src/api/routes/purchase-invoices.ts:1137` | PI create + convert-chain + GL post |
 | `app.put("/:id")` (PI edit) | `src/api/routes/purchase-invoices.ts:2039` | PI edit (DRAFT/CONFIRMED/legacy APPROVED) + GL correction |
 | `checkInvoicedQtyCeilingAfterEdit` | `src/api/routes/purchase-invoices.ts:703` | Ceiling on re-synced invoiced_qty |

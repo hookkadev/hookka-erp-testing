@@ -108,7 +108,33 @@ test("R4 release restores the status the CN had, read off a camelCased row", asy
     [/FROM consignment_notes WHERE convertedInvoiceId/, () => [{ id: "cn-1", statusBeforeConversion: "ACTIVE" }]],
   ]);
   const [stmt] = await buildInvoiceDeathCnReleaseStatements(db, { invoiceId: "inv-1" });
-  assert.deepEqual(stmt.args, ["ACTIVE", "cn-1"], "was always PARTIALLY_SOLD");
+  assert.equal(stmt.args[0], "ACTIVE", "was always PARTIALLY_SOLD");
+  assert.equal(stmt.args.at(-1), "cn-1");
+});
+
+test("R4 release undoes exactly what the conversion did — items back AT_BRANCH, units back LOADED", async () => {
+  const at = "2026-09-24T02:00:00.000Z"; // convert's `now`, stamped on invoice + items + units
+  const db = camelDb([
+    [/FROM consignment_notes WHERE convertedInvoiceId/, () => [{ id: "cn-1", statusBeforeConversion: "ACTIVE" }]],
+    [/SELECT created_at FROM invoices/, () => [{ createdAt: at }]],
+    [/FROM fg_units/, () => [{ id: "fgu-1", status: "DELIVERED", productCode: "SOFA", cnId: "cn-1" }]],
+  ]);
+  const stmts = await buildInvoiceDeathCnReleaseStatements(db, { invoiceId: "inv-1" });
+  const items = stmts.find((s) => /UPDATE consignment_items SET status = 'AT_BRANCH'/.test(s.sql));
+  assert.ok(items, "items flipped SOLD by the convert go back AT_BRANCH");
+  assert.deepEqual(items.args, ["cn-1", at], "matched on the convert stamp, not every SOLD item");
+  const units = stmts.find((s) => /UPDATE fg_units SET status = 'LOADED'/.test(s.sql));
+  assert.ok(units, "units flipped DELIVERED by the convert go back LOADED");
+  assert.deepEqual(units.args, ["cn-1", at]);
+  assert.ok(stmts.some((s) => /fg_stock_events/i.test(s.sql)), "the unit move is written to the FG ledger");
+});
+
+test("R4 release without a convert stamp touches only the CN header", async () => {
+  const db = camelDb([
+    [/FROM consignment_notes WHERE convertedInvoiceId/, () => [{ id: "cn-1", statusBeforeConversion: "ACTIVE" }]],
+  ]);
+  const stmts = await buildInvoiceDeathCnReleaseStatements(db, { invoiceId: "inv-1" });
+  assert.equal(stmts.length, 1);
 });
 
 test("deleting a CN-sourced draft invoice releases the CN too, not only a void", () => {

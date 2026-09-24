@@ -10,6 +10,8 @@ import {
 // rather than a batch, so it uses the best-effort recorder — see the note on
 // recordFgStockEvents for why that trade is made HERE and nowhere else.
 import {
+  buildFgStockEventStatements,
+  ensureFgStockEventsSchema,
   loadFgUnitsForEvent,
   recordFgStockEvents,
   SYSTEM_ACTOR,
@@ -461,17 +463,64 @@ export async function buildInvoiceDeathCnReleaseStatements(
   // read was always undefined and every release fell back to PARTIALLY_SOLD.
   const restoreTo =
     cn.statusBeforeConversion ?? cn.status_before_conversion ?? "PARTIALLY_SOLD";
-  return [
+
+  // convert-to-invoice stamps ONE `now` on everything it changes: the
+  // invoice's created_at, each AT_BRANCH item's soldDate (→ SOLD), each LOADED
+  // unit's deliveredAt (→ DELIVERED) and, if unset, the CN's deliveredAt. So
+  // that stamp identifies exactly what the conversion did — and only that is
+  // undone. An item sold, or a unit delivered, at any other moment is left
+  // alone. Without this the CN went back to ACTIVE while its items stayed
+  // SOLD and its units DELIVERED (measured on staging, 2026-09-24), and
+  // /return then matched no LOADED unit.
+  const inv = await db
+    .prepare("SELECT created_at FROM invoices WHERE id = ?")
+    .bind(args.invoiceId)
+    .first<{ createdAt?: string | null; created_at?: string | null }>();
+  const convertedAt = inv?.createdAt ?? inv?.created_at ?? null;
+
+  const statements: D1PreparedStatement[] = [
     db
       .prepare(
         `UPDATE consignment_notes
             SET status = ?,
                 status_before_conversion = NULL,
-                convertedInvoiceId = NULL
+                convertedInvoiceId = NULL,
+                deliveredAt = CASE WHEN deliveredAt = ? THEN NULL ELSE deliveredAt END
           WHERE id = ?`,
       )
-      .bind(restoreTo, cn.id),
+      .bind(restoreTo, convertedAt, cn.id),
   ];
+  if (!convertedAt) return statements;
+
+  statements.push(
+    db
+      .prepare(
+        `UPDATE consignment_items SET status = 'AT_BRANCH', soldDate = NULL
+          WHERE consignmentNoteId = ? AND status = 'SOLD' AND soldDate = ?`,
+      )
+      .bind(cn.id, convertedAt),
+  );
+  // Units: read the FROM side with the SAME predicate the UPDATE uses, so the
+  // ledger records exactly the transition that happens (fg-stock-events.ts).
+  await ensureFgStockEventsSchema(db);
+  const unitWhere = "cnId = ? AND status = 'DELIVERED' AND deliveredAt = ?";
+  const units = await loadFgUnitsForEvent(db, unitWhere, [cn.id, convertedAt]);
+  if (units.length > 0) {
+    statements.push(
+      db
+        .prepare(`UPDATE fg_units SET status = 'LOADED', deliveredAt = NULL WHERE ${unitWhere}`)
+        .bind(cn.id, convertedAt),
+      ...buildFgStockEventStatements(db, units, {
+        toStatus: "LOADED",
+        doc: { docType: "CONSIGNMENT_NOTE", docId: cn.id, docNo: null },
+        actor: SYSTEM_ACTOR,
+        occurredAt: new Date().toISOString(),
+        note: `Invoice ${args.invoiceId} voided/deleted — CN conversion undone`,
+        reverses: { docType: "CONSIGNMENT_NOTE", docId: cn.id },
+      }),
+    );
+  }
+  return statements;
 }
 
 export const CN_VALID_TRANSITIONS: Record<string, string[]> = {

@@ -402,9 +402,9 @@ goods be billed twice. **Needs the PRD author's sign-off.**
 **Still open, needs a decision:**
 - A return raised off the GRN *before* billing leaves those units billable (same on `main`).
   Closing it needs a returned-qty counter subtracted in every GRN availability read.
-- R4 void/delete restore the CN header only; its items stay `SOLD` and units `DELIVERED`.
-  Re-convert still works (it reads every item).
-- Pre-existing, not T-006: a PO-sourced GRN line has a blank `material_code`, so stock resolves
-  by `description = ? LIMIT 1` (`grn.ts`) — receiving `NLY-D12-6MM` posted to `D12-0.5`, one of
-  five "WHITE SPONGE" materials. And a DO whose only line is fully returned still invoices in
-  full (`computeDoInvoiceLines` falls back to billing the SO).
+- ~~R4 void/delete restore the CN header only~~ — fixed 2026-09-24 (BUG-2026-09-24-188): items
+  and units the conversion flipped are reverted by its timestamp. A parent consignment order
+  that convert marked complete is still not reopened.
+- ~~GRN stock by `description = ? LIMIT 1`~~ — fixed (BUG-2026-09-24-186). ~~Fully returned DO
+  still invoices the SO~~ — fixed (BUG-2026-09-24-187). Same first-match shape remains in BOM
+  consumption (`po-cost-cascade.ts` `resolveRmFromBom`, C21 row 17).

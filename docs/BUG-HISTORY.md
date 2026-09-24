@@ -34,6 +34,69 @@ Entries themselves stay newest-first.
 
 ---
 
+## BUG-2026-09-24-186 — GRN stock posted to the wrong raw material when several share a name `procurement` `inventory-cascade` 🟢
+
+🟢 **Fixed** · pre-existing on `main`; [C21](BUG-CLASSES.md) row 16. Found by the same live run as 182-185.
+
+**Root cause.** A PO-sourced GRN line stores a blank `material_code` (BUG-2026-08-13-052,
+deliberately not filled), so `resolveRmForGRNItem` fell through to
+`raw_materials WHERE description = ? LIMIT 1`. 37 descriptions are shared on staging; five
+materials are "WHITE SPONGE". Receiving 140 of `NLY-D12-6MM` posted `rm_batches`, `cost_ledger`
+and `balanceQty` onto `D12-0.5`.
+
+**Fix** (`grn.ts`). Resolve through the GRN line's `po_item_id` → the PO line's `materialCode`
+first. The description fallback now accepts only a unique name; a shared one resolves to nothing
+and the line is returned in `unresolvedLines` instead of guessed. A POSTED-line edit adjusts the
+raw material its original batch was posted to (`rm_batches.rmId`), so an edit can never move
+stock between materials.
+
+**Verified.** Live (staging DB, rolled back): the same receipt now posts to `NLY-D12-6MM`.
+Staging exposure measured: 45 posted GRN lines, **0** with a blank code — nothing to repair
+there. **Prod exposure UNMEASURED.** Test: `tests/grn-rm-resolution.test.mjs`. Same shape still
+open in `po-cost-cascade.ts` `resolveRmFromBom` (C21 row 17).
+
+---
+
+## BUG-2026-09-24-187 — a delivery order returned in full still invoiced the whole sales order `delivery-orders` `data-integrity` 🟢
+
+🟢 **Fixed** · pre-existing on `main`.
+
+**Root cause.** `computeDoInvoiceLines` falls back to billing the SO lines directly when
+"nothing priced" (BUG-2026-05-18-004). It read an empty `invItems` as "priced at zero" — but a
+DO whose every line came back on a Delivery Return is empty because nothing is left. A
+single-line DO returned in full would invoice RM 830.00 on staging.
+
+**Fix** (`delivery-orders/_helpers.ts`). The fallbacks fire only when there is something
+delivered to bill (a line that survived but priced at zero, or a legacy DO with no lines). The
+auto-invoice-on-delivery path raises no invoice when nothing is left, rather than an empty RM 0
+one; the manual path already 409s and now says "already billed or were returned".
+
+**Verified.** Live: the fully-returned DO now shows 0 invoiceable. Tests:
+`t006-r7-delivery-return` (single line returned in full → nothing), `invoice-death-releases-source`.
+
+---
+
+## BUG-2026-09-24-188 — voiding/deleting a CN's invoice left its items SOLD and units DELIVERED `consignment` `inventory-cascade` 🟢
+
+🟢 **Fixed** · completes T-006 R4 (BUG-2026-09-24-185 released the CN header only).
+
+**Root cause.** Convert flips the CN's AT_BRANCH items to SOLD and its LOADED units to
+DELIVERED; the release put the CN back to ACTIVE and left both. The CN read as unsold with
+every item sold, and `/return` matched no LOADED unit.
+
+**Fix** (`consignment-note-shared.ts`). Convert stamps ONE `now` on the invoice's `created_at`,
+each item's `soldDate` and each unit's `deliveredAt`. The release reads that stamp and reverts
+exactly those rows (items → AT_BRANCH, units → LOADED with a counter-row in the FG stock ledger,
+and the CN's `deliveredAt` if convert set it). Anything sold or delivered at another moment is
+left alone.
+
+**Verified.** Live: convert → void → items back to `AT_BRANCH:5`. Staging has no LOADED
+consignment units, so the unit half is proven by `t006-live-findings` only. **Still open:** a
+parent consignment order that convert's `cascadeCNCompletionToCO` marked complete is not
+reopened.
+
+---
+
 > **How this batch was found (182-185).** T-006 (#448) passed 4,635 mocked tests and was on
 > `staging`. Nobody could log in to click it, so its real route code was run against the staging
 > DB inside one transaction that was always rolled back (`zz-live` harness, 2026-09-24; staging

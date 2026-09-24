@@ -18,6 +18,20 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
+## 2026-09-24 — 🔵 Staging: the three pre-existing convert-chain bugs the T-006 live check found (branch `fix/staging-legacy-convert-bugs` → `staging`)
+
+Ask: continue fixing on staging after #506. All three were on `main` before T-006.
+
+- [x] GRN stock posted to the wrong raw material when several share a name (BUG-2026-09-24-186).
+- [x] Fully-returned DO still invoiced the whole SO (-187).
+- [x] CN void/delete left items SOLD / units DELIVERED (-188).
+- [x] tsc exit 0; full suite green; live re-run on staging DB (rolled back): procurement 25/25, sales/delivery/consignment 18/18.
+- [ ] PR → `staging` (needs a human merge); re-verify on the deployed commit.
+- [ ] Carry to `main` (these are `main` bugs too) — needs its own PR.
+- 🟡 Open: BOM consumption resolves by shared description (C21 row 17); convert's CO completion cascade is not reopened on void; prod exposure of -186 UNMEASURED.
+
+---
+
 ## 2026-09-24 — 🔵 T-006 live check on staging: fix what the real DB broke (branch `fix/t006-live-findings` → `fix/t006-transfer-convert-guards` + `staging`)
 
 A live run of the T-006 routes against the staging DB (real route code, one rolled-back
@@ -31,7 +45,7 @@ transaction) failed where the mocked tests passed. Asks: fix, push to `staging`,
 - [x] Deleting a CN-sourced invoice leaves the CN stuck `FULLY_SOLD` (-185).
 - [x] CN → invoice convert 400s on staging: writes `customers.updated_at`, which does not exist (-185, pre-existing).
 - [x] `tsc -p tsconfig.app.json` exit 0; full suite 4779 pass / 0 fail / 3 skips; live re-run on the fixed code: procurement 24/25, sales 16/18 (misses are the pre-existing items below).
-- [ ] Push; PR → `staging`; re-run the live check against deployed `staging`.
+- [x] Push; PR → `staging` (#506, merged); live check re-run against the deployed commit `f434916e`: 24/25 + 16/18, misses were the three pre-existing bugs (entry above).
 - 🟡 Needs a decision: GRN-sourced return of unbilled goods leaves them billable (needs a returned-qty counter); CN items stay `SOLD` after void; GRN stock resolves by description when `material_code` is blank (wrong raw material); single-line DO fully returned still invoices in full.
 
 ---
