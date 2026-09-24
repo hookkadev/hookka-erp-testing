@@ -1,6 +1,6 @@
 # Bug History
 
-> **Last verified: 2026-09-23** — newest entry BUG-2026-09-23-186 (branch `fix/invoice-line-so-ref`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-09-24** — newest entry BUG-2026-09-24-187 (branch `fix/audit-health-ts-cast`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 
 Living log of bugs we've identified, diagnosed, and fixed in Hookka ERP.
 
@@ -33,6 +33,52 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-09-24-187 — System Health showed "No audit events" and "Successful logins 0 … Healthy" while 19,227 audit rows sat in the table `audit-logging` `platform` 🟡
+
+🟡 **Fix in progress** · Owner-reported on `erp.hookka.com/admin/health`: the Audit feed read "No audit
+events in this window." and the whole Security panel read 0 / 0 / 0 with a green "Healthy". Measured on
+prod the same hour: **19,227 rows in `audit_events`, 122 of them inside the 24h window**, newest
+`2026-09-24 02:05:48+00` — 816 logins and 156 failed logins all present.
+
+**Root cause.** `audit_events.ts` is a **TEXT** column (`0046_audit_events.sql:28`) and both health
+queries compared it straight to a timestamp:
+
+```sql
+AND ts > NOW() - INTERVAL '24 hours'
+```
+
+Postgres refuses that outright — reproduced in the prod SQL editor: `ERROR: 42883: operator does not
+exist: text > timestamp with time zone`. So the query threw on **every** request, `admin-health.ts`
+caught its own error and returned `{success:true, data:[]}`, and the panel rendered that as a calm
+zero. Confirmed live before the fix: `GET /api/admin/health/audit-feed?range=24h` → `{"success":true,"data":[]}`.
+
+**Three layers hid it**, which is why it survived weeks: the audit WRITE swallows failures by design
+(`audit.ts` — "never block a real mutation"), the health QUERY swallows them (catch → empty), and the FE
+fetch swallows them (`useCachedJson` → null → empty state). Same shape as
+[BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently); an empty panel and
+a broken panel are indistinguishable to the reader. The cast fix already existed on `zaim-dev-branch`
+(`33694eeb`) and was never merged to `main`, so production never received it.
+
+**Fix.** `ts::timestamptz` in both queries — `admin-health.ts:1297` (audit-feed) and `:1456`
+(security-events). Comparing as TEXT would be wrong: rows carry two formats (the column DEFAULT writes
+`2026-09-24 02:05:48+00`, ISO writes use a `T` separator) and they sort differently. At 19k rows the seq
+scan is irrelevant. PR `fix/audit-health-ts-cast`.
+
+**Regression.** `tests/admin-health-audit-ts-cast.test.mjs` stubs a **Postgres-shaped** DB that raises
+42883 for an uncast comparison, so deleting the cast reproduces the production symptom (empty feed)
+rather than passing against a query that no longer runs. 3/3 fail without the cast, 3/3 pass with it.
+
+**Verify.** Sandbox, measured: feed went from empty to 7 rows (`login ×1`, `login.fail ×6`), Security read
+Successful logins 1 / Failed logins 6. **Prod UNMEASURED until deployed** — after deploy, the 24h window
+must show ~122 events instead of zero.
+
+**Still open.** (1) All three layers still swallow failures — the panels should say "query failed", not
+"Healthy". (2) `Who` and `IP` render `—`; sign-in does not record IP/device on `main` (`33694eeb` on
+`zaim-dev-branch` does). (3) Automation panel 404s: the repo moved to `hookkadev/hookka-erp-testing` but
+`admin-health.ts:971` still defaults to the old `weisiang329-eng` slug.
 
 ---
 
