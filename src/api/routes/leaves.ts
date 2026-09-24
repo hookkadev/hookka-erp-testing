@@ -77,6 +77,11 @@ function genId(): string {
 
 // GET /api/leaves?workerId=...&status=...
 app.get("/", async (c) => {
+  // Permission gate. getOrgId() below answers WHICH COMPANY, not whether
+  // this person may see it — every logged-in account of every role could
+  // read this until now. RBAC audit 2026-09-11.
+  const denied = await requirePermission(c, "leaves", "read");
+  if (denied) return denied;
   const workerId = c.req.query("workerId");
   const status = c.req.query("status");
 
@@ -104,6 +109,11 @@ app.get("/", async (c) => {
 // module. Replaces the arithmetic that used to sit in the office screen with a
 // hardcoded entitlement, no leave-year boundary and no holiday exclusion.
 app.get("/balances", async (c) => {
+  // Permission gate. getOrgId() below answers WHICH COMPANY, not whether
+  // this person may see it — every logged-in account of every role could
+  // read this until now. RBAC audit 2026-09-11.
+  const denied = await requirePermission(c, "leaves", "read");
+  if (denied) return denied;
   // The SELECT below names the two override columns, so the self-apply has to
   // land first — reading a column that does not exist fails exactly like
   // writing one.

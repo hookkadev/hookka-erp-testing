@@ -572,12 +572,8 @@ export default function ProductionPage({
   // size (minimal ~1.5MB → ~200KB for FAB_CUT, less for depts with fewer
   // JCs like FOAM / WEBBING).
   //
-  // LAZY LOAD: the bare URL is `null` until the user touches a filter (or
-  // explicitly hits "Load all"). useCachedJson skips the fetch when URL is
-  // null, so the initial /production render is instant and the 533-PO
-  // payload is only pulled when the operator actually wants to look at
-  // something. Per-dept routes (mode="dept") still auto-fetch since landing
-  // there means the user already wants the dept's queue.
+  // No lazy load (removed 2026-09-23): every mode fetches on mount — see the
+  // note above `ordersUrl`'s inputs below.
   // No PO-status pre-filter at the API layer (2026-04-27 user request) —
   // load ALL POs (PENDING / IN_PROGRESS / ON_HOLD / COMPLETED /
   // CANCELLED) and let the per-column Status filter on the grid handle
@@ -585,10 +581,12 @@ export default function ProductionPage({
   // payload size penalty is negligible vs the dropped Lifecycle dropdown
   // it replaces (which was redundant with the column filter the user
   // already had at hand).
-  // shouldFetch needs to live up here because some downstream effects
-  // depend on it. baseUrl / dueQueryFrag are deferred to AFTER
-  // fltDueFrom/fltDueTo are declared (~line 791) to dodge a TDZ error.
-  const [shouldFetch, setShouldFetch] = useState<boolean>(mode === "dept");
+  // The orders grid ALWAYS fetches on mount (owner 2026-09-23: having to click
+  // "Load all" after every refresh was annoying). The old lazy gate
+  // (`shouldFetch`, armed by a filter or the Load-all button) is gone; repeat
+  // loads are served from the client cache + server snapshot. baseUrl /
+  // dueQueryFrag are deferred to AFTER fltDueFrom/fltDueTo are declared to
+  // dodge a TDZ error.
   // Date-seed gate for the orders fetch.
   //
   // Before F1 (2026-05-11): this returned false on cold dept-mount when
@@ -935,12 +933,14 @@ export default function ProductionPage({
   // Re-sync local mirror when URL state changes externally (Clear all,
   // first-mount seed, deep link, back-button). Skip when the input
   // already matches to dodge a self-loop.
+  /* eslint-disable react-hooks/set-state-in-effect -- intentional mirror of URL state into the typed input */
   useEffect(() => {
     setFltDueFromInput((prev) => (prev === fltDueFrom ? prev : fltDueFrom));
   }, [fltDueFrom]);
   useEffect(() => {
     setFltDueToInput((prev) => (prev === fltDueTo ? prev : fltDueTo));
   }, [fltDueTo]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // F1 cold-start today fallback (2026-05-11).
   //
@@ -1040,22 +1040,25 @@ export default function ProductionPage({
     mode === "dept" && deptCode
       ? `/api/production-orders?fields=minimal&dept=${encodeURIComponent(deptCode)}${excludeCompletedFrag}${dueFrag}${fltCategory ? `&cat=${encodeURIComponent(fltCategory)}` : ""}`
       : `/api/production-orders?fields=minimal${excludeCompletedFrag}${dueFrag}${fltCategory ? `&cat=${encodeURIComponent(fltCategory)}` : ""}`;
-  const ordersUrl: string | null = shouldFetch && datesSeeded ? baseUrl : null;
+  const ordersUrl: string | null = datesSeeded ? baseUrl : null;
   // Phase 5 was reverted on 2026-05-24: the worker-parse path added
   // structured-clone overhead that ate the JSON.parse savings on desktop
   // (no measurable iPad win to justify the complexity either). Replaced
   // by Phase 6 — server-side KV snapshot cache — which gives every
   // repeat fetch a <200ms response instead of trying to optimise the
   // first-fetch parse cost.
-  const { data: ordersResp, loading, failure: ordersFailure, refresh: refreshOrders } = useCachedJson<{ success?: boolean; data?: ProductionOrder[] }>(ordersUrl);
+  const { data: ordersResp, loading, failure: ordersFailure, refresh: refreshOrders } = useCachedJson<{ success?: boolean; data?: ProductionOrder[] }>(
+    ordersUrl,
+    300,
+    // The 8 s poll below usually returns a byte-identical body — reuse the
+    // same object so an unchanged poll costs no re-render (see cached-fetch.ts).
+    { reuseUnchanged: true },
+  );
   // Date-filter-INDEPENDENT fetch used solely by the "Total Overdue SO"
   // header chip + drill-down panel. Pulls ALL POs (no dueFrom/dueTo, no
   // dept narrowing) so the count reflects the system-wide overdue state,
   // not just the slice the operator has windowed into via the date inputs
-  // above. Gated on `shouldFetch` so it doesn't fire on a cold landing —
-  // the existing first-mount seed (from/to → today) flips shouldFetch on
-  // anyway, so in practice this fetches once per session alongside the
-  // main orders fetch.
+  // above. Fetches once per session alongside the main orders fetch.
   //
   // 2026-05-08: replaced the bare `/api/production-orders?fields=minimal`
   // fetch with a thin aggregate endpoint. The page used to pull ~800 POs +
@@ -1066,16 +1069,14 @@ export default function ProductionPage({
   // dept tabs use that dept's JC.dueDate rule (mirrors isOverduePO in
   // src/pages/production/utils.ts).
   const overdueDept: string | null = activeTab === "ALL" ? null : activeTab;
-  // NOT gated on `shouldFetch` (2026-06-23). The overdue chips are the
+  // Fetched on every mount (2026-06-23). The overdue chips are the
   // Overview's primary KPI and now ALSO drive the grid filter (clicking
   // "Bedframe ⚠ N" filters the grid to those N), so they must populate on a
   // cold landing — otherwise the chips read 0, look wrong, and clicking them
-  // filters to nothing (the bug verify-live caught: cold Overview never flips
-  // shouldFetch, so the counts never loaded). This endpoint is a cheap
+  // filters to nothing (the bug verify-live caught: the cold Overview used to
+  // skip the fetch, so the counts never loaded). This endpoint is a cheap
   // ~5 KB / ~50 ms aggregate, snapshot-cached server-side (withSnapshot) and
-  // client-side (useCachedJson), so firing it on every Overview mount is fine;
-  // the heavy orders grid below stays lazy (still gated on shouldFetch), and a
-  // chip click arms that fetch via anyFilterActive.
+  // client-side (useCachedJson), so firing it on every Overview mount is fine.
   const overdueCountsUrl: string | null = datesSeeded
     ? `/api/production-orders/overdue-counts${overdueDept ? `?dept=${encodeURIComponent(overdueDept)}` : ""}`
     : null;
@@ -1424,27 +1425,6 @@ export default function ProductionPage({
     [overduePanelMode, setUrlBatch, clearAllOverviewFilters],
   );
 
-  // Lazy-load trigger: any filter being non-default flips shouldFetch=true,
-  // which arms ordersUrl in the useCachedJson call above. Once fetched the
-  // data is cached in localStorage, so subsequent filter changes filter
-  // client-side without re-fetching. The "Refresh" button forces a refetch.
-  // Lifecycle defaults to "active", DateAxis defaults to "dueDate" — both
-  // are excluded from the trigger because they're the user's baseline view.
-  const anyFilterActive =
-    !!fltSearch ||
-    !!fltState ||
-    !!fltCustomer ||
-    !!fltDueFrom ||
-    !!fltDueTo ||
-    !!fltCategory ||
-    // An active overdue chip filters the grid too — arm the fetch so clicking
-    // a chip on a cold (un-fetched) Overview loads the rows it selects.
-    !!overduePanelMode;
-  /* eslint-disable react-hooks/set-state-in-effect -- gate fetch on first filter activation */
-  useEffect(() => {
-    if (anyFilterActive && !shouldFetch) setShouldFetch(true);
-  }, [anyFilterActive, shouldFetch]);
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Scroll position restoration — keyed per active dept tab so each dept
   // remembers its own scroll independently. sessionStorage so the value
@@ -2771,8 +2751,8 @@ export default function ProductionPage({
   // complete" and the tab bar's per-dept fractions — printed a confident `0`
   // in all of them:
   //
-  //   1. COLD LANDING. `shouldFetch` starts `false` in overview/full mode
-  //      (:588), so `ordersUrl` is null and NO REQUEST IS EVER MADE. The page
+  //   1. COLD LANDING (historical — the lazy `shouldFetch` gate that caused it
+  //      was removed 2026-09-23). `ordersUrl` was null so NO REQUEST WAS MADE. The page
   //      rendered "No orders loaded yet." and, in the same viewport, the
   //      footer asserted "0 of 0 work orders · 0/0 cells complete". The matrix
   //      block is gated on `activeTab === "ALL"` alone, which is why the two
@@ -2793,7 +2773,7 @@ export default function ProductionPage({
   // "—" is only a prettier lie than "0".
   const ordersUnobservedReason = !ordersObserved
     ? ordersUrl == null
-      ? "not loaded yet — pick a filter or Load all"
+      ? "not loaded yet"
       : ordersLoadFailed
         ? "couldn't load — this is unknown, not empty"
         : "loading…"
@@ -3323,21 +3303,12 @@ export default function ProductionPage({
   // stay on their existing DataGrid path. estimateSize=36 matches the
   // typical row height (single-line product); rows that wrap (long
   // model + spec line) are auto-measured via `measureElement`.
-  const overviewBodyRef = useRef<HTMLDivElement>(null);
-  const overviewRowVirtualizer = useVirtualizer({
-    count: activeTab === "ALL" ? visibleOrders.length : 0,
-    getScrollElement: () => overviewBodyRef.current,
-    estimateSize: () => 36,
-    overscan: 8,
-  });
-  // When a column filter narrows the matrix, reset the body scroll to the top
-  // so the row virtualizer re-anchors. Without this it can hold a stale scroll
-  // offset whose row indices no longer exist after the filter, leaving the
-  // visible area blank (Wei Siang's "整列变空白" — and different users saw
-  // different empty-row counts depending on their prior scroll position).
-  useEffect(() => {
-    if (overviewBodyRef.current) overviewBodyRef.current.scrollTop = 0;
-  }, [overviewFilters]);
+  // The row virtualizer itself lives in <OverviewVirtualRows> (bottom of this
+  // file), NOT here: a virtualizer re-renders the component that hosts it on
+  // every scroll frame, and hosting it in this ~9.7k-line page re-rendered the
+  // whole page per frame (measured on prod 2026-09-23: 30–60 ms per scroll
+  // step, ~30 fps with only ~20 rows mounted). The scroll-to-top-on-filter
+  // reset moved with it (resetKey={overviewFilters}).
 
   // Unique customer + state options for the filter dropdowns, derived
   // live from the order set so they auto-update when data changes.
@@ -7201,10 +7172,8 @@ export default function ProductionPage({
       </div>
 
       {/* Filter bar — applies to Overview matrix AND all dept sub-tabs.
-          Setting any filter (or clicking Load all) arms the lazy-load fetch
-          via shouldFetch. While the response is in-flight the page shows a
-          spinner below. The "Refresh" button forces a re-fetch even when
-          shouldFetch is already on. */}
+          While the response is in-flight the page shows a spinner below.
+          The "Refresh" button forces a re-fetch. */}
       <div className="rounded-lg border border-[#E6E0D9] bg-white p-3 flex flex-wrap gap-2 items-center">
         <input
           type="text"
@@ -7348,15 +7317,6 @@ export default function ProductionPage({
             departments" button for cross-dept assignment; inline cells
             stay smart-filtered by active dept. picShowAll state kept
             (false forever) to avoid touching deptWorkers / Clear-all wiring. */}
-        {!shouldFetch && (
-          <button
-            onClick={() => setShouldFetch(true)}
-            className="text-[10px] px-2 py-1 rounded border border-[#6B5C32] text-[#6B5C32] hover:bg-[#FAF8F4]"
-            title="Skip filtering and load every active production order"
-          >
-            Load all
-          </button>
-        )}
         {/* Clear all — restored 2026-05-12. The 2026-05-05 removal was
             because clearing from/to caused a 1-2s main-thread freeze
             (~9k JC refetch + grid re-render); commit 1fdb903 fixed that
@@ -7417,9 +7377,7 @@ export default function ProductionPage({
           Clear all
         </button>
         <span className="ml-auto text-[10px] text-[#8A7F73]">
-          {!shouldFetch ? (
-            "Pick a filter (or Load all) to fetch orders"
-          ) : updatingHint ? (
+          {updatingHint ? (
             <span className="text-[#9C6F1E] font-semibold">Updating…</span>
           ) : ordersObserved ? (
             `${filteredOrders.length} of ${orders.length} orders`
@@ -7437,7 +7395,7 @@ export default function ProductionPage({
           SO list). This thin banner just confirms the active filter + restates
           the chip's metric, and offers a one-click clear. The actual rows are
           the grid below, narrowed via `overduePoIdSet` in `filteredOrders`. */}
-      {overduePanelMode && shouldFetch && (
+      {overduePanelMode && (
         <div className="flex items-center justify-between gap-3 rounded-lg border border-[#F1B5B0] bg-[#FFF7F6] px-3 py-2">
           <span className="text-xs text-[#A12C28]">
             <span className="font-semibold">
@@ -7466,23 +7424,6 @@ export default function ProductionPage({
           >
             Clear overdue filter
           </button>
-        </div>
-      )}
-
-      {/* Lazy-load placeholder: before any filter is set we don't fetch
-          the payload at all — the user sees the filter bar above plus this
-          callout. Clicking any filter (handled by the useEffect that flips
-          shouldFetch) or "Load all" arms the request. */}
-      {!shouldFetch && (
-        <div className="rounded-lg border border-dashed border-[#E6E0D9] bg-[#FAF8F4] px-4 py-12 text-center">
-          <p className="text-sm text-[#6B5C32] font-medium">
-            No orders loaded yet.
-          </p>
-          <p className="mt-1 text-xs text-[#8A7F73]">
-            Pick any filter above (or click <em>Load all</em>) to fetch the
-            production payload. Skipping the fetch keeps the page snappy when
-            you only need to navigate to a specific order.
-          </p>
         </div>
       )}
 
@@ -8266,8 +8207,9 @@ export default function ProductionPage({
               : `Orders not shown — ${ordersUnobservedReason}.`}
           </div>
         ) : (
-          <div
-            ref={overviewBodyRef}
+          <OverviewVirtualRows
+            count={visibleOrders.length}
+            resetKey={overviewFilters}
             // overflow-x-hidden: the body only scrolls VERTICALLY. Horizontal
             // scrolling is owned by the outer wrapper (which keeps header +
             // rows aligned). Without this the body grew its own, unsynced
@@ -8275,19 +8217,8 @@ export default function ProductionPage({
             // two left/right scrollbars. — Wei Siang 2026-05-29
             className="overflow-y-auto overflow-x-hidden"
             style={{ maxHeight: "calc(100vh - 320px)", minWidth: overviewMinWidth }}
-          >
-          <div
-            style={{
-              height: `${overviewRowVirtualizer.getTotalSize()}px`,
-              position: "relative",
-              width: "100%",
-            }}
-          >
-          {overviewRowVirtualizer
-            .getVirtualItems()
-            .filter((virtualRow) => virtualRow.index < visibleOrders.length)
-            .map((virtualRow) => {
-            const order = visibleOrders[virtualRow.index];
+            renderRow={(rowIndex, rowStart, measureRef) => {
+            const order = visibleOrders[rowIndex];
             if (!order) return null;
             const isSelected = selectedOverviewIds.has(order.id);
             // Lifecycle row styling — amber background for ON_HOLD, grey +
@@ -8325,8 +8256,8 @@ export default function ProductionPage({
             return (
             <div
               key={order.id}
-              ref={overviewRowVirtualizer.measureElement}
-              data-index={virtualRow.index}
+              ref={measureRef}
+              data-index={rowIndex}
               className={`grid items-stretch border-b border-[#F0EBE3] cursor-pointer ${rowCls}`}
               style={{
                 gridTemplateColumns: overviewTemplate,
@@ -8335,7 +8266,7 @@ export default function ProductionPage({
                 top: 0,
                 left: 0,
                 right: 0,
-                transform: `translateY(${virtualRow.start}px)`,
+                transform: `translateY(${rowStart}px)`,
               }}
               // Single-click anywhere on the row toggles its selection (the
               // operator asked to tick by clicking the row, not just the small
@@ -8483,9 +8414,8 @@ export default function ProductionPage({
               })}
             </div>
             );
-          })}
-          </div>
-          </div>
+          }}
+          />
         )}
         </div>{/* /overflow-x-auto matrix scroll wrapper */}
         </OverviewResizeCtx.Provider>
@@ -9899,6 +9829,57 @@ export default function ProductionPage({
           }
         }}
       />
+    </div>
+  );
+}
+
+// Hosts the Overview matrix's row virtualizer so a scroll re-renders only this
+// component and the ~20 mounted rows — never the whole ProductionPage (see the
+// note where `visibleOrders` is built). estimateSize=36 is the typical
+// single-line row; wrapped rows are measured via measureRef. `resetKey`
+// changing (the column filters) scrolls back to the top so the virtualizer
+// never holds an offset whose rows no longer exist (the "整列变空白" bug).
+function OverviewVirtualRows({
+  count,
+  resetKey,
+  className,
+  style,
+  renderRow,
+}: {
+  count: number;
+  resetKey: unknown;
+  className?: string;
+  style?: React.CSSProperties;
+  renderRow: (
+    index: number,
+    start: number,
+    measureRef: (el: Element | null) => void,
+  ) => React.ReactNode;
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({
+    count,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 36,
+    overscan: 8,
+  });
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+  }, [resetKey]);
+  return (
+    <div ref={scrollRef} className={className} style={style}>
+      <div
+        style={{
+          height: `${virtualizer.getTotalSize()}px`,
+          position: "relative",
+          width: "100%",
+        }}
+      >
+        {virtualizer
+          .getVirtualItems()
+          .filter((row) => row.index < count)
+          .map((row) => renderRow(row.index, row.start, virtualizer.measureElement))}
+      </div>
     </div>
   );
 }

@@ -10,6 +10,7 @@ import { lazy, Suspense } from 'react'
 import { Navigate, Route, type RouteObject } from 'react-router-dom'
 import { ErrorBoundary } from './components/ui/error-boundary'
 import RequirePermission from './components/auth/RequirePermission'
+import { resourceForNav } from './api/lib/nav-permissions'
 import RequireRole from './components/auth/RequireRole'
 import { PageSkeleton } from './components/ui/skeleton'
 
@@ -237,8 +238,16 @@ export const DASHBOARD_ROUTES: RouteObject[] = [
   },
   { path: '/dashboard-b', element: <Navigate to="/dashboard" replace /> },
 
-  // Experimental dashboard.
-  { path: '/dashboard-experimental', element: <S><DashboardPrototype /></S> },
+  // Experimental dashboard — same gate as /dashboard (the menu link is mapped
+  // to the same resource in nav-permissions.ts).
+  {
+    path: '/dashboard-experimental',
+    element: (
+      <RequirePermission resource="dashboard" action="read">
+        <S><DashboardPrototype /></S>
+      </RequirePermission>
+    ),
+  },
 
   // Sales
   { path: '/sales', element: <S><Sales /></S> },
@@ -559,9 +568,30 @@ export const DASHBOARD_ROUTES: RouteObject[] = [
 ]
 
 // JSX array usable inside <Routes> — same refs as DASHBOARD_ROUTES
-export const DASHBOARD_ROUTE_ELEMENTS = DASHBOARD_ROUTES.map((r) => (
-  <Route key={r.path!} path={r.path!} element={r.element} />
-))
+// Every dashboard route is guarded from the SAME map the sidebar filters with
+// (NAV_RESOURCE in api/lib/nav-permissions.ts), rather than by remembering to
+// wrap each one by hand. <RequirePermission> covered 11 of 117 routes before
+// this; the other 106 rendered for anyone who typed the URL — QA could open
+// /employees, and /api/attendance answered with 3,560 rows (RBAC audit
+// 2026-09-11).
+//
+// Deriving it from the nav map is what keeps the two from drifting: a link the
+// sidebar hides is now a page the router refuses, by construction.
+//
+// A path with NO mapping stays open, matching that file's documented choice
+// ("hiding by omission is how a menu quietly loses a page"). Making unmapped
+// routes fail closed is a separate decision for the owner.
+export const DASHBOARD_ROUTE_ELEMENTS = DASHBOARD_ROUTES.map((r) => {
+  const resource = resourceForNav(r.path!)
+  const element = resource ? (
+    <RequirePermission resource={resource} action="read">
+      {r.element}
+    </RequirePermission>
+  ) : (
+    r.element
+  )
+  return <Route key={r.path!} path={r.path!} element={element} />
+})
 
 // ── Route chunk prefetch ──────────────────────────────────────────────────
 // Lazy route chunks only download on first navigation, so the first click on

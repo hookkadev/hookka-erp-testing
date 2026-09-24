@@ -14,6 +14,7 @@
 // ---------------------------------------------------------------------------
 import { useEffect, useMemo, useState } from "react";
 import { useCachedJson } from "@/lib/cached-fetch";
+import { formatTimestampMY } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -1478,7 +1479,7 @@ export default function AdminHealthPage() {
                       <tbody>
                         {auditFeed.map((r) => (
                           <tr key={r.id} className="border-b border-[#F5F2EE]">
-                            <td className="py-1.5 text-[#5A5550] whitespace-nowrap">{r.ts.slice(5, 16).replace('T', ' ')}</td>
+                            <td className="py-1.5 text-[#5A5550] whitespace-nowrap" title={`${formatTimestampMY(r.ts, { withYear: true, withSeconds: true })} MYT`}>{formatTimestampMY(r.ts)}</td>
                             <td className="py-1.5 text-[#1F1D1B]">
                               <div>{r.actorUserName || '—'}</div>
                               {r.actorRole && <div className="text-[10px] text-[#8B8580]">{r.actorRole}</div>}
@@ -1664,7 +1665,7 @@ export default function AdminHealthPage() {
                         const isFail = r.action === "login.fail" || r.action === "login-failed";
                         return (
                           <tr key={r.id} className="border-b border-[#F5F2EE]">
-                            <td className="py-1.5 text-[#5A5550] whitespace-nowrap">{r.ts.slice(5, 16).replace('T', ' ')}</td>
+                            <td className="py-1.5 text-[#5A5550] whitespace-nowrap" title={`${formatTimestampMY(r.ts, { withYear: true, withSeconds: true })} MYT`}>{formatTimestampMY(r.ts)}</td>
                             <td className="py-1.5 text-[#1F1D1B]">
                               <div>{r.actorUserName || r.actorUserId || '—'}</div>
                               {r.actorRole && <div className="text-[10px] text-[#8B8580]">{r.actorRole}</div>}
@@ -1805,7 +1806,7 @@ export default function AdminHealthPage() {
                                 {icon} {resultLabel}
                               </td>
                               <td className="py-1.5 text-[#5A5550] whitespace-nowrap">
-                                {r.at ? r.at.slice(0, 16).replace("T", " ") : "—"}
+                                {r.at ? formatTimestampMY(r.at, { withYear: true }) : "—"}
                               </td>
                               <td className="py-1.5">
                                 {r.url ? (
@@ -1956,7 +1957,7 @@ export default function AdminHealthPage() {
                     <tbody>
                       {longTasks.map((r, i) => (
                         <tr key={i} className="border-b border-[#F5F2EE]">
-                          <td className="py-1.5 text-[#5A5550] whitespace-nowrap">{r.timestamp.slice(5, 16)}</td>
+                          <td className="py-1.5 text-[#5A5550] whitespace-nowrap">{formatTimestampMY(r.timestamp)}</td>
                           <td className="py-1.5 font-mono text-[11px] text-[#1F1D1B] truncate max-w-[220px]" title={r.route}>{r.route}</td>
                           <td className={`py-1.5 text-right ${r.status.startsWith('5') ? 'text-[#9A3A2D] font-semibold' : r.status.startsWith('4') ? 'text-[#9C6F1E]' : 'text-[#4F7C3A]'}`}>{r.status}</td>
                           <td className={`py-1.5 text-right font-semibold ${r.dur >= 1000 ? 'text-[#9A3A2D]' : 'text-[#9C6F1E]'}`}>{r.dur}ms</td>

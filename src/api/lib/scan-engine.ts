@@ -193,6 +193,7 @@ export function sanitizeSupplierDoc(
     .map((l) => {
       const qty = num(l?.qty);
       const amount = num(l?.amount);
+      const discount = num(l?.discount);
       let unitPrice = num(l?.unitPrice);
       // Derive a missing unit price from the line amount (BUG price=0): a faint
       // scan often reads the bold line TOTAL but misses the small unit-price
@@ -209,7 +210,11 @@ export function sanitizeSupplierDoc(
         // Four decimals, not two: RM 33.00 over 600 pcs is RM 0.055, and
         // rounding it here to RM 0.06 re-creates the very RM 3.00 error
         // this derivation exists to avoid.
-        unitPrice = Math.round((amount / qty) * 10000) / 10000;
+        // The printed amount on a discounted line is NET of the discount, and
+        // the PI takes the discount off the unit price again (DEV-14) — so add
+        // it back, or the line is discounted twice.
+        const gross = amount + (discount != null && discount > 0 ? discount : 0);
+        unitPrice = Math.round((gross / qty) * 10000) / 10000;
       }
       return {
         supplierCode: str(l?.supplierCode),
@@ -219,7 +224,7 @@ export function sanitizeSupplierDoc(
         unitPrice,
         amount,
         tax: num(l?.tax),
-        discount: num(l?.discount),
+        discount,
         density: str(l?.density),
         thickness: str(l?.thickness),
       };

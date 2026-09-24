@@ -13,6 +13,7 @@ import { AttendanceLogCard } from "./AttendanceLogCard";
 import { OverdueByDeptCard, DueSoonWorklist, type ProdOrderSummary } from "./OverdueCards";
 import type { EmployeeSlice } from "./EmployeesInsights";
 import { ProductionDailyPanels } from "./ProductionDailyPanels";
+import { CompletedCard, DeptBacklogCard, FabricUsageCard, PlantLoadCard, PurchasingCard } from "./DashboardWidgets";
 
 // Operations tab: the shop-floor report checklist (handed over on paper,
 // 2026-09-17), redesigned 2026-09-18 for density: a single KPI strip, a 2-column chart split
@@ -301,6 +302,11 @@ export function OperationsView({
 
             <OverdueByDeptCard overdueByDept={production?.overdueByDept ?? []} />
 
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <PlantLoadCard period={period} />
+              <DeptBacklogCard period={period} />
+            </div>
+
             <DueSoonWorklist orders={production?.dueSoon3Days ?? []} />
 
             {employee && <AttendanceLogCard employee={employee} period={period} />}
@@ -337,6 +343,8 @@ export function OperationsView({
                   </p>
                 </CardContent>
               </Card>
+
+              <CompletedCard period={period} />
 
         </>
       )}
@@ -423,6 +431,8 @@ export function OperationsView({
 
       {sub === "materials" && (
         <>
+            <PurchasingCard period={period} />
+            <FabricUsageCard period={period} />
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle>Material Shortage detail</CardTitle>

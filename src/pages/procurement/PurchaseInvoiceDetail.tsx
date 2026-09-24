@@ -41,6 +41,7 @@ import { moneyFieldToRinggit } from "@/lib/money-field";
 import {
   roundUnitPriceSen,
   lineTotalSen,
+  allocateDiscountSen,
   formatUnitPriceInput,
 } from "@/lib/unit-price";
 
@@ -99,6 +100,8 @@ type PurchaseInvoiceItem = {
   // Per-line SST in sen (owner 2026-06-30). Backend projects this from
   // purchase_invoice_items.tax_sen; 0 for legacy / non-taxable lines.
   taxSen?: number;
+  // Per-line discount in sen (DEV-14); lineTotalSen is already net of it.
+  discountSen?: number;
   lineType: LineType;
   notes: string | null;
   grnItemId?: string | number | null;
@@ -237,6 +240,10 @@ export default function PurchaseInvoiceDetailPage() {
   const subtotalDisplay = headerSubtotal || goodsLineAmount;
   const taxDisplay = headerTax || (perLineTax + legacyTaxLineAmount);
   const totalAmount = subtotalDisplay + taxDisplay;
+  // Invoice discount (DEV-14) = the lines' shares added back together; the
+  // gross is what the supplier printed before it.
+  const docDiscountSen = items.reduce((s, it) => s + (Number(it.discountSen) || 0), 0);
+  const grossDisplay = subtotalDisplay + docDiscountSen;
 
   // The GRN this PI was raised from + the supplier payments that settle it —
   // both resolved server-side off the PI's own keys.
@@ -393,6 +400,8 @@ export default function PurchaseInvoiceDetailPage() {
   const [dInvoiceDate, setDInvoiceDate] = useState("");
   const [dDueDate, setDDueDate] = useState("");
   const [dRemarks, setDRemarks] = useState("");
+  // Invoice-level discount in sen (DEV-14) — spread across the lines on save.
+  const [dDiscountSen, setDDiscountSen] = useState(0);
   const [dSupplierInvoiceNo, setDSupplierInvoiceNo] = useState("");
   const [dSupplierDoNo, setDSupplierDoNo] = useState("");
   const [dLines, setDLines] = useState<DraftLine[]>([]);
@@ -405,6 +414,7 @@ export default function PurchaseInvoiceDetailPage() {
     setDRemarks(pi.remarks || "");
     setDSupplierInvoiceNo(pi.supplierInvoiceNo || "");
     setDSupplierDoNo(pi.supplierDoNo || "");
+    setDDiscountSen(docDiscountSen);
     setDLines(
       (pi.items ?? []).map((it) => ({
         materialCode: it.materialCode || "",
@@ -445,27 +455,30 @@ export default function PurchaseInvoiceDetailPage() {
   // SST breakdown (owner 2026-06-30): subtotal = sum of GOODS line amounts
   // (lt !== 'TAX'); tax = sum of per-line tax + any legacy TAX-line amount;
   // grand total = subtotal + tax. Live-updates as the operator edits.
-  const draftSubtotalSen = dLines.reduce(
-    (s, l) =>
-      l.lineType === "TAX"
-        ? s
-        : s +
-          lineTotalSen(
-            parseFloat(l.qty) || 0,
-            roundUnitPriceSen((moneyFieldToRinggit(l.unitPriceRm) ?? 0) * 100),
-          ),
+  // Invoice discount (DEV-14): spread over the goods lines pro-rata — the same
+  // split is what gets saved as each line's discountSen.
+  const draftGrossSens = dLines.map((l) =>
+    lineTotalSen(
+      parseFloat(l.qty) || 0,
+      roundUnitPriceSen((moneyFieldToRinggit(l.unitPriceRm) ?? 0) * 100),
+    ),
+  );
+  const draftGoodsGrossSen = draftGrossSens.reduce(
+    (s, g, i) => (dLines[i].lineType === "TAX" ? s : s + g),
     0,
   );
+  const draftLineDiscountSens = allocateDiscountSen(
+    draftGrossSens,
+    dDiscountSen,
+    dLines.map((l) => l.lineType !== "TAX"),
+  );
+  const draftDiscountSen = draftLineDiscountSens.reduce((s, v) => s + v, 0);
+  const draftSubtotalSen = draftGoodsGrossSen - draftDiscountSen;
   const draftTaxSen = dLines.reduce(
-    (s, l) =>
+    (s, l, i) =>
       s +
       Math.round((moneyFieldToRinggit(l.taxRm) ?? 0) * 100) +
-      (l.lineType === "TAX"
-        ? lineTotalSen(
-            parseFloat(l.qty) || 0,
-            roundUnitPriceSen((moneyFieldToRinggit(l.unitPriceRm) ?? 0) * 100),
-          )
-        : 0),
+      (l.lineType === "TAX" ? draftGrossSens[i] : 0),
     0,
   );
   const draftTotalSen = draftSubtotalSen + draftTaxSen;
@@ -510,7 +523,7 @@ export default function PurchaseInvoiceDetailPage() {
     }
     setBusy(true);
     try {
-      const items = dLines.map((l) => ({
+      const items = dLines.map((l, i) => ({
         materialCode: l.materialCode.trim() || null,
         materialName: l.materialName.trim(),
         supplierSku: l.supplierSku.trim() || null,
@@ -520,6 +533,8 @@ export default function PurchaseInvoiceDetailPage() {
         // Per-line SST (owner 2026-06-30). 0 for non-taxable lines; backend
         // rolls them into header tax_sen on save.
         taxSen: Math.max(0, Math.round((moneyFieldToRinggit(l.taxRm) ?? 0) * 100)),
+        // This line's share of the invoice discount.
+        discountSen: draftLineDiscountSens[i],
         lineType: l.lineType,
         // Preserve the GRN-source link so the backend keeps invoiced_qty in sync.
         grnItemId: l.grnItemId,
@@ -609,8 +624,9 @@ export default function PurchaseInvoiceDetailPage() {
             {!editing && pi.sourceDocumentFileId && (
               // Owner 2026-06-30: when the PI was created from a scan, link to
               // the SPECIFIC source PDF chunk (not the original bundle if the
-              // upload was auto-split). Opens /api/files/:id/download in a
-              // new tab — that endpoint 302s to a short-lived presigned URL.
+              // upload was auto-split). Opens /api/files/:id/download?inline=1
+              // in a new tab — 302s to a short-lived presigned URL the browser
+              // RENDERS. Without inline=1 it forces a save (af09716b).
               <Button
                 type="button"
                 variant="outline"
@@ -618,7 +634,7 @@ export default function PurchaseInvoiceDetailPage() {
                 onClick={() => {
                   const url = `/api/files/${encodeURIComponent(
                     pi.sourceDocumentFileId as string,
-                  )}/download`;
+                  )}/download?inline=1`;
                   window.open(url, "_blank", "noopener,noreferrer");
                 }}
                 disabled={busy}
@@ -780,6 +796,18 @@ export default function PurchaseInvoiceDetailPage() {
               {/* SST breakdown (owner 2026-06-30) — Subtotal / SST / Total.
                   Legacy PIs read header values as 0; backend synthesizes from
                   the TAX line so this still renders sensibly. */}
+              {docDiscountSen > 0 && (
+                <>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-[#6B7280]">Gross</span>
+                    <span className="text-[#4B5563]">{formatCurrency(grossDisplay)}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-[#6B7280]">Discount</span>
+                    <span className="text-[#4B5563]">({formatCurrency(docDiscountSen)})</span>
+                  </div>
+                </>
+              )}
               <div className="flex justify-between text-sm">
                 <span className="text-[#6B7280]">Subtotal</span>
                 <span className="text-[#4B5563]">{formatCurrency(subtotalDisplay)}</span>
@@ -856,7 +884,9 @@ export default function PurchaseInvoiceDetailPage() {
                           <td className="h-12 px-3 text-right text-[#4B5563]">{it.qty}</td>
                           <td className="h-12 px-3 text-right text-[#4B5563]">{formatCurrency(it.unitPriceSen)}</td>
                           <td className="h-12 px-3 text-right text-[#4B5563]">{formatCurrency(Number(it.taxSen) || 0)}</td>
-                          <td className="h-12 px-3 text-right font-medium text-[#1F1D1B]">{formatCurrency(it.lineTotalSen)}</td>
+                          {/* Gross line amount, as the supplier prints it — the
+                              invoice discount is shown once, in the footer. */}
+                          <td className="h-12 px-3 text-right font-medium text-[#1F1D1B]">{formatCurrency((Number(it.lineTotalSen) || 0) + (Number(it.discountSen) || 0))}</td>
                           <td className="h-12 px-3 text-center">
                             <span
                               className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${LINE_TYPE_BADGE[it.lineType]}`}
@@ -874,13 +904,27 @@ export default function PurchaseInvoiceDetailPage() {
                         = per-line tax + any legacy TAX-line amount; Total =
                         Subtotal + SST. */}
                     <tr className="bg-[#FAF9F7]">
-                      <td colSpan={4} className="h-9 px-3 text-right text-xs font-medium text-[#6B7280]">Subtotal</td>
+                      <td colSpan={4} className="h-9 px-3 text-right text-xs font-medium text-[#6B7280]">{docDiscountSen > 0 ? "Gross" : "Subtotal"}</td>
                       <td className="h-9 px-3 text-right text-sm text-[#6B7280]">{totalQty}</td>
                       <td className="h-9 px-3"></td>
                       <td className="h-9 px-3"></td>
-                      <td className="h-9 px-3 text-right text-sm text-[#1F1D1B]">{formatCurrency(subtotalDisplay)}</td>
+                      <td className="h-9 px-3 text-right text-sm text-[#1F1D1B]">{formatCurrency(grossDisplay)}</td>
                       <td className="h-9 px-3"></td>
                     </tr>
+                    {docDiscountSen > 0 && (
+                      <>
+                        <tr className="bg-[#FAF9F7]">
+                          <td colSpan={7} className="h-9 px-3 text-right text-xs font-medium text-[#6B7280]">Less: Discount</td>
+                          <td className="h-9 px-3 text-right text-sm text-[#1F1D1B]">({formatCurrency(docDiscountSen)})</td>
+                          <td className="h-9 px-3"></td>
+                        </tr>
+                        <tr className="bg-[#FAF9F7]">
+                          <td colSpan={7} className="h-9 px-3 text-right text-xs font-medium text-[#6B7280]">Subtotal</td>
+                          <td className="h-9 px-3 text-right text-sm text-[#1F1D1B]">{formatCurrency(subtotalDisplay)}</td>
+                          <td className="h-9 px-3"></td>
+                        </tr>
+                      </>
+                    )}
                     <tr className="bg-[#FAF9F7]">
                       <td colSpan={7} className="h-9 px-3 text-right text-xs font-medium text-[#6B7280]">SST</td>
                       <td className="h-9 px-3 text-right text-sm text-[#1F1D1B]">{formatCurrency(taxDisplay)}</td>
@@ -969,8 +1013,7 @@ export default function PurchaseInvoiceDetailPage() {
                     <th className="h-10 px-2 text-left font-medium text-[#374151]">Internal Code</th>
                     <th className="h-10 px-2 text-left font-medium text-[#374151]">Supplier SKU</th>
                     <th className="h-10 px-2 text-right font-medium text-[#374151] w-20">Qty</th>
-                    <th className="h-10 px-2 text-right font-medium text-[#374151] w-28">Unit Price (RM)</th>
-                    <th className="h-10 px-2 text-right font-medium text-[#374151] w-24" title="Per-line SST in RM">SST (RM)</th>
+                    <th className="h-10 px-2 text-right font-medium text-[#374151] w-28">Unit Price (RM)</th>                    <th className="h-10 px-2 text-right font-medium text-[#374151] w-24" title="Per-line SST in RM">SST (RM)</th>
                     <th className="h-10 px-2 text-left font-medium text-[#374151] w-32">Type</th>
                     <th className="h-10 px-2 text-center font-medium text-[#374151] w-12"></th>
                   </tr>
@@ -1090,6 +1133,29 @@ export default function PurchaseInvoiceDetailPage() {
                 <tfoot>
                   {/* SST breakdown (owner 2026-06-30) — Subtotal / SST / Total
                       live-updates as the operator edits per-line tax. */}
+                  <tr className="bg-[#FAF9F7]">
+                    <td colSpan={6} className="h-8 px-2 text-right text-xs font-medium text-[#6B7280]">
+                      Gross
+                    </td>
+                    <td colSpan={3} className="h-8 px-2 text-right text-sm text-[#1F1D1B]">
+                      {formatCurrency(draftGoodsGrossSen)}
+                    </td>
+                  </tr>
+                  {/* Invoice-level discount (DEV-14) — the supplier's footer
+                      "Less: Discount"; RM, or "10%" of the gross. */}
+                  <tr className="bg-[#FAF9F7]">
+                    <td colSpan={6} className="h-8 px-2 text-right text-xs font-medium text-[#6B7280]">
+                      Less: Discount
+                    </td>
+                    <td colSpan={3} className="h-8 px-2">
+                      <DiscountInput
+                        className="h-8 w-32 ml-auto"
+                        baseAmountSen={draftGoodsGrossSen}
+                        valueSen={dDiscountSen || null}
+                        onChange={(sen) => { setDDiscountSen(sen ?? 0); setDirty(true); }}
+                      />
+                    </td>
+                  </tr>
                   <tr className="bg-[#FAF9F7]">
                     <td colSpan={6} className="h-8 px-2 text-right text-xs font-medium text-[#6B7280]">
                       Subtotal

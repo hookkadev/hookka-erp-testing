@@ -1,6 +1,6 @@
 # Bug History
 
-> **Last verified: 2026-09-23** — newest entry BUG-2026-09-23-185 (branch `fix/so-duplicate-ref-saves-draft`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-09-24** — newest entry BUG-2026-09-24-191 (branch `fix/so-customer-po-view`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 
 Living log of bugs we've identified, diagnosed, and fixed in Hookka ERP.
 
@@ -36,7 +36,7 @@ Entries themselves stay newest-first.
 
 ---
 
-## BUG-2026-09-23-186 — the sequence lock refused nothing: the gate was on an unmerged branch, and nine other paths completed cards with no check at all `production` `inventory` `auth-rbac` 🟢
+## BUG-2026-09-24-192 — the sequence lock refused nothing: the gate was on an unmerged branch, and nine other paths completed cards with no check at all `production` `inventory` `auth-rbac` 🟢
 
 🟢 Fixed on branch `feat/t013-sequence-lock` (PRD T-013, tracker BUG-09, owner
 2026-09-07). **Prod impact UNMEASURED until deployed and verified live.**
@@ -113,6 +113,209 @@ enumerate the population (every status writer in `src/api`) and fail on a
 member it does not recognise — otherwise it certifies exactly the omission it
 exists to catch. Classed with C-series "fixed the instance in front of the
 author" in [`BUG-CLASSES.md`](BUG-CLASSES.md).
+## BUG-2026-09-24-191 — SO "View original" returned `{"error":"stream failed"}`; 18–24 Sep uploads were saved to the wrong storage project `infrastructure` `sales-orders` 🟡
+
+🟡 **Fix in progress** · Owner-reported on the SO for HC-PO-2609-172 (file `fa-7920e088-8c9`,
+uploaded 2026-09-24 03:39 UTC). Same failure the catalog-photo session hit on `fa-20cc96eb-723`
+earlier the same day.
+
+**Root cause.** From about 2026-09-18 16:16 to 2026-09-24 12:40 MYT, production's
+`SUPABASE_PROJECT_REF` pointed at another Supabase project (`kahxgvbfanbraazetefr`). Uploads wrote
+their bytes THERE and their `file_assets` row to prod, so each row's `r2Key` was correct but empty
+in prod's `hookka-files` bucket once the setting was corrected. The catalog-photo session counted
+74 such files (55 SO attachments, 17 PI scans, 1 PV, 1 catalog photo).
+
+**Why it read as a crash.** `getFile` (`src/api/lib/supabase-storage.ts:219`) treats only HTTP 404
+as missing; Supabase Storage answers a missing object with 400 + `not_found`, so the route threw and
+returned a generic 500 "stream failed" instead of 404. **Still open** — not changed here.
+
+**Recovery.** `scripts/copy-storage-objects.mjs` copies an explicit list of keys (the `r2_key`s of
+rows uploaded in the window) from the other project to the same path in prod — add-only, dry run by
+default. The owner ran it; this SO's original now opens. **Per-file result UNMEASURED** — the run's
+summary was not captured here.
+
+**UI change on the same page.** The SO detail "View original" button is gone; the Customer PO number
+itself is the underlined link, and it opens `/api/files/:id/download?inline=1` so the PDF renders in
+the tab instead of downloading (`src/pages/sales/detail.tsx:1467`).
+
+**Verify.** `tsc -p tsconfig.app.json` clean; `tests/files-inline-view.test.mjs` 2/2. After deploy:
+click a Customer PO number on an SO with a scanned original — it must open in the tab, not save.
+**Prod UNMEASURED until then.**
+
+---
+
+
+## BUG-2026-09-24-190 — Every timestamp on System Health read 8 hours early; the Audit feed dated a 10:40 login as 02:40 `audit-logging` `ui-frontend` `platform` 🟡
+
+🟡 **Fix in progress** · Owner-reported right after [BUG-2026-09-24-187](#bug-2026-09-24-187--system-health-showed-no-audit-events-and-successful-logins-0--healthy-while-19227-audit-rows-sat-in-the-table)
+made the panels show data at all: the times were wrong. A login at **10:40 MYT** was listed as
+**02:40** — exactly UTC, on the one screen whose entire job is "when did this happen".
+
+**Root cause.** Four places rendered the stored timestamp by slicing the string rather than
+converting it: `src/pages/admin/health.tsx:1481` (Audit feed), `:1667` (Recent security events),
+`:1808` (deploys) and `:1959` (slow requests) all did
+`r.ts.slice(5, 16).replace('T', ' ')` on a value stored as `2026-09-24 02:05:48.109016+00`. A slice
+cannot convert a zone, so every row on the page showed the UTC clock, and rows between 16:00 and
+24:00 UTC also carried the WRONG DATE — an event at 01:00 on the 24th in Malaysia was filed under
+the 23rd.
+
+**Why the existing helper was not enough.** `formatDateTime` in `src/lib/utils.ts` leaves the zone
+to the viewer's machine and relies on `new Date()` parsing the Postgres shape — a space separator,
+microsecond precision and a BARE `+00` offset, which is not a format `new Date()` is specified to
+accept.
+
+**Fix.** `parseDbTimestamp` + `formatTimestampMY` in `src/lib/utils.ts`. The parser normalises all
+three stored shapes (Postgres text with a bare offset, ISO with `Z`, and the zone-less
+`CURRENT_TIMESTAMP` default, which is UTC) and returns null instead of an Invalid Date, so an odd
+row renders raw rather than as the word "Invalid" — an audit row with a strange timestamp is still
+evidence. The formatter pins `Asia/Kuala_Lumpur` rather than trusting the viewer's clock, matching
+`customer-notify.ts` and `delivery-list-filters.ts`. Each cell now carries the full
+`DD/MM/YYYY HH:MM:SS MYT` on hover.
+
+**Regression.** `tests/timestamp-my-format.test.mjs` — 8 cases over the three stored shapes, plus
+the 17:00-UTC case that pins the DATE rollover a naive "+8" would still get wrong, plus the
+unparseable and null paths.
+
+**Verify.** `npm test` 4,856 pass / 0 fail, `tsc` clean. After deploy, an event you trigger at a
+known local time must appear at that time on /admin/health, not eight hours earlier. **Prod
+UNMEASURED until then.**
+
+**Still open.** The same raw-slice pattern renders the Accounting → Corrections list and its CSV
+export (`src/pages/accounting/index.tsx:6623`, `:6648`); those are a separate change because the
+export may already have been archived by month.
+
+---
+
+
+## BUG-2026-09-24-189 — Scanned Meditex line NICCA-6-FOG came through blank; operators had to pick NICCA-06 by hand `procurement` `scan-supplier` 🟡
+
+🟡 **Fix in progress** · Meditex SMI2608/599, line 3: `NICCA-6-FOG` · "TEXTILE FABRIC,- FOG WIDTH:
+145CM +/- 2". The card left Internal Code blank ("Pick from catalog") and blocked Create. The
+operators want scans to fill themselves. Expected fill (confirmed with the user): Description
+**FABRIC**, Internal Code **NICCA-06**, Supplier SKU **NICCA-06-FOG**.
+
+**Root cause.** Every rung of the resolver missed. (1) The binding lookup and the PO-learned
+`supplierSkuIndex` compare codes EXACTLY after stripping punctuation — the saved code is
+`NICCA-06-FOG`, the invoice prints `NICCA-6-FOG`: one zero apart. (2) No Linked PO — the header P/O
+field reads "JASON ORDER"; the real refs (`= PO2511/008`) are printed under each line and not
+extracted. (3) Text scoring cannot single out NICCA-06, whose catalogue description is just
+"FABRIC". Yet the same invoice shows the supplier's codes ARE ours in another form: `NICCA-6-FOG` ↔
+`NICCA-06`, `PSF15.064HCS(14)` ↔ `MED-PSF15.064HCS(14)(L)`, `TARONI-CREAM 82"` ↔ identical.
+
+**Fix** (`src/lib/supplier-material-candidates.ts`): `codeFamilyMatch` — per tier, before text
+scoring, match when one code's parts sit inside the other's (zero-padding ignored); ≥2 parts / ≥5
+chars; longest run wins; a tie is refused. `sameSupplierCode` makes the binding lookup (PI + GRN
+wizards) and the SKU index zero-padding tolerant. Scan modal: the row says "Matched on the
+supplier's code"; a hand pick clears the auto-match flags so Create learns the binding (it did not —
+a correction over a catalogue guess stayed "unverified"). PI edit (PUT) now learns the binding for
+lines whose (material, supplier SKU) pair changed, so a fix on the detail page also sticks.
+
+**Regression.** `tests/scan-code-family-match.test.mjs` — the three Meditex pairs, the expected
+FABRIC / NICCA-06 fill, zero-padding equality, and the refusals (one part, < 5 chars, a different
+number, a tie).
+
+**Verify.** Not run in a browser (login). **Prod UNMEASURED until deployed** — re-scan SMI2608/599:
+line 3 must fill NICCA-06 / FABRIC / NICCA-06-FOG with no pick. Still open: per-line PO refs
+(`= PO2511/008`) are not extracted.
+
+---
+
+## BUG-2026-09-24-188 — PI discount shipped as a per-line column; the supplier prints ONE discount at the bottom of the invoice `procurement` `money` 🟡
+
+🟡 **Fix in progress** · DEV-14 ("add discount in purchase invoice") shipped in #510 as a Discount
+column on every PI line. Reported with the real document it was for — Meditex SMI2608/599: three
+lines, **Gross 856.00 · Discount (81.00) · Total 775.00**, the discount printed once, bottom right,
+not against any line. The operator had nowhere to type one figure; a per-line column made them
+invent a split the supplier never printed.
+
+**Root cause.** The requirement was read without the document. The storage #510 added was right —
+`purchase_invoice_items.discount_sen` with `line_total_sen` stored net — only the entry point was
+wrong.
+
+**Fix.** One "Less: Discount" field in the totals (create page footer + summary, detail edit footer,
+scan card), spread across the lines pro-rata by `allocateDiscountSen` (`src/lib/unit-price.ts`,
+largest-remainder, sums to the sen). The per-line column is gone from create / detail / scan / PDF;
+view + PDF show Gross / Less: Discount / Subtotal, with line amounts at gross as printed. The scan
+pre-fills the field from the footer `discount` the OCR already extracted (plus any per-line
+discounts it read). No API or schema change. Branch `fix/pi-document-discount`.
+
+**Regression.** `tests/pi-line-discount.test.mjs` — the Meditex figures land on exactly RM 775.00,
+allocation rounding never loses a sen, and no surface carries a per-line Discount column.
+
+**Verify.** Not run in a browser (login). **Prod UNMEASURED until deployed** — re-key SMI2608/599:
+Gross 856.00, Discount 81.00, Total 775.00, and the confirmed AP amount must be 775.00.
+
+---
+
+## BUG-2026-09-24-187 — System Health showed "No audit events" and "Successful logins 0 … Healthy" while 19,227 audit rows sat in the table `audit-logging` `platform` 🟡
+
+🟡 **Fix in progress** · Owner-reported on `erp.hookka.com/admin/health`: the Audit feed read "No audit
+events in this window." and the whole Security panel read 0 / 0 / 0 with a green "Healthy". Measured on
+prod the same hour: **19,227 rows in `audit_events`, 122 of them inside the 24h window**, newest
+`2026-09-24 02:05:48+00` — 816 logins and 156 failed logins all present.
+
+**Root cause.** `audit_events.ts` is a **TEXT** column (`0046_audit_events.sql:28`) and both health
+queries compared it straight to a timestamp:
+
+```sql
+AND ts > NOW() - INTERVAL '24 hours'
+```
+
+Postgres refuses that outright — reproduced in the prod SQL editor: `ERROR: 42883: operator does not
+exist: text > timestamp with time zone`. So the query threw on **every** request, `admin-health.ts`
+caught its own error and returned `{success:true, data:[]}`, and the panel rendered that as a calm
+zero. Confirmed live before the fix: `GET /api/admin/health/audit-feed?range=24h` → `{"success":true,"data":[]}`.
+
+**Three layers hid it**, which is why it survived weeks: the audit WRITE swallows failures by design
+(`audit.ts` — "never block a real mutation"), the health QUERY swallows them (catch → empty), and the FE
+fetch swallows them (`useCachedJson` → null → empty state). Same shape as
+[BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently); an empty panel and
+a broken panel are indistinguishable to the reader. The cast fix already existed on `zaim-dev-branch`
+(`33694eeb`) and was never merged to `main`, so production never received it.
+
+**Fix.** `ts::timestamptz` in both queries — `admin-health.ts:1297` (audit-feed) and `:1456`
+(security-events). Comparing as TEXT would be wrong: rows carry two formats (the column DEFAULT writes
+`2026-09-24 02:05:48+00`, ISO writes use a `T` separator) and they sort differently. At 19k rows the seq
+scan is irrelevant. PR `fix/audit-health-ts-cast`.
+
+**Regression.** `tests/admin-health-audit-ts-cast.test.mjs` stubs a **Postgres-shaped** DB that raises
+42883 for an uncast comparison, so deleting the cast reproduces the production symptom (empty feed)
+rather than passing against a query that no longer runs. 3/3 fail without the cast, 3/3 pass with it.
+
+**Verify.** Sandbox, measured: feed went from empty to 7 rows (`login ×1`, `login.fail ×6`), Security read
+Successful logins 1 / Failed logins 6. **Prod UNMEASURED until deployed** — after deploy, the 24h window
+must show ~122 events instead of zero.
+
+**Still open.** (1) All three layers still swallow failures — the panels should say "query failed", not
+"Healthy". (2) `Who` and `IP` render `—`; sign-in does not record IP/device on `main` (`33694eeb` on
+`zaim-dev-branch` does). (3) Automation panel 404s: the repo moved to `hookkadev/hookka-erp-testing` but
+`admin-health.ts:971` still defaults to the old `weisiang329-eng` slug.
+
+---
+
+## BUG-2026-09-24-192 — Invoice PDF printed the same SO / REF ("FAIR ITEM PG") on every line and a blank CO SO; the DO was correct `invoices` `pdf` 🟡
+
+🟡 **Fix in progress** · BUG-22, customer-reported on INV-2609-067 (DO-2609-061, Houzs Century):
+each line's PO was right, but SO and REF were the same invoice-level value on every line and CO SO
+was always `-`.
+
+**Root cause.** `buildUnifiedInvoiceData` (`src/lib/build-unified-doc-data.ts`) — the builder behind
+both the browser invoice download and the backend customer-notice email — read the per-line refs
+under the **DO** print-extras names (`customerSO` / `customerRef` / `salesOrderNo`). The invoice
+print-extras (`computeInvoicePrintExtras`) emit them as `customerSOLine` / `customerRefLine` /
+`companySO`. Every read was `undefined`, so SO/REF fell back to the invoice-level
+`fallbackCustomerSO/Ref` and CO SO printed `-`. PO worked only because both sides call it
+`customerPOId`. The resolver was always right; the jsPDF path and the invoice detail screen read
+the correct names.
+
+**Fix.** The builder reads the invoice names first, DO names second, invoice-level fallback last.
+Class C16 row 8. Regression: `tests/invoice-pdf-line-refs.test.mjs` (fails on the old builder).
+
+**Verify.** Re-download INV-2609-067 after deploy: each line's SO / REF / CO SO must match that
+line's own sales order. UNMEASURED on prod until then.
+
+---
+
 ## BUG-2026-09-23-185 — Scanned PO with a repeated customer S/O no. was rejected and the scan lost `sales` `scan-po` 🟡
 
 🟡 **Fix in progress** · DEV-12 (High, reported by Siti 2026-09-23 13:59, ref HC-SO-013492): when a

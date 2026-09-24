@@ -556,13 +556,46 @@ app.get("/", async (c) => {
     c.var.DB.prepare("SELECT id, serviceOrderNo, caseId, sourceType, sourceId, sourceNo, customerId, customerName, mode, status, createdBy, createdByName, created_at as createdAt, closedAt, notes FROM service_orders").all<ServiceOrderRow>(),
     loadSvOrdersForCases(c.var.DB),
   ]);
-  const data = (caseRes.results ?? []).map((r) =>
+  const caseRows = caseRes.results ?? [];
+  const poBySource = await loadCustomerPoBySource(c.var.DB, caseRows);
+  const data = caseRows.map((r) => ({
     // omitPhotos: the list never renders full photos (only the detail page
     // does), and 500 cases of base64 issue_photos was ~13 MB (perf 2026-07-31).
-    rowToApi(r, orderRes.results ?? [], svOrders, { omitPhotos: true }),
-  );
+    ...rowToApi(r, orderRes.results ?? [], svOrders, { omitPhotos: true }),
+    customerPO: poBySource.get(r.sourceId ?? "") ?? "",
+  }));
   return c.json({ success: true, data, total: data.length });
 });
+
+// Customer PO of each case's source order (SO → customerPOId, CO →
+// customerCOId) for the list's Customer PO column (DEV-13). One IN query per
+// source table; EXTERNAL cases have no source order → no entry.
+export async function loadCustomerPoBySource(
+  db: D1Database,
+  rows: ServiceCaseRow[],
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const sources = [
+    ["SO", "sales_orders", "customerPOId"],
+    ["CO", "consignment_orders", "customerCOId"],
+  ] as const;
+  for (const [type, table, col] of sources) {
+    const ids = [
+      ...new Set(rows.filter((r) => r.sourceType === type && r.sourceId).map((r) => r.sourceId as string)),
+    ];
+    if (ids.length === 0) continue;
+    const res = await db
+      .prepare(
+        `SELECT id, ${col} AS "customerPO" FROM ${table} WHERE id IN (${ids.map(() => "?").join(",")})`,
+      )
+      .bind(...ids)
+      .all<{ id: string; customerPO?: string | null }>();
+    for (const r of res.results ?? []) {
+      if (r.customerPO) out.set(r.id, r.customerPO);
+    }
+  }
+  return out;
+}
 
 // ---------------------------------------------------------------------------
 // GET /api/service-cases/:id

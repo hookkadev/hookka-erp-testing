@@ -33,7 +33,9 @@ export type AgingAoa = (string | number)[][];
 
 const rm = (sen: number): number => Number((sen / 100).toFixed(2));
 
-function bucketsOf(p: AgingExportParty): number[] {
+type AgingBuckets = Pick<AgingExportParty, "currentSen" | "days30Sen" | "days60Sen" | "days90Sen" | "over90Sen">;
+
+function bucketsOf(p: AgingBuckets): number[] {
   return [p.currentSen, p.days30Sen, p.days60Sen, p.days90Sen, p.over90Sen];
 }
 
@@ -47,6 +49,23 @@ export function agingRowKind(row: (string | number)[]): "section" | "subtotal" |
     return row.slice(1).every((c) => c === "") ? "section" : "subtotal";
   }
   return undefined;
+}
+
+/**
+ * Five-bucket aging totals — the same sums accounting/index.tsx OverviewTab
+ * shows (Current / 1 month / 2 months / 3 months / 3+ months), plus their
+ * total. Integer sen in, integer sen out.
+ */
+export function agingBucketTotals(rows: AgingBuckets[]) {
+  const buckets = [
+    { period: "Current", amountSen: 0 },
+    { period: "1 month", amountSen: 0 },
+    { period: "2 months", amountSen: 0 },
+    { period: "3 months", amountSen: 0 },
+    { period: "3+ months", amountSen: 0 },
+  ];
+  for (const r of rows) bucketsOf(r).forEach((v, i) => { buckets[i].amountSen += v; });
+  return { buckets, totalSen: buckets.reduce((s, b) => s + b.amountSen, 0) };
 }
 
 export function buildAgingExportAoa(

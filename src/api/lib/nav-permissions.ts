@@ -33,6 +33,10 @@ export const NAV_RESOURCE: Record<string, string> = {
   // kept away from. Mapped to `accounting`, which only Finance-side roles and
   // SUPER_ADMIN hold, so the command centre cannot leak past them.
   "/dashboard": "dashboard",
+  // Same figures, same audience. Not covered by "/dashboard" — prefix match
+  // stops at "/", so this needs its own row. Also gates the /m phone dashboard
+  // (DASHBOARD_NAV_HREF in dashboard-m-lib.ts).
+  "/dashboard-experimental": "dashboard",
   "/daily-report": "dashboard",
 
   // Comms — everyone has these, but map them so a future role could not.

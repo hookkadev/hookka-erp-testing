@@ -1,6 +1,9 @@
 # Hookka ERP — Work Tracker
 
 > **Last verified: 2026-09-23** — branch `feat/t013-sequence-lock` (PRD T-013 / BUG-09) is the newest entry below, open, not pushed. Previously: branch `fix/on-time-delivery-and-decisions` added below (open, not merged, its entry is the newest; its bug ids were renumbered 130-133 → 140-143 because `feat/leave-entitlement` claimed 130-133 and merged to `main` first). Previously: branch `feat/leave-entitlement` (MERGED as #326). Previously: branch `feat/job-card-completed-at` added below (open, not merged). Previously: branch `fix/security-posture` added below (open, not merged). Previously: PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
+> **Last verified: 2026-09-24** — DEV-14 entry below updated: #510 MERGED; the per-line column was the wrong shape — branch `fix/pi-document-discount` (→ `main`) moves it to ONE invoice-level discount (BUG-2026-09-24-188).
+> **Last verified: 2026-09-24** — branch `feat/dashboard-experimental-parity` entry updated below (PR #505 open; its entry is the newest).
+> **Last verified: 2026-09-23** — branch `fix/production-auto-load` added below (open, its entry is the newest).
 > **Last verified: 2026-09-23** — branch `fix/so-duplicate-ref-saves-draft` added below (open, its entry is the newest).
 > **Last verified: 2026-09-22** — branch `fix/scan-queue-client-driven` added below (open, its entry is the newest).
 > **Last verified: 2026-09-22** — branch `fix/datagrid-selection-loop` added below (open, its entry is the newest). Previously: branch `fix/delivery-tab-switch-pagination` (MERGED as #467). Previously: branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
@@ -81,10 +84,82 @@ Asks, in PRD order — each row flips to done as it lands:
 Plan: PR-A = R1-R2 (switch the rule on in shadow mode, fast to merge); PR-B = the rest.
 **2026-09-18:** R1–R15 on the branch (`9539c0dc` + docs commit). `docs/API.md` regenerated,
 `docs/modules/production.md` flow 7 rewritten for the one-gate design and restamped, CODEBASE-MAP rows
-for the gate / reasons / ordered-batch / report page, BUG-2026-09-23-186 logged. Full suite 4,649 / 0
+for the gate / reasons / ordered-batch / report page, BUG-2026-09-24-192 logged. Full suite 4,649 / 0
 failing; `tsc` strict clean. **Left:** browser pass (dialog, phone picker, report page), R16 run by the
 user with `HOOKKA_PROD_DB_URL`, then push + PR to `main` and live verification of A1–A7.
 Constraints kept: rule untouched, no fixed dept list, `prerequisiteMet` never read, shadow mode.
+## 2026-09-24 — 🔵 DEV-14 Discount on Purchase Invoices + PI "View source document" (#510 MERGED; correction on branch `fix/pi-document-discount` → `main`)
+
+**Scan autofill (BUG-2026-09-24-189, branch `fix/scan-code-family-match` → `main`):** a first-time
+supplier code now resolves when it is our code in another form (`codeFamilyMatch`: NICCA-6-FOG →
+NICCA-06, zero-padding-tolerant binding lookup), a hand pick teaches the binding, and a correction
+on the PI detail page teaches it too. Open: per-line PO refs (`= PO2511/008`) not extracted.
+
+**Correction (BUG-2026-09-24-188, #512 MERGED):** the supplier prints ONE discount at the bottom of the invoice
+(Meditex SMI2608/599: Gross 856.00 · Discount (81.00) · Total 775.00), not per line. The per-line
+column is removed from create / detail / scan / PDF; one "Less: Discount" field sits in the totals
+and `allocateDiscountSen` spreads it pro-rata into the same `discount_sen` column. Scan pre-fills it
+from the footer discount the OCR reads. Items 1–2 below describe #510 as merged; the storage still
+holds, the per-line entry points do not.
+
+Asks (DEV-14, requester SITI, plus three follow-ups in the same session):
+1. ✅ Discount column on PI lines (#510 — entry point superseded by the correction above). `purchase_invoice_items.discount_sen` (runtime self-applied in
+   `ensurePiMigrations`; record-only `migrations-postgres/0238_pi_item_discount.sql`).
+   `line_total_sen` is stored NET (`discountedLineSen` in `src/lib/unit-price.ts`, clamped to
+   [0, gross]), so GL / costing / 3-way match / AP need no change. Create page + detail edit use
+   `DiscountInput` (RM or "10%"); detail view + PI PDF show a Disc column. Purchase-return seed
+   uses the net unit cost when a line carries a discount.
+2. ✅ Scanning: the OCR already extracted a per-line `discount` but the scan modal dropped it — now
+   carried onto the PI line, editable in the review table, and a unit price backed out of a NET
+   amount adds the discount back (`sanitizeSupplierDoc`) so it is not discounted twice.
+3. ✅ Did discount exist in the DB before? No — 0179 added `discount_sen` to sales tables only.
+4. ✅ PI "View source document" downloaded instead of opening (af09716b forced `download=` on every
+   `/api/files/:id/download`). New opt-in `?inline=1` (allowlisted MIME only, `wantsInline`);
+   the PI button uses it. Other "view" links that hit `/download` are unchanged.
+Tests: `tests/pi-line-discount.test.mjs`, `tests/files-inline-view.test.mjs`. Not verified on
+staging/prod yet — needs a deploy + a real PI create/edit/scan.
+Known, NOT changed: a `DISCOUNT` line TYPE on a PI still ADDS to the total (positive qty × price,
+no sign flip anywhere) — pre-existing; flagged separately.
+
+
+## 2026-09-23 — 🔵 /dashboard-experimental: widgets from /dashboard (branch `feat/dashboard-experimental-parity`, PR #505 open)
+
+Director: every widget on /dashboard must also exist on /dashboard-experimental. Owner rules:
+`dashboard-b/index.tsx` and `accounting/index.tsx` untouched; no rounding (truncate to 2dp);
+cards go in existing tabs/sub-tabs (no new sub-tabs — `/m` reads `TAB_SUBS`). Asks:
+1. ✅ Gap list vs /dashboard, /finance-dashboard, Accounting Overview (answered in chat).
+2. ✅ Same `dashboard:read` gate as /dashboard (route + nav map; `/m` inherits), test added.
+3. ✅ `src/pages/dashboards/dashboard-widgets-lib.ts` — pure mirror of the /dashboard formulas
+   (index.tsx does NOT import it: frozen), incl. `unrounded` flags on `deptBacklogRows` /
+   `plantLoad`, `customerRevenue` / `concentrationShares` / `financeRatios` unrounded.
+4. ✅ `agingBucketTotals` (`src/lib/aging-export.ts`); truncating formatters + `widgetPeriod` in
+   `dashboard-shared-lib.ts`.
+5. ✅ `DashboardWidgets.tsx` placed: Overview (Invoices hero, Daily Report tile, OCR card) ·
+   Sales (Order Pipeline, Revenue trend, Sales by Customer, Top Sellers) · Ops > Overview (Plant
+   Load, Dept Backlog) · Ops > Output (Completed) · Ops > Materials (Purchasing, Fabric Usage) ·
+   Finance > Returns (margins / current & quick ratio / AR-AP aging, plain fetch).
+6. ✅ Tests: `tests/dashboard-widgets-lib.test.mjs`; Overview tile guard in
+   `tests/compliance-unknown-outcome.test.mjs`. tsc (app) / npm test / eslint / vite build green.
+7. 🟡 Owner: `OcrAccuracyCard` rates are rounded SERVER-side (`src/api/routes/ocr-accuracy.ts:354`) and the
+   card is shared with /dashboard, so it is left as is. Worker Efficiency not ported — Employees >
+   Efficiency already has Top 5 / Bottom 5. Not verified in a browser (needs a logged-in session
+   with API data) — check live after deploy.
+8. ⚪ Remaining from the gap list (not in this batch): /finance-dashboard P&L-vs-forecast /
+   salary / cost structure / cash flow.
+
+## 2026-09-23 — 🔵 /production: remove "Load all" (branch `fix/production-auto-load`)
+
+Owner: "i want the load all button to be remove because its annoying every time i refresh i need
+to click load all". The Overview/full page started empty behind a lazy `shouldFetch` gate
+(armed by a filter or Load all). Gate, button, "No orders loaded yet" callout and "Pick a filter"
+hint removed — every mode fetches on mount. Then measured on prod (owner logged in the browser
+pane): 1,426 orders / 11.8 MB decoded / ~0.26 s; only ~20 rows mounted, but (1) the 8 s poll
+re-applied an identical body (~350 ms main-thread block per poll) and (2) the Overview virtualizer
+lived in ProductionPage, so every scroll frame re-rendered the page (~30 fps). Fixed on the same
+branch: `useCachedJson` `reuseUnchanged` opt-in + `OverviewVirtualRows`. Open: re-measure on prod
+after deploy.
+
+---
 
 ## 2026-09-23 — 🔵 DEV-12: repeated customer S/O no. blocks the scanned SO (branch `fix/so-duplicate-ref-saves-draft`)
 
