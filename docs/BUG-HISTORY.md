@@ -1,6 +1,6 @@
 # Bug History
 
-> **Last verified: 2026-09-24** — newest entry BUG-2026-09-24-187 (branch `fix/audit-health-ts-cast`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-09-24** — newest entry BUG-2026-09-24-188 (branch `fix/pi-document-discount`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 
 Living log of bugs we've identified, diagnosed, and fixed in Hookka ERP.
 
@@ -33,6 +33,33 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-09-24-188 — PI discount shipped as a per-line column; the supplier prints ONE discount at the bottom of the invoice `procurement` `money` 🟡
+
+🟡 **Fix in progress** · DEV-14 ("add discount in purchase invoice") shipped in #510 as a Discount
+column on every PI line. Reported with the real document it was for — Meditex SMI2608/599: three
+lines, **Gross 856.00 · Discount (81.00) · Total 775.00**, the discount printed once, bottom right,
+not against any line. The operator had nowhere to type one figure; a per-line column made them
+invent a split the supplier never printed.
+
+**Root cause.** The requirement was read without the document. The storage #510 added was right —
+`purchase_invoice_items.discount_sen` with `line_total_sen` stored net — only the entry point was
+wrong.
+
+**Fix.** One "Less: Discount" field in the totals (create page footer + summary, detail edit footer,
+scan card), spread across the lines pro-rata by `allocateDiscountSen` (`src/lib/unit-price.ts`,
+largest-remainder, sums to the sen). The per-line column is gone from create / detail / scan / PDF;
+view + PDF show Gross / Less: Discount / Subtotal, with line amounts at gross as printed. The scan
+pre-fills the field from the footer `discount` the OCR already extracted (plus any per-line
+discounts it read). No API or schema change. Branch `fix/pi-document-discount`.
+
+**Regression.** `tests/pi-line-discount.test.mjs` — the Meditex figures land on exactly RM 775.00,
+allocation rounding never loses a sen, and no surface carries a per-line Discount column.
+
+**Verify.** Not run in a browser (login). **Prod UNMEASURED until deployed** — re-key SMI2608/599:
+Gross 856.00, Discount 81.00, Total 775.00, and the confirmed AP amount must be 775.00.
 
 ---
 

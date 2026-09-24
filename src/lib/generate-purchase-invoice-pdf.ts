@@ -205,8 +205,8 @@ export function generatePurchaseInvoicePdf(
       item.supplierSku || "-",
       String(item.qty),
       fmtCurrency(item.unitPriceSen),
-      Number(item.discountSen) > 0 ? fmtCurrency(Number(item.discountSen)) : "-",
-      fmtCurrency(item.lineTotalSen),
+      // Gross, as the supplier prints it; the invoice discount is in the totals.
+      fmtCurrency((Number(item.lineTotalSen) || 0) + (Number(item.discountSen) || 0)),
     ];
   });
 
@@ -220,7 +220,6 @@ export function generatePurchaseInvoicePdf(
       { content: "Supplier SKU" },
       { content: "Qty", styles: { halign: "right" } },
       { content: "Unit Price (RM)", styles: { halign: "right" } },
-      { content: "Disc (RM)", styles: { halign: "right" } },
       { content: "Total (RM)", styles: { halign: "right" } },
     ]],
     body: tableBody,
@@ -251,14 +250,13 @@ export function generatePurchaseInvoicePdf(
       2: { cellWidth: "auto" },
       3: { cellWidth: 26 },
       4: { cellWidth: 16, halign: "right" },
-      5: { cellWidth: 24, halign: "right" },
-      6: { cellWidth: 20, halign: "right" },
-      7: { cellWidth: 24, halign: "right", fontStyle: "bold" },
+      5: { cellWidth: 27, halign: "right" },
+      6: { cellWidth: 27, halign: "right", fontStyle: "bold" },
     },
     didDrawCell(data) {
       // Thin dashed separator under every item row (drawn once on the last
       // column) — the DO/SI per-row separator.
-      if (data.section !== "body" || data.column.index !== 7) return;
+      if (data.section !== "body" || data.column.index !== 6) return;
       const yy = data.cell.y + data.cell.height;
       doc.setDrawColor(...PDF.rule);
       doc.setLineWidth(0.1);
@@ -274,7 +272,9 @@ export function generatePurchaseInvoicePdf(
   // --- Totals (mirrors the Sales Invoice: Subtotal → rule → GRAND TOTAL big
   //     + amount in words, right-aligned label + value pairs) ---
   y += 8;
-  if (y > pageH - 70) {
+  // Invoice-level discount (DEV-14) = the lines' shares added back together.
+  const discountSen = (pi.items ?? []).reduce((s, i) => s + (Number(i.discountSen) || 0), 0);
+  if (y > pageH - 70 - (discountSen > 0 ? 12 : 0)) {
     doc.addPage();
     y = 36;
   }
@@ -306,6 +306,10 @@ export function generatePurchaseInvoicePdf(
     .reduce((s, i) => s + (Number(i.lineTotalSen) || 0), 0);
   const subtotalSen = pi.subtotalSen || goodsLineSen || pi.amountSen;
   const taxSen = pi.taxSen || perLineTaxSen + legacyTaxLineSen;
+  if (discountSen > 0) {
+    sumLine("Gross", fmtRM(subtotalSen + discountSen), false);
+    sumLine("Less: Discount", `(${fmtRM(discountSen)})`, false);
+  }
   sumLine("Subtotal", fmtRM(subtotalSen), false);
   sumLine("SST", fmtRM(taxSen), false);
   // Rule clears the 11pt TOTAL cap height (matches the Sales Invoice spacing).

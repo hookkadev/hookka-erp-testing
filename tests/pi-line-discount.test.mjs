@@ -1,16 +1,19 @@
 // ---------------------------------------------------------------------------
-// DEV-14 — per-line Discount column on purchase invoices.
+// DEV-14 — purchase invoice DISCOUNT.
 //
-// line_total_sen is stored NET of purchase_invoice_items.discount_sen, so the
-// GL posting, costing and 3-way match (all readers of line_total_sen) see the
-// discounted amount with no change of their own. `discountedLineSen` is the ONE
-// place that maths lives — the API, the create page and the detail page all
-// call it — so it is what this file pins, plus the wiring that uses it.
+// The supplier prints ONE discount for the whole invoice (Meditex SMI2608/599:
+// Gross 856.00 · Discount (81.00) · Total 775.00). The pages take that one
+// figure and `allocateDiscountSen` spreads it across the lines pro-rata; each
+// share is stored as purchase_invoice_items.discount_sen and line_total_sen is
+// stored NET of it (`discountedLineSen`), so the GL posting, costing and 3-way
+// match (all readers of line_total_sen) see the discounted amount unchanged.
 // ---------------------------------------------------------------------------
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { discountedLineSen } from "../src/lib/unit-price.ts";
+import { discountedLineSen, allocateDiscountSen } from "../src/lib/unit-price.ts";
+
+const read = (f) => readFileSync(new URL(f, import.meta.url), "utf8");
 
 test("net line = qty × unit − discount, rounded once on the product", () => {
   assert.deepEqual(discountedLineSen(10, 1250, 500), { discountSen: 500, lineTotalSen: 12000 });
@@ -29,8 +32,28 @@ test("discount is clamped to [0, gross] so discount + net always = gross", () =>
   assert.deepEqual(discountedLineSen(2, 1000, 99999), { discountSen: 2000, lineTotalSen: 0 });
 });
 
+test("Meditex SMI2608/599: RM 81.00 off RM 856.00 lands at exactly RM 775.00", () => {
+  const gross = [41800, 16800, 27000];
+  const shares = allocateDiscountSen(gross, 8100);
+  assert.equal(shares.reduce((s, v) => s + v, 0), 8100, "shares sum to the discount exactly");
+  const net = gross.map((g, i) => discountedLineSen(1, g, shares[i]).lineTotalSen);
+  assert.equal(net.reduce((s, v) => s + v, 0), 77500);
+  // Pro-rata: the biggest line carries the biggest share.
+  assert.ok(shares[0] > shares[2] && shares[2] > shares[1]);
+});
+
+test("allocation: rounding never loses or invents a sen; ineligible lines get 0", () => {
+  assert.deepEqual(allocateDiscountSen([100, 100, 100], 100), [34, 33, 33]);
+  assert.deepEqual(allocateDiscountSen([100, 500], 999999), [100, 500], "clamped to the gross");
+  assert.deepEqual(allocateDiscountSen([100, 500], 0), [0, 0]);
+  assert.deepEqual(allocateDiscountSen([100, 500], -50), [0, 0]);
+  assert.deepEqual(allocateDiscountSen([], 100), []);
+  // A TAX line does not share in the discount.
+  assert.deepEqual(allocateDiscountSen([1000, 60], 100, [true, false]), [100, 0]);
+});
+
 test("API stores discount_sen and a net line_total_sen on BOTH create and edit", () => {
-  const src = readFileSync(new URL("../src/api/routes/purchase-invoices.ts", import.meta.url), "utf8");
+  const src = read("../src/api/routes/purchase-invoices.ts");
   assert.match(src, /ADD COLUMN IF NOT EXISTS discount_sen INTEGER/, "column must be runtime self-applied");
   assert.match(src, /discountedLineSen\(qty, unitPriceSen, Number\(it\.discountSen\)\)/);
   const inserts = src.match(/INSERT INTO purchase_invoice_items \([^)]*\)/g) ?? [];
@@ -52,18 +75,17 @@ test("scan: a unit price backed out of a NET amount adds the discount back", asy
   assert.equal(kept.unitPrice, 12);
 });
 
-test("scan modal carries the OCR discount onto the PI line and lets the operator edit it", () => {
-  const src = readFileSync(new URL("../src/components/scan-supplier-modal.tsx", import.meta.url), "utf8");
-  assert.match(src, /const discountRM =\s*ln\.discount == null/);
-  assert.match(src, /discountSen: Math\.max\(0, Math\.round\(\(Number\(l\.discountRM\) \|\| 0\) \* 100\)\)/);
-  assert.match(src, /onPatchLine\(i, \{\s*discountRM:/);
-  assert.match(src, /const lineAmtsSen = pricedLines\.map\(\(l\) => scanLineNetSen\(l\)\)/);
-});
-
-test("both PI pages total lines through the shared helper and send discountSen", () => {
-  for (const f of ["../src/pages/procurement/pi/create.tsx", "../src/pages/procurement/PurchaseInvoiceDetail.tsx"]) {
-    const src = readFileSync(new URL(f, import.meta.url), "utf8");
-    assert.match(src, /discountedLineSen\(/, f);
-    assert.match(src, /discountSen: l\.discountSen/, f);
+test("ONE invoice discount on every surface — no per-line Discount column anywhere", () => {
+  const create = read("../src/pages/procurement/pi/create.tsx");
+  const detail = read("../src/pages/procurement/PurchaseInvoiceDetail.tsx");
+  const scan = read("../src/components/scan-supplier-modal.tsx");
+  for (const [name, src] of [["create", create], ["detail", detail], ["scan", scan]]) {
+    assert.match(src, /allocateDiscountSen\(/, `${name} spreads the invoice discount`);
+    assert.doesNotMatch(src, /Discount \(RM\)<\/th>|>Discount<\/th>/, `${name} has no per-line Discount column`);
   }
+  assert.match(create, /discountSen: lineDiscountSens\[idx\]/);
+  assert.match(detail, /discountSen: draftLineDiscountSens\[i\]/);
+  assert.match(scan, /discountSen: lineDiscSen\[idx\]/);
+  // Scan pre-fills from the footer discount the OCR reads.
+  assert.match(scan, /Math\.max\(0, Number\(ex\.discount\) \|\| 0\)/);
 });

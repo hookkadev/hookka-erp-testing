@@ -1,6 +1,6 @@
 # Hookka ERP — Work Tracker
 
-> **Last verified: 2026-09-24** — branch `feat/pi-line-discount-main` (DEV-14, → `main`) added below (its entry is the newest).
+> **Last verified: 2026-09-24** — DEV-14 entry below updated: #510 MERGED; the per-line column was the wrong shape — branch `fix/pi-document-discount` (→ `main`) moves it to ONE invoice-level discount (BUG-2026-09-24-188).
 > **Last verified: 2026-09-24** — branch `feat/dashboard-experimental-parity` entry updated below (PR #505 open; its entry is the newest).
 > **Last verified: 2026-09-23** — branch `fix/production-auto-load` added below (open, its entry is the newest).
 > **Last verified: 2026-09-23** — branch `fix/so-duplicate-ref-saves-draft` added below (open, its entry is the newest).
@@ -25,10 +25,17 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
-## 2026-09-24 — 🔵 DEV-14 per-line Discount column on Purchase Invoices + PI "View source document" (branch `feat/pi-line-discount-main` → `main`)
+## 2026-09-24 — 🔵 DEV-14 Discount on Purchase Invoices + PI "View source document" (#510 MERGED; correction on branch `fix/pi-document-discount` → `main`)
+
+**Correction (BUG-2026-09-24-188):** the supplier prints ONE discount at the bottom of the invoice
+(Meditex SMI2608/599: Gross 856.00 · Discount (81.00) · Total 775.00), not per line. The per-line
+column is removed from create / detail / scan / PDF; one "Less: Discount" field sits in the totals
+and `allocateDiscountSen` spreads it pro-rata into the same `discount_sen` column. Scan pre-fills it
+from the footer discount the OCR reads. Items 1–2 below describe #510 as merged; the storage still
+holds, the per-line entry points do not.
 
 Asks (DEV-14, requester SITI, plus three follow-ups in the same session):
-1. ✅ Discount column on PI lines. `purchase_invoice_items.discount_sen` (runtime self-applied in
+1. ✅ Discount column on PI lines (#510 — entry point superseded by the correction above). `purchase_invoice_items.discount_sen` (runtime self-applied in
    `ensurePiMigrations`; record-only `migrations-postgres/0238_pi_item_discount.sql`).
    `line_total_sen` is stored NET (`discountedLineSen` in `src/lib/unit-price.ts`, clamped to
    [0, gross]), so GL / costing / 3-way match / AP need no change. Create page + detail edit use
