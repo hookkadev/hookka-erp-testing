@@ -127,6 +127,19 @@ export async function nextPurchaseReturnNo(db: D1Database): Promise<string> {
   return `${prefix}${String(n).padStart(3, "0")}`;
 }
 
+// A PI line with a per-line discount (DEV-14) was billed at line_total / qty,
+// not at its list unit price — seed the return at what was actually paid.
+function netUnitCostSen(
+  r: Record<string, unknown>,
+  pick: (r: Record<string, unknown>, snake: string, camel: string) => unknown,
+): number {
+  const unit = Number(pick(r, "unit_price_sen", "unitPriceSen") ?? 0);
+  const discount = Number(pick(r, "discount_sen", "discountSen") ?? 0);
+  const qty = Number(pick(r, "qty", "qty") ?? 0);
+  if (!(discount > 0) || !(qty > 0)) return unit;
+  return roundUnitPriceSen(Number(pick(r, "line_total_sen", "lineTotalSen") ?? 0) / qty);
+}
+
 // Load a PI's stocked lines as return candidates. Only STOCKED lines (a real
 // raw_material) can be physically returned — fee / tax / rebate lines are
 // excluded. unitCostSen seeds the editable return cost.
@@ -158,7 +171,7 @@ export async function loadPiItemsForReturn(
       supplierSku: (pick(r, "supplier_sku", "supplierSku") ?? null) as string | null,
       grnItemId: (pick(r, "grn_item_id", "grnItemId") ?? null) as string | null,
       quantity: Number(pick(r, "qty", "qty") ?? 0),
-      unitCostSen: Number(pick(r, "unit_price_sen", "unitPriceSen") ?? 0),
+      unitCostSen: netUnitCostSen(r, pick),
       problem: "",
     });
   }

@@ -41,6 +41,7 @@ import { moneyFieldToRinggit } from "@/lib/money-field";
 import {
   roundUnitPriceSen,
   lineTotalSen,
+  discountedLineSen,
   formatUnitPriceInput,
 } from "@/lib/unit-price";
 
@@ -57,6 +58,8 @@ type DraftLine = {
   // Per-line SST in RM as a string for the input (owner 2026-06-30). Blank or
   // "0" = non-taxable. Converted to sen on save.
   taxRm: string;
+  // Per-line discount in sen (DEV-14). The line total is net of it.
+  discountSen: number;
   lineType: LineType;
   // Convert-chain link: when a line was sourced from a GRN line, carry its
   // grn_items id so saving keeps grn_items.invoiced_qty in sync (the backend
@@ -99,6 +102,8 @@ type PurchaseInvoiceItem = {
   // Per-line SST in sen (owner 2026-06-30). Backend projects this from
   // purchase_invoice_items.tax_sen; 0 for legacy / non-taxable lines.
   taxSen?: number;
+  // Per-line discount in sen (DEV-14); lineTotalSen is already net of it.
+  discountSen?: number;
   lineType: LineType;
   notes: string | null;
   grnItemId?: string | number | null;
@@ -415,6 +420,7 @@ export default function PurchaseInvoiceDetailPage() {
         // soon as the operator pressed Edit, and saving wrote 0.06 back.
         unitPriceRm: formatUnitPriceInput(Number(it.unitPriceSen || 0)),
         taxRm: (Number(it.taxSen || 0) / 100).toFixed(2),
+        discountSen: Number(it.discountSen) || 0,
         lineType: it.lineType,
         grnItemId: it.grnItemId == null ? null : String(it.grnItemId),
       })),
@@ -433,7 +439,7 @@ export default function PurchaseInvoiceDetailPage() {
   function addLine() {
     setDLines((p) => [
       ...p,
-      { materialCode: "", materialName: "", supplierSku: "", qty: "1", unitPriceRm: "0.00", taxRm: "0.00", lineType: "STOCKED", grnItemId: null },
+      { materialCode: "", materialName: "", supplierSku: "", qty: "1", unitPriceRm: "0.00", taxRm: "0.00", discountSen: 0, lineType: "STOCKED", grnItemId: null },
     ]);
     setDirty(true);
   }
@@ -445,27 +451,22 @@ export default function PurchaseInvoiceDetailPage() {
   // SST breakdown (owner 2026-06-30): subtotal = sum of GOODS line amounts
   // (lt !== 'TAX'); tax = sum of per-line tax + any legacy TAX-line amount;
   // grand total = subtotal + tax. Live-updates as the operator edits.
+  // Line amount net of its per-line discount (DEV-14) — same maths as the API.
+  const draftLineNetSen = (l: DraftLine) =>
+    discountedLineSen(
+      parseFloat(l.qty) || 0,
+      roundUnitPriceSen((moneyFieldToRinggit(l.unitPriceRm) ?? 0) * 100),
+      l.discountSen,
+    ).lineTotalSen;
   const draftSubtotalSen = dLines.reduce(
-    (s, l) =>
-      l.lineType === "TAX"
-        ? s
-        : s +
-          lineTotalSen(
-            parseFloat(l.qty) || 0,
-            roundUnitPriceSen((moneyFieldToRinggit(l.unitPriceRm) ?? 0) * 100),
-          ),
+    (s, l) => (l.lineType === "TAX" ? s : s + draftLineNetSen(l)),
     0,
   );
   const draftTaxSen = dLines.reduce(
     (s, l) =>
       s +
       Math.round((moneyFieldToRinggit(l.taxRm) ?? 0) * 100) +
-      (l.lineType === "TAX"
-        ? lineTotalSen(
-            parseFloat(l.qty) || 0,
-            roundUnitPriceSen((moneyFieldToRinggit(l.unitPriceRm) ?? 0) * 100),
-          )
-        : 0),
+      (l.lineType === "TAX" ? draftLineNetSen(l) : 0),
     0,
   );
   const draftTotalSen = draftSubtotalSen + draftTaxSen;
@@ -520,6 +521,7 @@ export default function PurchaseInvoiceDetailPage() {
         // Per-line SST (owner 2026-06-30). 0 for non-taxable lines; backend
         // rolls them into header tax_sen on save.
         taxSen: Math.max(0, Math.round((moneyFieldToRinggit(l.taxRm) ?? 0) * 100)),
+        discountSen: l.discountSen,
         lineType: l.lineType,
         // Preserve the GRN-source link so the backend keeps invoiced_qty in sync.
         grnItemId: l.grnItemId,
@@ -609,8 +611,9 @@ export default function PurchaseInvoiceDetailPage() {
             {!editing && pi.sourceDocumentFileId && (
               // Owner 2026-06-30: when the PI was created from a scan, link to
               // the SPECIFIC source PDF chunk (not the original bundle if the
-              // upload was auto-split). Opens /api/files/:id/download in a
-              // new tab — that endpoint 302s to a short-lived presigned URL.
+              // upload was auto-split). Opens /api/files/:id/download?inline=1
+              // in a new tab — 302s to a short-lived presigned URL the browser
+              // RENDERS. Without inline=1 it forces a save (af09716b).
               <Button
                 type="button"
                 variant="outline"
@@ -618,7 +621,7 @@ export default function PurchaseInvoiceDetailPage() {
                 onClick={() => {
                   const url = `/api/files/${encodeURIComponent(
                     pi.sourceDocumentFileId as string,
-                  )}/download`;
+                  )}/download?inline=1`;
                   window.open(url, "_blank", "noopener,noreferrer");
                 }}
                 disabled={busy}
@@ -819,6 +822,7 @@ export default function PurchaseInvoiceDetailPage() {
                       <th className="h-10 px-3 text-left font-medium text-[#374151]">Supplier SKU</th>
                       <th className="h-10 px-3 text-right font-medium text-[#374151]">Qty</th>
                       <th className="h-10 px-3 text-right font-medium text-[#374151]">Unit Price</th>
+                      <th className="h-10 px-3 text-right font-medium text-[#374151]">Discount</th>
                       <th className="h-10 px-3 text-right font-medium text-[#374151]">SST</th>
                       <th className="h-10 px-3 text-right font-medium text-[#374151]">Line Total</th>
                       <th className="h-10 px-3 text-center font-medium text-[#374151]">Type</th>
@@ -855,6 +859,9 @@ export default function PurchaseInvoiceDetailPage() {
                           <td className="h-12 px-3 text-[#4B5563]">{it.supplierSku || "-"}</td>
                           <td className="h-12 px-3 text-right text-[#4B5563]">{it.qty}</td>
                           <td className="h-12 px-3 text-right text-[#4B5563]">{formatCurrency(it.unitPriceSen)}</td>
+                          <td className="h-12 px-3 text-right text-[#4B5563]">
+                            {Number(it.discountSen) > 0 ? `- ${formatCurrency(Number(it.discountSen))}` : "-"}
+                          </td>
                           <td className="h-12 px-3 text-right text-[#4B5563]">{formatCurrency(Number(it.taxSen) || 0)}</td>
                           <td className="h-12 px-3 text-right font-medium text-[#1F1D1B]">{formatCurrency(it.lineTotalSen)}</td>
                           <td className="h-12 px-3 text-center">
@@ -878,16 +885,17 @@ export default function PurchaseInvoiceDetailPage() {
                       <td className="h-9 px-3 text-right text-sm text-[#6B7280]">{totalQty}</td>
                       <td className="h-9 px-3"></td>
                       <td className="h-9 px-3"></td>
+                      <td className="h-9 px-3"></td>
                       <td className="h-9 px-3 text-right text-sm text-[#1F1D1B]">{formatCurrency(subtotalDisplay)}</td>
                       <td className="h-9 px-3"></td>
                     </tr>
                     <tr className="bg-[#FAF9F7]">
-                      <td colSpan={7} className="h-9 px-3 text-right text-xs font-medium text-[#6B7280]">SST</td>
+                      <td colSpan={8} className="h-9 px-3 text-right text-xs font-medium text-[#6B7280]">SST</td>
                       <td className="h-9 px-3 text-right text-sm text-[#1F1D1B]">{formatCurrency(taxDisplay)}</td>
                       <td className="h-9 px-3"></td>
                     </tr>
                     <tr className="bg-[#F0ECE9] border-t border-[#E2DDD8]">
-                      <td colSpan={7} className="h-10 px-3 text-right font-semibold text-[#374151]">Total</td>
+                      <td colSpan={8} className="h-10 px-3 text-right font-semibold text-[#374151]">Total</td>
                       <td className="h-10 px-3 text-right font-bold text-[#6B5C32]">{formatCurrency(totalAmount)}</td>
                       <td className="h-10 px-3"></td>
                     </tr>
@@ -970,6 +978,7 @@ export default function PurchaseInvoiceDetailPage() {
                     <th className="h-10 px-2 text-left font-medium text-[#374151]">Supplier SKU</th>
                     <th className="h-10 px-2 text-right font-medium text-[#374151] w-20">Qty</th>
                     <th className="h-10 px-2 text-right font-medium text-[#374151] w-28">Unit Price (RM)</th>
+                    <th className="h-10 px-2 text-right font-medium text-[#374151] w-24" title="Per-line discount in RM, or type a percentage like 10%">Discount (RM)</th>
                     <th className="h-10 px-2 text-right font-medium text-[#374151] w-24" title="Per-line SST in RM">SST (RM)</th>
                     <th className="h-10 px-2 text-left font-medium text-[#374151] w-32">Type</th>
                     <th className="h-10 px-2 text-center font-medium text-[#374151] w-12"></th>
@@ -978,7 +987,7 @@ export default function PurchaseInvoiceDetailPage() {
                 <tbody>
                   {dLines.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="h-16 px-3 text-center text-sm text-[#9CA3AF]">
+                      <td colSpan={10} className="h-16 px-3 text-center text-sm text-[#9CA3AF]">
                         No lines. Use “Add Line” to start.
                       </td>
                     </tr>
@@ -1047,6 +1056,17 @@ export default function PurchaseInvoiceDetailPage() {
                             />
                           )}
                         </td>
+                        {/* Per-line discount (DEV-14) — RM or "10%" of qty × price */}
+                        <td className="px-2 py-1.5">
+                          <DiscountInput
+                            baseAmountSen={lineTotalSen(
+                              parseFloat(l.qty) || 0,
+                              roundUnitPriceSen((moneyFieldToRinggit(l.unitPriceRm) ?? 0) * 100),
+                            )}
+                            valueSen={l.discountSen || null}
+                            onChange={(sen) => patchLine(i, { discountSen: sen ?? 0 })}
+                          />
+                        </td>
                         {/* Per-line SST (owner 2026-06-30). Skipped for TAX
                             line type — the line amount itself IS the tax. */}
                         <td className="px-2 py-1.5">
@@ -1091,7 +1111,7 @@ export default function PurchaseInvoiceDetailPage() {
                   {/* SST breakdown (owner 2026-06-30) — Subtotal / SST / Total
                       live-updates as the operator edits per-line tax. */}
                   <tr className="bg-[#FAF9F7]">
-                    <td colSpan={6} className="h-8 px-2 text-right text-xs font-medium text-[#6B7280]">
+                    <td colSpan={7} className="h-8 px-2 text-right text-xs font-medium text-[#6B7280]">
                       Subtotal
                     </td>
                     <td colSpan={3} className="h-8 px-2 text-right text-sm text-[#1F1D1B]">
@@ -1099,7 +1119,7 @@ export default function PurchaseInvoiceDetailPage() {
                     </td>
                   </tr>
                   <tr className="bg-[#FAF9F7]">
-                    <td colSpan={6} className="h-8 px-2 text-right text-xs font-medium text-[#6B7280]">
+                    <td colSpan={7} className="h-8 px-2 text-right text-xs font-medium text-[#6B7280]">
                       SST
                     </td>
                     <td colSpan={3} className="h-8 px-2 text-right text-sm text-[#1F1D1B]">
@@ -1112,7 +1132,7 @@ export default function PurchaseInvoiceDetailPage() {
                         <Plus className="h-3.5 w-3.5" /> Add Line
                       </Button>
                     </td>
-                    <td colSpan={4} className="h-10 px-2 text-right font-bold text-[#6B5C32]">
+                    <td colSpan={5} className="h-10 px-2 text-right font-bold text-[#6B5C32]">
                       Total: {formatCurrency(draftTotalSen)}
                     </td>
                   </tr>

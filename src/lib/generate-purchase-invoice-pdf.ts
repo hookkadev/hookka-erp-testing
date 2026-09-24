@@ -35,6 +35,8 @@ export type PurchaseInvoicePdfLine = {
   lineTotalSen: number;
   // Per-line SST in sen (owner 2026-06-30). 0 for non-taxable lines.
   taxSen?: number | null;
+  // Per-line discount in sen (DEV-14); lineTotalSen is already net of it.
+  discountSen?: number | null;
   lineType?: string | null;
 };
 
@@ -203,6 +205,7 @@ export function generatePurchaseInvoicePdf(
       item.supplierSku || "-",
       String(item.qty),
       fmtCurrency(item.unitPriceSen),
+      Number(item.discountSen) > 0 ? fmtCurrency(Number(item.discountSen)) : "-",
       fmtCurrency(item.lineTotalSen),
     ];
   });
@@ -217,6 +220,7 @@ export function generatePurchaseInvoicePdf(
       { content: "Supplier SKU" },
       { content: "Qty", styles: { halign: "right" } },
       { content: "Unit Price (RM)", styles: { halign: "right" } },
+      { content: "Disc (RM)", styles: { halign: "right" } },
       { content: "Total (RM)", styles: { halign: "right" } },
     ]],
     body: tableBody,
@@ -247,13 +251,14 @@ export function generatePurchaseInvoicePdf(
       2: { cellWidth: "auto" },
       3: { cellWidth: 26 },
       4: { cellWidth: 16, halign: "right" },
-      5: { cellWidth: 27, halign: "right" },
-      6: { cellWidth: 27, halign: "right", fontStyle: "bold" },
+      5: { cellWidth: 24, halign: "right" },
+      6: { cellWidth: 20, halign: "right" },
+      7: { cellWidth: 24, halign: "right", fontStyle: "bold" },
     },
     didDrawCell(data) {
       // Thin dashed separator under every item row (drawn once on the last
       // column) — the DO/SI per-row separator.
-      if (data.section !== "body" || data.column.index !== 6) return;
+      if (data.section !== "body" || data.column.index !== 7) return;
       const yy = data.cell.y + data.cell.height;
       doc.setDrawColor(...PDF.rule);
       doc.setLineWidth(0.1);

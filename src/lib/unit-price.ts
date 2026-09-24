@@ -53,6 +53,22 @@ export function lineTotalSen(qty: number, unitPriceSen: number): number {
 }
 
 /**
+ * A line total NET of a per-line discount (DEV-14, purchase invoices). The
+ * discount is whole sen, clamped to [0, gross] so the stored discount and the
+ * stored net total always add back up to qty × unit price.
+ */
+export function discountedLineSen(
+  qty: number,
+  unitPriceSen: number,
+  discountSen: number,
+): { discountSen: number; lineTotalSen: number } {
+  const gross = lineTotalSen(qty, unitPriceSen);
+  const d = Math.round(Number(discountSen) || 0);
+  const discount = Math.min(Math.max(0, d), Math.max(0, gross));
+  return { discountSen: discount, lineTotalSen: gross - discount };
+}
+
+/**
  * Render a stored unit price for an EDITABLE text/number input.
  *
  * Two decimals is the floor — RM 25 must still read "25.00" so the ordinary

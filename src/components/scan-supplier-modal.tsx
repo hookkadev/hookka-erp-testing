@@ -52,7 +52,7 @@ import {
   CachedScanNotice,
 } from "@/components/scan-cached-hint";
 import { bestMatch } from "@/lib/party-fuzzy-match";
-import { roundUnitPriceSen } from "@/lib/unit-price";
+import { roundUnitPriceSen, discountedLineSen } from "@/lib/unit-price";
 import { resolvePoLink, splitPoRefs } from "@/lib/po-ref-match";
 import {
   allocateLinesToPos,
@@ -95,6 +95,9 @@ export type ExtractedSupplierLine = {
   unitPrice?: number | null;
   amount?: number | null;
   tax?: number | null;
+  // Per-line discount AMOUNT the OCR pulled (scan-engine.ts already asks for
+  // it). Carried onto the PI line as discountSen (DEV-14).
+  discount?: number | null;
   // Foam/sponge spec the OCR pulled (scan-engine.ts extracts + populates
   // these already) — density grade (e.g. "NLY22GH") and thickness with unit
   // (e.g. "25MM"). null for non-foam items or when not printed.
@@ -995,6 +998,9 @@ type PreviewLine = {
   // truth). When ALL lines are 0 AND the OCR captured a footer tax, that
   // footer is distributed pro-rata across goods lines (existing behavior).
   taxRM: number;
+  // Per-line discount in RM (DEV-14) — from the OCR or typed by the operator.
+  // Absent = 0. Sent as discountSen; the PI line total is net of it.
+  discountRM?: number;
   /**
    * True when the internal code came from matching the READ TEXT to the
    * catalogue rather than from a saved supplier binding. Shown in the table so
@@ -1088,6 +1094,15 @@ type PreviewCard = {
    */
   purchaseOrderIds?: string[];
 };
+
+/** Line amount in sen net of its discount (DEV-14) — same maths as the API. */
+function scanLineNetSen(l: PreviewLine): number {
+  return discountedLineSen(
+    Number(l.qty) || 0,
+    roundUnitPriceSen((Number(l.unitPriceRM) || 0) * 100),
+    Math.round((Number(l.discountRM) || 0) * 100),
+  ).lineTotalSen;
+}
 
 function makeBlankLine(): PreviewLine {
   return {
@@ -1595,6 +1610,8 @@ function CreatePIWizard({
             ? qty * unitPriceRM
             : Number(ln.amount);
         const taxRM = ln.tax == null || Number.isNaN(Number(ln.tax)) ? 0 : Number(ln.tax);
+        const discountRM =
+          ln.discount == null || Number.isNaN(Number(ln.discount)) ? 0 : Math.max(0, Number(ln.discount));
         // Foam/sponge spec — surface the density + thickness the OCR pulled so
         // the operator sees "…(NLY22GH 25MM)" on the card and it carries into
         // the material name for internal-code matching (owner 2026-07-01).
@@ -1621,6 +1638,7 @@ function CreatePIWizard({
           unitPriceRM,
           amountRM,
           taxRM,
+          discountRM,
         };
       });
 
@@ -2041,9 +2059,8 @@ function CreatePIWizard({
             (l) => (Number(l.taxRM) || 0) > 0,
           );
           const footerTaxRM = Number(card.originalExtraction.tax) || 0;
-          const lineAmtsSen = pricedLines.map(
-            (l) => Math.round((Number(l.qty) || 0) * (Number(l.unitPriceRM) || 0) * 100),
-          );
+          // Net of each line's discount (DEV-14) — the same amount the API stores.
+          const lineAmtsSen = pricedLines.map((l) => scanLineNetSen(l));
           const subTotalSen = lineAmtsSen.reduce((s, v) => s + v, 0);
           const footerTaxSen = Math.max(0, Math.round(footerTaxRM * 100));
           let allocated = 0;
@@ -2069,6 +2086,7 @@ function CreatePIWizard({
               // reached the (now NUMERIC(14,4)) column.
               unitPriceSen: roundUnitPriceSen((Number(l.unitPriceRM) || 0) * 100),
               taxSen: lineTaxSen < 0 ? 0 : lineTaxSen,
+              discountSen: Math.max(0, Math.round((Number(l.discountRM) || 0) * 100)),
               lineType: "STOCKED" as const,
               grnItemId: null,
               // Which of our orders this line bills. The backend's per-PO
@@ -3019,10 +3037,7 @@ function PICard({
   onSupplierChange: (newId: string) => void;
 }) {
   const totalQty = card.lines.reduce((s, l) => s + (Number(l.qty) || 0), 0);
-  const totalRM = card.lines.reduce(
-    (s, l) => s + (Number(l.qty) || 0) * (Number(l.unitPriceRM) || 0),
-    0,
-  );
+  const totalRM = card.lines.reduce((s, l) => s + scanLineNetSen(l), 0) / 100;
   const supplierLabel =
     suppliers.find((s) => s.id === card.supplierId)?.name ??
     card.originalExtraction.supplierName ??
@@ -3426,6 +3441,7 @@ function PICard({
                 <th className="text-right px-2 py-1.5 font-medium w-20">Qty</th>
                 <th className="text-left px-2 py-1.5 font-medium w-16">UoM</th>
                 <th className="text-right px-2 py-1.5 font-medium w-24">Unit Price</th>
+                <th className="text-right px-2 py-1.5 font-medium w-20" title="Per-line discount in RM">Discount</th>
                 <th className="text-right px-2 py-1.5 font-medium w-20">SST</th>
                 <th className="text-right px-2 py-1.5 font-medium w-24">Amount</th>
                 <th className="w-8" />
@@ -3549,6 +3565,24 @@ function PICard({
                       disabled={!!card.createdPiNo}
                     />
                   </td>
+                  {/* Per-line discount (DEV-14) — pre-filled from the scan when
+                      the supplier prints one; the operator can type/correct it. */}
+                  <td className="px-1 py-1">
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min={0}
+                      className="h-8 text-xs text-right"
+                      value={num(line.discountRM ?? 0)}
+                      onChange={(e) =>
+                        onPatchLine(i, {
+                          discountRM: e.target.value === "" ? 0 : Math.max(0, Number(e.target.value)),
+                        })
+                      }
+                      onFocus={(e) => e.currentTarget.select()}
+                      disabled={!!card.createdPiNo}
+                    />
+                  </td>
                   <td className="px-1 py-1">
                     <Input
                       type="number"
@@ -3565,7 +3599,7 @@ function PICard({
                     />
                   </td>
                   <td className="px-1 py-1 text-right text-xs text-[#1F1D1B]">
-                    {((Number(line.qty) || 0) * (Number(line.unitPriceRM) || 0)).toLocaleString("en-MY", {
+                    {(scanLineNetSen(line) / 100).toLocaleString("en-MY", {
                       minimumFractionDigits: 2,
                       maximumFractionDigits: 2,
                     })}
@@ -3791,8 +3825,10 @@ function serialiseCardAsExtraction(card: PreviewCard): SupplierExtraction {
       qty: Number(l.qty) || null,
       uom: l.uom || null,
       unitPrice: Number(l.unitPriceRM) || null,
-      amount:
-        (Number(l.qty) || 0) * (Number(l.unitPriceRM) || 0) || null,
+      // Net of the line discount, and the discount itself — so a corrected
+      // sample teaches the extractor to capture it (DEV-14).
+      amount: scanLineNetSen(l) / 100 || null,
+      discount: Number(l.discountRM) || null,
     })),
     subtotal: card.originalExtraction.subtotal ?? null,
     tax: card.originalExtraction.tax ?? null,

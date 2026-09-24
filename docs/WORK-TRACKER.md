@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-24** — branch `feat/pi-line-discount-main` (DEV-14, → `main`) added below (its entry is the newest).
 > **Last verified: 2026-09-24** — branch `feat/dashboard-experimental-parity` entry updated below (PR #505 open; its entry is the newest).
 > **Last verified: 2026-09-23** — branch `fix/production-auto-load` added below (open, its entry is the newest).
 > **Last verified: 2026-09-23** — branch `fix/so-duplicate-ref-saves-draft` added below (open, its entry is the newest).
@@ -23,6 +24,28 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
 ---
+
+## 2026-09-24 — 🔵 DEV-14 per-line Discount column on Purchase Invoices + PI "View source document" (branch `feat/pi-line-discount-main` → `main`)
+
+Asks (DEV-14, requester SITI, plus three follow-ups in the same session):
+1. ✅ Discount column on PI lines. `purchase_invoice_items.discount_sen` (runtime self-applied in
+   `ensurePiMigrations`; record-only `migrations-postgres/0238_pi_item_discount.sql`).
+   `line_total_sen` is stored NET (`discountedLineSen` in `src/lib/unit-price.ts`, clamped to
+   [0, gross]), so GL / costing / 3-way match / AP need no change. Create page + detail edit use
+   `DiscountInput` (RM or "10%"); detail view + PI PDF show a Disc column. Purchase-return seed
+   uses the net unit cost when a line carries a discount.
+2. ✅ Scanning: the OCR already extracted a per-line `discount` but the scan modal dropped it — now
+   carried onto the PI line, editable in the review table, and a unit price backed out of a NET
+   amount adds the discount back (`sanitizeSupplierDoc`) so it is not discounted twice.
+3. ✅ Did discount exist in the DB before? No — 0179 added `discount_sen` to sales tables only.
+4. ✅ PI "View source document" downloaded instead of opening (af09716b forced `download=` on every
+   `/api/files/:id/download`). New opt-in `?inline=1` (allowlisted MIME only, `wantsInline`);
+   the PI button uses it. Other "view" links that hit `/download` are unchanged.
+Tests: `tests/pi-line-discount.test.mjs`, `tests/files-inline-view.test.mjs`. Not verified on
+staging/prod yet — needs a deploy + a real PI create/edit/scan.
+Known, NOT changed: a `DISCOUNT` line TYPE on a PI still ADDS to the total (positive qty × price,
+no sign flip anywhere) — pre-existing; flagged separately.
+
 
 ## 2026-09-23 — 🔵 /dashboard-experimental: widgets from /dashboard (branch `feat/dashboard-experimental-parity`, PR #505 open)
 
