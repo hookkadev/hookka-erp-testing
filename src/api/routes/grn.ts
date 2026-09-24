@@ -275,6 +275,8 @@ type GRNItemRow = {
   // folds invoiced_qty → invoicedQty on read; dual-key for raw/mock rows.
   invoicedQty?: number | null;
   invoiced_qty?: number | null;
+  poItemId?: string | null;
+  po_item_id?: string | null;
 };
 
 type PurchaseOrderRow = {
@@ -474,15 +476,39 @@ async function fetchGRN(db: D1Database, id: string) {
 
 // ---------------------------------------------------------------------------
 // Resolve a GRN line to the underlying RawMaterial row. Tries, in order:
+//   0. The PO line the receipt draws down (grn_items.po_item_id) — its
+//      materialCode IS the item code that was ordered.
 //   1. Split materialName on " - " — newer POs encode "itemCode - desc".
 //   2. Map materialCode (= supplierSku) via supplier_material_bindings.
-//   3. Fall back to description match.
+//   3. Fall back to description match — ONLY when exactly one raw material
+//      carries that description.
+//
+// Why 0 and the "exactly one" rule: a PO-sourced GRN line stores a blank
+// material_code (BUG-2026-08-13-052), so it used to fall straight through to
+// `description = ? LIMIT 1`. Five raw materials are named "WHITE SPONGE";
+// receiving NLY-D12-6MM posted the stock onto D12-0.5 (measured on staging,
+// 2026-09-24). An ambiguous name now resolves to nothing and the line is
+// reported in unresolvedLines instead of guessed.
 // ---------------------------------------------------------------------------
 async function resolveRmForGRNItem(
   db: D1Database,
   materialCode: string,
   materialName: string,
+  poItemId?: string | null,
 ): Promise<RawMaterialRow | null> {
+  if (poItemId) {
+    const hit = await db
+      .prepare(
+        `SELECT rm.id, rm.itemCode, rm.description, rm.balanceQty
+           FROM purchase_order_items poi
+           JOIN raw_materials rm ON rm.itemCode = poi.materialCode
+          WHERE poi.id = ? LIMIT 1`,
+      )
+      .bind(poItemId)
+      .first<RawMaterialRow>();
+    if (hit) return hit;
+  }
+
   const dashIdx = materialName.indexOf(" - ");
   if (dashIdx > 0) {
     const codeFragment = materialName.slice(0, dashIdx).trim();
@@ -517,11 +543,12 @@ async function resolveRmForGRNItem(
 
   const byDesc = await db
     .prepare(
-      "SELECT id, itemCode, description, balanceQty FROM raw_materials WHERE description = ? LIMIT 1",
+      "SELECT id, itemCode, description, balanceQty FROM raw_materials WHERE description = ? LIMIT 2",
     )
     .bind(materialName)
-    .first<RawMaterialRow>();
-  return byDesc ?? null;
+    .all<RawMaterialRow>();
+  const matches = byDesc.results ?? [];
+  return matches.length === 1 ? matches[0] : null;
 }
 
 // Post committed GRN lines to stock — writes rm_batches, cost_ledger,
@@ -544,6 +571,10 @@ async function buildGRNStockStatements(
       materialCode: string | null;
       materialName: string | null;
       unitPrice: number | string;
+      // The PO line this receipt line draws down; resolves the raw material
+      // by the ordered item code. Dual-keyed for rows read back from the DB.
+      poItemId?: string | null;
+      po_item_id?: string | null;
     }>;
   },
 ): Promise<{
@@ -572,6 +603,7 @@ async function buildGRNStockStatements(
       db,
       item.materialCode ?? "",
       item.materialName ?? "",
+      item.poItemId ?? item.po_item_id ?? null,
     );
     if (!rm) {
       unresolved.push({
@@ -729,6 +761,7 @@ async function buildPostedGRNStockAdjustment(
     unitCostSen: number;
     materialCode: string;
     materialName: string;
+    poItemId?: string | null;
   }>,
 ): Promise<{ statements: D1PreparedStatement[]; unresolved: { materialCode: string; materialName: string }[] }> {
   const statements: D1PreparedStatement[] = [];
@@ -739,7 +772,17 @@ async function buildPostedGRNStockAdjustment(
     const delta = Number(ld.delta) || 0;
     if (delta === 0) continue;
 
-    const rm = await resolveRmForGRNItem(db, ld.materialCode, ld.materialName);
+    // Adjust the raw material the line was ORIGINALLY posted to (its batch
+    // records it), so an edit can never move stock between two materials.
+    // Falls back to resolving for a line whose original batch is missing.
+    const posted = await db
+      .prepare("SELECT rmId FROM rm_batches WHERE id = ?")
+      .bind(genBatchId(grnId, ld.lineIdx))
+      .first<{ rmId?: string | null; rm_id?: string | null }>();
+    const postedRmId = posted?.rmId ?? posted?.rm_id ?? null;
+    const rm = postedRmId
+      ? { id: postedRmId }
+      : await resolveRmForGRNItem(db, ld.materialCode, ld.materialName, ld.poItemId);
     if (!rm) {
       unresolved.push({ materialCode: ld.materialCode, materialName: ld.materialName });
       continue;
@@ -1820,6 +1863,7 @@ app.post("/", async (c) => {
           materialCode: i.materialCode,
           materialName: i.materialName,
           unitPrice: i.unitPrice,
+          poItemId: i.poItemId,
         })),
       });
       statements.push(...stockBuilt.statements);
@@ -2088,6 +2132,7 @@ app.put("/:id", async (c) => {
           unitCostSen: number;
           materialCode: string;
           materialName: string;
+          poItemId?: string | null;
         }> = [];
         const poLineDeltas: { poItemIndex: number; delta: number }[] = [];
         for (let i = 0; i < existingItems.length; i++) {
@@ -2130,6 +2175,7 @@ app.put("/:id", async (c) => {
               unitCostSen,
               materialCode: ex.materialCode ?? "",
               materialName: ex.materialName ?? "",
+              poItemId: ex.poItemId ?? ex.po_item_id ?? null,
             });
             if (ex.poItemIndex != null && ex.poItemIndex >= 0) {
               poLineDeltas.push({ poItemIndex: ex.poItemIndex, delta });

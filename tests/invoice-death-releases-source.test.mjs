@@ -315,7 +315,7 @@ test("both invoice-creation paths ask ONE shared question, and it ignores CANCEL
   );
   assert.match(
     DO_HELPERS,
-    /if \(!billing\.fullyInvoiced &&/,
+    /!billing\.fullyInvoiced && soIds\.length > 0 && !incomplete/,
     "…and skip only when there is genuinely nothing left to bill",
   );
   assert.match(

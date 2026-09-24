@@ -1,5 +1,10 @@
 # Procurement — Module Guide
 
+> **Last verified: 2026-09-24** — `grn.ts` symbol anchors re-derived after BUG-2026-09-24-186
+> (`resolveRmForGRNItem` :493, `buildGRNStockStatements` :563, `postGRNToStock` :689,
+> `buildPostedGRNStockAdjustment` :754, POST `/` :1427, PUT `/:id/arrival` :2361). GRN stock now
+> resolves through the PO line's item code first; a POSTED-line edit adjusts the raw material its
+> batch was posted to. The `:521`/`:473`/`:811` figures in the flow prose below are older.
 > **Last verified: 2026-09-22** (`ProcurementPage` anchor re-derived: `index.tsx:812`; grid search now covers line items; `supplier-payments.ts` anchors re-derived after the `buildSupplierPaymentCreate` extraction — `buildSupplierPaymentCreate` :410, `/knock-off` :621, `/un-knock` :782, `buildSupplierPaymentLifecycle` :876). Previously: **Last verified: 2026-08-19** against `src/api/routes/{purchase-orders,grn,purchase-invoices,three-way-match,supplier-payments,supplier-materials}.ts`,
 >
 > **Last verified: 2026-09-11 (later same day)** — QA bug found on GRN create:
@@ -129,16 +134,16 @@ Owns the buy-side document chain: **Purchase Orders** (PO) → **Goods Receipt N
 | `app.post("/")` (PO create) | `src/api/routes/purchase-orders.ts:430` | PO create; `body.status` verbatim |
 | `app.put("/:id")` (PO edit) | `src/api/routes/purchase-orders.ts:760` | PO edit + status lifecycle |
 | `ensurePendingMigrations` (PO) | `src/api/routes/purchase-orders.ts:1063` | Runtime column self-apply |
-| `buildGRNStockStatements` | `src/api/routes/grn.ts:535` | Pure builder: stock + cost_ledger statements (no execution) |
-| `postGRNToStock` | `src/api/routes/grn.ts:656` | Wrapper: reads GRN, calls builder, executes batch (edit path only) |
-| `buildPostedGRNStockAdjustment` | `src/api/routes/grn.ts:721` | Compensating DELTA for POSTED-line edit |
-| `buildPOCounterStatements` | `src/api/routes/grn.ts:867` | Pure builder: PO receivedQty draw-down statements (no execution) |
-| `cascadePOStatusAfterGRNPost` | `src/api/routes/grn.ts:893` | Wrapper: calls builder, executes batch, recomputes PO status (edit path only) |
-| `cascadePOReceivedQtyDelta` | `src/api/routes/grn.ts:1165` | Move PO line receivedQty by delta |
-| `restorePOReceivedQtyForGRN` | `src/api/routes/grn.ts:1072` | Un-post/cancel/delete: give back PO qty |
-| `resolveRmForGRNItem` | `src/api/routes/grn.ts:480` | Resolve GRN line → raw_material |
-| `app.post("/")` (GRN create) | `src/api/routes/grn.ts:1383` | GRN create; builds stock+PO-counter statements into ONE batch with header+lines (T-006 R3) |
-| `app.put("/:id/arrival")` | `src/api/routes/grn.ts:2322` | Arrival state transition (gate) |
+| `buildGRNStockStatements` | `src/api/routes/grn.ts:563` | Pure builder: stock + cost_ledger statements (no execution) |
+| `postGRNToStock` | `src/api/routes/grn.ts:689` | Wrapper: reads GRN, calls builder, executes batch (edit path only) |
+| `buildPostedGRNStockAdjustment` | `src/api/routes/grn.ts:754` | Compensating DELTA for POSTED-line edit |
+| `buildPOCounterStatements` | `src/api/routes/grn.ts:911` | Pure builder: PO receivedQty draw-down statements (no execution) |
+| `cascadePOStatusAfterGRNPost` | `src/api/routes/grn.ts:937` | Wrapper: calls builder, executes batch, recomputes PO status (edit path only) |
+| `cascadePOReceivedQtyDelta` | `src/api/routes/grn.ts:1209` | Move PO line receivedQty by delta |
+| `restorePOReceivedQtyForGRN` | `src/api/routes/grn.ts:1116` | Un-post/cancel/delete: give back PO qty |
+| `resolveRmForGRNItem` | `src/api/routes/grn.ts:493` | Resolve GRN line → raw_material: PO line's code first; a description shared by several RMs resolves to nothing (BUG-2026-09-24-186) |
+| `app.post("/")` (GRN create) | `src/api/routes/grn.ts:1427` | GRN create; builds stock+PO-counter statements into ONE batch with header+lines (T-006 R3) |
+| `app.put("/:id/arrival")` | `src/api/routes/grn.ts:2361` | Arrival state transition (gate) |
 | `app.post("/")` (PI create) | `src/api/routes/purchase-invoices.ts:1137` | PI create + convert-chain + GL post |
 | `app.put("/:id")` (PI edit) | `src/api/routes/purchase-invoices.ts:2039` | PI edit (DRAFT/CONFIRMED/legacy APPROVED) + GL correction |
 | `checkInvoicedQtyCeilingAfterEdit` | `src/api/routes/purchase-invoices.ts:702` | Ceiling on re-synced invoiced_qty |

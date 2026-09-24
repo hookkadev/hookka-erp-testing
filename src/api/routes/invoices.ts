@@ -2048,7 +2048,7 @@ app.post("/", async (c) => {
       return c.json(
         {
           success: false,
-          error: `Nothing to invoice on ${doRow.doNo} — the lines you picked are already billed. Reload the delivery order to see what is left.`,
+          error: `Nothing to invoice on ${doRow.doNo} — the lines you picked are already billed or were returned. Reload the delivery order to see what is left.`,
         },
         409,
       );
