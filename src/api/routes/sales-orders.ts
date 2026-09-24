@@ -2698,21 +2698,25 @@ app.post("/:id/confirm", async (c) => {
     );
   }
 
-  const { statements: poStmts, created: productionOrders, preExisting } =
-    await createProductionOrdersForSO(c.var.DB, existing, items);
-
-  const autoActions = preExisting
-    ? ["Production orders already exist for this SO — skipped duplicate creation."]
-    : productionOrders.map((po) => `Created PO ${po.poNo}`);
-
   // DEV-05 — hand already-built stock to this order (owner 2026-09-07:
-  // allocation is automatic on confirm). The statements ride the SAME batch as
-  // the confirm below, so an allocation can never land without the confirm that
-  // caused it. Best-effort: a factory must still be able to confirm an order
-  // when the ledger is unreachable, but the failure is LOUD rather than a
-  // silent "nothing was available" — those two read identically on screen and
-  // that is how a planner's "0 items" came to mean "cannot see".
+  // allocation is automatic on confirm), and do it BEFORE the production orders
+  // are built.
+  //
+  // THE ORDER OF THESE TWO STEPS IS THE WHOLE FEATURE. Allocating four pieces
+  // and then queueing all ten for production is not a cosmetic slip — it is
+  // precisely the waste this exists to prevent, and it would have shipped under
+  // a note reading "(6 to be produced)" while ten were on the floor. A5 says
+  // "allocate four pieces from stock AND PRODUCE THE REMAINING SIX".
+  //
+  // The statements ride the SAME batch as the confirm below, so an allocation
+  // can never land without the confirm that caused it. Best-effort: a factory
+  // must still be able to confirm an order when the ledger is unreachable, but
+  // the failure is LOUD rather than a silent "nothing was available" — those
+  // two read identically on screen and that is how a planner's "0 items" came
+  // to mean "cannot see".
   let allocationStmts: D1PreparedStatement[] = [];
+  let allocatedByItemId = new Map<string, number>();
+  const allocationNotes: string[] = [];
   try {
     await ensureStockOrderSchema(c.var.DB);
     await ensureStockAllocationSchema(c.var.DB);
@@ -2733,16 +2737,42 @@ app.post("/:id/confirm", async (c) => {
       now,
     );
     allocationStmts = plan.statements;
-    autoActions.push(...plan.notes);
+    allocatedByItemId = plan.allocatedByItemId;
+    allocationNotes.push(...plan.notes);
   } catch (err) {
     console.error(
       `[dev-05] auto-allocation failed for SO ${id} — order confirmed WITHOUT stock allocation. err=${
         err instanceof Error ? err.message : String(err)
       }`,
     );
-    autoActions.push(
+    allocationNotes.push(
       "Stock allocation could not be checked — allocate from the order detail page.",
     );
+  }
+
+  // Produce only what stock could not cover. A line taken entirely from stock
+  // is DROPPED, not left at quantity 0 — the builder floors piece count at 1
+  // (`Math.max(1, item.quantity)`, production-builder.ts:519), so a zero-qty
+  // line would still queue one production order.
+  const itemsToProduce = items
+    .map((it) => {
+      const taken = allocatedByItemId.get(it.id) ?? 0;
+      if (taken <= 0) return it;
+      return { ...it, quantity: (Number(it.quantity) || 0) - taken };
+    })
+    .filter((it) => (Number(it.quantity) || 0) > 0);
+
+  const { statements: poStmts, created: productionOrders, preExisting } =
+    itemsToProduce.length > 0
+      ? await createProductionOrdersForSO(c.var.DB, existing, itemsToProduce)
+      : { statements: [], created: [], preExisting: false };
+
+  const autoActions = preExisting
+    ? ["Production orders already exist for this SO — skipped duplicate creation."]
+    : productionOrders.map((po) => `Created PO ${po.poNo}`);
+  autoActions.push(...allocationNotes);
+  if (allocatedByItemId.size > 0 && itemsToProduce.length === 0) {
+    autoActions.push("Filled entirely from stock — nothing to produce.");
   }
 
   // 2026-04-28: confirm lands at IN_PRODUCTION directly. The PO cascade
