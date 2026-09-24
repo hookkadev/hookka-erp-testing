@@ -69,6 +69,7 @@ import {
   resolveMaterialForLine,
   supplierCodeOf,
   supplierSkuIndex,
+  sameSupplierCode,
   MIN_SKU_SUFFIX_MATCH,
   type CandidateTier,
 } from "@/lib/supplier-material-candidates";
@@ -290,7 +291,12 @@ function poOrderedFor(
  * a strong precedent, and a catalogue hit is the scanner reading text with
  * nothing to corroborate it. The wording escalates accordingly.
  */
-function matchTierHint(tier: CandidateTier | null | undefined): string {
+function matchTierHint(
+  tier: CandidateTier | null | undefined,
+  via?: "sku" | "code" | "text" | null,
+): string {
+  // The supplier's code is ours in another form (NICCA-6-FOG ↔ NICCA-06).
+  if (via === "code") return "Matched on the supplier's code — check the code before creating.";
   switch (tier) {
     case "po":
       return "Matched to a line on the linked PO — confirm the quantity.";
@@ -1014,6 +1020,8 @@ type PreviewLine = {
    * while a catalogue hit is the scanner reading text and nothing more.
    */
   matchTier?: CandidateTier | null;
+  /** HOW it matched — the supplier's code in another form, or the wording. */
+  matchVia?: "sku" | "code" | "text" | null;
   /**
    * The PO this invoice line bills (`purchase_invoice_items.po_id`). An
    * invoice may cover several of our orders, so ownership lives on the line
@@ -1333,6 +1341,13 @@ function CreatePIWizard({
       if (!sku || !supplierId) return null;
       const exact = bindingsBySupplierSku.get(`${supplierId}__${sku}`);
       if (exact) return exact;
+      // Same code, different zero-padding: the invoice prints NICCA-6-FOG, the
+      // binding was saved as NICCA-06-FOG (Meditex, 2026-09-24). Checked before
+      // the suffix fallback so a looser hit can never shadow it.
+      const padded = bindings.find(
+        (b) => b.supplierId === supplierId && sameSupplierCode(b.supplierSku, supplierSku),
+      );
+      if (padded) return padded;
       // Fallback for supplier-side SKU prefixing: "OST- SL 27" (binding)
       // vs "SL.27" (OCR) — exact normalised match fails because the
       // binding has a vendor prefix. Try endsWith / contains either way
@@ -1575,6 +1590,7 @@ function CreatePIWizard({
         //    stock against the wrong item and surfaces far later than a click.
         let autoMatched = false;
         let matchTier: CandidateTier | null = null;
+        let matchVia: "sku" | "code" | "text" | null = null;
         if (!binding && !rm) {
           const text = `${rawSku} ${ln.description ?? ""}`.trim();
           const hit = resolveMaterialForLine(text, tiers, {
@@ -1585,6 +1601,7 @@ function CreatePIWizard({
             rm = hit.item;
             autoMatched = true;
             matchTier = hit.tier;
+            matchVia = hit.via;
           }
         }
         // Use the binding's canonical supplier SKU once we resolved it, so
@@ -1634,6 +1651,7 @@ function CreatePIWizard({
           materialCode: rm?.itemCode ?? binding?.materialCode ?? "",
           autoMatched,
           matchTier,
+          matchVia,
           materialName: rm?.description ?? descOut,
           supplierSku: sku,
           description: descOut,
@@ -3498,6 +3516,12 @@ function PICard({
                           materialName: o.description,
                           supplierSku: reverse?.supplierSku ?? line.supplierSku,
                           uom: rm?.baseUOM || line.uom,
+                          // An operator's pick is not a machine guess: clear the
+                          // flags so the hint goes and Create may learn the
+                          // supplier code ↔ this material binding.
+                          autoMatched: false,
+                          matchTier: null,
+                          matchVia: null,
                         });
                       }}
                       onTyped={() => {}}
@@ -3617,7 +3641,7 @@ function PICard({
                   <tr className="bg-[#FBF4E6]">
                     <td colSpan={8} className="px-3 py-1">
                       <div className="text-[11px] text-[#9C6F1E]">
-                        {matchTierHint(line.matchTier)}
+                        {matchTierHint(line.matchTier, line.matchVia)}
                       </div>
                     </td>
                   </tr>
@@ -3890,6 +3914,8 @@ type GRNPreviewLine = {
   autoMatched?: boolean;
   /** Which search space produced it — see the create-PI line type. */
   matchTier?: CandidateTier | null;
+  /** HOW it matched — the supplier's code in another form, or the wording. */
+  matchVia?: "sku" | "code" | "text" | null;
   /**
    * The PO line THIS receipt line draws down. A delivery note may cover
    * several of our orders, so ownership lives here rather than on the card:
@@ -4122,6 +4148,13 @@ function CreateGRNWizard({
       if (!sku || !supplierId) return null;
       const exact = bindingsBySupplierSku.get(`${supplierId}__${sku}`);
       if (exact) return exact;
+      // Same code, different zero-padding: the invoice prints NICCA-6-FOG, the
+      // binding was saved as NICCA-06-FOG (Meditex, 2026-09-24). Checked before
+      // the suffix fallback so a looser hit can never shadow it.
+      const padded = bindings.find(
+        (b) => b.supplierId === supplierId && sameSupplierCode(b.supplierSku, supplierSku),
+      );
+      if (padded) return padded;
       // Prefix-tolerant fallback (e.g. binding "OST-SL 157" vs OCR "SL 157"):
       // try endsWith / contains either way for this supplier's bindings.
       for (const b of bindings) {
@@ -4315,6 +4348,7 @@ function CreateGRNWizard({
         //    against the wrong item and surfaces far later than one click.
         let autoMatched = false;
         let matchTier: CandidateTier | null = null;
+        let matchVia: "sku" | "code" | "text" | null = null;
         if (!binding && !rm) {
           const text = `${rawSku} ${ln.description ?? ""}`.trim();
           const hit = resolveMaterialForLine(text, tiers, {
@@ -4325,6 +4359,7 @@ function CreateGRNWizard({
             rm = hit.item;
             autoMatched = true;
             matchTier = hit.tier;
+            matchVia = hit.via;
           }
         }
         // The supplier's own code for whatever we ended up resolving to.
@@ -4361,6 +4396,7 @@ function CreateGRNWizard({
           materialCode: rm?.itemCode ?? binding?.materialCode ?? "",
           autoMatched,
           matchTier,
+          matchVia,
           materialName: rm?.description ?? descOut,
           supplierSku: sku,
           description: descOut,
@@ -5694,6 +5730,12 @@ function GRNCard({
                           materialName: o.description,
                           supplierSku: reverse?.supplierSku ?? line.supplierSku,
                           uom: rm?.baseUOM || line.uom,
+                          // An operator's pick is not a machine guess: clear the
+                          // flags so the hint goes and Create may learn the
+                          // supplier code ↔ this material binding.
+                          autoMatched: false,
+                          matchTier: null,
+                          matchVia: null,
                         });
                       }}
                       onTyped={() => {}}
@@ -5799,7 +5841,7 @@ function GRNCard({
                   <tr className="bg-[#FBF4E6]">
                     <td colSpan={8} className="px-3 py-1">
                       <div className="text-[11px] text-[#9C6F1E]">
-                        {matchTierHint(line.matchTier)}
+                        {matchTierHint(line.matchTier, line.matchVia)}
                       </div>
                     </td>
                   </tr>
