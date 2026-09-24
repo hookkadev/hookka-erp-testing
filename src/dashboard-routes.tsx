@@ -236,8 +236,16 @@ export const DASHBOARD_ROUTES: RouteObject[] = [
   },
   { path: '/dashboard-b', element: <Navigate to="/dashboard" replace /> },
 
-  // Experimental dashboard.
-  { path: '/dashboard-experimental', element: <S><DashboardPrototype /></S> },
+  // Experimental dashboard — same gate as /dashboard (the menu link is mapped
+  // to the same resource in nav-permissions.ts).
+  {
+    path: '/dashboard-experimental',
+    element: (
+      <RequirePermission resource="dashboard" action="read">
+        <S><DashboardPrototype /></S>
+      </RequirePermission>
+    ),
+  },
 
   // Sales
   { path: '/sales', element: <S><Sales /></S> },

@@ -10,6 +10,7 @@ import {
   fmtRMAxis, monthLabel, periodLabel, type FinSub, type Period,
 } from "./dashboard-shared-lib";
 import { Kpi } from "./dashboard-shared";
+import { AgingRatiosCard } from "./DashboardWidgets";
 
 // Finance tab. Reads its OWN endpoint, GET /api/dashboard/finance, which is
 // gated by the accounting permission and sent no-store — finance figures are
@@ -94,7 +95,12 @@ export function FinanceView({
         </span>
       </div>
       {sub === "perhead" && <PerHead d={d} onMonth={goMonth} />}
-      {sub === "returns" && <Returns d={d} />}
+      {sub === "returns" && (
+        <>
+          <Returns d={d} />
+          <AgingRatiosCard period={period} />
+        </>
+      )}
       {sub === "outlook" && <Outlook d={d} onSaved={() => setTick((t) => t + 1)} />}
     </div>
   );

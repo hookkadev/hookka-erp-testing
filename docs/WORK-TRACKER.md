@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-24** — branch `feat/dashboard-experimental-parity` entry updated below (PR #505 open; its entry is the newest).
 > **Last verified: 2026-09-23** — branch `fix/production-auto-load` added below (open, its entry is the newest).
 > **Last verified: 2026-09-23** — branch `fix/so-duplicate-ref-saves-draft` added below (open, its entry is the newest).
 > **Last verified: 2026-09-22** — branch `fix/scan-queue-client-driven` added below (open, its entry is the newest).
@@ -22,6 +23,31 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
 ---
+
+## 2026-09-23 — 🔵 /dashboard-experimental: widgets from /dashboard (branch `feat/dashboard-experimental-parity`, PR #505 open)
+
+Director: every widget on /dashboard must also exist on /dashboard-experimental. Owner rules:
+`dashboard-b/index.tsx` and `accounting/index.tsx` untouched; no rounding (truncate to 2dp);
+cards go in existing tabs/sub-tabs (no new sub-tabs — `/m` reads `TAB_SUBS`). Asks:
+1. ✅ Gap list vs /dashboard, /finance-dashboard, Accounting Overview (answered in chat).
+2. ✅ Same `dashboard:read` gate as /dashboard (route + nav map; `/m` inherits), test added.
+3. ✅ `src/pages/dashboards/dashboard-widgets-lib.ts` — pure mirror of the /dashboard formulas
+   (index.tsx does NOT import it: frozen), incl. `unrounded` flags on `deptBacklogRows` /
+   `plantLoad`, `customerRevenue` / `concentrationShares` / `financeRatios` unrounded.
+4. ✅ `agingBucketTotals` (`src/lib/aging-export.ts`); truncating formatters + `widgetPeriod` in
+   `dashboard-shared-lib.ts`.
+5. ✅ `DashboardWidgets.tsx` placed: Overview (Invoices hero, Daily Report tile, OCR card) ·
+   Sales (Order Pipeline, Revenue trend, Sales by Customer, Top Sellers) · Ops > Overview (Plant
+   Load, Dept Backlog) · Ops > Output (Completed) · Ops > Materials (Purchasing, Fabric Usage) ·
+   Finance > Returns (margins / current & quick ratio / AR-AP aging, plain fetch).
+6. ✅ Tests: `tests/dashboard-widgets-lib.test.mjs`; Overview tile guard in
+   `tests/compliance-unknown-outcome.test.mjs`. tsc (app) / npm test / eslint / vite build green.
+7. 🟡 Owner: `OcrAccuracyCard` rates are rounded SERVER-side (`src/api/routes/ocr-accuracy.ts:354`) and the
+   card is shared with /dashboard, so it is left as is. Worker Efficiency not ported — Employees >
+   Efficiency already has Top 5 / Bottom 5. Not verified in a browser (needs a logged-in session
+   with API data) — check live after deploy.
+8. ⚪ Remaining from the gap list (not in this batch): /finance-dashboard P&L-vs-forecast /
+   salary / cost structure / cash flow.
 
 ## 2026-09-23 — 🔵 /production: remove "Load all" (branch `fix/production-auto-load`)
 

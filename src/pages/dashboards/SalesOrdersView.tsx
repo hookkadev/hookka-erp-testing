@@ -25,6 +25,7 @@ import {
   inPeriod, inFocus, periodLabel, isConfirmedOrder, type Period,
 } from "./dashboard-shared-lib";
 import { Kpi, LiveBadge } from "./dashboard-shared";
+import { CustomerRevenueCard, OrderPipelineCard, RevenueTrendCard, TopSellersCard } from "./DashboardWidgets";
 import { rollingForecast } from "@/lib/revenue-forecast";
 import { pctDelta, buildSalesTrend, previousSalesKpis, computeSalesKpis } from "./dashboard-sales-lib";
 
@@ -957,6 +958,14 @@ export function SalesOrdersView({
           </CardContent>
         </Card>
       </div>
+
+      {/* Widgets ported from /dashboard (same URLs + formulas). */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <OrderPipelineCard period={period} />
+        <RevenueTrendCard period={period} />
+      </div>
+      <CustomerRevenueCard period={period} />
+      <TopSellersCard period={period} />
 
       {/* Fulfillment pipeline keeps its own row; the state/category donut
           and Top SKUs share one split, the way the design prototype pairs
