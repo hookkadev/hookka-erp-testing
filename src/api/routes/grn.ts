@@ -30,6 +30,7 @@ import { makeLedgerEntry } from "../../lib/costing";
 import { emitAudit } from "../lib/audit";
 import { learnSupplierBindings } from "../lib/supplier-binding-learn";
 import { availableQty as computeAvailableQty, clampDecrement } from "../../lib/convert-chain";
+import { loadGrnReturnedQty } from "../lib/purchase-return-create";
 import {
   checkGrnLineQtyEdit,
   isGrnFullyLockedByDownstreamPi,
@@ -277,6 +278,8 @@ type GRNItemRow = {
   invoiced_qty?: number | null;
   poItemId?: string | null;
   po_item_id?: string | null;
+  // Not a column — attached by attachReturnedQty (BUG-2026-09-24-190).
+  returnedQty?: number;
 };
 
 type PurchaseOrderRow = {
@@ -326,9 +329,12 @@ function deriveArrivalState(row: GRNRow): ArrivalState {
 
 function rowToItem(r: GRNItemRow) {
   // Convert-chain: invoiced_qty may be absent on rows predating the column
-  // (defaults to 0). available = accepted − invoiced, floored at 0. Exposed
-  // so the PI picker can show remaining-to-invoice per GRN line.
+  // (defaults to 0). available = accepted − invoiced − returned-before-billing,
+  // floored at 0 (BUG-2026-09-24-190). Exposed so the PI picker can show
+  // remaining-to-invoice per GRN line. returnedQty is attached by
+  // attachReturnedQty below; absent means nothing returned.
   const invoicedQty = Number(r.invoicedQty ?? r.invoiced_qty ?? 0) || 0;
+  const returnedQty = Number(r.returnedQty ?? 0) || 0;
   return {
     id: r.id,
     poItemIndex: r.poItemIndex ?? 0,
@@ -345,8 +351,15 @@ function rowToItem(r: GRNItemRow) {
     rejectionReason: r.rejectionReason,
     unitPrice: r.unitPrice,
     invoicedQty,
-    availableQty: computeAvailableQty(Number(r.acceptedQty) || 0, invoicedQty),
+    returnedQty,
+    availableQty: computeAvailableQty(Number(r.acceptedQty) || 0, invoicedQty + returnedQty),
   };
+}
+
+/** Stamp each GRN line with what was returned off it before billing. */
+async function attachReturnedQty(db: D1Database, items: GRNItemRow[]): Promise<void> {
+  const returned = await loadGrnReturnedQty(db, items.map((it) => it.id));
+  for (const it of items) it.returnedQty = returned.get(String(it.id)) ?? 0;
 }
 
 type GrnLike = { supplierId: string; items: Array<{ supplierSKU: string; materialCode: string; unitPrice: number }> };
@@ -471,7 +484,9 @@ async function fetchGRN(db: D1Database, id: string) {
       .all<GRNItemRow>(),
   ]);
   if (!grn) return null;
-  return rowToGRN(grn, itemsRes.results ?? []);
+  const items = itemsRes.results ?? [];
+  await attachReturnedQty(db, items);
+  return rowToGRN(grn, items);
 }
 
 // ---------------------------------------------------------------------------
@@ -1363,6 +1378,7 @@ app.get("/", async (c) => {
   // 0.1 ms. Cheap today; fixed because this list has no LIMIT unless the caller
   // opts into ?page, so the cost is ~1.2·N² in GRN count and grows with
   // receiving forever — the same reason the items fetch above was narrowed.
+  await attachReturnedQty(c.var.DB, itemsRes.results ?? []);
   const itemsByGrnId = new Map<string, GRNItemRow[]>();
   for (const it of itemsRes.results ?? []) {
     const arr = itemsByGrnId.get(it.grnId);

@@ -37,6 +37,7 @@ import {
 import { PI_STATUS_CHECK_SQL } from "../lib/ensure-partial-payment";
 import { buildPiApprovalLegs } from "../../lib/pi-posting";
 import { isPiEditable, piEditBlockedError } from "../../lib/purchase-edit-rules";
+import { loadGrnReturnedQty, loadPoReturnedQty } from "../lib/purchase-return-create";
 
 // ---------------------------------------------------------------------------
 // Runtime schema self-apply — convert-chain columns (PO→GRN→PI). All
@@ -666,6 +667,8 @@ async function buildGrnReconsumeStatements(
   if (wantByGrnItem.size === 0) return { ok: true, statements: [] };
 
   const statements: D1PreparedStatement[] = [];
+  // Goods sent back off the GRN before billing are not billable (BUG-2026-09-24-190).
+  const returnedByGi = await loadGrnReturnedQty(db, [...wantByGrnItem.keys()]);
   for (const [giId, { qty, name }] of wantByGrnItem) {
     const gi = await db
       .prepare("SELECT acceptedQty, invoiced_qty FROM grn_items WHERE id = ?")
@@ -684,10 +687,11 @@ async function buildGrnReconsumeStatements(
     }
     const accepted = Number(gi.acceptedQty ?? gi.accepted_qty ?? 0) || 0;
     const invoiced = Number(gi.invoicedQty ?? gi.invoiced_qty ?? 0) || 0;
-    if (invoiced + qty > accepted) {
+    const returned = returnedByGi.get(giId) ?? 0;
+    if (invoiced + returned + qty > accepted) {
       return {
         ok: false,
-        error: `Line "${name}": another invoice has billed this goods receipt since the void — only ${accepted - invoiced} of the ${qty} needed is still available (received ${accepted}, already billed ${invoiced}).`,
+        error: `Line "${name}": ${returned ? "this goods receipt has been billed or returned to the supplier" : "another invoice has billed this goods receipt"} since the void — only ${Math.max(0, accepted - invoiced - returned)} of the ${qty} needed is still available (received ${accepted}, already billed ${invoiced}${returned ? `, returned to supplier ${returned}` : ""}).`,
       };
     }
     statements.push(
@@ -732,6 +736,7 @@ async function checkInvoicedQtyCeilingAfterEdit(
     oldByGrnItem.set(String(giId), (oldByGrnItem.get(String(giId)) ?? 0) + (Number(ln.qty) || 0));
   }
 
+  const returnedByGi = await loadGrnReturnedQty(db, [...newByGrnItem.keys()]);
   for (const [giId, { qty: newQty, name }] of newByGrnItem) {
     const gi = await db
       .prepare("SELECT acceptedQty, invoiced_qty FROM grn_items WHERE id = ?")
@@ -751,13 +756,14 @@ async function checkInvoicedQtyCeilingAfterEdit(
     const accepted = Number(gi.acceptedQty ?? gi.accepted_qty ?? 0) || 0;
     const currentInvoiced = Number(gi.invoicedQty ?? gi.invoiced_qty ?? 0) || 0;
     const oldThisPi = oldByGrnItem.get(giId) ?? 0;
-    const projected = currentInvoiced - oldThisPi + newQty;
+    const returned = returnedByGi.get(giId) ?? 0;
+    const projected = currentInvoiced - oldThisPi + newQty + returned;
     if (projected > accepted) {
       const otherPIs = currentInvoiced - oldThisPi;
-      const remaining = accepted - otherPIs;
+      const remaining = Math.max(0, accepted - otherPIs - returned);
       return {
         ok: false,
-        error: `Line "${name}": invoicing ${newQty} would exceed the ${remaining} still available on its goods receipt (received ${accepted}, billed elsewhere ${otherPIs}).`,
+        error: `Line "${name}": invoicing ${newQty} would exceed the ${remaining} still available on its goods receipt (received ${accepted}, billed elsewhere ${otherPIs}${returned ? `, returned to supplier ${returned}` : ""}).`,
       };
     }
   }
@@ -1034,6 +1040,12 @@ async function checkPoRemaining(
     string,
     { code: string; name: string; qty: number }
   >();
+  // Returned off a GRN before billing (BUG-2026-09-24-190): those units left,
+  // so they no longer count as ordered-and-billable. The return already took
+  // them off receivedQty; without this the ceiling fell back to the full
+  // ordered qty and the returned goods stayed billable. A replacement receipt
+  // raises receivedQty again, and the max() below lets it be billed.
+  const returnedByPoItem = await loadPoReturnedQty(db, poId);
   for (const po of poItemsRes.results ?? []) {
     const itemId = String(po.id);
     const code = String(po.material_code ?? po.materialCode ?? "");
@@ -1050,7 +1062,7 @@ async function checkPoRemaining(
       qty:
         (prev?.qty ?? 0) +
         poInvoiceCeiling(
-          Number(po.quantity) || 0,
+          Math.max(0, (Number(po.quantity) || 0) - (returnedByPoItem.get(itemId) ?? 0)),
           Number(po.receivedQty ?? po.received_qty ?? 0) || 0,
         ),
     });
@@ -1376,6 +1388,9 @@ app.post("/", async (c) => {
       }
 
       const lines: ConvertLineRequest[] = [];
+      // Goods sent back off this GRN before billing are not billable
+      // (BUG-2026-09-24-190): available = accepted − invoiced − returned.
+      const returnedByGi = await loadGrnReturnedQty(db, [...giById.keys()]);
       for (const r of normalizedItems.rows) {
         if (!r.grnItemId) continue; // fee/tax/non-stocked lines don't draw down
         const gi = giById.get(String(r.grnItemId));
@@ -1388,10 +1403,12 @@ app.post("/", async (c) => {
             400,
           );
         }
+        const returned = returnedByGi.get(String(gi.id)) ?? 0;
+        const name = gi.materialName ?? r.materialName;
         lines.push({
-          ref: gi.materialName ?? r.materialName,
+          ref: returned ? `${name} (${returned} returned to supplier)` : name,
           orderedQty: Number(gi.acceptedQty) || 0,
-          consumedQty: Number(gi.invoicedQty ?? gi.invoiced_qty ?? 0) || 0,
+          consumedQty: (Number(gi.invoicedQty ?? gi.invoiced_qty ?? 0) || 0) + returned,
           requestedQty: r.qty,
         });
       }

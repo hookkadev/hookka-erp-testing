@@ -37,6 +37,9 @@ Ask: continue fixing on staging after #506. All three were on `main` before T-00
   click-through (Consignment menu, Sales → Transfer to DO created DO-2609-071, duplicate refused
   409). Found BUG-2026-09-24-189 (return stock-out moved nothing for PO-sourced lines) — fixed on
   `fix/staging-return-stockout`, lifecycle 23/23.
+- [x] Side quest G (owner chose option A): goods returned off a GRN before billing no longer
+  billable — BUG-2026-09-24-190, branch `fix/staging-grn-return-billable`, live 16/16 (5/15 on
+  deployed `81c77972`). PR → `staging` needs a human merge; then carry to #448.
 - Note: `/ready-planning` is serve-stale cached, so for ~2-3 min after a DO is created the Sales
   "Transfer to DO" dialog still offers its production orders; the server refuses the duplicate.
 - 🟡 Open: BOM consumption resolves by shared description (C21 row 17); convert's CO completion cascade is not reopened on void; prod exposure of -186 UNMEASURED.
