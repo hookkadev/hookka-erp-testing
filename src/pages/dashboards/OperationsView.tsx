@@ -10,7 +10,7 @@ import { AlertTriangle, Clock, CalendarClock, PackageX, DollarSign, UserCheck, G
 import { TAUPE, TEAL, AMBER, MUTED, BORDER, fmtN, fmtRMAxis, inPeriod, inFocus, dayLabel, periodLabel, type Period, type OpsSub } from "./dashboard-shared-lib";
 import { Kpi, LiveBadge } from "./dashboard-shared";
 import { AttendanceLogCard } from "./AttendanceLogCard";
-import { OverdueByDeptCard, DueSoonWorklist, type ProdOrderSummary } from "./OverdueCards";
+import { DueSoonWorklist, type ProdOrderSummary } from "./OverdueCards";
 import type { EmployeeSlice } from "./EmployeesInsights";
 import { ProductionDailyPanels } from "./ProductionDailyPanels";
 import { CompletedCard, DeptBacklogCard, FabricUsageCard, PlantLoadCard, PurchasingCard } from "./DashboardWidgets";
@@ -194,8 +194,11 @@ export function OperationsView({
 
       {sub === "overview" && (
         <>
-            {/* ---- KPI strip: 7 cards, one row on desktop ------------------------ */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-7 gap-3">
+            {/* ---- KPI groups: Orders (3) on top, Materials & cost | People (2+2) below at xl ---- */}
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-x-5 gap-y-4">
+             <div className="xl:col-span-2">
+              <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[#6B7280]">Orders</p>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
               <Kpi
                 label="Overdue Orders"
                 value={fmtN(totalOverdue)}
@@ -214,7 +217,7 @@ export function OperationsView({
                 iconColorClass="text-[#9C6F1E]"
                 valueColorClass="text-[#9C6F1E]"
               />
-              <div className="col-span-1">
+              <div className="col-span-2 md:col-span-1">
                 <Card>
                   <CardContent className="p-4">
                     <div className="flex items-center gap-3">
@@ -242,6 +245,12 @@ export function OperationsView({
                   </CardContent>
                 </Card>
               </div>
+              </div>
+             </div>
+             <div>
+              <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[#6B7280]">Materials &amp; cost</p>
+              {/* Cost gets the wider slot so an RM figure doesn't truncate. */}
+              <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-3">
               <Kpi
                 label="Material Shortage"
                 value={fmtN((inventory?.materialShortage ?? []).length)}
@@ -264,6 +273,11 @@ export function OperationsView({
                 valueColorClass="text-[#3E6570]"
                 valueSizeClass="text-xl"
               />
+              </div>
+             </div>
+             <div>
+              <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[#6B7280]">People</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Kpi
                 label="Attendance"
                 value={attendanceStat.pct == null ? "—" : `${attendanceStat.pct.toFixed(1)}%`}
@@ -298,13 +312,23 @@ export function OperationsView({
                   </CardContent>
                 </Card>
               </div>
+              </div>
+             </div>
             </div>
 
-            <OverdueByDeptCard overdueByDept={production?.overdueByDept ?? []} />
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <PlantLoadCard period={period} />
-              <DeptBacklogCard period={period} />
+            {/* How loaded is the plant (dial) · where is it stuck (per-dept board:
+                queue days + overdue + due-soon) · what's due next (lanes). */}
+            <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 items-start">
+              <div className="lg:col-span-2 min-w-0">
+                <PlantLoadCard period={period} />
+              </div>
+              <div className="lg:col-span-3 min-w-0">
+                <DeptBacklogCard
+                  period={period}
+                  overdueByDept={production?.overdueByDept ?? []}
+                  dueSoon={production?.dueSoon3Days ?? []}
+                />
+              </div>
             </div>
 
             <DueSoonWorklist orders={production?.dueSoon3Days ?? []} />

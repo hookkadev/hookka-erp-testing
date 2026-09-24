@@ -5,6 +5,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { TimeAttendancePanels, EfficiencyPanels, type EmployeeSlice } from "./EmployeesInsights";
 import { DeptEfficiencyCard } from "./ProductionDailyPanels";
+import { DepartmentsView } from "./DepartmentsView";
 import { AttendanceLogCard } from "./AttendanceLogCard";
 import { filterSlice } from "./employee-filter";
 import { Users, Target, Clock, Gauge } from "lucide-react";
@@ -37,7 +38,7 @@ type Feed = {
 
 export function EmployeesView({
   period, sub, onPeriodChange,
-}: { period: Period; sub: Exclude<PeopleSub, "departments">; onPeriodChange: (p: Period) => void }) {
+}: { period: Period; sub: PeopleSub; onPeriodChange: (p: Period) => void }) {
   const { data, loading, error } = useCachedJson<Feed>("/api/dashboard/prototype");
 
   const employee = data?.employee;
@@ -280,6 +281,7 @@ export function EmployeesView({
         <>
           {filterBar}
           <DeptEfficiencyCard employee={filtered} period={period} target={config?.efficiencyTargetPct ?? 100} />
+          <DepartmentsView employee={filtered} period={period} />
           <EfficiencyPanels employee={filtered} period={period} onPeriodChange={onPeriodChange} onPickEmployee={(id) => setEmp(id)} target={config?.efficiencyTargetPct ?? 100} />
         </>
       )}

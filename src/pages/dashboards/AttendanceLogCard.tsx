@@ -1,6 +1,6 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { MUTED, inFocus, periodLabel, type Period } from "./dashboard-shared-lib";
+import { MUTED, inFocus, periodLabel, stepDay, ymd, type Period } from "./dashboard-shared-lib";
 import type { EmployeeSlice } from "./EmployeesInsights";
 
 // Attendance log: latest recorded day per employee inside the period (or the
@@ -26,7 +26,18 @@ const lateMin = (t: string | null) => {
 // perDay is an explicit prop (set when the filter bar has ONE employee picked) rather than
 // derived from "one distinct employee in the slice": a department that happens to have a
 // single active worker should still read as the department view.
-export function AttendanceLogCard({ employee, period, perDay = false }: { employee: EmployeeSlice; period: Period; perDay?: boolean }) {
+export function AttendanceLogCard({ employee, period: pagePeriod, perDay = false }: { employee: EmployeeSlice; period: Period; perDay?: boolean }) {
+  // Today / Yesterday switch for THIS card only. "Today" is the browser's calendar day, the
+  // same one resolvePeriod opens the page on. A pick remembers the page period it was made
+  // against, so moving the page picker drops it (derived, no effect); pressing the lit chip
+  // again also hands the card back to the page period.
+  const today = ymd(new Date());
+  const days = [["Today", today], ["Yesterday", stepDay(today, -1, today)!]] as const;
+  const pageKey = JSON.stringify(pagePeriod);
+  const [pick, setPick] = useState<{ day: string; pageKey: string } | null>(null);
+  const override = pick?.pageKey === pageKey ? pick.day : undefined;
+  const period = useMemo(() => (override ? { ...pagePeriod, day: override } : pagePeriod), [pagePeriod, override]);
+
   const log = useMemo(() => {
     const byId = new Set(employee.workers.map((w) => w.id));
     const byName = new Map(employee.workers.map((w) => [(w.name ?? "").trim().toLowerCase(), w.id]));
@@ -76,7 +87,7 @@ export function AttendanceLogCard({ employee, period, perDay = false }: { employ
 
   return (
     <Card>
-      <CardHeader className="pb-3">
+      <CardHeader className="pb-3 flex-row flex-wrap items-start justify-between gap-2 space-y-0">
         <CardTitle>
           Attendance log{" "}
           <span className="ml-2 max-md:ml-0 max-md:block text-[11px] font-normal text-[#6B7280]">
@@ -85,6 +96,28 @@ export function AttendanceLogCard({ employee, period, perDay = false }: { employ
               : `${log.rows.length} employees · latest recorded day each · ${periodLabel(period)}`}
           </span>
         </CardTitle>
+        {/* Same segmented look as the page's Day / Month / YTD toggle (PeriodPicker). */}
+        <div role="group" aria-label="Attendance day" className="flex gap-0.5 rounded-lg border border-[#E2DDD8] bg-[#F7F5F3] p-0.5">
+          {days.map(([label, d]) => {
+            const on = period.day === d;
+            return (
+              <button
+                key={label}
+                type="button"
+                aria-pressed={on}
+                onClick={() => setPick(on ? null : { day: d, pageKey })}
+                className={
+                  "px-3 py-1 max-md:h-11 max-md:text-sm text-xs font-medium rounded-md border transition-colors " +
+                  (on
+                    ? "bg-white border-[#6B5C32] text-[#1F1D1B] shadow-sm"
+                    : "bg-transparent border-transparent text-[#6B7280] hover:bg-white/60")
+                }
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
       </CardHeader>
       <CardContent className="p-0">
         <div className="overflow-x-auto" style={{ maxHeight: 460, overflowY: "auto" }}>
