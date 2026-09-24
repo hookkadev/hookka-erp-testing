@@ -1,5 +1,8 @@
 # Hookka ERP — Codebase Map (the single authoritative map)
 
+> **Restamped 2026-09-24 on branch `fix/so-customer-po-view`:** Sales row — `sales/detail.tsx` line
+> count re-measured (1,819) and the Customer PO inline-view link noted. Nothing else re-checked.
+
 > **Restamped 2026-09-22 on branch `fix/delivery-tab-switch-pagination`:** Delivery row + the
 > `delivery/index.tsx` big-file index re-derived (file is 7,505 lines); DO list now paginated PER
 > STAGE TAB via `doBrowseUrl` / `GET /api/delivery-orders?status=`; see the delivery gotcha bullet.
@@ -148,7 +151,7 @@ authoritative current detail.** New here? Start with [ONBOARDING-PATH.md](ONBOAR
 |---|---|---|---|
 | `src/pages/sales/index.tsx` — SO list (2181), dual-mode SO vs service-order | `src/api/routes/sales-orders.ts` — 5,865 lines (re-measured 2026-09-23; create POST now WARNS, not 409s, on a repeated customer PO/SO ref — BUG-2026-09-23-185) (+ `sales-orders/_helpers.ts`, 1,462); SO CRUD + status cascades + snapshot | `sales_orders` / `sales_order_items` / `so_status_changes` | `tests/sofa-combo.test.mjs` |
 | `src/pages/sales/create.tsx` — Create SO (3760, re-measured 2026-09-23); OCR/scan-PO lands here | `src/api/routes/consignment-orders.ts` — CO CRUD + co_status_changes (2815) | `consignment_orders` / `consignment_order_items` / `co_status_changes` | `tests/so-category.test.mjs` |
-| `src/pages/sales/detail.tsx` — SO detail (1637); linked POs/JCs/DOs/invoices | `src/api/routes/consignment-notes.ts` — CN (DO-equiv) dispatch/delivered (2152) | `consignment_notes` / `consignment_items` | |
+| `src/pages/sales/detail.tsx` — SO detail (1819); linked POs/JCs/DOs/invoices; Customer PO number opens the original PO inline | `src/api/routes/consignment-notes.ts` — CN (DO-equiv) dispatch/delivered (2152) | `consignment_notes` / `consignment_items` | |
 | `src/pages/sales/edit.tsx` — Edit SO (1634); re-runs sofa-combo on save; unit price + build-up via `@/lib/pricing` | `src/api/routes/consignments.ts` — legacy/shared reads (536) | `sofa_combo_rules` / `customer_products` / `price_overrides` | |
 | `src/pages/consignment/index.tsx` — CO list (1197) | `src/api/routes/sofa-combos.ts` — sofa_combo_rules CRUD (650) | `cost_ledger` / `production_orders` / `job_cards` / `fg_units` | |
 | `src/pages/consignment/create.tsx` — Create CO (1782) | `src/api/routes/historical-sales.ts` — read-only history (128) | `delivery_orders` / `delivery_order_items` / `invoices` / `invoice_items` | |
