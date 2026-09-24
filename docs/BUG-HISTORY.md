@@ -657,7 +657,7 @@ correctness bug in the key, and mixing them into one change would have made the
 
 ---
 
-## BUG-2026-09-24-186 — the note said six, the factory would have queued ten `sales` `production` 🟢
+## BUG-2026-09-24-186b — the note said six, the factory would have queued ten `sales` `production` 🟢
 
 🟢 Fixed before it could reach anyone — found while testing DEV-05 on staging,
 in the window where no stock had finished yet, so the double-build never
