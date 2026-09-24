@@ -34,6 +34,32 @@ Entries themselves stay newest-first.
 
 ---
 
+## BUG-2026-09-24-190 — goods returned off a GRN before billing stayed billable `procurement` `data-integrity` 🟢
+
+🟢 **Fixed** · pre-existing on `main` (left open by -184, which covered PI-sourced returns only).
+
+**Root cause.** Two ceilings limit a purchase invoice and neither counted returns. The GRN
+line's available was `accepted − invoiced`; the PO ceiling was `max(ordered, received)`, and a
+return lowers `received` but not `ordered`, so it fell back to the full order. Measured on the
+deployed staging commit `81c77972`: receive 140, return 2 off the GRN → the GRN still showed 140
+available, a PI for 139 was accepted, and a further PO-direct PI for 1 was accepted too — 141
+billable against 138 kept.
+
+**Fix.** `loadGrnReturnedQty` / `loadPoReturnedQty` (`purchase-return-create.ts`) sum returns
+raised off the GRN (`purchase_invoice_id` empty — a PI-sourced return is billed goods, credited
+by its debit note, and never counts). Subtracted in the GRN list/detail `availableQty`
+(`grn.ts`, what the invoice-from-GRN picker reads), PI create (GRN branch), PI edit ceiling, PI
+un-void re-draw, and the PO ceiling, now `max(ordered − returned, received)` so a replacement
+receipt becomes billable again. Both helpers fail soft on a DB with no return tables.
+
+**Verified.** Live on the staging DB (rolled back), 16/16: returned 2 → available 138; PI 139
+refused, 138 accepted; PO-direct +1 refused; PI edit up refused, down accepted; replacement
+receipt of 2 billable; un-void refused after 3 more returned; a PI-sourced return is not counted.
+Same run against `81c77972`: 5/15. Tests: `t006-live-findings` (helpers, fail-soft, every site),
+`pi-void` pin updated.
+
+---
+
 ## BUG-2026-09-24-189 — a purchase return of a PO-sourced GRN line never left stock `procurement` `inventory-cascade` 🟢
 
 🟢 **Fixed** · pre-existing on `main`; same root as -186 (blank `material_code` on PO-sourced GRN lines).

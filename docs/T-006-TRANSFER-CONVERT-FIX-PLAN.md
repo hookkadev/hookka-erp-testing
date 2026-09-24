@@ -400,8 +400,9 @@ returned units and the supplier's credit is the debit note, so the write-back le
 goods be billed twice. **Needs the PRD author's sign-off.**
 
 **Still open, needs a decision:**
-- A return raised off the GRN *before* billing leaves those units billable (same on `main`).
-  Closing it needs a returned-qty counter subtracted in every GRN availability read.
+- ~~A return raised off the GRN *before* billing leaves those units billable~~ — fixed
+  2026-09-24 (BUG-2026-09-24-190): returned-before-billing is subtracted in every GRN
+  availability read and the PO ceiling; a replacement receipt is billable again.
 - ~~R4 void/delete restore the CN header only~~ — fixed 2026-09-24 (BUG-2026-09-24-188): items
   and units the conversion flipped are reverted by its timestamp. A parent consignment order
   that convert marked complete is still not reopened.

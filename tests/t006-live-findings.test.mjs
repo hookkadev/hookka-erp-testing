@@ -26,6 +26,8 @@ const {
   deletePurchaseReturnRestoreStatements,
   applyPurchaseReturnStockOut,
   loadGrnItemsForReturn,
+  loadGrnReturnedQty,
+  loadPoReturnedQty,
 } = await load(
   "src/api/lib/purchase-return-create.ts",
 );
@@ -115,6 +117,38 @@ test("a blank-code GRN line is offered for return, with its PO line's code", asy
   const items = await loadGrnItemsForReturn(db, "grn-1");
   assert.equal(items.length, 1, "was dropped by `if (!materialCode) continue`");
   assert.equal(items[0].materialCode, "NLY-D12-6MM");
+});
+
+test("returned-before-billing counts only GRN-sourced returns, per GRN line", async () => {
+  const db = camelDb([
+    [/FROM purchase_return_items pri[\s\S]*pri\.grn_item_id IN/, () => [{ grnItemId: "1153", qty: 2 }]],
+  ]);
+  const m = await loadGrnReturnedQty(db, [1153, "1154"]);
+  assert.equal(m.get("1153"), 2);
+  assert.equal(m.get("1154"), undefined);
+  const src = readFileSync("src/api/lib/purchase-return-create.ts", "utf8");
+  const fn = src.slice(src.indexOf("export async function loadGrnReturnedQty"), src.indexOf("export async function loadPoReturnedQty"));
+  assert.match(fn, /COALESCE\(pr\.purchase_invoice_id, ''\) = ''/, "a PI-sourced return is billed goods — it must not count");
+});
+
+test("returned-before-billing fails soft on a DB with no return tables", async () => {
+  const db = { prepare: () => ({ bind: () => ({ all: async () => { throw new Error('relation "purchase_return_items" does not exist'); } }) }) };
+  assert.equal((await loadGrnReturnedQty(db, ["1"])).size, 0);
+  assert.equal((await loadPoReturnedQty(db, "po-1")).size, 0);
+});
+
+test("every GRN billable-qty check subtracts returned-before-billing (BUG-2026-09-24-190)", () => {
+  const pi = readFileSync("src/api/routes/purchase-invoices.ts", "utf8");
+  // create (GRN branch), edit ceiling, un-void re-draw
+  assert.match(pi, /consumedQty: \(Number\(gi\.invoicedQty \?\? gi\.invoiced_qty \?\? 0\) \|\| 0\) \+ returned/);
+  assert.match(pi, /const projected = currentInvoiced - oldThisPi \+ newQty \+ returned;/);
+  assert.match(pi, /if \(invoiced \+ returned \+ qty > accepted\)/);
+  // PO ceiling: ordered less what went back, never below what was received
+  assert.match(pi, /poInvoiceCeiling\(\s*Math\.max\(0, \(Number\(po\.quantity\) \|\| 0\) - \(returnedByPoItem\.get\(itemId\) \?\? 0\)\)/);
+  // what the invoice-from-GRN picker reads
+  const grn = readFileSync("src/api/routes/grn.ts", "utf8");
+  assert.match(grn, /availableQty: computeAvailableQty\(Number\(r\.acceptedQty\) \|\| 0, invoicedQty \+ returnedQty\)/);
+  assert.equal((grn.match(/await attachReturnedQty\(/g) ?? []).length, 2, "GRN detail AND list");
 });
 
 test("deleting an OPEN return puts the PO line's receivedQty back", async () => {

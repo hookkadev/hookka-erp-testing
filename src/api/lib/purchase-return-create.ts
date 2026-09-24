@@ -207,6 +207,68 @@ async function orderedCodeForGrnItem(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Returned-before-billing quantities (BUG-2026-09-24-190). A return raised off
+// the GRN itself (no purchase_invoice_id) sends back goods nobody has billed
+// yet, so those units must come off what is still billable: GRN line
+// available = accepted − invoiced − returned. A return raised off a PI is
+// already-billed goods — the debit note is its credit — and never counts here.
+// Both helpers fail soft to "nothing returned" on a DB that has never had a
+// return (the tables are created on first use).
+// ---------------------------------------------------------------------------
+/** grn_items.id → qty returned off the GRN before billing. */
+export async function loadGrnReturnedQty(
+  db: D1Database,
+  grnItemIds: Array<string | number>,
+): Promise<Map<string, number>> {
+  const ids = [...new Set(grnItemIds.map(String).filter(Boolean))];
+  const out = new Map<string, number>();
+  if (ids.length === 0) return out;
+  try {
+    const res = await db
+      .prepare(
+        `SELECT pri.grn_item_id AS "grnItemId", COALESCE(SUM(pri.quantity), 0) AS "qty"
+           FROM purchase_return_items pri
+           JOIN purchase_returns pr ON pr.id = pri.purchase_return_id
+          WHERE COALESCE(pr.purchase_invoice_id, '') = ''
+            AND pri.grn_item_id IN (${ids.map(() => "?").join(", ")})
+          GROUP BY pri.grn_item_id`,
+      )
+      .bind(...ids)
+      .all<{ grnItemId: string; qty: number }>();
+    for (const r of res.results ?? []) out.set(String(r.grnItemId), Number(r.qty) || 0);
+  } catch {
+    /* no purchase_return tables yet — nothing returned */
+  }
+  return out;
+}
+
+/** purchase_order_items.id → qty returned off that PO line's GRNs before billing. */
+export async function loadPoReturnedQty(
+  db: D1Database,
+  poId: string,
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  try {
+    const res = await db
+      .prepare(
+        `SELECT gi.po_item_id AS "poItemId", COALESCE(SUM(pri.quantity), 0) AS "qty"
+           FROM purchase_return_items pri
+           JOIN purchase_returns pr ON pr.id = pri.purchase_return_id
+           JOIN grn_items gi ON gi.id::text = pri.grn_item_id
+          WHERE COALESCE(pr.purchase_invoice_id, '') = ''
+            AND gi.po_item_id IN (SELECT id FROM purchase_order_items WHERE purchaseOrderId = ?)
+          GROUP BY gi.po_item_id`,
+      )
+      .bind(poId)
+      .all<{ poItemId: string; qty: number }>();
+    for (const r of res.results ?? []) out.set(String(r.poItemId), Number(r.qty) || 0);
+  } catch {
+    /* no purchase_return tables / po_item_id yet — nothing returned */
+  }
+  return out;
+}
+
 // Load a GRN's received lines as return candidates (owner 2026-07-30 — "convert
 // from PI or GR"). SELECT * + dual-keyed read (runtime-added columns). Any line
 // with a material code — its own, or its PO line's — is returnable; qty seeds
