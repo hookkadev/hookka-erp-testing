@@ -181,9 +181,36 @@ export async function loadPiItemsForReturn(
   return out;
 }
 
+// The item code a GRN line was ORDERED as — through the PO line it draws down.
+// A PO-sourced GRN line stores a blank material_code (BUG-2026-08-13-052), so
+// without this a return of it listed nothing and its stock-out moved nothing
+// (measured on staging 2026-09-24). Same resolution grn.ts posts stock with
+// since BUG-2026-09-24-186, so goods leave from the material they arrived on.
+async function orderedCodeForGrnItem(
+  db: D1Database,
+  grnItemId: string | null | undefined,
+): Promise<string | null> {
+  if (!grnItemId) return null;
+  try {
+    const row = await db
+      .prepare(
+        `SELECT poi.materialCode AS "code"
+           FROM grn_items gi JOIN purchase_order_items poi ON poi.id = gi.po_item_id
+          WHERE gi.id::text = ?`,
+      )
+      .bind(String(grnItemId))
+      .first<{ code?: string | null }>();
+    return row?.code?.trim() || null;
+  } catch {
+    // grn_items.po_item_id not self-applied on this DB yet — no PO link to follow.
+    return null;
+  }
+}
+
 // Load a GRN's received lines as return candidates (owner 2026-07-30 — "convert
 // from PI or GR"). SELECT * + dual-keyed read (runtime-added columns). Any line
-// with a material code is returnable; qty seeds from the accepted/received qty.
+// with a material code — its own, or its PO line's — is returnable; qty seeds
+// from the accepted/received qty.
 export async function loadGrnItemsForReturn(
   db: D1Database,
   grnId: string,
@@ -198,7 +225,9 @@ export async function loadGrnItemsForReturn(
   };
   const out: PRCreateItem[] = [];
   for (const r of res.results ?? []) {
-    const materialCode = (pick(r, "material_code", "materialCode") ?? null) as string | null;
+    const materialCode =
+      ((pick(r, "material_code", "materialCode") ?? null) as string | null) ||
+      (await orderedCodeForGrnItem(db, String(r.id ?? "")));
     if (!materialCode) continue;
     out.push({
       grnItemId: String(r.id ?? ""),
@@ -250,8 +279,13 @@ export async function applyPurchaseReturnStockOut(
   let ledgerN = 0;
   let reversedItems = 0;
   for (const it of items) {
-    const materialCode = String((it.material_code ?? it.materialCode) ?? "").trim();
     const qty = Number(it.quantity ?? 0);
+    // A line off a PO-sourced GRN (or a PI raised from one) carries no code of
+    // its own — take the one its GRN line was ordered as.
+    const materialCode =
+      String((it.material_code ?? it.materialCode) ?? "").trim() ||
+      (await orderedCodeForGrnItem(db, (it.grn_item_id ?? it.grnItemId) as string | null)) ||
+      "";
     if (!materialCode || !(qty > 0)) continue;
     const rm = await db
       .prepare("SELECT id FROM raw_materials WHERE itemCode = ? LIMIT 1")

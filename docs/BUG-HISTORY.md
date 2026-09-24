@@ -36,6 +36,27 @@ Entries themselves stay newest-first.
 
 ---
 
+## BUG-2026-09-24-189 — a purchase return of a PO-sourced GRN line never left stock `procurement` `inventory-cascade` 🟢
+
+🟢 **Fixed** · pre-existing on `main`; same root as -186 (blank `material_code` on PO-sourced GRN lines).
+
+**Root cause.** `applyPurchaseReturnStockOut` resolved the raw material only from the return
+line's `material_code` and skipped the line when it was blank — while still flipping the return
+to `STOCK_OUT`. A PO-sourced GRN line (and any PI raised from one) has a blank code, so the
+return "succeeded" and moved no stock. `loadGrnItemsForReturn` dropped those lines outright, so a
+GRN-sourced return could not even offer them. Staging's existing 45 GRN lines all carry codes
+(imports), so nothing there was affected yet; every new PO receipt would have been.
+
+**Fix** (`purchase-return-create.ts`). `orderedCodeForGrnItem`: the GRN line's `po_item_id` →
+the PO line's item code, used by both the stock-out and the GRN return picker — the same
+resolution GRN posting uses since -186, so goods leave from the material they arrived on.
+
+**Verified.** Live lifecycle run on the staging DB (rolled back), 23/23: return 3 off a PI →
+confirm → `NLY-D12-6MM` 5355 → 5352, same-named materials untouched (was 5355 → 5355). Tests:
+`t006-live-findings` (stock-out of a blank-code line; picker offers it with the PO line's code).
+
+---
+
 ## BUG-2026-09-24-186 — GRN stock posted to the wrong raw material when several share a name `procurement` `inventory-cascade` 🟢
 
 🟢 **Fixed** · pre-existing on `main`; [C21](BUG-CLASSES.md) row 16. Found by the same live run as 182-185.

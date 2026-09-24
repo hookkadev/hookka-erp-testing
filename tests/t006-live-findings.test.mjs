@@ -21,7 +21,12 @@ try {
   // Native type-stripping handles it on newer Node.
 }
 const load = (p) => import(pathToFileURL(resolve(process.cwd(), p)).href);
-const { createPurchaseReturn, deletePurchaseReturnRestoreStatements } = await load(
+const {
+  createPurchaseReturn,
+  deletePurchaseReturnRestoreStatements,
+  applyPurchaseReturnStockOut,
+  loadGrnItemsForReturn,
+} = await load(
   "src/api/lib/purchase-return-create.ts",
 );
 const { buildInvoiceDeathCnReleaseStatements } = await load(
@@ -84,6 +89,32 @@ test("purchase return gives the PO line back its qty, and does NOT re-open the G
     !stmts.some((s) => /UPDATE grn_items SET invoiced_qty/.test(s.sql)),
     "lowering invoiced_qty let the returned goods be invoiced a second time",
   );
+});
+
+test("return stock-out of a blank-code (PO-sourced) line takes stock off the PO line's material", async () => {
+  // Was `if (!materialCode) continue;` — status went STOCK_OUT, no stock moved.
+  const db = camelDb([
+    [/FROM purchase_returns WHERE id = \?/, () => [{ id: "pr-1", status: "OPEN" }]],
+    [/FROM purchase_return_items WHERE purchase_return_id/, () => [{ grnItemId: "1153", materialCode: null, quantity: 3 }]],
+    [/JOIN purchase_order_items poi ON poi\.id = gi\.po_item_id/, () => [{ code: "NLY-D12-6MM" }]],
+    [/FROM raw_materials WHERE itemCode = \?/, (args) => (args[0] === "NLY-D12-6MM" ? [{ id: "rm-172" }] : [])],
+    [/FROM rm_batches WHERE rmId = \?/, () => [{ id: "b1", remainingQty: 10, unitCostSen: 100 }]],
+  ]);
+  const res = await applyPurchaseReturnStockOut(db, "pr-1", "hookka");
+  assert.equal(res.ok, true);
+  assert.equal(res.reversedItems, 1, "the line must actually leave stock");
+  const bal = db.batches[0].find((s) => /UPDATE raw_materials SET balanceQty = balanceQty - \?/.test(s.sql));
+  assert.deepEqual(bal?.args, [3, "rm-172"]);
+});
+
+test("a blank-code GRN line is offered for return, with its PO line's code", async () => {
+  const db = camelDb([
+    [/SELECT \* FROM grn_items WHERE grnId/, () => [{ id: 1153, materialCode: "", materialName: "WHITE SPONGE", acceptedQty: 5 }]],
+    [/JOIN purchase_order_items poi ON poi\.id = gi\.po_item_id/, () => [{ code: "NLY-D12-6MM" }]],
+  ]);
+  const items = await loadGrnItemsForReturn(db, "grn-1");
+  assert.equal(items.length, 1, "was dropped by `if (!materialCode) continue`");
+  assert.equal(items[0].materialCode, "NLY-D12-6MM");
 });
 
 test("deleting an OPEN return puts the PO line's receivedQty back", async () => {
