@@ -53,7 +53,7 @@ test('the release restores status and clears both linkage columns', () => {
   assert.match(fn, /SET status = \?,\s*\n\s*status_before_conversion = NULL,\s*\n\s*convertedInvoiceId = NULL/);
   // Dual-keyed — the camelCase key is what the real Postgres client returns.
   assert.match(fn, /cn\.statusBeforeConversion \?\? cn\.status_before_conversion \?\? "PARTIALLY_SOLD"/);
-  assert.match(fn, /\.bind\(restoreTo, cn\.id\)/);
+  assert.match(fn, /\.bind\(restoreTo, convertedAt, cn\.id\)/);
 });
 
 test('the void handler calls the CN release inside the void branch, alongside the DO release', () => {

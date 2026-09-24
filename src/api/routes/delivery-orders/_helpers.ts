@@ -1540,8 +1540,18 @@ export async function computeDoInvoiceLines(
   // invoice would bill the whole sales order again on top of what the first
   // invoice already charged. Restrict them to what they were always for — the
   // FIRST, whole-document bill of a delivery nothing has drawn on yet.
+  //
+  // And only when there IS something delivered to bill: lines that survived to
+  // invItems but priced at zero, or a legacy DO with no lines at all. A DO whose
+  // lines all came back on a Delivery Return has an empty invItems for the
+  // right reason — nothing is left — and must bill RM 0, not fall through to
+  // billing the whole SO (a fully-returned single-line DO billed RM 830.00 on
+  // staging, 2026-09-24).
+  const somethingToBill = invItems.length > 0 || doItems.length === 0;
   const freshWholeDo =
-    !select && doItems.every((di) => (Number(di.invoicedQty ?? di.invoiced_qty ?? 0) || 0) === 0);
+    somethingToBill &&
+    !select &&
+    doItems.every((di) => (Number(di.invoicedQty ?? di.invoiced_qty ?? 0) || 0) === 0);
 
   // Fallback 1: nothing priced at all → bill the linked SO lines directly.
   if (computedTotal === 0 && freshWholeDo) {
@@ -1713,12 +1723,14 @@ export async function buildDoDeliveredSoAndInvoice(
   await ensureDoPartialInvoiceColumns(db);
   const billing = await loadDoBillingState(db, doRow.id);
 
-  if (!billing.fullyInvoiced && soIds.length > 0 && !incomplete) {
-    const { invItems, computedTotal, draws } = await computeDoInvoiceLines(
-      db,
-      doRow.id,
-      soIds,
-    );
+  const lines =
+    !billing.fullyInvoiced && soIds.length > 0 && !incomplete
+      ? await computeDoInvoiceLines(db, doRow.id, soIds)
+      : null;
+  // Nothing left to bill (every line came back on a Delivery Return) → raise
+  // no invoice at all, rather than an empty RM 0 one.
+  if (lines && (lines.invItems.length > 0 || lines.computedTotal > 0)) {
+    const { invItems, computedTotal, draws } = lines;
 
     const invId = genInvoiceId();
     const invoiceNo = await nextInvoiceNo(db);

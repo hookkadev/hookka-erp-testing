@@ -160,6 +160,24 @@ test("A7 — a return of the WHOLE line zeroes just that line, a sibling line is
   assert.equal(table.quantity, 2, "the untouched sibling line bills in full");
 });
 
+test("a single-line DO returned in FULL bills nothing — it must not fall back to billing the whole SO", async () => {
+  // Was the "nothing priced → bill the SO lines directly" fallback: an empty
+  // invItems read as "priced at zero", so a DO whose only line came back
+  // invoiced the entire sales order (RM 830.00 on staging, 2026-09-24).
+  const b = book();
+  b.returnedQtyByPoId["po-1"] = 3;
+  const db = fakeDb(b);
+  const { invItems, computedTotal } = await computeDoInvoiceLines(db, "do-1", ["so-1"], null);
+  assert.equal(invItems.length, 0);
+  assert.equal(computedTotal, 0);
+});
+
+test("the auto-invoice on delivery raises no invoice when nothing is left to bill", () => {
+  const i = HELPERS_SRC.indexOf("export async function buildDoDeliveredSoAndInvoice");
+  const fn = HELPERS_SRC.slice(i);
+  assert.match(fn, /if \(lines && \(lines\.invItems\.length > 0 \|\| lines\.computedTotal > 0\)\)/);
+});
+
 // ===========================================================================
 // 3. Cancel must refuse after restock (delivery-returns.ts)
 // ===========================================================================
