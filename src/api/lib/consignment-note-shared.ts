@@ -523,6 +523,40 @@ export async function buildInvoiceDeathCnReleaseStatements(
   return statements;
 }
 
+// Side quest H (BUG-2026-09-24-191). convert-to-invoice runs
+// cascadeCNCompletionToCO: once every CN of a consignment order is sold, the CO
+// goes DELIVERED. The void / delete release above puts the CN back to ACTIVE,
+// but nothing stepped the CO back, so it read "complete" with goods still at
+// the branch. The caller reads the CO BEFORE its batch (the release clears
+// convertedInvoiceId) and reopens it AFTER — cascadeCNReversalToCO is the
+// existing inverse and only moves a DELIVERED CO whose CNs are no longer all
+// sold. Best-effort, exactly like the completion cascade on convert.
+export async function consignmentOrderForInvoice(
+  db: D1Database,
+  invoiceId: string,
+): Promise<string | null> {
+  const row = await db
+    .prepare("SELECT consignmentOrderId FROM consignment_notes WHERE convertedInvoiceId = ?")
+    .bind(invoiceId)
+    .first<{ consignmentOrderId?: string | null; consignment_order_id?: string | null }>();
+  return row?.consignmentOrderId ?? row?.consignment_order_id ?? null;
+}
+
+export async function reopenConsignmentOrderAfterRelease(
+  db: D1Database,
+  consignmentOrderId: string | null,
+): Promise<void> {
+  if (!consignmentOrderId) return;
+  try {
+    await cascadeCNReversalToCO(db, consignmentOrderId);
+  } catch (err) {
+    console.error(
+      "[invoice void/delete] CO reversal cascade failed:",
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+}
+
 export const CN_VALID_TRANSITIONS: Record<string, string[]> = {
   ACTIVE: ["ACTIVE", "PARTIALLY_SOLD"],
   PARTIALLY_SOLD: [

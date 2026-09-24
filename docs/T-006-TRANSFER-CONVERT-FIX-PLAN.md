@@ -404,8 +404,8 @@ goods be billed twice. **Needs the PRD author's sign-off.**
   2026-09-24 (BUG-2026-09-24-190): returned-before-billing is subtracted in every GRN
   availability read and the PO ceiling; a replacement receipt is billable again.
 - ~~R4 void/delete restore the CN header only~~ — fixed 2026-09-24 (BUG-2026-09-24-188): items
-  and units the conversion flipped are reverted by its timestamp. A parent consignment order
-  that convert marked complete is still not reopened.
+  and units the conversion flipped are reverted by its timestamp. ~~A parent consignment order
+  that convert marked complete is still not reopened~~ — fixed (BUG-2026-09-24-191).
 - ~~GRN stock by `description = ? LIMIT 1`~~ — fixed (BUG-2026-09-24-186). ~~Fully returned DO
   still invoices the SO~~ — fixed (BUG-2026-09-24-187). Same first-match shape remains in BOM
   consumption (`po-cost-cascade.ts` `resolveRmFromBom`, C21 row 17).
