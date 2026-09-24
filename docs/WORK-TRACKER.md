@@ -1,6 +1,6 @@
 # Hookka ERP — Work Tracker
 
-> **Last verified: 2026-09-23** — branch `feat/dashboard-experimental-parity` entry updated below (its entry is the newest).
+> **Last verified: 2026-09-24** — branch `feat/dashboard-experimental-parity` entry updated below (PR #505 open; its entry is the newest).
 > **Last verified: 2026-09-23** — branch `fix/production-auto-load` added below (open, its entry is the newest).
 > **Last verified: 2026-09-23** — branch `fix/so-duplicate-ref-saves-draft` added below (open, its entry is the newest).
 > **Last verified: 2026-09-22** — branch `fix/scan-queue-client-driven` added below (open, its entry is the newest).
@@ -24,7 +24,7 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
-## 2026-09-23 — 🔵 /dashboard-experimental: widgets from /dashboard (branch `feat/dashboard-experimental-parity`, pushed, no PR)
+## 2026-09-23 — 🔵 /dashboard-experimental: widgets from /dashboard (branch `feat/dashboard-experimental-parity`, PR #505 open)
 
 Director: every widget on /dashboard must also exist on /dashboard-experimental. Owner rules:
 `dashboard-b/index.tsx` and `accounting/index.tsx` untouched; no rounding (truncate to 2dp);
@@ -42,7 +42,7 @@ cards go in existing tabs/sub-tabs (no new sub-tabs — `/m` reads `TAB_SUBS`). 
    Finance > Returns (margins / current & quick ratio / AR-AP aging, plain fetch).
 6. ✅ Tests: `tests/dashboard-widgets-lib.test.mjs`; Overview tile guard in
    `tests/compliance-unknown-outcome.test.mjs`. tsc (app) / npm test / eslint / vite build green.
-7. 🟡 Owner: `OcrAccuracyCard` rates are rounded SERVER-side (`ocr-accuracy.ts:354`) and the
+7. 🟡 Owner: `OcrAccuracyCard` rates are rounded SERVER-side (`src/api/routes/ocr-accuracy.ts:354`) and the
    card is shared with /dashboard, so it is left as is. Worker Efficiency not ported — Employees >
    Efficiency already has Top 5 / Bottom 5. Not verified in a browser (needs a logged-in session
    with API data) — check live after deploy.

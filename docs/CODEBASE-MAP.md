@@ -40,7 +40,7 @@
 > section gains the `attendance_records` warning — that table carries no production or
 > efficiency data and never has (BUG-2026-08-13-103).
 >
-> **Last verified: 2026-09-23 on branch `feat/dashboard-experimental-parity`** — the Experimental dashboard section only: "Widgets from `/dashboard`" paragraph added, the `DashboardWidgets.tsx` row added, and the AllOverviewView / SalesOrdersView / OperationsView / dashboard-shared-lib / FinanceView rows extended for the ported cards.
+> **Last verified: 2026-09-24 on branch `feat/dashboard-experimental-parity`** — the Experimental dashboard section: "Widgets from `/dashboard`" paragraph added, the `DashboardWidgets.tsx` row added, and the AllOverviewView / SalesOrdersView / OperationsView / dashboard-shared-lib / FinanceView rows extended for the ported cards; the OCR-exception anchor re-pointed at `src/api/routes/ocr-accuracy.ts:354` (the `Math.round`), and the Hookka Report row's `/daily-report` route anchor re-measured (`src/dashboard-routes.tsx:489`, was `:474` — the access-gate edit moved it). `check-codebase-map.mjs` OK.
 >
 > **Last verified: 2026-09-23 on branch `feat/service-case-customer-po`** — the Service & Repair `service-cases/index.tsx` / `service-cases.ts` row only: line counts re-measured (1691 / 1068) and the Customer PO column (DEV-13) noted.
 >
@@ -989,7 +989,7 @@ quick ratio from `/api/accounting/dashboard` rows via `financeRatios`, unrounded
 accounting access"). Not ported: Worker Efficiency — Employees > Efficiency already has its
 Top 5 / Bottom 5 (production ÷ working, off the prototype feed rather than `/dashboard`'s
 job-card / working-hour summaries).
-**Known exception:** `OcrAccuracyCard`'s rates are rounded server-side (`ocr-accuracy.ts:354`)
+**Known exception:** the OCR card's rates are rounded server-side — `Math.round` in `src/api/routes/ocr-accuracy.ts:354`
 and the card is shared with `/dashboard`, so it is left as is. Tests:
 `tests/dashboard-widgets-lib.test.mjs`, `tests/compliance-unknown-outcome.test.mjs` (Overview tile).
 
@@ -1760,7 +1760,7 @@ id** — those carry their own endpoints.
 
 | Frontend module | API route | Primary tables | Tests |
 |---|---|---|---|
-| `src/pages/hookka-report-editions.tsx` — **NOT a page and NOT a route.** No default export; it exports `EditionToggle` (`src/pages/hookka-report-editions.tsx:157`), `OperationsEdition` (`src/pages/hookka-report-editions.tsx:235`) and the `Edition` type (line 17). Imported ONLY by `src/pages/daily-report.tsx` (import block L16-20), which imports both at `src/pages/daily-report.tsx:17-18` and renders `OperationsEdition` at `src/pages/daily-report.tsx:1134` and `EditionToggle` at `src/pages/daily-report.tsx:1097` + `:1180`. (`--fix` rewrites these to the IMPORT lines, because the import is the first occurrence of each name — if this row comes back reading `:17` / `:18`, re-point it at the render sites rather than trusting the auto-fix.) Reachable only via the `/daily-report` route entry — `DailyReport` (`src/dashboard-routes.tsx:474`) (759) | `src/api/routes/reports.ts` — `GET /operations.json` (`:345`), collector `src/api/lib/operations-report.ts` (1248) | `sales_orders` / `sales_order_items` / `job_cards` / `payslips` / `attendance_records` / `workers` / `products` / `raw_materials` / `rm_batches` / `cost_ledger` / `purchase_orders` / `invoices` / `invoice_payments` / `delivery_orders` / `service_cases` / `qc_inspection_items` / `price_histories` / `departments` | **NONE** |
+| `src/pages/hookka-report-editions.tsx` — **NOT a page and NOT a route.** No default export; it exports `EditionToggle` (`src/pages/hookka-report-editions.tsx:157`), `OperationsEdition` (`src/pages/hookka-report-editions.tsx:235`) and the `Edition` type (line 17). Imported ONLY by `src/pages/daily-report.tsx` (import block L16-20), which imports both at `src/pages/daily-report.tsx:17-18` and renders `OperationsEdition` at `src/pages/daily-report.tsx:1134` and `EditionToggle` at `src/pages/daily-report.tsx:1097` + `:1180`. (`--fix` rewrites these to the IMPORT lines, because the import is the first occurrence of each name — if this row comes back reading `:17` / `:18`, re-point it at the render sites rather than trusting the auto-fix.) Reachable only via the `/daily-report` route entry — `DailyReport` (`src/dashboard-routes.tsx:489`) (759) | `src/api/routes/reports.ts` — `GET /operations.json` (`:345`), collector `src/api/lib/operations-report.ts` (1248) | `sales_orders` / `sales_order_items` / `job_cards` / `payslips` / `attendance_records` / `workers` / `products` / `raw_materials` / `rm_batches` / `cost_ledger` / `purchase_orders` / `invoices` / `invoice_payments` / `delivery_orders` / `service_cases` / `qc_inspection_items` / `price_histories` / `departments` | **NONE** |
 
 **Endpoints:** `GET /api/reports/operations.json?period=<edition>&date=<anchorYmd>`
 (`:230-231`), `GET /api/files?resourceType=modular` (`:236-237`) for the product photos,
