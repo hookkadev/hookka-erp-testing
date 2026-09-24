@@ -27,12 +27,7 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ## 2026-09-24 — 🔵 DEV-14 Discount on Purchase Invoices + PI "View source document" (#510 MERGED; correction on branch `fix/pi-document-discount` → `main`)
 
-**Scan autofill (BUG-2026-09-24-189, branch `fix/scan-code-family-match` → `main`):** a first-time
-supplier code now resolves when it is our code in another form (`codeFamilyMatch`: NICCA-6-FOG →
-NICCA-06, zero-padding-tolerant binding lookup), a hand pick teaches the binding, and a correction
-on the PI detail page teaches it too. Open: per-line PO refs (`= PO2511/008`) not extracted.
-
-**Correction (BUG-2026-09-24-188, #512 MERGED):** the supplier prints ONE discount at the bottom of the invoice
+**Correction (BUG-2026-09-24-188):** the supplier prints ONE discount at the bottom of the invoice
 (Meditex SMI2608/599: Gross 856.00 · Discount (81.00) · Total 775.00), not per line. The per-line
 column is removed from create / detail / scan / PDF; one "Less: Discount" field sits in the totals
 and `allocateDiscountSen` spreads it pro-rata into the same `discount_sen` column. Scan pre-fills it

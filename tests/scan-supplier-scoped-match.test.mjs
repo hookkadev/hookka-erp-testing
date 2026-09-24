@@ -116,8 +116,7 @@ test("a catalogue-tier guess is not allowed to teach a binding", () => {
 test("the operator is told which tier answered", () => {
   // A PO line and a bare catalogue reading must not look alike on the row.
   assert.match(SRC, /function matchTierHint\(/);
-  // …and HOW it matched (a supplier-code match reads differently from text).
-  assert.match(SRC, /matchTierHint\(line\.matchTier, line\.matchVia\)/);
+  assert.match(SRC, /matchTierHint\(line\.matchTier\)/);
 });
 
 // ── Why the scoping matters, demonstrated on the matcher itself ─────────────

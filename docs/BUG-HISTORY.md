@@ -1,6 +1,6 @@
 # Bug History
 
-> **Last verified: 2026-09-24** — newest entry BUG-2026-09-24-189 (branch `fix/scan-code-family-match`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-09-24** — newest entry BUG-2026-09-24-188 (branch `fix/pi-document-discount`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 
 Living log of bugs we've identified, diagnosed, and fixed in Hookka ERP.
 
@@ -33,39 +33,6 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
-
----
-
-## BUG-2026-09-24-189 — Scanned Meditex line NICCA-6-FOG came through blank; operators had to pick NICCA-06 by hand `procurement` `scan-supplier` 🟡
-
-🟡 **Fix in progress** · Meditex SMI2608/599, line 3: `NICCA-6-FOG` · "TEXTILE FABRIC,- FOG WIDTH:
-145CM +/- 2". The card left Internal Code blank ("Pick from catalog") and blocked Create. The
-operators want scans to fill themselves. Expected fill (confirmed with the user): Description
-**FABRIC**, Internal Code **NICCA-06**, Supplier SKU **NICCA-06-FOG**.
-
-**Root cause.** Every rung of the resolver missed. (1) The binding lookup and the PO-learned
-`supplierSkuIndex` compare codes EXACTLY after stripping punctuation — the saved code is
-`NICCA-06-FOG`, the invoice prints `NICCA-6-FOG`: one zero apart. (2) No Linked PO — the header P/O
-field reads "JASON ORDER"; the real refs (`= PO2511/008`) are printed under each line and not
-extracted. (3) Text scoring cannot single out NICCA-06, whose catalogue description is just
-"FABRIC". Yet the same invoice shows the supplier's codes ARE ours in another form: `NICCA-6-FOG` ↔
-`NICCA-06`, `PSF15.064HCS(14)` ↔ `MED-PSF15.064HCS(14)(L)`, `TARONI-CREAM 82"` ↔ identical.
-
-**Fix** (`src/lib/supplier-material-candidates.ts`): `codeFamilyMatch` — per tier, before text
-scoring, match when one code's parts sit inside the other's (zero-padding ignored); ≥2 parts / ≥5
-chars; longest run wins; a tie is refused. `sameSupplierCode` makes the binding lookup (PI + GRN
-wizards) and the SKU index zero-padding tolerant. Scan modal: the row says "Matched on the
-supplier's code"; a hand pick clears the auto-match flags so Create learns the binding (it did not —
-a correction over a catalogue guess stayed "unverified"). PI edit (PUT) now learns the binding for
-lines whose (material, supplier SKU) pair changed, so a fix on the detail page also sticks.
-
-**Regression.** `tests/scan-code-family-match.test.mjs` — the three Meditex pairs, the expected
-FABRIC / NICCA-06 fill, zero-padding equality, and the refusals (one part, < 5 chars, a different
-number, a tie).
-
-**Verify.** Not run in a browser (login). **Prod UNMEASURED until deployed** — re-scan SMI2608/599:
-line 3 must fill NICCA-06 / FABRIC / NICCA-06-FOG with no pick. Still open: per-line PO refs
-(`= PO2511/008`) are not extracted.
 
 ---
 

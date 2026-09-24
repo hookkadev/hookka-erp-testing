@@ -550,11 +550,6 @@ function normalizeItems(
   return { ok: true, rows };
 }
 
-/** A line's (internal code, supplier code) pair, as the binding learner keys it. */
-function supplierPairKey(materialCode: string | null, supplierSku: string | null): string {
-  return `${(materialCode ?? "").trim().toUpperCase()}\u0000${(supplierSku ?? "").trim().toUpperCase()}`;
-}
-
 async function loadItemsForPI(
   db: D1Database,
   piId: string,
@@ -2558,35 +2553,7 @@ app.put("/:id", async (c) => {
     }
   }
 
-  // The pairs on file BEFORE this edit — so the learner below can tell which
-  // lines the operator actually corrected.
-  const priorPairs = normalizedItems && normalizedItems.ok
-    ? new Set((await loadItemsForPI(db, id)).map((it) => supplierPairKey(it.materialCode, it.supplierSku)))
-    : new Set<string>();
-
   await db.batch(statements);
-
-  // A line the operator CORRECTED here (supplier code NICCA-6-FOG now points at
-  // NICCA-06) teaches the binding, exactly as Create does — otherwise fixing it
-  // on this page left the next scan of the same supplier code blank again.
-  // Only changed pairs: an untouched line may be a catalogue guess from the scan
-  // that Create deliberately declined to learn, and re-saving the invoice for
-  // some other reason must not quietly turn it into a permanent binding.
-  if (normalizedItems && normalizedItems.ok) {
-    await learnSupplierBindings(
-      db,
-      String(existing.supplierId ?? ""),
-      normalizedItems.rows.map((r) => ({
-        materialCode: r.materialCode,
-        materialName: r.materialName,
-        supplierSku: r.supplierSku,
-        supplierDescription: r.materialName,
-        unitPriceSen: r.unitPriceSen,
-        learnable: !priorPairs.has(supplierPairKey(r.materialCode, r.supplierSku)),
-      })),
-      () => `smb-${crypto.randomUUID().slice(0, 8)}`,
-    ).catch(() => undefined);
-  }
 
   await emitAudit(c, {
     resource: "purchase-invoices",
