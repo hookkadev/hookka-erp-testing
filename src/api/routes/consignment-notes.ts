@@ -1328,11 +1328,12 @@ app.post("/:id/return", async (c) => {
       const refundSen = cn.totalValue - nextTotalValue;
       statements.push(
         c.var.DB.prepare(
+          // No updated_at: `customers` has no such column (the write made
+          // this whole batch fail — see convert-to-invoice below).
           `UPDATE customers
-              SET outstandingSen = GREATEST(0, COALESCE(outstandingSen, 0) - ?),
-                  updated_at = ?
+              SET outstandingSen = GREATEST(0, COALESCE(outstandingSen, 0) - ?)
             WHERE id = ?`,
-        ).bind(refundSen, now, cn.customerId),
+        ).bind(refundSen, cn.customerId),
       );
     }
 
@@ -1677,12 +1678,14 @@ app.post("/:id/convert-to-invoice", async (c) => {
       // invoice total, mirroring DO's DELIVERED → invoice flow
       // (delivery-orders.ts:1857-1861). Without this, every CN-origin
       // invoice was off-ledger from the customer's A/R balance.
+      // No updated_at: `customers` has no such column, and writing it failed
+      // the whole convert batch — no CN on staging had ever converted
+      // (measured 2026-09-24). Same shape as the DO-side bump.
       c.var.DB.prepare(
         `UPDATE customers
-            SET outstandingSen = COALESCE(outstandingSen, 0) + ?,
-                updated_at = ?
+            SET outstandingSen = COALESCE(outstandingSen, 0) + ?
           WHERE id = ?`,
-      ).bind(totalSen, now, cn.customerId),
+      ).bind(totalSen, cn.customerId),
     ];
 
     await c.var.DB.batch(statements);

@@ -63,7 +63,8 @@ test("the guard's ceiling and consumption are read for THAT PO", () => {
 test("the ceiling matches by po_item_id, not material_code (T-006 R8)", () => {
   assert.match(
     SRC,
-    /LEFT JOIN grn_items gi ON gi\.id = pii\.grn_item_id/,
+    // ::text — grn_items.id is BIGINT, grn_item_id TEXT; uncast, Postgres 500s.
+    /LEFT JOIN grn_items gi ON gi\.id::text = pii\.grn_item_id/,
     "already-invoiced must resolve through the GRN line's own po_item_id",
   );
   assert.match(SRC, /gi\.po_item_id AS "poItemId"/);

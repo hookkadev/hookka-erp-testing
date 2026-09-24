@@ -1,5 +1,8 @@
 # Recurring bug classes — the index that makes P5 executable
 
+> **Last verified: 2026-09-24** — restamped on branch `fix/t006-live-findings`: C23 gains
+> instances 8-9 (BUG-2026-09-24-183), both found by running T-006's routes against the real
+> staging DB after their snake-keyed mocks had passed.
 > **Last verified: 2026-09-11** — restamped on branch `fix/po-list-cache-key-collision`,
 > which **adds C22 — a cache key coarser than the handler it names** (BUG-2026-09-11-180:
 > the Production Overview served another page's job-card-less payload and rendered its
@@ -1632,5 +1635,7 @@ in both, a read that cannot succeed returns a value that looks like data.
 | 3 | P&L historical, read side | ✅ 2026-06-30 (BUG-2026-06-30-001) |
 | 4 | supplier payments list + PI outstanding | ✅ 2026-07-01 (BUG-2026-07-01-003) |
 | 5 | `dashboard-prototype.ts` — 260 reads, whole route | ✅ 2026-09-15 (BUG-2026-09-15-181) — converted from the rename map |
+| 8 | `createPurchaseReturn` — `accepted_qty` / `po_item_id` read snake-only: every GRN-linked return refused | ✅ 2026-09-24 (BUG-2026-09-24-183) |
+| 9 | `buildInvoiceDeathCnReleaseStatements` — `status_before_conversion` snake-only: every CN void restored `PARTIALLY_SOLD` | ✅ 2026-09-24 (BUG-2026-09-24-183) — both passed tests whose mock returned snake keys; `tests/t006-live-findings.test.mjs` uses a camelCase fake DB instead |
 | 6 | **every other route reading rows from `getSql`** | ⬜ unswept. No test forbids a sixth. The cheap sweep is `grep -oE "\br\.[a-z]+_[a-z_]+" src/api/routes/*.ts` — a hit is not automatically a bug (some are bound params or SQL fragments) but every hit deserves a look |
 | 7 | **no test asserts a payload's money field is non-zero** | ⬜ open. This class has now recurred five times and every instance was found by a human noticing a wrong number on a screen. One assertion per money-bearing endpoint — "this field is not 0 for a book with sales" — would have caught all five |
