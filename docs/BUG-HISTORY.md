@@ -1,6 +1,6 @@
 # Bug History
 
-> **Last verified: 2026-09-24** — newest entry BUG-2026-09-24-189 (branch `fix/scan-code-family-match`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-09-24** — newest entry BUG-2026-09-24-190 (branch `fix/health-timestamps-myt`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 
 Living log of bugs we've identified, diagnosed, and fixed in Hookka ERP.
 
@@ -35,6 +35,48 @@ Entries themselves stay newest-first.
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
 
 ---
+
+## BUG-2026-09-24-190 — Every timestamp on System Health read 8 hours early; the Audit feed dated a 10:40 login as 02:40 `audit-logging` `ui-frontend` `platform` 🟡
+
+🟡 **Fix in progress** · Owner-reported right after [BUG-2026-09-24-187](#bug-2026-09-24-187--system-health-showed-no-audit-events-and-successful-logins-0--healthy-while-19227-audit-rows-sat-in-the-table)
+made the panels show data at all: the times were wrong. A login at **10:40 MYT** was listed as
+**02:40** — exactly UTC, on the one screen whose entire job is "when did this happen".
+
+**Root cause.** Four places rendered the stored timestamp by slicing the string rather than
+converting it: `src/pages/admin/health.tsx:1481` (Audit feed), `:1667` (Recent security events),
+`:1808` (deploys) and `:1959` (slow requests) all did
+`r.ts.slice(5, 16).replace('T', ' ')` on a value stored as `2026-09-24 02:05:48.109016+00`. A slice
+cannot convert a zone, so every row on the page showed the UTC clock, and rows between 16:00 and
+24:00 UTC also carried the WRONG DATE — an event at 01:00 on the 24th in Malaysia was filed under
+the 23rd.
+
+**Why the existing helper was not enough.** `formatDateTime` in `src/lib/utils.ts` leaves the zone
+to the viewer's machine and relies on `new Date()` parsing the Postgres shape — a space separator,
+microsecond precision and a BARE `+00` offset, which is not a format `new Date()` is specified to
+accept.
+
+**Fix.** `parseDbTimestamp` + `formatTimestampMY` in `src/lib/utils.ts`. The parser normalises all
+three stored shapes (Postgres text with a bare offset, ISO with `Z`, and the zone-less
+`CURRENT_TIMESTAMP` default, which is UTC) and returns null instead of an Invalid Date, so an odd
+row renders raw rather than as the word "Invalid" — an audit row with a strange timestamp is still
+evidence. The formatter pins `Asia/Kuala_Lumpur` rather than trusting the viewer's clock, matching
+`customer-notify.ts` and `delivery-list-filters.ts`. Each cell now carries the full
+`DD/MM/YYYY HH:MM:SS MYT` on hover.
+
+**Regression.** `tests/timestamp-my-format.test.mjs` — 8 cases over the three stored shapes, plus
+the 17:00-UTC case that pins the DATE rollover a naive "+8" would still get wrong, plus the
+unparseable and null paths.
+
+**Verify.** `npm test` 4,856 pass / 0 fail, `tsc` clean. After deploy, an event you trigger at a
+known local time must appear at that time on /admin/health, not eight hours earlier. **Prod
+UNMEASURED until then.**
+
+**Still open.** The same raw-slice pattern renders the Accounting → Corrections list and its CSV
+export (`src/pages/accounting/index.tsx:6623`, `:6648`); those are a separate change because the
+export may already have been archived by month.
+
+---
+
 
 ## BUG-2026-09-24-189 — Scanned Meditex line NICCA-6-FOG came through blank; operators had to pick NICCA-06 by hand `procurement` `scan-supplier` 🟡
 
