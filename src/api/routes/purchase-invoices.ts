@@ -24,7 +24,7 @@ import {
   ledgerHasSource,
 } from "../lib/journal-hash";
 import { nextMonthDueDate } from "../../lib/terms";
-import { roundUnitPriceSen, lineTotalSen as computeLineTotalSen } from "../../lib/unit-price";
+import { roundUnitPriceSen, discountedLineSen } from "../../lib/unit-price";
 import { issueDocNumber } from "../lib/doc-number-service";
 import {
   checkConvertAvailability,
@@ -104,6 +104,10 @@ function ensurePiMigrations(db: D1Database): Promise<void> {
       "ALTER TABLE purchase_invoices ADD COLUMN IF NOT EXISTS subtotal_sen INTEGER DEFAULT 0",
       "ALTER TABLE purchase_invoices ADD COLUMN IF NOT EXISTS tax_sen INTEGER DEFAULT 0",
       "ALTER TABLE purchase_invoice_items ADD COLUMN IF NOT EXISTS tax_sen INTEGER DEFAULT 0",
+      // Per-line discount in sen (DEV-14, 2026-09-24). line_total_sen is stored
+      // NET of it, so every reader of line_total_sen (GL, costing, 3-way match)
+      // sees the discounted amount without change. snake_case → no rename-map.
+      "ALTER TABLE purchase_invoice_items ADD COLUMN IF NOT EXISTS discount_sen INTEGER DEFAULT 0",
       // Source supplier document (owner 2026-06-30). When the PI was created
       // from a scan-queue auto-split chunk, this points to the file_assets
       // row holding THAT specific chunk's PDF — the operator can re-open the
@@ -277,6 +281,8 @@ export type PurchaseInvoiceItem = {
   // Per-line SST in sen (owner 2026-06-30). 0 for non-taxable lines and for
   // legacy rows that never recorded per-line tax. lineTotalSen stays PRE-TAX.
   taxSen: number;
+  // Per-line discount in sen (DEV-14). lineTotalSen = qty × unit − discount.
+  discountSen: number;
   lineType: PurchaseInvoiceItemLineType;
   notes: string | null;
   grnItemId: string | null;
@@ -303,6 +309,8 @@ type PurchaseInvoiceItemRow = {
   lineType?: string;
   tax_sen?: number | null;
   taxSen?: number | null;
+  discount_sen?: number | null;
+  discountSen?: number | null;
   notes: string | null;
   grn_item_id?: string | null;
   grnItemId?: string | null;
@@ -412,6 +420,7 @@ function rowToItem(r: PurchaseInvoiceItemRow): PurchaseInvoiceItem {
     unitPriceSen: Number(r.unit_price_sen ?? r.unitPriceSen) || 0,
     lineTotalSen: Number(r.line_total_sen ?? r.lineTotalSen) || 0,
     taxSen: Number(r.tax_sen ?? r.taxSen) || 0,
+    discountSen: Number(r.discount_sen ?? r.discountSen) || 0,
     lineType: VALID_LINE_TYPES.includes(lineType) ? lineType : "OTHER",
     notes: r.notes ?? null,
     grnItemId: r.grnItemId ?? r.grn_item_id ?? null,
@@ -432,6 +441,8 @@ type PurchaseInvoiceItemInput = {
   // TAX-line amount (so old payloads using lt='TAX' still produce a sensible
   // breakdown).
   taxSen?: number;
+  // Per-line discount in sen (DEV-14). Omitted = 0.
+  discountSen?: number;
   lineType?: string;
   notes?: string | null;
   // Convert-chain: when this line is sourced from a GRN line, the grn_items
@@ -452,6 +463,7 @@ function normalizeItems(
     qty: number;
     unitPriceSen: number;
     lineTotalSen: number;
+    discountSen: number;
     taxSen: number;
     lineType: PurchaseInvoiceItemLineType;
     notes: string | null;
@@ -470,6 +482,7 @@ function normalizeItems(
     qty: number;
     unitPriceSen: number;
     lineTotalSen: number;
+    discountSen: number;
     taxSen: number;
     lineType: PurchaseInvoiceItemLineType;
     notes: string | null;
@@ -514,6 +527,10 @@ function normalizeItems(
         : String(it.grnItemId).trim();
     const taxSenIn = Math.round(Number(it.taxSen ?? 0));
     const taxSen = Number.isFinite(taxSenIn) && taxSenIn >= 0 ? taxSenIn : 0;
+    // Round ONCE, on the product — never the rate first. 600 x 5.5 sen is
+    // 3300 sen = RM33.00, which is exactly what the supplier billed. The
+    // per-line discount (DEV-14) comes off that, clamped to [0, gross].
+    const { discountSen, lineTotalSen } = discountedLineSen(qty, unitPriceSen, Number(it.discountSen));
     rows.push({
       id: `pii-${crypto.randomUUID().slice(0, 8)}`,
       materialCode: matCode,
@@ -521,9 +538,8 @@ function normalizeItems(
       supplierSku: supSku,
       qty,
       unitPriceSen,
-      // Round ONCE, on the product — never the rate first. 600 x 5.5 sen is
-      // 3300 sen = RM33.00, which is exactly what the supplier billed.
-      lineTotalSen: computeLineTotalSen(qty, unitPriceSen),
+      lineTotalSen,
+      discountSen,
       taxSen,
       lineType,
       notes: it.notes == null ? null : String(it.notes),
@@ -1517,9 +1533,9 @@ app.post("/", async (c) => {
           .prepare(
             `INSERT INTO purchase_invoice_items (
                id, pi_id, material_code, material_name, supplier_sku,
-               qty, unit_price_sen, line_total_sen, tax_sen, line_type, notes,
+               qty, unit_price_sen, line_total_sen, discount_sen, tax_sen, line_type, notes,
                grn_item_id, po_id, created_at, updated_at
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .bind(
             r.id,
@@ -1530,6 +1546,7 @@ app.post("/", async (c) => {
             r.qty,
             toHome(r.unitPriceSen),
             toHome(r.lineTotalSen),
+            toHome(r.discountSen),
             toHome(r.taxSen),
             r.lineType,
             r.notes,
@@ -2167,9 +2184,9 @@ app.put("/:id", async (c) => {
           .prepare(
             `INSERT INTO purchase_invoice_items (
                id, pi_id, material_code, material_name, supplier_sku,
-               qty, unit_price_sen, line_total_sen, tax_sen, line_type, notes,
+               qty, unit_price_sen, line_total_sen, discount_sen, tax_sen, line_type, notes,
                grn_item_id, po_id, created_at, updated_at
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .bind(
             r.id,
@@ -2180,6 +2197,7 @@ app.put("/:id", async (c) => {
             r.qty,
             r.unitPriceSen,
             r.lineTotalSen,
+            r.discountSen,
             r.taxSen,
             r.lineType,
             r.notes,

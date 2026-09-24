@@ -425,7 +425,8 @@ test('tax, discount and payment fields stay whole sen', () => {
 test('the API stores the rate and derives the amount, not the reverse', () => {
   const src = read('src/api/routes/purchase-invoices.ts');
   assert.match(src, /const unitPriceSen = roundUnitPriceSen\(Number\(it\.unitPriceSen\)\);/);
-  assert.match(src, /lineTotalSen: computeLineTotalSen\(qty, unitPriceSen\)/);
+  // DEV-14: the amount is derived net of the per-line discount, still from the rate.
+  assert.match(src, /discountedLineSen\(qty, unitPriceSen, Number\(it\.discountSen\)\)/);
 });
 
 // --- 7. the SOURCE of the price, and the cost chain below it --------------

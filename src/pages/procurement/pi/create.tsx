@@ -26,7 +26,8 @@ import { MoneyInput } from "@/components/ui/money-input";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { useCachedJson, invalidateCachePrefix } from "@/lib/cached-fetch";
 import { formatCurrency } from "@/lib/utils";
-import { roundUnitPriceSen } from "@/lib/unit-price";
+import { roundUnitPriceSen, discountedLineSen } from "@/lib/unit-price";
+import { DiscountInput } from "@/components/ui/discount-input";
 import type { Supplier, RawMaterial, SupplierMaterialBinding, PurchaseOrder } from "@/types";
 import { MaterialPicker, type MaterialOption } from "@/components/material-picker";
 import { ArrowLeft, Plus, Save, Trash2, FolderInput } from "lucide-react";
@@ -82,6 +83,8 @@ type PILineDraft = {
   // backend stores it in sen as purchase_invoice_items.tax_sen and rolls it
   // into the header tax_sen — the legacy single TAX line is no longer needed.
   taxRM: number;
+  // Per-line discount in sen (DEV-14). Absent = 0. The line total is net of it.
+  discountSen?: number;
   // Convert-chain: set ONLY when this line was picked from a GRN line. Sent in
   // the POST so the backend increments grn_items.invoiced_qty and runs the
   // line-level availability guard. null = manual / PO-source line.
@@ -107,6 +110,20 @@ function emptyPILine(): PILineDraft {
     grnItemId: null,
     poId: null,
   };
+}
+
+/** Qty × unit price in sen, before the line discount. */
+function lineGrossSen(l: PILineDraft): number {
+  return Math.round((Number(l.qty) || 0) * roundUnitPriceSen((Number(l.unitPriceRM) || 0) * 100));
+}
+
+/** Line amount in sen NET of its discount — the same maths the API stores. */
+function lineNetSen(l: PILineDraft): number {
+  return discountedLineSen(
+    Number(l.qty) || 0,
+    roundUnitPriceSen((Number(l.unitPriceRM) || 0) * 100),
+    l.discountSen ?? 0,
+  ).lineTotalSen;
 }
 
 /**
@@ -450,10 +467,7 @@ function CreatePurchaseInvoicePage() {
 
   // ── Derived totals ────────────────────────────────────────────────────────
   const validLines = lines.filter((l) => l.materialName.trim() !== "");
-  const subtotalRM = validLines.reduce(
-    (s, l) => s + (Number(l.qty) || 0) * (Number(l.unitPriceRM) || 0),
-    0,
-  );
+  const subtotalRM = validLines.reduce((s, l) => s + lineNetSen(l), 0) / 100;
   const perLineTaxRM = validLines.reduce(
     (s, l) => s + (Number(l.taxRM) || 0),
     0,
@@ -502,9 +516,7 @@ function CreatePurchaseInvoicePage() {
           // header SST total, distribute it pro-rata across goods lines (by
           // line amount), with the LAST line absorbing any rounding drift so
           // Σ line tax === header tax in sen.
-          const lineAmountsSen = validLines.map(
-            (l) => Math.round((Number(l.qty) || 0) * (Number(l.unitPriceRM) || 0) * 100),
-          );
+          const lineAmountsSen = validLines.map(lineNetSen);
           const subtotalLocalSen = lineAmountsSen.reduce((s, v) => s + v, 0);
           const usePerLine =
             headerTaxOverride == null || !Number.isFinite(headerTaxOverride) || headerTaxOverride <= 0;
@@ -534,6 +546,7 @@ function CreatePurchaseInvoicePage() {
               // reached the (now NUMERIC(14,4)) column.
               unitPriceSen: roundUnitPriceSen((Number(l.unitPriceRM) || 0) * 100),
               taxSen: lineTaxSen < 0 ? 0 : lineTaxSen,
+              discountSen: l.discountSen ?? 0,
               lineType: "STOCKED" as const,
               // Convert-chain: carry the GRN source line so the backend draws down
               // grn_items.invoiced_qty and enforces the line-level guard.
@@ -894,6 +907,13 @@ function CreatePurchaseInvoicePage() {
                   <th
                     className="text-right px-3 py-2 font-medium"
                     style={{ minWidth: 110 }}
+                    title="Per-line discount in RM, or type a percentage like 10%."
+                  >
+                    Discount (RM)
+                  </th>
+                  <th
+                    className="text-right px-3 py-2 font-medium"
+                    style={{ minWidth: 110 }}
                     title="Per-line SST in RM. Leave 0 for non-taxable lines."
                   >
                     SST (RM)
@@ -909,8 +929,7 @@ function CreatePurchaseInvoicePage() {
               </thead>
               <tbody>
                 {lines.map((line, idx) => {
-                  const lineTotal =
-                    (Number(line.qty) || 0) * (Number(line.unitPriceRM) || 0);
+                  const lineTotal = lineNetSen(line) / 100;
                   return (
                     <tr
                       key={idx}
@@ -1002,6 +1021,17 @@ function CreatePurchaseInvoicePage() {
                           }
                         />
                       </td>
+                      {/* Per-line discount (DEV-14) — RM or "10%" of qty × price */}
+                      <td className="px-2 py-1.5">
+                        <DiscountInput
+                          className="h-8 w-24 ml-auto"
+                          baseAmountSen={lineGrossSen(line)}
+                          valueSen={line.discountSen ? line.discountSen : null}
+                          onChange={(sen) =>
+                            updateLine(idx, "discountSen", sen ?? 0)
+                          }
+                        />
+                      </td>
                       {/* Per-line SST (owner 2026-06-30) — leave 0 for non-
                           taxable lines. Alternatively use the Summary's
                           "SST override (RM)" fallback. */}
@@ -1039,7 +1069,7 @@ function CreatePurchaseInvoicePage() {
               <tfoot className="bg-[#FAF9F7] border-t border-[#E2DDD8]">
                 <tr>
                   <td
-                    colSpan={6}
+                    colSpan={7}
                     className="px-3 py-1.5 text-right text-xs font-medium text-[#6B7280]"
                   >
                     Subtotal
@@ -1054,7 +1084,7 @@ function CreatePurchaseInvoicePage() {
                 </tr>
                 <tr>
                   <td
-                    colSpan={6}
+                    colSpan={7}
                     className="px-3 py-1.5 text-right text-xs font-medium text-[#6B7280]"
                   >
                     SST
@@ -1069,7 +1099,7 @@ function CreatePurchaseInvoicePage() {
                 </tr>
                 <tr className="border-t border-[#E2DDD8]">
                   <td
-                    colSpan={6}
+                    colSpan={7}
                     className="px-3 py-2 text-right text-sm font-medium text-[#6B7280]"
                   >
                     TOTAL
