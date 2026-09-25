@@ -34,6 +34,7 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 3. 🔵 Sales › Pending Delivery card shows its value (`pendingDeliverySen` in `computeSalesKpis`, sum of SHIPPED orders); mirrored on the `/m` Sales tab. Test: `tests/dashboard-m-lib.test.mjs`.
 4. 🔵 Sales › Completed card shows its value too (`completedSen`, DELIVERED/INVOICED/CLOSED sum; desktop + `/m`).
 5. 🔵 Sales › Revenue trend: Both / Revenue / Orders switch at the card top-right hides either series and its axis.
+6. 🔵 Sticky table headers no longer let scrolled rows show through: sticky/bg/borders moved from the `<tr>` onto its cells (inset-shadow borders) on the 7 dashboard tables — Operations ×2, Employees, Sales, OverdueCards, Service ×2. Sweep of the Attendance-log instance fixed in PR #525 (BUG-2026-09-25-193).
 ---
 
 ## 2026-09-25 — 🔵 /dashboard-experimental: OCR tab for the Haiku + pre-processing decision (branch `feat/ocr-dashboard-tab`, PR #522 open)

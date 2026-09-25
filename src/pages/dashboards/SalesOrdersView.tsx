@@ -1167,7 +1167,7 @@ export function SalesOrdersView({
             <div className="overflow-x-auto" style={{ maxHeight: 300, overflowY: "auto" }}>
               <table className="w-full text-[12.5px]">
                 <thead>
-                  <tr className="border-t border-b border-[#E5E0D8] sticky top-0 bg-white">
+                  <tr className="*:sticky *:top-0 *:z-10 *:bg-white *:shadow-[inset_0_1px_0_#E5E0D8,inset_0_-1px_0_#E5E0D8]">
                     <th className="text-left px-3 py-2 font-semibold uppercase text-[10.5px] tracking-wide" style={{ color: CHART_AXIS }}>#</th>
                     <th className="text-left px-3 py-2 font-semibold uppercase text-[10.5px] tracking-wide" style={{ color: CHART_AXIS }}>SKU</th>
                     <th className="text-left px-3 py-2 font-semibold uppercase text-[10.5px] tracking-wide" style={{ color: CHART_AXIS }}>Category</th>
