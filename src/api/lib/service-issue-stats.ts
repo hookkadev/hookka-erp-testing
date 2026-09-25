@@ -54,9 +54,12 @@ export type TallyRow = {
 const DAY_MS = 86_400_000;
 const OPEN = new Set(["OPEN", "IN_PROGRESS"]);
 
+// Same wording as the case's Root Cause & Prevention picker (detail.tsx
+// ROOT_CAUSE_LABELS), so the dashboard names a cause the way it was recorded.
 const CAUSE_LABEL: Record<string, string> = {
-  PRODUCTION: "Production", DESIGN: "Design", MATERIAL: "Material", PROCESS: "Process",
-  CUSTOMER: "Customer", TRANSPORT: "Transport", SALES: "Sales", PICKING: "Picking", OTHER: "Other",
+  PRODUCTION: "Production / workmanship", DESIGN: "Design / R&D", MATERIAL: "Material / supplier",
+  PROCESS: "Process / SOP gap", CUSTOMER: "Customer (not our fault)", TRANSPORT: "Transport / 3PL",
+  SALES: "Sales / order-taking error", PICKING: "Picking / packing error", OTHER: "Other",
 };
 const UNIT_LABEL: Record<string, string> = {
   PRODUCTION: "Production", QC: "QC", R_AND_D: "R&D", OFFICE: "Office", TRANSPORT: "Transport",

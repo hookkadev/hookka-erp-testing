@@ -47,14 +47,14 @@ test("root cause = category + the detail recorded under it; one row per distinct
     c({}),
   ]);
   assert.deepEqual(rows.map((r) => [r.label, r.count]), [
-    ["Transport — GDEX", 2],
-    ["Customer — no detail recorded", 1],
-    ["Production — no detail recorded", 1],
-    ["Transport — J&T", 1],
+    ["Transport / 3PL — GDEX", 2],
+    ["Customer (not our fault) — no detail recorded", 1],
+    ["Production / workmanship — no detail recorded", 1],
+    ["Transport / 3PL — J&T", 1],
     ["Other — no detail recorded", 1],
     ["Not yet analysed", 1],
   ]);
-  assert.equal(rootCauseLabel(`TRANSPORT${RC_SEP}GDEX`), "Transport — GDEX");
+  assert.equal(rootCauseLabel(`TRANSPORT${RC_SEP}GDEX`), "Transport / 3PL — GDEX");
 });
 
 test("rootCauseDetail picks the one naming field per category, trims and caps it", () => {

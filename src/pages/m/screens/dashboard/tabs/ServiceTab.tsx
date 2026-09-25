@@ -161,9 +161,9 @@ function FlowCharts({ flow, period, setPeriod, openedTitle }: {
 
 // ---- Report (sub "overview") ---------------------------------------------
 
-function Report({ cases, threshold, period, setPeriod, search, setSearch, causeFilter, clearCause, openCase }: {
+function Report({ cases, threshold, period, setPeriod, search, setSearch, causeFilter, setCauseFilter, openCase }: {
   cases: ServiceCase[]; threshold: number; period: Period; setPeriod: (p: Period) => void;
-  search: string; setSearch: (s: string) => void; causeFilter: string | null; clearCause: () => void; openCase: OpenCase;
+  search: string; setSearch: (s: string) => void; causeFilter: string | null; setCauseFilter: (k: string | null) => void; openCase: OpenCase;
 }) {
   const logged = useMemo(() => cases.filter((c) => inFocus(period, c.createdDate)), [cases, period]);
   const flow = useFlow(cases, period);
@@ -175,6 +175,8 @@ function Report({ cases, threshold, period, setPeriod, search, setSearch, causeF
       .filter((c) => !q || [c.caseNo, c.customer, c.issue].some((v) => (v ?? "").toLowerCase().includes(q)))
       .sort((a, b) => (a.createdDate < b.createdDate ? 1 : -1));
   }, [logged, search, causeFilter]);
+  // Categories present in the period's cases (plus the active one, so it never vanishes).
+  const causeOptions = useMemo(() => byCause(logged).filter((r) => r.count > 0 || r.key === causeFilter), [logged, causeFilter]);
   const count = (st: string) => fmtN(logged.filter((c) => c.status === st).length);
 
   return (
@@ -194,7 +196,18 @@ function Report({ cases, threshold, period, setPeriod, search, setSearch, causeF
 
       <MSection title="Service cases logged" hint={`${fmtN(rows.length)} cases`}>
         <div style={{ display: "grid", gap: 8, marginBottom: 10 }}>
-          {causeFilter ? <div><MFocusChip label={causeLabel(causeFilter)} onClear={clearCause} /></div> : null}
+          <select
+            value={causeFilter ?? ""}
+            onChange={(e) => setCauseFilter(e.target.value || null)}
+            aria-label="Filter by category"
+            style={{
+              width: "100%", boxSizing: "border-box", minHeight: 44, padding: "0 12px", borderRadius: 12,
+              border: `1px solid ${M.border}`, background: M.card, color: M.raisin, fontSize: 16, fontFamily: "inherit", outline: "none",
+            }}
+          >
+            <option value="">All categories</option>
+            {causeOptions.map((r) => <option key={r.key} value={r.key}>{r.label} ({fmtN(r.count)})</option>)}
+          </select>
           <input
             type="search"
             value={search}
@@ -731,7 +744,7 @@ export function ServiceTab({ period, setPeriod }: DashboardTabProps) {
         {sub === "overview" && (
           <Report
             cases={cases} threshold={threshold} period={period} setPeriod={setPeriod}
-            search={search} setSearch={setSearch} causeFilter={causeFilter} clearCause={() => setCauseFilter(null)}
+            search={search} setSearch={setSearch} causeFilter={causeFilter} setCauseFilter={setCauseFilter}
             openCase={openCase}
           />
         )}
