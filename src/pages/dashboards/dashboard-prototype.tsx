@@ -145,8 +145,10 @@ export default function DashboardPrototypePage() {
 
   return (
     // Dashboard cards are flat with a tighter radius and only lift on hover.
-    // Scoped here so every other page keeps the default Card look.
-    <div ref={rootRef} className="space-y-4 max-md:space-y-3 [--card-pad:0.75rem] [&_[data-slot=card]]:rounded-md [&_[data-slot=card]]:shadow-none [&_[data-slot=card]]:transition-shadow [&_[data-slot=card]:hover]:shadow-md">
+    // Scoped here so every other page keeps the default Card look. pb-20
+    // lets the last card scroll clear of the floating chat button (56px at
+    // bottom-6).
+    <div ref={rootRef} className="space-y-4 max-md:space-y-3 pb-20 [--card-pad:0.75rem] [&_[data-slot=card]]:rounded-md [&_[data-slot=card]]:shadow-none [&_[data-slot=card]]:transition-shadow [&_[data-slot=card]:hover]:shadow-md">
       {/* Sticky: the title, the tab strip and the period control stay put while
           a long tab scrolls, so you can switch tab or month without scrolling
           back up. -mx/px cancels the page gutter so the backdrop reaches the

@@ -576,20 +576,20 @@ export function DailyWarningAudit({ employee, period, target, onPickEmployee, se
               </tbody>
             </table>
           </div>
+          {/* Controls sit LEFT: the floating chat button (FloatingChatButton,
+              fixed bottom-right) would otherwise cover the next-page arrow. */}
           {shown.length > PAGE_SIZE && (
-            <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 text-xs text-[#6B7280]">
-              <span className="tabular-nums">
+            <div className="flex flex-wrap items-center gap-2 px-4 py-2.5 text-xs text-[#6B7280]">
+              <button type="button" className={pagerBtn} disabled={cur <= 1} onClick={() => setPage(cur - 1)} aria-label="Previous page">
+                <ChevronLeft className="h-3.5 w-3.5" />
+              </button>
+              <span className="tabular-nums">Page {cur} of {pageCount}</span>
+              <button type="button" className={pagerBtn} disabled={cur >= pageCount} onClick={() => setPage(cur + 1)} aria-label="Next page">
+                <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+              <span className="ml-2 tabular-nums">
                 {(cur - 1) * PAGE_SIZE + 1}–{Math.min(cur * PAGE_SIZE, shown.length)} of {shown.length}
               </span>
-              <div className="flex items-center gap-2">
-                <button type="button" className={pagerBtn} disabled={cur <= 1} onClick={() => setPage(cur - 1)} aria-label="Previous page">
-                  <ChevronLeft className="h-3.5 w-3.5" />
-                </button>
-                <span className="tabular-nums">Page {cur} of {pageCount}</span>
-                <button type="button" className={pagerBtn} disabled={cur >= pageCount} onClick={() => setPage(cur + 1)} aria-label="Next page">
-                  <ChevronRight className="h-3.5 w-3.5" />
-                </button>
-              </div>
             </div>
           )}
         </CardContent>
