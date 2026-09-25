@@ -4,7 +4,7 @@
 > the real route code run in a rolled-back transaction. R1, R2, R3, R5, R7, R10 held as written.
 > R8/R9/PI-side R10 500'd (`bigint = text` join), R6 refused every return and re-opened
 > billing, R4 restored the wrong status and missed the DELETE path — all fixed, see
-> BUG-2026-09-24-182..185 and "Live check, 2026-09-24" at the foot. **R6 no longer writes back
+> BUG-2026-09-24-198..185 and "Live check, 2026-09-24" at the foot. **R6 no longer writes back
 > `grn_items.invoiced_qty`** — a deliberate deviation from the PRD wording, needs sign-off.
 > **Last verified: 2026-09-21** against branch `fix/t006-transfer-convert-guards`
 > (`tsc -p tsconfig.app.json --noEmit` clean, `npm test` 4635 pass / 0 fail / 3 pre-existing skips).
@@ -401,11 +401,11 @@ goods be billed twice. **Needs the PRD author's sign-off.**
 
 **Still open, needs a decision:**
 - ~~A return raised off the GRN *before* billing leaves those units billable~~ — fixed
-  2026-09-24 (BUG-2026-09-24-190): returned-before-billing is subtracted in every GRN
+  2026-09-24 (BUG-2026-09-24-206): returned-before-billing is subtracted in every GRN
   availability read and the PO ceiling; a replacement receipt is billable again.
-- ~~R4 void/delete restore the CN header only~~ — fixed 2026-09-24 (BUG-2026-09-24-188): items
+- ~~R4 void/delete restore the CN header only~~ — fixed 2026-09-24 (BUG-2026-09-24-204): items
   and units the conversion flipped are reverted by its timestamp. ~~A parent consignment order
-  that convert marked complete is still not reopened~~ — fixed (BUG-2026-09-24-191).
-- ~~GRN stock by `description = ? LIMIT 1`~~ — fixed (BUG-2026-09-24-186). ~~Fully returned DO
-  still invoices the SO~~ — fixed (BUG-2026-09-24-187). Same first-match shape remains in BOM
+  that convert marked complete is still not reopened~~ — fixed (BUG-2026-09-24-207).
+- ~~GRN stock by `description = ? LIMIT 1`~~ — fixed (BUG-2026-09-24-202). ~~Fully returned DO
+  still invoices the SO~~ — fixed (BUG-2026-09-24-203). Same first-match shape remains in BOM
   consumption (`po-cost-cascade.ts` `resolveRmFromBom`, C21 row 17).

@@ -5,7 +5,7 @@
 // materials are named "WHITE SPONGE"; receiving NLY-D12-6MM posted 140 units
 // onto D12-0.5 (measured on staging, 2026-09-24). resolveRmForGRNItem is
 // module-private, so this pins the source; the live check in the bug entry
-// (BUG-2026-09-24-186) drove the real route against the real rows.
+// (BUG-2026-09-24-202) drove the real route against the real rows.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

@@ -429,7 +429,7 @@ test("the migration and the runtime self-apply declare the same table", () => {
 });
 
 // ---------------------------------------------------------------------------
-// BUG-2026-09-24-186b — the note said six, the factory queued ten.
+// BUG-2026-09-24-202b — the note said six, the factory queued ten.
 //
 // Confirm used to call createProductionOrdersForSO for the FULL line quantity
 // and THEN allocate stock alongside it. Order ten with four finished in the

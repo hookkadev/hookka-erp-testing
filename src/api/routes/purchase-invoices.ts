@@ -688,7 +688,7 @@ async function buildGrnReconsumeStatements(
   if (wantByGrnItem.size === 0) return { ok: true, statements: [] };
 
   const statements: D1PreparedStatement[] = [];
-  // Goods sent back off the GRN before billing are not billable (BUG-2026-09-24-190).
+  // Goods sent back off the GRN before billing are not billable (BUG-2026-09-24-206).
   const returnedByGi = await loadGrnReturnedQty(db, [...wantByGrnItem.keys()]);
   for (const [giId, { qty, name }] of wantByGrnItem) {
     const gi = await db
@@ -1061,7 +1061,7 @@ async function checkPoRemaining(
     string,
     { code: string; name: string; qty: number }
   >();
-  // Returned off a GRN before billing (BUG-2026-09-24-190): those units left,
+  // Returned off a GRN before billing (BUG-2026-09-24-206): those units left,
   // so they no longer count as ordered-and-billable. The return already took
   // them off receivedQty; without this the ceiling fell back to the full
   // ordered qty and the returned goods stayed billable. A replacement receipt
@@ -1410,7 +1410,7 @@ app.post("/", async (c) => {
 
       const lines: ConvertLineRequest[] = [];
       // Goods sent back off this GRN before billing are not billable
-      // (BUG-2026-09-24-190): available = accepted − invoiced − returned.
+      // (BUG-2026-09-24-206): available = accepted − invoiced − returned.
       const returnedByGi = await loadGrnReturnedQty(db, [...giById.keys()]);
       for (const r of normalizedItems.rows) {
         if (!r.grnItemId) continue; // fee/tax/non-stocked lines don't draw down

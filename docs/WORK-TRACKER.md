@@ -37,7 +37,7 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 1. 🔵 `delivery-orders.ts` imports: both kept (`requireReadOrDashboardTab` from main, idempotency from staging).
 2. 🔵 `purchase-invoices.ts` PUT: main's `priorPairs` read kept BEFORE staging's 23514-guarded `db.batch` (it must see the pre-edit rows).
 3. 🔵 Docs: stamps/logs unioned; module-guide + map anchors re-derived; `API.md` regenerated.
-4. 🟡 **Bug-id collisions (owner call):** main and staging independently numbered DIFFERENT bugs 184–191 and 193; both entries kept. Only 193 (rack-scan, this session's) was renumbered → **195**; 184–191 still collide and their cross-references were not touched.
+4. 🔵 **Bug-id collisions — followed `main`:** main's numbers stand; staging's colliding entries renumbered after main's max (194) and every staging-side reference (code comments, tests, docs, short forms) moved with them: 09-23-184→196, 185→197; 09-24-182→198, 183→199, 184→200, 185→201, 186→202 (186b→202b), 187→203, 188→204, 189→205, 190→206, 191→207; rack-scan 09-25-193→195.
 tsc strict 0; `npm test` 5047 pass / 0 fail.
 ---
 
@@ -63,21 +63,21 @@ State: all five built on the branch, NOT committed / pushed. tsc strict 0; `npm 
 
 Ask: continue fixing on staging after #506. All three were on `main` before T-006.
 
-- [x] GRN stock posted to the wrong raw material when several share a name (BUG-2026-09-24-186).
-- [x] Fully-returned DO still invoiced the whole SO (-187).
-- [x] CN void/delete left items SOLD / units DELIVERED (-188).
+- [x] GRN stock posted to the wrong raw material when several share a name (BUG-2026-09-24-202).
+- [x] Fully-returned DO still invoiced the whole SO (-203).
+- [x] CN void/delete left items SOLD / units DELIVERED (-204).
 - [x] tsc exit 0; full suite green; live re-run on staging DB (rolled back): procurement 25/25, sales/delivery/consignment 18/18.
 - [x] PR → `staging` (#508, merged); deployed `e19db151` re-verified: 25/25 + 18/18.
 - [x] Carried to `main` via #448 (`13d5287e`).
 - [x] Staging-only lifecycle run (edit / confirm / void / cancel / delete / stock-out) + UI
   click-through (Consignment menu, Sales → Transfer to DO created DO-2609-071, duplicate refused
-  409). Found BUG-2026-09-24-189 (return stock-out moved nothing for PO-sourced lines) — fixed on
+  409). Found BUG-2026-09-24-205 (return stock-out moved nothing for PO-sourced lines) — fixed on
   `fix/staging-return-stockout`, lifecycle 23/23.
 - [x] Side quest G (owner chose option A): goods returned off a GRN before billing no longer
-  billable — BUG-2026-09-24-190, branch `fix/staging-grn-return-billable`, live 16/16 (5/15 on
+  billable — BUG-2026-09-24-206, branch `fix/staging-grn-return-billable`, live 16/16 (5/15 on
   deployed `81c77972`). PR → `staging` needs a human merge; then carry to #448.
 - [x] Side quest H: voiding/deleting a CN's invoice now reopens the consignment order the
-  conversion completed — BUG-2026-09-24-191, branch `fix/staging-co-reopen-on-void` (on top of
+  conversion completed — BUG-2026-09-24-207, branch `fix/staging-co-reopen-on-void` (on top of
   #516), live 8/8 (6/8 on deployed `81c77972`). PR → `staging` needs a human merge after #516.
 - Note: `/ready-planning` is serve-stale cached, so for ~2-3 min after a DO is created the Sales
   "Transfer to DO" dialog still offers its production orders; the server refuses the duplicate.
@@ -90,13 +90,13 @@ Ask: continue fixing on staging after #506. All three were on `main` before T-00
 A live run of the T-006 routes against the staging DB (real route code, one rolled-back
 transaction) failed where the mocked tests passed. Asks: fix, push to `staging`, re-test.
 
-- [x] PI create 500s for every PO/GRN-linked invoice — R8 join `bigint = text` (BUG-2026-09-24-182).
+- [x] PI create 500s for every PO/GRN-linked invoice — R8 join `bigint = text` (BUG-2026-09-24-198).
 - [x] Purchase return always refused — R6 reads `accepted_qty` / `po_item_id` single-keyed (-183).
 - [x] R4 void restores `PARTIALLY_SOLD`, not the saved status — single-keyed read (-183).
-- [x] R6 re-opens billing of returned goods — `invoiced_qty` write-back removed (-184, **PRD sign-off needed**).
-- [x] Deleting an OPEN purchase return keeps the PO counter it lowered (-184).
-- [x] Deleting a CN-sourced invoice leaves the CN stuck `FULLY_SOLD` (-185).
-- [x] CN → invoice convert 400s on staging: writes `customers.updated_at`, which does not exist (-185, pre-existing).
+- [x] R6 re-opens billing of returned goods — `invoiced_qty` write-back removed (-200, **PRD sign-off needed**).
+- [x] Deleting an OPEN purchase return keeps the PO counter it lowered (-200).
+- [x] Deleting a CN-sourced invoice leaves the CN stuck `FULLY_SOLD` (-201).
+- [x] CN → invoice convert 400s on staging: writes `customers.updated_at`, which does not exist (-201, pre-existing).
 - [x] `tsc -p tsconfig.app.json` exit 0; full suite 4779 pass / 0 fail / 3 skips; live re-run on the fixed code: procurement 24/25, sales 16/18 (misses are the pre-existing items below).
 - [x] Push; PR → `staging` (#506, merged); live check re-run against the deployed commit `f434916e`: 24/25 + 16/18, misses were the three pre-existing bugs (entry above).
 - 🟡 Needs a decision: GRN-sourced return of unbilled goods leaves them billable (needs a returned-qty counter); CN items stay `SOLD` after void; GRN stock resolves by description when `material_code` is blank (wrong raw material); single-line DO fully returned still invoices in full.

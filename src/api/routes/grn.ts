@@ -278,7 +278,7 @@ type GRNItemRow = {
   invoiced_qty?: number | null;
   poItemId?: string | null;
   po_item_id?: string | null;
-  // Not a column — attached by attachReturnedQty (BUG-2026-09-24-190).
+  // Not a column — attached by attachReturnedQty (BUG-2026-09-24-206).
   returnedQty?: number;
 };
 
@@ -330,7 +330,7 @@ function deriveArrivalState(row: GRNRow): ArrivalState {
 function rowToItem(r: GRNItemRow) {
   // Convert-chain: invoiced_qty may be absent on rows predating the column
   // (defaults to 0). available = accepted − invoiced − returned-before-billing,
-  // floored at 0 (BUG-2026-09-24-190). Exposed so the PI picker can show
+  // floored at 0 (BUG-2026-09-24-206). Exposed so the PI picker can show
   // remaining-to-invoice per GRN line. returnedQty is attached by
   // attachReturnedQty below; absent means nothing returned.
   const invoicedQty = Number(r.invoicedQty ?? r.invoiced_qty ?? 0) || 0;

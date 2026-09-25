@@ -3,7 +3,7 @@
 > **Last verified: 2026-09-25**: newest entry BUG-2026-09-25-194 (branch `feat/dashboard-kpi-no-icons`, PR #524); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-25** — newest entry BUG-2026-09-25-192 (branch `feat/ocr-dashboard-tab`, PR #522); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-25** — newest entry BUG-2026-09-24-191 (branch `fix/so-customer-po-view`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
-> **Last verified: 2026-09-25** — newest entry BUG-2026-09-25-195 (branch `feat/m-warehouse-locate`; renumbered from 193 in the staging←main sync — main had already used 193). Previously: newest entry BUG-2026-09-23-182 (branch `laphii/fix/dashboard-exp-production-revenue`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-09-25** — newest entry BUG-2026-09-25-195 (branch `feat/m-warehouse-locate`; renumbered from 193 in the staging←main sync). **Numbering follows `main`:** staging entries that reused a sequence number main had already given a different bug were renumbered 196-207 (see WORK-TRACKER 2026-09-25 sync entry for the map). Previously: newest entry BUG-2026-09-23-182 (branch `laphii/fix/dashboard-exp-production-revenue`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 
 Living log of bugs we've identified, diagnosed, and fixed in Hookka ERP.
 
@@ -66,9 +66,9 @@ cases fail on the pre-fix code. **Not yet verified live** (not deployed; prod co
 
 ---
 
-## BUG-2026-09-24-191 — voiding a CN's invoice left its consignment order DELIVERED `consignment` `data-integrity` 🟢
+## BUG-2026-09-24-207 — voiding a CN's invoice left its consignment order DELIVERED `consignment` `data-integrity` 🟢
 
-🟢 **Fixed** · completes T-006 R4 at the order level (-185 / -188 released the CN and its items).
+🟢 **Fixed** · completes T-006 R4 at the order level (-201 / -204 released the CN and its items).
 
 **Root cause.** Convert-to-invoice runs `cascadeCNCompletionToCO`: once every CN of a
 consignment order is sold, the CO goes `DELIVERED`. The void and delete release put the CN back
@@ -90,9 +90,9 @@ on deployed `81c77972` (both CO checks stayed `DELIVERED`). Tests: `t006-live-fi
 
 ---
 
-## BUG-2026-09-24-190 — goods returned off a GRN before billing stayed billable `procurement` `data-integrity` 🟢
+## BUG-2026-09-24-206 — goods returned off a GRN before billing stayed billable `procurement` `data-integrity` 🟢
 
-🟢 **Fixed** · pre-existing on `main` (left open by -184, which covered PI-sourced returns only).
+🟢 **Fixed** · pre-existing on `main` (left open by -200, which covered PI-sourced returns only).
 
 **Root cause.** Two ceilings limit a purchase invoice and neither counted returns. The GRN
 line's available was `accepted − invoiced`; the PO ceiling was `max(ordered, received)`, and a
@@ -116,7 +116,7 @@ Same run against `81c77972`: 5/15. Tests: `t006-live-findings` (helpers, fail-so
 
 ---
 
-## BUG-2026-09-24-189 — a purchase return of a PO-sourced GRN line never left stock `procurement` `inventory-cascade` 🟢
+## BUG-2026-09-24-205 — a purchase return of a PO-sourced GRN line never left stock `procurement` `inventory-cascade` 🟢
 
 🟢 **Fixed** · pre-existing on `main`; same root as -186 (blank `material_code` on PO-sourced GRN lines).
 
@@ -137,7 +137,7 @@ confirm → `NLY-D12-6MM` 5355 → 5352, same-named materials untouched (was 535
 
 ---
 
-## BUG-2026-09-24-186 — GRN stock posted to the wrong raw material when several share a name `procurement` `inventory-cascade` 🟢
+## BUG-2026-09-24-202 — GRN stock posted to the wrong raw material when several share a name `procurement` `inventory-cascade` 🟢
 
 🟢 **Fixed** · pre-existing on `main`; [C21](BUG-CLASSES.md) row 16. Found by the same live run as 182-185.
 
@@ -160,7 +160,7 @@ open in `po-cost-cascade.ts` `resolveRmFromBom` (C21 row 17).
 
 ---
 
-## BUG-2026-09-24-187 — a delivery order returned in full still invoiced the whole sales order `delivery-orders` `data-integrity` 🟢
+## BUG-2026-09-24-203 — a delivery order returned in full still invoiced the whole sales order `delivery-orders` `data-integrity` 🟢
 
 🟢 **Fixed** · pre-existing on `main`.
 
@@ -179,9 +179,9 @@ one; the manual path already 409s and now says "already billed or were returned"
 
 ---
 
-## BUG-2026-09-24-188 — voiding/deleting a CN's invoice left its items SOLD and units DELIVERED `consignment` `inventory-cascade` 🟢
+## BUG-2026-09-24-204 — voiding/deleting a CN's invoice left its items SOLD and units DELIVERED `consignment` `inventory-cascade` 🟢
 
-🟢 **Fixed** · completes T-006 R4 (BUG-2026-09-24-185 released the CN header only).
+🟢 **Fixed** · completes T-006 R4 (BUG-2026-09-24-201 released the CN header only).
 
 **Root cause.** Convert flips the CN's AT_BRANCH items to SOLD and its LOADED units to
 DELIVERED; the release put the CN back to ACTIVE and left both. The CN read as unsold with
@@ -206,7 +206,7 @@ reopened.
 > re-read afterwards and unchanged). Every bug below passed the mocks: they return snake_case
 > keys and have no column types, the real client does neither.
 
-## BUG-2026-09-24-182 — every PO/GRN-linked purchase invoice create 500'd: `bigint = text` `procurement` `data-integrity` 🟢
+## BUG-2026-09-24-198 — every PO/GRN-linked purchase invoice create 500'd: `bigint = text` `procurement` `data-integrity` 🟢
 
 🟢 **Fixed** · found by the live staging run; `staging` only (T-006 never reached `main`).
 
@@ -223,7 +223,7 @@ grn_items.id (BIGINT) to a TEXT grn_item_id"; `pi-multi-po` pin updated.
 
 ---
 
-## BUG-2026-09-24-183 — purchase return always refused, CN void restored the wrong status: snake-only reads `data-migration` `procurement` 🟢
+## BUG-2026-09-24-199 — purchase return always refused, CN void restored the wrong status: snake-only reads `data-migration` `procurement` 🟢
 
 🟢 **Fixed** · [C23](BUG-CLASSES.md#c23--sql-says-snake_case-the-row-comes-back-camelcase) instances 8-9.
 
@@ -240,7 +240,7 @@ read `cn.status_before_conversion` → always `undefined` → every voided CN we
 
 ---
 
-## BUG-2026-09-24-184 — a purchase return re-opened billing; deleting one kept the PO counter it took `procurement` `data-integrity` 🟢
+## BUG-2026-09-24-200 — a purchase return re-opened billing; deleting one kept the PO counter it took `procurement` `data-integrity` 🟢
 
 🟢 **Fixed** · deviates from PRD T-006 R6's literal wording — needs the PRD author's sign-off.
 
@@ -260,7 +260,7 @@ availability read; owner decision, not patched here.
 
 ---
 
-## BUG-2026-09-24-185 — CN → invoice convert never worked on staging; deleting the draft stranded the CN `consignment` `data-integrity` 🟢
+## BUG-2026-09-24-201 — CN → invoice convert never worked on staging; deleting the draft stranded the CN `consignment` `data-integrity` 🟢
 
 🟢 **Fixed** · convert bug pre-dates T-006 (`7701e1aa`, 2026-05-04); delete-path gap is T-006 R4.
 
@@ -1062,7 +1062,7 @@ correctness bug in the key, and mixing them into one change would have made the
 
 ---
 
-## BUG-2026-09-24-186b — the note said six, the factory would have queued ten `sales` `production` 🟢
+## BUG-2026-09-24-202b — the note said six, the factory would have queued ten `sales` `production` 🟢
 
 🟢 Fixed before it could reach anyone — found while testing DEV-05 on staging,
 in the window where no stock had finished yet, so the double-build never
@@ -1095,9 +1095,9 @@ count at 1, `production-builder.ts:519`, so a zero-quantity line would still
 queue one order). Four new tests assert the ORDER of the two steps and the
 arithmetic that reaches the builder, not the sentence.
 
-## BUG-2026-09-23-185 — the fix for 184 deployed correctly and still did not reach the screen: the list snapshot had no payload-shape version `production` `caching` 🟢
+## BUG-2026-09-23-197 — the fix for 196 deployed correctly and still did not reach the screen: the list snapshot had no payload-shape version `production` `caching` 🟢
 
-🟢 Fixed. Same symptom as BUG-2026-09-23-184, second and independent cause —
+🟢 Fixed. Same symptom as BUG-2026-09-23-196, second and independent cause —
 caught because the STOCK chip still did not render after 184 shipped, while the
 dialog copy in the same deploy plainly had.
 
@@ -1122,7 +1122,7 @@ second one was invisible even to a correct deploy of a correct fix. A payload
 that changes shape is not shipped when the code merges — it is shipped when the
 cache holding the old shape is gone.
 
-## BUG-2026-09-23-184 — the stock delivery gate shipped as a no-op: its two fields were not on the payload it reads `production` `delivery` 🟢
+## BUG-2026-09-23-196 — the stock delivery gate shipped as a no-op: its two fields were not on the payload it reads `production` `delivery` 🟢
 
 🟢 Fixed. **Found by clicking it on staging, not by a test.**
 

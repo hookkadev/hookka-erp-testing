@@ -11,7 +11,7 @@
 > C21 gains rows 16 (GRN stock by shared description — fixed) and 17 (BOM consumption, same
 > shape — open).
 > **Last verified: 2026-09-24** — restamped on branch `fix/t006-live-findings`: C23 gains
-> instances 8-9 (BUG-2026-09-24-183), both found by running T-006's routes against the real
+> instances 8-9 (BUG-2026-09-24-199), both found by running T-006's routes against the real
 > staging DB after their snake-keyed mocks had passed.
 > **Last verified: 2026-09-22** — restamped on branch `fix/scan-queue-client-driven`, which
 > **adds C25 — long work handed to `ctx.waitUntil`** (BUG-2026-09-22-178). Previously:
@@ -1475,7 +1475,7 @@ IDENTITY or MONEY.
 | 13 | UI selection defaults — `default-bank.ts:12`, `bom.tsx` ×6, `procurement/{create,detail,index}.tsx` + `pi/create.tsx` (`bindings.find(isMainSupplier) ?? bindings[0]`), `employees.tsx:5376`, `finance-dashboard.tsx:549`, `leads/index.tsx:402`, `m/FormSheet.tsx:527`, `m/ModuleListScreen.tsx:220-221`, `mail-center/index.tsx:3301`, `maintenance/sofa-combos.tsx:1212`, `inventory/index.tsx:2607`, `scan-supplier-modal.tsx` ×4 (`activeOrgs[0]?.code ?? "HOOKKA"`) | a **pre-filled** value the user sees and can change before saving | ✅ benign — see "Not every `[0]` is this class" above |
 | 14 | `accounting.ts:11043` (`others[0]` + `"+N"`), `delivery-orders.ts:2274` (error text) | display only, and the truncation is visible | ✅ benign |
 | 15 | grep false positives — `web-push.ts:107` (`pub[0] !== 0x04`, a byte), `do-component-breakdown.ts:102` (`a[0]`/`b[0]`, Map-entry tuples in a comparator), `sales/index.tsx:250-251` (`_flStatus[0]`, "any filter active?") | nothing | ✅ not this class |
-| 16 | `grn.ts` `resolveRmForGRNItem` — `raw_materials WHERE description = ? LIMIT 1` for a blank-code (PO-sourced) GRN line; 37 descriptions are shared on staging, e.g. five "WHITE SPONGE" | receiving NLY-D12-6MM posted stock onto D12-0.5 | ✅ 2026-09-24 (BUG-2026-09-24-186) — PO line's code first; a shared name resolves to nothing and is reported unresolved. Staging: 0 posted lines hit it (measured). Prod UNMEASURED |
+| 16 | `grn.ts` `resolveRmForGRNItem` — `raw_materials WHERE description = ? LIMIT 1` for a blank-code (PO-sourced) GRN line; 37 descriptions are shared on staging, e.g. five "WHITE SPONGE" | receiving NLY-D12-6MM posted stock onto D12-0.5 | ✅ 2026-09-24 (BUG-2026-09-24-202) — PO line's code first; a shared name resolves to nothing and is reported unresolved. Staging: 0 posted lines hit it (measured). Prod UNMEASURED |
 | 17 | `po-cost-cascade.ts` `resolveRmFromBom` — same `description = ? LIMIT 1` for a BOM line with no code | FIFO consumption could draw the wrong raw material | ⬜ open — refusing an ambiguous name there silently stops consumption for that line, so it needs its own decision |
 
 **Enforced by** `tests/first-one-wins-refusal.test.mjs` — 8 behavioural assertions driving
@@ -1675,8 +1675,8 @@ in both, a read that cannot succeed returns a value that looks like data.
 | 3 | P&L historical, read side | ✅ 2026-06-30 (BUG-2026-06-30-001) |
 | 4 | supplier payments list + PI outstanding | ✅ 2026-07-01 (BUG-2026-07-01-003) |
 | 5 | `dashboard-prototype.ts` — 260 reads, whole route | ✅ 2026-09-15 (BUG-2026-09-15-181) — converted from the rename map |
-| 8 | `createPurchaseReturn` — `accepted_qty` / `po_item_id` read snake-only: every GRN-linked return refused | ✅ 2026-09-24 (BUG-2026-09-24-183) |
-| 9 | `buildInvoiceDeathCnReleaseStatements` — `status_before_conversion` snake-only: every CN void restored `PARTIALLY_SOLD` | ✅ 2026-09-24 (BUG-2026-09-24-183) — both passed tests whose mock returned snake keys; `tests/t006-live-findings.test.mjs` uses a camelCase fake DB instead |
+| 8 | `createPurchaseReturn` — `accepted_qty` / `po_item_id` read snake-only: every GRN-linked return refused | ✅ 2026-09-24 (BUG-2026-09-24-199) |
+| 9 | `buildInvoiceDeathCnReleaseStatements` — `status_before_conversion` snake-only: every CN void restored `PARTIALLY_SOLD` | ✅ 2026-09-24 (BUG-2026-09-24-199) — both passed tests whose mock returned snake keys; `tests/t006-live-findings.test.mjs` uses a camelCase fake DB instead |
 | 6 | **every other route reading rows from `getSql`** | ⬜ unswept. No test forbids a sixth. The cheap sweep is `grep -oE "\br\.[a-z]+_[a-z_]+" src/api/routes/*.ts` — a hit is not automatically a bug (some are bound params or SQL fragments) but every hit deserves a look |
 | 7 | **no test asserts a payload's money field is non-zero** | ⬜ open. This class has now recurred five times and every instance was found by a human noticing a wrong number on a screen. One assertion per money-bearing endpoint — "this field is not 0 for a book with sales" — would have caught all five |
 

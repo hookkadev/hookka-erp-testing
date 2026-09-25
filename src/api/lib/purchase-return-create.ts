@@ -198,7 +198,7 @@ export async function loadPiItemsForReturn(
 // A PO-sourced GRN line stores a blank material_code (BUG-2026-08-13-052), so
 // without this a return of it listed nothing and its stock-out moved nothing
 // (measured on staging 2026-09-24). Same resolution grn.ts posts stock with
-// since BUG-2026-09-24-186, so goods leave from the material they arrived on.
+// since BUG-2026-09-24-202, so goods leave from the material they arrived on.
 async function orderedCodeForGrnItem(
   db: D1Database,
   grnItemId: string | null | undefined,
@@ -221,7 +221,7 @@ async function orderedCodeForGrnItem(
 }
 
 // ---------------------------------------------------------------------------
-// Returned-before-billing quantities (BUG-2026-09-24-190). A return raised off
+// Returned-before-billing quantities (BUG-2026-09-24-206). A return raised off
 // the GRN itself (no purchase_invoice_id) sends back goods nobody has billed
 // yet, so those units must come off what is still billable: GRN line
 // available = accepted − invoiced − returned. A return raised off a PI is

@@ -2,13 +2,13 @@
 
 > **Last verified: 2026-09-25** (branch `chore/sync-staging-from-main-0925`) — `purchase-invoices.ts` anchors (POST `/` :1172, PUT `/:id` :2080, `checkInvoicedQtyCeilingAfterEdit` :728, `checkPoRemaining` :1014, `mapPurchaseLinesToAccounts` :205) re-derived against the staging←main merge; nothing else re-checked.
 
-> **Last verified: 2026-09-24 (later)** — BUG-2026-09-24-190: a GRN line's billable qty is now
+> **Last verified: 2026-09-24 (later)** — BUG-2026-09-24-206: a GRN line's billable qty is now
 > `accepted − invoiced − returned-before-billing` (returns raised off the GRN, not off a PI), in
 > the GRN list/detail `availableQty`, PI create/edit/un-void, and the PO ceiling
 > (`max(ordered − returned, received)`). Table anchors re-derived: `grn.ts` `resolveRmForGRNItem`
 > :508, POST `/` :1443, PUT `/:id/arrival` :2377; `purchase-invoices.ts` POST `/` :1151, PUT
 > `/:id` :2058, `checkInvoicedQtyCeilingAfterEdit` :707, `checkPoRemaining` :993.
-> **Last verified: 2026-09-24** — `grn.ts` symbol anchors re-derived after BUG-2026-09-24-186
+> **Last verified: 2026-09-24** — `grn.ts` symbol anchors re-derived after BUG-2026-09-24-202
 > (`resolveRmForGRNItem` :493, `buildGRNStockStatements` :563, `postGRNToStock` :689,
 > `buildPostedGRNStockAdjustment` :754, POST `/` :1427, PUT `/:id/arrival` :2361). GRN stock now
 > resolves through the PO line's item code first; a POSTED-line edit adjusts the raw material its
@@ -151,7 +151,7 @@ Owns the buy-side document chain: **Purchase Orders** (PO) → **Goods Receipt N
 | `cascadePOStatusAfterGRNPost` | `src/api/routes/grn.ts:952` | Wrapper: calls builder, executes batch, recomputes PO status (edit path only) |
 | `cascadePOReceivedQtyDelta` | `src/api/routes/grn.ts:1224` | Move PO line receivedQty by delta |
 | `restorePOReceivedQtyForGRN` | `src/api/routes/grn.ts:1131` | Un-post/cancel/delete: give back PO qty |
-| `resolveRmForGRNItem` | `src/api/routes/grn.ts:508` | Resolve GRN line → raw_material: PO line's code first; a description shared by several RMs resolves to nothing (BUG-2026-09-24-186) |
+| `resolveRmForGRNItem` | `src/api/routes/grn.ts:508` | Resolve GRN line → raw_material: PO line's code first; a description shared by several RMs resolves to nothing (BUG-2026-09-24-202) |
 | `app.post("/")` (GRN create) | `src/api/routes/grn.ts:1443` | GRN create; builds stock+PO-counter statements into ONE batch with header+lines (T-006 R3) |
 | `app.put("/:id/arrival")` | `src/api/routes/grn.ts:2377` | Arrival state transition (gate) |
 | `app.post("/")` (PI create) | `src/api/routes/purchase-invoices.ts:1172` | PI create + convert-chain + GL post |

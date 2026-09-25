@@ -523,7 +523,7 @@ export async function buildInvoiceDeathCnReleaseStatements(
   return statements;
 }
 
-// Side quest H (BUG-2026-09-24-191). convert-to-invoice runs
+// Side quest H (BUG-2026-09-24-207). convert-to-invoice runs
 // cascadeCNCompletionToCO: once every CN of a consignment order is sold, the CO
 // goes DELIVERED. The void / delete release above puts the CN back to ACTIVE,
 // but nothing stepped the CO back, so it read "complete" with goods still at

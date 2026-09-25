@@ -3392,7 +3392,7 @@ app.delete("/:id", async (c) => {
   const releasedCoId = await consignmentOrderForInvoice(c.var.DB, id);
   stmts.push(...(await buildInvoiceDeathCnReleaseStatements(c.var.DB, { invoiceId: id })));
   await c.var.DB.batch(stmts);
-  // …and its consignment order is no longer fully sold (BUG-2026-09-24-191).
+  // …and its consignment order is no longer fully sold (BUG-2026-09-24-207).
   await reopenConsignmentOrderAfterRelease(c.var.DB, releasedCoId);
 
   // Deleting an invoice also reverses the customer's outstanding balance, so

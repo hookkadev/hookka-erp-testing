@@ -92,7 +92,7 @@ test("unvoid re-claims the GRN quantity, and is REFUSED if it no longer fits", (
   const guardAt = UNVOID.indexOf("if (!reconsume.ok)");
   const writeAt = UNVOID.indexOf("await db.batch(statements)");
   assert.ok(guardAt > 0 && guardAt < writeAt, "the refusal must come before the batch");
-  // Goods returned off the GRN since the void count too (BUG-2026-09-24-190).
+  // Goods returned off the GRN since the void count too (BUG-2026-09-24-206).
   assert.match(SRC, /if \(invoiced \+ returned \+ qty > accepted\) \{/);
 });
 
