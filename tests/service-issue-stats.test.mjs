@@ -5,6 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   NONE_KEY, OTHER_KEY, RC_SEP, topCauses, byCause, byRootCause, rootCauseDetail, parseRootCauses, rootCauseLabel, byUnit, byPrevention, topProducts, causeTrend, avgClose, closeTrend, openedVsClosed, agingSplit, preventionNotDone, parseCauses, parseProductLabels,
+  rootCauseGrid, dayBuckets, monthBuckets,
 } from "../src/api/lib/service-issue-stats.ts";
 
 const c = (o) => ({ status: "OPEN", createdDate: "2026-09-01", closedDate: null, ...o });
@@ -47,14 +48,14 @@ test("root cause = category + the detail recorded under it; one row per distinct
     c({}),
   ]);
   assert.deepEqual(rows.map((r) => [r.label, r.count]), [
-    ["Transport — GDEX", 2],
-    ["Customer — no detail recorded", 1],
-    ["Production — no detail recorded", 1],
-    ["Transport — J&T", 1],
-    ["Other — no detail recorded", 1],
+    ["Transport / 3PL — GDEX", 2],
+    ["Customer (not our fault)", 1],
+    ["Production / workmanship", 1],
+    ["Transport / 3PL — J&T", 1],
+    ["Other", 1],
     ["Not yet analysed", 1],
   ]);
-  assert.equal(rootCauseLabel(`TRANSPORT${RC_SEP}GDEX`), "Transport — GDEX");
+  assert.equal(rootCauseLabel(`TRANSPORT${RC_SEP}GDEX`), "Transport / 3PL — GDEX");
 });
 
 test("rootCauseDetail picks the one naming field per category, trims and caps it", () => {
@@ -111,7 +112,23 @@ test("top products: once per case, highest first, limited", () => {
   const rows = topProducts([
     c({ products: ["A", "A", "B"] }), c({ products: ["A"] }), c({ products: ["C"] }),
   ], 2);
-  assert.deepEqual(rows, [{ label: "A", count: 2 }, { label: "B", count: 1 }]);
+  assert.deepEqual(rows.map((r) => [r.label, r.count]), [["A", 2], ["B", 1]]);
+});
+
+test("top products carry the root causes recorded on their cases, most frequent first, unanalysed last", () => {
+  const [a] = topProducts([
+    c({ products: ["A"], rootCauses: [{ category: "TRANSPORT", detail: "GDEX" }] }),
+    c({ products: ["A"], rootCauses: [{ category: "TRANSPORT", detail: "GDEX" }, { category: "MATERIAL", detail: "" }] }),
+    c({ products: ["A"] }),
+    c({ products: ["A"], rootCauses: [{ category: "MATERIAL", detail: "" }] }),
+    c({ products: ["A"], rootCauses: [{ category: "TRANSPORT", detail: "GDEX" }] }),
+  ]);
+  assert.equal(a.count, 5);
+  assert.deepEqual(a.causes.map((r) => [r.label, r.count]), [
+    ["Transport / 3PL — GDEX", 3],
+    ["Material / supplier", 2],
+    ["Not yet analysed", 1],
+  ]);
 });
 
 test("causeTrend buckets top causes by period bucket", () => {
@@ -188,4 +205,24 @@ test("preventionNotDone: drops done / not-needed / cancelled / unanalysed-open; 
   assert.deepEqual(rows.map((r) => [r.createdDate, r.daysOpen]), [
     ["2026-09-01", 6], ["2026-09-04", 3], ["2026-09-05", 2], ["2026-09-06", 3],
   ]);
+});
+
+test("rootCauseGrid: one row per category + detail on a fixed day grid; empty days stay; NONE last", () => {
+  const buckets = dayBuckets("2026-09-01", "2026-09-03");
+  assert.deepEqual(buckets, ["2026-09-01", "2026-09-02", "2026-09-03"]);
+  const g = rootCauseGrid([
+    c({ createdDate: "2026-09-01", rootCauses: [{ category: "TRANSPORT", detail: "GDEX" }] }),
+    c({ createdDate: "2026-09-01", rootCauses: [{ category: "TRANSPORT", detail: "GDEX" }] }),
+    c({ createdDate: "2026-09-03", rootCauses: [{ category: "CUSTOMER", detail: "" }] }),
+    c({ createdDate: "2026-09-02" }),
+    c({ createdDate: "2026-08-31", rootCauses: [{ category: "DESIGN", detail: "" }] }), // outside the grid
+  ], buckets, (d) => d);
+  assert.deepEqual(g.rows.map((r) => [r.label, r.cells]), [
+    ["Transport / 3PL — GDEX", [2, 0, 0]],
+    ["Customer (not our fault)", [0, 0, 1]],
+    ["Design / R&D", [0, 0, 0]],
+    ["Not yet analysed", [0, 1, 0]],
+  ]);
+  assert.equal(g.max, 2);
+  assert.deepEqual(monthBuckets(2026, 3), ["2026-01", "2026-02", "2026-03"]);
 });

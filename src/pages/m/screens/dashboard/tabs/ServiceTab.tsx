@@ -4,8 +4,7 @@
 // (api/lib/service-issue-stats.ts), phone layout. Sub-tab lives in `?sub=`.
 //
 // Changed vs desktop: two-series charts are split into two single-series cards
-// (MChartCard is single-series), the "Top 3 causes" line chart is one small bar
-// card per cause, and long case lists show 50 rows until "Show all" is tapped.
+// (MChartCard is single-series), and long case lists show 50 rows until "Show all" is tapped.
 //
 // Approvals is a REAL write path. Endpoints, bodies, the approve confirm step,
 // the reject-needs-a-reason rule and the cache invalidation are the desktop
@@ -22,8 +21,8 @@ import {
 } from "../../../../dashboards/dashboard-shared-lib";
 import { SERVICE_CASES_NAV_HREF, serviceCaseHref, serviceCasesHref } from "../../../../dashboards/service-case-link-lib";
 import {
-  NONE_KEY, agingSplit, avgClose, byCause, byPrevention, byRootCause, byUnit, causeKeys, causeLabel, causeTrend,
-  closeTrend, openedVsClosed, preventionNotDone, topCauses, topProducts, type TallyRow,
+  NONE_KEY, agingSplit, avgClose, byCause, byPrevention, byRootCause, causeKeys, causeLabel,
+  closeTrend, openedVsClosed, preventionNotDone, topProducts, type TallyRow,
 } from "../../../../../api/lib/service-issue-stats";
 import { ListRow, MobileCard, StatusPill } from "../../../components";
 import { resolveStatus, SERVICE_CASE_STATUS_MAP } from "../../../config/helpers";
@@ -161,9 +160,9 @@ function FlowCharts({ flow, period, setPeriod, openedTitle }: {
 
 // ---- Report (sub "overview") ---------------------------------------------
 
-function Report({ cases, threshold, period, setPeriod, search, setSearch, causeFilter, clearCause, openCase }: {
+function Report({ cases, threshold, period, setPeriod, search, setSearch, causeFilter, setCauseFilter, openCase }: {
   cases: ServiceCase[]; threshold: number; period: Period; setPeriod: (p: Period) => void;
-  search: string; setSearch: (s: string) => void; causeFilter: string | null; clearCause: () => void; openCase: OpenCase;
+  search: string; setSearch: (s: string) => void; causeFilter: string | null; setCauseFilter: (k: string | null) => void; openCase: OpenCase;
 }) {
   const logged = useMemo(() => cases.filter((c) => inFocus(period, c.createdDate)), [cases, period]);
   const flow = useFlow(cases, period);
@@ -175,6 +174,8 @@ function Report({ cases, threshold, period, setPeriod, search, setSearch, causeF
       .filter((c) => !q || [c.caseNo, c.customer, c.issue].some((v) => (v ?? "").toLowerCase().includes(q)))
       .sort((a, b) => (a.createdDate < b.createdDate ? 1 : -1));
   }, [logged, search, causeFilter]);
+  // Categories present in the period's cases (plus the active one, so it never vanishes).
+  const causeOptions = useMemo(() => byCause(logged).filter((r) => r.count > 0 || r.key === causeFilter), [logged, causeFilter]);
   const count = (st: string) => fmtN(logged.filter((c) => c.status === st).length);
 
   return (
@@ -194,7 +195,18 @@ function Report({ cases, threshold, period, setPeriod, search, setSearch, causeF
 
       <MSection title="Service cases logged" hint={`${fmtN(rows.length)} cases`}>
         <div style={{ display: "grid", gap: 8, marginBottom: 10 }}>
-          {causeFilter ? <div><MFocusChip label={causeLabel(causeFilter)} onClear={clearCause} /></div> : null}
+          <select
+            value={causeFilter ?? ""}
+            onChange={(e) => setCauseFilter(e.target.value || null)}
+            aria-label="Filter by category"
+            style={{
+              width: "100%", boxSizing: "border-box", minHeight: 44, padding: "0 12px", borderRadius: 12,
+              border: `1px solid ${M.border}`, background: M.card, color: M.raisin, fontSize: 16, fontFamily: "inherit", outline: "none",
+            }}
+          >
+            <option value="">All categories</option>
+            {causeOptions.map((r) => <option key={r.key} value={r.key}>{r.label} ({fmtN(r.count)})</option>)}
+          </select>
           <input
             type="search"
             value={search}
@@ -239,20 +251,12 @@ const tallyItems = (rows: TallyRow[], total: number, onPick: ((key: string) => v
     onClick: onPick ? () => onPick(r.key) : undefined,
   }));
 
-function Issues({ cases, period, onPickCause, causeOnly }: {
-  cases: ServiceCase[]; period: Period; onPickCause: ((key: string) => void) | null; causeOnly: boolean;
+function Issues({ cases, onPickCause, causeOnly }: {
+  cases: ServiceCase[]; onPickCause: ((key: string) => void) | null; causeOnly: boolean;
 }) {
-  const ytd = period.mode === "ytd";
   const causes = useMemo(() => byCause(cases), [cases]);
   const rootCauses = useMemo(() => byRootCause(cases), [cases]);
-  const units = useMemo(() => byUnit(cases), [cases]);
-  const prevention = useMemo(() => byPrevention(cases), [cases]);
   const products = useMemo(() => topProducts(cases, 10), [cases]);
-  const top3 = useMemo(() => topCauses(causes, 3), [causes]);
-  const trend = useMemo(
-    () => causeTrend(cases, top3.map((r) => r.key), (d) => (ytd ? d.slice(0, 7) : d.slice(5))),
-    [cases, top3, ytd],
-  );
   const unanalysed = causes.find((r) => r.key === NONE_KEY)?.count ?? 0;
   const empty = "No service cases in this period.";
 
@@ -284,16 +288,13 @@ function Issues({ cases, period, onPickCause, causeOnly }: {
 
       {causeOnly ? null : (
         <>
-          <MSection title="By responsible unit">
-            <MRankList items={tallyItems(units, cases.length, null)} valueHeading="Cases" emptyText={empty} />
-          </MSection>
-          <MSection title="Prevention status">
-            <MRankList items={tallyItems(prevention, cases.length, null)} valueHeading="Cases" emptyText={empty} />
-          </MSection>
           <MSection title="Most affected products" hint="top 10">
-            <Note>Cases that list the product as affected; a product counts once per case.</Note>
+            <Note>Cases that list the product as affected; a product counts once per case. Under each: the root causes recorded on those cases.</Note>
             <MRankList
-              items={products.map((p) => ({ key: p.label, label: p.label, value: p.count, valueLabel: fmtN(p.count) }))}
+              items={products.map((p) => ({
+                key: p.label, label: p.label, value: p.count, valueLabel: fmtN(p.count),
+                sub: p.causes.map((rc) => `${fmtN(rc.count)} ${rc.label}`).join(" · "),
+              }))}
               valueHeading="Cases"
               emptyText="No affected products recorded in this period."
             />
@@ -301,24 +302,6 @@ function Issues({ cases, period, onPickCause, causeOnly }: {
         </>
       )}
 
-      <MSection title="Top 3 categories" hint={ytd ? "by month" : "by day"}>
-        {top3.length === 0 ? (
-          <MobileCard><MState kind="empty" text="No analysed cases in this period." /></MobileCard>
-        ) : (
-          <div style={{ display: "grid", gap: 10 }}>
-            {top3.map((r) => (
-              <MChartCard
-                key={r.key}
-                title={causeLabel(r.key)}
-                subtitle={`${fmtN(r.count)} cases · ${r.pct}% of cases`}
-                data={trend.map((t) => ({ key: String(t.bucket), value: Number(t[r.key]) }))}
-                formatAxis={wholeAxis}
-                height={120}
-              />
-            ))}
-          </div>
-        )}
-      </MSection>
     </>
   );
 }
@@ -424,7 +407,7 @@ function Performance({ cases, threshold, period, setPeriod, openCase }: {
         </MobileCard>
       </MSection>
 
-      <Issues cases={openedInFocus} period={period} onPickCause={null} causeOnly />
+      <Issues cases={openedInFocus} onPickCause={null} causeOnly />
 
       <MSection title="Prevention">
         <Note>
@@ -731,7 +714,7 @@ export function ServiceTab({ period, setPeriod }: DashboardTabProps) {
         {sub === "overview" && (
           <Report
             cases={cases} threshold={threshold} period={period} setPeriod={setPeriod}
-            search={search} setSearch={setSearch} causeFilter={causeFilter} clearCause={() => setCauseFilter(null)}
+            search={search} setSearch={setSearch} causeFilter={causeFilter} setCauseFilter={setCauseFilter}
             openCase={openCase}
           />
         )}
@@ -745,7 +728,7 @@ export function ServiceTab({ period, setPeriod }: DashboardTabProps) {
                 <MFocusChip label={dayLabel(period.day)} onClear={() => setPeriod({ ...period, day: undefined })} />
               </div>
             ) : null}
-            <Issues cases={logged} period={period} onPickCause={(k) => { setCauseFilter(k); setSub("overview"); }} causeOnly={false} />
+            <Issues cases={logged} onPickCause={(k) => { setCauseFilter(k); setSub("overview"); }} causeOnly={false} />
           </>
         )}
       </>

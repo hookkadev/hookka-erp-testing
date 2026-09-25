@@ -54,9 +54,12 @@ export type TallyRow = {
 const DAY_MS = 86_400_000;
 const OPEN = new Set(["OPEN", "IN_PROGRESS"]);
 
+// Same wording as the case's Root Cause & Prevention picker (detail.tsx
+// ROOT_CAUSE_LABELS), so the dashboard names a cause the way it was recorded.
 const CAUSE_LABEL: Record<string, string> = {
-  PRODUCTION: "Production", DESIGN: "Design", MATERIAL: "Material", PROCESS: "Process",
-  CUSTOMER: "Customer", TRANSPORT: "Transport", SALES: "Sales", PICKING: "Picking", OTHER: "Other",
+  PRODUCTION: "Production / workmanship", DESIGN: "Design / R&D", MATERIAL: "Material / supplier",
+  PROCESS: "Process / SOP gap", CUSTOMER: "Customer (not our fault)", TRANSPORT: "Transport / 3PL",
+  SALES: "Sales / order-taking error", PICKING: "Picking / packing error", OTHER: "Other",
 };
 const UNIT_LABEL: Record<string, string> = {
   PRODUCTION: "Production", QC: "QC", R_AND_D: "R&D", OFFICE: "Office", TRANSPORT: "Transport",
@@ -89,7 +92,7 @@ export const rootCauseLabel = (k: string): string => {
   const i = k.indexOf(RC_SEP);
   const cat = i < 0 ? k : k.slice(0, i);
   const detail = i < 0 ? "" : k.slice(i + RC_SEP.length);
-  return `${causeLabel(cat)} — ${detail || "no detail recorded"}`;
+  return detail ? `${causeLabel(cat)} — ${detail}` : causeLabel(cat);
 };
 
 /** Keys a case counts under for the cause dimension (NONE when it has none). */
@@ -135,12 +138,29 @@ export const byRootCause = (cases: IssueCase[]) => tally(cases, rootCauseKeys, r
 export const byUnit = (cases: IssueCase[]) => tally(cases, (c) => [c.unit || NONE_KEY], unitLabel);
 export const byPrevention = (cases: IssueCase[]) => tally(cases, (c) => [c.prevention || NONE_KEY], preventionLabel);
 
-/** Most affected products (a case counts once per distinct product). */
-export function topProducts(cases: IssueCase[], limit = 10): { label: string; count: number }[] {
-  const m = new Map<string, number>();
-  for (const c of cases) for (const p of new Set(c.products ?? [])) m.set(p, (m.get(p) ?? 0) + 1);
+export type ProductRow = { label: string; count: number; causes: { key: string; label: string; count: number }[] };
+
+/** Most affected products (a case counts once per distinct product), each with the root causes
+ *  (category + detail) recorded on its cases, most frequent first, "Not yet analysed" last. */
+export function topProducts(cases: IssueCase[], limit = 10): ProductRow[] {
+  const m = new Map<string, { count: number; causes: Map<string, number> }>();
+  for (const c of cases) {
+    const keys = rootCauseKeys(c);
+    for (const p of new Set(c.products ?? [])) {
+      const e = m.get(p) ?? { count: 0, causes: new Map<string, number>() };
+      e.count += 1;
+      for (const k of keys) e.causes.set(k, (e.causes.get(k) ?? 0) + 1);
+      m.set(p, e);
+    }
+  }
   return [...m.entries()]
-    .map(([label, count]) => ({ label, count }))
+    .map(([label, e]) => ({
+      label,
+      count: e.count,
+      causes: [...e.causes.entries()]
+        .map(([key, count]) => ({ key, label: rootCauseLabel(key), count }))
+        .sort((a, b) => Number(a.key === NONE_KEY) - Number(b.key === NONE_KEY) || b.count - a.count || a.label.localeCompare(b.label)),
+    }))
     .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
     .slice(0, limit);
 }
@@ -295,4 +315,39 @@ export function parseProductLabels(raw: unknown, max = 10): string[] {
     if (label) out.add(label);
   }
   return [...out].slice(0, max);
+}
+
+export type CauseGrid = {
+  buckets: string[];
+  rows: { key: string; label: string; cells: number[]; total: number }[];
+  max: number;
+};
+
+/** Cases per root cause (category + detail) per bucket over a FIXED bucket list, so empty buckets stay visible. Rows: root causes with a case, NONE last. */
+export function rootCauseGrid(cases: IssueCase[], buckets: string[], bucketOf: (createdDate: string) => string): CauseGrid {
+  const idx = new Map(buckets.map((b, i) => [b, i]));
+  const rows = byRootCause(cases)
+    .filter((r) => r.count > 0)
+    .map((r) => ({ key: r.key, label: r.label, cells: buckets.map(() => 0), total: r.count }));
+  const byKey = new Map(rows.map((r) => [r.key, r]));
+  for (const c of cases) {
+    const i = idx.get(bucketOf(c.createdDate));
+    if (i === undefined) continue;
+    for (const k of rootCauseKeys(c)) { const row = byKey.get(k); if (row) row.cells[i] += 1; }
+  }
+  return { buckets, rows, max: Math.max(0, ...rows.flatMap((r) => r.cells)) };
+}
+
+/** Every YYYY-MM-DD from `from` to `to` inclusive (UTC arithmetic; inputs are plain dates). */
+export function dayBuckets(from: string, to: string): string[] {
+  const out: string[] = [];
+  for (let t = Date.parse(from + "T00:00:00Z"), end = Date.parse(to + "T00:00:00Z"); t <= end; t += DAY_MS) {
+    out.push(new Date(t).toISOString().slice(0, 10));
+  }
+  return out;
+}
+
+/** Every YYYY-MM of `year` from January through `throughMonth` (1-12). */
+export function monthBuckets(year: number, throughMonth: number): string[] {
+  return Array.from({ length: Math.max(1, Math.min(12, throughMonth)) }, (_, i) => `${year}-${String(i + 1).padStart(2, "0")}`);
 }
