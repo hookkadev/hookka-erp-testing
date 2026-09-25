@@ -4,7 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   stepPeriod, stepDay, yearsWithData, periodLabel, periodPresets, presetActive, calendarCells, shiftMonth,
-  warnDays, dayList, overallEfficiencyPct,
+  warnDays, dayList, overallEfficiencyPct, workerDays,
 } from "../src/pages/dashboards/dashboard-shared-lib.ts";
 
 const months = ["2025-11", "2025-12", "2026-06", "2026-08", "2026-09"];
@@ -165,4 +165,23 @@ test("overall efficiency skips days whose hours are not in yet", () => {
   const sep = { mode: "monthly", month: "2026-09" };
   assert.equal(overallEfficiencyPct(byDay, sep), 90);
   assert.equal(overallEfficiencyPct(byDay, { ...sep, day: "2026-09-25" }), null);
+});
+
+test("workerDays: one person's hours on every day of the month, gaps included", () => {
+  const byDay = [
+    { date: "2026-02-03", workers: [{ workerId: "a", workingMinutes: 480, productionMinutes: 432 }, { workerId: "b", workingMinutes: 480, productionMinutes: 100 }] },
+    { date: "2026-02-05", workers: [{ workerId: "b", workingMinutes: 480, productionMinutes: 480 }] },
+    { date: "2026-02-10", workers: [{ workerId: "a", workingMinutes: 0, productionMinutes: 60 }] },
+    { date: "2026-03-01", workers: [{ workerId: "a", workingMinutes: 480, productionMinutes: 480 }] },
+  ];
+  const feb = workerDays(byDay, "a", { mode: "monthly", month: "2026-02" });
+  assert.equal(feb.length, 28, "every day of Feb, not just days worked");
+  assert.equal(feb[0].date, "2026-02-01");
+  assert.equal(feb[27].date, "2026-02-28");
+  assert.deepEqual(feb[2], { date: "2026-02-03", workingMinutes: 480, productionMinutes: 432, eff: 90 });
+  assert.deepEqual(feb[4], { date: "2026-02-05", workingMinutes: 0, productionMinutes: 0, eff: null }, "b's day is not a's");
+  assert.equal(feb[9].eff, null, "earned time with no clocked hours has no ratio");
+  // A range is walked day by day; YTD keeps only days worked.
+  assert.equal(workerDays(byDay, "a", { mode: "range", month: "2026-02", from: "2026-02-27", to: "2026-03-02" }).length, 4);
+  assert.deepEqual(workerDays(byDay, "a", { mode: "ytd", month: "2026-02" }).map((d) => d.date), ["2026-02-03", "2026-02-10", "2026-03-01"]);
 });

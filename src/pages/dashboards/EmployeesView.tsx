@@ -1,9 +1,9 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { ComposedChart, Area, Line, XAxis, YAxis, Tooltip, Legend, ReferenceLine, ResponsiveContainer } from "recharts";
 import { useCachedJson } from "@/lib/cached-fetch";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { TimeAttendancePanels, EfficiencyPanels, type EmployeeSlice } from "./EmployeesInsights";
+import { TimeAttendancePanels, EfficiencyPanels, DailyEfficiencyCard, type EmployeeSlice } from "./EmployeesInsights";
 import { DeptEfficiencyCard } from "./ProductionDailyPanels";
 import { DepartmentsView } from "./DepartmentsView";
 import { AttendanceLogCard } from "./AttendanceLogCard";
@@ -98,6 +98,15 @@ export function EmployeesView({
   const empOptions = useMemo(() => headcountWorkers.filter((w) => !dept || w.dept === dept), [headcountWorkers, dept]);
   const filtered = useMemo(() => (employee ? filterSlice(employee, dept, emp) : undefined), [employee, dept, emp]);
   const shownCount = emp ? 1 : empOptions.length;
+
+  // Picking a person in the ranking or the warning audit drills the Daily
+  // efficiency chart into them (same `emp` as the filter bar) and brings the
+  // chart back into view, since those rows sit below it.
+  const effChartRef = useRef<HTMLDivElement>(null);
+  const pickEmployee = (id: string) => {
+    setEmp(id);
+    effChartRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  };
 
   if (loading) {
     return <div className="py-16 text-center text-sm text-[#6B7280]">Loading…</div>;
@@ -284,9 +293,14 @@ export function EmployeesView({
       {sub === "efficiency" && employee && filtered && (
         <>
           {filterBar}
+          {/* scroll-margin clears the sticky page header, plus the sticky
+              filter bar on md+ (~90px), so the card top lands in view. */}
+          <div ref={effChartRef} className="scroll-mt-[var(--dash-sticky-top,0px)] md:scroll-mt-[calc(var(--dash-sticky-top,0px)+96px)]">
+            <DailyEfficiencyCard employee={filtered} period={period} onPeriodChange={onPeriodChange} target={config?.efficiencyTargetPct ?? 100} workerId={emp || undefined} onBack={() => setEmp("")} />
+          </div>
           <DeptEfficiencyCard employee={filtered} period={period} target={config?.efficiencyTargetPct ?? 100} />
           <DepartmentsView employee={filtered} period={period} />
-          <EfficiencyPanels employee={filtered} period={period} onPeriodChange={onPeriodChange} onPickEmployee={(id) => setEmp(id)} target={config?.efficiencyTargetPct ?? 100} />
+          <EfficiencyPanels employee={filtered} period={period} onPeriodChange={onPeriodChange} onPickEmployee={pickEmployee} target={config?.efficiencyTargetPct ?? 100} />
         </>
       )}
     </div>

@@ -1,7 +1,7 @@
 import { useMemo } from "react";
-import { PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, Tooltip, ReferenceLine, ResponsiveContainer } from "recharts";
+import { PieChart, Pie, Cell, ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, Legend, ReferenceLine, ResponsiveContainer } from "recharts";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { TAUPE, TEAL, MUTED, BORDER, AMBER, GREEN, fmtN, inPeriod, inFocus, dayLabel, dayList, warnDays, periodLabel, type Period } from "./dashboard-shared-lib";
+import { TAUPE, TEAL, MUTED, BORDER, AMBER, GREEN, fmtN, inPeriod, inFocus, dayLabel, dayList, warnDays, workerDays, periodLabel, type Period } from "./dashboard-shared-lib";
 
 // The Employees tab's time/efficiency panels. Everything here is derived from
 // the SAME cached /api/dashboard/prototype `employee` slice the rest of the
@@ -85,15 +85,6 @@ export function TimeAttendancePanels({ employee, period, target, onPeriodChange 
     return { w, p, nonProd: Math.max(0, all - w) };
   }, [employee.performance.byDay, period]);
 
-  const daily = useMemo(
-    () => employee.performance.byDay
-      .filter((d) => inPeriod(period, d.date) && d.workingMinutes > 0)
-      .sort((a, b) => (a.date < b.date ? -1 : 1))
-      .map((d) => ({ iso: d.date, date: d.date.slice(5), Efficiency: Math.round((d.productionMinutes / d.workingMinutes) * 1000) / 10 })),
-    [employee.performance.byDay, period],
-  );
-  const below = daily.filter((d) => d.Efficiency < target).length;
-
   const donut = [
     { name: "Regular", value: t.regular, color: TAUPE },
     { name: "Overtime", value: t.ot, color: AMBER },
@@ -157,45 +148,117 @@ export function TimeAttendancePanels({ employee, period, target, onPeriodChange 
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle>Daily efficiency</CardTitle>
-          <p className="text-xs text-[#6B7280]">
-            Pool (production ÷ working) per day against the {target}% target · {below} of {daily.length} days below · click a point to focus that day
-          </p>
-        </CardHeader>
-        <CardContent>
-          <div className="select-none [&_*]:outline-none [&_.recharts-wrapper]:outline-none" style={{ width: "100%", height: 260 }}>
-            {daily.length === 0 ? (
-              <div className="flex items-center justify-center h-full text-xs text-[#6B7280]">No clocked hours in range.</div>
-            ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart
-                  data={daily}
-                  margin={{ top: 6, right: 8, bottom: 0, left: 0 }}
-                  style={{ cursor: "pointer" }}
-                  onClick={(e) => {
-                    const hit = daily.find((d) => d.date === e?.activeLabel);
-                    if (hit) onPeriodChange({ ...period, day: period.day === hit.iso ? undefined : hit.iso });
-                  }}
-                >
-                  <XAxis dataKey="date" tick={{ fontSize: 10, fill: MUTED }} axisLine={{ stroke: BORDER }} tickLine={false} />
-                  <YAxis tick={{ fontSize: 10, fill: MUTED }} axisLine={false} tickLine={false} width={38} unit="%" domain={[0, "auto"]} />
-                  <Tooltip cursor={{ stroke: BORDER }} contentStyle={TOOLTIP} formatter={(v) => `${v}%`} />
-                  {period.day && <ReferenceLine x={period.day.slice(5)} stroke={TAUPE} strokeDasharray="3 3" />}
-                  <ReferenceLine y={target} stroke={MUTED} strokeDasharray="4 3" label={{ value: `${target}% target`, fontSize: 10, fill: MUTED, position: "insideTopRight" }} />
-                  <Line type="monotone" dataKey="Efficiency" stroke={TEAL} strokeWidth={1.75} dot={{ r: 2.5 }} activeDot={{ r: 5.5, fill: "#FFFFFF", stroke: TEAL, strokeWidth: 2 }} />
-                </LineChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+      <DailyEfficiencyCard employee={employee} period={period} target={target} onPeriodChange={onPeriodChange} />
     </div>
   );
 }
 
+// Pool efficiency per day. With `workerId` set it drills into that one person:
+// every day of the period on the x axis, their working vs production hours as
+// bars (right axis) and their own efficiency as the line. `workerId` is
+// EmployeesView's `emp` filter, so the filter bar, Reset, a picked row and the
+// back button all move the same state.
+export function DailyEfficiencyCard({ employee, period, target, onPeriodChange, workerId, onBack }: Common & {
+  workerId?: string; onBack?: () => void;
+}) {
+  const worker = workerId ? employee.workers.find((w) => w.id === workerId) : undefined;
+  const daily = useMemo(() => {
+    const r1 = (v: number) => Math.round(v * 10) / 10;
+    if (workerId) {
+      return workerDays(employee.performance.byDay, workerId, period).map((d) => ({
+        iso: d.date, date: d.date.slice(5),
+        Efficiency: d.eff == null ? null : r1(d.eff),
+        "Working hours": r1(d.workingMinutes / 60),
+        "Production hours": r1(d.productionMinutes / 60),
+      }));
+    }
+    return employee.performance.byDay
+      .filter((d) => inPeriod(period, d.date) && d.workingMinutes > 0)
+      .sort((a, b) => (a.date < b.date ? -1 : 1))
+      .map((d) => ({ iso: d.date, date: d.date.slice(5), Efficiency: r1((d.productionMinutes / d.workingMinutes) * 100) as number | null }));
+  }, [employee.performance.byDay, period, workerId]);
+  const measured = daily.filter((d) => d.Efficiency != null);
+  const below = measured.filter((d) => d.Efficiency! < target).length;
+  const month = periodLabel({ ...period, day: undefined });
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <CardTitle>{workerId ? `Daily efficiency · ${worker?.name ?? "Employee"}` : "Daily efficiency"}</CardTitle>
+          {workerId && onBack && (
+            <button
+              type="button"
+              onClick={onBack}
+              className="ml-auto text-xs rounded-md border border-[#E5E0D8] bg-[#F7F5F3] px-2 py-0.5 font-medium text-[#6B5C32] hover:bg-white max-md:min-h-10 max-md:px-3"
+            >
+              ← All employees
+            </button>
+          )}
+        </div>
+        <p className="text-xs text-[#6B7280]">
+          {workerId
+            ? `Working vs production hours and efficiency for each day of ${month} against the ${target}% target · ${below} of ${measured.length} days worked below · click a day to focus it`
+            : `Pool (production ÷ working) per day against the ${target}% target · ${below} of ${daily.length} days below · click a point to focus that day`}
+        </p>
+      </CardHeader>
+      <CardContent>
+        <div className="select-none [&_*]:outline-none [&_.recharts-wrapper]:outline-none" style={{ width: "100%", height: 260 }}>
+          {measured.length === 0 ? (
+            <div className="flex items-center justify-center h-full text-xs text-[#6B7280]">
+              {workerId ? `No clocked hours for ${worker?.name ?? "this employee"} in ${month}.` : "No clocked hours in range."}
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart
+                data={daily}
+                margin={{ top: 6, right: 8, bottom: 0, left: 0 }}
+                style={{ cursor: "pointer" }}
+                onClick={(e) => {
+                  const hit = daily.find((d) => d.date === e?.activeLabel);
+                  if (hit) onPeriodChange({ ...period, day: period.day === hit.iso ? undefined : hit.iso });
+                }}
+              >
+                <XAxis dataKey="date" tick={{ fontSize: 10, fill: MUTED }} axisLine={{ stroke: BORDER }} tickLine={false} />
+                <YAxis yAxisId="pct" tick={{ fontSize: 10, fill: MUTED }} axisLine={false} tickLine={false} width={38} unit="%" domain={[0, "auto"]} />
+                {workerId && <YAxis yAxisId="h" orientation="right" tick={{ fontSize: 10, fill: MUTED }} axisLine={false} tickLine={false} width={32} unit="h" />}
+                <Tooltip cursor={{ stroke: BORDER }} contentStyle={TOOLTIP} formatter={(v, name) => (v == null ? "—" : name === "Efficiency" ? `${v}%` : `${v}h`)} />
+                {workerId && <Legend wrapperStyle={{ fontSize: 11 }} />}
+                {period.day && <ReferenceLine yAxisId="pct" x={period.day.slice(5)} stroke={TAUPE} strokeDasharray="3 3" />}
+                <ReferenceLine yAxisId="pct" y={target} stroke={MUTED} strokeDasharray="4 3" label={{ value: `${target}% target`, fontSize: 10, fill: MUTED, position: "insideTopRight" }} />
+                {/* activeBar off + pointer-events none: see SalesOrdersView, the
+                    hovered bar would cover the line and swallow the day click. */}
+                {workerId && <Bar yAxisId="h" dataKey="Working hours" fill={TAUPE} fillOpacity={0.35} radius={[3, 3, 0, 0]} maxBarSize={14} activeBar={false} isAnimationActive={false} style={{ pointerEvents: "none" }} />}
+                {workerId && <Bar yAxisId="h" dataKey="Production hours" fill={TAUPE} radius={[3, 3, 0, 0]} maxBarSize={14} activeBar={false} isAnimationActive={false} style={{ pointerEvents: "none" }} />}
+                <Line yAxisId="pct" type="monotone" dataKey="Efficiency" stroke={TEAL} strokeWidth={1.75} dot={{ r: 2.5 }} activeDot={{ r: 5.5, fill: "#FFFFFF", stroke: TEAL, strokeWidth: 2 }} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 type RankRow = { key: string; name: string; sub: string; avg: number };
+
+// A row that opens that person's day-by-day chart: clickable, and reachable +
+// operable from the keyboard (Tab, then Enter or Space).
+const PICK_CLS = "cursor-pointer hover:bg-[#F7F5F3] focus-visible:bg-[#F7F5F3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#6B5C32]";
+function pickable(onPick: ((key: string) => void) | undefined, key: string, name: string) {
+  if (!onPick) return {};
+  return {
+    role: "button",
+    tabIndex: 0,
+    "aria-label": `Show ${name} day by day`,
+    onClick: () => onPick(key),
+    onKeyDown: (e: React.KeyboardEvent) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      onPick(key);
+    },
+  };
+}
 
 function RankCard({ title, hint, rows, total, fromTop, color, onPick }: {
   title: string; hint: string; rows: RankRow[]; total: number; fromTop: boolean; color: string;
@@ -211,8 +274,8 @@ function RankCard({ title, hint, rows, total, fromTop, color, onPick }: {
         {rows.map((r, i) => (
           <div
             key={r.key}
-            className={`flex items-center gap-3 ${onPick ? "cursor-pointer rounded-md hover:bg-[#F7F5F3]" : ""}`}
-            onClick={() => onPick?.(r.key)}
+            className={`flex items-center gap-3 ${onPick ? `rounded-md ${PICK_CLS}` : ""}`}
+            {...pickable(onPick, r.key, r.name)}
           >
             <span className="w-5 font-mono text-xs text-[#6B7280]">{fromTop ? i + 1 : total - i}</span>
             <div className="min-w-0 flex-1">
@@ -277,7 +340,7 @@ export function EfficiencyPanels({ employee, period, target, onPeriodChange, onP
         <DayChip period={period} onPeriodChange={onPeriodChange} />
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <RankCard title="Top 5 performers" hint="Highest efficiency in the period · click a row to filter to that person" rows={top} total={people.length} fromTop color={GREEN} onPick={onPickEmployee} />
+        <RankCard title="Top 5 performers" hint="Highest efficiency in the period · click a row to see that person day by day" rows={top} total={people.length} fromTop color={GREEN} onPick={onPickEmployee} />
         <RankCard title="Bottom 5 · needs attention" hint="Lowest efficiency (production ÷ working) in the period" rows={bottom} total={people.length} fromTop={false} color={AMBER} onPick={onPickEmployee} />
       </div>
 
@@ -289,7 +352,7 @@ export function EfficiencyPanels({ employee, period, target, onPeriodChange, onP
         <CardHeader className="pb-3">
           <CardTitle>Employee efficiency warning audit</CardTitle>
           <p className="text-xs text-[#6B7280]">
-            Efficiency vs the {target}% baseline · flags under {WARN_LOW}% (under-performance) and over {WARN_HIGH}% (over-reporting) · Dates are the days that person's own ratio was outside the band (hover for the full list)
+            Efficiency vs the {target}% baseline · flags under {WARN_LOW}% (under-performance) and over {WARN_HIGH}% (over-reporting) · Dates are the days that person's own ratio was outside the band (hover for the full list) · click a row to see that person day by day
           </p>
         </CardHeader>
         <CardContent className="p-0">
@@ -308,8 +371,8 @@ export function EfficiencyPanels({ employee, period, target, onPeriodChange, onP
                   return (
                     <tr
                       key={p.key}
-                      className={`border-b border-[#E2DDD8] ${onPickEmployee ? "cursor-pointer hover:bg-[#F7F5F3]" : ""}`}
-                      onClick={() => onPickEmployee?.(p.key)}
+                      className={`border-b border-[#E2DDD8] ${onPickEmployee ? PICK_CLS : ""}`}
+                      {...pickable(onPickEmployee, p.key, p.name)}
                     >
                       <td className="px-4 py-2.5 font-medium text-[#1F1D1B]">{p.name}</td>
                       <td className="px-4 py-2.5 text-[#6B7280]">{p.sub || "—"}</td>
