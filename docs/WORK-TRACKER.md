@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-24** — branch `feat/dashboard-exp-ops-layout` added below (not committed, its entry is the newest).
 > **Last verified: 2026-09-24** — DEV-14 entry below updated: #510 MERGED; the per-line column was the wrong shape — branch `fix/pi-document-discount` (→ `main`) moves it to ONE invoice-level discount (BUG-2026-09-24-188).
 > **Last verified: 2026-09-24** — branch `feat/dashboard-experimental-parity` entry updated below (PR #505 open; its entry is the newest).
 > **Last verified: 2026-09-23** — branch `fix/production-auto-load` added below (open, its entry is the newest).
@@ -24,6 +25,14 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
 ---
+
+## 2026-09-24 — 🔵 /dashboard-experimental: Operations + Employees layout pass (branch `feat/dashboard-exp-ops-layout`)
+
+Four asks, one agent each — all built on the branch (tsc strict 0, 116 dashboard tests pass); browser check pending (preview needs a login), not committed:
+1. 🔵 Operations > Overview: 7 KPIs → three labelled groups (Orders / Materials & cost / People), 2 rows at xl.
+2. 🔵 Employees > Departments → folded into Efficiency (desktop + `/m`); `?sub=departments` / `?tab=department` redirect there.
+3. 🔵 Attendance log: Today / Yesterday chips at the card's top right (card-local; `/m` copy not yet mirrored).
+4. 🔵 Operations > Overview after the KPIs: Plant Load dial + per-department status board + due-soon urgency lanes (`ops-floor-lib.ts`).
 
 ## 2026-09-24 — 🔵 DEV-14 Discount on Purchase Invoices + PI "View source document" (#510 MERGED; correction on branch `fix/pi-document-discount` → `main`)
 

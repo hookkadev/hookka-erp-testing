@@ -372,8 +372,7 @@ export function inFocus(p: Period, date: string | null | undefined): boolean {
 export const PEOPLE_SUBS = [
   { key: "overview", label: "Overview" },
   { key: "time", label: "Time & attendance" },
-  { key: "efficiency", label: "Efficiency" },
-  { key: "departments", label: "Departments" },
+  { key: "efficiency", label: "Efficiency" }, // also holds the department ledger (was its own "departments" sub)
 ] as const;
 export const OPS_SUBS = [
   { key: "overview", label: "Overview" },

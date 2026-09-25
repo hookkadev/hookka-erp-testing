@@ -9,7 +9,6 @@ import { AllOverviewView } from "./AllOverviewView";
 import { SalesOrdersView } from "./SalesOrdersView";
 import { OperationsView } from "./OperationsView";
 import { EmployeesView } from "./EmployeesView";
-import { DepartmentsView } from "./DepartmentsView";
 import { ServiceView } from "./ServiceView";
 import { PageHeader } from "@/components/ui/page-header";
 import { Tabs, type TabItem } from "@/components/ui/tabs";
@@ -47,7 +46,7 @@ import { Tabs, type TabItem } from "@/components/ui/tabs";
 // font is loaded — the app's default font-sans (system-ui) applies here too.
 // ---------------------------------------------------------------------------
 
-// Old keys (siti / lim / employee / department) still resolve: see LEGACY in
+// Old keys (siti / lim / employee / department, people:departments) still resolve: see LEGACY in
 // dashboard-url-state-lib.ts.
 const TABS: TabItem<"overview" | "sales" | "operations" | "people" | "service" | "finance">[] = [
   { key: "overview", label: "Overview" },
@@ -170,9 +169,7 @@ export default function DashboardPrototypePage() {
         <SalesOrdersView period={effectivePeriod} months={months} onPeriodChange={setPeriod} />
       )}
       {tab === "operations" && <OperationsView period={effectivePeriod} sub={sub as OpsSub} onPeriodChange={setPeriod} />}
-      {tab === "people" && ((sub as PeopleSub) === "departments"
-        ? <DepartmentsView period={effectivePeriod} />
-        : <EmployeesView period={effectivePeriod} sub={sub as Exclude<PeopleSub, "departments">} onPeriodChange={setPeriod} />)}
+      {tab === "people" && <EmployeesView period={effectivePeriod} sub={sub as PeopleSub} onPeriodChange={setPeriod} />}
       {tab === "service" && <ServiceView period={effectivePeriod} sub={sub as ServiceSub} onPeriodChange={setPeriod} onSubChange={(x) => setSub(x)} />}
       {tab === "finance" && <FinanceView period={effectivePeriod} sub={sub as FinSub} months={months} onPeriodChange={setPeriod} />}
     </div>

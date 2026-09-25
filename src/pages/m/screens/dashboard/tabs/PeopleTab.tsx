@@ -1,6 +1,7 @@
 // Employees tab (key `people`) — phone port of the desktop Employees dashboard (EmployeesView +
 // EmployeesInsights + AttendanceLogCard + DeptEfficiencyCard + DepartmentsView).
-// Sub-tabs (?sub=): overview, time, efficiency, departments — same keys as desktop.
+// Sub-tabs (?sub=): overview, time, efficiency — same keys as desktop. Efficiency
+// also holds the department ledger (was a separate "departments" sub-tab).
 //
 // Every number is the HOUSE metric the desktop reads (performance.byDay: earned
 // production minutes / clocked working minutes), not attendance_records'
@@ -453,6 +454,8 @@ function EfficiencySub({ employee, period, setPeriod, target, onPickEmployee }: 
         </Note>
       </MSection>
 
+      <DepartmentLedger employee={employee} period={period} />
+
       <MSection title="Efficiency trend">
         <EfficiencyTrend employee={employee} period={period} setPeriod={setPeriod} target={target} />
       </MSection>
@@ -495,46 +498,39 @@ function EfficiencySub({ employee, period, setPeriod, target, onPickEmployee }: 
   );
 }
 
-function DepartmentsSub({ employee, period }: { employee: EmployeeSlice; period: Period }) {
+// Department ledger — a section of Efficiency (it used to be its own
+// "departments" sub-tab). The totals row mirrors the desktop table's footer.
+function DepartmentLedger({ employee, period }: { employee: EmployeeSlice; period: Period }) {
   const { rows, total } = useMemo(() => deptLedger(employee, period), [employee, period]);
   const scope = periodLabel({ ...period, day: undefined });
+  const row = (key: string, title: string, r: typeof total) => (
+    <ListRow
+      key={key}
+      code={`Headcount ${fmtN(r.headcount)}`}
+      title={title}
+      subLine={`Working ${hrs(r.working)} · Prod ${hrs(r.prod)}`}
+      meta={[
+        { label: "Efficiency", value: pct1(ratio(r.working, r.prod)) },
+        { label: "Days worked", value: fmtN(r.days) },
+      ]}
+    />
+  );
 
   return (
-    <>
-      <MKpiGrid>
-        <MKpi label="Departments" value={fmtN(rows.length)} sub={scope} />
-        <MKpi label="Headcount" value={fmtN(total.headcount)} sub="current" />
-        <MKpi label="Working hours" value={hrs(total.working)} />
-        <MKpi label="Prod hours" value={hrs(total.prod)} tone="#3E6570" />
-        <MKpi label="Factory efficiency" value={pct1(ratio(total.working, total.prod))} tone={M.taupe} />
-        <MKpi label="Days worked" value={fmtN(total.days)} />
-      </MKpiGrid>
-
-      <MSection title="Department ledger" hint={scope}>
-        {rows.length === 0 ? (
-          <MobileCard><MState kind="empty" text="No departments." /></MobileCard>
-        ) : (
-          <Rows>
-            {rows.map((r) => (
-              <ListRow
-                key={r.dept}
-                code={`Headcount ${fmtN(r.headcount)}`}
-                title={r.dept}
-                subLine={`Working ${hrs(r.working)} · Prod ${hrs(r.prod)}`}
-                meta={[
-                  { label: "Efficiency", value: pct1(ratio(r.working, r.prod)) },
-                  { label: "Days worked", value: fmtN(r.days) },
-                ]}
-              />
-            ))}
-          </Rows>
-        )}
-        <Note>
-          Headcount is current; hours and efficiency follow the period. Revenue and labor cost per department are not
-          shown: there is no per-department revenue source, and labor cost needs a payroll aggregate in the feed.
-        </Note>
-      </MSection>
-    </>
+    <MSection title="Department ledger" hint={`${fmtN(rows.length)} departments · ${scope}`}>
+      {rows.length === 0 ? (
+        <MobileCard><MState kind="empty" text="No departments." /></MobileCard>
+      ) : (
+        <Rows>
+          {rows.map((r) => row(r.dept, r.dept, r))}
+          {row("__total", "Factory total", total)}
+        </Rows>
+      )}
+      <Note>
+        Headcount is current; hours and efficiency follow the period. Revenue and labor cost per department are not
+        shown: there is no per-department revenue source, and labor cost needs a payroll aggregate in the feed.
+      </Note>
+    </MSection>
   );
 }
 
@@ -602,7 +598,6 @@ function PeopleBody({ employee, sub, period, setPeriod, targetPct, hoursPerDay }
   if (sub === "efficiency") {
     return <>{filterBar}<EfficiencySub employee={filtered} period={period} setPeriod={setPeriod} target={target} onPickEmployee={setEmp} /></>;
   }
-  if (sub === "departments") return <DepartmentsSub employee={employee} period={period} />;
   return <OverviewSub employee={employee} period={period} setPeriod={setPeriod} targetPct={targetPct} hoursPerDay={hoursPerDay} />;
 }
 
