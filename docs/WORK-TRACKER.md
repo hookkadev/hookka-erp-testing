@@ -84,7 +84,7 @@ Asks, in PRD order — each row flips to done as it lands:
 Plan: PR-A = R1-R2 (switch the rule on in shadow mode, fast to merge); PR-B = the rest.
 **2026-09-18:** R1–R15 on the branch (`9539c0dc` + docs commit). `docs/API.md` regenerated,
 `docs/modules/production.md` flow 7 rewritten for the one-gate design and restamped, CODEBASE-MAP rows
-for the gate / reasons / ordered-batch / report page, BUG-2026-09-24-192 logged. Full suite 4,649 / 0
+for the gate / reasons / ordered-batch / report page, BUG-2026-09-24-193 logged. Full suite 4,649 / 0
 failing; `tsc` strict clean. **Left:** browser pass (dialog, phone picker, report page), R16 run by the
 user with `HOOKKA_PROD_DB_URL`, then push + PR to `main` and live verification of A1–A7.
 Constraints kept: rule untouched, no fixed dept list, `prerequisiteMet` never read, shadow mode.

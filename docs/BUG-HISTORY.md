@@ -36,7 +36,7 @@ Entries themselves stay newest-first.
 
 ---
 
-## BUG-2026-09-24-192 — the sequence lock refused nothing: the gate was on an unmerged branch, and nine other paths completed cards with no check at all `production` `inventory` `auth-rbac` 🟢
+## BUG-2026-09-24-193 — the sequence lock refused nothing: the gate was on an unmerged branch, and nine other paths completed cards with no check at all `production` `inventory` `auth-rbac` 🟢
 
 🟢 Fixed on branch `feat/t013-sequence-lock` (PRD T-013, tracker BUG-09, owner
 2026-09-07). **Prod impact UNMEASURED until deployed and verified live.**
