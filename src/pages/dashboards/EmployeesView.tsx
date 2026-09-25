@@ -113,8 +113,11 @@ export function EmployeesView({
   }
 
   const selectCls = "h-9 max-md:h-10 rounded-md border border-[#E2DDD8] bg-[#E8E1D6] px-3 text-sm text-[#1F1D1B] focus:outline-none";
+  // Sticky under the dashboard header (--dash-sticky-top, dashboard-prototype.tsx)
+  // so department / employee stay switchable while scrolling. md+ only: on a
+  // phone the stacked filters would eat most of the screen.
   const filterBar = (
-    <Card>
+    <Card className="md:sticky md:top-[var(--dash-sticky-top,0px)] md:z-20">
       <CardContent className="p-3 flex flex-wrap items-end gap-3">
         <label className="text-[11px] text-[#6B7280] space-y-1 block max-md:w-full">
           Department
