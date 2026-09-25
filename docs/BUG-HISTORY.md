@@ -1,6 +1,6 @@
 # Bug History
 
-> **Last verified: 2026-09-23** — newest entry BUG-2026-09-23-182 (branch `laphii/fix/dashboard-exp-production-revenue`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-09-25** — newest entry BUG-2026-09-25-193 (branch `feat/m-warehouse-locate`). Previously: newest entry BUG-2026-09-23-182 (branch `laphii/fix/dashboard-exp-production-revenue`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 
 Living log of bugs we've identified, diagnosed, and fixed in Hookka ERP.
 
@@ -33,6 +33,33 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-09-25-193 — rack-scan movements showed the rack ID, "Public scan", and no trace of a move `warehouse` `data-integrity` 🟢
+
+🟢 **Fixed** · found planning DEV-09 (Mobile Warehouse — movement history).
+
+**Symptom.** Every stock-in made by scanning a rack QR (`/r/<rackId>`) wrote a movement whose
+Rack column held the rack's id, whose "by" read `Public scan` even for a logged-in
+storekeeper, and a piece re-scanned into a different rack left only a plain `STOCK_IN` at the
+new rack — nothing recorded where it came from. **Measured on prod 2026-09-25 (read-only):** 21
+racks, 20 of which have `id = label` ("Rack 11"), so the id-for-label bug only shows on the
+one whose id is a UUID — `Floor`, also the fullest rack (701 items). Of the newest 500
+`STOCK_IN` movements, 333 are rack scans and all 333 read `Public scan`.
+
+**Root cause.** `buildRackStockInStatements` (`public-rack-qr.ts`) bound `rackLocationId` into
+BOTH the id and the `rackLabel` column, hard-coded `performedBy = "Public scan"`, and the
+stock-in POST's move-detect deleted the old `rack_items` row without telling the movement write.
+
+**Fix.** The builder takes the rack label; `performedBy` = `scannerName(c)` — the session user's
+`displayName` (the auth middleware still attaches a valid session on this auth-bypassed path),
+else `Public scan`, never the request body; a detected move sets `movedFromLabel` so the movement
+is a `TRANSFER` "Moved from <old rack>". Rows written before this keep the id / "Public scan".
+
+**Verified.** `tests/warehouse-scan-history.test.mjs` runs the real route on node:sqlite: label,
+name, no-session fallback, TRANSFER from → to, same-rack re-scan stays `STOCK_IN`. 2 of its
+cases fail on the pre-fix code. **Not yet verified live** (not deployed; prod counts UNMEASURED).
 
 ---
 

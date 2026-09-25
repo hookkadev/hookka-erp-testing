@@ -1,7 +1,7 @@
 # API — generated reference
 
 > **GENERATED FILE — do not hand-edit.** Regenerate with `node scripts/gen-api-docs.mjs`.
-> **Last generated: 2026-09-24** from `src/api/worker.ts` + `src/api/routes/*.ts`.
+> **Last generated: 2026-09-25** from `src/api/worker.ts` + `src/api/routes/*.ts`.
 
 The backend is a single [Hono](https://hono.dev) app in `src/api/worker.ts`, served
 as a Cloudflare Pages Function via `functions/api/[[route]].ts`. There is no
@@ -31,7 +31,7 @@ as a Cloudflare Pages Function via `functions/api/[[route]].ts`. There is no
   route module) and is exempt from the rate limiter.
 
 **Counts at generation time:** 142 mounts, 140 route files in
-`src/api/routes/`, 980 top-level handler registrations discovered.
+`src/api/routes/`, 981 top-level handler registrations discovered.
 
 ## Scope and limits of this file
 
@@ -93,7 +93,7 @@ offsets pointing past the end of their own file.
 | `/api/component-boms` | `src/api/routes/component-boms.ts` | `GET /` <sub>:30</sub><br>`GET /:parentCode` <sub>:38</sub><br>`PUT /:parentCode` <sub>:51</sub><br>`DELETE /:parentCode` <sub>:75</sub> | gated |
 | `/api/packing-lists` | `src/api/routes/packing-lists.ts` | `GET /` <sub>:408</sub><br>`GET /:id/qr-token` <sub>:454</sub><br>`GET /:id` <sub>:495</sub><br>`POST /` <sub>:753</sub><br>`DELETE /:id` <sub>:780</sub> | gated |
 | `/api/public/do-qr` | `src/api/routes/public-do-qr.ts` | `GET /:token/edit` <sub>:616</sub><br>`GET /:token` <sub>:665</sub><br>`POST /:token/advance` <sub>:713</sub> | **public** (PUBLIC_PREFIXES) |
-| `/api/public/rack-qr` | `src/api/routes/public-rack-qr.ts` | `GET /:rackId` <sub>:537</sub><br>`GET /:rackId/item` <sub>:611</sub><br>`POST /:rackId/stock-in` <sub>:787</sub> | **public** (PUBLIC_PREFIXES) |
+| `/api/public/rack-qr` | `src/api/routes/public-rack-qr.ts` | `GET /:rackId` <sub>:569</sub><br>`GET /:rackId/item` <sub>:643</sub><br>`POST /:rackId/stock-in` <sub>:820</sub> | **public** (PUBLIC_PREFIXES) |
 | `/api/public/rack-write` | `src/api/routes/public-rack-write.ts` | `GET /:token` <sub>:179</sub><br>`POST /:token/rack` <sub>:228</sub> | **public** (PUBLIC_PREFIXES) |
 | `/api/public/survey` | `src/api/routes/public-kpi-survey.ts` | `GET /:token` <sub>:134</sub><br>`POST /:token` <sub>:166</sub> | **public** (PUBLIC_PREFIXES) |
 | `/api/cnc-templates` | `src/api/routes/cnc-templates.ts` | `GET /` <sub>:692</sub><br>`GET /:id` <sub>:741</sub><br>`GET /:id/file/:kind` <sub>:762</sub><br>`POST /` <sub>:821</sub><br>`POST /import` <sub>:947</sub><br>`PATCH /:id` <sub>:1178</sub><br>`DELETE /:id` <sub>:1272</sub> | gated |
@@ -111,7 +111,7 @@ offsets pointing past the end of their own file.
 | `/api/fg-units` | `src/api/routes/fg-units.ts` | `GET /` <sub>:563</sub><br>`GET /ledger-reconciliation` <sub>:616</sub><br>`GET /:id` <sub>:632</sub><br>`POST /backfill-dedupe-fg-units` <sub>:670</sub><br>`POST /generate/:poId` <sub>:769</sub><br>`POST /backfill-hub` <sub>:796</sub><br>`POST /seed-stock-events` <sub>:884</sub><br>`POST /backfill-batch-link` <sub>:987</sub><br>`POST /scan` <sub>:1047</sub> | gated (some paths public) |
 | `/api/fabric-tracking` | `src/api/routes/fabric-tracking.ts` | `GET /` <sub>:133</sub><br>`POST /` <sub>:278</sub><br>`DELETE /:id` <sub>:358</sub><br>`PUT /:id` <sub>:382</sub> | gated |
 | `/api/fabrics` | `src/api/routes/fabrics.ts` | `GET /` <sub>:37</sub><br>`POST /` <sub>:67</sub><br>`PUT /:id` <sub>:68</sub><br>`DELETE /:id` <sub>:69</sub> | gated |
-| `/api/warehouse` | `src/api/routes/warehouse.ts` | `GET /` <sub>:248</sub><br>`POST /` <sub>:298</sub><br>`POST /racks` <sub>:396</sub><br>`GET /movements` <sub>:456</sub><br>`POST /movements` <sub>:497</sub><br>`GET /:id/details` <sub>:565</sub><br>`GET /:id` <sub>:611</sub><br>`PUT /:id` <sub>:628</sub><br>`DELETE /:id` <sub>:697</sub> | gated |
+| `/api/warehouse` | `src/api/routes/warehouse.ts` | `GET /` <sub>:248</sub><br>`POST /` <sub>:298</sub><br>`POST /racks` <sub>:396</sub><br>`GET /movements` <sub>:456</sub><br>`GET /locate` <sub>:502</sub><br>`POST /movements` <sub>:560</sub><br>`GET /:id/details` <sub>:628</sub><br>`GET /:id` <sub>:674</sub><br>`PUT /:id` <sub>:691</sub><br>`DELETE /:id` <sub>:760</sub> | gated |
 | `/api/stock-accounts` | `src/api/routes/stock-accounts.ts` | `GET /` <sub>:29</sub> | gated |
 | `/api/stock-value` | `src/api/routes/stock-value.ts` | `GET /` <sub>:58</sub><br>`POST /` <sub>:72</sub><br>`GET /:id` <sub>:170</sub><br>`PUT /:id` <sub>:185</sub> | gated |
 | `/api/stock` | `src/api/routes/stock-breakdown.ts` | `GET /breakdown` <sub>:168</sub> | gated |
