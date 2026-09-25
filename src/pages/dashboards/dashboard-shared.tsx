@@ -558,7 +558,7 @@ export function Kpi({
   const Trend = down ? TrendingDown : TrendingUp;
   return (
     <Card>
-      <CardContent className="p-4 max-md:p-3 min-w-0">
+      <CardContent className="p-3 min-w-0">
         <p className="text-xs text-[#6B7280] truncate">
           {label}
           {hint && (

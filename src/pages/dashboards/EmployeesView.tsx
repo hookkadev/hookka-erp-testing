@@ -105,7 +105,7 @@ export function EmployeesView({
   if (error || !data?.success) {
     return (
       <Card className="border-[#F0D9AE] bg-[#FDF3E4]">
-        <CardContent className="p-4 text-sm text-[#B5701A]">
+        <CardContent className="p-3 text-sm text-[#B5701A]">
           Couldn't load Employees:{error ?? "unknown error"}
         </CardContent>
       </Card>
@@ -145,7 +145,7 @@ export function EmployeesView({
   );
 
   return (
-    <div className="space-y-6 max-md:space-y-4">
+    <div className="space-y-4 max-md:space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-lg font-semibold text-[#1F1D1B]">Employees</h2>
         <LiveBadge live={live} />
@@ -159,7 +159,7 @@ export function EmployeesView({
       {/* Two real metrics; the config constants (target, working day) ride
           along as a baseline line and a subtitle instead of their own tiles. */}
       <div className="space-y-2">
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <Kpi
           label="Headcount"
           value={fmtN(headcount)}

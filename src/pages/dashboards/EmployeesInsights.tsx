@@ -106,7 +106,7 @@ export function TimeAttendancePanels({ employee, period, target, onPeriodChange 
   ];
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
       <Card>
         <CardHeader className="pb-3">
           <CardTitle>Time &amp; attendance</CardTitle>
@@ -270,13 +270,13 @@ export function EfficiencyPanels({ employee, period, target, onPeriodChange, onP
   );
 
   return (
-    <div className="space-y-5 max-md:space-y-4">
+    <div className="space-y-4 max-md:space-y-3">
       <div className="flex items-center gap-2">
         <h3 className="text-base font-semibold text-[#1F1D1B]">Efficiency ranking</h3>
         <span className="rounded-full bg-[#F0ECE9] px-2 py-0.5 text-[11px] text-[#6B7280]">{people.length} ranked · {period.day ? dayLabel(period.day) : periodLabel(period)}</span>
         <DayChip period={period} onPeriodChange={onPeriodChange} />
       </div>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <RankCard title="Top 5 performers" hint="Highest efficiency in the period · click a row to filter to that person" rows={top} total={people.length} fromTop color={GREEN} onPick={onPickEmployee} />
         <RankCard title="Bottom 5 · needs attention" hint="Lowest efficiency (production ÷ working) in the period" rows={bottom} total={people.length} fromTop={false} color={AMBER} onPick={onPickEmployee} />
       </div>

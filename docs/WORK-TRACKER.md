@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-25**: branch `fix/dashboard-tighter-padding` added below (not committed, its entry is the newest).
 > **Last verified: 2026-09-25**: branch `feat/dashboard-kpi-no-icons` (PR #524 to `main`, open) is the newest entry below, items 1 to 17 checked against the branch. The Attendance log, time audit dates and Department Status branches are folded into it (#525, #526, #527 closed).
 > **Last verified: 2026-09-25** — branch `feat/ocr-dashboard-tab` entry below updated: PR #522 open, BUG-2026-09-25-192 fixed, historical model fallback added.
 > **Last verified: 2026-09-24** — branch `feat/dashboard-exp-ops-layout` added below (not committed, its entry is the newest).
@@ -25,6 +26,15 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+---
+
+## 2026-09-25 — 🔵 /dashboard-experimental: tighter padding + even Materials & cost cards (branch `fix/dashboard-tighter-padding`)
+
+1. 🔵 Tighter padding across every dashboard tab: Card header/content padding now reads `--card-pad` (default unchanged: 1.5rem desktop / 1rem mobile), the dashboard root sets it to 0.75rem; KPI / hero tiles p-4 → p-3; section spacing space-y-5/6 → space-y-4; card grids gap-4 → gap-3.
+2. 🔵 Operations overview: Materials & cost cards split 1:1 like People (was 2fr/3fr, short left, long right).
+
+Verified: `tsc -p tsconfig.app.json` exit 0. Visual check NOT done (local preview needs a login + worker).
 
 ---
 
