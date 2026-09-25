@@ -1,5 +1,6 @@
 # Recurring bug classes — the index that makes P5 executable
 
+> **Last verified: 2026-09-25** — restamped on branch `feat/ocr-dashboard-tab`: C23 gains the OCR-tab row (BUG-2026-09-25-192, `readQueueRow` dual-key fix); no other class re-checked.
 > **Last verified: 2026-09-23** — branch `fix/invoice-line-so-ref` adds **C16 row 8** (invoice PDF read the DO field names for per-line SO/REF/CO SO). Nothing else re-checked.
 >
 > **Last verified: 2026-09-23** — restamped on branch `fix/so-duplicate-ref-saves-draft`: only C21 row 11

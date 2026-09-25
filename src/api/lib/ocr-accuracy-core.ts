@@ -239,6 +239,20 @@ export type QueueRow = {
 };
 
 /**
+ * The model a row scanned before ocr_model existed (2026-09-25) ran on.
+ * PO_MODEL / SUPPLIER_MODEL in scan-engine.ts have not changed since
+ * 2026-06-29 (commit 91d402b2, when the queue began calling scan-engine
+ * directly), so from that date the kind alone names the model. Earlier rows
+ * went through the old per-route self-fetch and stay unrecorded. If either
+ * constant changes, stamped rows carry the new value; this only covers the gap.
+ */
+const MODEL_SINCE = "2026-06-29";
+const HISTORICAL_MODEL: Record<string, string> = { po: "claude-sonnet-4-6", supplier: "claude-haiku-4-5" };
+export function historicalModel(kind: string, createdAt: string): string | null {
+  return createdAt.slice(0, 10) >= MODEL_SINCE ? HISTORICAL_MODEL[kind] ?? null : null;
+}
+
+/**
  * One scan_queue SELECT row → QueueRow minus the sample fields. Dual-keyed:
  * the DB layer hands columns back camelCased (sample_id → sampleId), the same
  * reason hydrateRow in routes/scan-queue.ts reads `r.x ?? r.x_snake`.
@@ -249,7 +263,7 @@ export function readQueueRow(r: Record<string, unknown>): Omit<QueueRow, "raw" |
   return {
     id: String(r.id ?? ""),
     kind: String(r.kind ?? "po"),
-    model: (v("ocrModel", "ocr_model") as string | null) || null,
+    model: (v("ocrModel", "ocr_model") as string | null) || historicalModel(String(r.kind ?? "po"), String(v("createdAt", "created_at") ?? "")),
     status: String(r.status ?? ""),
     secs: secs !== null && Number.isFinite(secs) ? secs : null,
     consumed: v("consumedAt", "consumed_at") != null,

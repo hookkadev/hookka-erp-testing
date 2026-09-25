@@ -371,8 +371,9 @@ app.get("/", async (c) => {
 // Per model × document kind, from scan_queue (every finished scan, not just
 // the imported ones): accuracy, failure rate, discard rate, scan time, and a
 // per-field miss rate; plus the most recent failed / edited scans. The model
-// comes from scan_queue.ocr_model (stamped since 2026-09-25); older rows read
-// "Not recorded" rather than being guessed at.
+// comes from scan_queue.ocr_model (stamped since 2026-09-25); unstamped rows
+// from 2026-06-29 on take the model the code ran then (historicalModel), and
+// anything older reads "Not recorded".
 // ---------------------------------------------------------------------------
 app.get("/models", async (c) => {
   const denied = await requirePermission(c, "sales-orders", "read");

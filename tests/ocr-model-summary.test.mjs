@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 
-const { summariseQueue, rowOutcome, percentile, readQueueRow } = await import(
+const { summariseQueue, rowOutcome, percentile, readQueueRow, historicalModel } = await import(
   pathToFileURL(resolve(process.cwd(), "src/api/lib/ocr-accuracy-core.ts")).href
 );
 
@@ -66,4 +66,13 @@ test("readQueueRow reads camelCase AND snake_case rows identically", () => {
   assert.equal(bare.createdAt, "");
   assert.equal(bare.model, null);
   assert.equal(bare.sampleId, null);
+});
+
+test("unstamped rows since 2026-06-29 take the model the code ran; older stay unrecorded", () => {
+  assert.equal(historicalModel("po", "2026-08-01T00:00:00Z"), "claude-sonnet-4-6");
+  assert.equal(historicalModel("supplier", "2026-06-29"), "claude-haiku-4-5");
+  assert.equal(historicalModel("po", "2026-06-28T23:59:59Z"), null);
+  assert.equal(historicalModel("po", ""), null);
+  assert.equal(readQueueRow({ id: "q", kind: "supplier", status: "done", createdAt: "2026-09-01" }).model, "claude-haiku-4-5");
+  assert.equal(readQueueRow({ id: "q", kind: "po", status: "done", ocrModel: "claude-haiku-4-5", createdAt: "2026-09-01" }).model, "claude-haiku-4-5");
 });
