@@ -154,3 +154,15 @@ test("overall efficiency is a weighted total over the period, not an average of 
   assert.equal(overallEfficiencyPct(byDay, { mode: "monthly", month: "2026-07" }), null);
   assert.equal(overallEfficiencyPct([], sep), null);
 });
+
+test("overall efficiency skips days whose hours are not in yet", () => {
+  // Today: cards completed, hours entered after the day. Its earned minutes
+  // must not push the month up, and the day on its own has no figure.
+  const byDay = [
+    { date: "2026-09-24", workingMinutes: 600, productionMinutes: 540 }, // 90%
+    { date: "2026-09-25", workingMinutes: 0, productionMinutes: 300 },
+  ];
+  const sep = { mode: "monthly", month: "2026-09" };
+  assert.equal(overallEfficiencyPct(byDay, sep), 90);
+  assert.equal(overallEfficiencyPct(byDay, { ...sep, day: "2026-09-25" }), null);
+});

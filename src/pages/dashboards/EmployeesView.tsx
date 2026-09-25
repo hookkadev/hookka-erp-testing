@@ -8,7 +8,7 @@ import { DeptEfficiencyCard } from "./ProductionDailyPanels";
 import { DepartmentsView } from "./DepartmentsView";
 import { AttendanceLogCard } from "./AttendanceLogCard";
 import { filterSlice } from "./employee-filter";
-import { TAUPE, TEAL, MUTED, BORDER, fmtN, inPeriod, overallEfficiencyPct, periodLabel, type Period, type PeopleSub } from "./dashboard-shared-lib";
+import { TAUPE, TEAL, MUTED, BORDER, fmtN, inPeriod, overallEfficiencyPct, periodLabel, dayLabel, type Period, type PeopleSub } from "./dashboard-shared-lib";
 import { Kpi, LiveBadge, MissingNote } from "./dashboard-shared";
 
 // Real data from GET /api/dashboard/prototype — the `employee` +
@@ -44,6 +44,7 @@ export function EmployeesView({
   const live = data?.availability?.employee?.live ?? false;
   const missing = data?.availability?.employee?.missing ?? [];
   const config = data?.meta?.config;
+  const target = config?.efficiencyTargetPct;
 
   const headcount = useMemo(
     () => (employee?.workers ?? []).filter((w) => w.countsToHeadcount).length,
@@ -77,6 +78,12 @@ export function EmployeesView({
     () => overallEfficiencyPct(employee?.performance.byDay ?? [], period),
     [employee?.performance.byDay, period],
   );
+
+  // The dash alone read as broken. The People tab opens on today, and today's
+  // hours are entered after the day, so say why the figure is missing.
+  const noHoursNote = efficiencyPct == null
+    ? `No production hours clocked ${period.day ? `on ${dayLabel(period.day)}` : `in ${periodLabel(period)}`}`
+    : null;
 
   // Department / employee filter (Time & attendance and Efficiency tabs). Every
   // panel downstream reads the filtered slice, so picking a person re-derives
@@ -149,28 +156,35 @@ export function EmployeesView({
       {sub === "overview" && (
         <>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+      {/* Two real metrics; the config constants (target, working day) ride
+          along as a baseline line and a subtitle instead of their own tiles. */}
+      <div className="space-y-2">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <Kpi
           label="Headcount"
           value={fmtN(headcount)}
-          sub="ACTIVE, excl. TEST accounts"
+          hint="ACTIVE workers, excluding TEST accounts"
         />
         <Kpi
           label="Overall Efficiency"
           value={efficiencyPct == null ? "—" : `${efficiencyPct.toFixed(1)}%`}
-          sub="production ÷ working hours, all production staff"
+          sub={[noHoursNote, target != null ? `Target: ${target}%` : null].filter(Boolean).join(" · ") || undefined}
+          hint="Production ÷ working hours, all production staff"
           valueColorClass="text-[#3E6570]"
-        />
-        <Kpi
-          label="Efficiency Target"
-          value={config?.efficiencyTargetPct != null ? `${config.efficiencyTargetPct}%` : "—"}
-          valueColorClass="text-[#4F7C3A]"
-        />
-        <Kpi
-          label="Working Hours / Day"
-          value={config?.workingHoursPerDay != null ? `${config.workingHoursPerDay}h` : "—"}
-          valueColorClass="text-[#9C6F1E]"
-        />
+        >
+          {efficiencyPct != null && target != null && target > 0 && (
+            <div className="mt-2 h-1.5 w-full rounded-full bg-[#E2DDD8] overflow-hidden">
+              <div
+                className={`h-full rounded-full ${efficiencyPct >= target ? "bg-[#4F7C3A]" : "bg-[#9C6F1E]"}`}
+                style={{ width: `${Math.min(100, (efficiencyPct / target) * 100)}%` }}
+              />
+            </div>
+          )}
+        </Kpi>
+      </div>
+      {config?.workingHoursPerDay != null && (
+        <p className="text-xs text-[#6B7280]">Standard working day: {config.workingHoursPerDay}h</p>
+      )}
       </div>
 
       <Card>
