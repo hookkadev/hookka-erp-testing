@@ -4,7 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   stepPeriod, stepDay, yearsWithData, periodLabel, periodPresets, presetActive, calendarCells, shiftMonth,
-  warnDays, dayList, overallEfficiencyPct, workerDays,
+  warnDays, dayList, overallEfficiencyPct, workerDays, auditTier,
 } from "../src/pages/dashboards/dashboard-shared-lib.ts";
 
 const months = ["2025-11", "2025-12", "2026-06", "2026-08", "2026-09"];
@@ -184,4 +184,15 @@ test("workerDays: one person's hours on every day of the month, gaps included", 
   // A range is walked day by day; YTD keeps only days worked.
   assert.equal(workerDays(byDay, "a", { mode: "range", month: "2026-02", from: "2026-02-27", to: "2026-03-02" }).length, 4);
   assert.deepEqual(workerDays(byDay, "a", { mode: "ytd", month: "2026-02" }).map((d) => d.date), ["2026-02-03", "2026-02-10", "2026-03-01"]);
+});
+
+test("auditTier: the highest over step cleared, low under the floor, null in the band", () => {
+  assert.equal(auditTier(583.3), 500);
+  assert.equal(auditTier(1000), 500); // strictly ABOVE a step
+  assert.equal(auditTier(1000.1), 1000);
+  assert.equal(auditTier(301), 300);
+  assert.equal(auditTier(150), null);
+  assert.equal(auditTier(150.1), 150);
+  assert.equal(auditTier(90), null);
+  assert.equal(auditTier(89.9), "low");
 });

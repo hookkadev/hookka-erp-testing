@@ -484,3 +484,17 @@ export const FIN_SUBS = [
   { key: "outlook", label: "Outlook & P/E" },
 ] as const;
 export type FinSub = (typeof FIN_SUBS)[number]["key"];
+
+/** Over-reporting steps of the daily warning audit, highest first. */
+export const OVER_TIERS = [1000, 500, 300, 150] as const;
+export type AuditTier = (typeof OVER_TIERS)[number] | "low";
+
+/**
+ * Tier for one person-day efficiency %: the highest over-reporting step it is
+ * ABOVE, "low" under the floor, null inside the band (floor..150 inclusive).
+ */
+export function auditTier(effPct: number, low = 90): AuditTier | null {
+  const over = OVER_TIERS.find((t) => effPct > t);
+  if (over) return over;
+  return effPct < low ? "low" : null;
+}

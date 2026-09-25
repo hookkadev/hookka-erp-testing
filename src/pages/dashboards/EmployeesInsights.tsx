@@ -1,7 +1,8 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { ChevronDown, ChevronLeft, ChevronRight, Filter } from "lucide-react";
 import { PieChart, Pie, Cell, ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, Legend, ReferenceLine, ResponsiveContainer } from "recharts";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { TAUPE, TEAL, MUTED, BORDER, AMBER, GREEN, fmtN, inPeriod, inFocus, dayLabel, dayList, warnDays, workerDays, periodLabel, type Period } from "./dashboard-shared-lib";
+import { TAUPE, TEAL, MUTED, BORDER, AMBER, GREEN, fmtN, inPeriod, inFocus, dayLabel, dayList, warnDays, workerDays, auditTier, OVER_TIERS, periodLabel, type AuditTier, type Period } from "./dashboard-shared-lib";
 
 // The Employees tab's time/efficiency panels. Everything here is derived from
 // the SAME cached /api/dashboard/prototype `employee` slice the rest of the
@@ -429,83 +430,168 @@ function WarningAuditPanel({ employee, period, target, onPickEmployee }: Omit<Co
 // month averages inside the band can still have one wild day (e.g. 0.4h
 // clocked, 2.3h earned = 583%); the per-person audit hides that, this lists it.
 // Any clocked production time counts here (no MIN_RANK_MINUTES): the tiny
-// denominators are exactly the days worth checking.
+// denominators are exactly the days worth checking. Over-reporting is split
+// into steps (auditTier), the menu filters by step, 10 rows a page.
+const TIER_STYLE: Record<AuditTier, { background: string; color: string }> = {
+  1000: { background: "#9A3A2D", color: "#FFFFFF" },
+  500: { background: "#E9A89A", color: "#6E2418" },
+  300: { background: "#F6CFC6", color: "#9A3A2D" },
+  150: { background: "#FBE7E3", color: "#B3452F" },
+  low: { background: "#FAEFCB", color: "#9C6F1E" },
+};
+const tierLabel = (t: AuditTier) => (t === "low" ? "Needs Attention" : `Over ${t}%`);
+type AuditFilter = "all" | AuditTier;
+const PAGE_SIZE = 10;
+
 export function DailyWarningAudit({ employee, period, target, onPickEmployee, selectedId }: Omit<Common, "onPeriodChange"> & { selectedId?: string }) {
   const rows = useMemo(() => {
     const byId = new Map(employee.workers.map((w) => [w.id, w]));
-    const out: { key: string; workerId: string; name: string; sub: string; date: string; w: number; p: number; eff: number }[] = [];
+    const out: { key: string; workerId: string; name: string; sub: string; date: string; w: number; p: number; eff: number; tier: AuditTier }[] = [];
     for (const d of employee.performance.byDay) {
       if (!inFocus(period, d.date)) continue;
       for (const x of d.workers ?? []) {
         const wk = byId.get(x.workerId);
         if (!wk?.countsToHeadcount || x.workingMinutes <= 0) continue;
         const eff = (x.productionMinutes / x.workingMinutes) * 100;
-        if (eff >= WARN_LOW && eff <= WARN_HIGH) continue;
+        const tier = auditTier(eff, WARN_LOW);
+        if (!tier) continue;
         out.push({
           key: `${x.workerId}|${d.date}`, workerId: x.workerId, name: wk.name ?? "—",
           sub: [wk.role, wk.dept].filter(Boolean).join(" · "), date: d.date,
-          w: x.workingMinutes, p: x.productionMinutes, eff,
+          w: x.workingMinutes, p: x.productionMinutes, eff, tier,
         });
       }
     }
     // Highest first: the over-reporting days lead, the weakest days close the list.
     return out.sort((a, b) => b.eff - a.eff);
   }, [employee, period]);
-  const overCount = rows.filter((r) => r.eff > WARN_HIGH).length;
+
+  // "Over N%" filters are cumulative (Over 300% includes the 500% and 1000%
+  // days), matching the label; Needs Attention is the under-floor days.
+  const [filter, setFilter] = useState<AuditFilter>("all");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [page, setPage] = useState(1);
+  const matches = (f: AuditFilter, r: (typeof rows)[number]) =>
+    f === "all" ? true : f === "low" ? r.tier === "low" : r.eff > f;
+  const options: AuditFilter[] = ["all", ...OVER_TIERS, "low"];
+  const shown = rows.filter((r) => matches(filter, r));
+  const pageCount = Math.max(1, Math.ceil(shown.length / PAGE_SIZE));
+  const cur = Math.min(page, pageCount); // a shorter list after a period change clamps, no effect needed
+  const pageRows = shown.slice((cur - 1) * PAGE_SIZE, cur * PAGE_SIZE);
+  const pick = (f: AuditFilter) => { setFilter(f); setPage(1); setMenuOpen(false); };
+  const optLabel = (f: AuditFilter) => (f === "all" ? "All flagged days" : tierLabel(f));
+  const pagerBtn = "h-8 max-md:h-10 rounded-md border border-[#E2DDD8] bg-white px-3 text-xs font-medium text-[#1F1D1B] hover:bg-[#F7F5F3] disabled:opacity-40 disabled:hover:bg-white";
 
   return (
     <div className="space-y-4 max-md:space-y-3">
       <div className="flex items-center gap-2">
         <h3 className="text-base font-semibold text-[#1F1D1B]">Time audit warning tiers</h3>
-        <span className="rounded-full bg-[#F0ECE9] px-2 py-0.5 text-[11px] text-[#6B7280]">{rows.length} flagged days · {overCount} over {WARN_HIGH}% · {periodLabel(period)}</span>
+        <span className="rounded-full bg-[#F0ECE9] px-2 py-0.5 text-[11px] text-[#6B7280]">{rows.length} flagged days · {rows.filter((r) => r.tier !== "low").length} over {WARN_HIGH}% · {periodLabel(period)}</span>
       </div>
       <Card>
-        <CardHeader className="pb-3">
-          <CardTitle>Employee efficiency warning audit</CardTitle>
-          <p className="text-xs text-[#6B7280]">
-            Each person's efficiency ON EACH DAY vs the {target}% baseline · flags days under {WARN_LOW}% (under-performance) and over {WARN_HIGH}% (over-reporting), highest first · click a row to open that person's attendance log above, click it again to go back
-          </p>
+        <CardHeader className="pb-3 flex-row flex-wrap items-start justify-between gap-2 space-y-0">
+          <div className="min-w-0 flex-1 space-y-1.5">
+            <CardTitle>Employee efficiency warning audit</CardTitle>
+            <p className="text-xs text-[#6B7280]">
+              Each person's efficiency ON EACH DAY vs the {target}% baseline · flags days under {WARN_LOW}% (under-performance) and over {WARN_HIGH}% (over-reporting, stepped at 300 / 500 / 1000%), highest first · click a row to open that person's attendance log above, click it again to go back
+            </p>
+          </div>
+          {/* Status filter menu. The transparent backdrop closes it on any outside click. */}
+          <div className="relative">
+            <button
+              type="button"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen((o) => !o)}
+              className="flex h-8 max-md:h-10 items-center gap-1.5 rounded-md border border-[#E2DDD8] bg-white px-3 text-xs font-medium text-[#1F1D1B] hover:bg-[#F7F5F3]"
+            >
+              <Filter className="h-3.5 w-3.5 text-[#6B7280]" />
+              {optLabel(filter)}
+              <ChevronDown className="h-3.5 w-3.5 text-[#6B7280]" />
+            </button>
+            {menuOpen && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
+                <div role="menu" className="absolute right-0 z-20 mt-1 w-52 rounded-md border border-[#E2DDD8] bg-white py-1 shadow-md">
+                  {options.map((f) => (
+                    <button
+                      key={f}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={filter === f}
+                      onClick={() => pick(f)}
+                      className={`flex w-full items-center justify-between gap-2 px-3 py-1.5 max-md:py-2.5 text-left text-xs hover:bg-[#F7F5F3] ${filter === f ? "font-semibold text-[#1F1D1B]" : "text-[#4B4540]"}`}
+                    >
+                      <span className="flex items-center gap-2">
+                        <span
+                          className="h-2 w-2 rounded-full"
+                          style={f === "all" ? { background: MUTED } : { background: TIER_STYLE[f].background, boxShadow: `inset 0 0 0 1px ${TIER_STYLE[f].color}` }}
+                        />
+                        {optLabel(f)}
+                      </span>
+                      <span className="font-mono text-[#6B7280]">{rows.filter((r) => matches(f, r)).length}</span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
         </CardHeader>
         <CardContent className="p-0">
-          <div className="overflow-x-auto" style={{ maxHeight: 460, overflowY: "auto" }}>
+          <div className="overflow-x-auto">
             <table className="w-full text-[12.5px]">
               <thead>
-                <tr className="*:sticky *:top-0 *:z-10 *:bg-white *:shadow-[inset_0_1px_0_#E2DDD8,inset_0_-1px_0_#E2DDD8]">
+                <tr className="border-t border-b border-[#E2DDD8]">
                   {["Employee", "Role / Dept", "Date", "Production time", "Prod hours", "Efficiency", "Status"].map((h, i) => (
                     <th key={h} className={`px-4 py-2 font-semibold uppercase text-[10.5px] tracking-wide text-[#6B7280] ${i >= 3 && i <= 5 ? "text-right" : "text-left"}`}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r) => {
-                  const over = r.eff > WARN_HIGH;
-                  return (
-                    <tr
-                      key={r.key}
-                      className={`border-b border-[#E2DDD8] ${onPickEmployee ? PICK_CLS : ""} ${r.workerId === selectedId ? "bg-[#F0ECE9]" : ""}`}
-                      aria-pressed={onPickEmployee ? r.workerId === selectedId : undefined}
-                      {...pickable(onPickEmployee, r.workerId, r.name)}
-                    >
-                      <td className="px-4 py-2.5 font-medium text-[#1F1D1B]">{r.name}</td>
-                      <td className="px-4 py-2.5 text-[#6B7280]">{r.sub || "—"}</td>
-                      <td className="px-4 py-2.5 text-[#6B7280] whitespace-nowrap">{dayLabel(r.date)}</td>
-                      <td className="px-4 py-2.5 text-right font-mono">{hrs(r.w)}</td>
-                      <td className="px-4 py-2.5 text-right font-mono">{hrs(r.p)}</td>
-                      <td className="px-4 py-2.5 text-right font-mono font-semibold" style={{ color: over ? "#9A3A2D" : "#9C6F1E" }}>{pct1(r.eff)}</td>
-                      <td className="px-4 py-2.5">
-                        <span className="inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold" style={over ? { background: "#FBE7E3", color: "#9A3A2D" } : { background: "#FAEFCB", color: "#9C6F1E" }}>
-                          {over ? `Over ${WARN_HIGH}%` : "Needs Attention"}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-                {rows.length === 0 && (
-                  <tr><td colSpan={7} className="px-4 py-6 text-center text-[#6B7280]">No day is outside the {WARN_LOW}–{WARN_HIGH}% band.</td></tr>
+                {pageRows.map((r) => (
+                  <tr
+                    key={r.key}
+                    className={`border-b border-[#E2DDD8] ${onPickEmployee ? PICK_CLS : ""} ${r.workerId === selectedId ? "bg-[#F0ECE9]" : ""}`}
+                    aria-pressed={onPickEmployee ? r.workerId === selectedId : undefined}
+                    {...pickable(onPickEmployee, r.workerId, r.name)}
+                  >
+                    <td className="px-4 py-2.5 font-medium text-[#1F1D1B]">{r.name}</td>
+                    <td className="px-4 py-2.5 text-[#6B7280]">{r.sub || "—"}</td>
+                    <td className="px-4 py-2.5 text-[#6B7280] whitespace-nowrap">{dayLabel(r.date)}</td>
+                    <td className="px-4 py-2.5 text-right font-mono">{hrs(r.w)}</td>
+                    <td className="px-4 py-2.5 text-right font-mono">{hrs(r.p)}</td>
+                    <td className="px-4 py-2.5 text-right font-mono font-semibold" style={{ color: r.tier === "low" ? "#9C6F1E" : "#9A3A2D" }}>{pct1(r.eff)}</td>
+                    <td className="px-4 py-2.5">
+                      <span className="inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold" style={TIER_STYLE[r.tier]}>
+                        {tierLabel(r.tier)}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+                {shown.length === 0 && (
+                  <tr><td colSpan={7} className="px-4 py-6 text-center text-[#6B7280]">
+                    {rows.length === 0 ? `No day is outside the ${WARN_LOW}–${WARN_HIGH}% band.` : `No days match "${optLabel(filter)}".`}
+                  </td></tr>
                 )}
               </tbody>
             </table>
           </div>
+          {shown.length > PAGE_SIZE && (
+            <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 text-xs text-[#6B7280]">
+              <span className="tabular-nums">
+                {(cur - 1) * PAGE_SIZE + 1}–{Math.min(cur * PAGE_SIZE, shown.length)} of {shown.length}
+              </span>
+              <div className="flex items-center gap-2">
+                <button type="button" className={pagerBtn} disabled={cur <= 1} onClick={() => setPage(cur - 1)} aria-label="Previous page">
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                </button>
+                <span className="tabular-nums">Page {cur} of {pageCount}</span>
+                <button type="button" className={pagerBtn} disabled={cur >= pageCount} onClick={() => setPage(cur + 1)} aria-label="Next page">
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
