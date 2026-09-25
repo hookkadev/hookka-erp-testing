@@ -1,6 +1,6 @@
 # Bug History
 
-> **Last verified: 2026-09-24** — newest entry BUG-2026-09-24-191 (branch `fix/so-customer-po-view`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-09-25** — newest entry BUG-2026-09-24-191 (branch `fix/so-customer-po-view`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 
 Living log of bugs we've identified, diagnosed, and fixed in Hookka ERP.
 
@@ -43,7 +43,7 @@ uploaded 2026-09-24 03:39 UTC). Same failure the catalog-photo session hit on `f
 earlier the same day.
 
 **Root cause.** From about 2026-09-18 16:16 to 2026-09-24 12:40 MYT, production's
-`SUPABASE_PROJECT_REF` pointed at another Supabase project (`kahxgvbfanbraazetefr`). Uploads wrote
+`SUPABASE_PROJECT_REF` pointed at another Supabase project. Uploads wrote
 their bytes THERE and their `file_assets` row to prod, so each row's `r2Key` was correct but empty
 in prod's `hookka-files` bucket once the setting was corrected. The catalog-photo session counted
 74 such files (55 SO attachments, 17 PI scans, 1 PV, 1 catalog photo).
@@ -52,10 +52,7 @@ in prod's `hookka-files` bucket once the setting was corrected. The catalog-phot
 as missing; Supabase Storage answers a missing object with 400 + `not_found`, so the route threw and
 returned a generic 500 "stream failed" instead of 404. **Still open** — not changed here.
 
-**Recovery.** `scripts/copy-storage-objects.mjs` copies an explicit list of keys (the `r2_key`s of
-rows uploaded in the window) from the other project to the same path in prod — add-only, dry run by
-default. The owner ran it; this SO's original now opens. **Per-file result UNMEASURED** — the run's
-summary was not captured here.
+**Recovery.** The owner copied the missing objects with a one-off Node script run outside the repo; this SO's original now opens. **Per-file result UNMEASURED** — the run's summary was not captured here.
 
 **UI change on the same page.** The SO detail "View original" button is gone; the Customer PO number
 itself is the underlined link, and it opens `/api/files/:id/download?inline=1` so the PDF renders in
