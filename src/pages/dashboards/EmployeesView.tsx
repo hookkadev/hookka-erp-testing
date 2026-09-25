@@ -8,7 +8,7 @@ import { DeptEfficiencyCard } from "./ProductionDailyPanels";
 import { DepartmentsView } from "./DepartmentsView";
 import { AttendanceLogCard } from "./AttendanceLogCard";
 import { filterSlice } from "./employee-filter";
-import { TAUPE, TEAL, MUTED, BORDER, fmtN, inPeriod, periodLabel, type Period, type PeopleSub } from "./dashboard-shared-lib";
+import { TAUPE, TEAL, MUTED, BORDER, fmtN, inPeriod, overallEfficiencyPct, periodLabel, type Period, type PeopleSub } from "./dashboard-shared-lib";
 import { Kpi, LiveBadge, MissingNote } from "./dashboard-shared";
 
 // Real data from GET /api/dashboard/prototype — the `employee` +
@@ -55,29 +55,28 @@ export function EmployeesView({
     [employee?.workers],
   );
 
-  // Scoped to the global period picker, same as every other dated tab —
+  // Scoped to the global period picker, same as every other dated tab.
   // headcount/target/hours-per-day above stay book-wide (workers have no
   // date of their own), only the daily hours series is filtered.
-  const { chartData, workingHours, productionHours } = useMemo(() => {
-    const days = (employee?.performance.byDay ?? [])
+  const chartData = useMemo(
+    () => (employee?.performance.byDay ?? [])
       .filter((d) => inPeriod(period, d.date))
-      .sort((a, b) => (a.date < b.date ? -1 : 1));
-    // The chart keeps the whole period; the totals narrow to a focused day.
-    const focus = period.day ? days.filter((d) => d.date === period.day) : days;
-    const w = focus.reduce((a, d) => a + d.workingMinutes, 0);
-    const p = focus.reduce((a, d) => a + d.productionMinutes, 0);
-    const rows = days.map((d) => {
-      return {
+      .sort((a, b) => (a.date < b.date ? -1 : 1))
+      .map((d) => ({
         iso: d.date,
         date: d.date.slice(5),
         "Working Hours": Math.round((d.workingMinutes / 60) * 10) / 10,
         "Production Hours": Math.round((d.productionMinutes / 60) * 10) / 10,
-      };
-    });
-    return { chartData: rows, workingHours: w / 60, productionHours: p / 60 };
-  }, [employee?.performance.byDay, period]);
+      })),
+    [employee?.performance.byDay, period],
+  );
 
-  const efficiencyPct = workingHours > 0 ? (productionHours / workingHours) * 100 : null;
+  // Company-wide, narrowed to a focused day like every other total. Same
+  // helper as the Operations overview card.
+  const efficiencyPct = useMemo(
+    () => overallEfficiencyPct(employee?.performance.byDay ?? [], period),
+    [employee?.performance.byDay, period],
+  );
 
   // Department / employee filter (Time & attendance and Efficiency tabs). Every
   // panel downstream reads the filtered slice, so picking a person re-derives
@@ -157,9 +156,9 @@ export function EmployeesView({
           sub="ACTIVE, excl. TEST accounts"
         />
         <Kpi
-          label="Efficiency (Prod ÷ Working)"
+          label="Overall Efficiency"
           value={efficiencyPct == null ? "—" : `${efficiencyPct.toFixed(1)}%`}
-          sub="earned standard time, not measured"
+          sub="production ÷ working hours, all production staff"
           valueColorClass="text-[#3E6570]"
         />
         <Kpi

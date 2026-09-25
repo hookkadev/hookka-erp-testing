@@ -386,6 +386,27 @@ export function inFocus(p: Period, date: string | null | undefined): boolean {
   return inPeriod(p, date);
 }
 
+/**
+ * Overall efficiency for the period: total earned production minutes divided
+ * by total clocked working minutes (performance.byDay from the prototype
+ * route). A weighted total, not an average of each person's %. Null when
+ * nobody clocked any time, so the card shows a dash, not 0%. The Employees
+ * and Operations overview cards both read this, so they cannot disagree.
+ */
+export function overallEfficiencyPct(
+  byDay: readonly { date: string; workingMinutes: number; productionMinutes: number }[],
+  p: Period,
+): number | null {
+  let w = 0;
+  let prod = 0;
+  for (const d of byDay) {
+    if (!inFocus(p, d.date)) continue;
+    w += d.workingMinutes;
+    prod += d.productionMinutes;
+  }
+  return w > 0 ? (prod / w) * 100 : null;
+}
+
 // Sub-tab strips live in the page's sticky row (next to the period picker), so
 // the keys are shared between the shell and the views.
 // Tabs and sub-tabs are named after the FUNCTION, never the person who reads

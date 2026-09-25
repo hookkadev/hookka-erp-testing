@@ -6,7 +6,7 @@ import {
 import { useCachedJson } from "@/lib/cached-fetch";
 import { formatCurrency } from "@/lib/utils";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { TAUPE, TEAL, AMBER, MUTED, BORDER, fmtN, fmtRMAxis, inPeriod, inFocus, dayLabel, periodLabel, type Period, type OpsSub } from "./dashboard-shared-lib";
+import { TAUPE, TEAL, AMBER, MUTED, BORDER, fmtN, fmtRMAxis, inPeriod, inFocus, overallEfficiencyPct, dayLabel, periodLabel, type Period, type OpsSub } from "./dashboard-shared-lib";
 import { Kpi, LiveBadge } from "./dashboard-shared";
 import { AttendanceLogCard } from "./AttendanceLogCard";
 import { DueSoonWorklist, type ProdOrderSummary } from "./OverdueCards";
@@ -148,14 +148,12 @@ export function OperationsView({
   // entries clocked ÷ completed job_cards earned), not attendance_records.
   const efficiencyStat = useMemo(() => {
     const days = (employee?.performance.byDay ?? []).filter((d) => inFocus(period, d.date));
-    const totalWorking = days.reduce((a, d) => a + d.workingMinutes, 0);
-    const totalProduction = days.reduce((a, d) => a + d.productionMinutes, 0);
     const last7 = [...days].sort((a, b) => (a.date < b.date ? -1 : 1)).slice(-7).map((d) => ({
       date: d.date,
       pct: d.workingMinutes > 0 ? (d.productionMinutes / d.workingMinutes) * 100 : 0,
     }));
     return {
-      pct: totalWorking > 0 ? (totalProduction / totalWorking) * 100 : null,
+      pct: overallEfficiencyPct(days, period), // same helper as the Employees overview card
       sparkline: last7,
     };
   }, [employee, period]);
