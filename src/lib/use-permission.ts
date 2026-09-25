@@ -42,6 +42,11 @@ type PermissionsResponse = {
   navHidden?: string[];
   /** Where this user should land — see homeForPermissions on the API. */
   home?: string;
+  /**
+   * The experimental dashboard tabs this role is limited to (role-policy.ts
+   * DASHBOARD_TABS_BY_ROLE). Absent or null: every tab, as before.
+   */
+  dashboardTabs?: string[] | null;
 };
 
 const PERMISSIONS_URL = "/api/auth/me/permissions";
@@ -102,6 +107,8 @@ type UsePermissionsResult = {
   isNavAllowed: (href: string) => boolean;
   /** Server-decided landing page for this role. See homeForPermissions on the API. */
   home: string;
+  /** Experimental dashboard tabs this role is limited to; null means every tab. */
+  dashboardTabs: string[] | null;
 };
 
 /**
@@ -142,6 +149,7 @@ export function usePermissions(): UsePermissionsResult {
     permissions,
     loading: loading && !data,
     home,
+    dashboardTabs: data?.dashboardTabs ?? null,
     hasPermission: (resource: string, action: string) =>
       checkSet(permissions, resource, action),
     /**

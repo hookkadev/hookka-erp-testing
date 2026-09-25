@@ -47,6 +47,7 @@
 > section gains the `attendance_records` warning — that table carries no production or
 > efficiency data and never has (BUG-2026-08-13-103).
 >
+> **Last verified: 2026-09-25 on branch `feat/dashboard-kpi-no-icons`**: Experimental dashboard "Access" paragraph rewritten for the per-role tab map (PRODUCTION).
 > **Last verified: 2026-09-24 on branch `feat/dashboard-experimental-parity`** — the Experimental dashboard section: "Widgets from `/dashboard`" paragraph added, the `DashboardWidgets.tsx` row added, and the AllOverviewView / SalesOrdersView / OperationsView / dashboard-shared-lib / FinanceView rows extended for the ported cards; the OCR-exception anchor re-pointed at `src/api/routes/ocr-accuracy.ts:354` (the `Math.round`), and the Hookka Report row's `/daily-report` route anchor re-measured (`src/dashboard-routes.tsx:489`, was `:474` — the access-gate edit moved it). `check-codebase-map.mjs` OK.
 >
 > **Last verified: 2026-09-23 on branch `feat/service-case-customer-po`** — the Service & Repair `service-cases/index.tsx` / `service-cases.ts` row only: line counts re-measured (1691 / 1068) and the Customer PO column (DEV-13) noted.
@@ -972,10 +973,17 @@ Separate from the Command Center above: its own page, its own route, its own
 feed. Nothing here CHANGES `dashboard-overview.ts` — but since 2026-09-23 the widgets ported from `/dashboard`
 (below) READ its endpoint (`/api/dashboard/overview`) and the other `/dashboard` URLs.
 
-**Access (2026-09-23): same gate as `/dashboard`** — `dashboard:read` (SUPER_ADMIN / ADMIN /
-OFFICE per the code roles). Route wrapped in `RequirePermission` (`src/dashboard-routes.tsx`)
-and the menu link mapped in `NAV_RESOURCE` (`src/api/lib/nav-permissions.ts`); the `/m` phone
-dashboard inherits it through `DASHBOARD_NAV_HREF`. Test: `tests/nav-permissions.test.mjs`.
+**Access (2026-09-25): `dashboard-experimental:read`.** Every `dashboard:read` holder (SUPER_ADMIN /
+ADMIN / OFFICE per the code roles) gets it derived in `/api/auth/me/permissions`
+(`withDashboardAccess`, `src/api/lib/role-policy.ts`), and so does a role in
+`DASHBOARD_TABS_BY_ROLE` (same file; today PRODUCTION: Sales, Operations, Employees, Service).
+A listed role is tab-restricted: the endpoint returns `dashboardTabs`, the page and `/m` show only
+those tabs (others by URL render "Under maintenance"), and the feed (`dashboardReadsFor` in
+`rbac.ts`) hands it only those tabs' sections. `requireReadOrDashboardTab` (`rbac.ts`) opens
+`/api/delivery-orders/stats`, `/pending-value` and `GET /api/service-cases/approvals` for the tab.
+Route wrapped in `RequirePermission` (`src/dashboard-routes.tsx`) and the menu link mapped in
+`NAV_RESOURCE` (`src/api/lib/nav-permissions.ts`); the `/m` phone dashboard inherits it through
+`DASHBOARD_NAV_HREF`. Tests: `tests/dashboard-tab-access.test.mjs`, `tests/nav-permissions.test.mjs`.
 
 **Widgets from `/dashboard` (2026-09-23, director: every `/dashboard` widget also lives here).**
 `src/pages/dashboards/DashboardWidgets.tsx` holds the ported widgets; each fetches the SAME URL
