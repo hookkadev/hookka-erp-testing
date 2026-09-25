@@ -1,6 +1,6 @@
 # RBAC Remediation — current state and the way through
 
-> **Last verified: 2026-09-24** — rebased onto `main` (215 commits of drift, cherry-picked clean) and
+> **Last verified: 2026-09-25** — added the `working-hour-entries` `/summary` caveat (the mobile Home card depends on it); nothing else re-checked. Previously 2026-09-24 — rebased onto `main` (215 commits of drift, cherry-picked clean) and
 > re-measured: scanner against this branch, plus the PRODUCTION grant counts quoted below. Previously against `src/api/lib/rbac.ts` (fail-opens closed) and `src/api/routes/{attendance,leaves,files,working-hour-entries,cash-flow,stock-value,forecasts,sessions}.ts`,
 > `src/api/lib/{rbac,nav-permissions}.ts`, `src/dashboard-routes.tsx`. Every claim below was
 > read out of the source on that date, not inferred from a plan or a migration.
@@ -155,6 +155,15 @@ here. Scanner limitation, confirmed by hand.
 gates on `attendance:create` / `update` / `delete`, and `GET /nonprod-requests` on
 `attendance:read`. The four open GETs are an omission, not an undecided design.
 `GET /production-revenue` is the one exception and uses `revenue-figures:read`.
+
+**Caveat found 2026-09-25 — do not gate `GET /summary` on `attendance:read` without deciding this
+first.** That endpoint is what the mobile Home "Worker Efficiency" card computes from (hours clocked per
+worker per dept), and it is read by PRODUCTION accounts, which do not and should not hold
+`attendance:read`. Gating it as planned would blank the card for them entirely. The card also now takes
+each worker's name and department from this endpoint (BUG-2026-09-25-193), so whatever gate it gets
+covers those two fields too. Options when the batch is done: gate it on `production-orders:read` (what
+the card's other summary, `/api/job-cards/summary`, already uses), or accept OR-of-both via
+`hasPermission`. Either way, test the card as a PRODUCTION account, not only as HR.
 
 **4. A tenth ungated write, missing from the 09-11 audit.** `PATCH /api/files/:id/cover`
 has no permission check and runs `ALTER TABLE file_assets ADD COLUMN IF NOT EXISTS

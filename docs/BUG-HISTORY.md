@@ -1,6 +1,6 @@
 # Bug History
 
-> **Last verified: 2026-09-25** — newest entry BUG-2026-09-25-192 (branch `feat/ocr-dashboard-tab`, PR #522); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-09-25** — newest entry BUG-2026-09-25-193 (branch `fix/worker-efficiency-names`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-25** — newest entry BUG-2026-09-24-191 (branch `fix/so-customer-po-view`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 
 Living log of bugs we've identified, diagnosed, and fixed in Hookka ERP.
@@ -36,6 +36,66 @@ Entries themselves stay newest-first.
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
 
 ---
+
+## BUG-2026-09-25-193 — Worker Efficiency card showed raw worker ids ("worker-45109bfc") to a PRODUCTION account while an admin saw names `dashboard` `rbac` `ui-frontend` 🟡
+
+🟡 **Fix in progress** · Owner-reported with two screenshots of the same mobile Home card: the
+PRODUCTION account listed `worker-45109bfc · 163%`, `worker-189e28b6 · 156%` …, the admin listed
+`YE LI SOE · Wood Cutting · 163%`, `KYAR TUN HLA · Wood Cutting · 156%` for the same workers. The
+percentages matched; only the labels differed.
+
+**Root cause.** `src/pages/m/screens/Home.tsx` turned each `workerId` into a name by fetching
+`/api/workers`. That endpoint is `SELECT * FROM workers` — it carries the payment and payroll-tax
+columns — so it is gated on `workers:read`, and PRODUCTION does not hold it (measured on prod
+2026-09-24: `workers:read` is held by HR, SALES and SUPER_ADMIN only). The affected account's browser
+console showed the 403 on `/api/workers`; the lookup map stayed empty, so `name.get(id) ?? id` fell
+back to the raw id and the department came out blank (`worker-45109bfc ·`). The card's numbers were
+right because they come from two other summaries the role can read.
+
+**Not caused by the 2026-09-24 RBAC deploy.** The gate on `GET /api/workers` predates it; nothing
+that deploy changed touches this card.
+
+**Why the obvious fix is wrong.** Granting PRODUCTION `workers:read` would put every worker's payment
+details in front of a role that has no business with them. The card needs a name and a department,
+not a worker record.
+
+**Fix.** `GET /api/working-hour-entries/summary` — the endpoint that already decides which workers the
+card shows — now returns `workerName` and `workerDepartmentCode` on each entry, from one
+`SELECT id, name, departmentCode FROM workers WHERE id IN (…)` over exactly the workers in the
+payload. Names and department, nothing else; job cards already print the PIC's name
+(`pic1Name` / `pic2Name`) to every role that reads production, so no new information is exposed.
+The names are attached AFTER the snapshot layer, on the cache-hit path as well as the compute path, so
+the cached payload keeps its old shape (no cacheKey bump, old rows stay valid) and a renamed worker
+shows up on the next request. A failed lookup is logged and degrades to nulls — the card falls back to
+the id, the summary does not 500 on a cosmetic join. `Home.tsx` drops its `/api/workers` fetch (two
+requests instead of three, and no 403 on every load for a role without `workers:read`) and reads the
+name from the entry.
+
+**Regression.** `tests/whe-summary-worker-names.test.mjs` — the real `/summary` handler against a
+stub DB: names and department joined by id (including `department_code` arriving snake_case), a worker
+with no row gets nulls, one query not one per worker, names never written into the snapshot, a cache
+HIT still returns them, a failed lookup still answers 200, and two source guards that `Home.tsx` no
+longer fetches `/api/workers`. 7 of 8 fail on the old code; the eighth (names never cached) guards a
+future regression and passes trivially when no names exist.
+
+**Verify.** `npm test` 4,872 pass / 0 fail, `tsc -p tsconfig.app.json` clean. After deploy, log in as
+the production account and open the mobile Home: the Worker Efficiency rows must read name +
+department, not ids. **Prod UNMEASURED until then.**
+
+**Still open.**
+1. **RBAC batch 2 will empty this card.** `GET /api/working-hour-entries/summary` is still ungated
+   (see the working-hour-entries finding in `docs/RBAC-REMEDIATION.md`). Gating it on
+   `attendance:read`, as that plan says, takes away the hours this card is computed from — for
+   PRODUCTION the card would go blank, not just lose names. Decide the gate when that batch is done.
+2. **Same pattern elsewhere.** `src/pages/production/fg-scan.tsx:113` and
+   `src/pages/production/folder-detail.tsx:269` also fetch `/api/workers`, and the desktop
+   `src/pages/dashboard-b/index.tsx` reads the same three summaries. Roles without `workers:read` get a
+   403 there too. Not touched here.
+3. The affected account's console also showed 403s on `/api/delivery-orders/stats` and
+   `/api/delivery-orders/pending-value`, and a 504 on a production-orders request. Not examined.
+
+---
+
 
 ## BUG-2026-09-25-192 — OCR tab: "When" read "undefined", Accuracy was always empty, Model always "Not recorded" `dashboard` `scan-ocr` 🟢
 

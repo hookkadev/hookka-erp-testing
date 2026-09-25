@@ -487,6 +487,61 @@ app.get("/production-revenue", async (c) => {
 });
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Worker display names for the summary payload.
+//
+// BUG-2026-09-25-193: the Worker Efficiency card resolved each workerId to a
+// name by fetching /api/workers. That endpoint is `SELECT *` over a table that
+// carries payment and payroll-tax columns, so it is gated on workers:read — and
+// a PRODUCTION account, which does not (and should not) hold it, got a 403,
+// an empty lookup, and a card full of raw ids ("worker-45109bfc").
+//
+// The summary already decides which workers the card shows, so it now says who
+// they are: id -> name + department, nothing else. Job cards already print the
+// PIC's name to every role that can read production, so this reveals no more.
+//
+// Attached AFTER the snapshot layer, on the cache-hit path as well as the
+// compute path: the snapshot stays keyed and shaped exactly as before (no
+// cacheKey bump, old rows still valid), and a renamed worker shows up on the
+// next request instead of waiting for working_hour_entries to change.
+//
+// Names are decoration. A failed lookup is logged and degrades to nulls, so
+// the card falls back to the id it had before rather than the whole summary
+// failing on a cosmetic join.
+// ---------------------------------------------------------------------------
+type WorkerNameRow = { id: string; name: string | null; departmentCode?: string | null; department_code?: string | null };
+
+async function attachWorkerNames<T extends { workerId: string }>(
+  db: Env["Variables"]["DB"],
+  entries: T[],
+): Promise<(T & { workerName: string | null; workerDepartmentCode: string | null })[]> {
+  const ids = [...new Set(entries.map((e) => e.workerId).filter(Boolean))];
+  const byId = new Map<string, { name: string | null; dept: string | null }>();
+  if (ids.length > 0) {
+    try {
+      const res = await db
+        .prepare(
+          `SELECT id, name, departmentCode FROM workers WHERE id IN (${ids.map(() => "?").join(",")})`,
+        )
+        .bind(...ids)
+        .all<WorkerNameRow>();
+      for (const r of res.results ?? []) {
+        byId.set(r.id, {
+          name: r.name ?? null,
+          dept: r.departmentCode ?? r.department_code ?? null,
+        });
+      }
+    } catch (err) {
+      console.warn("[whe-summary] worker name lookup failed; cards fall back to ids:", err);
+    }
+  }
+  return entries.map((e) => ({
+    ...e,
+    workerName: byId.get(e.workerId)?.name ?? null,
+    workerDepartmentCode: byId.get(e.workerId)?.dept ?? null,
+  }));
+}
+
 // GET /summary?from=YYYY-MM-DD&to=YYYY-MM-DD
 //
 // Per-worker totals + per-(worker × dept) breakdown for the date range.
@@ -497,7 +552,8 @@ app.get("/production-revenue", async (c) => {
 //
 // Returns one entry per worker that has ANY working_hour_entries rows
 // in the period:
-//   { workerId, totalHours, byDept: { FAB_CUT: 9, ... }, daysWithEntries }
+//   { workerId, totalHours, byDept: { FAB_CUT: 9, ... }, daysWithEntries,
+//     workerName, workerDepartmentCode }   <- null when the worker row is gone
 // ---------------------------------------------------------------------------
 app.get("/summary", async (c) => {
   const from = c.req.query("from");
@@ -520,7 +576,12 @@ app.get("/summary", async (c) => {
     _snapMod.getSourceSignature(c.var.DB, _snapCfgSum.sourceTables),
   ]);
   if (_snapMod.isSnapshotFresh(_checkSum[0], _checkSum[1].maxUpdatedAt, _checkSum[1].rowCount) && _checkSum[0]) {
-    return c.json({ success: true, ..._checkSum[0].data });
+    const cached = _checkSum[0].data as { data?: { workerId: string }[] };
+    return c.json({
+      success: true,
+      ..._checkSum[0].data,
+      data: await attachWorkerNames(c.var.DB, cached.data ?? []),
+    });
   }
   const _currentMaxSum = _checkSum[1].maxUpdatedAt;
   const _sourceRowsSum = _checkSum[1].rowCount;
@@ -597,7 +658,11 @@ app.get("/summary", async (c) => {
   } catch (e) {
     console.warn("[whe-summary-snapshot] write-back failed:", e);
   }
-  return c.json({ success: true, ..._payloadSum });
+  return c.json({
+    success: true,
+    ..._payloadSum,
+    data: await attachWorkerNames(c.var.DB, _payloadSum.data),
+  });
 });
 
 // ---------------------------------------------------------------------------
