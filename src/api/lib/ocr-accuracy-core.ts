@@ -238,6 +238,28 @@ export type QueueRow = {
   createdAt: string;
 };
 
+/**
+ * One scan_queue SELECT row → QueueRow minus the sample fields. Dual-keyed:
+ * the DB layer hands columns back camelCased (sample_id → sampleId), the same
+ * reason hydrateRow in routes/scan-queue.ts reads `r.x ?? r.x_snake`.
+ */
+export function readQueueRow(r: Record<string, unknown>): Omit<QueueRow, "raw" | "corrected"> & { sampleId: string | null } {
+  const v = (camel: string, snake: string) => r[camel] ?? r[snake] ?? null;
+  const secs = r.secs == null ? null : Number(r.secs);
+  return {
+    id: String(r.id ?? ""),
+    kind: String(r.kind ?? "po"),
+    model: (v("ocrModel", "ocr_model") as string | null) || null,
+    status: String(r.status ?? ""),
+    secs: secs !== null && Number.isFinite(secs) ? secs : null,
+    consumed: v("consumedAt", "consumed_at") != null,
+    sampleId: (v("sampleId", "sample_id") as string | null) || null,
+    fileName: String(v("fileName", "file_name") ?? ""),
+    error: (r.error ?? null) as string | null,
+    createdAt: String(v("createdAt", "created_at") ?? ""),
+  };
+}
+
 export type Outcome = "clean" | "edited" | "failed" | "discarded" | "pending";
 
 export const KIND_LABEL: Record<string, string> = {

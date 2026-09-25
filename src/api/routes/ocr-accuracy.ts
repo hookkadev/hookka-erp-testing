@@ -29,6 +29,7 @@ import {
   rateOf,
   topFails,
   summariseQueue,
+  readQueueRow,
   type Bucket,
   type QueueRow,
 } from "../lib/ocr-accuracy-core";
@@ -385,11 +386,10 @@ app.get("/models", async (c) => {
   if (from) { parts.push("substr(created_at::text, 1, 10) >= ?"); binds.push(from); }
   if (to) { parts.push("substr(created_at::text, 1, 10) <= ?"); binds.push(to); }
 
-  type QRow = {
-    id: string; kind: string; ocr_model: string | null; status: string;
-    secs: number | null; consumed_at: string | null; sample_id: string | null;
-    file_name: string; error: string | null; created_at: string;
-  };
+  // Rows come back camelCased by the DB layer (created_at → createdAt), so
+  // every read goes through readQueueRow's dual-key lookup — reading only the
+  // snake_case key left every field undefined (BUG-2026-09-25-192).
+  type QRow = Record<string, unknown>;
   let qRows: QRow[] = [];
   try {
     // Same lazy-ensure dependency as the timing block above: the column is
@@ -433,26 +433,15 @@ app.get("/models", async (c) => {
       }
     }
   };
+  const base = qRows.map(readQueueRow);
   const idsOf = (kind: string) =>
-    [...new Set(qRows.filter((r) => r.kind === kind && r.sample_id).map((r) => r.sample_id!))];
+    [...new Set(base.filter((r) => r.kind === kind && r.sampleId).map((r) => r.sampleId!))];
   await load("po_scan_samples", "rawExtracted", idsOf("po"));
   await load("supplier_scan_samples", "rawJson", idsOf("supplier"));
 
-  const rows: QueueRow[] = qRows.map((r) => {
-    const s = r.sample_id ? samples.get(r.sample_id) : undefined;
-    return {
-      id: r.id,
-      kind: r.kind,
-      model: r.ocr_model,
-      status: r.status,
-      secs: r.secs === null ? null : Number(r.secs),
-      consumed: r.consumed_at != null,
-      raw: s?.raw ?? null,
-      corrected: s?.corrected ?? null,
-      fileName: r.file_name,
-      error: r.error,
-      createdAt: String(r.created_at),
-    };
+  const rows: QueueRow[] = base.map(({ sampleId, ...r }) => {
+    const s = sampleId ? samples.get(sampleId) : undefined;
+    return { ...r, raw: s?.raw ?? null, corrected: s?.corrected ?? null };
   });
 
   return c.json({

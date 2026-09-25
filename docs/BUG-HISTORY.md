@@ -36,6 +36,14 @@ Entries themselves stay newest-first.
 
 ---
 
+## BUG-2026-09-25-192 — OCR tab: "When" read "undefined", Accuracy was always empty, Model always "Not recorded" `dashboard` `scan-ocr` 🟢
+
+**Root cause (C23).** `GET /api/ocr-accuracy/models` (#522) read `scan_queue` rows by their snake_case keys (`created_at`, `sample_id`, `ocr_model`, `consumed_at`, `file_name`), but the DB layer returns them camelCased. Every field was `undefined`: no scan linked to its sample (so none counted as imported → accuracy "—"), the date printed "undefined", every model fell to "Not recorded".
+
+**Fix.** `readQueueRow` in `src/api/lib/ocr-accuracy-core.ts` reads `r.camel ?? r.snake`, as `hydrateRow` in `scan-queue.ts` already did. Regression: `tests/ocr-model-summary.test.mjs` feeds the same row in both key shapes.
+
+---
+
 ## BUG-2026-09-24-191 — SO "View original" returned `{"error":"stream failed"}`; 18–24 Sep uploads were saved to the wrong storage project `infrastructure` `sales-orders` 🟡
 
 🟡 **Fix in progress** · Owner-reported on the SO for HC-PO-2609-172 (file `fa-7920e088-8c9`,

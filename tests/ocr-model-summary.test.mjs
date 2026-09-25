@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 
-const { summariseQueue, rowOutcome, percentile } = await import(
+const { summariseQueue, rowOutcome, percentile, readQueueRow } = await import(
   pathToFileURL(resolve(process.cwd(), "src/api/lib/ocr-accuracy-core.ts")).href
 );
 
@@ -49,4 +49,21 @@ test("percentile is nearest-rank", () => {
   assert.equal(percentile([], 90), null);
   assert.equal(percentile([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 90), 9);
   assert.equal(percentile([5], 90), 5);
+});
+
+// BUG-2026-09-25-192: the DB layer returns camelCased keys; reading only the
+// snake_case ones left When = "undefined" and accuracy empty on every row.
+test("readQueueRow reads camelCase AND snake_case rows identically", () => {
+  const camel = { id: "q1", kind: "po", ocrModel: "claude-haiku-4-5", status: "done", secs: "4.5",
+    consumedAt: "2026-09-25", sampleId: "pos-1", fileName: "a.pdf", error: null, createdAt: "2026-09-25T01:02:03Z" };
+  const snake = { id: "q1", kind: "po", ocr_model: "claude-haiku-4-5", status: "done", secs: 4.5,
+    consumed_at: "2026-09-25", sample_id: "pos-1", file_name: "a.pdf", error: null, created_at: "2026-09-25T01:02:03Z" };
+  const want = { id: "q1", kind: "po", model: "claude-haiku-4-5", status: "done", secs: 4.5, consumed: true,
+    sampleId: "pos-1", fileName: "a.pdf", error: null, createdAt: "2026-09-25T01:02:03Z" };
+  assert.deepEqual(readQueueRow(camel), want);
+  assert.deepEqual(readQueueRow(snake), want);
+  const bare = readQueueRow({ id: "q2", kind: "po", status: "done" });
+  assert.equal(bare.createdAt, "");
+  assert.equal(bare.model, null);
+  assert.equal(bare.sampleId, null);
 });
