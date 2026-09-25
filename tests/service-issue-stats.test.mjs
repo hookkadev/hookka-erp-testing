@@ -112,7 +112,23 @@ test("top products: once per case, highest first, limited", () => {
   const rows = topProducts([
     c({ products: ["A", "A", "B"] }), c({ products: ["A"] }), c({ products: ["C"] }),
   ], 2);
-  assert.deepEqual(rows, [{ label: "A", count: 2 }, { label: "B", count: 1 }]);
+  assert.deepEqual(rows.map((r) => [r.label, r.count]), [["A", 2], ["B", 1]]);
+});
+
+test("top products carry the root causes recorded on their cases, most frequent first, unanalysed last", () => {
+  const [a] = topProducts([
+    c({ products: ["A"], rootCauses: [{ category: "TRANSPORT", detail: "GDEX" }] }),
+    c({ products: ["A"], rootCauses: [{ category: "TRANSPORT", detail: "GDEX" }, { category: "MATERIAL", detail: "" }] }),
+    c({ products: ["A"] }),
+    c({ products: ["A"], rootCauses: [{ category: "MATERIAL", detail: "" }] }),
+    c({ products: ["A"], rootCauses: [{ category: "TRANSPORT", detail: "GDEX" }] }),
+  ]);
+  assert.equal(a.count, 5);
+  assert.deepEqual(a.causes.map((r) => [r.label, r.count]), [
+    ["Transport / 3PL — GDEX", 3],
+    ["Material / supplier", 2],
+    ["Not yet analysed", 1],
+  ]);
 });
 
 test("causeTrend buckets top causes by period bucket", () => {

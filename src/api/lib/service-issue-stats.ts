@@ -138,12 +138,29 @@ export const byRootCause = (cases: IssueCase[]) => tally(cases, rootCauseKeys, r
 export const byUnit = (cases: IssueCase[]) => tally(cases, (c) => [c.unit || NONE_KEY], unitLabel);
 export const byPrevention = (cases: IssueCase[]) => tally(cases, (c) => [c.prevention || NONE_KEY], preventionLabel);
 
-/** Most affected products (a case counts once per distinct product). */
-export function topProducts(cases: IssueCase[], limit = 10): { label: string; count: number }[] {
-  const m = new Map<string, number>();
-  for (const c of cases) for (const p of new Set(c.products ?? [])) m.set(p, (m.get(p) ?? 0) + 1);
+export type ProductRow = { label: string; count: number; causes: { key: string; label: string; count: number }[] };
+
+/** Most affected products (a case counts once per distinct product), each with the root causes
+ *  (category + detail) recorded on its cases, most frequent first, "Not yet analysed" last. */
+export function topProducts(cases: IssueCase[], limit = 10): ProductRow[] {
+  const m = new Map<string, { count: number; causes: Map<string, number> }>();
+  for (const c of cases) {
+    const keys = rootCauseKeys(c);
+    for (const p of new Set(c.products ?? [])) {
+      const e = m.get(p) ?? { count: 0, causes: new Map<string, number>() };
+      e.count += 1;
+      for (const k of keys) e.causes.set(k, (e.causes.get(k) ?? 0) + 1);
+      m.set(p, e);
+    }
+  }
   return [...m.entries()]
-    .map(([label, count]) => ({ label, count }))
+    .map(([label, e]) => ({
+      label,
+      count: e.count,
+      causes: [...e.causes.entries()]
+        .map(([key, count]) => ({ key, label: rootCauseLabel(key), count }))
+        .sort((a, b) => Number(a.key === NONE_KEY) - Number(b.key === NONE_KEY) || b.count - a.count || a.label.localeCompare(b.label)),
+    }))
     .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
     .slice(0, limit);
 }
