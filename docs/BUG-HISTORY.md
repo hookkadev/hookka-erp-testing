@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-09-25** — newest entry BUG-2026-09-25-192 (branch `feat/ocr-dashboard-tab`, PR #522); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-25** — newest entry BUG-2026-09-24-191 (branch `fix/so-customer-po-view`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 
 Living log of bugs we've identified, diagnosed, and fixed in Hookka ERP.
@@ -33,6 +34,14 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-09-25-192 — OCR tab: "When" read "undefined", Accuracy was always empty, Model always "Not recorded" `dashboard` `scan-ocr` 🟢
+
+**Root cause (C23).** `GET /api/ocr-accuracy/models` (#522) read `scan_queue` rows by their snake_case keys (`created_at`, `sample_id`, `ocr_model`, `consumed_at`, `file_name`), but the DB layer returns them camelCased. Every field was `undefined`: no scan linked to its sample (so none counted as imported → accuracy "—"), the date printed "undefined", every model fell to "Not recorded".
+
+**Fix.** `readQueueRow` in `src/api/lib/ocr-accuracy-core.ts` reads `r.camel ?? r.snake`, as `hydrateRow` in `scan-queue.ts` already did. Regression: `tests/ocr-model-summary.test.mjs` feeds the same row in both key shapes. Follow-up: rows from before the stamp existed now take the model the code ran on since 2026-06-29 (`historicalModel`) instead of "Not recorded".
 
 ---
 

@@ -196,7 +196,7 @@ export function resolvePeriod(period: Period, months: string[], today: string, o
 }
 
 /** Tabs whose bare URL opens on the MONTH, not on today. Same keys on desktop and /m. */
-const MONTHLY_TABS = new Set(["overview", "sales"]);
+const MONTHLY_TABS = new Set(["overview", "sales", "ocr"]);
 
 export function opensOnToday(tab: string | undefined): boolean {
   return !MONTHLY_TABS.has(tab ?? "");

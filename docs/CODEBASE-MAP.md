@@ -57,6 +57,8 @@
 
 > **Last verified: 2026-09-23 on branch `fix/production-auto-load`** — the `production/index.tsx` row only: line count re-measured (`wc -l`, was 8888), the removed "Load all" gate and the Overview scroll/poll perf fix noted.
 
+> **Last verified: 2026-09-25 on branch `feat/ocr-dashboard-tab`** — the OCR rows only (new `OcrView.tsx` row, `scan-queue.ts` line refs re-anchored by `check-codebase-map.mjs --fix`, gate exits 0).
+
 > **Last verified: 2026-09-22 on branch `fix/scan-queue-client-driven`** — the Scan-queue rows only (`scan-queue.ts` row, its route table, its Internals paragraph): re-anchored after BUG-2026-09-22-178 made the OCR browser-driven; the machine gate `check-codebase-map.mjs` exits 0 (its only errors were these rows); its 17 advisories about unmapped `src/pages/m/**` and production-component files predate this branch and are unchanged.
 
 > **Last verified: 2026-09-24** (dashboard-prototype.tsx / OperationsView.tsx rows: Departments folded into Efficiency, Operations > Overview re-layout) / 2026-09-22 (dashboard-prototype.tsx / dashboard-shared.tsx / dashboard-shared-lib.ts rows: Day/Month/YTD nav redesign) / 2026-09-21 (URL navigation state) / 2026-08-14 — re-checked mechanically by `node scripts/check-codebase-map.mjs`,
@@ -958,6 +960,7 @@ that proves those locks can actually go red.
 | ↳ `/m` Home **"Orders due this week"** card only (`src/pages/m/screens/Home.tsx`) — URL is the shared `ORDERS_DUE_URL` in `src/pages/m/lib/preload.ts`, imported by both so preload + screen can never warm different cache keys | `src/api/routes/sales-orders.ts` — `GET /?fields=orders-due&top=N` → `soListToOrdersDue` in `sales-orders/_helpers.ts`. Never go back to the BARE `/api/sales-orders` here: that ships 1,342 rows to render 6 (BUG-2026-08-13-013). The sort MUST stay a stable `localeCompare` over rows pre-ordered `created_at DESC, id DESC` — a SQL `ORDER BY` breaks ties under the DB's collation instead | `sales_orders` (+ `sales_orders_list_snapshot`, `cache_key = orders-due:<top>`) | `tests/sales-orders-orders-due.test.mjs` |
 | ↓ `/m` Home **Stock alerts** card (`src/pages/m/screens/Home.tsx`) — URL is the shared `STOCK_ALERTS_URL` in `src/pages/m/lib/preload.ts`, imported by both for the same reason as `ORDERS_DUE_URL` above | `src/api/routes/inventory.ts` — `GET /?buckets=rawMaterials`. Never go back to the BARE `/api/inventory`: that is 1.16 MB / three buckets to read one (BUG-2026-08-13-021) | `raw_materials` | `tests/inventory-buckets-projection.test.mjs` |
 | `src/pages/dashboard-b/OcrAccuracyCard.tsx` — self-contained OCR-accuracy block at the foot of the Command Center; owns its own fetch and follows the page's `period` selector | `src/api/routes/ocr-accuracy.ts` — `GET /` (`?from=&to=`) | `ocr_*` scan/import audit rows | `tests/dashboard-truthfulness.test.mjs` |
+| `src/pages/dashboards/OcrView.tsx` — /dashboard-experimental OCR tab (2026-09-25): model comparison, per-field misses, recent problem scans, then the full `OcrAccuracyCard` | `src/api/routes/ocr-accuracy.ts` — `GET /models` (`?from=&to=`), aggregation in `summariseQueue` (`src/api/lib/ocr-accuracy-core.ts`) | `scan_queue` (`ocr_model`, stamped since 2026-09-25) + `po_scan_samples` / `supplier_scan_samples` via `sample_id` | `tests/ocr-model-summary.test.mjs` |
 | `src/pages/dashboard-b/charts.tsx` — lazy recharts wrappers (RevenueChart, CustomerPieChart) (240) | `src/api/lib/dashboard-snapshot.ts` — daily snapshot for cumulative revenue | `invoices` / `delivery_orders` / `delivery_order_items` / `consignment_order_items` | `tests/snapshot-freshness-latestts.test.mjs` |
 | `src/dashboard-routes.tsx` — maps /dashboard → dashboard-b; redirects legacy /dashboard-b → /dashboard | `src/api/lib/dashboard-state-snapshot.ts` — daily point-in-time state snapshot (upsert on org_id+snap_date) | `production_orders` / `job_cards` / `cost_ledger` | |
 | | | `purchase_orders` / `purchase_order_items` / `grns` | |
@@ -2100,7 +2103,7 @@ two roles. "Org-scoped" means the SQL carries an `org_id` / `orgId` bind.
 | POST `/api/scan-queue/:id/retry` | `src/api/routes/scan-queue.ts:1201` | `purchase-orders:create` | org-filtered SELECT, then an id-only UPDATE (transitively safe) |
 | POST `/api/scan-queue/:id/consume` | `src/api/routes/scan-queue.ts:1273` | `purchase-orders:create` | org-filtered |
 
-Sweepers (`sweepStuckBatch` per poll, `sweepStuckScans` cron) only **re-queue** stuck rows; the next open modal drives them. The cron sweeper is **not** in this router: `sweepStuckScans` (`src/api/routes/scan-queue.ts:1481`)
+Sweepers (`sweepStuckBatch` per poll, `sweepStuckScans` cron) only **re-queue** stuck rows; the next open modal drives them. The cron sweeper is **not** in this router: `sweepStuckScans` (`src/api/routes/scan-queue.ts:1495`)
 is exported and mounted by hand as `POST /api/internal/scan-queue-sweep`
 (`src/api/worker.ts:791`), registered **before** `authMiddleware` and gated by a
 constant-time `CRON_SECRET` compare that 503s when the secret is unset or under 16 chars

@@ -10,6 +10,7 @@ import { SalesOrdersView } from "./SalesOrdersView";
 import { OperationsView } from "./OperationsView";
 import { EmployeesView } from "./EmployeesView";
 import { ServiceView } from "./ServiceView";
+import { OcrView } from "./OcrView";
 import { PageHeader } from "@/components/ui/page-header";
 import { Tabs, type TabItem } from "@/components/ui/tabs";
 
@@ -23,7 +24,8 @@ import { Tabs, type TabItem } from "@/components/ui/tabs";
 //
 // Tabs are named after the FUNCTION, never after the person who reads them:
 // Overview, Sales, Operations, Employees (key `people`), Service, Finance — the same keys the
-// /m dashboard uses (m/screens/dashboard/dashboard-m-lib.ts). A reviewer has
+// /m dashboard uses (OCR is desktop-only: it reads GET /api/ocr-accuracy/models,
+// not the shared feed) (m/screens/dashboard/dashboard-m-lib.ts). A reviewer has
 // no tab of their own: each chart lives in the tab that owns it, approvals
 // live in Service > Approvals, and Overview's "Needs action" strip links
 // there. All read the same cached GET /api/dashboard/prototype payload; no
@@ -48,13 +50,14 @@ import { Tabs, type TabItem } from "@/components/ui/tabs";
 
 // Old keys (siti / lim / employee / department, people:departments) still resolve: see LEGACY in
 // dashboard-url-state-lib.ts.
-const TABS: TabItem<"overview" | "sales" | "operations" | "people" | "service" | "finance">[] = [
+const TABS: TabItem<"overview" | "sales" | "operations" | "people" | "service" | "finance" | "ocr">[] = [
   { key: "overview", label: "Overview" },
   { key: "sales", label: "Sales" },
   { key: "operations", label: "Operations" },
   { key: "people", label: "Employees" },
   { key: "service", label: "Service" },
   { key: "finance", label: "Finance" },
+  { key: "ocr", label: "OCR" },
 ];
 
 const TAB_KEYS = TABS.map((t) => t.key);
@@ -172,6 +175,7 @@ export default function DashboardPrototypePage() {
       {tab === "people" && <EmployeesView period={effectivePeriod} sub={sub as PeopleSub} onPeriodChange={setPeriod} />}
       {tab === "service" && <ServiceView period={effectivePeriod} sub={sub as ServiceSub} onPeriodChange={setPeriod} onSubChange={(x) => setSub(x)} />}
       {tab === "finance" && <FinanceView period={effectivePeriod} sub={sub as FinSub} months={months} onPeriodChange={setPeriod} />}
+      {tab === "ocr" && <OcrView period={effectivePeriod} />}
     </div>
   );
 }

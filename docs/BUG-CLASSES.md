@@ -1,5 +1,6 @@
 # Recurring bug classes — the index that makes P5 executable
 
+> **Last verified: 2026-09-25** — restamped on branch `feat/ocr-dashboard-tab`: C23 gains the OCR-tab row (BUG-2026-09-25-192, `readQueueRow` dual-key fix); no other class re-checked.
 > **Last verified: 2026-09-23** — branch `fix/invoice-line-so-ref` adds **C16 row 8** (invoice PDF read the DO field names for per-line SO/REF/CO SO). Nothing else re-checked.
 >
 > **Last verified: 2026-09-23** — restamped on branch `fix/so-duplicate-ref-saves-draft`: only C21 row 11
@@ -1595,6 +1596,7 @@ snake_case throughout — 260 reads across 74 identifiers. Live effect:
 | `r.total_sen` | `undefined` | Revenue **RM 0** |
 | `r.is_service_order` | `undefined` → `!!` → `false` | no service order ever filtered; **1804 orders** where the house page shows 1713 |
 | `r.created_at` | `undefined` → `dayKey()` → `null` | revenue trend **empty**, and a `TypeError` at `:754` on a non-null-asserted map lookup |
+| `r.created_at` / `r.sample_id` / `r.ocr_model` (BUG-2026-09-25-192, OCR tab) | `undefined` | When **"undefined"**, Accuracy **—** on every row, Model **"Not recorded"** |
 
 The crash was read as "a delivery order with a NULL `created_at`" and patched
 with a null guard. The guard was correct but the diagnosis was not — there was
