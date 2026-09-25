@@ -3,8 +3,8 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } f
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { TAUPE, TEAL, AMBER, GREEN, MUTED, BORDER, CHART_GOLD, fmtN, type Period } from "./dashboard-shared-lib";
 import {
-  NONE_KEY, byCause, byRootCause, topCauses, byUnit, byPrevention, topProducts, causeTrend, causeLabel,
-  type IssueCase, type TallyRow,
+  NONE_KEY, byCause, topCauses, byUnit, byPrevention, topProducts, causeTrend, causeLabel,
+  rootCauseGrid, dayBuckets, monthBuckets, type IssueCase, type TallyRow,
 } from "../../api/lib/service-issue-stats";
 
 // "Top issues" sub-tab of the Service tab: which root cause / unit /
@@ -51,11 +51,56 @@ export function TallyList({
 
 const TREND_COLOURS = [TAUPE, TEAL, CHART_GOLD];
 
+/** The period's bucket list: every day of the month / range, or every month of the year to date. */
+function bucketsFor(period: Period): { buckets: string[]; bucketOf: (d: string) => string; label: (b: string) => string; unit: "day" | "month" } {
+  if (period.mode === "ytd") {
+    const [y, m] = period.month.split("-").map(Number);
+    return { buckets: monthBuckets(y, m), bucketOf: (d) => d.slice(0, 7), label: (b) => b.slice(5), unit: "month" };
+  }
+  if (period.mode === "range" && period.from && period.to) {
+    const days = dayBuckets(period.from, period.to);
+    if (days.length <= 62) return { buckets: days, bucketOf: (d) => d, label: (b) => b.slice(8), unit: "day" };
+    const months = [...new Set(days.map((d) => d.slice(0, 7)))];
+    return { buckets: months, bucketOf: (d) => d.slice(0, 7), label: (b) => b.slice(2), unit: "month" };
+  }
+  const [y, m] = period.month.split("-").map(Number);
+  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return { buckets: dayBuckets(`${period.month}-01`, `${period.month}-${String(last).padStart(2, "0")}`), bucketOf: (d) => d, label: (b) => b.slice(8), unit: "day" };
+}
+
+/** Root cause × bucket heatmap: one hue, darker = more; zero cells stay visibly empty. */
+function RootCauseHeatmap({ cases, period }: { cases: IssueCase[]; period: Period }) {
+  const { buckets, bucketOf, label, unit } = useMemo(() => bucketsFor(period), [period]);
+  const grid = useMemo(() => rootCauseGrid(cases, buckets, bucketOf), [cases, buckets, bucketOf]);
+  if (grid.rows.length === 0) return <div className="py-6 text-center text-xs text-[#6B7280]">No service cases in this period.</div>;
+  const cols = `minmax(140px,1.2fr) repeat(${buckets.length}, minmax(${unit === "day" ? 18 : 30}px, 1fr))`;
+  return (
+    <div className="overflow-x-auto select-none">
+      <div className="grid gap-[2px] items-center text-[10.5px] text-[#6B7280]" style={{ gridTemplateColumns: cols, minWidth: unit === "day" ? 720 : 0 }}>
+        <span />
+        {buckets.map((b) => <span key={b} className="text-center tabular-nums">{label(b)}</span>)}
+        {grid.rows.map((r) => [
+          <span key={`${r.key}-l`} className="truncate pr-2 text-[12px] font-medium" style={{ color: r.key === NONE_KEY ? AMBER : "#1F1D1B" }} title={r.label}>{r.label}</span>,
+          ...r.cells.map((v, i) => (
+            <span
+              key={`${r.key}-${i}`}
+              className="flex h-6 items-center justify-center rounded-[3px] tabular-nums text-[11px] text-[#1F1D1B]"
+              style={{ background: v ? CHART_GOLD : "#F0ECE9", opacity: v ? 0.3 + 0.7 * (v / Math.max(1, grid.max)) : 1 }}
+              title={`${r.label} · ${buckets[i]}: ${v} case${v === 1 ? "" : "s"}`}
+            >
+              {v || ""}
+            </span>
+          )),
+        ])}
+      </div>
+    </div>
+  );
+}
+
 export function ServiceIssuesPanel({
   cases, period, onPickCause, causeOnly,
 }: { cases: IssueCase[]; period: Period; onPickCause: (key: string) => void; causeOnly?: boolean }) {
   const causes = useMemo(() => byCause(cases), [cases]);
-  const rootCauses = useMemo(() => byRootCause(cases), [cases]);
   const units = useMemo(() => byUnit(cases), [cases]);
   const prevention = useMemo(() => byPrevention(cases), [cases]);
   const products = useMemo(() => topProducts(cases, 10), [cases]);
@@ -93,14 +138,15 @@ export function ServiceIssuesPanel({
 
       <Card>
         <CardHeader className="pb-1">
-          <CardTitle>Root cause</CardTitle>
+          <CardTitle>Root cause — {period.mode === "ytd" ? "by month" : "by day"}</CardTitle>
           <p className="text-xs text-[#6B7280]">
             From each case's Root Cause &amp; Prevention panel: the category plus the detail recorded under it (department,
-            supplier, 3PL, salesperson or sub-reason). A category with no detail recorded shows as one row.
+            supplier, 3PL, salesperson or sub-reason); a category with no detail recorded is one row. Darker = more cases.
+            Empty cells are quiet days, not missing data.
           </p>
         </CardHeader>
         <CardContent>
-          <TallyList rows={rootCauses} total={cases.length} empty="No service cases in this period." />
+          <RootCauseHeatmap cases={cases} period={period} />
         </CardContent>
       </Card>
 

@@ -92,7 +92,7 @@ export const rootCauseLabel = (k: string): string => {
   const i = k.indexOf(RC_SEP);
   const cat = i < 0 ? k : k.slice(0, i);
   const detail = i < 0 ? "" : k.slice(i + RC_SEP.length);
-  return `${causeLabel(cat)} — ${detail || "no detail recorded"}`;
+  return detail ? `${causeLabel(cat)} — ${detail}` : causeLabel(cat);
 };
 
 /** Keys a case counts under for the cause dimension (NONE when it has none). */
@@ -298,4 +298,39 @@ export function parseProductLabels(raw: unknown, max = 10): string[] {
     if (label) out.add(label);
   }
   return [...out].slice(0, max);
+}
+
+export type CauseGrid = {
+  buckets: string[];
+  rows: { key: string; label: string; cells: number[]; total: number }[];
+  max: number;
+};
+
+/** Cases per root cause (category + detail) per bucket over a FIXED bucket list, so empty buckets stay visible. Rows: root causes with a case, NONE last. */
+export function rootCauseGrid(cases: IssueCase[], buckets: string[], bucketOf: (createdDate: string) => string): CauseGrid {
+  const idx = new Map(buckets.map((b, i) => [b, i]));
+  const rows = byRootCause(cases)
+    .filter((r) => r.count > 0)
+    .map((r) => ({ key: r.key, label: r.label, cells: buckets.map(() => 0), total: r.count }));
+  const byKey = new Map(rows.map((r) => [r.key, r]));
+  for (const c of cases) {
+    const i = idx.get(bucketOf(c.createdDate));
+    if (i === undefined) continue;
+    for (const k of rootCauseKeys(c)) { const row = byKey.get(k); if (row) row.cells[i] += 1; }
+  }
+  return { buckets, rows, max: Math.max(0, ...rows.flatMap((r) => r.cells)) };
+}
+
+/** Every YYYY-MM-DD from `from` to `to` inclusive (UTC arithmetic; inputs are plain dates). */
+export function dayBuckets(from: string, to: string): string[] {
+  const out: string[] = [];
+  for (let t = Date.parse(from + "T00:00:00Z"), end = Date.parse(to + "T00:00:00Z"); t <= end; t += DAY_MS) {
+    out.push(new Date(t).toISOString().slice(0, 10));
+  }
+  return out;
+}
+
+/** Every YYYY-MM of `year` from January through `throughMonth` (1-12). */
+export function monthBuckets(year: number, throughMonth: number): string[] {
+  return Array.from({ length: Math.max(1, Math.min(12, throughMonth)) }, (_, i) => `${year}-${String(i + 1).padStart(2, "0")}`);
 }
