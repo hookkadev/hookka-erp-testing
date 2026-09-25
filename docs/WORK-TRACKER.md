@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-25** — branch `feat/m-warehouse-locate` (DEV-09) added below (open, its entry is the newest).
 > **Last verified: 2026-09-22** — branch `fix/delivery-loading-gate-po-paging` added below (open, its entry is the newest). Previously: branch `fix/delivery-tab-switch-pagination` (MERGED as #467). Previously: branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
 > **Last verified: 2026-09-22** — branch `fix/delivery-tab-switch-pagination` added below (open, its entry is the newest). Previously: branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
 > **Last verified: 2026-09-22** — branch `claude/nice-sanderson-27be32` (dashboard Service > Top issues redesign) added below (open, its entry is the newest). Previously: branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
@@ -22,6 +23,23 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
 ---
+
+## 2026-09-25 — 🔵 Experimental dashboard: icon-free KPI cards (uncommitted, on `feat/m-warehouse-locate` working tree — move to its own branch → `staging`)
+
+1. 🔵 Sales first-row KPI cards lose their icons; stacked layout (label → value → sub; a ±% delta sub is a green/red pill, any other sub stays plain wrapping text).
+3. 🔵 Same sweep across every tab: `Kpi` (`dashboard-shared.tsx`) no longer takes an icon at all — Finance / Operations (incl. its 2 custom cards) / Production / Service / Employees tiles, All-Overview Hero + DomainCard label icons, Service approvals header icon removed. Kept only icons that carry meaning or affordance: ↑/↓ delta arrows, → on CTA buttons, search-field magnifier, ↗ on case links.
+2. 🔵 Pending Delivery shows its value (`pendingDeliverySen` in `computeSalesKpis`, same confirmed-order sum as Outstanding); mirrored on `/m` Sales tab.
+
+## 2026-09-25 — 🔵 DEV-09 Mobile Warehouse: scan rack / locate / move / history (branch `feat/m-warehouse-locate` → `staging`)
+
+Ticket asks 1-6 (scan rack, scan item into rack, search location, move rack, movement history). Asks 1/2/4 already exist as the rack-QR `/r/<rackId>` page (rack QR encodes that URL); the build is the gaps:
+1. 🔵 B3 — scan stock-in movements stored the rack ID as `rackLabel` (history showed ids, not "Rack 3").
+2. 🔵 B1 — `performedBy` = the logged-in user's name (soft session on the public path; WAREHOUSE role logs in), else "Public scan".
+3. 🔵 B2 — a cross-rack move now writes a `TRANSFER` movement ("Moved from <rack>") instead of a silent delete.
+4. 🔵 B4 — `GET /api/warehouse/locate?q=` per-piece search (PO / customer PO / SO / item code / model / customer), `warehouse:read` gated.
+5. 🔵 F1-F3 — `/m/warehouse`: Scan Rack button → `/r/<id>`; Find tab (locate + Move → scan new rack); Movement tab Move chip + from→to + by.
+Out of scope v1 (owner default): office Packing dropdown / worker rack-assign (`applyPackingRack`) still write no movement row.
+State: all five built on the branch, NOT committed / pushed. tsc strict 0; `npm test` 4926 pass / 0 fail; `tests/warehouse-scan-history.test.mjs` (11, real route SQL on node:sqlite; 2 fail on pre-fix code). Browser (`npm run dev` → prod proxy, read-only): Scan Rack opens the scanner (camera blocked in the pane, so no decode tested), Find renders and shows "Search failed" against prod (no `/locate` there yet), Move chip renders. Prod measured: 21 racks, only `Floor` has id ≠ label; 333/333 recent scan stock-ins read "Public scan". BUG-2026-09-25-193.
 
 ## 2026-09-24 — 🔵 Staging: the three pre-existing convert-chain bugs the T-006 live check found (branch `fix/staging-legacy-convert-bugs` → `staging`)
 

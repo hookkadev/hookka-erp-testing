@@ -493,6 +493,69 @@ app.get("/movements", async (c) => {
   return c.json({ success: true, data, total: data.length });
 });
 
+// GET /api/warehouse/locate?q=… — "where is it?" (DEV-09). One row PER PIECE
+// (rack_items row), matched on anything a storekeeper would type: our SO
+// (Order No), internal PO no, customer PO, item code, model / description,
+// customer name. Server-side so the phone doesn't pull every rack (GET / is
+// the whole warehouse) just to answer one search. Read-gated: this names
+// customers, so it is not open to every logged-in role.
+app.get("/locate", async (c) => {
+  const denied = await requirePermission(c, "warehouse", "read");
+  if (denied) return denied;
+  // LIKE wildcards are stripped, not escaped: no order / PO / model code carries
+  // them, and stripping needs no dialect-specific ESCAPE clause.
+  const q = (c.req.query("q") || "").replace(/[\\%_]/g, "").trim().toLowerCase();
+  if (q.length < 2) return c.json({ success: true, data: [] });
+  const like = `%${q}%`;
+  // Every alias is snake_case so toCamel recovers it (an unquoted camelCase
+  // alias folds to lowercase on Postgres and is lost). Read dual-keyed below.
+  const res = await c.var.DB.prepare(
+    `SELECT ri.id AS rack_item_id, ri.rackLocationId AS rack_location_id,
+            rl.rack AS rack_label, ri.productName AS description,
+            ri.notes AS item_notes, ri.stockedInDate AS stocked_in_date,
+            ri.productCode AS item_code, ri.customerName AS item_customer,
+            po.poNo AS po_no, po.customerPOId AS customer_po,
+            po.salesOrderNo AS sales_order_no, po.productCode AS product_code,
+            po.customerName AS customer_name
+       FROM rack_items ri
+       JOIN rack_locations rl ON rl.id = ri.rackLocationId
+       LEFT JOIN production_orders po ON po.id = ri.productionOrderId
+      WHERE LOWER(COALESCE(ri.productName, '')) LIKE ?
+         OR LOWER(COALESCE(ri.notes, '')) LIKE ?
+         OR LOWER(COALESCE(ri.productCode, '')) LIKE ?
+         OR LOWER(COALESCE(ri.customerName, '')) LIKE ?
+         OR LOWER(COALESCE(po.poNo, '')) LIKE ?
+         OR LOWER(COALESCE(po.customerPOId, '')) LIKE ?
+         OR LOWER(COALESCE(po.salesOrderNo, '')) LIKE ?
+         OR LOWER(COALESCE(po.productCode, '')) LIKE ?
+         OR LOWER(COALESCE(po.customerName, '')) LIKE ?
+      ORDER BY ri.id DESC
+      LIMIT 50`,
+  )
+    .bind(like, like, like, like, like, like, like, like, like)
+    .all<Record<string, unknown>>();
+  const s = (r: Record<string, unknown>, camel: string, snake: string) =>
+    String(r[camel] ?? r[snake] ?? "").trim();
+  const data = (res.results ?? []).map((r) => ({
+    rackItemId: s(r, "rackItemId", "rack_item_id"),
+    rackLocationId: s(r, "rackLocationId", "rack_location_id"),
+    rackLabel: s(r, "rackLabel", "rack_label"),
+    description: s(r, "description", "description"),
+    // "SO <no> · pc N of M" — the piece identity notes; the SO is also joined
+    // below, so the client shows notes only for its piece suffix.
+    notes: s(r, "itemNotes", "item_notes"),
+    stockedInDate: s(r, "stockedInDate", "stocked_in_date"),
+    poNo: s(r, "poNo", "po_no"),
+    customerPO: s(r, "customerPo", "customer_po"),
+    salesOrderNo:
+      s(r, "salesOrderNo", "sales_order_no") ||
+      s(r, "itemNotes", "item_notes").replace(/^SO\s+/i, "").replace(/\s*·.*$/, ""),
+    itemCode: s(r, "productCode", "product_code") || s(r, "itemCode", "item_code"),
+    customerName: s(r, "customerName", "customer_name") || s(r, "itemCustomer", "item_customer"),
+  }));
+  return c.json({ success: true, data });
+});
+
 // POST /api/warehouse/movements — append a stock movement record
 app.post("/movements", async (c) => {
   const denied = await requirePermission(c, "warehouse", "create");
