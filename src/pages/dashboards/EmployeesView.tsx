@@ -3,7 +3,7 @@ import { ComposedChart, Area, Line, XAxis, YAxis, Tooltip, Legend, ReferenceLine
 import { useCachedJson } from "@/lib/cached-fetch";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { TimeAttendancePanels, EfficiencyPanels, DailyEfficiencyCard, WarningAuditPanel, type EmployeeSlice } from "./EmployeesInsights";
+import { TimeAttendancePanels, EfficiencyPanels, DailyEfficiencyCard, DailyWarningAudit, type EmployeeSlice } from "./EmployeesInsights";
 import { DeptEfficiencyCard } from "./ProductionDailyPanels";
 import { DepartmentsView } from "./DepartmentsView";
 import { AttendanceLogCard } from "./AttendanceLogCard";
@@ -304,13 +304,12 @@ export function EmployeesView({
               period={period}
               perDay={!!emp}
               below={(logPeriod) => deptOnly && (
-                <WarningAuditPanel
+                <DailyWarningAudit
                   employee={deptOnly}
                   period={logPeriod}
                   target={config?.efficiencyTargetPct ?? 100}
                   onPickEmployee={pickForLog}
                   selectedId={emp || undefined}
-                  pickHint="click a row to open that person's attendance log above, click it again to go back"
                 />
               )}
             />

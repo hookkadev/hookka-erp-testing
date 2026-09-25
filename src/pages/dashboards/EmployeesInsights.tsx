@@ -42,7 +42,7 @@ const TOOLTIP = { background: "#FFFFFF", border: `1px solid ${BORDER}`, borderRa
 // Audit bands around the 100% baseline. The feed carries no configured warning
 // threshold, so these are display choices, not policy.
 const WARN_LOW = 90;
-const WARN_HIGH = 110;
+const WARN_HIGH = 150;
 // A person clocking under an hour in the window has no meaningful ratio.
 const MIN_RANK_MINUTES = 60;
 
@@ -348,12 +348,10 @@ export function EfficiencyPanels({ employee, period, target, onPeriodChange, onP
   );
 }
 
-// People whose efficiency sits outside the audit band. Shown on Efficiency
-// (a click drills the Daily efficiency chart) and again under the Attendance
-// log on Time & attendance (a click opens that person's log above it).
-export function WarningAuditPanel({ employee, period, target, onPickEmployee, selectedId, pickHint = "click a row to see that person day by day" }: Omit<Common, "onPeriodChange"> & {
-  selectedId?: string; pickHint?: string;
-}) {
+// Efficiency: people whose period average sits outside the audit band (a
+// click drills the Daily efficiency chart). Time & attendance lists the same
+// band per day instead: DailyWarningAudit below.
+function WarningAuditPanel({ employee, period, target, onPickEmployee }: Omit<Common, "onPeriodChange">) {
   const people = useRankedPeople(employee, period);
   const flagged = useMemo(
     () => people
@@ -373,7 +371,7 @@ export function WarningAuditPanel({ employee, period, target, onPickEmployee, se
         <CardHeader className="pb-3">
           <CardTitle>Employee efficiency warning audit</CardTitle>
           <p className="text-xs text-[#6B7280]">
-            Efficiency vs the {target}% baseline · flags under {WARN_LOW}% (under-performance) and over {WARN_HIGH}% (over-reporting) · Dates are the days that person's own ratio was outside the band (hover for the full list) · {pickHint}
+            Efficiency vs the {target}% baseline · flags under {WARN_LOW}% (under-performance) and over {WARN_HIGH}% (over-reporting) · Dates are the days that person's own ratio was outside the band (hover for the full list) · click a row to see that person day by day
           </p>
         </CardHeader>
         <CardContent className="p-0">
@@ -392,8 +390,7 @@ export function WarningAuditPanel({ employee, period, target, onPickEmployee, se
                   return (
                     <tr
                       key={p.key}
-                      className={`border-b border-[#E2DDD8] ${onPickEmployee ? PICK_CLS : ""} ${p.key === selectedId ? "bg-[#F0ECE9]" : ""}`}
-                      aria-pressed={onPickEmployee ? p.key === selectedId : undefined}
+                      className={`border-b border-[#E2DDD8] ${onPickEmployee ? PICK_CLS : ""}`}
                       {...pickable(onPickEmployee, p.key, p.name)}
                     >
                       <td className="px-4 py-2.5 font-medium text-[#1F1D1B]">{p.name}</td>
@@ -410,7 +407,7 @@ export function WarningAuditPanel({ employee, period, target, onPickEmployee, se
                       </td>
                       <td className="px-4 py-2.5">
                         <span className="inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold" style={over ? { background: "#FBE7E3", color: "#9A3A2D" } : { background: "#FAEFCB", color: "#9C6F1E" }}>
-                          {over ? "Over-reporting" : "Needs Attention"}
+                          {over ? `Over ${WARN_HIGH}%` : "Needs Attention"}
                         </span>
                       </td>
                     </tr>
@@ -418,6 +415,93 @@ export function WarningAuditPanel({ employee, period, target, onPickEmployee, se
                 })}
                 {flagged.length === 0 && (
                   <tr><td colSpan={7}className="px-4 py-6 text-center text-[#6B7280]">Nobody is outside the {WARN_LOW}–{WARN_HIGH}% band.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// Time & attendance: the same band, but per person PER DAY. A person whose
+// month averages inside the band can still have one wild day (e.g. 0.4h
+// clocked, 2.3h earned = 583%); the per-person audit hides that, this lists it.
+// Any clocked production time counts here (no MIN_RANK_MINUTES): the tiny
+// denominators are exactly the days worth checking.
+export function DailyWarningAudit({ employee, period, target, onPickEmployee, selectedId }: Omit<Common, "onPeriodChange"> & { selectedId?: string }) {
+  const rows = useMemo(() => {
+    const byId = new Map(employee.workers.map((w) => [w.id, w]));
+    const out: { key: string; workerId: string; name: string; sub: string; date: string; w: number; p: number; eff: number }[] = [];
+    for (const d of employee.performance.byDay) {
+      if (!inFocus(period, d.date)) continue;
+      for (const x of d.workers ?? []) {
+        const wk = byId.get(x.workerId);
+        if (!wk?.countsToHeadcount || x.workingMinutes <= 0) continue;
+        const eff = (x.productionMinutes / x.workingMinutes) * 100;
+        if (eff >= WARN_LOW && eff <= WARN_HIGH) continue;
+        out.push({
+          key: `${x.workerId}|${d.date}`, workerId: x.workerId, name: wk.name ?? "—",
+          sub: [wk.role, wk.dept].filter(Boolean).join(" · "), date: d.date,
+          w: x.workingMinutes, p: x.productionMinutes, eff,
+        });
+      }
+    }
+    // Highest first: the over-reporting days lead, the weakest days close the list.
+    return out.sort((a, b) => b.eff - a.eff);
+  }, [employee, period]);
+  const overCount = rows.filter((r) => r.eff > WARN_HIGH).length;
+
+  return (
+    <div className="space-y-4 max-md:space-y-3">
+      <div className="flex items-center gap-2">
+        <h3 className="text-base font-semibold text-[#1F1D1B]">Time audit warning tiers</h3>
+        <span className="rounded-full bg-[#F0ECE9] px-2 py-0.5 text-[11px] text-[#6B7280]">{rows.length} flagged days · {overCount} over {WARN_HIGH}% · {periodLabel(period)}</span>
+      </div>
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle>Employee efficiency warning audit</CardTitle>
+          <p className="text-xs text-[#6B7280]">
+            Each person's efficiency ON EACH DAY vs the {target}% baseline · flags days under {WARN_LOW}% (under-performance) and over {WARN_HIGH}% (over-reporting), highest first · click a row to open that person's attendance log above, click it again to go back
+          </p>
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="overflow-x-auto" style={{ maxHeight: 460, overflowY: "auto" }}>
+            <table className="w-full text-[12.5px]">
+              <thead>
+                <tr className="*:sticky *:top-0 *:z-10 *:bg-white *:shadow-[inset_0_1px_0_#E2DDD8,inset_0_-1px_0_#E2DDD8]">
+                  {["Employee", "Role / Dept", "Date", "Production time", "Prod hours", "Efficiency", "Status"].map((h, i) => (
+                    <th key={h} className={`px-4 py-2 font-semibold uppercase text-[10.5px] tracking-wide text-[#6B7280] ${i >= 3 && i <= 5 ? "text-right" : "text-left"}`}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => {
+                  const over = r.eff > WARN_HIGH;
+                  return (
+                    <tr
+                      key={r.key}
+                      className={`border-b border-[#E2DDD8] ${onPickEmployee ? PICK_CLS : ""} ${r.workerId === selectedId ? "bg-[#F0ECE9]" : ""}`}
+                      aria-pressed={onPickEmployee ? r.workerId === selectedId : undefined}
+                      {...pickable(onPickEmployee, r.workerId, r.name)}
+                    >
+                      <td className="px-4 py-2.5 font-medium text-[#1F1D1B]">{r.name}</td>
+                      <td className="px-4 py-2.5 text-[#6B7280]">{r.sub || "—"}</td>
+                      <td className="px-4 py-2.5 text-[#6B7280] whitespace-nowrap">{dayLabel(r.date)}</td>
+                      <td className="px-4 py-2.5 text-right font-mono">{hrs(r.w)}</td>
+                      <td className="px-4 py-2.5 text-right font-mono">{hrs(r.p)}</td>
+                      <td className="px-4 py-2.5 text-right font-mono font-semibold" style={{ color: over ? "#9A3A2D" : "#9C6F1E" }}>{pct1(r.eff)}</td>
+                      <td className="px-4 py-2.5">
+                        <span className="inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold" style={over ? { background: "#FBE7E3", color: "#9A3A2D" } : { background: "#FAEFCB", color: "#9C6F1E" }}>
+                          {over ? `Over ${WARN_HIGH}%` : "Needs Attention"}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {rows.length === 0 && (
+                  <tr><td colSpan={7} className="px-4 py-6 text-center text-[#6B7280]">No day is outside the {WARN_LOW}–{WARN_HIGH}% band.</td></tr>
                 )}
               </tbody>
             </table>
