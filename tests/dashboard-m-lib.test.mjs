@@ -115,6 +115,12 @@ test("sales KPIs count confirmed orders only; previous is null while a day is fo
   ]);
   assert.equal(pd.pendingDelivery, 2);
   assert.equal(pd.pendingDeliverySen, 1000);
+  const done = computeSalesKpis([
+    { customer: "A", status: "CLOSED", totalSen: 400, createdAt: "2026-08-03" },
+    { customer: "B", status: "SHIPPED", totalSen: 900, createdAt: "2026-08-04" },
+  ]);
+  assert.equal(done.completedCount, 1);
+  assert.equal(done.completedSen, 400);
   const p = { mode: "monthly", month: "2026-08" };
   assert.deepEqual(previousSalesKpis(orders, p, months, false), { label: "Jul 2026", count: 1, revenueSen: 3000 });
   assert.equal(previousSalesKpis(orders, p, months, true), null);

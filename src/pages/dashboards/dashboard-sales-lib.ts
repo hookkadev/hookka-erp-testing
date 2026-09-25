@@ -97,6 +97,7 @@ export function computeSalesKpis(scopedOrders: SalesOrderRow[]) {
     pendingDelivery: pending.length,
     pendingDeliverySen: pending.reduce((s, o) => s + o.totalSen, 0),
     completedCount: completed.length,
+    completedSen: completed.reduce((s, o) => s + o.totalSen, 0),
   };
 }
 

@@ -83,7 +83,7 @@ export function SalesTab({ period, setPeriod, months }: DashboardTabProps) {
         <MKpi label="Outstanding" value={fmtN(kpis.outstandingCount)} tone="#9C6F1E" sub={`${money(kpis.outstandingSen)} value`} />
         <MKpi label="Pending delivery" value={fmtN(kpis.pendingDelivery)} tone="#3E6570" sub={`${money(kpis.pendingDeliverySen)} value`} />
         <div style={{ gridColumn: "1 / -1" }}>
-          <MKpi label="Completed" value={fmtN(kpis.completedCount)} tone="#4F7C3A" />
+          <MKpi label="Completed" value={fmtN(kpis.completedCount)} tone="#4F7C3A" sub={`${money(kpis.completedSen)} value`} />
         </div>
       </MKpiGrid>
 
