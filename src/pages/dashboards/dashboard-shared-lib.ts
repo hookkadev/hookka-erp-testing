@@ -168,6 +168,27 @@ export function dayLabel(d: string): string {
 }
 
 /**
+ * The days a time-audit warning happened on. A person is flagged on their
+ * PERIOD ratio (sum production / sum working); these are the days whose own
+ * ratio sits on the same side of the band. Never empty for a flagged person:
+ * the period ratio is a working-weighted average of the daily ones. Compared
+ * by multiplication, so a day with production but no working minutes counts
+ * as over, not as a divide-by-zero.
+ */
+export function warnDays(days: { date: string; w: number; p: number }[], over: boolean, low: number, high: number): string[] {
+  return days
+    .filter((d) => (over ? d.p * 100 > d.w * high : d.p * 100 < d.w * low))
+    .map((d) => d.date)
+    .sort();
+}
+
+/** "3 Sep, 5 Sep, 9 Sep +2 more": the first `max` days, year dropped (the period label carries it). */
+export function dayList(dates: string[], max = 3): string {
+  const shown = dates.slice(0, max).map((d) => dayLabel(d).replace(/ \d{4}$/, ""));
+  return shown.join(", ") + (dates.length > max ? ` +${dates.length - max} more` : "");
+}
+
+/**
  * The period a view actually reads, from the period in the URL.
  *
  * A BARE URL (nothing picked yet: monthly, no month, no day) opens on TODAY -

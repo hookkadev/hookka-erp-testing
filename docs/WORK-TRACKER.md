@@ -28,7 +28,7 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
-## 2026-09-25 — 🔵 Experimental dashboard: icon-free KPI cards, Sales values, sticky tables, Attendance log (branch `feat/dashboard-kpi-no-icons` → `main`)
+## 2026-09-25 — 🔵 Experimental dashboard: icon-free KPI cards, Sales values, sticky tables, Attendance log, time-audit dates, Department Status (branch `feat/dashboard-kpi-no-icons` → `main`)
 
 1. 🔵 `Kpi` (`dashboard-shared.tsx`) no longer takes an icon: label → value → sub; a ±% delta sub is a green/red pill, any other sub stays plain wrapping text. Applies to Sales / Finance / Operations (incl. its 2 custom cards) / Production / Service / Employees; All-Overview Hero + DomainCard label icons and the Service approvals header icon removed too.
 2. 🔵 Kept only icons that carry meaning or affordance: ↑/↓ delta arrows, → on CTA buttons, search-field magnifier, ↗ case links, OCR error/retry, widget info chips.
@@ -38,6 +38,8 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 6. 🔵 Sticky table headers no longer let scrolled rows show through: sticky/bg/borders moved from the `<tr>` onto its cells (inset-shadow borders) on the 7 dashboard tables — Operations ×2, Employees, Sales, OverdueCards, Service ×2. Sweep of the Attendance-log instance, item 8 (BUG-2026-09-25-193).
 7. 🔵 Attendance log — "Listed rows" / "Total (N days)" footer pinned to the bottom of the scrolling table (`*:sticky *:bottom-0` on its cells, white background, 2px inset top rule).
 8. 🔵 Attendance log — Header no longer shows scrolled rows through/above it: sticky, background, z-index and borders moved from the `<tr>` onto each `<th>` (BUG-2026-09-25-193).
+9. 🔵 Time audit — Each flagged person in "Time audit warning tiers" (desktop `EmployeesInsights.tsx` `EfficiencyPanels`) and "Time audit warnings" (`/m` `PeopleTab.tsx` `EfficiencySub`) now shows the days it happened: the days whose own production ÷ working ratio sits on the flagged side of the 90–110% band (`warnDays` + `dayList` in `dashboard-shared-lib.ts`). Desktop: new "Dates" column, first 3 + "+N more", full list on hover. `/m`: sub-line "N days: …". Client-side only, same `/api/dashboard/prototype` feed — no API change.
+   Time audit: tsc strict 0; `tests/dashboard-period.test.mjs` 14 pass. Browser check NOT done (no login); prod data UNMEASURED.
 
 ---
 
