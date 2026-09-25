@@ -3,7 +3,7 @@ import { ComposedChart, Area, Line, XAxis, YAxis, Tooltip, Legend, ReferenceLine
 import { useCachedJson } from "@/lib/cached-fetch";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { TimeAttendancePanels, EfficiencyPanels, DailyEfficiencyCard, type EmployeeSlice } from "./EmployeesInsights";
+import { TimeAttendancePanels, EfficiencyPanels, DailyEfficiencyCard, WarningAuditPanel, type EmployeeSlice } from "./EmployeesInsights";
 import { DeptEfficiencyCard } from "./ProductionDailyPanels";
 import { DepartmentsView } from "./DepartmentsView";
 import { AttendanceLogCard } from "./AttendanceLogCard";
@@ -97,6 +97,9 @@ export function EmployeesView({
   const depts = useMemo(() => [...new Set(headcountWorkers.map((w) => w.dept).filter((d): d is string => !!d))].sort(), [headcountWorkers]);
   const empOptions = useMemo(() => headcountWorkers.filter((w) => !dept || w.dept === dept), [headcountWorkers, dept]);
   const filtered = useMemo(() => (employee ? filterSlice(employee, dept, emp) : undefined), [employee, dept, emp]);
+  // The Time & attendance warning audit ignores the employee pick, so the
+  // flagged list stays whole while one person's log is open above it.
+  const deptOnly = useMemo(() => (employee ? filterSlice(employee, dept, "") : undefined), [employee, dept]);
   const shownCount = emp ? 1 : empOptions.length;
 
   // Picking a person in the ranking or the warning audit drills the Daily
@@ -106,6 +109,13 @@ export function EmployeesView({
   const pickEmployee = (id: string) => {
     setEmp(id);
     effChartRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  };
+  // Time & attendance: a warning-audit row opens that person's Attendance log
+  // (just above the audit); clicking the same row again goes back to everyone.
+  const logRef = useRef<HTMLDivElement>(null);
+  const pickForLog = (id: string) => {
+    setEmp(id === emp ? "" : id);
+    logRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
   if (loading) {
@@ -286,7 +296,25 @@ export function EmployeesView({
           {filterBar}
           <TimeAttendancePanels employee={filtered} period={period} onPeriodChange={onPeriodChange} target={config?.efficiencyTargetPct ?? 100} />
 
-      <AttendanceLogCard employee={filtered ?? employee} period={period} perDay={!!emp} />
+          {/* The audit rides inside the log's `below` slot so it follows the log's
+              Today / Yesterday switch; the wrapper spaces the two like siblings. */}
+          <div ref={logRef} className="space-y-4 max-md:space-y-3 scroll-mt-[var(--dash-sticky-top,0px)] md:scroll-mt-[calc(var(--dash-sticky-top,0px)+96px)]">
+            <AttendanceLogCard
+              employee={filtered ?? employee}
+              period={period}
+              perDay={!!emp}
+              below={(logPeriod) => deptOnly && (
+                <WarningAuditPanel
+                  employee={deptOnly}
+                  period={logPeriod}
+                  target={config?.efficiencyTargetPct ?? 100}
+                  onPickEmployee={pickForLog}
+                  selectedId={emp || undefined}
+                  pickHint="click a row to open that person's attendance log above, click it again to go back"
+                />
+              )}
+            />
+          </div>
         </>
       )}
 

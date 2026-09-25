@@ -294,13 +294,15 @@ function RankCard({ title, hint, rows, total, fromTop, color, onPick }: {
   );
 }
 
-export function EfficiencyPanels({ employee, period, target, onPeriodChange, onPickEmployee }: Common) {
+// The HOUSE metric per person, shared by the ranking (Efficiency) and the
+// warning audit (Time & attendance) so both read the same numbers.
+function useRankedPeople(employee: EmployeeSlice, period: Period) {
   // The HOUSE metric, per person: earned production minutes ÷ clocked working
   // minutes (performance.byDay[].workers) — the same numbers the Employees
   // KPI and the pool line use, so the ranking reconciles with them. NOT
   // attendance_records.efficiency_pct, a looser number the route's own header
   // says reads ~94% where the office reads ~84%. Headcount workers only.
-  const people = useMemo(() => {
+  return useMemo(() => {
     const byId = new Map(employee.workers.map((w) => [w.id, w]));
     const m = new Map<string, { w: number; p: number; days: { date: string; w: number; p: number }[] }>();
     for (const d of employee.performance.byDay) {
@@ -321,16 +323,13 @@ export function EfficiencyPanels({ employee, period, target, onPeriodChange, onP
       })
       .sort((a, b) => b.avg - a.avg);
   }, [employee.performance.byDay, employee.workers, period]);
+}
+
+export function EfficiencyPanels({ employee, period, target, onPeriodChange, onPickEmployee }: Common) {
+  const people = useRankedPeople(employee, period);
 
   const top = people.slice(0, 5);
   const bottom = people.slice(-5).reverse();
-  const flagged = useMemo(
-    () => people
-      .filter((p) => p.avg < WARN_LOW || p.avg > WARN_HIGH)
-      .map((p) => ({ ...p, dates: warnDays(p.days, p.avg > WARN_HIGH, WARN_LOW, WARN_HIGH) }))
-      .sort((a, b) => a.avg - b.avg),
-    [people],
-  );
 
   return (
     <div className="space-y-4 max-md:space-y-3">
@@ -344,6 +343,28 @@ export function EfficiencyPanels({ employee, period, target, onPeriodChange, onP
         <RankCard title="Bottom 5 · needs attention" hint="Lowest efficiency (production ÷ working) in the period" rows={bottom} total={people.length} fromTop={false} color={AMBER} onPick={onPickEmployee} />
       </div>
 
+      <WarningAuditPanel employee={employee} period={period} target={target} onPickEmployee={onPickEmployee} />
+    </div>
+  );
+}
+
+// People whose efficiency sits outside the audit band. Shown on Efficiency
+// (a click drills the Daily efficiency chart) and again under the Attendance
+// log on Time & attendance (a click opens that person's log above it).
+export function WarningAuditPanel({ employee, period, target, onPickEmployee, selectedId, pickHint = "click a row to see that person day by day" }: Omit<Common, "onPeriodChange"> & {
+  selectedId?: string; pickHint?: string;
+}) {
+  const people = useRankedPeople(employee, period);
+  const flagged = useMemo(
+    () => people
+      .filter((p) => p.avg < WARN_LOW || p.avg > WARN_HIGH)
+      .map((p) => ({ ...p, dates: warnDays(p.days, p.avg > WARN_HIGH, WARN_LOW, WARN_HIGH) }))
+      .sort((a, b) => a.avg - b.avg),
+    [people],
+  );
+
+  return (
+    <div className="space-y-4 max-md:space-y-3">
       <div className="flex items-center gap-2">
         <h3 className="text-base font-semibold text-[#1F1D1B]">Time audit warning tiers</h3>
         <span className="rounded-full bg-[#F0ECE9] px-2 py-0.5 text-[11px] text-[#6B7280]">{flagged.length} flagged · {periodLabel(period)}</span>
@@ -352,7 +373,7 @@ export function EfficiencyPanels({ employee, period, target, onPeriodChange, onP
         <CardHeader className="pb-3">
           <CardTitle>Employee efficiency warning audit</CardTitle>
           <p className="text-xs text-[#6B7280]">
-            Efficiency vs the {target}% baseline · flags under {WARN_LOW}% (under-performance) and over {WARN_HIGH}% (over-reporting) · Dates are the days that person's own ratio was outside the band (hover for the full list) · click a row to see that person day by day
+            Efficiency vs the {target}% baseline · flags under {WARN_LOW}% (under-performance) and over {WARN_HIGH}% (over-reporting) · Dates are the days that person's own ratio was outside the band (hover for the full list) · {pickHint}
           </p>
         </CardHeader>
         <CardContent className="p-0">
@@ -371,7 +392,8 @@ export function EfficiencyPanels({ employee, period, target, onPeriodChange, onP
                   return (
                     <tr
                       key={p.key}
-                      className={`border-b border-[#E2DDD8] ${onPickEmployee ? PICK_CLS : ""}`}
+                      className={`border-b border-[#E2DDD8] ${onPickEmployee ? PICK_CLS : ""} ${p.key === selectedId ? "bg-[#F0ECE9]" : ""}`}
+                      aria-pressed={onPickEmployee ? p.key === selectedId : undefined}
                       {...pickable(onPickEmployee, p.key, p.name)}
                     >
                       <td className="px-4 py-2.5 font-medium text-[#1F1D1B]">{p.name}</td>
