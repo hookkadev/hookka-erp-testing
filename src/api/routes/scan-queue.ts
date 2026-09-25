@@ -58,6 +58,7 @@ import {
   detectSupplierDocBoundaries,
   splitPdfByChunks,
   getPdfPageCount,
+  ocrModelFor,
 } from "../lib/scan-engine";
 
 const app = new Hono<Env>();
@@ -140,7 +141,8 @@ async function ensureScanQueueTable(
            completed_at    TEXT,
            org_id          TEXT,
            consumed_at     TIMESTAMP,
-           sample_id       TEXT
+           sample_id       TEXT,
+           ocr_model       TEXT
          )`,
       )
       .run();
@@ -198,6 +200,14 @@ async function ensureScanQueueTable(
     await db
       .prepare(
         "ALTER TABLE scan_queue ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0",
+      )
+      .run();
+    // Which Claude model extracted the row (2026-09-25) — the OCR dashboard
+    // tab compares accuracy / failure rate / speed per model. NULL on rows
+    // scanned before this column existed.
+    await db
+      .prepare(
+        "ALTER TABLE scan_queue ADD COLUMN IF NOT EXISTS ocr_model TEXT",
       )
       .run();
     await db
@@ -636,6 +646,7 @@ async function processOneRow(
                 SET status = 'done',
                     raw_json = ?,
                     sample_id = ?,
+                    ocr_model = ?,
                     completed_at = ?,
                     error = NULL
               WHERE id = ?`,
@@ -643,6 +654,7 @@ async function processOneRow(
           .bind(
             JSON.stringify(result.data),
             result.sampleId ?? null,
+            ocrModelFor(next.kind),
             completedAt,
             next.id,
           )
@@ -675,11 +687,13 @@ async function processOneRow(
             `UPDATE scan_queue
                 SET status = 'failed',
                     error = ?,
+                    ocr_model = ?,
                     completed_at = ?
               WHERE id = ?`,
           )
           .bind(
             `failed after ${MAX_OCR_ATTEMPTS} attempts: ${result.error.slice(0, 1900)}`,
+            ocrModelFor(next.kind),
             completedAt,
             next.id,
           )

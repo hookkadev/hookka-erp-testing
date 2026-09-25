@@ -28,7 +28,9 @@ import {
   addToBucket,
   rateOf,
   topFails,
+  summariseQueue,
   type Bucket,
+  type QueueRow,
 } from "../lib/ocr-accuracy-core";
 
 const app = new Hono<Env>();
@@ -359,6 +361,103 @@ app.get("/", async (c) => {
       from: from ?? null,
       to: to ?? null,
     },
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/ocr-accuracy/models?from=&to= — the dashboard's OCR tab.
+//
+// Per model × document kind, from scan_queue (every finished scan, not just
+// the imported ones): accuracy, failure rate, discard rate, scan time, and a
+// per-field miss rate; plus the most recent failed / edited scans. The model
+// comes from scan_queue.ocr_model (stamped since 2026-09-25); older rows read
+// "Not recorded" rather than being guessed at.
+// ---------------------------------------------------------------------------
+app.get("/models", async (c) => {
+  const denied = await requirePermission(c, "sales-orders", "read");
+  if (denied) return denied;
+  const db = c.var.DB;
+  const from = c.req.query("from");
+  const to = c.req.query("to");
+
+  const parts = ["status IN ('done', 'failed')"];
+  const binds: string[] = [];
+  if (from) { parts.push("substr(created_at::text, 1, 10) >= ?"); binds.push(from); }
+  if (to) { parts.push("substr(created_at::text, 1, 10) <= ?"); binds.push(to); }
+
+  type QRow = {
+    id: string; kind: string; ocr_model: string | null; status: string;
+    secs: number | null; consumed_at: string | null; sample_id: string | null;
+    file_name: string; error: string | null; created_at: string;
+  };
+  let qRows: QRow[] = [];
+  try {
+    // Same lazy-ensure dependency as the timing block above: the column is
+    // added by scan-queue's ensure, which may not have run on this isolate.
+    await db
+      .prepare("ALTER TABLE scan_queue ADD COLUMN IF NOT EXISTS ocr_model TEXT")
+      .run()
+      .catch(() => undefined);
+    const res = await db
+      .prepare(
+        `SELECT id, kind, ocr_model, status, consumed_at, sample_id, file_name, error, created_at,
+                EXTRACT(EPOCH FROM (completed_at::timestamptz - started_at::timestamptz))::float8 AS secs
+           FROM scan_queue
+          WHERE ${parts.join(" AND ")}`,
+      )
+      .bind(...binds)
+      .all<QRow>();
+    qRows = res.results ?? [];
+  } catch {
+    qRows = []; // scan_queue absent on a fresh environment
+  }
+
+  // Samples for the rows that have one, by kind, in IN-list chunks.
+  const samples = new Map<string, { raw: unknown; corrected: unknown }>();
+  const load = async (table: string, rawCol: string, ids: string[]) => {
+    for (let i = 0; i < ids.length; i += 100) {
+      const chunk = ids.slice(i, i + 100);
+      try {
+        const res = await db
+          .prepare(
+            `SELECT id, ${rawCol} AS raw, correctedJson FROM ${table}
+              WHERE id IN (${chunk.map(() => "?").join(",")})`,
+          )
+          .bind(...chunk)
+          .all<{ id: string; raw: string | null; correctedJson: string | null }>();
+        for (const r of res.results ?? []) {
+          samples.set(r.id, { raw: parse(r.raw), corrected: parse(r.correctedJson) });
+        }
+      } catch {
+        /* table absent — rows fall back to pending/discarded */
+      }
+    }
+  };
+  const idsOf = (kind: string) =>
+    [...new Set(qRows.filter((r) => r.kind === kind && r.sample_id).map((r) => r.sample_id!))];
+  await load("po_scan_samples", "rawExtracted", idsOf("po"));
+  await load("supplier_scan_samples", "rawJson", idsOf("supplier"));
+
+  const rows: QueueRow[] = qRows.map((r) => {
+    const s = r.sample_id ? samples.get(r.sample_id) : undefined;
+    return {
+      id: r.id,
+      kind: r.kind,
+      model: r.ocr_model,
+      status: r.status,
+      secs: r.secs === null ? null : Number(r.secs),
+      consumed: r.consumed_at != null,
+      raw: s?.raw ?? null,
+      corrected: s?.corrected ?? null,
+      fileName: r.file_name,
+      error: r.error,
+      createdAt: String(r.created_at),
+    };
+  });
+
+  return c.json({
+    success: true,
+    data: { ...summariseQueue(rows), from: from ?? null, to: to ?? null },
   });
 });
 

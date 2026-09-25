@@ -214,3 +214,147 @@ export function topFails(failFields: Record<string, number>, n = 3): string[] {
     .slice(0, n)
     .map(([label, count]) => `${label} (${count})`);
 }
+
+// ---------------------------------------------------------------------------
+// Per-model queue summary (2026-09-25) — the dashboard's OCR tab.
+//
+// The sample tables only hold scans the operator IMPORTED, so a model that
+// fails or produces junk the operator throws away looks no worse there. This
+// works from scan_queue instead: every finished row counts, and each row gets
+// exactly one outcome.
+// ---------------------------------------------------------------------------
+
+export type QueueRow = {
+  id: string;
+  kind: string; // "po" | "supplier"
+  model: string | null; // scan_queue.ocr_model; null = scanned before it was stamped
+  status: string; // done | failed (other statuses are filtered out by the caller)
+  secs: number | null; // started_at → completed_at
+  consumed: boolean;
+  raw: unknown; // the sample's raw extraction (null when no sample)
+  corrected: unknown; // the sample's correctedJson (null = not imported)
+  fileName: string;
+  error: string | null;
+  createdAt: string;
+};
+
+export type Outcome = "clean" | "edited" | "failed" | "discarded" | "pending";
+
+export const KIND_LABEL: Record<string, string> = {
+  po: "Customer PO",
+  supplier: "Supplier doc",
+};
+export const UNRECORDED_MODEL = "Not recorded";
+
+export function rowOutcome(r: QueueRow): { outcome: Outcome; fields: string[] } {
+  if (r.status === "failed") return { outcome: "failed", fields: [] };
+  if (r.corrected) {
+    const d = r.kind === "supplier"
+      ? diffSupplierSample(r.raw, r.corrected)
+      : diffSalesOrderSample(r.raw, r.corrected);
+    return d.changed ? { outcome: "edited", fields: d.fields } : { outcome: "clean", fields: [] };
+  }
+  // Consumed with nothing imported = the operator dismissed the result.
+  return { outcome: r.consumed ? "discarded" : "pending", fields: [] };
+}
+
+/** Nearest-rank percentile of an unsorted list; null when empty. */
+export function percentile(values: number[], p: number): number | null {
+  if (values.length === 0) return null;
+  const s = [...values].sort((a, b) => a - b);
+  return s[Math.min(s.length - 1, Math.ceil((p / 100) * s.length) - 1)];
+}
+
+const pct1 = (n: number, d: number): number | null =>
+  d === 0 ? null : Math.round((n / d) * 1000) / 10;
+
+export type ModelGroup = {
+  kind: string;
+  kindLabel: string;
+  model: string;
+  scans: number;
+  failed: number;
+  discarded: number;
+  pending: number;
+  imported: number;
+  clean: number;
+  /** clean / imported */
+  accuracy: number | null;
+  /** failed / scans */
+  failureRate: number | null;
+  avgSec: number | null;
+  p90Sec: number | null;
+  /** Per-field miss rate over imported scans, worst first. */
+  fields: { field: string; fails: number; rate: number | null }[];
+};
+
+export type ProblemScan = {
+  id: string;
+  kindLabel: string;
+  model: string;
+  fileName: string;
+  outcome: "failed" | "edited";
+  detail: string;
+  createdAt: string;
+};
+
+export function summariseQueue(rows: QueueRow[], recentLimit = 25): {
+  groups: ModelGroup[];
+  problems: ProblemScan[];
+} {
+  const acc = new Map<string, ModelGroup & { _secs: number[] }>();
+  const problems: ProblemScan[] = [];
+  for (const r of rows) {
+    const model = r.model || UNRECORDED_MODEL;
+    const kindLabel = KIND_LABEL[r.kind] ?? r.kind;
+    const key = `${r.kind}||${model}`;
+    let g = acc.get(key);
+    if (!g) {
+      g = {
+        kind: r.kind, kindLabel, model, scans: 0, failed: 0, discarded: 0, pending: 0,
+        imported: 0, clean: 0, accuracy: null, failureRate: null, avgSec: null, p90Sec: null,
+        fields: [], _secs: [],
+      };
+      acc.set(key, g);
+    }
+    const { outcome, fields } = rowOutcome(r);
+    g.scans += 1;
+    if (r.secs !== null && Number.isFinite(r.secs) && r.status === "done") g._secs.push(r.secs);
+    if (outcome === "failed") g.failed += 1;
+    else if (outcome === "discarded") g.discarded += 1;
+    else if (outcome === "pending") g.pending += 1;
+    else {
+      g.imported += 1;
+      if (outcome === "clean") g.clean += 1;
+      for (const f of fields) {
+        const hit = g.fields.find((x) => x.field === f);
+        if (hit) hit.fails += 1;
+        else g.fields.push({ field: f, fails: 1, rate: null });
+      }
+    }
+    if (outcome === "failed" || outcome === "edited") {
+      problems.push({
+        id: r.id,
+        kindLabel,
+        model,
+        fileName: r.fileName,
+        outcome,
+        detail: outcome === "failed" ? (r.error ?? "").slice(0, 300) : fields.join(", "),
+        createdAt: r.createdAt,
+      });
+    }
+  }
+  const groups = [...acc.values()].map(({ _secs, ...g }) => ({
+    ...g,
+    accuracy: pct1(g.clean, g.imported),
+    failureRate: pct1(g.failed, g.scans),
+    avgSec: _secs.length ? Math.round((_secs.reduce((a, b) => a + b, 0) / _secs.length) * 10) / 10 : null,
+    p90Sec: percentile(_secs, 90),
+    fields: g.fields
+      .map((f) => ({ ...f, rate: pct1(f.fails, g.imported) }))
+      .sort((a, b) => b.fails - a.fails),
+  }));
+  groups.sort((a, b) => a.kind.localeCompare(b.kind) || b.scans - a.scans);
+  problems.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  return { groups, problems: problems.slice(0, recentLimit) };
+}

@@ -1,7 +1,7 @@
 # API — generated reference
 
 > **GENERATED FILE — do not hand-edit.** Regenerate with `node scripts/gen-api-docs.mjs`.
-> **Last generated: 2026-09-24** from `src/api/worker.ts` + `src/api/routes/*.ts`.
+> **Last generated: 2026-09-25** from `src/api/worker.ts` + `src/api/routes/*.ts`.
 
 The backend is a single [Hono](https://hono.dev) app in `src/api/worker.ts`, served
 as a Cloudflare Pages Function via `functions/api/[[route]].ts`. There is no
@@ -31,7 +31,7 @@ as a Cloudflare Pages Function via `functions/api/[[route]].ts`. There is no
   route module) and is exempt from the rate limiter.
 
 **Counts at generation time:** 141 mounts, 139 route files in
-`src/api/routes/`, 978 top-level handler registrations discovered.
+`src/api/routes/`, 979 top-level handler registrations discovered.
 
 ## Scope and limits of this file
 
@@ -156,7 +156,7 @@ offsets pointing past the end of their own file.
 | `/api/three-pl-state-rates` | `src/api/routes/three-pl-state-rates.ts` | `GET /` <sub>:171</sub><br>`PUT /bulk` <sub>:189</sub> | gated |
 | `/api/equipment` | `src/api/routes/equipment.ts` | `GET /` <sub>:110</sub><br>`POST /` <sub>:163</sub><br>`GET /:id` <sub>:213</sub><br>`PUT /:id` <sub>:236</sub><br>`DELETE /:id` <sub>:389</sub> | gated |
 | `/api/forecasts` | `src/api/routes/forecasts.ts` | `GET /` <sub>:55</sub><br>`POST /` <sub>:80</sub> | gated |
-| `/api/ocr-accuracy` | `src/api/routes/ocr-accuracy.ts` | `GET /` <sub>:76</sub> | gated |
+| `/api/ocr-accuracy` | `src/api/routes/ocr-accuracy.ts` | `GET /` <sub>:78</sub><br>`GET /models` <sub>:376</sub> | gated |
 | `/api/historical-sales` | `src/api/routes/historical-sales.ts` | `GET /` <sub>:49</sub> | gated |
 | `/api/leaves` | `src/api/routes/leaves.ts` | `GET /` <sub>:79</sub><br>`GET /balances` <sub>:111</sub><br>`POST /` <sub>:175</sub><br>`PUT /` <sub>:245</sub><br>`PUT /:id` <sub>:283</sub><br>`DELETE /:id` <sub>:350</sub> | gated |
 | `/api/lorries` | `src/api/routes/lorries.ts` | `GET /` <sub>:50</sub><br>`POST /` <sub>:62</sub><br>`PUT /` <sub>:110</sub><br>`GET /:id` <sub>:165</sub><br>`PUT /:id` <sub>:177</sub><br>`DELETE /:id` <sub>:234</sub> | gated |
@@ -186,7 +186,7 @@ offsets pointing past the end of their own file.
 | `/api/scan-supplier` | `src/api/routes/scan-supplier.ts` | `POST /extract` <sub>:36</sub><br>`POST /samples/:id/confirm` <sub>:127</sub> | gated |
 | `/api/party-aliases` | `src/api/routes/party-aliases.ts` | `GET /` <sub>:50</sub><br>`GET /list` <sub>:69</sub><br>`POST /` <sub>:93</sub><br>`DELETE /` <sub>:134</sub> | gated |
 | `/api/scan-finance` | `src/api/routes/scan-finance.ts` | `POST /extract` <sub>:54</sub> | gated |
-| `/api/scan-queue` | `src/api/routes/scan-queue.ts` | `POST /upload` <sub>:705</sub><br>`POST /batch/:batchId/work` <sub>:886</sub><br>`GET /batch/:batchId` <sub>:943</sub><br>`GET /pending` <sub>:1023</sub><br>`GET /:id` <sub>:1148</sub><br>`GET /:id/bytes` <sub>:1208</sub><br>`POST /:id/retry` <sub>:1268</sub><br>`POST /:id/consume` <sub>:1340</sub> | gated |
+| `/api/scan-queue` | `src/api/routes/scan-queue.ts` | `POST /upload` <sub>:719</sub><br>`POST /batch/:batchId/work` <sub>:900</sub><br>`GET /batch/:batchId` <sub>:957</sub><br>`GET /pending` <sub>:1037</sub><br>`GET /:id` <sub>:1162</sub><br>`GET /:id/bytes` <sub>:1222</sub><br>`POST /:id/retry` <sub>:1282</sub><br>`POST /:id/consume` <sub>:1354</sub> | gated |
 | `/api/import` | `src/api/routes/import-completion.ts` | _(none found by static scan — read the file)_ | gated |
 | `/api/service-cases` | `src/api/routes/service-cases.ts` | `GET /` <sub>:525</sub><br>`GET /:id` <sub>:603</sub><br>`POST /` <sub>:650</sub><br>`PUT /:id` <sub>:793</sub><br>`PUT /:id/status` <sub>:967</sub><br>`DELETE /:id` <sub>:1043</sub> | gated |
 | `/api/service-orders` | `src/api/routes/service-orders.ts` | `GET /` <sub>:427</sub><br>`GET /:id` <sub>:471</sub><br>`POST /` <sub>:557</sub><br>`PUT /:id` <sub>:950</sub><br>`PUT /:id/status` <sub>:1030</sub><br>`PUT /:id/mode` <sub>:1221</sub><br>`POST /:id/returns` <sub>:1481</sub><br>`PUT /:id/returns/:rid` <sub>:1571</sub><br>`POST /:id/returns/:rid/scrap` <sub>:1682</sub><br>`DELETE /:id` <sub>:1845</sub> | gated |

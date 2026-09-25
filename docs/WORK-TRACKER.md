@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-25** — branch `feat/ocr-dashboard-tab` added below (not committed, its entry is the newest).
 > **Last verified: 2026-09-24** — branch `feat/dashboard-exp-ops-layout` added below (not committed, its entry is the newest).
 > **Last verified: 2026-09-24** — DEV-14 entry below updated: #510 MERGED; the per-line column was the wrong shape — branch `fix/pi-document-discount` (→ `main`) moves it to ONE invoice-level discount (BUG-2026-09-24-188).
 > **Last verified: 2026-09-24** — branch `feat/dashboard-experimental-parity` entry updated below (PR #505 open; its entry is the newest).
@@ -25,6 +26,14 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
 ---
+
+## 2026-09-25 — 🔵 /dashboard-experimental: OCR tab for the Haiku + pre-processing decision (branch `feat/ocr-dashboard-tab`)
+
+Context: the CEO wants customer-PO OCR moved Sonnet → Haiku with a precise pre-processing phase in front; the OCR Accuracy card could not compare models (imported-only, no model recorded).
+1. 🔵 `scan_queue.ocr_model` (runtime self-apply) stamped on done/failed rows from `ocrModelFor(kind)`.
+2. 🔵 `GET /api/ocr-accuracy/models` — per document × model: accuracy, failure / discard rate, avg + p90 time, per-field miss rate, 25 recent problem scans (`summariseQueue`, `tests/ocr-model-summary.test.mjs`).
+3. 🔵 Desktop OCR tab (`OcrView.tsx`): model comparison, where-it-misses, recent problem scans (link to the file), then the full OCR Accuracy card.
+tsc strict 0, `npm test` 4862 pass. Browser check NOT done: `npm run dev` proxies to prod (no new endpoint) and `dev:worker` has no DB creds. Rows before 2026-09-25 read "Not recorded". Not done yet: pre-processing path column (add with the pre-processing work), `/m` tab.
 
 ## 2026-09-24 — 🔵 /dashboard-experimental: Operations + Employees layout pass (branch `feat/dashboard-exp-ops-layout`)
 

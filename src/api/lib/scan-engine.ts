@@ -65,6 +65,11 @@ const PO_MODEL = "claude-sonnet-4-6";
 // the heavy Sonnet/Haiku extractor runs, we let Haiku scan ONLY the page
 // boundaries — much cheaper and parallelisable per chunk afterwards.
 const BOUNDARY_MODEL = "claude-haiku-4-5-20251001";
+/** The extraction model a queue row of this kind ran on — stamped on
+ *  scan_queue.ocr_model so the OCR dashboard can compare models. */
+export function ocrModelFor(kind: "po" | "supplier"): string {
+  return kind === "supplier" ? SUPPLIER_MODEL : PO_MODEL;
+}
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 
 // Hard ceiling on a single Anthropic call. WITHOUT this, a request the model
