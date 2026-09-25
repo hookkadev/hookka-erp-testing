@@ -40,7 +40,14 @@ function handlers(src) {
     // lines of slack for a multi-line handler signature, but not so much that
     // a check buried after the first write would count as gating.
     const body = lines.slice(i, i + 8).join("\n");
-    out.push({ method: m[1], path: m[2], line: i + 1, gated: /requirePermission\s*\(/.test(body) });
+    // requireAdmin (PRD T-013 R4, 2026-09-17) is the STRICTER gate: the bulk
+    // completion writers moved from the everyday grid permission to admin-only.
+    out.push({
+      method: m[1],
+      path: m[2],
+      line: i + 1,
+      gated: /requirePermission\s*\(|requireAdmin\s*\(/.test(body),
+    });
   });
   return out;
 }

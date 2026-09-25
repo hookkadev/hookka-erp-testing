@@ -34,6 +34,9 @@ import { postJobCardLabor } from "../lib/po-cost-cascade";
 import { resolveWorkerToken } from "./worker-auth";
 import { workerCoversDept } from "../../lib/worker";
 import { requirePermission } from "../lib/rbac";
+import { type SequenceCard } from "../lib/sequence-lock";
+import { runGroupedInOrder } from "../lib/ordered-batch";
+import { isRecordingGap, type UnlockReasonCode } from "../lib/sequence-unlock-reasons";
 import { salesOrderScopeSql, isCustomerScoped } from "../lib/customer-scope";
 import {
   ensureJobCardQrTokenColumn,
@@ -63,6 +66,8 @@ import {
   PO_LIST_BODY_TTL_S,
   applyPoStatusChange,
   applyPoUpdate,
+  gateJobCardSequence,
+  resolveSequenceActor,
   applyWipInventoryChange,
   attachCustomerSO,
   buildPoListBodyKey,
@@ -401,6 +406,129 @@ export async function computeOverdueCounts(
   );
   return result;
 }
+
+// ---------------------------------------------------------------------------
+// Weekly unlock report (PRD T-013 R12).
+//
+// Who released the sequence lock, on which step, and whether it was a real
+// skip or a recording gap. This is the figure that decides when the lock
+// tightens from "anyone" to supervisors only (canSequenceUnlock in
+// _helpers.ts): a week of RECORDING_GAP rows means the factory was ahead of
+// the record and the fix is on the recording side; REAL_SKIP rows mean the
+// record is ahead of the factory and the lock is doing its job.
+//
+// Reads scan_override_audit rows written by recordSequenceUnlock. Older rows
+// (before 2026-09-17) have no reason_code and are reported as UNCLASSIFIED
+// rather than guessed at.
+// ---------------------------------------------------------------------------
+type UnlockAuditRow = {
+  id: string;
+  workerId?: string | null;
+  workerName?: string | null;
+  jobCardId?: string | null;
+  productionOrderId?: string | null;
+  poNo?: string | null;
+  reason?: string | null;
+  reasonCode?: string | null;
+  reason_code?: string | null;
+  departmentCode?: string | null;
+  department_code?: string | null;
+  blockedBy?: string | null;
+  blocked_by?: string | null;
+  actorKind?: string | null;
+  actor_kind?: string | null;
+  createdAt?: string | null;
+  created_at?: string | null;
+};
+
+app.get("/sequence-unlocks", async (c) => {
+  const denied = await requirePermission(c, "production-orders", "read");
+  if (denied) return denied;
+  const db = c.var.DB;
+  await ensurePendingMigrations(db);
+
+  const daysRaw = Number(c.req.query("days") ?? 7);
+  const days =
+    Number.isFinite(daysRaw) && daysRaw > 0 ? Math.min(Math.floor(daysRaw), 90) : 7;
+  const since = new Date(Date.now() - days * 86_400_000).toISOString();
+
+  const res = await db
+    .prepare(
+      `SELECT a.id, a.workerId, a.workerName, a.jobCardId, a.productionOrderId,
+              a.reason, a.reason_code, a.department_code, a.blocked_by, a.actor_kind,
+              a.created_at, po.poNo
+         FROM scan_override_audit a
+         LEFT JOIN production_orders po ON po.id = a.productionOrderId
+        WHERE a.overrideCode = 'UPSTREAM_LOCKED' AND a.created_at >= ?
+        ORDER BY a.created_at DESC`,
+    )
+    .bind(since)
+    .all<UnlockAuditRow>();
+
+  const rows = (res.results ?? []).map((r) => {
+    const code = String(r.reasonCode ?? r.reason_code ?? "UNCLASSIFIED").toUpperCase();
+    return {
+      id: r.id,
+      at: r.createdAt ?? r.created_at ?? null,
+      actorId: r.workerId ?? null,
+      actorName: r.workerName ?? r.workerId ?? null,
+      actorKind: r.actorKind ?? r.actor_kind ?? null,
+      jobCardId: r.jobCardId ?? null,
+      productionOrderId: r.productionOrderId ?? null,
+      poNo: r.poNo ?? null,
+      departmentCode: r.departmentCode ?? r.department_code ?? null,
+      blockedBy: r.blockedBy ?? r.blocked_by ?? null,
+      reasonCode: code,
+      reason: r.reason ?? null,
+      recordingGap: isRecordingGap(code as UnlockReasonCode),
+    };
+  });
+
+  const tally = <K extends string>(keyOf: (row: (typeof rows)[number]) => K) => {
+    const m = new Map<K, { key: K; total: number; realSkips: number; recordingGaps: number }>();
+    for (const r of rows) {
+      const k = keyOf(r);
+      const cur = m.get(k) ?? { key: k, total: 0, realSkips: 0, recordingGaps: 0 };
+      cur.total += 1;
+      if (r.recordingGap) cur.recordingGaps += 1;
+      else if (r.reasonCode === "REAL_SKIP") cur.realSkips += 1;
+      m.set(k, cur);
+    }
+    return [...m.values()].sort((a, b) => b.total - a.total);
+  };
+
+  const byActor = tally((r) => `${r.actorKind ?? "?"}:${r.actorName ?? r.actorId ?? "?"}`).map(
+    (t) => {
+      const [kind, ...name] = t.key.split(":");
+      return { actorKind: kind, actorName: name.join(":"), ...t, key: undefined };
+    },
+  );
+  const byDepartment = tally((r) => r.departmentCode ?? "?").map((t) => ({
+    departmentCode: t.key,
+    ...t,
+    key: undefined,
+  }));
+  const byReason = tally((r) => r.reasonCode).map((t) => ({
+    reasonCode: t.key,
+    ...t,
+    key: undefined,
+  }));
+
+  return c.json({
+    success: true,
+    data: {
+      days,
+      since,
+      total: rows.length,
+      realSkips: rows.filter((r) => r.reasonCode === "REAL_SKIP").length,
+      recordingGaps: rows.filter((r) => r.recordingGap).length,
+      byActor,
+      byDepartment,
+      byReason,
+      rows: rows.slice(0, 500),
+    },
+  });
+});
 
 app.get("/overdue-counts", async (c) => {
   // An aggregate, so nothing downstream can narrow it — the badge would keep
@@ -2031,6 +2159,24 @@ app.post("/:id/scan-complete", async (c) => {
       409,
     );
   }
+  // ---- Upstream sequence lock (owner 2026-09-06) --------------------------
+  // A scan completes the card, so it consumes upstream WIP — the same reason
+  // the desktop PATCH path is gated in _helpers.ts. Gating one surface and not
+  // the other only moves the skipping to whichever screen stayed open.
+  //
+  // The floor keeps a way out during the shadow phase (`unlock`), but it is
+  // recorded against the WORKER whose token signed the scan — not "unknown"
+  // (PRD T-013 R10). One shared gate for every path (R5).
+  {
+    const gate = await gateJobCardSequence(db, c, {
+      productionOrderId: scannedId,
+      cards: [scannedJc],
+      body,
+      actor: await resolveSequenceActor(db, c, worker),
+    });
+    if (gate.response) return gate.response;
+  }
+
   const stickerKey = `${scannedPo.id}::${scannedJc.id}::${pieceNo}`;
   const slots = await ensurePiecePicsForJc(db, scannedJc);
   // Mirror a legacy JC-level PIC onto slot[0] so the same-worker / share / full
@@ -2474,32 +2620,29 @@ app.post("/:id/scan-complete", async (c) => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// POST /api/production-orders/:id/scan-complete-dept
-//
-// One-sticker-per-variant fan-out completion (FAB_CUT / FAB_SEW only).
-//
-// A sofa variant (one production_orders row) breaks into several WIP
-// compartments — BASE / CUSHION / ARMREST — each its own job card in the SAME
-// department. The shop floor prints ONE QR sticker per variant (sentinel
-// op="FG-<DEPT>"); scanning it must complete ALL of that variant's compartment
-// job cards in that ONE department, in a single scan. Owner-confirmed
-// (Wei Siang 2026-06-03): one worker sews/cuts the whole variant, so attributing
-// every compartment's labour to the scanning worker is correct.
-//
-// This is the fan-out twin of /scan-complete. It deliberately does NOT run the
-// FIFO same-spec piece redirect (that path routes a single piece to the
-// oldest-due card across OTHER POs — wrong for a whole-variant assembly scan,
-// which belongs to THIS PO). Grouping key = (productionOrderId, departmentCode);
-// compartments can never live on a different PO, so it can't over-complete.
-//
-// Per-card side effects mirror /scan-complete exactly (piece_pics fill →
-// JC COMPLETED → applyWipInventoryChange → postJobCardLabor); the PO rollup +
-// SO/CO cascade run ONCE at the end. Idempotency: each real jcId claims its own
-// wip_cascade_log ticket and postJobCardLabor is keyed per jcId, and the card
-// set is filtered to status NOT IN (COMPLETED,TRANSFERRED) — a re-scan finds
-// nothing to do and returns success-empty.
-// ---------------------------------------------------------------------------
+/**
+ * Sequence gate for the two fan-out scans (dept / shared). Cards already
+ * COMPLETED are skipped by the shared gate, so a second worker co-signing a
+ * finished card, or a re-scan of a finished department, is never told "not
+ * your turn" (PRD T-013 R14). The worker is the actor of any unlock (R10).
+ */
+async function gateFanOutSequence(
+  db: D1Database,
+  c: Context<Env>,
+  productionOrderId: string,
+  cards: SequenceCard[],
+  body: unknown,
+  worker: { id: string; name?: string | null } | null,
+): Promise<Response | null> {
+  const gate = await gateJobCardSequence(db, c, {
+    productionOrderId,
+    cards,
+    body,
+    actor: await resolveSequenceActor(db, c, worker),
+  });
+  return gate.response;
+}
+
 app.post("/:id/scan-complete-dept", async (c) => {
   // Two auth paths (mirrors /scan-complete): a dashboard user (userId stamped
   // by auth-middleware) is authorised via RBAC; a shop-floor worker call
@@ -2629,11 +2772,14 @@ app.post("/:id/scan-complete-dept", async (c) => {
     });
   }
 
-  // Prerequisite gate — soft-warn (202) if ANY compartment's upstream dept
-  // hasn't completed, unless the worker already acknowledged and re-posted
-  // with force:true. Mirrors /scan-complete's single-card gate.
-  // prerequisiteMet warning REMOVED (Wei Siang 2026-06-08) — workers may
-  // complete any dept directly; no "earlier dept hasn't completed" gate.
+  // Upstream sequence lock (owner 2026-09-06). Replaces the note that stood
+  // here since 2026-06-08 saying workers may complete any dept directly — that
+  // is the permission this change withdraws, and leaving the sentence would
+  // have left the file arguing with itself.
+  {
+    const gate = await gateFanOutSequence(db, c, poId, cards, body, worker);
+    if (gate) return gate;
+  }
 
   const nowIso = new Date().toISOString();
   const today = nowIso.split("T")[0];
@@ -3011,6 +3157,13 @@ app.post("/:id/scan-complete-shared", async (c) => {
     .bind(...(wipKey ? [poId, targetDept, wipKey] : [poId, targetDept]))
     .all<JobCardRow>();
   const cards = cardsRes.results ?? [];
+  // Upstream sequence lock (owner 2026-09-06). Placed AFTER the empty check
+  // below would have been wrong: an already-finished compartment must still
+  // report "already done", not "blocked" — the work is not being repeated.
+  if (cards.length > 0) {
+    const gate = await gateFanOutSequence(db, c, poId, cards, body, worker);
+    if (gate) return gate;
+  }
   if (cards.length === 0) {
     // No open cards of THIS worker's dept on this compartment → it's already
     // done. Report it for the worker's own dept (never advance to the next),
@@ -3073,8 +3226,10 @@ app.post("/:id/scan-complete-shared", async (c) => {
     }
   }
 
-  // prerequisiteMet warning REMOVED (Wei Siang 2026-06-08) — workers may
-  // complete any dept directly; no "earlier dept hasn't completed" gate.
+  // The sequence lock is applied above, on the resolved card set (owner
+  // 2026-09-06). The 2026-06-08 note that used to sit here — workers may
+  // complete any dept directly — described the permission this change
+  // withdraws.
 
   const nowIso = new Date().toISOString();
   const today = nowIso.split("T")[0];
@@ -3618,8 +3773,17 @@ app.post("/bulk-patch", async (c) => {
   const authHeader = c.req.header("Authorization") ?? "";
   const csrfHeader = c.req.header("X-CSRF-Token") ?? c.req.header("x-csrf-token") ?? "";
 
-  const results = await Promise.all(
-    patches.map(async (p) => {
+  // In order per production order, not all at once (PRD T-013 R6). The
+  // "complete the earlier step too" remedy sends the upstream card first and
+  // the blocked card second, and the whole point is that the first FINISHES
+  // before the second starts — otherwise the downstream consume can land
+  // before the upstream produce and the remedy creates the negative WIP row
+  // the lock exists to prevent. Orders are independent of each other (the
+  // lock is per order), so different orders still run side by side.
+  const results = await runGroupedInOrder(
+    patches,
+    (p) => String(p.poId ?? ""),
+    async (p) => {
       const { poId, jobCardId } = p;
       if (!poId || typeof poId !== "string" || !jobCardId || typeof jobCardId !== "string") {
         return { poId, jobCardId, success: false, error: "poId and jobCardId required" };
@@ -3644,13 +3808,29 @@ app.post("/bulk-patch", async (c) => {
           return { poId, jobCardId, success: true };
         }
         let msg = `HTTP ${res.status}`;
+        // The sequence lock's refusal is STRUCTURED — which departments, and
+        // whether this user may release it. Flattening it to a string here
+        // would leave the grid unable to tell "waiting on Framing" from a
+        // network blip, and the operator would get "error 409" on a batch of
+        // twenty. Carry the shape through; the client parses it in one place
+        // (src/lib/sequence-unlock.ts).
+        let code: string | undefined;
+        let blockedBy: unknown;
+        let canSelfUnlock: boolean | undefined;
         try {
-          const errBody = (await res.json()) as { error?: string } | null;
+          const errBody = (await res.json()) as
+            | { error?: string; code?: string; blockedBy?: unknown; canSelfUnlock?: boolean }
+            | null;
           if (errBody && typeof errBody.error === "string") msg = errBody.error;
+          if (errBody && typeof errBody.code === "string") code = errBody.code;
+          if (errBody && Array.isArray(errBody.blockedBy)) blockedBy = errBody.blockedBy;
+          if (errBody && typeof errBody.canSelfUnlock === "boolean") {
+            canSelfUnlock = errBody.canSelfUnlock;
+          }
         } catch {
           /* non-json error body */
         }
-        return { poId, jobCardId, success: false, error: msg };
+        return { poId, jobCardId, success: false, error: msg, code, blockedBy, canSelfUnlock };
       } catch (err) {
         return {
           poId,
@@ -3659,7 +3839,7 @@ app.post("/bulk-patch", async (c) => {
           error: err instanceof Error ? err.message : "network error",
         };
       }
-    }),
+    },
   );
 
   // ── Verify-readback (Wei Siang verifiedSave 2026-05-25 rule) ────────────

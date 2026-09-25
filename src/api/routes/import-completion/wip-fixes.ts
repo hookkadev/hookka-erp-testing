@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { Env } from "../../worker";
-import { requirePermission } from "../../lib/rbac";
+import { requirePermission, requireAdmin } from "../../lib/rbac";
 import { applyWipInventoryChange, type JobCardRow, type ProductionOrderRow } from "../production-orders";
 import { consumeRawMaterialsForPO, postJobCardLabor } from "../../lib/po-cost-cascade";
 import { loadLeadTimes, type LeadTimeMap } from "../../lib/lead-times";
@@ -13,7 +13,10 @@ const app = new Hono<Env>();
 
 
 app.post("/uph-pofold-backfill", async (c) => {
-  const denied = await requirePermission(c, "production-orders", "update");
+  // Writes job-card completion in bulk with no sequence check — a repair
+  // tool, and the way out when the lock refuses history that happened. Admin
+  // only (PRD T-013 R4): the everyday grid permission must not reach it.
+  const denied = requireAdmin(c);
   if (denied) return denied;
 
   const db = c.var.DB;
@@ -295,7 +298,10 @@ app.post("/uph-pofold-backfill", async (c) => {
 });
 
 app.post("/fab-cut-pofold-backfill", async (c) => {
-  const denied = await requirePermission(c, "production-orders", "update");
+  // Writes job-card completion in bulk with no sequence check — a repair
+  // tool, and the way out when the lock refuses history that happened. Admin
+  // only (PRD T-013 R4): the everyday grid permission must not reach it.
+  const denied = requireAdmin(c);
   if (denied) return denied;
 
   const db = c.var.DB;

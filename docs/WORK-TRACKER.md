@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-23** — branch `feat/t013-sequence-lock` (PRD T-013 / BUG-09) is the newest entry below, open, not pushed. Previously: branch `fix/on-time-delivery-and-decisions` added below (open, not merged, its entry is the newest; its bug ids were renumbered 130-133 → 140-143 because `feat/leave-entitlement` claimed 130-133 and merged to `main` first). Previously: branch `feat/leave-entitlement` (MERGED as #326). Previously: branch `feat/job-card-completed-at` added below (open, not merged). Previously: branch `fix/security-posture` added below (open, not merged). Previously: PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
 > **Last verified: 2026-09-25**: branch `feat/dashboard-kpi-no-icons` (PR #524 to `main`, open) is the newest entry below, items 1 to 17 checked against the branch. The Attendance log, time audit dates and Department Status branches are folded into it (#525, #526, #527 closed).
 > **Last verified: 2026-09-25** — branch `feat/ocr-dashboard-tab` entry below updated: PR #522 open, BUG-2026-09-25-192 fixed, historical model fallback added.
 > **Last verified: 2026-09-24** — branch `feat/dashboard-exp-ops-layout` added below (not committed, its entry is the newest).
@@ -28,6 +29,68 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
+## 2026-09-17 — 🔵 PRD T-013 · Production stages can still be skipped (BUG-09, sequence lock)
+
+Requested by Mr Lim, PRD dated 2026-09-07, tracker id **BUG-09**, priority **Low (to be raised
+later)**. Full PRD: `T-013-Hookka-production-sequence-lock - wei siang.pdf` (user's local
+Downloads, not in repo). Branch `feat/t013-sequence-lock` off `main` 728a1ac5, worktree
+`hookka-erp-testing-t013`. Related: `docs/plans/2026-09-06-production-sequence-lock.md`,
+BUG-2026-09-07-179, PR #427 (`feat/production-sequence-lock`, never merged).
+
+Asks, in PRD order — each row flips to done as it lands:
+
+- 🔵 R1 **done on branch** — `origin/feat/production-sequence-lock` merged (`e7dd01a4`, clean, no
+  conflicts against `main` 728a1ac5); `tests/sequence-rule-unit.test.mjs` deleted (its 5 tests are a
+  strict subset of the 26 in `tests/sequence-lock.test.mjs`, and its own header said it existed only
+  until the gate landed). Rule now has callers: `_helpers.ts:4472`, `production-orders.ts:2040`, `:2554`
+- 🔵 R2 **done on branch** — verified, no code change needed: `applyPoUpdate` gates on
+  `transitionConsumesUpstream(body.status)` (IN_PROGRESS / COMPLETED / TRANSFERRED); the three scan
+  endpoints gate every scan unconditionally before the WAITING→IN_PROGRESS write at
+  `production-orders.ts:2335 / 2787 / 3265`
+- 🔵 R3 **done on branch** — `sheets-sync.ts` runs `gateJobCardSequence` with `autoUnlock` (SHEETS_SYNC,
+  actor SYSTEM) before its UPDATE, and the UPDATE carries the R13 guard
+- 🔵 R4 **done on branch** — new `requireAdmin` (rbac.ts, SUPER_ADMIN/ADMIN) on the PRD's seven PLUS two
+  the side-door test found: `/backfill-fab-cut-merge` (fg-fabric.ts) and `/clear-future-completions`
+- 🔵 R5 **done on branch** — `gateJobCardSequence` in `_helpers.ts` is the one gate (grid, scan, both
+  fan-outs, sheets); `tests/sequence-lock-side-doors.test.mjs` walks src/api for every job_cards status
+  write and fails an unlisted one
+- 🔵 R6 **done on branch** — `src/api/lib/ordered-batch.ts` `runGroupedInOrder`; bulk-patch runs
+  sequentially per production order, orders concurrently
+- 🔵 R7 **done on branch** — `tests/ordered-batch.test.mjs` runs a slow upstream + fast downstream and
+  observes the event order (and reproduces the old Promise.all bug)
+- 🔵 R8 **done on branch** — `canSequenceUnlock(c, actor)` in `_helpers.ts`, policy constant `ANYONE`
+  (shadow) → `SUPERVISORS` is a one-line flip; every refusal carries its answer
+- 🔵 R9 **done on branch** — `validateUnlockReason` (`src/api/lib/sequence-unlock-reasons.ts`) inside the
+  gate: required, 3–300 chars, bare "Other" refused → 400 `UNLOCK_REASON_REQUIRED`
+- 🔵 R10 **done on branch** — `resolveSequenceActor`: USER (displayName/email looked up), WORKER (the
+  token's worker), SYSTEM only when passed; `actor_kind` column
+- 🔵 R11 **done on branch** — `worker/scan.tsx` reason picker from the shared `UNLOCK_REASONS` + Other
+  text; fixed string "Released on the shop floor" gone
+- 🔵 R12 **done on branch** — `GET /api/production-orders/sequence-unlocks?days=7` + page
+  `/production/sequence-unlocks` (button "Unlock report" on the production header); `reason_code`,
+  `department_code`, `blocked_by`, `actor_kind` self-applied on `scan_override_audit`
+  (migrations-postgres/0237)
+- 🔵 R13 **done on branch, partially** — applyPoUpdate and the sheets webhook re-check the upstream
+  cards INSIDE the UPDATE (`sequenceGuardSql`, 0 rows → 409 race refusal). The three scan endpoints
+  write piece_pics rows between gate and UPDATE, so a guarded UPDATE there would leave partial state;
+  the window stays and is documented in production.md
+- 🔵 R14 **done on branch** — the shared gate skips cards already COMPLETED/TRANSFERRED, so
+  scan-complete-dept's kept-COMPLETED cards no longer trip "not your turn"
+- 🔵 R15 **done on branch** — `docs/modules/production.md` flow 7 + gotcha + two key-function rows,
+  restamped 2026-09-17; `docs/CODEBASE-MAP.md:559` no longer says "refuses nothing today"
+- 🔵 R16 **MEASURED 2026-09-23 against production** (`scripts/measure-sequence-lock-no-branch.mjs`,
+  read-only, run by the user): the no-branch bucket is **773 (order, wipKey) groups / 865 cards / 654 open**,
+  and the lock blocks **0 of them (0.0%)**. Script's own check: *"No wood-waits-for-fabric pair in the
+  no-branch bucket."* So products with no branch information are NOT over-blocked and no `branch_key`
+  backfill is needed before merging.
+
+Plan: PR-A = R1-R2 (switch the rule on in shadow mode, fast to merge); PR-B = the rest.
+**2026-09-18:** R1–R15 on the branch (`9539c0dc` + docs commit). `docs/API.md` regenerated,
+`docs/modules/production.md` flow 7 rewritten for the one-gate design and restamped, CODEBASE-MAP rows
+for the gate / reasons / ordered-batch / report page, BUG-2026-09-25-195 logged. Full suite 4,649 / 0
+failing; `tsc` strict clean. **Left:** browser pass (dialog, phone picker, report page), R16 run by the
+user with `HOOKKA_PROD_DB_URL`, then push + PR to `main` and live verification of A1–A7.
+Constraints kept: rule untouched, no fixed dept list, `prerequisiteMet` never read, shadow mode.
 ## 2026-09-25 — 🔵 Experimental dashboard: icon-free KPI cards, Sales values, sticky tables, Attendance log, time-audit dates, Department Status (branch `feat/dashboard-kpi-no-icons` → `main`)
 
 1. 🔵 `Kpi` (`dashboard-shared.tsx`) no longer takes an icon: label → value → sub; a ±% delta sub is a green/red pill, any other sub stays plain wrapping text. Applies to Sales / Finance / Operations (incl. its 2 custom cards) / Production / Service / Employees; All-Overview Hero + DomainCard label icons and the Service approvals header icon removed too.

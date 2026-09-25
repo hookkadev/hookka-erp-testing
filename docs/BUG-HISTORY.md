@@ -38,6 +38,83 @@ Entries themselves stay newest-first.
 
 ---
 
+## BUG-2026-09-25-195 — the sequence lock refused nothing: the gate was on an unmerged branch, and nine other paths completed cards with no check at all `production` `inventory` `auth-rbac` 🟢
+
+🟢 Fixed on branch `feat/t013-sequence-lock` (PRD T-013, tracker BUG-09, owner
+2026-09-07). **Prod impact UNMEASURED until deployed and verified live.**
+
+**Symptom.** A worker or planner could complete any production stage in any
+order. The system then consumed work-in-progress that was never produced and
+the stock figures went wrong (the −446 / 513-negative-row story in
+BUG-2026-09-06-177/178 is the damage; this is the door it came through).
+
+**Root cause, in layers.** The rule (`src/api/lib/sequence-lock.ts`,
+BOM-derived, measured correct on 2,189 of 3,706 open cards) was landed on
+`main` ahead of its gate (#431) so the backfill could close history first. The
+gate — padlock, dialog, 409 — was written on `feat/production-sequence-lock`
+(PR #427) and never merged; `main` moved on. Underneath that, even the branch
+left doors open:
+
+| door | where | what it did |
+| --- | --- | --- |
+| Google Sheets sync webhook | `sheets-sync.ts:198-238` | a date keyed into the sheet set the card COMPLETED, any order, no check |
+| seven repair endpoints, plus two found by enumeration | `import-completion/{completion-cascades,wip-fixes,so-co-do-backfills,fg-fabric}.ts` | wrote completion in bulk behind the SAME `production-orders:update` the grid uses |
+| "complete the earlier step too" | `production-orders.ts` bulk-patch | `Promise.all` — list order, not execution order; the remedy could itself create the negative row |
+| unlock permission | `_helpers.ts`, `production-orders.ts` ×2 | `canSelfUnlock: true` hardcoded three times |
+| unlock reason | same three | optional, never validated; an empty unlock was accepted |
+| shop-floor actor | `_helpers.ts` `recordSequenceUnlock` | every worker unlock recorded as `unknown`; the handler held the worker's id and name |
+| re-scan of a finished dept | `scan-complete-dept` | kept COMPLETED cards (for PIC2 co-sign), so the gate said "not your turn" instead of "already done" |
+| the test | `tests/sequence-lock.test.mjs` "all FOUR completion paths are gated" | read two files; could not see any of the above |
+
+**Fix.** One gate, `gateJobCardSequence` (`production-orders/_helpers.ts`),
+called by `applyPoUpdate` (grid + bulk-patch), `POST /:id/scan-complete`,
+both fan-out scans (`gateFanOutSequence`), and the Sheets webhook (auto-unlock
+recorded as `SHEETS_SYNC`, actor SYSTEM). Inside it: `canSequenceUnlock`
+(the ONE policy — `ANYONE` in shadow mode, flips to `SUPERVISORS`),
+`validateUnlockReason` (required, bounded, bare "Other" refused → 400
+`UNLOCK_REASON_REQUIRED`), `resolveSequenceActor` (USER with displayName,
+WORKER from the token, SYSTEM only when passed) and `recordSequenceUnlock`
+with `reason_code` / `department_code` / `blocked_by` / `actor_kind`
+(self-applied in `ensurePendingMigrations`; migrations-postgres/0237). The
+gate skips cards already COMPLETED/TRANSFERRED, which is the R14 fix. The
+nine repair endpoints are `requireAdmin` (new in `rbac.ts`: SUPER_ADMIN /
+ADMIN only). bulk-patch runs through `runGroupedInOrder`
+(`src/api/lib/ordered-batch.ts`): sequential per production order, orders
+concurrent. `applyPoUpdate` and the Sheets UPDATE re-check the upstream cards
+inside the write (`sequenceGuardSql` — `AND NOT EXISTS (... b.status NOT IN
+(done, cancelled))`, 0 rows → 409). The weekly report is
+`GET /api/production-orders/sequence-unlocks?days=7` and
+`/production/sequence-unlocks`.
+
+**Verified.** `tests/sequence-lock-side-doors.test.mjs` walks `src/api` for
+every `UPDATE job_cards … SET … status =` and requires each file to be gated,
+admin-only (with the handler named), or provably not a completion — an
+unlisted writer fails the build. `tests/ordered-batch.test.mjs` runs a slow
+upstream and a fast downstream and asserts the observed event order (and
+reproduces the old `Promise.all` interleaving). `tests/sequence-unlock-
+reasons.test.mjs` covers the validation and the one-place permission.
+`tests/import-completion-all-gated.test.mjs` now counts `requireAdmin` as a
+gate. 4,649 tests, 0 failing; `tsc -p tsconfig.app.json --noEmit` clean.
+
+**R16 measured 2026-09-23, against production.** The worry was that a product
+whose cards ALL carry an empty `branch_key` collapses into one linear chain and
+gets over-blocked. `scripts/measure-sequence-lock-no-branch.mjs` (read-only)
+says it does not: that bucket is 773 (order, wipKey) groups, 865 cards, 654 of
+them open, and the lock blocks **0 — 0.0%**. No wood-waits-for-fabric pair
+appears in it, so nothing needs a `branch_key` backfill before this merges.
+
+**Still open, on purpose.** The three scan endpoints write `piece_pics` rows between the gate and their
+job-card UPDATE, so the R13 write-guard is not applied there; the window is
+the same as before this change and is documented in
+`docs/modules/production.md`. The 513 historical negative rows are the
+owner's decision (§9 of the PRD), after the lock is live.
+
+**The lesson is the test, not the gate.** "All four paths are gated" was
+true and worthless because it counted what it could see. A guard test has to
+enumerate the population (every status writer in `src/api`) and fail on a
+member it does not recognise — otherwise it certifies exactly the omission it
+exists to catch. Classed with C-series "fixed the instance in front of the
+author" in [`BUG-CLASSES.md`](BUG-CLASSES.md).
 ## BUG-2026-09-25-194: Worker Efficiency showed raw worker ids ("worker-45109bfc") instead of names for PRODUCTION `dashboard` `employees` 🟡
 
 🟡 **Fix in progress** (PR #524, not verified in a browser).
@@ -243,7 +320,7 @@ must show ~122 events instead of zero.
 
 ---
 
-## BUG-2026-09-23-186 — Invoice PDF printed the same SO / REF ("FAIR ITEM PG") on every line and a blank CO SO; the DO was correct `invoices` `pdf` 🟡
+## BUG-2026-09-24-192 — Invoice PDF printed the same SO / REF ("FAIR ITEM PG") on every line and a blank CO SO; the DO was correct `invoices` `pdf` 🟡
 
 🟡 **Fix in progress** · BUG-22, customer-reported on INV-2609-067 (DO-2609-061, Houzs Century):
 each line's PO was right, but SO and REF were the same invoice-level value on every line and CO SO

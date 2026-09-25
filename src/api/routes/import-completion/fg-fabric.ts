@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { Env } from "../../worker";
-import { requirePermission } from "../../lib/rbac";
+import { requirePermission, requireAdmin } from "../../lib/rbac";
 import { generateFGUnitsForPO } from "../fg-units";
 import { createProductionOrdersForOrder } from "../_shared/production-builder";
 import { getOrgId } from "../../lib/tenant";
@@ -12,7 +12,10 @@ const app = new Hono<Env>();
 
 
 app.post("/backfill-fab-cut-merge", async (c) => {
-  const denied = await requirePermission(c, "production-orders", "update");
+  // Rebuilds anchor cards and writes their status in bulk with no sequence
+  // check — a repair tool. Admin only (PRD T-013 R4; found beyond the seven
+  // the PRD named, same class): the everyday grid permission must not reach it.
+  const denied = requireAdmin(c);
   if (denied) return denied;
   const db = c.var.DB;
   // Migrations are inert on deploy (CLAUDE.md) — awaited before the anchor

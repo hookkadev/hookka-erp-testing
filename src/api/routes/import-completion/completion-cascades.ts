@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { Env } from "../../worker";
-import { requirePermission } from "../../lib/rbac";
+import { requireAdmin } from "../../lib/rbac";
 import { invalidateProductionListCaches } from "../../lib/po-list-cache";
 import { applyWipInventoryChange, type JobCardRow, type ProductionOrderRow } from "../production-orders";
 import { postJobCardLabor } from "../../lib/po-cost-cascade";
@@ -16,7 +16,10 @@ const app = new Hono<Env>();
 // POST /api/import/job-card-completion
 // ---------------------------------------------------------------------------
 app.post("/job-card-completion", async (c) => {
-  const denied = await requirePermission(c, "production-orders", "update");
+  // Writes job-card completion in bulk with no sequence check — a repair
+  // tool, and the way out when the lock refuses history that happened. Admin
+  // only (PRD T-013 R4): the everyday grid permission must not reach it.
+  const denied = requireAdmin(c);
   if (denied) return denied;
 
   let body: RequestBody;
@@ -125,10 +128,11 @@ app.post("/job-card-completion", async (c) => {
 // touching legitimately recent completions.
 //
 // Returns the count of rows reset and a sample.
-// Permission: production-orders:update.
+// Permission: admin only (PRD T-013 R4 — a bulk status rewrite is a repair
+// tool, and the everyday grid permission must not reach one).
 // ---------------------------------------------------------------------------
 app.post("/clear-future-completions", async (c) => {
-  const denied = await requirePermission(c, "production-orders", "update");
+  const denied = requireAdmin(c);
   if (denied) return denied;
 
   const db = c.var.DB;
@@ -205,7 +209,10 @@ app.post("/clear-future-completions", async (c) => {
 });
 
 app.post("/cascade-upstream-completion", async (c) => {
-  const denied = await requirePermission(c, "production-orders", "update");
+  // Writes job-card completion in bulk with no sequence check — a repair
+  // tool, and the way out when the lock refuses history that happened. Admin
+  // only (PRD T-013 R4): the everyday grid permission must not reach it.
+  const denied = requireAdmin(c);
   if (denied) return denied;
 
   const db = c.var.DB;
@@ -698,7 +705,10 @@ app.post("/cascade-upstream-completion", async (c) => {
 });
 
 app.post("/cascade-leak-pass", async (c) => {
-  const denied = await requirePermission(c, "production-orders", "update");
+  // Writes job-card completion in bulk with no sequence check — a repair
+  // tool, and the way out when the lock refuses history that happened. Admin
+  // only (PRD T-013 R4): the everyday grid permission must not reach it.
+  const denied = requireAdmin(c);
   if (denied) return denied;
 
   const db = c.var.DB;

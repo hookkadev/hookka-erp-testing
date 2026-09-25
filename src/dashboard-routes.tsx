@@ -48,6 +48,7 @@ const ProductionOverview = lazy(() => import('./pages/production/overview'))
 const ProductionDeptPage = lazy(() => import('./pages/production/dept'))
 const WipTimesPage = lazy(() => import('./pages/production/wip-times'))
 const ProductionFolders = lazy(() => import('./pages/production/folders'))
+const SequenceUnlocksPage = lazy(() => import('./pages/production/sequence-unlocks'))
 const ProductionFolderDetail = lazy(() => import('./pages/production/folder-detail'))
 const ProductionScan = lazy(() => import('./pages/production/scan'))
 const FGScan = lazy(() => import('./pages/production/fg-scan'))
@@ -286,6 +287,8 @@ export const DASHBOARD_ROUTES: RouteObject[] = [
   // Production Folders — archive paper schedules. Both routes are LITERAL
   // prefixes so React Router's route matcher distinguishes them from the
   // dept routes below. `/folders` lists, `/folders/:id` opens one.
+  // Sequence-unlock report (PRD T-013 R12) — literal prefix, above the dept routes.
+  { path: '/production/sequence-unlocks', element: <S><SequenceUnlocksPage /></S> },
   { path: '/production/folders', element: <S><ProductionFolders /></S> },
   { path: '/production/folders/:id', element: <S><ProductionFolderDetail /></S> },
   // Per-department split routes — each renders the shared ProductionPage
@@ -638,6 +641,7 @@ const ROUTE_CHUNK_LOADERS: Record<string, () => Promise<unknown>> = {
   '/production/packing': () => import('./pages/production/dept'),
   '/production/scan': () => import('./pages/production/scan'),
   '/production/folders': () => import('./pages/production/folders'),
+  '/production/sequence-unlocks': () => import('./pages/production/sequence-unlocks'),
   '/planning': () => import('./pages/planning'),
   '/planning/mrp': () => import('./pages/planning/mrp'),
   '/planning/dept/fabric-cutting': () => import('./pages/planning/dept/fabric-cutting'),

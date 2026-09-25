@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { Env } from "../../worker";
-import { requirePermission } from "../../lib/rbac";
+import { requirePermission, requireAdmin } from "../../lib/rbac";
 import { recomputePoStatusAndProgress } from "../production-orders";
 import { loadHookkaDDBuffer, hookkaDDBufferFor, addDays } from "../../lib/lead-times";
 import { createProductionOrdersForOrder } from "../_shared/production-builder";
@@ -27,7 +27,10 @@ const app = new Hono<Env>();
 // Idempotent: if a delivery_orders row already exists with that do_no, skip.
 // ---------------------------------------------------------------------------
 app.post("/migrate-do-from-excel", async (c) => {
-  const denied = await requirePermission(c, "delivery-orders", "create");
+  // Writes job-card completion in bulk with no sequence check — a repair
+  // tool, and the way out when the lock refuses history that happened. Admin
+  // only (PRD T-013 R4): the everyday grid permission must not reach it.
+  const denied = requireAdmin(c);
   if (denied) return denied;
 
   const db = c.var.DB;
@@ -663,7 +666,10 @@ app.post("/backfill-5543-co2606002", async (c) => {
 // genuinely the WAITING {MODULE} junk card. AUDIT-FIRST — apply with
 // { "apply": true, "confirm": "complete-jc" }.
 app.post("/backfill-complete-stray-jc-co2606002", async (c) => {
-  const denied = await requirePermission(c, "production-orders", "update");
+  // Writes job-card completion in bulk with no sequence check — a repair
+  // tool, and the way out when the lock refuses history that happened. Admin
+  // only (PRD T-013 R4): the everyday grid permission must not reach it.
+  const denied = requireAdmin(c);
   if (denied) return denied;
   const db = c.var.DB;
   // Migrations are inert on deploy (CLAUDE.md) — awaited before the UPDATE
