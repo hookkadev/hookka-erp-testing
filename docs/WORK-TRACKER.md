@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-25** — branch `fix/dept-status-zero-align` added below (PR open, its entry is the newest).
 > **Last verified: 2026-09-25** — branch `feat/ocr-dashboard-tab` entry below updated: PR #522 open, BUG-2026-09-25-192 fixed, historical model fallback added.
 > **Last verified: 2026-09-24** — branch `feat/dashboard-exp-ops-layout` added below (not committed, its entry is the newest).
 > **Last verified: 2026-09-24** — DEV-14 entry below updated: #510 MERGED; the per-line column was the wrong shape — branch `fix/pi-document-discount` (→ `main`) moves it to ONE invoice-level discount (BUG-2026-09-24-188).
@@ -26,6 +27,13 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
 ---
+
+## 2026-09-25 — 🔵 /dashboard-experimental › Operations: Department Status column alignment (branch `fix/dept-status-zero-align`, PR open)
+
+1. 🔵 `CountPill` (`DashboardWidgets.tsx`): a zero now renders in the same centred pill box as a count (no fill, `CHART_AXIS` grey, normal weight) instead of right-aligned bare text, so Overdue / Due ≤3d zeros line up with the pills.
+2. 🔵 Overdue / Due ≤3d headers centred to match.
+3. 🔵 The "—" for a department with no backlog data is centred in the days cell instead of hugging its right edge.
+tsc strict 0, `tests/ops-floor-lib.test.mjs` pass. Browser check NOT done (no login in the agent session).
 
 ## 2026-09-25 — 🔵 /dashboard-experimental: OCR tab for the Haiku + pre-processing decision (branch `feat/ocr-dashboard-tab`, PR #522 open)
 

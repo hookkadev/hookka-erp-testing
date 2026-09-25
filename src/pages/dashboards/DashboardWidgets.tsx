@@ -579,12 +579,15 @@ const PILL = {
   neutral: "bg-[#F0ECE9] text-[#6B5C32]",
 } as const;
 
+// Zero uses the same centred pill box (no fill, muted, normal weight) so zeros
+// and counts share one column position.
 function CountPill({ n, tone }: { n: number; tone: keyof typeof PILL }) {
-  return n === 0 ? (
-    <span className="text-right tabular-nums" style={{ color: CHART_AXIS }}>0</span>
-  ) : (
-    <span className="justify-self-end">
-      <span className={`inline-flex min-w-[1.75rem] justify-center rounded-full px-1.5 py-0.5 text-[11px] font-semibold tabular-nums ${PILL[tone]}`}>{fmtN(n)}</span>
+  return (
+    <span
+      className={`inline-flex min-w-[1.75rem] justify-center justify-self-center rounded-full px-1.5 py-0.5 text-[11px] tabular-nums ${n === 0 ? "" : `font-semibold ${PILL[tone]}`}`}
+      style={n === 0 ? { color: CHART_AXIS } : undefined}
+    >
+      {fmtN(n)}
     </span>
   );
 }
@@ -651,8 +654,8 @@ export function DeptBacklogCard({
             <div className={`${grid} border-b pb-1.5 text-[10px] uppercase tracking-wide`} style={{ borderColor: BORDER, color: MUTED }}>
               <span>Department</span>
               <span>Queue · days to clear</span>
-              <span className="text-right">Overdue</span>
-              <span className="text-right">Due ≤3d</span>
+              <span className="text-center">Overdue</span>
+              <span className="text-center">Due ≤3d</span>
             </div>
             {rows.map(({ name, backlog: b, overdue, dueSoon: soon }) => {
               const days = b?.showDays ?? null;
@@ -672,7 +675,7 @@ export function DeptBacklogCard({
                       {b && b.bedDays > 0 && <span className="h-full" style={{ width: `${(b.bedDays / mxDays) * 100}%`, background: CHART_GOLD }} />}
                     </span>
                     <span
-                      className="w-12 shrink-0 text-right font-semibold tabular-nums"
+                      className={`w-12 shrink-0 font-semibold tabular-nums ${b ? "text-right" : "text-center"}`}
                       style={{ color: dayColor }}
                       title={b && days == null ? "No completions in the rolling window — the queue can't be sized in days" : undefined}
                     >
