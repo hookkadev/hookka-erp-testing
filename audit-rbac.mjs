@@ -37,6 +37,8 @@ const GUARDS = [
   /x-cron-secret/i, /verifySignature\s*\(/, /hmac/i,
   /requirePermission\s*\(/,
   /requireSuperAdmin\s*\(/,
+  // requirePermission(read), or a role whose dashboard tab map reads it (rbac.ts)
+  /requireReadOrDashboardTab\s*\(/,
   /requireFinance\w*\s*\(/,
   /requireRole\s*\(/,
   /requireAuth\s*\(/,

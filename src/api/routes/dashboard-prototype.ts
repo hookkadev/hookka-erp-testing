@@ -53,7 +53,7 @@
 import { Hono } from "hono";
 import type { Env } from "../worker";
 import { getOrgId } from "../lib/tenant";
-import { requirePermission, hasPermission } from "../lib/rbac";
+import { requirePermission, hasPermission, dashboardReadsFor } from "../lib/rbac";
 import { buildServiceSlice } from "../lib/dashboard-service-slice";
 import { isCustomerScoped } from "../lib/customer-scope";
 import { collectOnTimeDelivery, EMPTY_ON_TIME } from "../lib/on-time-delivery";
@@ -299,21 +299,31 @@ app.get("/", async (c) => {
   // section's data just because they can see Sales — see the redaction pass
   // right before the response is built, same "drop it, don't refuse the
   // whole page" doctrine hasPermission's own doc describes.
-  const denied = await requirePermission(c, "sales-orders", "read");
-  if (denied) return denied;
+  //
+  // A TAB-RESTRICTED role (DASHBOARD_TABS_BY_ROLE in role-policy.ts, e.g.
+  // PRODUCTION) is decided by its tab map instead: it receives exactly the
+  // sections its tabs draw on, whatever its module grants say, and nothing
+  // else. Its front door opens only if one of its tabs reads Sales.
+  const tabReads = dashboardReadsFor(c);
+  const canRead = (resource: string) =>
+    tabReads ? Promise.resolve(tabReads.has(resource)) : hasPermission(c, resource, "read");
+
+  if (!tabReads?.has("sales-orders")) {
+    const denied = await requirePermission(c, "sales-orders", "read");
+    if (denied) return denied;
+  }
 
   const [canDelivery, canPurchase, canInventory, canWorkers, canProduction] = await Promise.all([
-    hasPermission(c, "delivery-orders", "read"),
-    hasPermission(c, "purchase-orders", "read"),
-    hasPermission(c, "inventory", "read"),
-    hasPermission(c, "workers", "read"),
-    hasPermission(c, "production-orders", "read"),
+    canRead("delivery-orders"),
+    canRead("purchase-orders"),
+    canRead("inventory"),
+    canRead("workers"),
+    canRead("production-orders"),
   ]);
 
   // Customer-scoped roles (SALES) must not see the whole case book through a
   // shared, org-wide cached feed, so the slice is dropped for them.
-  const canService =
-    (await hasPermission(c, "service-cases", "read")) && !isCustomerScoped(c);
+  const canService = (await canRead("service-cases")) && !isCustomerScoped(c);
 
   const orgId = getOrgId(c);
   const { cached } = await import("../lib/kv-cache");

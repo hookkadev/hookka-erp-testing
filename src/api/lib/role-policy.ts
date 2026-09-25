@@ -114,6 +114,12 @@ export const ALL_RESOURCES = [
   // Not listed in FINANCE_RESOURCES, so allExcept() grants it to Office and
   // the roles with hand-written lists (Sales, QA, HR, R&D) still do not get it.
   "dashboard",
+  // The experimental dashboard's own front door (page route, menu link and the
+  // /m phone dashboard). Split from `dashboard` on 2026-09-25 so a role can be
+  // given this page, limited to some of its tabs, without the Command Center
+  // or the daily report. Anyone holding dashboard:read also gets it: see
+  // withDashboardAccess below. Office gets it through allExcept().
+  "dashboard-experimental",
   // KPI module. Deliberately granted to NOBODY by name — Super Admin reaches
   // it through the "*" short-circuit, and the owner asked for it to land there
   // first ("给superadmin先"). Opening it to Office is one line here, once the
@@ -439,6 +445,66 @@ export const AGENTS_BY_ROLE: Record<string, string[]> = {
   // R&D deliberately absent: there is no R&D agent in the roster, and handing
   // them DATA_QUALITY would be making one up. Revisit when one exists.
 };
+
+// ---------------------------------------------------------------------------
+// Experimental dashboard: which tabs a role may open.
+//
+// Owner 2026-09-25: PRODUCTION may view /dashboard-experimental, limited to
+// Sales, Operations, Employees and Service, and gains nothing else (not the
+// module pages behind those tabs, not /dashboard, not /daily-report).
+//
+// A role listed here is TAB-RESTRICTED on that page: it sees only these tabs,
+// and the dashboard feed hands it exactly the sections those tabs draw on
+// (DASHBOARD_TAB_READS), whatever its own module grants say. No module
+// permission is granted: GET /api/workers still refuses PRODUCTION.
+//
+// A role NOT listed here keeps the old behaviour exactly: every tab, each feed
+// section gated on the reader's own module permission.
+//
+// Keys are the tab keys in src/pages/dashboards/dashboard-prototype.tsx (TABS)
+// and the /m dashboard (MOBILE_TABS): people is the Employees tab.
+// ---------------------------------------------------------------------------
+export const DASHBOARD_TABS_BY_ROLE: Record<string, string[]> = {
+  PRODUCTION: ["sales", "operations", "people", "service"],
+};
+
+/**
+ * What each tab reads out of GET /api/dashboard/prototype, named by the
+ * resource that gates that section of the feed. Traced from the views:
+ * Sales reads `sales`; Operations reads `production`, `lim`, `inventory` and
+ * `employee` (the attendance log and headcount on its overview); Employees
+ * reads `employee`; Service reads `service`. Overview, Finance and OCR are
+ * absent on purpose: they are never opened to a tab-restricted role.
+ */
+export const DASHBOARD_TAB_READS: Record<string, string[]> = {
+  sales: ["sales-orders"],
+  operations: ["production-orders", "inventory", "workers"],
+  people: ["workers"],
+  service: ["service-cases"],
+};
+
+/** The dashboard tabs this role is limited to, or null when it is not tab-restricted. */
+export function dashboardTabsForRole(role: string): string[] | null {
+  return DASHBOARD_TABS_BY_ROLE[(role || "").trim().toUpperCase()] ?? null;
+}
+
+/** The feed sections (as resources) a tab-restricted role receives, or null when not restricted. */
+export function dashboardReadsForRole(role: string): Set<string> | null {
+  const tabs = dashboardTabsForRole(role);
+  return tabs ? new Set(tabs.flatMap((t) => DASHBOARD_TAB_READS[t] ?? [])) : null;
+}
+
+/**
+ * A permission list plus the derived `dashboard-experimental:read`, for
+ * /me/permissions. Granted to a tab-restricted role and to anyone who could
+ * already read the dashboard, so no existing viewer loses the page.
+ */
+export function withDashboardAccess(perms: Iterable<string>, role: string): string[] {
+  const set = new Set(perms);
+  const viewer = ["dashboard:read", "dashboard:*", "*:read", "*:*", "*"].some((p) => set.has(p));
+  if (viewer || dashboardTabsForRole(role)) set.add("dashboard-experimental:read");
+  return [...set];
+}
 
 /** Agent ids this role may see. `null` means every agent (super admin / admin). */
 export function agentsForRole(role: string): string[] | null {

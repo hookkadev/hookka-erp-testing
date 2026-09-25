@@ -1,6 +1,8 @@
 # Bug History
 
-> **Last verified: 2026-09-24** — newest entry BUG-2026-09-24-191 (branch `fix/so-customer-po-view`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-09-25**: newest entry BUG-2026-09-25-194 (branch `feat/dashboard-kpi-no-icons`, PR #524); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-09-25** — newest entry BUG-2026-09-25-192 (branch `feat/ocr-dashboard-tab`, PR #522); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-09-25** — newest entry BUG-2026-09-24-191 (branch `fix/so-customer-po-view`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 
 Living log of bugs we've identified, diagnosed, and fixed in Hookka ERP.
 
@@ -36,7 +38,7 @@ Entries themselves stay newest-first.
 
 ---
 
-## BUG-2026-09-24-193 — the sequence lock refused nothing: the gate was on an unmerged branch, and nine other paths completed cards with no check at all `production` `inventory` `auth-rbac` 🟢
+## BUG-2026-09-25-195 — the sequence lock refused nothing: the gate was on an unmerged branch, and nine other paths completed cards with no check at all `production` `inventory` `auth-rbac` 🟢
 
 🟢 Fixed on branch `feat/t013-sequence-lock` (PRD T-013, tracker BUG-09, owner
 2026-09-07). **Prod impact UNMEASURED until deployed and verified live.**
@@ -113,6 +115,34 @@ enumerate the population (every status writer in `src/api`) and fail on a
 member it does not recognise — otherwise it certifies exactly the omission it
 exists to catch. Classed with C-series "fixed the instance in front of the
 author" in [`BUG-CLASSES.md`](BUG-CLASSES.md).
+## BUG-2026-09-25-194: Worker Efficiency showed raw worker ids ("worker-45109bfc") instead of names for PRODUCTION `dashboard` `employees` 🟡
+
+🟡 **Fix in progress** (PR #524, not verified in a browser).
+
+**Root cause.** The Worker Efficiency card on /m Home and /dashboard joins three fetches: job-card production minutes, `/api/working-hour-entries/summary` and `/api/workers` for names and departments. `/api/workers` requires `workers:read`; the two summaries do not. A role that can read hours but not the worker directory got a 403 on the third fetch, so every row fell back to its id and the department was blank. Seen on a PRODUCTION account on the phone.
+
+**Fix.** The summary now returns `name` and `departmentCode` for each worker (one extra query on `workers`, snapshot key bumped to `v2` so old cached bodies without names are not served). Both cards read names from the summary and no longer fetch `/api/workers`. Regression: `tests/working-hours-summary-names.test.mjs`.
+
+---
+
+## BUG-2026-09-25-193 — Attendance log: scrolled rows showed through above the sticky header; totals row scrolled out of view `ui-frontend` `dashboard` 🟡
+
+🟡 **Fix in progress** (PR open, not verified in a browser).
+
+**Root cause.** The header was made sticky on the `<tr>` (`sticky top-0 bg-white` plus `border-t border-b`). Tailwind's preflight gives tables `border-collapse: collapse`, where row borders belong to the table grid and do not travel with a stuck row, and the row background does not cover that border strip, so the row scrolling underneath showed through at the header's top edge. The footer ("Listed rows" / "Total (N days)") was a plain `<tfoot>` and scrolled away with the body.
+
+**Fix.** `src/pages/dashboards/AttendanceLogCard.tsx`: the header `<tr>` now puts `sticky top-0 z-10 bg-white` on each `<th>` (`*:` variant) and draws its top/bottom rules as inset box-shadows, which move with the cell. The footer `<tr>` does the same with `bottom-0` and a 2px inset top rule. The same `<tr>` level sticky pattern in OperationsView, EmployeesView, SalesOrdersView, OverdueCards and ServiceView was fixed the same way in PR #524.
+
+---
+
+## BUG-2026-09-25-192 — OCR tab: "When" read "undefined", Accuracy was always empty, Model always "Not recorded" `dashboard` `scan-ocr` 🟢
+
+**Root cause (C23).** `GET /api/ocr-accuracy/models` (#522) read `scan_queue` rows by their snake_case keys (`created_at`, `sample_id`, `ocr_model`, `consumed_at`, `file_name`), but the DB layer returns them camelCased. Every field was `undefined`: no scan linked to its sample (so none counted as imported → accuracy "—"), the date printed "undefined", every model fell to "Not recorded".
+
+**Fix.** `readQueueRow` in `src/api/lib/ocr-accuracy-core.ts` reads `r.camel ?? r.snake`, as `hydrateRow` in `scan-queue.ts` already did. Regression: `tests/ocr-model-summary.test.mjs` feeds the same row in both key shapes. Follow-up: rows from before the stamp existed now take the model the code ran on since 2026-06-29 (`historicalModel`) instead of "Not recorded".
+
+---
+
 ## BUG-2026-09-24-191 — SO "View original" returned `{"error":"stream failed"}`; 18–24 Sep uploads were saved to the wrong storage project `infrastructure` `sales-orders` 🟡
 
 🟡 **Fix in progress** · Owner-reported on the SO for HC-PO-2609-172 (file `fa-7920e088-8c9`,
@@ -120,7 +150,7 @@ uploaded 2026-09-24 03:39 UTC). Same failure the catalog-photo session hit on `f
 earlier the same day.
 
 **Root cause.** From about 2026-09-18 16:16 to 2026-09-24 12:40 MYT, production's
-`SUPABASE_PROJECT_REF` pointed at another Supabase project (`kahxgvbfanbraazetefr`). Uploads wrote
+`SUPABASE_PROJECT_REF` pointed at another Supabase project. Uploads wrote
 their bytes THERE and their `file_assets` row to prod, so each row's `r2Key` was correct but empty
 in prod's `hookka-files` bucket once the setting was corrected. The catalog-photo session counted
 74 such files (55 SO attachments, 17 PI scans, 1 PV, 1 catalog photo).
@@ -129,10 +159,7 @@ in prod's `hookka-files` bucket once the setting was corrected. The catalog-phot
 as missing; Supabase Storage answers a missing object with 400 + `not_found`, so the route threw and
 returned a generic 500 "stream failed" instead of 404. **Still open** — not changed here.
 
-**Recovery.** `scripts/copy-storage-objects.mjs` copies an explicit list of keys (the `r2_key`s of
-rows uploaded in the window) from the other project to the same path in prod — add-only, dry run by
-default. The owner ran it; this SO's original now opens. **Per-file result UNMEASURED** — the run's
-summary was not captured here.
+**Recovery.** The owner copied the missing objects with a one-off Node script run outside the repo; this SO's original now opens. **Per-file result UNMEASURED** — the run's summary was not captured here.
 
 **UI change on the same page.** The SO detail "View original" button is gone; the Customer PO number
 itself is the underlined link, and it opens `/api/files/:id/download?inline=1` so the PDF renders in

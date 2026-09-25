@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState } from "react";
-import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Info } from "lucide-react";
+import { daysTone, deptStatusRows } from "./ops-floor-lib";
 import { useCachedJson } from "@/lib/cached-fetch";
 import { agingBucketTotals } from "@/lib/aging-export";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -473,90 +474,226 @@ export function TopSellersCard({ period }: { period: Period }) {
 
 const TONE = { red: RED, amber: AMBER, green: GREEN } as const;
 
+// Plant Load gauge: a half-ring, 0 → 14 days (plantLoad()'s buffer), centre
+// (100,108) r=80. pathLength=100 lets a dasharray of `pct 100` fill pct% of
+// the arc. Notches + labels sit at plantLoad()'s own cut-offs (amber > 7d,
+// red > 12d), so the colour change is visible on the dial itself.
+const GAUGE_ARC = "M 20 108 A 80 80 0 0 1 180 108";
+const gaugePt = (days: number, r: number) => {
+  const a = Math.PI * (1 - days / 14);
+  return { x: 100 + r * Math.cos(a), y: 108 - r * Math.sin(a) };
+};
+
 export function PlantLoadCard({ period }: { period: Period }) {
   const ovR = useOverview(period);
   const ov = ok(ovR);
   const prod = ov?.production;
   const pl = plantLoad(prod, true);
   const perWorker = prod ? capacityPerWorkerMin(prod.capacityDays ?? [], prod.dailyCapacityMin) : null;
+  const avgBasis = widgetPeriod(period) === "all" ? "7-day avg" : "month avg";
+  const capDays = [...(prod?.capacityDays ?? [])].sort((a, b) => a.date.localeCompare(b.date));
+  const tone = TONE[pl.tone];
   return (
-    <CardShell title={`Plant Load — ${widgetPeriodLabel(period)}`} sub="backlog vs daily capacity">
+    <CardShell title={`Plant Load — ${widgetPeriodLabel(period)}`} sub="how many days of work are queued at the plant's daily capacity">
       {!prod ? (
         <Gate loading={ovR.loading} what="plant load" />
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-4">
           <StateTags ss={ov?.stateSnapshot} />
-          <div>
-            <div className="flex items-baseline justify-between">
-              <span className="text-3xl font-[800] tabular-nums" style={{ color: TONE[pl.tone] }}>{fmtDec2(pl.days)}d</span>
-              <span className="text-xs" style={{ color: MUTED }}>queue</span>
-            </div>
-            <div className="mt-1 h-2.5 overflow-hidden rounded bg-[#F5F2ED]" title="Queue length as a share of a 2-week (14-day) buffer — 100% means two full weeks of work are queued. Not a machine/worker utilisation figure.">
-              <div className="h-full rounded" style={{ width: `${pl.bufferPct}%`, background: TONE[pl.tone] }} />
-            </div>
+          <div className="mx-auto max-w-[260px]" title="Queue length as a share of a 2-week (14-day) buffer — a full ring means two full weeks of work are queued. Not a machine/worker utilisation figure.">
+            <svg viewBox="0 0 200 124" className="w-full" role="img" aria-label={`${fmtDec2(pl.days)} days of work queued, ${fmtPct2(pl.bufferPct)} of a 14-day buffer`}>
+              <path d={GAUGE_ARC} fill="none" stroke="#F0ECE6" strokeWidth={14} />
+              <path d={GAUGE_ARC} fill="none" stroke={tone} strokeWidth={14} pathLength={100} strokeDasharray={`${pl.bufferPct} 100`} />
+              {[7, 12].map((t) => {
+                const a = gaugePt(t, 71), b = gaugePt(t, 89), l = gaugePt(t, 98);
+                return (
+                  <g key={t}>
+                    <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#FFFFFF" strokeWidth={2} />
+                    <text x={l.x} y={l.y} fontSize={9} fill={MUTED} textAnchor="middle" dominantBaseline="middle">{t}d</text>
+                  </g>
+                );
+              })}
+              <text x={20} y={121} fontSize={9} fill={MUTED} textAnchor="middle">0</text>
+              <text x={180} y={121} fontSize={9} fill={MUTED} textAnchor="middle">14d</text>
+              <text x={100} y={94} fontSize={30} fontWeight={800} fill={tone} textAnchor="middle">{fmtDec2(pl.days)}d</text>
+              <text x={100} y={110} fontSize={10} fill={MUTED} textAnchor="middle">of work queued</text>
+            </svg>
+            <p className="-mt-1 text-center text-[11px]" style={{ color: MUTED }}>
+              <span className="font-semibold tabular-nums" style={{ color: tone }}>{fmtPct2(pl.bufferPct)}</span> of a 14-day buffer · amber over 7d, red over 12d
+            </p>
           </div>
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
-            <Stat label="Queue vs 14d" value={fmtPct2(pl.bufferPct)} color={TONE[pl.tone]} sub="of a 14-day buffer" />
+          <div className="grid grid-cols-2 gap-2">
+            <Stat label="Total backlog" value={fmtHM(prod.backlogMin)} sub="÷ daily capacity = the dial" />
+            <Stat label="Daily capacity" value={fmtHM(prod.dailyCapacityMin)} sub={`${perWorker == null ? "—" : fmtHM(perWorker)} per worker · ${avgBasis}`} />
             <Stat label="Workforce" value={fmtN(ov?.employee?.activeHeadcount ?? 0)} sub="active headcount" />
-            <Stat label="Daily capacity" value={fmtHM(prod.dailyCapacityMin)} sub={`${perWorker == null ? "—" : fmtHM(perWorker)} per worker · ${widgetPeriod(period) === "all" ? "7-day avg" : "month avg"}`} />
-            <Stat label="Total backlog" value={fmtHM(prod.backlogMin)} sub={`${fmtDec2(pl.days)}d of work`} />
             <Stat label="Active jobs" value={`${fmtN(prod.activeJobs?.bedframeUnits ?? 0)} / ${fmtN(prod.activeJobs?.sofaSets ?? 0)}`} sub="bedframe units / sofa sets" />
           </div>
-          <div>
-            <p className="mb-1 text-[11px] font-semibold text-[#5A5550]">Daily capacity per day</p>
-            <MiniTable
-              cols={["Date", "Production time", "Workers", "Per worker", "vs Avg"]}
-              rows={[...(prod.capacityDays ?? [])]
-                .sort((a, b) => a.date.localeCompare(b.date))
-                .map((d) => {
+          {capDays.length > 1 && (
+            <div>
+              <p className="mb-1 text-[11px] font-semibold text-[#5A5550]">
+                Production time per day <span className="font-normal" style={{ color: MUTED }}>· grey line = {fmtHM(prod.dailyCapacityMin)} {avgBasis}</span>
+              </p>
+              <div style={{ width: "100%", height: 96 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={capDays} margin={{ top: 6, right: 8, bottom: 0, left: 8 }}>
+                    <XAxis dataKey="date" tickFormatter={(d: string) => d.slice(5)} tick={{ fontSize: 9, fill: CHART_AXIS }} axisLine={{ stroke: BORDER }} tickLine={false} interval="preserveStartEnd" minTickGap={24} />
+                    <YAxis hide domain={[0, "auto"]} />
+                    <ReferenceLine y={prod.dailyCapacityMin} stroke={CHART_AXIS} strokeWidth={1} />
+                    <Tooltip
+                      formatter={(v) => [fmtHM(Number(v)), "Production time"]}
+                      contentStyle={{ background: CARD_BG, border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: 12 }}
+                    />
+                    <Line type="monotone" dataKey="minutes" stroke={TEAL} strokeWidth={2} dot={{ r: 2.5, fill: TEAL, strokeWidth: 0 }} activeDot={{ r: 4 }} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
+          <details className="group">
+            <summary className="cursor-pointer select-none text-[11px] font-semibold text-[#5A5550] hover:text-[#1F1D1B]">Daily capacity per day — table</summary>
+            <div className="mt-1">
+              <MiniTable
+                cols={["Date", "Production time", "Workers", "Per worker", "vs Avg"]}
+                rows={capDays.map((d) => {
                   const diff = d.minutes - prod.dailyCapacityMin;
                   const w = d.workers ?? 0;
                   return [d.date, fmtHM(d.minutes), w > 0 ? fmtN(w) : "—", w > 0 ? fmtHM(d.minutes / w) : "—", `${diff >= 0 ? "+" : "−"}${fmtHM(Math.abs(diff))}`];
                 })}
-            />
-          </div>
+              />
+            </div>
+          </details>
         </div>
       )}
     </CardShell>
   );
 }
 
-const DEPT_SERIES = [["Sofa", TEAL], ["Bedframe", CHART_INK]] as const;
+// Sofa teal / Bedframe brass: validated as a pair (dataviz validator, light
+// surface — normal-vision ΔE 29, CVD ΔE 26). The old teal/taupe pair was ΔE 9.9,
+// too close to tell apart. Brass is light (2.2:1), so each row also prints its
+// days as text and the bar's tooltip splits them.
+const DEPT_SERIES = [["Sofa", TEAL], ["Bedframe", CHART_GOLD]] as const;
+const PILL = {
+  red: "bg-[#FBE7E3] text-[#9A3A2D]",
+  amber: "bg-[#FAEFCB] text-[#9C6F1E]",
+  neutral: "bg-[#F0ECE9] text-[#6B5C32]",
+} as const;
 
-export function DeptBacklogCard({ period }: { period: Period }) {
+// Zero uses the same centred pill box (no fill, muted, normal weight) so zeros
+// and counts share one column position.
+function CountPill({ n, tone }: { n: number; tone: keyof typeof PILL }) {
+  return (
+    <span
+      className={`inline-flex min-w-[1.75rem] justify-center justify-self-center rounded-full px-1.5 py-0.5 text-[11px] tabular-nums ${n === 0 ? "" : `font-semibold ${PILL[tone]}`}`}
+      style={n === 0 ? { color: CHART_AXIS } : undefined}
+    >
+      {fmtN(n)}
+    </span>
+  );
+}
+
+/**
+ * Department status board — one row per department in floor order: the
+ * queue in days to clear (Sofa/Bedframe split, this period's backlog feed)
+ * beside the live overdue and due-in-3-days order counts (prototype feed).
+ * Replaces three separate cards (overdue bar chart, backlog bars, nothing for
+ * due-soon by dept) so "where is the plant stuck?" is answered in one place.
+ */
+export function DeptBacklogCard({
+  period, overdueByDept, dueSoon,
+}: {
+  period: Period;
+  overdueByDept: { department: string; count: number }[];
+  dueSoon: { currentDept: string | null }[];
+}) {
   const ovR = useOverview(period);
   const ov = ok(ovR);
   const prod = ov?.production;
   const [hidden, toggle] = useToggleSet();
   const sofaOn = !hidden.has("Sofa");
   const bedOn = !hidden.has("Bedframe");
-  const { rows, mxDays } = deptBacklogRows(prod?.backlogByDept ?? [], sofaOn, bedOn, true);
+  const { rows: backlog, mxDays } = deptBacklogRows(prod?.backlogByDept ?? [], sofaOn, bedOn, true);
+  const rows = deptStatusRows(backlog, overdueByDept, dueSoon);
+  // Bottleneck = the longest finite queue. Stalled rows carry their own red "stalled".
+  const bottleneck = backlog.reduce<(typeof backlog)[number] | null>(
+    (m, r) => (r.showDays != null && r.showDays > (m?.showDays ?? 0) ? r : m),
+    null,
+  )?.d.dept;
+  const grid = "grid grid-cols-[minmax(0,6.5rem)_minmax(0,1fr)_2.75rem_2.75rem] sm:grid-cols-[minmax(0,8.5rem)_minmax(0,1fr)_3.5rem_3.5rem] items-center gap-2";
   return (
     <CardShell
-      title={`Department Backlog — ${widgetPeriodLabel(period)}`}
-      sub="active work vs daily capacity — bottleneck first · click a legend to toggle"
-      right={<LegendToggle items={DEPT_SERIES} hidden={hidden} onToggle={toggle} />}
-    >
-      {!prod ? (
-        <Gate loading={ovR.loading} what="department backlog" />
-      ) : (
-        <div className="space-y-1">
-          <StateTags ss={ov?.stateSnapshot} />
-          {rows.length === 0 && <p className="text-xs" style={{ color: MUTED }}>No active work.</p>}
-          {rows.map(({ d, sofaDays, bedDays, showDays }) => (
-            <div key={d.dept} className="flex items-center gap-3 py-1">
-              <span className="w-28 text-xs text-[#1F1D1B]">{d.dept}</span>
-              <div className="flex h-2.5 flex-1 overflow-hidden rounded bg-[#F5F2ED]">
-                {sofaOn && <div className="h-full" style={{ width: `${(sofaDays / mxDays) * 100}%`, background: TEAL }} />}
-                {bedOn && <div className="h-full" style={{ width: `${(bedDays / mxDays) * 100}%`, background: CHART_INK }} />}
-              </div>
-              <span className="w-16 text-right text-xs font-semibold tabular-nums" style={{ color: RED }} title={showDays == null ? "No completions in the rolling window — the queue can't be sized in days" : undefined}>
-                {showDays == null ? "stalled" : `${fmtDec2(showDays)}d`}
-              </span>
-            </div>
-          ))}
+      title={`Department Status — ${widgetPeriodLabel(period)}`}
+      sub="where work is piling up, in floor order · click Sofa / Bedframe to toggle"
+      right={
+        <div className="flex gap-3 text-xs">
+          {DEPT_SERIES.map(([k, c]) => {
+            const off = hidden.has(k);
+            return (
+              <button
+                key={k}
+                type="button"
+                onClick={() => toggle(k)}
+                aria-pressed={!off}
+                className="inline-flex items-center gap-1.5 text-[#1F1D1B]"
+                style={{ opacity: off ? 0.45 : 1, textDecoration: off ? "line-through" : "none" }}
+              >
+                <span className="h-2.5 w-2.5 rounded-sm" style={{ background: c }} />
+                {k}
+              </button>
+            );
+          })}
         </div>
-      )}
+      }
+    >
+      <div className="space-y-2">
+        {prod ? <StateTags ss={ov?.stateSnapshot} /> : <Gate loading={ovR.loading} what="department backlog" />}
+        {rows.length === 0 ? (
+          prod && <p className="text-xs" style={{ color: MUTED }}>No active work.</p>
+        ) : (
+          <div className="text-xs">
+            <div className={`${grid} border-b pb-1.5 text-[10px] uppercase tracking-wide`} style={{ borderColor: BORDER, color: MUTED }}>
+              <span>Department</span>
+              <span>Queue · days to clear</span>
+              <span className="text-center">Overdue</span>
+              <span className="text-center">Due ≤3d</span>
+            </div>
+            {rows.map(({ name, backlog: b, overdue, dueSoon: soon }) => {
+              const days = b?.showDays ?? null;
+              const dayColor = b ? TONE[daysTone(days)] : MUTED;
+              return (
+                <div key={name} className={`${grid} border-b border-[#F0ECE6] py-2`}>
+                  <span className="min-w-0">
+                    <span className="block truncate font-medium text-[#1F1D1B]">{name}</span>
+                    {name === bottleneck && <span className="text-[10px] font-semibold" style={{ color: dayColor }}>▲ Bottleneck</span>}
+                  </span>
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span
+                      className="flex h-2 min-w-0 flex-1 gap-[2px] overflow-hidden rounded-sm bg-[#F5F2ED]"
+                      title={b && days != null ? `Sofa ${fmtDec2(b.sofaDays)}d · Bedframe ${fmtDec2(b.bedDays)}d` : undefined}
+                    >
+                      {b && b.sofaDays > 0 && <span className="h-full" style={{ width: `${(b.sofaDays / mxDays) * 100}%`, background: TEAL }} />}
+                      {b && b.bedDays > 0 && <span className="h-full" style={{ width: `${(b.bedDays / mxDays) * 100}%`, background: CHART_GOLD }} />}
+                    </span>
+                    <span
+                      className={`w-12 shrink-0 font-semibold tabular-nums ${b ? "text-right" : "text-center"}`}
+                      style={{ color: dayColor }}
+                      title={b && days == null ? "No completions in the rolling window — the queue can't be sized in days" : undefined}
+                    >
+                      {!b ? "—" : days == null ? "stalled" : `${fmtDec2(days)}d`}
+                    </span>
+                  </span>
+                  <CountPill n={overdue} tone={overdue >= 10 ? "red" : overdue >= 4 ? "amber" : "neutral"} />
+                  <CountPill n={soon} tone="neutral" />
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <p className="text-[10.5px] leading-relaxed" style={{ color: MUTED }}>
+          Days = queued work ÷ that department's own recent daily output — amber over 7d, red over 12d (Plant Load's cut-offs).
+          Overdue / due ≤3d are live order counts by each order's current department — overdue amber at 4+, red at 10+.
+        </p>
+      </div>
     </CardShell>
   );
 }

@@ -1,6 +1,9 @@
 # Hookka ERP — Work Tracker
 
 > **Last verified: 2026-09-23** — branch `feat/t013-sequence-lock` (PRD T-013 / BUG-09) is the newest entry below, open, not pushed. Previously: branch `fix/on-time-delivery-and-decisions` added below (open, not merged, its entry is the newest; its bug ids were renumbered 130-133 → 140-143 because `feat/leave-entitlement` claimed 130-133 and merged to `main` first). Previously: branch `feat/leave-entitlement` (MERGED as #326). Previously: branch `feat/job-card-completed-at` added below (open, not merged). Previously: branch `fix/security-posture` added below (open, not merged). Previously: PRs #304/#310/#312/#313/#314/#315/#316/#317 all MERGED and
+> **Last verified: 2026-09-25**: branch `feat/dashboard-kpi-no-icons` (PR #524 to `main`, open) is the newest entry below, items 1 to 17 checked against the branch. The Attendance log, time audit dates and Department Status branches are folded into it (#525, #526, #527 closed).
+> **Last verified: 2026-09-25** — branch `feat/ocr-dashboard-tab` entry below updated: PR #522 open, BUG-2026-09-25-192 fixed, historical model fallback added.
+> **Last verified: 2026-09-24** — branch `feat/dashboard-exp-ops-layout` added below (not committed, its entry is the newest).
 > **Last verified: 2026-09-24** — DEV-14 entry below updated: #510 MERGED; the per-line column was the wrong shape — branch `fix/pi-document-discount` (→ `main`) moves it to ONE invoice-level discount (BUG-2026-09-24-188).
 > **Last verified: 2026-09-24** — branch `feat/dashboard-experimental-parity` entry updated below (PR #505 open; its entry is the newest).
 > **Last verified: 2026-09-23** — branch `fix/production-auto-load` added below (open, its entry is the newest).
@@ -84,10 +87,51 @@ Asks, in PRD order — each row flips to done as it lands:
 Plan: PR-A = R1-R2 (switch the rule on in shadow mode, fast to merge); PR-B = the rest.
 **2026-09-18:** R1–R15 on the branch (`9539c0dc` + docs commit). `docs/API.md` regenerated,
 `docs/modules/production.md` flow 7 rewritten for the one-gate design and restamped, CODEBASE-MAP rows
-for the gate / reasons / ordered-batch / report page, BUG-2026-09-24-193 logged. Full suite 4,649 / 0
+for the gate / reasons / ordered-batch / report page, BUG-2026-09-25-195 logged. Full suite 4,649 / 0
 failing; `tsc` strict clean. **Left:** browser pass (dialog, phone picker, report page), R16 run by the
 user with `HOOKKA_PROD_DB_URL`, then push + PR to `main` and live verification of A1–A7.
 Constraints kept: rule untouched, no fixed dept list, `prerequisiteMet` never read, shadow mode.
+## 2026-09-25 — 🔵 Experimental dashboard: icon-free KPI cards, Sales values, sticky tables, Attendance log, time-audit dates, Department Status (branch `feat/dashboard-kpi-no-icons` → `main`)
+
+1. 🔵 `Kpi` (`dashboard-shared.tsx`) no longer takes an icon: label → value → sub; a ±% delta sub is a green/red pill, any other sub stays plain wrapping text. Applies to Sales / Finance / Operations (incl. its 2 custom cards) / Production / Service / Employees; All-Overview Hero + DomainCard label icons and the Service approvals header icon removed too.
+2. 🔵 Kept only icons that carry meaning or affordance: ↑/↓ delta arrows, → on CTA buttons, search-field magnifier, ↗ case links, OCR error/retry, widget info chips.
+3. 🔵 Sales › Pending Delivery card shows its value (`pendingDeliverySen` in `computeSalesKpis`, sum of SHIPPED orders); mirrored on the `/m` Sales tab. Test: `tests/dashboard-m-lib.test.mjs`.
+4. 🔵 Sales › Completed card shows its value too (`completedSen`, DELIVERED/INVOICED/CLOSED sum; desktop + `/m`).
+5. 🔵 Sales › Revenue trend: Both / Revenue / Orders switch at the card top-right hides either series and its axis.
+6. 🔵 Sticky table headers no longer let scrolled rows show through: sticky/bg/borders moved from the `<tr>` onto its cells (inset-shadow borders) on the 7 dashboard tables — Operations ×2, Employees, Sales, OverdueCards, Service ×2. Sweep of the Attendance-log instance, item 8 (BUG-2026-09-25-193).
+7. 🔵 Attendance log — "Listed rows" / "Total (N days)" footer pinned to the bottom of the scrolling table (`*:sticky *:bottom-0` on its cells, white background, 2px inset top rule).
+8. 🔵 Attendance log — Header no longer shows scrolled rows through/above it: sticky, background, z-index and borders moved from the `<tr>` onto each `<th>` (BUG-2026-09-25-193).
+9. 🔵 Time audit — Each flagged person in "Time audit warning tiers" (desktop `EmployeesInsights.tsx` `EfficiencyPanels`) and "Time audit warnings" (`/m` `PeopleTab.tsx` `EfficiencySub`) now shows the days it happened: the days whose own production ÷ working ratio sits on the flagged side of the 90–110% band (`warnDays` + `dayList` in `dashboard-shared-lib.ts`). Desktop: new "Dates" column, first 3 + "+N more", full list on hover. `/m`: sub-line "N days: …". Client-side only, same `/api/dashboard/prototype` feed — no API change.
+10. 🔵 Department Status — `CountPill` (`DashboardWidgets.tsx`): a zero now renders in the same centred pill box as a count (no fill, `CHART_AXIS` grey, normal weight) instead of right-aligned bare text, so Overdue / Due ≤3d zeros line up with the pills.
+11. 🔵 Department Status — Overdue / Due ≤3d headers centred to match.
+12. 🔵 Department Status — The "—" for a department with no backlog data is centred in the days cell instead of hugging its right edge.
+13. 🔵 Cards on the experimental dashboard are flat with a tighter radius (rounded-md) and only get a shadow on hover. Scoped through a `data-slot="card"` hook on `Card` plus a descendant rule on the dashboard root, so other pages keep the default look.
+14. 🔵 Every tab shows the selected period next to its heading (added on Overview, Operations, Employees, Service and OCR; Sales and Finance already had it).
+15. 🔵 Worker Efficiency (/m Home and /dashboard) showed raw worker ids for PRODUCTION, which cannot read `/api/workers`. The hours summary now carries each worker name and department and the cards stopped fetching the directory (BUG-2026-09-25-194, test `tests/working-hours-summary-names.test.mjs`).
+16. 🔵 Employees › Overview: the efficiency card is now "Overall Efficiency" (sub: production ÷ working hours, all production staff). It is total earned production minutes ÷ total clocked working minutes over the period (`performance.byDay` from `/api/dashboard/prototype`), a weighted total, not an average of personal %s; a dash when nobody clocked time. The maths moved into `overallEfficiencyPct` (`dashboard-shared-lib.ts`), which the Operations "Efficiency (Prod ÷ Working)" card now reads too, so the two cannot disagree. No API change. tsc strict 0; `tests/dashboard-period.test.mjs` 15 pass. Browser check NOT done (no login); prod data UNMEASURED.
+17. 🔵 PRODUCTION can open the experimental dashboard (desktop and `/m`), limited to Sales, Operations, Employees and Service. Built as a per-role tab map, `DASHBOARD_TABS_BY_ROLE` in `role-policy.ts`: the feed hands a listed role only its tabs' sections, `/me/permissions` returns `dashboardTabs` plus a derived `dashboard-experimental:read` (also held by every `dashboard:read` viewer, so nobody loses the page), the page hides the other tabs and shows "Under maintenance" for them by URL. DO stats / pending value and the service approvals list open for the tab; no module permission is granted (still 403 on `/api/workers`, approve/reject still gated). Roles not in the map are unchanged. Test `tests/dashboard-tab-access.test.mjs`. Browser check NOT done (no login); PRODUCTION's real grants UNMEASURED.
+   Department Status: tsc strict 0, `tests/ops-floor-lib.test.mjs` pass. Browser check NOT done (no login in the agent session).
+   Time audit: tsc strict 0; `tests/dashboard-period.test.mjs` 14 pass. Browser check NOT done (no login); prod data UNMEASURED.
+
+---
+
+## 2026-09-25 — 🔵 /dashboard-experimental: OCR tab for the Haiku + pre-processing decision (branch `feat/ocr-dashboard-tab`, PR #522 open)
+
+Context: the CEO wants customer-PO OCR moved Sonnet → Haiku with a precise pre-processing phase in front; the OCR Accuracy card could not compare models (imported-only, no model recorded).
+1. 🔵 `scan_queue.ocr_model` (runtime self-apply) stamped on done/failed rows from `ocrModelFor(kind)`.
+2. 🔵 `GET /api/ocr-accuracy/models` — per document × model: accuracy, failure / discard rate, avg + p90 time, per-field miss rate, 25 recent problem scans (`summariseQueue`, `tests/ocr-model-summary.test.mjs`).
+3. 🔵 Desktop OCR tab (`OcrView.tsx`): model comparison, where-it-misses, recent problem scans (link to the file), then the full OCR Accuracy card.
+tsc strict 0, `npm test` 4862 pass. Browser check NOT done: `npm run dev` proxies to prod (no new endpoint) and `dev:worker` has no DB creds. Unstamped rows from 2026-06-29 take the model the code ran then (`historicalModel`; PO_MODEL / SUPPLIER_MODEL unchanged since commit 91d402b2); older rows read "Not recorded".
+4. 🔵 BUG-2026-09-25-192: When "undefined" / Accuracy empty / Model "Not recorded" — rows came back camelCased; `readQueueRow` now dual-keys (C23). Not done yet: pre-processing path column (add with the pre-processing work), `/m` tab.
+
+## 2026-09-24 — 🔵 /dashboard-experimental: Operations + Employees layout pass (branch `feat/dashboard-exp-ops-layout`)
+
+Four asks, one agent each — all built on the branch (tsc strict 0, 116 dashboard tests pass); browser check pending (preview needs a login), not committed:
+1. 🔵 Operations > Overview: 7 KPIs → three labelled groups (Orders / Materials & cost / People), 2 rows at xl.
+2. 🔵 Employees > Departments → folded into Efficiency (desktop + `/m`); `?sub=departments` / `?tab=department` redirect there.
+3. 🔵 Attendance log: Today / Yesterday chips at the card's top right (card-local; `/m` copy not yet mirrored).
+4. 🔵 Operations > Overview after the KPIs: Plant Load dial + per-department status board + due-soon urgency lanes (`ops-floor-lib.ts`).
+
 ## 2026-09-24 — 🔵 DEV-14 Discount on Purchase Invoices + PI "View source document" (#510 MERGED; correction on branch `fix/pi-document-discount` → `main`)
 
 **Scan autofill (BUG-2026-09-24-189, branch `fix/scan-code-family-match` → `main`):** a first-time

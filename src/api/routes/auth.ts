@@ -18,7 +18,7 @@
 // /me round-trip, but the token itself never touches localStorage.
 // ---------------------------------------------------------------------------
 import { Hono } from "hono";
-import { permissionsForRole } from "../lib/role-policy";
+import { permissionsForRole, withDashboardAccess, dashboardTabsForRole } from "../lib/role-policy";
 import { requirePermission } from "../lib/rbac";
 import { hiddenNavPrefixes, hiddenNavForRole, homeForPermissions } from "../lib/nav-permissions";
 import type { Context } from "hono";
@@ -583,12 +583,14 @@ app.get("/me/permissions", async (c) => {
     // the API enforces: menus for pages that 403, or pages hidden that work.
     const coded = permissionsForRole(roleName);
     if (coded) {
+      const codedPerms = new Set(withDashboardAccess(coded, roleName));
       return c.json({
         success: true,
         role: roleName,
-        permissions: [...coded],
-        navHidden: [...new Set([...hiddenNavPrefixes(coded), ...hiddenNavForRole(roleName)])],
-        home: homeForPermissions(coded, roleName),
+        permissions: [...codedPerms],
+        navHidden: [...new Set([...hiddenNavPrefixes(codedPerms), ...hiddenNavForRole(roleName)])],
+        home: homeForPermissions(codedPerms, roleName),
+        dashboardTabs: dashboardTabsForRole(roleName),
       });
     }
 
@@ -602,7 +604,10 @@ app.get("/me/permissions", async (c) => {
       .all<{ resource: string; action: string }>();
 
     const rows = permsRes.results ?? [];
-    const permissions = rows.map((r) => `${r.resource}:${r.action}`);
+    // Plus the derived dashboard-experimental:read (role-policy withDashboardAccess):
+    // every dashboard viewer keeps the experimental page, and a tab-restricted
+    // role (DASHBOARD_TABS_BY_ROLE) gets that page and only that page.
+    const permissions = withDashboardAccess(rows.map((r) => `${r.resource}:${r.action}`), roleName);
 
     return c.json({
       success: true,
@@ -612,6 +617,8 @@ app.get("/me/permissions", async (c) => {
       // which link (owner: "直接从 backend 就挡掉嘛").
       navHidden: [...new Set([...hiddenNavPrefixes(new Set(permissions)), ...hiddenNavForRole(roleName)])],
       home: homeForPermissions(new Set(permissions), roleName),
+      // null: every tab, gated as before. A list: the only tabs this role may open.
+      dashboardTabs: dashboardTabsForRole(roleName),
     });
   } catch (err) {
     console.warn(

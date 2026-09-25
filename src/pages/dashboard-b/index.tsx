@@ -230,13 +230,12 @@ type JcSummaryResp = {
 type WheSummaryResp = {
   data?: {
     workerId: string;
+    name?: string | null;
+    departmentCode?: string | null;
     totalHours: number;
     byDept: Record<string, number>;
     daysWithEntries: number;
   }[];
-};
-type WorkersResp = {
-  data?: { id: string; name: string; departmentCode?: string; status?: string }[];
 };
 // Daily Report (process / SOP exceptions) summary — independent fetch, shown
 // as its own card. Mirrors src/api/lib/compliance-report.ts counts.
@@ -751,8 +750,6 @@ export default function DashboardBPage() {
   const { data: wheSumRaw, loading: wheSumL } = useCachedJson<WheSummaryResp>(
     `/api/working-hour-entries/summary?from=${effWin.from}&to=${effWin.to}`,
   );
-  const { data: workersRaw, loading: workersL } =
-    useCachedJson<WorkersResp>("/api/workers");
   // Daily Report summary — independent fetch (own loading state), so it paints
   // the instant its data lands without blocking the rest of the dashboard.
   const {
@@ -789,9 +786,9 @@ export default function DashboardBPage() {
   //                  Purchasing). Snapshot-backed — resolves quickly.
   //   • soL        → Order Pipeline + the "Outstanding" KPI tile.
   //   • pendingL   → the "Pending Delivery" KPI tile (ONE small live fetch).
-  //   • effL       → Worker Efficiency (3 live fetches).
+  //   • effL       → Worker Efficiency (2 live fetches).
   const overviewLoading = ovL;
-  const effL = jcSumL || wheSumL || workersL;
+  const effL = jcSumL || wheSumL;
 
   // Pending Delivery — server-computed (see the fetch above). Integer sen.
   const pendingDeliveryValueSen = pendingRaw?.pendingDeliveryValueSen ?? 0;
@@ -815,12 +812,6 @@ export default function DashboardBPage() {
     const prodMin = new Map<string, number>();
     for (const r of jcSumRaw?.data ?? [])
       prodMin.set(r.workerId, Number(r.productionMinutes) || 0);
-    const name = new Map<string, string>();
-    const dept = new Map<string, string>();
-    for (const w of workersRaw?.data ?? []) {
-      name.set(w.id, w.name || w.id);
-      dept.set(w.id, DEPT_LABEL[w.departmentCode || ""] ?? w.departmentCode ?? "");
-    }
     const rows: { name: string; dept: string; pct: number }[] = [];
     for (const e of wheSumRaw?.data ?? []) {
       if ((e.daysWithEntries ?? 0) === 0) continue;
@@ -829,14 +820,14 @@ export default function DashboardBPage() {
         if (PROD_DEPTS.has(d)) prodHours += Number(h) || 0;
       if (prodHours <= 0) continue;
       rows.push({
-        name: name.get(e.workerId) ?? e.workerId,
-        dept: dept.get(e.workerId) ?? "",
+        name: e.name || e.workerId,
+        dept: DEPT_LABEL[e.departmentCode || ""] ?? e.departmentCode ?? "",
         pct: ((prodMin.get(e.workerId) ?? 0) / (prodHours * 60)) * 100,
       });
     }
     rows.sort((a, b) => b.pct - a.pct);
     return { top: rows.slice(0, 5), bottom: rows.slice(-5).reverse() };
-  }, [jcSumRaw, wheSumRaw, workersRaw]);
+  }, [jcSumRaw, wheSumRaw]);
 
   const so = soRaw ?? {};
   const ov = ovRaw ?? {};

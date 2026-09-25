@@ -62,9 +62,11 @@ test("the dashboard is management-only, and everyone still has a home", () => {
   // opened to Office without opening Finance with it.
   assert.equal(resourceForNav("/dashboard"), "dashboard");
   assert.equal(resourceForNav("/daily-report"), "dashboard");
-  // Same audience as /dashboard. "/dashboard" does not cover it (prefix match
-  // stops at "/"), so it needs — and has — its own row.
-  assert.equal(resourceForNav("/dashboard-experimental"), "dashboard");
+  // "/dashboard" does not cover it (prefix match stops at "/"), so it needs its
+  // own row. Its own resource since 2026-09-25, so one role (PRODUCTION) can be
+  // given this page without /dashboard; every dashboard viewer still holds it
+  // (see tests/dashboard-tab-access.test.mjs).
+  assert.equal(resourceForNav("/dashboard-experimental"), "dashboard-experimental");
 
   for (const role of ["SALES", "QA", "HR", "R_AND_D"]) {
     const perms = permissionsForRole(role);

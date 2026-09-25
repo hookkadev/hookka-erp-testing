@@ -238,12 +238,13 @@ export const DASHBOARD_ROUTES: RouteObject[] = [
   },
   { path: '/dashboard-b', element: <Navigate to="/dashboard" replace /> },
 
-  // Experimental dashboard — same gate as /dashboard (the menu link is mapped
-  // to the same resource in nav-permissions.ts).
+  // Experimental dashboard. Its own resource, same as its menu link in
+  // nav-permissions.ts: every dashboard:read holder has it, plus a role in
+  // DASHBOARD_TABS_BY_ROLE (role-policy.ts), which the page limits to its tabs.
   {
     path: '/dashboard-experimental',
     element: (
-      <RequirePermission resource="dashboard" action="read">
+      <RequirePermission resource="dashboard-experimental" action="read">
         <S><DashboardPrototype /></S>
       </RequirePermission>
     ),
