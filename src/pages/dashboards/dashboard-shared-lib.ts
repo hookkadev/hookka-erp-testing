@@ -392,6 +392,12 @@ export function inFocus(p: Period, date: string | null | undefined): boolean {
  * route). A weighted total, not an average of each person's %. Null when
  * nobody clocked any time, so the card shows a dash, not 0%. The Employees
  * and Operations overview cards both read this, so they cannot disagree.
+ *
+ * Days with no clocked production time are skipped entirely. Job cards finish
+ * during the day but working hours are entered after it, so today (and any day
+ * whose hours are not in yet) carries earned minutes with nothing to divide
+ * them by. Counting them pushed the month's figure up (MEASURED 2026-09-25:
+ * 95.0% with today's 105.8h of earned time vs 92.9% without).
  */
 export function overallEfficiencyPct(
   byDay: readonly { date: string; workingMinutes: number; productionMinutes: number }[],
@@ -400,7 +406,7 @@ export function overallEfficiencyPct(
   let w = 0;
   let prod = 0;
   for (const d of byDay) {
-    if (!inFocus(p, d.date)) continue;
+    if (!inFocus(p, d.date) || d.workingMinutes <= 0) continue;
     w += d.workingMinutes;
     prod += d.productionMinutes;
   }

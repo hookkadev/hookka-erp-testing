@@ -8,7 +8,7 @@ import { DeptEfficiencyCard } from "./ProductionDailyPanels";
 import { DepartmentsView } from "./DepartmentsView";
 import { AttendanceLogCard } from "./AttendanceLogCard";
 import { filterSlice } from "./employee-filter";
-import { TAUPE, TEAL, MUTED, BORDER, fmtN, inPeriod, overallEfficiencyPct, periodLabel, type Period, type PeopleSub } from "./dashboard-shared-lib";
+import { TAUPE, TEAL, MUTED, BORDER, fmtN, inPeriod, overallEfficiencyPct, periodLabel, dayLabel, type Period, type PeopleSub } from "./dashboard-shared-lib";
 import { Kpi, LiveBadge, MissingNote } from "./dashboard-shared";
 
 // Real data from GET /api/dashboard/prototype — the `employee` +
@@ -78,6 +78,12 @@ export function EmployeesView({
     () => overallEfficiencyPct(employee?.performance.byDay ?? [], period),
     [employee?.performance.byDay, period],
   );
+
+  // The dash alone read as broken. The People tab opens on today, and today's
+  // hours are entered after the day, so say why the figure is missing.
+  const noHoursNote = efficiencyPct == null
+    ? `No production hours clocked ${period.day ? `on ${dayLabel(period.day)}` : `in ${periodLabel(period)}`}`
+    : null;
 
   // Department / employee filter (Time & attendance and Efficiency tabs). Every
   // panel downstream reads the filtered slice, so picking a person re-derives
@@ -162,7 +168,7 @@ export function EmployeesView({
         <Kpi
           label="Overall Efficiency"
           value={efficiencyPct == null ? "—" : `${efficiencyPct.toFixed(1)}%`}
-          sub={target != null ? `Target: ${target}%` : undefined}
+          sub={[noHoursNote, target != null ? `Target: ${target}%` : null].filter(Boolean).join(" · ") || undefined}
           hint="Production ÷ working hours, all production staff"
           valueColorClass="text-[#3E6570]"
         >
