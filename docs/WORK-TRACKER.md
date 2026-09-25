@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-25** — branch `fix/attendance-log-sticky-rows` added below (open, its entry is the newest).
 > **Last verified: 2026-09-25** — branch `feat/ocr-dashboard-tab` entry below updated: PR #522 open, BUG-2026-09-25-192 fixed, historical model fallback added.
 > **Last verified: 2026-09-24** — branch `feat/dashboard-exp-ops-layout` added below (not committed, its entry is the newest).
 > **Last verified: 2026-09-24** — DEV-14 entry below updated: #510 MERGED; the per-line column was the wrong shape — branch `fix/pi-document-discount` (→ `main`) moves it to ONE invoice-level discount (BUG-2026-09-24-188).
@@ -26,6 +27,12 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
 ---
+
+## 2026-09-25 — 🔵 Attendance log: frozen totals row + opaque sticky header (branch `fix/attendance-log-sticky-rows` → `main`)
+
+1. 🔵 "Listed rows" / "Total (N days)" footer pinned to the bottom of the scrolling table (`*:sticky *:bottom-0` on its cells, white background, 2px inset top rule).
+2. 🔵 Header no longer shows scrolled rows through/above it: sticky, background, z-index and borders moved from the `<tr>` onto each `<th>` (BUG-2026-09-25-193).
+File: `src/pages/dashboards/AttendanceLogCard.tsx` (not a shared component). tsc strict 0; no test touches the file. NOT verified in a browser. Same `<tr … sticky top-0 bg-white>` pattern remains in OperationsView (×2), EmployeesView, SalesOrdersView, OverdueCards, ServiceView (×2) — left alone (files under active edit elsewhere).
 
 ## 2026-09-25 — 🔵 /dashboard-experimental: OCR tab for the Haiku + pre-processing decision (branch `feat/ocr-dashboard-tab`, PR #522 open)
 

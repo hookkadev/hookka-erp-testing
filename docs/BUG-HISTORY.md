@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-09-25** — newest entry BUG-2026-09-25-193 (branch `fix/attendance-log-sticky-rows`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-25** — newest entry BUG-2026-09-25-192 (branch `feat/ocr-dashboard-tab`, PR #522); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-25** — newest entry BUG-2026-09-24-191 (branch `fix/so-customer-po-view`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 
@@ -34,6 +35,16 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-09-25-193 — Attendance log: scrolled rows showed through above the sticky header; totals row scrolled out of view `ui-frontend` `dashboard` 🟡
+
+🟡 **Fix in progress** (PR open, not verified in a browser).
+
+**Root cause.** The header was made sticky on the `<tr>` (`sticky top-0 bg-white` plus `border-t border-b`). Tailwind's preflight gives tables `border-collapse: collapse`, where row borders belong to the table grid and do not travel with a stuck row, and the row background does not cover that border strip, so the row scrolling underneath showed through at the header's top edge. The footer ("Listed rows" / "Total (N days)") was a plain `<tfoot>` and scrolled away with the body.
+
+**Fix.** `src/pages/dashboards/AttendanceLogCard.tsx`: the header `<tr>` now puts `sticky top-0 z-10 bg-white` on each `<th>` (`*:` variant) and draws its top/bottom rules as inset box-shadows, which move with the cell. The footer `<tr>` does the same with `bottom-0` and a 2px inset top rule. Same `<tr>`-level sticky pattern still in OperationsView, EmployeesView, SalesOrdersView, OverdueCards, ServiceView (not changed here).
 
 ---
 

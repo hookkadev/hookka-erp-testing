@@ -122,8 +122,11 @@ export function AttendanceLogCard({ employee, period: pagePeriod, perDay = false
       <CardContent className="p-0">
         <div className="overflow-x-auto" style={{ maxHeight: 460, overflowY: "auto" }}>
           <table className="w-full text-[12.5px]">
+            {/* Sticky + background + borders live on the CELLS, not the <tr>: under Tailwind's
+                border-collapse a row's border stays put while the row sticks, leaving a strip
+                the scrolled rows show through. Inset shadows are the borders that travel. */}
             <thead>
-              <tr className="border-t border-b border-[#E2DDD8] sticky top-0 bg-white">
+              <tr className="*:sticky *:top-0 *:z-10 *:bg-white *:shadow-[inset_0_1px_0_#E2DDD8,inset_0_-1px_0_#E2DDD8]">
                 {H.map((t, i) => (
                   <th key={t} className={`px-3 py-2 font-semibold uppercase text-[10.5px] tracking-wide text-[#6B7280] whitespace-nowrap ${i >= 4 && i <= 7 + (perDay ? 0 : 1) ? "text-right" : "text-left"}`}>{t}</th>
                 ))}
@@ -164,7 +167,7 @@ export function AttendanceLogCard({ employee, period: pagePeriod, perDay = false
             </tbody>
             {log.rows.length > 0 && (
               <tfoot>
-                <tr className="border-t-2 border-[#E2DDD8] font-mono font-semibold">
+                <tr className="font-mono font-semibold *:sticky *:bottom-0 *:z-10 *:bg-white *:shadow-[inset_0_2px_0_#E2DDD8]">
                   <td className="px-3 py-2" colSpan={4}>{perDay ? `Total (${log.days} days)` : "Listed rows"}</td>
                   <td className="px-3 py-2 text-right">{hrs(log.working)}</td>
                   <td className="px-3 py-2 text-right">{hrs(log.prod)}</td>
