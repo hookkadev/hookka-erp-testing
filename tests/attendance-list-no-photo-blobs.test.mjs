@@ -111,15 +111,27 @@ function makeDb(mode) {
   };
 }
 
-async function call(db, query = '?from=2026-08-01&to=2026-08-31') {
+// Passed as the Worker env. Without it c.env is undefined, getRolePermissions
+// throws on `c.env.SESSION_CACHE`, and rbac.ts's catch hands the role its
+// legacy default — `*:read` for any role not listed there, HR included. The
+// gate would then pass for EVERY role and prove nothing. With an env object
+// the role resolves through role-policy.ts, exactly as in production.
+const TEST_ENV = {};
+
+async function call(db, query = '?from=2026-08-01&to=2026-08-31', role = 'HR', path = '') {
   const app = new Hono();
   app.use('*', async (c, next) => {
     c.set('orgId', 'hookka');
     c.set('DB', db);
+    // GET /api/attendance is permission-gated as of the RBAC audit
+    // (2026-09-11) — it was readable by every logged-in account. HR is
+    // the role that legitimately holds attendance:read, so the test
+    // exercises the handler as HR rather than as nobody.
+    c.set('userRole', role);
     await next();
   });
   app.route('/api/attendance', attendance);
-  return app.request(`/api/attendance${query}`);
+  return app.request(`/api/attendance${path}${query}`, undefined, TEST_ENV);
 }
 
 test('the list query does not read the punch-selfie blobs', async () => {
@@ -225,5 +237,49 @@ test('?employeeId= composes with the date window (the BUG-2026-08-13-111 read)',
     /ORDER BY date DESC, employeeId/,
     'ordering must be unchanged from the unscoped call — with from/to set and ' +
       'no ?date=, both take the same branch (attendance.ts orderBy).',
+  );
+});
+
+// ---------------------------------------------------------------------------
+// RBAC — both attendance reads refuse a role without attendance:read (RBAC
+// audit 2026-09-11). Asserted three ways: status 403, the missingPermission
+// body, and ZERO database calls. "No rows came back" would pass against a
+// working gate, a broken gate and a dead connection alike.
+// ---------------------------------------------------------------------------
+for (const [label, query, path] of [
+  ['GET /api/attendance', '?from=2026-08-01&to=2026-08-31', ''],
+  ['GET /api/attendance/:id/photo', '', '/att-1/photo'],
+]) {
+  test(`RBAC: ${label} refuses QA with 403 before touching the database`, async () => {
+    const db = makeDb('narrow');
+    const res = await call(db, query, 'QA', path);
+    assert.equal(res.status, 403);
+    const body = await res.json();
+    assert.equal(body.success, false);
+    assert.equal(body.missingPermission, 'attendance:read');
+    assert.equal(body.role, 'QA');
+    assert.equal(db.seen.length, 0, 'a refused request must not reach the database');
+  });
+}
+
+test('RBAC: HR is allowed through the real role policy, not the rbac.ts fallback', async () => {
+  const original = console.warn;
+  const rbacWarnings = [];
+  console.warn = (...args) => {
+    if (String(args[0]).includes('[rbac]')) rbacWarnings.push(String(args[0]));
+    else original(...args);
+  };
+  let res;
+  try {
+    res = await call(makeDb('narrow'));
+  } finally {
+    console.warn = original;
+  }
+  assert.equal(res.status, 200);
+  assert.deepEqual(
+    rbacWarnings,
+    [],
+    'HR must be allowed by role-policy.ts. An [rbac] fallback warning means the ' +
+      'permission lookup threw and the request was let through by the fail-open catch.',
   );
 });

@@ -1,25 +1,18 @@
 import { useMemo } from "react";
-import { useCachedJson } from "@/lib/cached-fetch";
+import { Link } from "react-router-dom";
+import { isUnknownOutcome, useCachedJson } from "@/lib/cached-fetch";
 import { formatCurrency } from "@/lib/utils";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { ArrowRight, TrendingUp, TrendingDown } from "lucide-react";
 import {
-  ArrowRight,
-  TrendingUp,
-  TrendingDown,
-  Factory,
-  AlertTriangle,
-  ShoppingCart,
-  Truck,
-  Users,
-  Package,
-} from "lucide-react";
-import {
-  MUTED, GREEN, RED, AMBER, fmtN,
+  MUTED, GREEN, RED, AMBER, fmtN, fmtRM2, widgetPeriod, widgetPeriodLabel,
   periodLabel, dayLabel, isConfirmedOrder, type Period,
 } from "./dashboard-shared-lib";
 import { LiveBadge } from "./dashboard-shared";
 import { overviewTotals, overviewSalesSnapshot, overviewWorkforce } from "./dashboard-sales-lib";
+import { complianceSummary, monthWindow, type ComplianceResp, type Overview } from "./dashboard-widgets-lib";
+import { OcrAccuracyCard } from "../dashboard-b/OcrAccuracyCard";
 
 // All Overview — the dashboard's landing tab, ported from the static design
 // prototype's own first screen. Reads the SAME GET /api/dashboard/prototype
@@ -80,7 +73,7 @@ function ActionTile({ label, value, hint, onOpen }: { label: string; value: numb
     <button
       type="button"
       onClick={onOpen}
-      className="text-left rounded-lg border border-[#E2DDD8] bg-white shadow-sm p-4 max-md:p-3 min-h-11 hover:bg-[#F7F5F3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#6B5C32]"
+      className="text-left rounded-md border border-[#E2DDD8] bg-white transition-shadow hover:shadow-md p-4 max-md:p-3 min-h-11 hover:bg-[#F7F5F3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#6B5C32]"
     >
       <p className="text-2xl max-md:text-xl font-bold tabular-nums" style={{ color: value ? RED : value === 0 ? GREEN : MUTED }}>
         {value == null ? "—" : fmtN(value)}
@@ -114,19 +107,16 @@ function Delta({ pct, vs }: { pct: number | null; vs: string }) {
 function Hero({
   label,
   value,
-  icon: Icon,
   children,
 }: {
   label: string;
   value: string;
-  icon: typeof Factory;
   children?: React.ReactNode;
 }) {
   return (
     <Card>
       <CardContent className="p-4 space-y-1">
-        <p className="text-[11px] uppercase tracking-wide flex items-center gap-1.5" style={{ color: MUTED }}>
-          <Icon className="h-3.5 w-3.5 shrink-0" />
+        <p className="text-[11px] uppercase tracking-wide" style={{ color: MUTED }}>
           {label}
         </p>
         <p className="text-2xl font-bold tabular-nums truncate text-[#1F1D1B]">{value}</p>
@@ -147,7 +137,6 @@ function Stat({ label, value }: { label: string; value: string }) {
 
 function DomainCard({
   title,
-  icon: Icon,
   stats,
   note,
   noteTone,
@@ -155,7 +144,6 @@ function DomainCard({
   onOpen,
 }: {
   title: string;
-  icon: typeof Factory;
   stats: { label: string; value: string }[];
   note?: string;
   noteTone?: string;
@@ -165,8 +153,7 @@ function DomainCard({
   return (
     <Card className="flex flex-col">
       <CardContent className="p-4 flex flex-col gap-3 flex-1">
-        <p className="text-sm font-semibold flex items-center gap-2 text-[#1F1D1B]">
-          <Icon className="h-4 w-4 shrink-0" style={{ color: MUTED }} />
+        <p className="text-sm font-semibold text-[#1F1D1B]">
           {title}
         </p>
         <div className="grid grid-cols-2 gap-3 flex-1">
@@ -196,6 +183,16 @@ export function AllOverviewView({
   onOpenTab: (tab: string, sub: string | undefined) => void;
 }) {
   const { data, loading, error } = useCachedJson<Feed>("/api/dashboard/prototype");
+  // Invoices KPI + Daily Report tile — the SAME URLs
+  // /dashboard reads, derived with the same formulas (dashboard-widgets-lib.ts).
+  const wp = widgetPeriod(period);
+  const wpLabel = widgetPeriodLabel(period);
+  const { data: ovRaw, loading: ovLoading } = useCachedJson<Overview>(`/api/dashboard/overview?period=${wp}`);
+  const ovData = ovRaw && ovRaw.success !== false ? ovRaw : null;
+  const { data: compRaw, loading: compLoading, failure: compFailure } =
+    useCachedJson<ComplianceResp>("/api/reports/compliance.json");
+  // A dead read is not a clean day (C15): only a 2xx body licenses a number.
+  const comp = complianceSummary(compRaw, isUnknownOutcome(compFailure));
 
   const totals = useMemo(
     () => overviewTotals(data?.sales?.byDay ?? [], period, months),
@@ -277,40 +274,53 @@ export function AllOverviewView({
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-lg font-semibold text-[#1F1D1B]">Overview</h2>
         <LiveBadge live={!!data.availability?.sales?.live} />
+        <span className="text-xs text-[#6B7280]">{periodName}</span>
       </div>
 
       <p className="text-sm" style={{ color: MUTED }}>
-        {periodName} · Key operational bottlenecks &amp; priority action items
+        Key operational bottlenecks &amp; priority action items
       </p>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <Hero label={`Total Revenue (${period.day ? "day" : period.mode === "monthly" ? "MTD" : "YTD"})`} value={formatCurrency(totals.revenueSen)} icon={TrendingUp}>
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+        <Hero label={`Total Revenue (${period.day ? "day" : period.mode === "monthly" ? "MTD" : "YTD"})`} value={formatCurrency(totals.revenueSen)}>
           <Delta pct={deltaPct} vs={totals.prevLabel || "—"} />
           <p className="text-xs" style={{ color: MUTED }}>{fmtN(totals.orders)} orders recorded</p>
         </Hero>
 
-        <Hero label="Active Factory Backlog" value={prod ? fmtN(prod.backlogCards) : "—"} icon={Factory}>
+        <Hero label="Active Factory Backlog" value={prod ? fmtN(prod.backlogCards) : "—"}>
           <p className="text-xs" style={{ color: MUTED }}>
             {prod ? `${fmtN(prod.active)} active production orders` : "no production feed"}
           </p>
         </Hero>
 
-        <Hero label="Operational Bottleneck" value={neck?.dept || "—"} icon={AlertTriangle}>
+        <Hero label="Operational Bottleneck" value={neck?.dept || "—"}>
           <p className="text-xs" style={{ color: MUTED }}>
             {neck?.dept ? `${fmtN(neck.cards)} cards · ${fmtN(neck.orders)} orders` : "no production feed"}
           </p>
         </Hero>
 
-        <Hero label="Critical Alerts" value={prod ? `${fmtN(prod.critical)} Critical` : "—"} icon={AlertTriangle}>
+        <Hero label="Critical Alerts" value={prod ? `${fmtN(prod.critical)} Critical` : "—"}>
           <p className="text-xs" style={{ color: prod && prod.atRisk > 0 ? AMBER : MUTED }}>
             {prod ? `${fmtN(prod.atRisk)} more at risk` : "no production feed"}
+          </p>
+        </Hero>
+
+        {/* Invoices KPI (as on /dashboard): Σ invoice totals (excl. cancelled)
+            by invoice date for the month, or all-time. */}
+        <Hero
+          label={`Invoices (${wpLabel})`}
+          value={ovData ? fmtRM2(ovData.invoicesThisMonthSen ?? 0) : ovLoading ? "…" : "—"}
+         
+        >
+          <p className="text-xs" style={{ color: ovData || ovLoading ? MUTED : AMBER }}>
+            {ovData ? "issued, by invoice date" : ovLoading ? "loading" : "Couldn't load invoices — not shown as zero"}
           </p>
         </Hero>
       </div>
 
       <section aria-label="Needs action" className="space-y-2">
         <h3 className="text-sm font-semibold text-[#1F1D1B]">Needs action</h3>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 max-md:gap-3">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 max-md:gap-3">
           <ActionTile
             label="Pending approvals"
             value={svc ? svc.filter((c) => c.approvalStatus === "PENDING").length : null}
@@ -335,6 +345,31 @@ export function AllOverviewView({
             hint="production early warning"
             onOpen={() => onOpenTab("operations", undefined)}
           />
+          {/* Daily Report — process / SOP exceptions, same summary as the
+              /dashboard tile. Failed = "—", partial = a floor ("+"). */}
+          <Link
+            to="/daily-report"
+            className="text-left rounded-md border border-[#E2DDD8] bg-white transition-shadow hover:shadow-md p-4 max-md:p-3 min-h-11 hover:bg-[#F7F5F3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#6B5C32]"
+          >
+            <p
+              className="text-2xl max-md:text-xl font-bold tabular-nums"
+              style={{ color: comp.failed || comp.partial ? MUTED : comp.total === 0 ? GREEN : RED }}
+            >
+              {compLoading && !comp.counts ? "…" : comp.failed ? "—" : `${fmtN(comp.total)}${comp.partial ? "+" : ""}`}
+            </p>
+            <p className="text-xs font-medium text-[#1F1D1B] flex items-center gap-1">
+              Daily Report
+              <ArrowRight className="h-3 w-3 shrink-0" />
+            </p>
+            <p className="text-xs" style={{ color: MUTED }}>
+              {compLoading && !comp.counts ? "loading" : comp.caption}
+            </p>
+            {comp.chips.length > 0 && (
+              <p className="mt-1 text-[11px]" style={{ color: RED }}>
+                {comp.chips.map(([l, n]) => `${l} ${fmtN(n)}`).join(" · ")}
+              </p>
+            )}
+          </Link>
         </div>
       </section>
 
@@ -425,7 +460,6 @@ export function AllOverviewView({
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <DomainCard
           title="Sales &amp; Demand Snapshot"
-          icon={ShoppingCart}
           stats={[
             { label: "Top customer", value: sales.topCustomer },
             { label: `Revenue ${period.day ? "this day" : period.mode === "monthly" ? "this period" : "YTD"}`, value: formatCurrency(totals.revenueSen) },
@@ -438,7 +472,6 @@ export function AllOverviewView({
 
         <DomainCard
           title="Production &amp; Floor Status"
-          icon={Factory}
           stats={[
             { label: "Active jobs", value: prod ? fmtN(prod.active) : "—" },
             { label: "Bottleneck", value: neck?.dept || "—" },
@@ -451,7 +484,6 @@ export function AllOverviewView({
 
         <DomainCard
           title="Fulfillment &amp; Deliveries"
-          icon={Truck}
           stats={[
             { label: "Outstanding", value: outstanding ? fmtN(outstanding.count) : "—" },
             { label: "Value", value: outstanding ? formatCurrency(outstanding.valueSen) : "—" },
@@ -462,7 +494,6 @@ export function AllOverviewView({
 
         <DomainCard
           title="Workforce &amp; Attendance"
-          icon={Users}
           stats={[
             { label: workforce.presentDay ? `Present (${dayLabel(workforce.presentDay)})` : "Present", value: workforce.presentLabel },
             { label: "Team efficiency avg", value: workforce.avg == null ? "—" : `${workforce.avg.toFixed(1)}%` },
@@ -477,7 +508,6 @@ export function AllOverviewView({
 
         <DomainCard
           title="Inventory &amp; Supply Chain"
-          icon={Package}
           stats={[
             { label: "Stock value on hand", value: inv ? formatCurrency(inv.stockValueSen) : "—" },
             { label: "Items tracked", value: inv ? fmtN(inv.items) : "—" },
@@ -486,6 +516,9 @@ export function AllOverviewView({
           ]}
         />
       </div>
+
+      {/* OCR accuracy — shared with /dashboard, same period rule. */}
+      <OcrAccuracyCard period={wp} range={wp === "all" ? null : monthWindow(wp)} />
     </div>
   );
 }

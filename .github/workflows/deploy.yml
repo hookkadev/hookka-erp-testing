@@ -43,6 +43,14 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    # main → "production", staging → "staging" in the repo home page's
+    # "Deployments" sidebar: in progress while it builds/deploys, then Active /
+    # Failed (no URL shown, on purpose). Only those two branches are recorded
+    # (deployment: false otherwise) — PR canary / other branch runs still build
+    # + deploy exactly as before.
+    environment:
+      name: ${{ github.ref == 'refs/heads/staging' && 'staging' || 'production' }}
+      deployment: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging' }}
     permissions:
       contents: read
       deployments: write

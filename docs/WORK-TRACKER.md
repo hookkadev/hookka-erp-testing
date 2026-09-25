@@ -1,10 +1,18 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-25** — branch `chore/sync-staging-from-main-0925` (staging←main sync) added below (its entry is the newest).
 > **Last verified: 2026-09-25** — branch `feat/m-warehouse-locate` (DEV-09) added below (open, its entry is the newest).
 > **Last verified: 2026-09-22** — branch `fix/delivery-loading-gate-po-paging` added below (open, its entry is the newest). Previously: branch `fix/delivery-tab-switch-pagination` (MERGED as #467). Previously: branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
 > **Last verified: 2026-09-22** — branch `fix/delivery-tab-switch-pagination` added below (open, its entry is the newest). Previously: branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
 > **Last verified: 2026-09-22** — branch `claude/nice-sanderson-27be32` (dashboard Service > Top issues redesign) added below (open, its entry is the newest). Previously: branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
 > **Last verified: 2026-09-22** — branch `feat/po-supplier-searchable-select` added below (open, pushed, no PR). NOTE: the 2026-09-22 Houzs entry below still carries committed merge-conflict markers (`<<<<<<< HEAD` … `>>>>>>> 85e58b40`) on `main`; left for its owner to resolve.
+> **Last verified: 2026-09-25**: branch `feat/dashboard-kpi-no-icons` (PR #524 to `main`, open) is the newest entry below, items 1 to 17 checked against the branch. The Attendance log, time audit dates and Department Status branches are folded into it (#525, #526, #527 closed).
+> **Last verified: 2026-09-25** — branch `feat/ocr-dashboard-tab` entry below updated: PR #522 open, BUG-2026-09-25-192 fixed, historical model fallback added.
+> **Last verified: 2026-09-24** — branch `feat/dashboard-exp-ops-layout` added below (not committed, its entry is the newest).
+> **Last verified: 2026-09-24** — DEV-14 entry below updated: #510 MERGED; the per-line column was the wrong shape — branch `fix/pi-document-discount` (→ `main`) moves it to ONE invoice-level discount (BUG-2026-09-24-188).
+> **Last verified: 2026-09-24** — branch `feat/dashboard-experimental-parity` entry updated below (PR #505 open; its entry is the newest).
+> **Last verified: 2026-09-23** — branch `fix/production-auto-load` added below (open, its entry is the newest).
+> **Last verified: 2026-09-23** — branch `fix/so-duplicate-ref-saves-draft` added below (open, its entry is the newest).
 > **Last verified: 2026-09-22** — branch `fix/scan-queue-client-driven` added below (open, its entry is the newest).
 > **Last verified: 2026-09-22** — branch `fix/datagrid-selection-loop` added below (open, its entry is the newest). Previously: branch `fix/delivery-tab-switch-pagination` (MERGED as #467). Previously: branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
 > **Last verified: 2026-09-22** — branch `feat/service-dashboard-root-cause-graph` added below (stacked on the staging sync PR).
@@ -22,6 +30,15 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
+
+## 2026-09-25 — 🔵 Sync `staging` from `main` (branch `chore/sync-staging-from-main-0925` → `staging`)
+
+105 `main` commits merged into `staging` (75 staging-only). Conflicts: 2 code, 9 docs.
+1. 🔵 `delivery-orders.ts` imports: both kept (`requireReadOrDashboardTab` from main, idempotency from staging).
+2. 🔵 `purchase-invoices.ts` PUT: main's `priorPairs` read kept BEFORE staging's 23514-guarded `db.batch` (it must see the pre-edit rows).
+3. 🔵 Docs: stamps/logs unioned; module-guide + map anchors re-derived; `API.md` regenerated.
+4. 🔵 **Bug-id collisions — followed `main`:** main's numbers stand; staging's colliding entries renumbered after main's max (194) and every staging-side reference (code comments, tests, docs, short forms) moved with them: 09-23-184→196, 185→197; 09-24-182→198, 183→199, 184→200, 185→201, 186→202 (186b→202b), 187→203, 188→204, 189→205, 190→206, 191→207; rack-scan 09-25-193→195.
+tsc strict 0; `npm test` 5047 pass / 0 fail.
 ---
 
 ## 2026-09-25 — 🔵 Experimental dashboard: icon-free KPI cards (uncommitted, on `feat/m-warehouse-locate` working tree — move to its own branch → `staging`)
@@ -40,27 +57,27 @@ Ticket asks 1-6 (scan rack, scan item into rack, search location, move rack, mov
 5. 🔵 F1-F3 — `/m/warehouse`: Scan Rack button → `/r/<id>`; Find tab (locate + Move → scan new rack); Movement tab Move chip + from→to + by.
 6. 🔵 `/m` `ScanSheet` rework (shared by every /m scan button): square aiming box + dimmed surround, a real error screen with Retry when the camera fails (was a black screen forever), torch when supported, vibrate + tone + green box on a hit, native BarcodeDetector else jsQR on a ≤960px frame at ~9/s (was full-res on every frame). **Scan only — no typed rack code, by owner rule.** Verified in the pane: the blocked-camera screen + Retry; the live decode could NOT be exercised (pane hidden → no paint, 0 rAF/s) — test on a real phone.
 Out of scope v1 (owner default): office Packing dropdown / worker rack-assign (`applyPackingRack`) still write no movement row.
-State: all five built on the branch, NOT committed / pushed. tsc strict 0; `npm test` 4926 pass / 0 fail; `tests/warehouse-scan-history.test.mjs` (11, real route SQL on node:sqlite; 2 fail on pre-fix code). Browser (`npm run dev` → prod proxy, read-only): Scan Rack opens the scanner (camera blocked in the pane, so no decode tested), Find renders and shows "Search failed" against prod (no `/locate` there yet), Move chip renders. Prod measured: 21 racks, only `Floor` has id ≠ label; 333/333 recent scan stock-ins read "Public scan". BUG-2026-09-25-193.
+State: all five built on the branch, NOT committed / pushed. tsc strict 0; `npm test` 4926 pass / 0 fail; `tests/warehouse-scan-history.test.mjs` (11, real route SQL on node:sqlite; 2 fail on pre-fix code). Browser (`npm run dev` → prod proxy, read-only): Scan Rack opens the scanner (camera blocked in the pane, so no decode tested), Find renders and shows "Search failed" against prod (no `/locate` there yet), Move chip renders. Prod measured: 21 racks, only `Floor` has id ≠ label; 333/333 recent scan stock-ins read "Public scan". BUG-2026-09-25-195.
 
 ## 2026-09-24 — 🔵 Staging: the three pre-existing convert-chain bugs the T-006 live check found (branch `fix/staging-legacy-convert-bugs` → `staging`)
 
 Ask: continue fixing on staging after #506. All three were on `main` before T-006.
 
-- [x] GRN stock posted to the wrong raw material when several share a name (BUG-2026-09-24-186).
-- [x] Fully-returned DO still invoiced the whole SO (-187).
-- [x] CN void/delete left items SOLD / units DELIVERED (-188).
+- [x] GRN stock posted to the wrong raw material when several share a name (BUG-2026-09-24-202).
+- [x] Fully-returned DO still invoiced the whole SO (-203).
+- [x] CN void/delete left items SOLD / units DELIVERED (-204).
 - [x] tsc exit 0; full suite green; live re-run on staging DB (rolled back): procurement 25/25, sales/delivery/consignment 18/18.
 - [x] PR → `staging` (#508, merged); deployed `e19db151` re-verified: 25/25 + 18/18.
 - [x] Carried to `main` via #448 (`13d5287e`).
 - [x] Staging-only lifecycle run (edit / confirm / void / cancel / delete / stock-out) + UI
   click-through (Consignment menu, Sales → Transfer to DO created DO-2609-071, duplicate refused
-  409). Found BUG-2026-09-24-189 (return stock-out moved nothing for PO-sourced lines) — fixed on
+  409). Found BUG-2026-09-24-205 (return stock-out moved nothing for PO-sourced lines) — fixed on
   `fix/staging-return-stockout`, lifecycle 23/23.
 - [x] Side quest G (owner chose option A): goods returned off a GRN before billing no longer
-  billable — BUG-2026-09-24-190, branch `fix/staging-grn-return-billable`, live 16/16 (5/15 on
+  billable — BUG-2026-09-24-206, branch `fix/staging-grn-return-billable`, live 16/16 (5/15 on
   deployed `81c77972`). PR → `staging` needs a human merge; then carry to #448.
 - [x] Side quest H: voiding/deleting a CN's invoice now reopens the consignment order the
-  conversion completed — BUG-2026-09-24-191, branch `fix/staging-co-reopen-on-void` (on top of
+  conversion completed — BUG-2026-09-24-207, branch `fix/staging-co-reopen-on-void` (on top of
   #516), live 8/8 (6/8 on deployed `81c77972`). PR → `staging` needs a human merge after #516.
 - Note: `/ready-planning` is serve-stale cached, so for ~2-3 min after a DO is created the Sales
   "Transfer to DO" dialog still offers its production orders; the server refuses the duplicate.
@@ -73,16 +90,140 @@ Ask: continue fixing on staging after #506. All three were on `main` before T-00
 A live run of the T-006 routes against the staging DB (real route code, one rolled-back
 transaction) failed where the mocked tests passed. Asks: fix, push to `staging`, re-test.
 
-- [x] PI create 500s for every PO/GRN-linked invoice — R8 join `bigint = text` (BUG-2026-09-24-182).
+- [x] PI create 500s for every PO/GRN-linked invoice — R8 join `bigint = text` (BUG-2026-09-24-198).
 - [x] Purchase return always refused — R6 reads `accepted_qty` / `po_item_id` single-keyed (-183).
 - [x] R4 void restores `PARTIALLY_SOLD`, not the saved status — single-keyed read (-183).
-- [x] R6 re-opens billing of returned goods — `invoiced_qty` write-back removed (-184, **PRD sign-off needed**).
-- [x] Deleting an OPEN purchase return keeps the PO counter it lowered (-184).
-- [x] Deleting a CN-sourced invoice leaves the CN stuck `FULLY_SOLD` (-185).
-- [x] CN → invoice convert 400s on staging: writes `customers.updated_at`, which does not exist (-185, pre-existing).
+- [x] R6 re-opens billing of returned goods — `invoiced_qty` write-back removed (-200, **PRD sign-off needed**).
+- [x] Deleting an OPEN purchase return keeps the PO counter it lowered (-200).
+- [x] Deleting a CN-sourced invoice leaves the CN stuck `FULLY_SOLD` (-201).
+- [x] CN → invoice convert 400s on staging: writes `customers.updated_at`, which does not exist (-201, pre-existing).
 - [x] `tsc -p tsconfig.app.json` exit 0; full suite 4779 pass / 0 fail / 3 skips; live re-run on the fixed code: procurement 24/25, sales 16/18 (misses are the pre-existing items below).
 - [x] Push; PR → `staging` (#506, merged); live check re-run against the deployed commit `f434916e`: 24/25 + 16/18, misses were the three pre-existing bugs (entry above).
 - 🟡 Needs a decision: GRN-sourced return of unbilled goods leaves them billable (needs a returned-qty counter); CN items stay `SOLD` after void; GRN stock resolves by description when `material_code` is blank (wrong raw material); single-line DO fully returned still invoices in full.
+## 2026-09-25 — 🔵 Experimental dashboard: icon-free KPI cards, Sales values, sticky tables, Attendance log, time-audit dates, Department Status (branch `feat/dashboard-kpi-no-icons` → `main`)
+
+1. 🔵 `Kpi` (`dashboard-shared.tsx`) no longer takes an icon: label → value → sub; a ±% delta sub is a green/red pill, any other sub stays plain wrapping text. Applies to Sales / Finance / Operations (incl. its 2 custom cards) / Production / Service / Employees; All-Overview Hero + DomainCard label icons and the Service approvals header icon removed too.
+2. 🔵 Kept only icons that carry meaning or affordance: ↑/↓ delta arrows, → on CTA buttons, search-field magnifier, ↗ case links, OCR error/retry, widget info chips.
+3. 🔵 Sales › Pending Delivery card shows its value (`pendingDeliverySen` in `computeSalesKpis`, sum of SHIPPED orders); mirrored on the `/m` Sales tab. Test: `tests/dashboard-m-lib.test.mjs`.
+4. 🔵 Sales › Completed card shows its value too (`completedSen`, DELIVERED/INVOICED/CLOSED sum; desktop + `/m`).
+5. 🔵 Sales › Revenue trend: Both / Revenue / Orders switch at the card top-right hides either series and its axis.
+6. 🔵 Sticky table headers no longer let scrolled rows show through: sticky/bg/borders moved from the `<tr>` onto its cells (inset-shadow borders) on the 7 dashboard tables — Operations ×2, Employees, Sales, OverdueCards, Service ×2. Sweep of the Attendance-log instance, item 8 (BUG-2026-09-25-193).
+7. 🔵 Attendance log — "Listed rows" / "Total (N days)" footer pinned to the bottom of the scrolling table (`*:sticky *:bottom-0` on its cells, white background, 2px inset top rule).
+8. 🔵 Attendance log — Header no longer shows scrolled rows through/above it: sticky, background, z-index and borders moved from the `<tr>` onto each `<th>` (BUG-2026-09-25-193).
+9. 🔵 Time audit — Each flagged person in "Time audit warning tiers" (desktop `EmployeesInsights.tsx` `EfficiencyPanels`) and "Time audit warnings" (`/m` `PeopleTab.tsx` `EfficiencySub`) now shows the days it happened: the days whose own production ÷ working ratio sits on the flagged side of the 90–110% band (`warnDays` + `dayList` in `dashboard-shared-lib.ts`). Desktop: new "Dates" column, first 3 + "+N more", full list on hover. `/m`: sub-line "N days: …". Client-side only, same `/api/dashboard/prototype` feed — no API change.
+10. 🔵 Department Status — `CountPill` (`DashboardWidgets.tsx`): a zero now renders in the same centred pill box as a count (no fill, `CHART_AXIS` grey, normal weight) instead of right-aligned bare text, so Overdue / Due ≤3d zeros line up with the pills.
+11. 🔵 Department Status — Overdue / Due ≤3d headers centred to match.
+12. 🔵 Department Status — The "—" for a department with no backlog data is centred in the days cell instead of hugging its right edge.
+13. 🔵 Cards on the experimental dashboard are flat with a tighter radius (rounded-md) and only get a shadow on hover. Scoped through a `data-slot="card"` hook on `Card` plus a descendant rule on the dashboard root, so other pages keep the default look.
+14. 🔵 Every tab shows the selected period next to its heading (added on Overview, Operations, Employees, Service and OCR; Sales and Finance already had it).
+15. 🔵 Worker Efficiency (/m Home and /dashboard) showed raw worker ids for PRODUCTION, which cannot read `/api/workers`. The hours summary now carries each worker name and department and the cards stopped fetching the directory (BUG-2026-09-25-194, test `tests/working-hours-summary-names.test.mjs`).
+16. 🔵 Employees › Overview: the efficiency card is now "Overall Efficiency" (sub: production ÷ working hours, all production staff). It is total earned production minutes ÷ total clocked working minutes over the period (`performance.byDay` from `/api/dashboard/prototype`), a weighted total, not an average of personal %s; a dash when nobody clocked time. The maths moved into `overallEfficiencyPct` (`dashboard-shared-lib.ts`), which the Operations "Efficiency (Prod ÷ Working)" card now reads too, so the two cannot disagree. No API change. tsc strict 0; `tests/dashboard-period.test.mjs` 15 pass. Browser check NOT done (no login); prod data UNMEASURED.
+17. 🔵 PRODUCTION can open the experimental dashboard (desktop and `/m`), limited to Sales, Operations, Employees and Service. Built as a per-role tab map, `DASHBOARD_TABS_BY_ROLE` in `role-policy.ts`: the feed hands a listed role only its tabs' sections, `/me/permissions` returns `dashboardTabs` plus a derived `dashboard-experimental:read` (also held by every `dashboard:read` viewer, so nobody loses the page), the page hides the other tabs and shows "Under maintenance" for them by URL. DO stats / pending value and the service approvals list open for the tab; no module permission is granted (still 403 on `/api/workers`, approve/reject still gated). Roles not in the map are unchanged. Test `tests/dashboard-tab-access.test.mjs`. Browser check NOT done (no login); PRODUCTION's real grants UNMEASURED.
+   Department Status: tsc strict 0, `tests/ops-floor-lib.test.mjs` pass. Browser check NOT done (no login in the agent session).
+   Time audit: tsc strict 0; `tests/dashboard-period.test.mjs` 14 pass. Browser check NOT done (no login); prod data UNMEASURED.
+
+---
+
+## 2026-09-25 — 🔵 /dashboard-experimental: OCR tab for the Haiku + pre-processing decision (branch `feat/ocr-dashboard-tab`, PR #522 open)
+
+Context: the CEO wants customer-PO OCR moved Sonnet → Haiku with a precise pre-processing phase in front; the OCR Accuracy card could not compare models (imported-only, no model recorded).
+1. 🔵 `scan_queue.ocr_model` (runtime self-apply) stamped on done/failed rows from `ocrModelFor(kind)`.
+2. 🔵 `GET /api/ocr-accuracy/models` — per document × model: accuracy, failure / discard rate, avg + p90 time, per-field miss rate, 25 recent problem scans (`summariseQueue`, `tests/ocr-model-summary.test.mjs`).
+3. 🔵 Desktop OCR tab (`OcrView.tsx`): model comparison, where-it-misses, recent problem scans (link to the file), then the full OCR Accuracy card.
+tsc strict 0, `npm test` 4862 pass. Browser check NOT done: `npm run dev` proxies to prod (no new endpoint) and `dev:worker` has no DB creds. Unstamped rows from 2026-06-29 take the model the code ran then (`historicalModel`; PO_MODEL / SUPPLIER_MODEL unchanged since commit 91d402b2); older rows read "Not recorded".
+4. 🔵 BUG-2026-09-25-192: When "undefined" / Accuracy empty / Model "Not recorded" — rows came back camelCased; `readQueueRow` now dual-keys (C23). Not done yet: pre-processing path column (add with the pre-processing work), `/m` tab.
+
+## 2026-09-24 — 🔵 /dashboard-experimental: Operations + Employees layout pass (branch `feat/dashboard-exp-ops-layout`)
+
+Four asks, one agent each — all built on the branch (tsc strict 0, 116 dashboard tests pass); browser check pending (preview needs a login), not committed:
+1. 🔵 Operations > Overview: 7 KPIs → three labelled groups (Orders / Materials & cost / People), 2 rows at xl.
+2. 🔵 Employees > Departments → folded into Efficiency (desktop + `/m`); `?sub=departments` / `?tab=department` redirect there.
+3. 🔵 Attendance log: Today / Yesterday chips at the card's top right (card-local; `/m` copy not yet mirrored).
+4. 🔵 Operations > Overview after the KPIs: Plant Load dial + per-department status board + due-soon urgency lanes (`ops-floor-lib.ts`).
+
+## 2026-09-24 — 🔵 DEV-14 Discount on Purchase Invoices + PI "View source document" (#510 MERGED; correction on branch `fix/pi-document-discount` → `main`)
+
+**Scan autofill (BUG-2026-09-24-189, branch `fix/scan-code-family-match` → `main`):** a first-time
+supplier code now resolves when it is our code in another form (`codeFamilyMatch`: NICCA-6-FOG →
+NICCA-06, zero-padding-tolerant binding lookup), a hand pick teaches the binding, and a correction
+on the PI detail page teaches it too. Open: per-line PO refs (`= PO2511/008`) not extracted.
+
+**Correction (BUG-2026-09-24-188, #512 MERGED):** the supplier prints ONE discount at the bottom of the invoice
+(Meditex SMI2608/599: Gross 856.00 · Discount (81.00) · Total 775.00), not per line. The per-line
+column is removed from create / detail / scan / PDF; one "Less: Discount" field sits in the totals
+and `allocateDiscountSen` spreads it pro-rata into the same `discount_sen` column. Scan pre-fills it
+from the footer discount the OCR reads. Items 1–2 below describe #510 as merged; the storage still
+holds, the per-line entry points do not.
+
+Asks (DEV-14, requester SITI, plus three follow-ups in the same session):
+1. ✅ Discount column on PI lines (#510 — entry point superseded by the correction above). `purchase_invoice_items.discount_sen` (runtime self-applied in
+   `ensurePiMigrations`; record-only `migrations-postgres/0238_pi_item_discount.sql`).
+   `line_total_sen` is stored NET (`discountedLineSen` in `src/lib/unit-price.ts`, clamped to
+   [0, gross]), so GL / costing / 3-way match / AP need no change. Create page + detail edit use
+   `DiscountInput` (RM or "10%"); detail view + PI PDF show a Disc column. Purchase-return seed
+   uses the net unit cost when a line carries a discount.
+2. ✅ Scanning: the OCR already extracted a per-line `discount` but the scan modal dropped it — now
+   carried onto the PI line, editable in the review table, and a unit price backed out of a NET
+   amount adds the discount back (`sanitizeSupplierDoc`) so it is not discounted twice.
+3. ✅ Did discount exist in the DB before? No — 0179 added `discount_sen` to sales tables only.
+4. ✅ PI "View source document" downloaded instead of opening (af09716b forced `download=` on every
+   `/api/files/:id/download`). New opt-in `?inline=1` (allowlisted MIME only, `wantsInline`);
+   the PI button uses it. Other "view" links that hit `/download` are unchanged.
+Tests: `tests/pi-line-discount.test.mjs`, `tests/files-inline-view.test.mjs`. Not verified on
+staging/prod yet — needs a deploy + a real PI create/edit/scan.
+Known, NOT changed: a `DISCOUNT` line TYPE on a PI still ADDS to the total (positive qty × price,
+no sign flip anywhere) — pre-existing; flagged separately.
+
+
+## 2026-09-23 — 🔵 /dashboard-experimental: widgets from /dashboard (branch `feat/dashboard-experimental-parity`, PR #505 open)
+
+Director: every widget on /dashboard must also exist on /dashboard-experimental. Owner rules:
+`dashboard-b/index.tsx` and `accounting/index.tsx` untouched; no rounding (truncate to 2dp);
+cards go in existing tabs/sub-tabs (no new sub-tabs — `/m` reads `TAB_SUBS`). Asks:
+1. ✅ Gap list vs /dashboard, /finance-dashboard, Accounting Overview (answered in chat).
+2. ✅ Same `dashboard:read` gate as /dashboard (route + nav map; `/m` inherits), test added.
+3. ✅ `src/pages/dashboards/dashboard-widgets-lib.ts` — pure mirror of the /dashboard formulas
+   (index.tsx does NOT import it: frozen), incl. `unrounded` flags on `deptBacklogRows` /
+   `plantLoad`, `customerRevenue` / `concentrationShares` / `financeRatios` unrounded.
+4. ✅ `agingBucketTotals` (`src/lib/aging-export.ts`); truncating formatters + `widgetPeriod` in
+   `dashboard-shared-lib.ts`.
+5. ✅ `DashboardWidgets.tsx` placed: Overview (Invoices hero, Daily Report tile, OCR card) ·
+   Sales (Order Pipeline, Revenue trend, Sales by Customer, Top Sellers) · Ops > Overview (Plant
+   Load, Dept Backlog) · Ops > Output (Completed) · Ops > Materials (Purchasing, Fabric Usage) ·
+   Finance > Returns (margins / current & quick ratio / AR-AP aging, plain fetch).
+6. ✅ Tests: `tests/dashboard-widgets-lib.test.mjs`; Overview tile guard in
+   `tests/compliance-unknown-outcome.test.mjs`. tsc (app) / npm test / eslint / vite build green.
+7. 🟡 Owner: `OcrAccuracyCard` rates are rounded SERVER-side (`src/api/routes/ocr-accuracy.ts:354`) and the
+   card is shared with /dashboard, so it is left as is. Worker Efficiency not ported — Employees >
+   Efficiency already has Top 5 / Bottom 5. Not verified in a browser (needs a logged-in session
+   with API data) — check live after deploy.
+8. ⚪ Remaining from the gap list (not in this batch): /finance-dashboard P&L-vs-forecast /
+   salary / cost structure / cash flow.
+
+## 2026-09-23 — 🔵 /production: remove "Load all" (branch `fix/production-auto-load`)
+
+Owner: "i want the load all button to be remove because its annoying every time i refresh i need
+to click load all". The Overview/full page started empty behind a lazy `shouldFetch` gate
+(armed by a filter or Load all). Gate, button, "No orders loaded yet" callout and "Pick a filter"
+hint removed — every mode fetches on mount. Then measured on prod (owner logged in the browser
+pane): 1,426 orders / 11.8 MB decoded / ~0.26 s; only ~20 rows mounted, but (1) the 8 s poll
+re-applied an identical body (~350 ms main-thread block per poll) and (2) the Overview virtualizer
+lived in ProductionPage, so every scroll frame re-rendered the page (~30 fps). Fixed on the same
+branch: `useCachedJson` `reuseUnchanged` opt-in + `OverviewVirtualRows`. Open: re-measure on prod
+after deploy.
+
+---
+
+## 2026-09-23 — 🔵 DEV-12: repeated customer S/O no. blocks the scanned SO (branch `fix/so-duplicate-ref-saves-draft`)
+
+Siti (High): "IF CUST SO NUMBER SAME WITH PREVIOUS PURCHASE ORDER … THE SYSTEM WILL NOT PROCEED
+THE NEW ORDER" (ref HC-SO-013492) → BUG-2026-09-23-185. SO create 409'd on a repeated customer
+PO/SO ref and the scan modal consumed the failed scan. Now saved as DRAFT with a warning; failed
+creates stay in the queue; "Create Order" won't auto-confirm a warned SO. Open: prod verify after
+deploy; mobile form shows no warning (no notice channel).
+
+---
+
 ## 2026-09-22 — 🔵 Scan PO / PI / GRN: second file "scanning" 5+ min (branch `fix/scan-queue-client-driven`)
 
 Owner: "under the SO the scan PO function … it takes more than 5 min scanning second PO

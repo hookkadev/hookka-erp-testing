@@ -63,7 +63,7 @@ test("links from the person-named tabs resolve to the functional tab that owns t
   assert.equal(at("tab=siti"), "operations/overview");
   assert.equal(at("tab=siti&sub=cost"), "operations/cost");
   assert.equal(at("tab=employee&sub=time"), "people/time");
-  assert.equal(at("tab=department"), "people/departments");
+  assert.equal(at("tab=department"), "people/efficiency");
   assert.equal(at("tab=lim"), "people/efficiency");
   assert.equal(at("tab=lim&sub=plan"), "operations/plan");
   assert.equal(at("tab=lim&sub=revenue"), "operations/cost");
@@ -71,6 +71,15 @@ test("links from the person-named tabs resolve to the functional tab that owns t
   assert.equal(at("tab=lim&sub=attendance"), "people/time");
   assert.equal(at("tab=lim&sub=service"), "service/performance");
   assert.equal(parse("tab=lim&sub=plan&day=2026-09-12").period.day, "2026-09-12");
+});
+
+// Employees > Departments was folded into Employees > Efficiency.
+test("the retired people/departments sub-tab lands on Efficiency", () => {
+  assert.ok(!TAB_SUBS.people.some((s) => s.key === "departments"));
+  const s = parse("tab=people&sub=departments&month=2026-09");
+  assert.deepEqual([s.tab, s.sub, s.period.month], ["people", "efficiency", "2026-09"]);
+  assert.equal(ser(s), "tab=people&sub=efficiency&month=2026-09");
+  assert.equal(ser(parse("tab=department&day=2026-09-12")), "tab=people&sub=efficiency&day=2026-09-12");
 });
 
 test("no tab or sub-tab is named after a person", () => {

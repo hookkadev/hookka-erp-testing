@@ -26,7 +26,8 @@ import { MoneyInput } from "@/components/ui/money-input";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { useCachedJson, invalidateCachePrefix } from "@/lib/cached-fetch";
 import { formatCurrency } from "@/lib/utils";
-import { roundUnitPriceSen } from "@/lib/unit-price";
+import { roundUnitPriceSen, allocateDiscountSen } from "@/lib/unit-price";
+import { DiscountInput } from "@/components/ui/discount-input";
 import type { Supplier, RawMaterial, SupplierMaterialBinding, PurchaseOrder } from "@/types";
 import { MaterialPicker, type MaterialOption } from "@/components/material-picker";
 import { ArrowLeft, Plus, Save, Trash2, FolderInput } from "lucide-react";
@@ -107,6 +108,11 @@ function emptyPILine(): PILineDraft {
     grnItemId: null,
     poId: null,
   };
+}
+
+/** Qty × unit price in sen — the line amount the supplier prints. */
+function lineGrossSen(l: PILineDraft): number {
+  return Math.round((Number(l.qty) || 0) * roundUnitPriceSen((Number(l.unitPriceRM) || 0) * 100));
 }
 
 /**
@@ -447,13 +453,18 @@ function CreatePurchaseInvoicePage() {
   // pro-rata across goods lines on Save. Empty string = no override (use the
   // per-line taxRM values directly).
   const [headerTaxRMInput, setHeaderTaxRMInput] = useState<string>("");
+  // Invoice-level discount in sen (DEV-14) — the supplier's footer "Less:
+  // Discount". Spread across the lines pro-rata on save (allocateDiscountSen)
+  // so each stored line total is net of its share.
+  const [docDiscountSen, setDocDiscountSen] = useState<number>(0);
 
   // ── Derived totals ────────────────────────────────────────────────────────
   const validLines = lines.filter((l) => l.materialName.trim() !== "");
-  const subtotalRM = validLines.reduce(
-    (s, l) => s + (Number(l.qty) || 0) * (Number(l.unitPriceRM) || 0),
-    0,
-  );
+  const grossLineSens = validLines.map(lineGrossSen);
+  const grossSen = grossLineSens.reduce((s, v) => s + v, 0);
+  const lineDiscountSens = allocateDiscountSen(grossLineSens, docDiscountSen);
+  const discountSen = lineDiscountSens.reduce((s, v) => s + v, 0);
+  const subtotalRM = (grossSen - discountSen) / 100;
   const perLineTaxRM = validLines.reduce(
     (s, l) => s + (Number(l.taxRM) || 0),
     0,
@@ -467,7 +478,6 @@ function CreatePurchaseInvoicePage() {
       : perLineTaxRM;
   const totalRM = subtotalRM + taxRM;
   // *RM are RM — convert to sen for formatCurrency
-  const subtotalSen = Math.round(subtotalRM * 100);
   const taxSen = Math.round(taxRM * 100);
   const totalSen = Math.round(totalRM * 100);
 
@@ -502,9 +512,7 @@ function CreatePurchaseInvoicePage() {
           // header SST total, distribute it pro-rata across goods lines (by
           // line amount), with the LAST line absorbing any rounding drift so
           // Σ line tax === header tax in sen.
-          const lineAmountsSen = validLines.map(
-            (l) => Math.round((Number(l.qty) || 0) * (Number(l.unitPriceRM) || 0) * 100),
-          );
+          const lineAmountsSen = grossLineSens.map((g, i) => g - lineDiscountSens[i]);
           const subtotalLocalSen = lineAmountsSen.reduce((s, v) => s + v, 0);
           const usePerLine =
             headerTaxOverride == null || !Number.isFinite(headerTaxOverride) || headerTaxOverride <= 0;
@@ -534,6 +542,8 @@ function CreatePurchaseInvoicePage() {
               // reached the (now NUMERIC(14,4)) column.
               unitPriceSen: roundUnitPriceSen((Number(l.unitPriceRM) || 0) * 100),
               taxSen: lineTaxSen < 0 ? 0 : lineTaxSen,
+              // This line's share of the invoice discount.
+              discountSen: lineDiscountSens[idx],
               lineType: "STOCKED" as const,
               // Convert-chain: carry the GRN source line so the backend draws down
               // grn_items.invoiced_qty and enforces the line-level guard.
@@ -817,9 +827,15 @@ function CreatePurchaseInvoicePage() {
             </div>
             <hr className="border-[#E2DDD8]" />
             <div className="flex justify-between text-sm">
-              <span className="text-[#6B7280]">Subtotal</span>
-              <span className="font-medium">{formatCurrency(subtotalSen)}</span>
+              <span className="text-[#6B7280]">Gross</span>
+              <span className="font-medium">{formatCurrency(grossSen)}</span>
             </div>
+            {discountSen > 0 && (
+              <div className="flex justify-between text-sm">
+                <span className="text-[#6B7280]">Discount</span>
+                <span className="font-medium">({formatCurrency(discountSen)})</span>
+              </div>
+            )}
             <div className="flex justify-between text-sm items-center">
               <span className="text-[#6B7280]">SST</span>
               <span className="font-medium">{formatCurrency(taxSen)}</span>
@@ -909,8 +925,7 @@ function CreatePurchaseInvoicePage() {
               </thead>
               <tbody>
                 {lines.map((line, idx) => {
-                  const lineTotal =
-                    (Number(line.qty) || 0) * (Number(line.unitPriceRM) || 0);
+                  const lineTotal = lineGrossSen(line) / 100;
                   return (
                     <tr
                       key={idx}
@@ -1042,13 +1057,32 @@ function CreatePurchaseInvoicePage() {
                     colSpan={6}
                     className="px-3 py-1.5 text-right text-xs font-medium text-[#6B7280]"
                   >
-                    Subtotal
+                    Gross
                   </td>
                   <td className="px-3 py-1.5 text-right text-sm font-medium text-[#1F1D1B]">
-                    {subtotalRM.toLocaleString("en-MY", {
+                    {(grossSen / 100).toLocaleString("en-MY", {
                       minimumFractionDigits: 2,
                       maximumFractionDigits: 2,
                     })}
+                  </td>
+                  <td />
+                </tr>
+                {/* Invoice-level discount (DEV-14) — the supplier's footer
+                    "Less: Discount". RM, or "10%" of the gross. */}
+                <tr>
+                  <td
+                    colSpan={6}
+                    className="px-3 py-1.5 text-right text-xs font-medium text-[#6B7280]"
+                  >
+                    Less: Discount
+                  </td>
+                  <td className="px-2 py-1.5">
+                    <DiscountInput
+                      className="h-8 w-28 ml-auto"
+                      baseAmountSen={grossSen}
+                      valueSen={docDiscountSen || null}
+                      onChange={(sen) => setDocDiscountSen(sen ?? 0)}
+                    />
                   </td>
                   <td />
                 </tr>

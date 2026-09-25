@@ -1,11 +1,15 @@
 # Service & Repair — Module Guide
 
+> **Addendum 2026-09-23:** only the `ServiceCasesListPage` anchor (`index.tsx:249`, was `:248`) and the
+> list Source-column note under Gotchas were re-checked, against `src/pages/service-cases/index.tsx`.
 > **Addendum 2026-09-22:** the "Dashboard Top issues" gotcha re-checked after the panel redesign
 > (`src/pages/dashboards/ServiceIssuesPanel.tsx`, `src/api/lib/service-issue-stats.ts`, `tests/service-issue-stats.test.mjs`).
 >
 > **Addendum 2026-09-21:** only the "Dashboard Top issues" gotcha was added and checked, against
 > `src/api/lib/{dashboard-service-slice,service-issue-stats}.ts`, `src/api/routes/service-cases.ts`
 > L34-60 / L241-288 and `tests/db-schema.json`; everything else keeps the stamp below.
+>
+> **Last verified: 2026-09-23** (branch `feat/service-case-customer-po`) — the `app.post("/")` / `app.put("/:id")` anchors only, re-anchored to `service-cases.ts:650` / `:793` after the list GET gained `loadCustomerPoBySource`.
 >
 > **Last verified: 2026-08-19** against `src/api/routes/{service-cases,service-orders,sales-orders,stock-adjustments}.ts`,
 > `src/lib/{repair-scope,so-mode}.ts`, `src/api/lib/bom-wip-breakdown.ts`,
@@ -54,7 +58,7 @@ legacy path) plus component-level picks on `affectedProducts[].components`, all 
 
 ## Entry points
 - Pages
-  - `/service-cases` → `src/pages/service-cases/index.tsx:248` (`ServiceCasesListPage` — case list)
+  - `/service-cases` → `src/pages/service-cases/index.tsx:249` (`ServiceCasesListPage` — case list)
   - `/service-cases/:id` → `src/pages/service-cases/detail.tsx:204` (`ServiceCaseDetailPage` — 3,600-line command center)
   - `/service-orders` → `src/pages/service-orders/index.tsx:119` (`ServiceOrdersListPage`; `CreateServiceOrderModal` at `:314`)
   - `/service-orders/:id` → `src/pages/service-orders/detail.tsx:129` (`ServiceOrderDetailPage` — returns, repair scope; `SetModePanel` `:845`, `LogReturnModal` `:731`)
@@ -80,7 +84,7 @@ legacy path) plus component-level picks on `affectedProducts[].components`, all 
 - Relationships: a case spawns SV orders (`sales_orders.caseid`); confirming a scoped SV order filters WIPs by `repairscope`; replacement parts bypass production entirely and land as stock adjustments backlinked to the case.
 
 ## Core flows
-1. **Create case** — `app.post("/")` `service-cases.ts:614`. Allocates case no (`nextCaseNo` `:366`), sanitizes RCA
+1. **Create case** — `app.post("/")` `service-cases.ts:650`. Allocates case no (`nextCaseNo` `:366`), sanitizes RCA
    (`sanitizeRootCauses` `:178`, `synthesizeRootCauses` `:208`) and `affectedProducts`, stores photos JSON.
 2. **Case status transition** — `app.put("/:id/status")` in `service-cases.ts`, gated by `STATUS_TRANSITIONS` (`:60`).
    Case pipeline is auto-computed display-only in the FE (`CasePipeline` `detail.tsx:965`) from linked SV-order progress.
@@ -100,7 +104,7 @@ legacy path) plus component-level picks on `affectedProducts[].components`, all 
 ## Key functions / sections (locate-to-function)
 | Symbol / section | file:line | Role |
 |---|---|---|
-| `ServiceCasesListPage` | `src/pages/service-cases/index.tsx:248` | Case list |
+| `ServiceCasesListPage` | `src/pages/service-cases/index.tsx:249` | Case list |
 | `ServiceCaseDetailPage` | `src/pages/service-cases/detail.tsx:204` | Case command center (header/tabs/orchestration) |
 | `CasePipeline` | `src/pages/service-cases/detail.tsx:965` | Auto-computed display-only progress stepper |
 | `RootCausePanel` | `src/pages/service-cases/detail.tsx:1052` | Multi root-cause editor (manual Add/Save; verifiedSave ref impl) |
@@ -109,8 +113,8 @@ legacy path) plus component-level picks on `affectedProducts[].components`, all 
 | `ServiceOrdersListPage` | `src/pages/service-orders/index.tsx:119` | Plural SV-order list |
 | `CreateServiceOrderModal` | `src/pages/service-orders/index.tsx:314` | Create a plural SV order |
 | `ServiceOrderDetailPage` | `src/pages/service-orders/detail.tsx:129` | Plural SV-order detail (returns, repair scope) |
-| `app.post("/")` (case create) | `src/api/routes/service-cases.ts:614` | Create case + RCA/affected-products sanitize |
-| `app.put("/:id")` (case edit) | `src/api/routes/service-cases.ts:757` | Case edit (`ensureCaseLinkColumns` `:239`) |
+| `app.post("/")` (case create) | `src/api/routes/service-cases.ts:650` | Create case + RCA/affected-products sanitize |
+| `app.put("/:id")` (case edit) | `src/api/routes/service-cases.ts:793` | Case edit (`ensureCaseLinkColumns` `:239`) |
 | `STATUS_TRANSITIONS` (case) | `src/api/routes/service-cases.ts:60` | Legal case status moves |
 | `sanitizeRootCauses` / `synthesizeRootCauses` | `src/api/routes/service-cases.ts:178 / 208` | RCA normalization |
 | `app.post("/")` (SV-order create) | `src/api/routes/service-orders.ts:556` | Plural SV order create (`ensureServiceOrderMigrations` `:531`) |
@@ -124,6 +128,7 @@ legacy path) plus component-level picks on `affectedProducts[].components`, all 
 
 ## Gotchas
 - **Dashboard "Top issues" (2026-09-21).** `src/api/lib/service-issue-stats.ts` is the single definition: a case with several root causes counts once per distinct cause (rows can sum past the case total; % = share of cases); no cause = the always-shown "Not yet analysed" row; avg close = whole days created to closed over CLOSED cases; prevention values are `PENDING`(shown "Planned")/`IN_PROGRESS`/`DONE`/`NOT_NEEDED`, none = "No prevention recorded". The slice self-applies `rootcauses`/`responsibleunit` (same idempotent ALTER as `service-cases.ts` `ensureCaseLinkColumns`) and falls back to legacy `root_cause_category`. How many live cases actually have a root cause is UNMEASURED. **Panel redesign (2026-09-22):** the four look-alike bar tables + smoothed top-3 line became forms that fit each question — `analysisProgress` meters (root cause recorded / unit set / prevention recorded / prevention DONE-or-NOT_NEEDED; note `PENDING` "Planned" is the default on every case, so "prevention recorded" is NOT "prevention planned by someone"), a closed|open split per cause, `closeDaysByCause` (every closed case's days, not one average over 1-5 cases), and `causeGrid` on a fixed `dayBuckets`/`monthBuckets` list so quiet days render as empty cells rather than being skipped. `byUnit`/`byPrevention`/`causeTrend` stay in the lib: the Performance panel and the `/m` tab still read them.
+- **List Source column (2026-09-23).** `index.tsx` builds `row.source` once (`sourceNo`, or `EXTERNAL (<externalRef>)` for external cases, same text as the detail header); the grid cell, sort, filter, search and CSV all read that field — change it there, not in the column `render`. The column is `noClip` so a long ref widens it instead of ending in an ellipsis. `externalRef` comes from the list API's `rowToApi`.
 - **Two directories, near-identical names.** `service-order/*` (SINGULAR) = re-exports of Sales pages in SV mode via
   `useSOMode()` (`src/lib/so-mode.ts`); `service-orders/*` (PLURAL) = the real returns/repair module. Don't confuse them.
 - **The singular pages have NO own data model** — the four files under `src/pages/service-order/` are 6–18 lines each and are literally `export { default } from "@/pages/sales…"`. They hit `/api/sales-orders` with `isServiceOrder:true`. Changing service-order behavior usually means editing `src/pages/sales/*` (NOT a fork) or `sales-orders.ts`. Never fork the sales list — it is now **2,181 lines** (the in-code comment still says ~1,400).

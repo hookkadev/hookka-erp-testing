@@ -1,6 +1,9 @@
 # Bug History
 
-> **Last verified: 2026-09-25** — newest entry BUG-2026-09-25-193 (branch `feat/m-warehouse-locate`). Previously: newest entry BUG-2026-09-23-182 (branch `laphii/fix/dashboard-exp-production-revenue`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-09-25**: newest entry BUG-2026-09-25-194 (branch `feat/dashboard-kpi-no-icons`, PR #524); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-09-25** — newest entry BUG-2026-09-25-192 (branch `feat/ocr-dashboard-tab`, PR #522); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-09-25** — newest entry BUG-2026-09-24-191 (branch `fix/so-customer-po-view`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-09-25** — newest entry BUG-2026-09-25-195 (branch `feat/m-warehouse-locate`; renumbered from 193 in the staging←main sync). **Numbering follows `main`:** staging entries that reused a sequence number main had already given a different bug were renumbered 196-207 (see WORK-TRACKER 2026-09-25 sync entry for the map). Previously: newest entry BUG-2026-09-23-182 (branch `laphii/fix/dashboard-exp-production-revenue`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 
 Living log of bugs we've identified, diagnosed, and fixed in Hookka ERP.
 
@@ -36,7 +39,7 @@ Entries themselves stay newest-first.
 
 ---
 
-## BUG-2026-09-25-193 — rack-scan movements showed the rack ID, "Public scan", and no trace of a move `warehouse` `data-integrity` 🟢
+## BUG-2026-09-25-195 — rack-scan movements showed the rack ID, "Public scan", and no trace of a move `warehouse` `data-integrity` 🟢
 
 🟢 **Fixed** · found planning DEV-09 (Mobile Warehouse — movement history).
 
@@ -63,9 +66,9 @@ cases fail on the pre-fix code. **Not yet verified live** (not deployed; prod co
 
 ---
 
-## BUG-2026-09-24-191 — voiding a CN's invoice left its consignment order DELIVERED `consignment` `data-integrity` 🟢
+## BUG-2026-09-24-207 — voiding a CN's invoice left its consignment order DELIVERED `consignment` `data-integrity` 🟢
 
-🟢 **Fixed** · completes T-006 R4 at the order level (-185 / -188 released the CN and its items).
+🟢 **Fixed** · completes T-006 R4 at the order level (-201 / -204 released the CN and its items).
 
 **Root cause.** Convert-to-invoice runs `cascadeCNCompletionToCO`: once every CN of a
 consignment order is sold, the CO goes `DELIVERED`. The void and delete release put the CN back
@@ -87,9 +90,9 @@ on deployed `81c77972` (both CO checks stayed `DELIVERED`). Tests: `t006-live-fi
 
 ---
 
-## BUG-2026-09-24-190 — goods returned off a GRN before billing stayed billable `procurement` `data-integrity` 🟢
+## BUG-2026-09-24-206 — goods returned off a GRN before billing stayed billable `procurement` `data-integrity` 🟢
 
-🟢 **Fixed** · pre-existing on `main` (left open by -184, which covered PI-sourced returns only).
+🟢 **Fixed** · pre-existing on `main` (left open by -200, which covered PI-sourced returns only).
 
 **Root cause.** Two ceilings limit a purchase invoice and neither counted returns. The GRN
 line's available was `accepted − invoiced`; the PO ceiling was `max(ordered, received)`, and a
@@ -113,7 +116,7 @@ Same run against `81c77972`: 5/15. Tests: `t006-live-findings` (helpers, fail-so
 
 ---
 
-## BUG-2026-09-24-189 — a purchase return of a PO-sourced GRN line never left stock `procurement` `inventory-cascade` 🟢
+## BUG-2026-09-24-205 — a purchase return of a PO-sourced GRN line never left stock `procurement` `inventory-cascade` 🟢
 
 🟢 **Fixed** · pre-existing on `main`; same root as -186 (blank `material_code` on PO-sourced GRN lines).
 
@@ -134,7 +137,7 @@ confirm → `NLY-D12-6MM` 5355 → 5352, same-named materials untouched (was 535
 
 ---
 
-## BUG-2026-09-24-186 — GRN stock posted to the wrong raw material when several share a name `procurement` `inventory-cascade` 🟢
+## BUG-2026-09-24-202 — GRN stock posted to the wrong raw material when several share a name `procurement` `inventory-cascade` 🟢
 
 🟢 **Fixed** · pre-existing on `main`; [C21](BUG-CLASSES.md) row 16. Found by the same live run as 182-185.
 
@@ -157,7 +160,7 @@ open in `po-cost-cascade.ts` `resolveRmFromBom` (C21 row 17).
 
 ---
 
-## BUG-2026-09-24-187 — a delivery order returned in full still invoiced the whole sales order `delivery-orders` `data-integrity` 🟢
+## BUG-2026-09-24-203 — a delivery order returned in full still invoiced the whole sales order `delivery-orders` `data-integrity` 🟢
 
 🟢 **Fixed** · pre-existing on `main`.
 
@@ -176,9 +179,9 @@ one; the manual path already 409s and now says "already billed or were returned"
 
 ---
 
-## BUG-2026-09-24-188 — voiding/deleting a CN's invoice left its items SOLD and units DELIVERED `consignment` `inventory-cascade` 🟢
+## BUG-2026-09-24-204 — voiding/deleting a CN's invoice left its items SOLD and units DELIVERED `consignment` `inventory-cascade` 🟢
 
-🟢 **Fixed** · completes T-006 R4 (BUG-2026-09-24-185 released the CN header only).
+🟢 **Fixed** · completes T-006 R4 (BUG-2026-09-24-201 released the CN header only).
 
 **Root cause.** Convert flips the CN's AT_BRANCH items to SOLD and its LOADED units to
 DELIVERED; the release put the CN back to ACTIVE and left both. The CN read as unsold with
@@ -203,7 +206,7 @@ reopened.
 > re-read afterwards and unchanged). Every bug below passed the mocks: they return snake_case
 > keys and have no column types, the real client does neither.
 
-## BUG-2026-09-24-182 — every PO/GRN-linked purchase invoice create 500'd: `bigint = text` `procurement` `data-integrity` 🟢
+## BUG-2026-09-24-198 — every PO/GRN-linked purchase invoice create 500'd: `bigint = text` `procurement` `data-integrity` 🟢
 
 🟢 **Fixed** · found by the live staging run; `staging` only (T-006 never reached `main`).
 
@@ -220,7 +223,7 @@ grn_items.id (BIGINT) to a TEXT grn_item_id"; `pi-multi-po` pin updated.
 
 ---
 
-## BUG-2026-09-24-183 — purchase return always refused, CN void restored the wrong status: snake-only reads `data-migration` `procurement` 🟢
+## BUG-2026-09-24-199 — purchase return always refused, CN void restored the wrong status: snake-only reads `data-migration` `procurement` 🟢
 
 🟢 **Fixed** · [C23](BUG-CLASSES.md#c23--sql-says-snake_case-the-row-comes-back-camelcase) instances 8-9.
 
@@ -237,7 +240,7 @@ read `cn.status_before_conversion` → always `undefined` → every voided CN we
 
 ---
 
-## BUG-2026-09-24-184 — a purchase return re-opened billing; deleting one kept the PO counter it took `procurement` `data-integrity` 🟢
+## BUG-2026-09-24-200 — a purchase return re-opened billing; deleting one kept the PO counter it took `procurement` `data-integrity` 🟢
 
 🟢 **Fixed** · deviates from PRD T-006 R6's literal wording — needs the PRD author's sign-off.
 
@@ -257,7 +260,7 @@ availability read; owner decision, not patched here.
 
 ---
 
-## BUG-2026-09-24-185 — CN → invoice convert never worked on staging; deleting the draft stranded the CN `consignment` `data-integrity` 🟢
+## BUG-2026-09-24-201 — CN → invoice convert never worked on staging; deleting the draft stranded the CN `consignment` `data-integrity` 🟢
 
 🟢 **Fixed** · convert bug pre-dates T-006 (`7701e1aa`, 2026-05-04); delete-path gap is T-006 R4.
 
@@ -273,6 +276,331 @@ DELETE now pushes `buildInvoiceDeathCnReleaseStatements` into its batch (`invoic
 **Verified.** Live: convert 201 → void → CN `ACTIVE` → convert again 201 → delete the draft →
 CN `ACTIVE`. **Still open:** void/delete leave the CN's items `SOLD` and units `DELIVERED`;
 re-convert still works (it reads every item regardless of status).
+## BUG-2026-09-25-194: Worker Efficiency showed raw worker ids ("worker-45109bfc") instead of names for PRODUCTION `dashboard` `employees` 🟡
+
+🟡 **Fix in progress** (PR #524, not verified in a browser).
+
+**Root cause.** The Worker Efficiency card on /m Home and /dashboard joins three fetches: job-card production minutes, `/api/working-hour-entries/summary` and `/api/workers` for names and departments. `/api/workers` requires `workers:read`; the two summaries do not. A role that can read hours but not the worker directory got a 403 on the third fetch, so every row fell back to its id and the department was blank. Seen on a PRODUCTION account on the phone.
+
+**Fix.** The summary now returns `name` and `departmentCode` for each worker (one extra query on `workers`, snapshot key bumped to `v2` so old cached bodies without names are not served). Both cards read names from the summary and no longer fetch `/api/workers`. Regression: `tests/working-hours-summary-names.test.mjs`.
+
+---
+
+## BUG-2026-09-25-193 — Attendance log: scrolled rows showed through above the sticky header; totals row scrolled out of view `ui-frontend` `dashboard` 🟡
+
+🟡 **Fix in progress** (PR open, not verified in a browser).
+
+**Root cause.** The header was made sticky on the `<tr>` (`sticky top-0 bg-white` plus `border-t border-b`). Tailwind's preflight gives tables `border-collapse: collapse`, where row borders belong to the table grid and do not travel with a stuck row, and the row background does not cover that border strip, so the row scrolling underneath showed through at the header's top edge. The footer ("Listed rows" / "Total (N days)") was a plain `<tfoot>` and scrolled away with the body.
+
+**Fix.** `src/pages/dashboards/AttendanceLogCard.tsx`: the header `<tr>` now puts `sticky top-0 z-10 bg-white` on each `<th>` (`*:` variant) and draws its top/bottom rules as inset box-shadows, which move with the cell. The footer `<tr>` does the same with `bottom-0` and a 2px inset top rule. The same `<tr>` level sticky pattern in OperationsView, EmployeesView, SalesOrdersView, OverdueCards and ServiceView was fixed the same way in PR #524.
+
+---
+
+## BUG-2026-09-25-192 — OCR tab: "When" read "undefined", Accuracy was always empty, Model always "Not recorded" `dashboard` `scan-ocr` 🟢
+
+**Root cause (C23).** `GET /api/ocr-accuracy/models` (#522) read `scan_queue` rows by their snake_case keys (`created_at`, `sample_id`, `ocr_model`, `consumed_at`, `file_name`), but the DB layer returns them camelCased. Every field was `undefined`: no scan linked to its sample (so none counted as imported → accuracy "—"), the date printed "undefined", every model fell to "Not recorded".
+
+**Fix.** `readQueueRow` in `src/api/lib/ocr-accuracy-core.ts` reads `r.camel ?? r.snake`, as `hydrateRow` in `scan-queue.ts` already did. Regression: `tests/ocr-model-summary.test.mjs` feeds the same row in both key shapes. Follow-up: rows from before the stamp existed now take the model the code ran on since 2026-06-29 (`historicalModel`) instead of "Not recorded".
+
+---
+
+## BUG-2026-09-24-191 — SO "View original" returned `{"error":"stream failed"}`; 18–24 Sep uploads were saved to the wrong storage project `infrastructure` `sales-orders` 🟡
+
+🟡 **Fix in progress** · Owner-reported on the SO for HC-PO-2609-172 (file `fa-7920e088-8c9`,
+uploaded 2026-09-24 03:39 UTC). Same failure the catalog-photo session hit on `fa-20cc96eb-723`
+earlier the same day.
+
+**Root cause.** From about 2026-09-18 16:16 to 2026-09-24 12:40 MYT, production's
+`SUPABASE_PROJECT_REF` pointed at another Supabase project. Uploads wrote
+their bytes THERE and their `file_assets` row to prod, so each row's `r2Key` was correct but empty
+in prod's `hookka-files` bucket once the setting was corrected. The catalog-photo session counted
+74 such files (55 SO attachments, 17 PI scans, 1 PV, 1 catalog photo).
+
+**Why it read as a crash.** `getFile` (`src/api/lib/supabase-storage.ts:219`) treats only HTTP 404
+as missing; Supabase Storage answers a missing object with 400 + `not_found`, so the route threw and
+returned a generic 500 "stream failed" instead of 404. **Still open** — not changed here.
+
+**Recovery.** The owner copied the missing objects with a one-off Node script run outside the repo; this SO's original now opens. **Per-file result UNMEASURED** — the run's summary was not captured here.
+
+**UI change on the same page.** The SO detail "View original" button is gone; the Customer PO number
+itself is the underlined link, and it opens `/api/files/:id/download?inline=1` so the PDF renders in
+the tab instead of downloading (`src/pages/sales/detail.tsx:1467`).
+
+**Verify.** `tsc -p tsconfig.app.json` clean; `tests/files-inline-view.test.mjs` 2/2. After deploy:
+click a Customer PO number on an SO with a scanned original — it must open in the tab, not save.
+**Prod UNMEASURED until then.**
+
+---
+
+
+## BUG-2026-09-24-190 — Every timestamp on System Health read 8 hours early; the Audit feed dated a 10:40 login as 02:40 `audit-logging` `ui-frontend` `platform` 🟡
+
+🟡 **Fix in progress** · Owner-reported right after [BUG-2026-09-24-187](#bug-2026-09-24-187--system-health-showed-no-audit-events-and-successful-logins-0--healthy-while-19227-audit-rows-sat-in-the-table)
+made the panels show data at all: the times were wrong. A login at **10:40 MYT** was listed as
+**02:40** — exactly UTC, on the one screen whose entire job is "when did this happen".
+
+**Root cause.** Four places rendered the stored timestamp by slicing the string rather than
+converting it: `src/pages/admin/health.tsx:1481` (Audit feed), `:1667` (Recent security events),
+`:1808` (deploys) and `:1959` (slow requests) all did
+`r.ts.slice(5, 16).replace('T', ' ')` on a value stored as `2026-09-24 02:05:48.109016+00`. A slice
+cannot convert a zone, so every row on the page showed the UTC clock, and rows between 16:00 and
+24:00 UTC also carried the WRONG DATE — an event at 01:00 on the 24th in Malaysia was filed under
+the 23rd.
+
+**Why the existing helper was not enough.** `formatDateTime` in `src/lib/utils.ts` leaves the zone
+to the viewer's machine and relies on `new Date()` parsing the Postgres shape — a space separator,
+microsecond precision and a BARE `+00` offset, which is not a format `new Date()` is specified to
+accept.
+
+**Fix.** `parseDbTimestamp` + `formatTimestampMY` in `src/lib/utils.ts`. The parser normalises all
+three stored shapes (Postgres text with a bare offset, ISO with `Z`, and the zone-less
+`CURRENT_TIMESTAMP` default, which is UTC) and returns null instead of an Invalid Date, so an odd
+row renders raw rather than as the word "Invalid" — an audit row with a strange timestamp is still
+evidence. The formatter pins `Asia/Kuala_Lumpur` rather than trusting the viewer's clock, matching
+`customer-notify.ts` and `delivery-list-filters.ts`. Each cell now carries the full
+`DD/MM/YYYY HH:MM:SS MYT` on hover.
+
+**Regression.** `tests/timestamp-my-format.test.mjs` — 8 cases over the three stored shapes, plus
+the 17:00-UTC case that pins the DATE rollover a naive "+8" would still get wrong, plus the
+unparseable and null paths.
+
+**Verify.** `npm test` 4,856 pass / 0 fail, `tsc` clean. After deploy, an event you trigger at a
+known local time must appear at that time on /admin/health, not eight hours earlier. **Prod
+UNMEASURED until then.**
+
+**Still open.** The same raw-slice pattern renders the Accounting → Corrections list and its CSV
+export (`src/pages/accounting/index.tsx:6623`, `:6648`); those are a separate change because the
+export may already have been archived by month.
+
+---
+
+
+## BUG-2026-09-24-189 — Scanned Meditex line NICCA-6-FOG came through blank; operators had to pick NICCA-06 by hand `procurement` `scan-supplier` 🟡
+
+🟡 **Fix in progress** · Meditex SMI2608/599, line 3: `NICCA-6-FOG` · "TEXTILE FABRIC,- FOG WIDTH:
+145CM +/- 2". The card left Internal Code blank ("Pick from catalog") and blocked Create. The
+operators want scans to fill themselves. Expected fill (confirmed with the user): Description
+**FABRIC**, Internal Code **NICCA-06**, Supplier SKU **NICCA-06-FOG**.
+
+**Root cause.** Every rung of the resolver missed. (1) The binding lookup and the PO-learned
+`supplierSkuIndex` compare codes EXACTLY after stripping punctuation — the saved code is
+`NICCA-06-FOG`, the invoice prints `NICCA-6-FOG`: one zero apart. (2) No Linked PO — the header P/O
+field reads "JASON ORDER"; the real refs (`= PO2511/008`) are printed under each line and not
+extracted. (3) Text scoring cannot single out NICCA-06, whose catalogue description is just
+"FABRIC". Yet the same invoice shows the supplier's codes ARE ours in another form: `NICCA-6-FOG` ↔
+`NICCA-06`, `PSF15.064HCS(14)` ↔ `MED-PSF15.064HCS(14)(L)`, `TARONI-CREAM 82"` ↔ identical.
+
+**Fix** (`src/lib/supplier-material-candidates.ts`): `codeFamilyMatch` — per tier, before text
+scoring, match when one code's parts sit inside the other's (zero-padding ignored); ≥2 parts / ≥5
+chars; longest run wins; a tie is refused. `sameSupplierCode` makes the binding lookup (PI + GRN
+wizards) and the SKU index zero-padding tolerant. Scan modal: the row says "Matched on the
+supplier's code"; a hand pick clears the auto-match flags so Create learns the binding (it did not —
+a correction over a catalogue guess stayed "unverified"). PI edit (PUT) now learns the binding for
+lines whose (material, supplier SKU) pair changed, so a fix on the detail page also sticks.
+
+**Regression.** `tests/scan-code-family-match.test.mjs` — the three Meditex pairs, the expected
+FABRIC / NICCA-06 fill, zero-padding equality, and the refusals (one part, < 5 chars, a different
+number, a tie).
+
+**Verify.** Not run in a browser (login). **Prod UNMEASURED until deployed** — re-scan SMI2608/599:
+line 3 must fill NICCA-06 / FABRIC / NICCA-06-FOG with no pick. Still open: per-line PO refs
+(`= PO2511/008`) are not extracted.
+
+---
+
+## BUG-2026-09-24-188 — PI discount shipped as a per-line column; the supplier prints ONE discount at the bottom of the invoice `procurement` `money` 🟡
+
+🟡 **Fix in progress** · DEV-14 ("add discount in purchase invoice") shipped in #510 as a Discount
+column on every PI line. Reported with the real document it was for — Meditex SMI2608/599: three
+lines, **Gross 856.00 · Discount (81.00) · Total 775.00**, the discount printed once, bottom right,
+not against any line. The operator had nowhere to type one figure; a per-line column made them
+invent a split the supplier never printed.
+
+**Root cause.** The requirement was read without the document. The storage #510 added was right —
+`purchase_invoice_items.discount_sen` with `line_total_sen` stored net — only the entry point was
+wrong.
+
+**Fix.** One "Less: Discount" field in the totals (create page footer + summary, detail edit footer,
+scan card), spread across the lines pro-rata by `allocateDiscountSen` (`src/lib/unit-price.ts`,
+largest-remainder, sums to the sen). The per-line column is gone from create / detail / scan / PDF;
+view + PDF show Gross / Less: Discount / Subtotal, with line amounts at gross as printed. The scan
+pre-fills the field from the footer `discount` the OCR already extracted (plus any per-line
+discounts it read). No API or schema change. Branch `fix/pi-document-discount`.
+
+**Regression.** `tests/pi-line-discount.test.mjs` — the Meditex figures land on exactly RM 775.00,
+allocation rounding never loses a sen, and no surface carries a per-line Discount column.
+
+**Verify.** Not run in a browser (login). **Prod UNMEASURED until deployed** — re-key SMI2608/599:
+Gross 856.00, Discount 81.00, Total 775.00, and the confirmed AP amount must be 775.00.
+
+---
+
+## BUG-2026-09-24-187 — System Health showed "No audit events" and "Successful logins 0 … Healthy" while 19,227 audit rows sat in the table `audit-logging` `platform` 🟡
+
+🟡 **Fix in progress** · Owner-reported on `erp.hookka.com/admin/health`: the Audit feed read "No audit
+events in this window." and the whole Security panel read 0 / 0 / 0 with a green "Healthy". Measured on
+prod the same hour: **19,227 rows in `audit_events`, 122 of them inside the 24h window**, newest
+`2026-09-24 02:05:48+00` — 816 logins and 156 failed logins all present.
+
+**Root cause.** `audit_events.ts` is a **TEXT** column (`0046_audit_events.sql:28`) and both health
+queries compared it straight to a timestamp:
+
+```sql
+AND ts > NOW() - INTERVAL '24 hours'
+```
+
+Postgres refuses that outright — reproduced in the prod SQL editor: `ERROR: 42883: operator does not
+exist: text > timestamp with time zone`. So the query threw on **every** request, `admin-health.ts`
+caught its own error and returned `{success:true, data:[]}`, and the panel rendered that as a calm
+zero. Confirmed live before the fix: `GET /api/admin/health/audit-feed?range=24h` → `{"success":true,"data":[]}`.
+
+**Three layers hid it**, which is why it survived weeks: the audit WRITE swallows failures by design
+(`audit.ts` — "never block a real mutation"), the health QUERY swallows them (catch → empty), and the FE
+fetch swallows them (`useCachedJson` → null → empty state). Same shape as
+[BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently); an empty panel and
+a broken panel are indistinguishable to the reader. The cast fix already existed on `zaim-dev-branch`
+(`33694eeb`) and was never merged to `main`, so production never received it.
+
+**Fix.** `ts::timestamptz` in both queries — `admin-health.ts:1297` (audit-feed) and `:1456`
+(security-events). Comparing as TEXT would be wrong: rows carry two formats (the column DEFAULT writes
+`2026-09-24 02:05:48+00`, ISO writes use a `T` separator) and they sort differently. At 19k rows the seq
+scan is irrelevant. PR `fix/audit-health-ts-cast`.
+
+**Regression.** `tests/admin-health-audit-ts-cast.test.mjs` stubs a **Postgres-shaped** DB that raises
+42883 for an uncast comparison, so deleting the cast reproduces the production symptom (empty feed)
+rather than passing against a query that no longer runs. 3/3 fail without the cast, 3/3 pass with it.
+
+**Verify.** Sandbox, measured: feed went from empty to 7 rows (`login ×1`, `login.fail ×6`), Security read
+Successful logins 1 / Failed logins 6. **Prod UNMEASURED until deployed** — after deploy, the 24h window
+must show ~122 events instead of zero.
+
+**Still open.** (1) All three layers still swallow failures — the panels should say "query failed", not
+"Healthy". (2) `Who` and `IP` render `—`; sign-in does not record IP/device on `main` (`33694eeb` on
+`zaim-dev-branch` does). (3) Automation panel 404s: the repo moved to `hookkadev/hookka-erp-testing` but
+`admin-health.ts:971` still defaults to the old `weisiang329-eng` slug.
+
+---
+
+## BUG-2026-09-23-186 — Invoice PDF printed the same SO / REF ("FAIR ITEM PG") on every line and a blank CO SO; the DO was correct `invoices` `pdf` 🟡
+
+🟡 **Fix in progress** · BUG-22, customer-reported on INV-2609-067 (DO-2609-061, Houzs Century):
+each line's PO was right, but SO and REF were the same invoice-level value on every line and CO SO
+was always `-`.
+
+**Root cause.** `buildUnifiedInvoiceData` (`src/lib/build-unified-doc-data.ts`) — the builder behind
+both the browser invoice download and the backend customer-notice email — read the per-line refs
+under the **DO** print-extras names (`customerSO` / `customerRef` / `salesOrderNo`). The invoice
+print-extras (`computeInvoicePrintExtras`) emit them as `customerSOLine` / `customerRefLine` /
+`companySO`. Every read was `undefined`, so SO/REF fell back to the invoice-level
+`fallbackCustomerSO/Ref` and CO SO printed `-`. PO worked only because both sides call it
+`customerPOId`. The resolver was always right; the jsPDF path and the invoice detail screen read
+the correct names.
+
+**Fix.** The builder reads the invoice names first, DO names second, invoice-level fallback last.
+Class C16 row 8. Regression: `tests/invoice-pdf-line-refs.test.mjs` (fails on the old builder).
+
+**Verify.** Re-download INV-2609-067 after deploy: each line's SO / REF / CO SO must match that
+line's own sales order. UNMEASURED on prod until then.
+
+---
+
+## BUG-2026-09-23-185 — Scanned PO with a repeated customer S/O no. was rejected and the scan lost `sales` `scan-po` 🟡
+
+🟡 **Fix in progress** · DEV-12 (High, reported by Siti 2026-09-23 13:59, ref HC-SO-013492): when a
+scanned PO carried the same customer S/O no. as an earlier order, the system "will not proceed the new
+order" — it was not saved as a draft.
+
+**Root cause.** `POST /api/sales-orders` had a duplicate-document guard (owner 2026-07) that returned
+**409** when `customerPOId` OR `customerSOId` was already on a non-cancelled SO for the same customer.
+Houzs reuses its S/O no. across POs, so a legitimate new PO was refused. Evidence (owner's Sales
+Orders search, 2026-09-23): HC-PO-2609-025 / `HC-SO-013492` (09/09, INVOICED — not cancelled, so
+it still counted) and HC-PO-2609-070 / **`HC-SO--013492`** (23/09, IN PRODUCTION): after the
+refusal the operator typed a second dash to slip past the guard, so that SO now carries a wrong
+customer S/O no. (data fix left to the owner; other `--` workarounds UNMEASURED). Worse, `scan-po-modal.tsx`
+consumed EVERY selected scan after the create loop — including the failed ones — so the rejected
+order vanished from the queue instead of waiting to be retried. (The supplier scan modal already
+consumed only successfully-created rows; the PO modal was the outlier.)
+
+**Fix.**
+- `sales-orders.ts` create: the guard now records `duplicateWarning` instead of returning 409; the SO
+  is saved as DRAFT (as every new SO is) and the 201 carries `duplicateOf` + `warning`. A true
+  duplicate customer PO still cannot be CONFIRMED — BR-SO-010 in the confirm handler is unchanged.
+- `scan-po-modal.tsx`: only rows whose SO was created are consumed (`createdRows`); a warning shows
+  in a separate amber "Check before confirming" box, not under "failed to create".
+- `sales/create.tsx`: a warned SO is NOT auto-confirmed by "Create Order" — it stays DRAFT with a
+  toast. The mobile form (`m/config/forms.ts`) has no notice channel, so it saves the DRAFT silently.
+
+**Verified.** `tests/so-duplicate-ref-draft.test.mjs`; `tsc -p tsconfig.app.json` exit 0; full
+`npm test` pass. Not browser-verified (needs a login). **Prod state UNMEASURED** — how many scans
+were lost this way was not queried.
+
+---
+
+## BUG-2026-09-23-184 — After a deploy, open tabs kept running the old code `deploy` `cache` 🟡
+
+🟡 **Fix in progress** · owner-reported: after a deploy "some of the thing is there already but
+it doesn't update" — operators kept seeing pre-fix behaviour.
+
+**Root cause.** HTML is `no-store` and the SW is network-first, so a *fresh load* always gets the
+new build — but nobody reloads an open ERP tab. `useVersionCheck` detected the new build and the
+dashboard showed a ONE-SHOT "Reload?" confirm; dismiss it (or never see it) and `firedRef` meant
+it never asked again — the tab ran the old bundle all day. The phone shell (`/m`,
+`MobileLayout.tsx`) never ran a version check at all. Also: the inline `onNewVersion` arrow was an
+effect dep, so the poll (and its 30s first check) restarted on every render.
+
+**Fix.** `useAutoUpdateOnNavigate` (`src/lib/use-version-check.ts`): once a new build is seen,
+the NEXT route change does a full reload (the user has already left the form, so nothing typed is
+lost). Used by `DashboardLayout` (which keeps the immediate "Reload now" offer) and
+`MobileLayout`. Poll 5 → 2 min; callback held in a ref so the poll isn't restarted.
+WorkerLayout unchanged (already reloads immediately).
+
+**Verified.** `tests/deploy-auto-update.test.mjs`; `tsc -p tsconfig.app.json` exit 0; eslint
+clean. Not browser-verified — the check only fires on a built bundle (dev serves unhashed
+`/src/main.tsx`); verify on prod by keeping a tab open across the deploy and changing page.
+
+---
+
+## BUG-2026-09-23-183 — Ticking a special order showed "+RM 100" but added RM 0 to the SO line `sales` `money` 🟡
+
+🟡 **Fix in progress** · owner-reported (urgent, wrong SO values): on a SOFA line, ticking
+"Extend Down 6"(1A)" (+RM 100) and "Bottom Fully Cover (1s)" (+RM 110) left the line at RM 0.
+
+**Root cause.** Options added in Settings (kv_config `sofaSpecials` / `specials`) that are NOT
+in the static `specialOrderOptions` table get a slugged code in the form's `availableSpecials`.
+The surcharge maths mapped code → name through the static table only, and
+`priceOfSen` (`src/lib/special-order-surcharge.ts`) returned 0 for any name not in the static
+table even when the config priced it. So every config-only option was charged RM 0; the
+checkbox label (priced from config) disagreed with the total. Four forms each had their own
+copy — sales/edit + both consignment forms also still carried the pre-2026-08-02 "HB + Divan
+BTM = RM 100" combo rule, and wrote the slug (e.g. `EXTEND_DOWN_6_1A_`) into the saved
+`specialOrder` text instead of the name.
+
+**Fix.** `special-order-surcharge.ts`: `priceOfSen` honours config-only entries; new shared
+`calcSpecialsSurchargeSen` / `specialCodeForName` / `specialNameForCode`. sales create/edit and
+consignment create/edit all price + label through them; stale copies deleted; collapsed chips
+and price breakdown look up the config list so config-only options show.
+Server write paths (`sales-orders.ts` POST/PUT, `consignment-orders.ts` POST/PUT) priced SOFA
+lines against the BEDFRAME list (`loadSpecialsConfig` only read `specials`) — now
+`loadSpecialsConfig(db, "sofaSpecials")` for sofa lines.
+
+**Existing rows.** `GET/POST /api/admin/backfill-config-only-specials` (super-admin; POST needs
+`{confirm:true}`). Per line (`repriceSavedSpecialsLine`): slug → name in the text, and ADD the
+config-only options' price capped at owed − charged (no double charge for lines the old sofa
+edit page priced right; never decreases; a static option re-priced in Settings since is not
+touched). Unit / line / header totals move by the delta, one transaction, header guarded on the
+planned total (double-POST safe). Only SOs with no invoice and COs with no consignment note;
+issued docs are listed under `issuedNeedOwnerDecision`, never touched. The older
+`/backfill-special-order-surcharge` does NOT catch this bug (only charged-exactly-0 lines, bed
+list only, can't read slugs).
+
+**Verified.** `tests/special-order-surcharge.test.mjs` (config-only options charged by code),
+`tests/special-order-combo-discount.test.mjs` (no form carries its own copy — all four);
+`tsc -p tsconfig.app.json` exit 0; backfill maths: 6 cases in `special-order-surcharge.test.mjs`.
+**Prod impact UNMEASURED** — no prod DB access from this session. Run the GET dry-run after
+deploy to measure it, review, then POST.
+
+---
+
 ## BUG-2026-09-23-182 — Experimental dashboard Operations › Revenue & Cost showed a different Production revenue from the main Dashboard (~RM 6k on 22 Sep) `dashboard` 🟡
 
 🟡 **Fix in progress** · owner-reported: main Dashboard revenue chart tooltip for 09-22 shows
@@ -734,7 +1062,7 @@ correctness bug in the key, and mixing them into one change would have made the
 
 ---
 
-## BUG-2026-09-24-186b — the note said six, the factory would have queued ten `sales` `production` 🟢
+## BUG-2026-09-24-202b — the note said six, the factory would have queued ten `sales` `production` 🟢
 
 🟢 Fixed before it could reach anyone — found while testing DEV-05 on staging,
 in the window where no stock had finished yet, so the double-build never
@@ -767,9 +1095,9 @@ count at 1, `production-builder.ts:519`, so a zero-quantity line would still
 queue one order). Four new tests assert the ORDER of the two steps and the
 arithmetic that reaches the builder, not the sentence.
 
-## BUG-2026-09-23-185 — the fix for 184 deployed correctly and still did not reach the screen: the list snapshot had no payload-shape version `production` `caching` 🟢
+## BUG-2026-09-23-197 — the fix for 196 deployed correctly and still did not reach the screen: the list snapshot had no payload-shape version `production` `caching` 🟢
 
-🟢 Fixed. Same symptom as BUG-2026-09-23-184, second and independent cause —
+🟢 Fixed. Same symptom as BUG-2026-09-23-196, second and independent cause —
 caught because the STOCK chip still did not render after 184 shipped, while the
 dialog copy in the same deploy plainly had.
 
@@ -794,7 +1122,7 @@ second one was invisible even to a correct deploy of a correct fix. A payload
 that changes shape is not shipped when the code merges — it is shipped when the
 cache holding the old shape is gone.
 
-## BUG-2026-09-23-184 — the stock delivery gate shipped as a no-op: its two fields were not on the payload it reads `production` `delivery` 🟢
+## BUG-2026-09-23-196 — the stock delivery gate shipped as a no-op: its two fields were not on the payload it reads `production` `delivery` 🟢
 
 🟢 Fixed. **Found by clicking it on staging, not by a test.**
 

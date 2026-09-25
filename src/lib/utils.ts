@@ -382,3 +382,78 @@ export function formatHours(minutes: number): string {
   const m = minutes % 60;
   return m > 0 ? `${h}h ${m}m` : `${h}h`;
 }
+
+
+/**
+ * Parse a timestamp the way THIS database writes them, not the way
+ * `new Date()` guesses.
+ *
+ * BUG-2026-09-24-190: every timestamp on /admin/health was rendered by
+ * slicing the stored string (`r.ts.slice(5, 16)`), which shows the UTC
+ * clock — so a 10:40 MYT login displayed as 02:40, eight hours early, on the
+ * one screen whose whole job is "when did this happen".
+ *
+ * Two stored shapes have to parse, and only one of them is a format
+ * `new Date()` is specified to accept:
+ *   - `2026-09-24 02:05:48.109016+00`  — Postgres text: space separator,
+ *     micro-second precision, a BARE two-digit offset
+ *   - `2026-09-24T02:05:48.000Z`       — ISO, written by the JS side
+ * and a third that carries no zone at all (`ts TEXT DEFAULT CURRENT_TIMESTAMP`
+ * on a row written before the column took an offset), which is UTC.
+ *
+ * Returns null rather than an Invalid Date, so callers render the raw value
+ * instead of the word "Invalid" — an audit row with an odd timestamp is still
+ * evidence, and hiding it would be worse than showing it unformatted.
+ */
+export function parseDbTimestamp(value: string | Date | null | undefined): Date | null {
+  if (!value) return null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  let s = String(value).trim();
+  if (!s) return null;
+  if (/^\d{4}-\d{2}-\d{2}[ T]/.test(s)) {
+    s = s.replace(" ", "T");
+    // `+00` is a legal Postgres offset and an illegal ISO one.
+    s = s.replace(/([+-]\d{2})$/, "$1:00");
+    // No zone at all → the column stores UTC (CURRENT_TIMESTAMP).
+    if (!/(Z|[+-]\d{2}:\d{2})$/.test(s)) s += "Z";
+  }
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+const MY_TIME_ZONE = "Asia/Kuala_Lumpur";
+
+/**
+ * Render a stored timestamp in Malaysia time.
+ *
+ * The zone is PINNED rather than left to the viewer's machine: every reader of
+ * these screens is on site, and an admin checking the audit trail from a laptop
+ * still on another country's clock would otherwise compare two different
+ * timelines without noticing. Same choice as `customer-notify.ts` and
+ * `delivery-list-filters.ts`.
+ */
+export function formatTimestampMY(
+  value: string | Date | null | undefined,
+  opts: { withYear?: boolean; withSeconds?: boolean } = {},
+): string {
+  const d = parseDbTimestamp(value);
+  if (!d) return typeof value === "string" && value.trim() ? value : "—";
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: MY_TIME_ZONE,
+    day: "2-digit",
+    month: "2-digit",
+    ...(opts.withYear ? { year: "numeric" as const } : {}),
+    hour: "2-digit",
+    minute: "2-digit",
+    ...(opts.withSeconds ? { second: "2-digit" as const } : {}),
+    hour12: false,
+  }).formatToParts(d);
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+  const date = opts.withYear
+    ? `${get("day")}/${get("month")}/${get("year")}`
+    : `${get("day")}/${get("month")}`;
+  const time = opts.withSeconds
+    ? `${get("hour")}:${get("minute")}:${get("second")}`
+    : `${get("hour")}:${get("minute")}`;
+  return `${date} ${time}`;
+}

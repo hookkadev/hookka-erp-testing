@@ -56,8 +56,11 @@ test("returnable lines come from the PI, SELECT * dual-keyed, stocked-only", () 
   const f = flat(CREATE);
   assert.match(f, /SELECT \* FROM purchase_invoice_items WHERE pi_id = \?/);
   assert.match(f, /lineType !== "STOCKED" && !materialCode\) continue/);
-  // Editable return cost seeds from the PI unit price (owner: negotiated return).
-  assert.match(f, /unitCostSen: Number\(pick\(r, "unit_price_sen", "unitPriceSen"\)/);
+  // Editable return cost seeds from the PI unit price (owner: negotiated return)
+  // — net of a per-line discount (DEV-14) when the line carries one.
+  assert.match(f, /unitCostSen: netUnitCostSen\(r, pick\)/);
+  assert.match(f, /const unit = Number\(pick\(r, "unit_price_sen", "unitPriceSen"\)/);
+  assert.match(f, /pick\(r, "line_total_sen", "lineTotalSen"\) \?\? 0\) \/ qty/);
 });
 
 // ===========================================================================

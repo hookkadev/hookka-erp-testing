@@ -218,7 +218,7 @@ test("MinimalPOOut declares stockedIn, so a slim-down cannot drop it silently", 
 // ---------------------------------------------------------------------------
 // DEV-05 — the Pending Delivery gate reads these two fields OFF THIS PAYLOAD.
 //
-// BUG-2026-09-23-184. `poReadyForDelivery` keeps an unallocated stock order out
+// BUG-2026-09-23-196. `poReadyForDelivery` keeps an unallocated stock order out
 // of Pending Delivery by comparing salesOrderId against stockOriginSoId. The
 // Delivery page's ready-planning fetch asks for the MINIMAL projection
 // (delivery-orders.ts passes minimal=true) and neither field was on it, so both
@@ -260,7 +260,7 @@ test("EVERY row-to-PO mapper emits the pair, not just the minimal one", () => {
 // ---------------------------------------------------------------------------
 // A payload-shape change has to bypass snapshots built by the previous code.
 //
-// BUG-2026-09-23-184, second cause. The fix that put isStock /
+// BUG-2026-09-23-196, second cause. The fix that put isStock /
 // stockOriginSoId on the projection deployed correctly and STILL did not
 // reach the screen: production_orders_list_snapshot only rebuilds when a
 // source table changes, so rows built before the deploy kept being served —

@@ -25,7 +25,7 @@ import {
   ledgerHasSource,
 } from "../lib/journal-hash";
 import { nextMonthDueDate } from "../../lib/terms";
-import { roundUnitPriceSen, lineTotalSen as computeLineTotalSen } from "../../lib/unit-price";
+import { roundUnitPriceSen, discountedLineSen } from "../../lib/unit-price";
 import { issueDocNumber } from "../lib/doc-number-service";
 import {
   checkConvertAvailability,
@@ -125,6 +125,10 @@ function ensurePiMigrations(db: D1Database): Promise<void> {
       "ALTER TABLE purchase_invoices ADD COLUMN IF NOT EXISTS subtotal_sen INTEGER DEFAULT 0",
       "ALTER TABLE purchase_invoices ADD COLUMN IF NOT EXISTS tax_sen INTEGER DEFAULT 0",
       "ALTER TABLE purchase_invoice_items ADD COLUMN IF NOT EXISTS tax_sen INTEGER DEFAULT 0",
+      // Per-line discount in sen (DEV-14, 2026-09-24). line_total_sen is stored
+      // NET of it, so every reader of line_total_sen (GL, costing, 3-way match)
+      // sees the discounted amount without change. snake_case → no rename-map.
+      "ALTER TABLE purchase_invoice_items ADD COLUMN IF NOT EXISTS discount_sen INTEGER DEFAULT 0",
       // Source supplier document (owner 2026-06-30). When the PI was created
       // from a scan-queue auto-split chunk, this points to the file_assets
       // row holding THAT specific chunk's PDF — the operator can re-open the
@@ -298,6 +302,8 @@ export type PurchaseInvoiceItem = {
   // Per-line SST in sen (owner 2026-06-30). 0 for non-taxable lines and for
   // legacy rows that never recorded per-line tax. lineTotalSen stays PRE-TAX.
   taxSen: number;
+  // Per-line discount in sen (DEV-14). lineTotalSen = qty × unit − discount.
+  discountSen: number;
   lineType: PurchaseInvoiceItemLineType;
   notes: string | null;
   grnItemId: string | null;
@@ -324,6 +330,8 @@ type PurchaseInvoiceItemRow = {
   lineType?: string;
   tax_sen?: number | null;
   taxSen?: number | null;
+  discount_sen?: number | null;
+  discountSen?: number | null;
   notes: string | null;
   grn_item_id?: string | null;
   grnItemId?: string | null;
@@ -433,6 +441,7 @@ function rowToItem(r: PurchaseInvoiceItemRow): PurchaseInvoiceItem {
     unitPriceSen: Number(r.unit_price_sen ?? r.unitPriceSen) || 0,
     lineTotalSen: Number(r.line_total_sen ?? r.lineTotalSen) || 0,
     taxSen: Number(r.tax_sen ?? r.taxSen) || 0,
+    discountSen: Number(r.discount_sen ?? r.discountSen) || 0,
     lineType: VALID_LINE_TYPES.includes(lineType) ? lineType : "OTHER",
     notes: r.notes ?? null,
     grnItemId: r.grnItemId ?? r.grn_item_id ?? null,
@@ -453,6 +462,8 @@ type PurchaseInvoiceItemInput = {
   // TAX-line amount (so old payloads using lt='TAX' still produce a sensible
   // breakdown).
   taxSen?: number;
+  // Per-line discount in sen (DEV-14). Omitted = 0.
+  discountSen?: number;
   lineType?: string;
   notes?: string | null;
   // Convert-chain: when this line is sourced from a GRN line, the grn_items
@@ -473,6 +484,7 @@ function normalizeItems(
     qty: number;
     unitPriceSen: number;
     lineTotalSen: number;
+    discountSen: number;
     taxSen: number;
     lineType: PurchaseInvoiceItemLineType;
     notes: string | null;
@@ -491,6 +503,7 @@ function normalizeItems(
     qty: number;
     unitPriceSen: number;
     lineTotalSen: number;
+    discountSen: number;
     taxSen: number;
     lineType: PurchaseInvoiceItemLineType;
     notes: string | null;
@@ -535,6 +548,10 @@ function normalizeItems(
         : String(it.grnItemId).trim();
     const taxSenIn = Math.round(Number(it.taxSen ?? 0));
     const taxSen = Number.isFinite(taxSenIn) && taxSenIn >= 0 ? taxSenIn : 0;
+    // Round ONCE, on the product — never the rate first. 600 x 5.5 sen is
+    // 3300 sen = RM33.00, which is exactly what the supplier billed. The
+    // per-line discount (DEV-14) comes off that, clamped to [0, gross].
+    const { discountSen, lineTotalSen } = discountedLineSen(qty, unitPriceSen, Number(it.discountSen));
     rows.push({
       id: `pii-${crypto.randomUUID().slice(0, 8)}`,
       materialCode: matCode,
@@ -542,9 +559,8 @@ function normalizeItems(
       supplierSku: supSku,
       qty,
       unitPriceSen,
-      // Round ONCE, on the product — never the rate first. 600 x 5.5 sen is
-      // 3300 sen = RM33.00, which is exactly what the supplier billed.
-      lineTotalSen: computeLineTotalSen(qty, unitPriceSen),
+      lineTotalSen,
+      discountSen,
       taxSen,
       lineType,
       notes: it.notes == null ? null : String(it.notes),
@@ -553,6 +569,11 @@ function normalizeItems(
     });
   }
   return { ok: true, rows };
+}
+
+/** A line's (internal code, supplier code) pair, as the binding learner keys it. */
+function supplierPairKey(materialCode: string | null, supplierSku: string | null): string {
+  return `${(materialCode ?? "").trim().toUpperCase()}\u0000${(supplierSku ?? "").trim().toUpperCase()}`;
 }
 
 async function loadItemsForPI(
@@ -667,7 +688,7 @@ async function buildGrnReconsumeStatements(
   if (wantByGrnItem.size === 0) return { ok: true, statements: [] };
 
   const statements: D1PreparedStatement[] = [];
-  // Goods sent back off the GRN before billing are not billable (BUG-2026-09-24-190).
+  // Goods sent back off the GRN before billing are not billable (BUG-2026-09-24-206).
   const returnedByGi = await loadGrnReturnedQty(db, [...wantByGrnItem.keys()]);
   for (const [giId, { qty, name }] of wantByGrnItem) {
     const gi = await db
@@ -1040,7 +1061,7 @@ async function checkPoRemaining(
     string,
     { code: string; name: string; qty: number }
   >();
-  // Returned off a GRN before billing (BUG-2026-09-24-190): those units left,
+  // Returned off a GRN before billing (BUG-2026-09-24-206): those units left,
   // so they no longer count as ordered-and-billable. The return already took
   // them off receivedQty; without this the ceiling fell back to the full
   // ordered qty and the returned goods stayed billable. A replacement receipt
@@ -1389,7 +1410,7 @@ app.post("/", async (c) => {
 
       const lines: ConvertLineRequest[] = [];
       // Goods sent back off this GRN before billing are not billable
-      // (BUG-2026-09-24-190): available = accepted − invoiced − returned.
+      // (BUG-2026-09-24-206): available = accepted − invoiced − returned.
       const returnedByGi = await loadGrnReturnedQty(db, [...giById.keys()]);
       for (const r of normalizedItems.rows) {
         if (!r.grnItemId) continue; // fee/tax/non-stocked lines don't draw down
@@ -1634,9 +1655,9 @@ app.post("/", async (c) => {
           .prepare(
             `INSERT INTO purchase_invoice_items (
                id, pi_id, material_code, material_name, supplier_sku,
-               qty, unit_price_sen, line_total_sen, tax_sen, line_type, notes,
+               qty, unit_price_sen, line_total_sen, discount_sen, tax_sen, line_type, notes,
                grn_item_id, po_id, created_at, updated_at
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .bind(
             r.id,
@@ -1647,6 +1668,7 @@ app.post("/", async (c) => {
             r.qty,
             toHome(r.unitPriceSen),
             toHome(r.lineTotalSen),
+            toHome(r.discountSen),
             toHome(r.taxSen),
             r.lineType,
             r.notes,
@@ -2324,9 +2346,9 @@ app.put("/:id", async (c) => {
           .prepare(
             `INSERT INTO purchase_invoice_items (
                id, pi_id, material_code, material_name, supplier_sku,
-               qty, unit_price_sen, line_total_sen, tax_sen, line_type, notes,
+               qty, unit_price_sen, line_total_sen, discount_sen, tax_sen, line_type, notes,
                grn_item_id, po_id, created_at, updated_at
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .bind(
             r.id,
@@ -2337,6 +2359,7 @@ app.put("/:id", async (c) => {
             r.qty,
             r.unitPriceSen,
             r.lineTotalSen,
+            r.discountSen,
             r.taxSen,
             r.lineType,
             r.notes,
@@ -2692,6 +2715,12 @@ app.put("/:id", async (c) => {
     }
   }
 
+  // The pairs on file BEFORE this edit — so the learner below can tell which
+  // lines the operator actually corrected.
+  const priorPairs = normalizedItems && normalizedItems.ok
+    ? new Set((await loadItemsForPI(db, id)).map((it) => supplierPairKey(it.materialCode, it.supplierSku)))
+    : new Set<string>();
+
   try {
     await db.batch(statements);
   } catch (e) {
@@ -2707,6 +2736,28 @@ app.put("/:id", async (c) => {
       );
     }
     throw e;
+  }
+
+  // A line the operator CORRECTED here (supplier code NICCA-6-FOG now points at
+  // NICCA-06) teaches the binding, exactly as Create does — otherwise fixing it
+  // on this page left the next scan of the same supplier code blank again.
+  // Only changed pairs: an untouched line may be a catalogue guess from the scan
+  // that Create deliberately declined to learn, and re-saving the invoice for
+  // some other reason must not quietly turn it into a permanent binding.
+  if (normalizedItems && normalizedItems.ok) {
+    await learnSupplierBindings(
+      db,
+      String(existing.supplierId ?? ""),
+      normalizedItems.rows.map((r) => ({
+        materialCode: r.materialCode,
+        materialName: r.materialName,
+        supplierSku: r.supplierSku,
+        supplierDescription: r.materialName,
+        unitPriceSen: r.unitPriceSen,
+        learnable: !priorPairs.has(supplierPairKey(r.materialCode, r.supplierSku)),
+      })),
+      () => `smb-${crypto.randomUUID().slice(0, 8)}`,
+    ).catch(() => undefined);
   }
 
   await emitAudit(c, {

@@ -53,6 +53,7 @@ type PayData = {
     basicEarnedSen: number;
     otSen: number;
     efficiencyAllowanceSen: number;
+    leadershipAllowanceSen: number;
     estimatedGrossSen: number;
     // Per-day detail behind the Absent / OT figures (optional — older backend
     // responses omit them; the UI then falls back to a plain, non-tappable row).
@@ -141,6 +142,7 @@ function asPayData(v: unknown): PayData | null {
   const basicEarnedSen = asNumber(v.current.basicEarnedSen);
   const otSen = asNumber(v.current.otSen);
   const efficiencyAllowanceSen = asNumber(v.current.efficiencyAllowanceSen) ?? 0;
+  const leadershipAllowanceSen = asNumber(v.current.leadershipAllowanceSen) ?? 0;
   const estimatedGrossSen = asNumber(v.current.estimatedGrossSen);
   const absentDates = Array.isArray(v.current.absentDates)
     ? v.current.absentDates.filter((x): x is string => typeof x === "string")
@@ -184,6 +186,7 @@ function asPayData(v: unknown): PayData | null {
       basicEarnedSen,
       otSen,
       efficiencyAllowanceSen,
+      leadershipAllowanceSen,
       estimatedGrossSen,
       absentDates,
       otDays,
@@ -555,6 +558,11 @@ function CurrentMonthBreakdown({
           label={t("pay.efficiencyAllowance")}
           value={rm(c.efficiencyAllowanceSen)}
         />
+        {/* Leadership allowance — same "always listed" rule, no threshold. */}
+        <Row
+          label={t("pay.leadershipAllowance")}
+          value={rm(c.leadershipAllowanceSen)}
+        />
         <div className="pt-2 mt-2 border-t border-white/10">
           <Row label={t("pay.gross")} value={rm(c.estimatedGrossSen)} bold />
         </div>
@@ -599,7 +607,10 @@ function FinalisedBreakdown({ slip, t }: { slip: PayslipRow; t: Translate }) {
         ) : null}
         <Row label={t("pay.basicEarned")} value={rm(slip.basicSen)} />
         {slip.allowancesSen ? (
-          <Row label={t("pay.efficiencyAllowance")} value={rm(slip.allowancesSen)} />
+          // Combined efficiency + leadership allowance (payslip's single
+          // allowancesSen bucket — see generate-payslip-pdf.ts), so this row
+          // uses the generic label, not the efficiency-only one above.
+          <Row label={t("pay.allowance")} value={rm(slip.allowancesSen)} />
         ) : null}
         {slip.overtimeSen ? (
           <Row

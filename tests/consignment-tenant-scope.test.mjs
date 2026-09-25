@@ -164,6 +164,13 @@ function makeDb({ cos = COS, cns = CNS, foreignCustomers = [] } = {}) {
   return { db: { prepare, batch: async () => [] }, seen };
 }
 
+// Passed as the Worker env on every request. Without it c.env is undefined,
+// rbac.ts's permission lookup throws on SESSION_CACHE, and the request is
+// DENIED (the old `*:read` fallback that used to let it through was removed in
+// the RBAC audit of 2026-09-11). With it, OFFICE resolves through
+// role-policy.ts exactly as in production.
+const TEST_ENV = {};
+
 function mount(routeApp, db, { role = "OFFICE", userId = "user-1", orgId = "hookka" } = {}) {
   const parent = new Hono();
   parent.use("*", async (c, next) => {
@@ -174,7 +181,9 @@ function mount(routeApp, db, { role = "OFFICE", userId = "user-1", orgId = "hook
     await next();
   });
   parent.route("/", routeApp);
-  return parent;
+  return {
+    request: (path, init) => parent.request(path, init, TEST_ENV),
+  };
 }
 
 const ids = (body) => (body.data ?? []).map((r) => r.id).sort();

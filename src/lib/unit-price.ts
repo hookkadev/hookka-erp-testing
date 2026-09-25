@@ -53,6 +53,52 @@ export function lineTotalSen(qty: number, unitPriceSen: number): number {
 }
 
 /**
+ * A line total NET of a per-line discount (DEV-14, purchase invoices). The
+ * discount is whole sen, clamped to [0, gross] so the stored discount and the
+ * stored net total always add back up to qty × unit price.
+ */
+export function discountedLineSen(
+  qty: number,
+  unitPriceSen: number,
+  discountSen: number,
+): { discountSen: number; lineTotalSen: number } {
+  const gross = lineTotalSen(qty, unitPriceSen);
+  const d = Math.round(Number(discountSen) || 0);
+  const discount = Math.min(Math.max(0, d), Math.max(0, gross));
+  return { discountSen: discount, lineTotalSen: gross - discount };
+}
+
+/**
+ * Spread ONE invoice-level discount (the supplier's footer "Less: Discount")
+ * across the lines, pro-rata to each line's gross, in whole sen. Largest-
+ * remainder rounding, so the shares always sum to exactly the discount (itself
+ * clamped to the eligible gross) and no line goes below zero. Lines marked
+ * ineligible (e.g. a TAX line) get 0. Stored per line as discount_sen so every
+ * reader of line_total_sen (GL, costing, AP) sees the net amount.
+ */
+export function allocateDiscountSen(
+  grossSen: number[],
+  discountSen: number,
+  eligible: boolean[] = grossSen.map(() => true),
+): number[] {
+  const g = grossSen.map((v, i) => (eligible[i] && v > 0 ? Math.round(v) : 0));
+  const total = g.reduce((s, v) => s + v, 0);
+  const d = Math.min(Math.max(0, Math.round(Number(discountSen) || 0)), total);
+  if (d === 0) return g.map(() => 0);
+  const exact = g.map((v) => (d * v) / total);
+  const out = exact.map(Math.floor);
+  let rem = d - out.reduce((s, v) => s + v, 0);
+  const order = exact
+    .map((x, i) => ({ i, frac: x - Math.floor(x) }))
+    .sort((a, b) => b.frac - a.frac || a.i - b.i);
+  for (const { i } of order) {
+    if (rem <= 0) break;
+    if (g[i] > 0) { out[i] += 1; rem -= 1; }
+  }
+  return out;
+}
+
+/**
  * Render a stored unit price for an EDITABLE text/number input.
  *
  * Two decimals is the floor — RM 25 must still read "25.00" so the ordinary

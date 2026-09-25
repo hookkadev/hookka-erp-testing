@@ -470,6 +470,13 @@ app.get("/:id", async (c) => {
   return c.json({ success: true, data: row });
 });
 
+// A "View" caller passes ?inline=1 to open the file in the tab. Honoured only
+// for the upload allowlist (PDF / image / video) — never HTML/SVG, so a stale
+// pre-allowlist row still downloads instead of rendering script same-origin.
+export function wantsInline(flag: string | undefined, contentType: string | null | undefined): boolean {
+  return flag === "1" && ALLOWED_MIME.has(String(contentType ?? "").toLowerCase());
+}
+
 // ---------------------------------------------------------------------------
 // GET /api/files/:id/download — 302 to a presigned URL.
 // ---------------------------------------------------------------------------
@@ -485,10 +492,14 @@ app.get("/:id/download", async (c) => {
     .bind(id, orgId)
     .first<FileAssetRow>();
   if (!row) return c.json({ success: false, error: "Not found" }, 404);
+  const inline = wantsInline(c.req.query("inline"), row.contentType);
 
   try {
     const url = await signedDownloadUrl(c.env, row.r2Key, 300);
     if (url) {
+      // ?inline=1 (a "View" button): hand over the bare signed URL so the
+      // browser renders the PDF / image in the tab instead of saving it.
+      if (inline) return c.redirect(url, 302);
       // Force the browser to save with the real filename. Without this the
       // presigned URL serves the object under its storage key, so the file
       // downloaded as a raw UUID (e.g. "a8793c72-…") instead of its name.
@@ -498,7 +509,7 @@ app.get("/:id/download", async (c) => {
       return c.redirect(named, 302);
     }
     // Presigning unavailable on this runtime — fall through to stream proxy.
-    return c.redirect(`/api/files/${id}/stream`, 302);
+    return c.redirect(`/api/files/${id}/stream${inline ? "?inline=1" : ""}`, 302);
   } catch (err) {
     if (err instanceof SupabaseStorageNotConfiguredError) {
       return c.json({ success: false, error: "file storage unavailable" }, 503);
@@ -534,8 +545,11 @@ app.get("/:id/stream", async (c) => {
         "Content-Length": String(row.sizeBytes),
         // Force download — browser doesn't try to render HTML/SVG inline
         // even if a stale row from before the upload allowlist landed
-        // somehow stored such content.
-        "Content-Disposition": `attachment; filename="${row.filename.replace(/"/g, "")}"`,
+        // somehow stored such content. ?inline=1 relaxes this ONLY for an
+        // allowlisted type (PDF / image / video — see wantsInline).
+        "Content-Disposition": `${
+          wantsInline(c.req.query("inline"), row.contentType) ? "inline" : "attachment"
+        }; filename="${row.filename.replace(/"/g, "")}"`,
         // Belt-and-braces: tell the browser not to MIME-sniff in case the
         // upload validator missed a polyglot file.
         "X-Content-Type-Options": "nosniff",

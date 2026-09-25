@@ -137,7 +137,7 @@ test("returned-before-billing fails soft on a DB with no return tables", async (
   assert.equal((await loadPoReturnedQty(db, "po-1")).size, 0);
 });
 
-test("every GRN billable-qty check subtracts returned-before-billing (BUG-2026-09-24-190)", () => {
+test("every GRN billable-qty check subtracts returned-before-billing (BUG-2026-09-24-206)", () => {
   const pi = readFileSync("src/api/routes/purchase-invoices.ts", "utf8");
   // create (GRN branch), edit ceiling, un-void re-draw
   assert.match(pi, /consumedQty: \(Number\(gi\.invoicedQty \?\? gi\.invoiced_qty \?\? 0\) \|\| 0\) \+ returned/);
@@ -202,7 +202,7 @@ test("R4 release without a convert stamp touches only the CN header", async () =
   assert.equal(stmts.length, 1);
 });
 
-test("void AND delete reopen the consignment order: read before the batch, reopen after (BUG-2026-09-24-191)", () => {
+test("void AND delete reopen the consignment order: read before the batch, reopen after (BUG-2026-09-24-207)", () => {
   const src = readFileSync("src/api/routes/invoices.ts", "utf8");
   const put = src.slice(src.indexOf('app.put("/:id"'), src.indexOf('app.delete("/:id"'));
   const del = src.slice(src.indexOf('app.delete("/:id"'));

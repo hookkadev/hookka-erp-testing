@@ -1,7 +1,6 @@
 import { useMemo } from "react";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, ReferenceLine } from "recharts";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Timer, FolderOpen, FilePlus2, CheckCircle2 } from "lucide-react";
 import {
   TAUPE, TEAL, MUTED, BORDER, GREEN, AMBER, RED, CHART_GOLD, fmtN,
   inPeriod, inFocus, periodLabel, previousPeriod, type Period,
@@ -104,10 +103,10 @@ export function ServicePerformancePanel({
   return (
     <>
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
-        <Kpi label="Avg case closing" value={closeNow.avg === null ? "—" : `${closeNow.avg} d`} sub={`${fmtN(closeNow.n)} closed · ${dl ? dl.text : "no previous-period comparison"}`} icon={Timer} iconBgClass="bg-[#E6F0F3]" iconColorClass="text-[#3E6570]" valueColorClass={dl?.good == null ? undefined : dl.good ? "text-[#4F7C3A]" : "text-[#9A3A2D]"} />
-        <Kpi label="Open cases now" value={fmtN(open.length)} sub={`${fmtN(open.filter((c) => c.daysOverdue > 0).length)} overdue (> ${threshold} d)`} icon={FolderOpen} iconBgClass="bg-[#FAEFCB]" iconColorClass="text-[#9C6F1E]" valueColorClass="text-[#9C6F1E]" />
-        <Kpi label="Opened in period" value={fmtN(openedInFocus.length)} sub={win} icon={FilePlus2} iconBgClass="bg-[#F0ECE9]" iconColorClass="text-[#6B5C32]" />
-        <Kpi label="Closed in period" value={fmtN(closedNow.length)} sub={win} icon={CheckCircle2} iconBgClass="bg-[#EEF3E4]" iconColorClass="text-[#4F7C3A]" valueColorClass="text-[#4F7C3A]" />
+        <Kpi label="Avg case closing" value={closeNow.avg === null ? "—" : `${closeNow.avg} d`} sub={`${fmtN(closeNow.n)} closed · ${dl ? dl.text : "no previous-period comparison"}`} valueColorClass={dl?.good == null ? undefined : dl.good ? "text-[#4F7C3A]" : "text-[#9A3A2D]"} />
+        <Kpi label="Open cases now" value={fmtN(open.length)} sub={`${fmtN(open.filter((c) => c.daysOverdue > 0).length)} overdue (> ${threshold} d)`} valueColorClass="text-[#9C6F1E]" />
+        <Kpi label="Opened in period" value={fmtN(openedInFocus.length)} sub={win} />
+        <Kpi label="Closed in period" value={fmtN(closedNow.length)} sub={win} valueColorClass="text-[#4F7C3A]" />
       </div>
 
       <Card>

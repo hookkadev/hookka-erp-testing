@@ -6,13 +6,13 @@ import {
 import { useCachedJson } from "@/lib/cached-fetch";
 import { formatCurrency } from "@/lib/utils";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { AlertTriangle, Clock, CalendarClock, PackageX, DollarSign, UserCheck, Gauge } from "lucide-react";
-import { TAUPE, TEAL, AMBER, MUTED, BORDER, fmtN, fmtRMAxis, inPeriod, inFocus, dayLabel, periodLabel, type Period, type OpsSub } from "./dashboard-shared-lib";
+import { TAUPE, TEAL, AMBER, MUTED, BORDER, fmtN, fmtRMAxis, inPeriod, inFocus, overallEfficiencyPct, dayLabel, periodLabel, type Period, type OpsSub } from "./dashboard-shared-lib";
 import { Kpi, LiveBadge } from "./dashboard-shared";
 import { AttendanceLogCard } from "./AttendanceLogCard";
-import { OverdueByDeptCard, DueSoonWorklist, type ProdOrderSummary } from "./OverdueCards";
+import { DueSoonWorklist, type ProdOrderSummary } from "./OverdueCards";
 import type { EmployeeSlice } from "./EmployeesInsights";
 import { ProductionDailyPanels } from "./ProductionDailyPanels";
+import { CompletedCard, DeptBacklogCard, FabricUsageCard, PlantLoadCard, PurchasingCard } from "./DashboardWidgets";
 
 // Operations tab: the shop-floor report checklist (handed over on paper,
 // 2026-09-17), redesigned 2026-09-18 for density: a single KPI strip, a 2-column chart split
@@ -148,14 +148,12 @@ export function OperationsView({
   // entries clocked ÷ completed job_cards earned), not attendance_records.
   const efficiencyStat = useMemo(() => {
     const days = (employee?.performance.byDay ?? []).filter((d) => inFocus(period, d.date));
-    const totalWorking = days.reduce((a, d) => a + d.workingMinutes, 0);
-    const totalProduction = days.reduce((a, d) => a + d.productionMinutes, 0);
     const last7 = [...days].sort((a, b) => (a.date < b.date ? -1 : 1)).slice(-7).map((d) => ({
       date: d.date,
       pct: d.workingMinutes > 0 ? (d.productionMinutes / d.workingMinutes) * 100 : 0,
     }));
     return {
-      pct: totalWorking > 0 ? (totalProduction / totalWorking) * 100 : null,
+      pct: overallEfficiencyPct(days, period), // same helper as the Employees overview card
       sparkline: last7,
     };
   }, [employee, period]);
@@ -180,6 +178,7 @@ export function OperationsView({
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-lg font-semibold text-[#1F1D1B]">Operations</h2>
         <LiveBadge live={prodLive && invLive} />
+        {!period.day && <span className="text-xs text-[#6B7280]">{periodLabel(period)}</span>}
         {period.day && (
           <button
             type="button"
@@ -193,40 +192,30 @@ export function OperationsView({
 
       {sub === "overview" && (
         <>
-            {/* ---- KPI strip: 7 cards, one row on desktop ------------------------ */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-7 gap-3">
+            {/* ---- KPI groups: Orders (3) on top, Materials & cost | People (2+2) below at xl ---- */}
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-x-5 gap-y-4">
+             <div className="xl:col-span-2">
+              <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[#6B7280]">Orders</p>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
               <Kpi
                 label="Overdue Orders"
                 value={fmtN(totalOverdue)}
                 sub="all departments"
-                icon={AlertTriangle}
-                iconBgClass="bg-[#FBE7E3]"
-                iconColorClass="text-[#9A3A2D]"
                 valueColorClass="text-[#9A3A2D]"
               />
               <Kpi
                 label="Due Within 3 Days"
                 value={fmtN((production?.dueSoon3Days ?? []).length)}
                 sub="early warning"
-                icon={Clock}
-                iconBgClass="bg-[#FAEFCB]"
-                iconColorClass="text-[#9C6F1E]"
                 valueColorClass="text-[#9C6F1E]"
               />
-              <div className="col-span-1">
+              <div className="col-span-2 md:col-span-1">
                 <Card>
                   <CardContent className="p-4">
-                    <div className="flex items-center gap-3">
-                      <div className="rounded-lg p-2.5 shrink-0 bg-[#EEF3E4]">
-                        <CalendarClock className="h-5 w-5 text-[#4F7C3A]" />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="font-bold truncate tabular-nums text-2xl text-[#1F1D1B]">
-                          {stageCompletion.pct == null ? "—" : `${stageCompletion.pct.toFixed(1)}%`}
-                        </p>
-                        <p className="text-xs text-[#6B7280]">Plan vs Actual</p>
-                      </div>
-                    </div>
+                    <p className="text-xs text-[#6B7280] truncate">Plan vs Actual</p>
+                    <p className="mt-1 font-bold truncate tabular-nums text-2xl text-[#1F1D1B]">
+                      {stageCompletion.pct == null ? "—" : `${stageCompletion.pct.toFixed(1)}%`}
+                    </p>
                     <div className="mt-2.5">
                       <div className="h-1.5 w-full rounded-full bg-[#E2DDD8] overflow-hidden">
                         <div
@@ -241,13 +230,16 @@ export function OperationsView({
                   </CardContent>
                 </Card>
               </div>
+              </div>
+             </div>
+             <div>
+              <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[#6B7280]">Materials &amp; cost</p>
+              {/* Cost gets the wider slot so an RM figure doesn't truncate. */}
+              <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-3">
               <Kpi
                 label="Material Shortage"
                 value={fmtN((inventory?.materialShortage ?? []).length)}
                 sub="at zero/negative stock"
-                icon={PackageX}
-                iconBgClass="bg-[#F0ECE9]"
-                iconColorClass="text-[#6B5C32]"
               />
               <Kpi
                 label="Production Cost"
@@ -257,34 +249,26 @@ export function OperationsView({
                     ? `${production.productionCost.batchesWithCost}/${production.productionCost.totalBatches} batches costed`
                     : undefined
                 }
-                icon={DollarSign}
-                iconBgClass="bg-[#E6F0F3]"
-                iconColorClass="text-[#3E6570]"
                 valueColorClass="text-[#3E6570]"
                 valueSizeClass="text-xl"
               />
+              </div>
+             </div>
+             <div>
+              <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[#6B7280]">People</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Kpi
                 label="Attendance"
                 value={attendanceStat.pct == null ? "—" : `${attendanceStat.pct.toFixed(1)}%`}
                 sub={`${fmtN(attendanceStat.present)} / ${fmtN(attendanceStat.headcount)} recorded, latest day`}
-                icon={UserCheck}
-                iconBgClass="bg-[#E6F0F3]"
-                iconColorClass="text-[#3E6570]"
               />
               <div className="col-span-1">
                 <Card>
                   <CardContent className="p-4">
-                    <div className="flex items-center gap-3">
-                      <div className="rounded-lg p-2.5 shrink-0 bg-[#E6F0F3]">
-                        <Gauge className="h-5 w-5 text-[#3E6570]" />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="font-bold truncate tabular-nums text-2xl text-[#3E6570]">
-                          {efficiencyStat.pct == null ? "—" : `${efficiencyStat.pct.toFixed(1)}%`}
-                        </p>
-                        <p className="text-xs text-[#6B7280]">Efficiency (Prod ÷ Working)</p>
-                      </div>
-                    </div>
+                    <p className="text-xs text-[#6B7280] truncate">Efficiency (Prod ÷ Working)</p>
+                    <p className="mt-1 font-bold truncate tabular-nums text-2xl text-[#3E6570]">
+                      {efficiencyStat.pct == null ? "—" : `${efficiencyStat.pct.toFixed(1)}%`}
+                    </p>
                     <div style={{ width: "100%", height: 32 }} className="mt-1.5">
                       {efficiencyStat.sparkline.length > 1 && (
                         <ResponsiveContainer width="100%" height="100%">
@@ -297,9 +281,24 @@ export function OperationsView({
                   </CardContent>
                 </Card>
               </div>
+              </div>
+             </div>
             </div>
 
-            <OverdueByDeptCard overdueByDept={production?.overdueByDept ?? []} />
+            {/* How loaded is the plant (dial) · where is it stuck (per-dept board:
+                queue days + overdue + due-soon) · what's due next (lanes). */}
+            <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 items-start">
+              <div className="lg:col-span-2 min-w-0">
+                <PlantLoadCard period={period} />
+              </div>
+              <div className="lg:col-span-3 min-w-0">
+                <DeptBacklogCard
+                  period={period}
+                  overdueByDept={production?.overdueByDept ?? []}
+                  dueSoon={production?.dueSoon3Days ?? []}
+                />
+              </div>
+            </div>
 
             <DueSoonWorklist orders={production?.dueSoon3Days ?? []} />
 
@@ -338,6 +337,8 @@ export function OperationsView({
                 </CardContent>
               </Card>
 
+              <CompletedCard period={period} />
+
         </>
       )}
 
@@ -352,7 +353,7 @@ export function OperationsView({
                   <div className="overflow-x-auto" style={{ maxHeight: 300, overflowY: "auto" }}>
                     <table className="w-full text-[12px]">
                       <thead>
-                        <tr className="border-t border-b border-[#E2DDD8] sticky top-0 bg-white">
+                        <tr className="*:sticky *:top-0 *:z-10 *:bg-white *:shadow-[inset_0_1px_0_#E2DDD8,inset_0_-1px_0_#E2DDD8]">
                           {["PO No", "Plan", "Actual", "Variance"].map((h) => (
                             <th key={h} className="text-left px-3 py-1.5 font-semibold uppercase text-[10px] tracking-wide text-[#6B7280]">{h}</th>
                           ))}
@@ -423,6 +424,8 @@ export function OperationsView({
 
       {sub === "materials" && (
         <>
+            <PurchasingCard period={period} />
+            <FabricUsageCard period={period} />
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle>Material Shortage detail</CardTitle>
@@ -431,7 +434,7 @@ export function OperationsView({
                 <div className="overflow-x-auto" style={{ maxHeight: 260, overflowY: "auto" }}>
                   <table className="w-full text-[12.5px]">
                     <thead>
-                      <tr className="border-t border-b border-[#E2DDD8] sticky top-0 bg-white">
+                      <tr className="*:sticky *:top-0 *:z-10 *:bg-white *:shadow-[inset_0_1px_0_#E2DDD8,inset_0_-1px_0_#E2DDD8]">
                         {["Code", "Description", "Group", "Balance Qty"].map((h) => (
                           <th key={h} className="text-left px-4 py-2 font-semibold uppercase text-[10.5px] tracking-wide text-[#6B7280]">{h}</th>
                         ))}

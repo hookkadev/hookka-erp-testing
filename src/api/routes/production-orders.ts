@@ -892,7 +892,7 @@ app.get("/", async (c) => {
     // happens to touch a production order. v2 (2026-09-23, DEV-05): the
     // projection gained isStock + stockOriginSoId, and without a bump the
     // Delivery page kept reading a payload that had neither — the same
-    // BUG-2026-09-23-184 symptom a second time, from a different cause.
+    // BUG-2026-09-23-196 symptom a second time, from a different cause.
     // Bump this on ANY payload shape change; `overdueCountsCacheKey` carries
     // its own vN for exactly this reason.
     const snapshotCacheKey =

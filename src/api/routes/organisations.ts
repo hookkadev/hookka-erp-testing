@@ -354,8 +354,10 @@ function ensureOrganisationRegistry(db: D1Database): Promise<void> {
 // every button is `organisations:update` and would 403. `tests/role-policy.mjs`
 // caught exactly that.
 //
-// Net effect: SUPER_ADMIN / ADMIN (rbac wildcard), OFFICE, QA, and the
-// DB-defined roles riding rbac's `*:read` fail-safe keep the full registry.
+// Net effect: SUPER_ADMIN / ADMIN (rbac wildcard), OFFICE, QA, READ_ONLY, and
+// any DB-defined role granted organisations:read or purchase-orders:read in
+// role_permissions keep the full registry. (rbac's `*:read` fail-safe for
+// ungranted roles was removed in the RBAC audit of 2026-09-11.)
 // SALES, HR and R&D get the projection — and none of their screens read
 // anything outside it (verified against every call site).
 app.get("/", async (c) => {

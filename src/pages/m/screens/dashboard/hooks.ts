@@ -3,7 +3,7 @@ import { useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useCachedJson } from "@/lib/cached-fetch";
 import { opensOnToday, ymd, type Period } from "../../../dashboards/dashboard-shared-lib";
-import { TAB_SUBS } from "../../../dashboards/dashboard-url-state-lib";
+import { LEGACY, TAB_SUBS } from "../../../dashboards/dashboard-url-state-lib";
 import { readPeriod, resolvePeriod, writePeriod } from "./dashboard-m-lib";
 import { DASHBOARD_FEED_URL, type DashboardFeed } from "./types";
 
@@ -50,7 +50,10 @@ export function useDashboardPeriod(months: string[], tab?: string) {
 export function useDashboardSub(tab: string) {
   const [params, setParams] = useSearchParams();
   const subs = TAB_SUBS[tab] ?? [];
-  const sub = subs.find((s) => s.key === params.get("sub"))?.key ?? subs[0]?.key ?? "";
+  // A retired sub-tab (e.g. people:departments) opens where desktop sends it.
+  const legacy = LEGACY[`${tab}:${params.get("sub")}`];
+  const want = legacy?.[0] === tab ? legacy[1] : params.get("sub");
+  const sub = subs.find((s) => s.key === want)?.key ?? subs[0]?.key ?? "";
   const setSub = useCallback(
     (key: string) => setParams((prev) => { const n = new URLSearchParams(prev); n.set("sub", key); return n; }),
     [setParams],

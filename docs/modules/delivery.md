@@ -1,5 +1,7 @@
 # Delivery & Consignment — Module Guide
 
+> **Last verified: 2026-09-25** (branch `chore/sync-staging-from-main-0925`) — `POST /packing-list-first` anchor re-derived against the staging←main merge; nothing else re-checked.
+
 > **Last verified: 2026-09-22** (branch `fix/delivery-loading-gate-po-paging`, BUG-2026-09-22-004) — the page's
 > `loading` gates on the CURRENT tab's rows only (`delivery/index.tsx:~1262`); Planning / Pending Delivery
 > page client-side via `pageSlice` (50/page, bypassed while searching) with the shared `PagerFooter`
@@ -113,7 +115,7 @@ deliver write `stock_movements` and read `fg_units`, and fire idempotent custome
 | `applyDeliveryOrderUpdate` | `delivery-orders/_helpers.ts:4194` | DO edit + transition apply |
 | `buildDoDeliveredSoAndInvoice` / `computeDoInvoiceLines` | `delivery-orders/_helpers.ts:1558 / 1342` | DELIVERED→INVOICED SO + invoice build |
 | `queueDoCustomerNotice` | `delivery-orders/_helpers.ts:3637` | Recipient chain + idempotent email claim |
-| `app.post("/packing-list-first")` | `src/api/routes/delivery-orders.ts:2093` | PL-first auto-split create |
+| `app.post("/packing-list-first")` | `src/api/routes/delivery-orders.ts:2103` | PL-first auto-split create |
 | `createPackingListCore` | `src/api/routes/packing-lists.ts:628` | Truck-run packing-list build |
 | `collectDeliveryBrief` / `generateDeliveryProposals` | `src/api/lib/delivery-agent.ts:633 / 868` | Agent brief + proposals |
 | `cheapestForState` / `loadStateRateCard` | `src/api/lib/delivery-agent.ts` | Cheapest-3PL routing |
