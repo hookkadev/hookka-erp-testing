@@ -6,8 +6,7 @@ import {
 import { useCachedJson } from "@/lib/cached-fetch";
 import { formatCurrency } from "@/lib/utils";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { AlertTriangle, Clock, CalendarClock, PackageX, DollarSign, UserCheck, Gauge } from "lucide-react";
-import { TAUPE, TEAL, AMBER, MUTED, BORDER, fmtN, fmtRMAxis, inPeriod, inFocus, dayLabel, periodLabel, type Period, type OpsSub } from "./dashboard-shared-lib";
+import { TAUPE, TEAL, AMBER, MUTED, BORDER, fmtN, fmtRMAxis, inPeriod, inFocus, overallEfficiencyPct, dayLabel, periodLabel, type Period, type OpsSub } from "./dashboard-shared-lib";
 import { Kpi, LiveBadge } from "./dashboard-shared";
 import { AttendanceLogCard } from "./AttendanceLogCard";
 import { DueSoonWorklist, type ProdOrderSummary } from "./OverdueCards";
@@ -149,14 +148,12 @@ export function OperationsView({
   // entries clocked ÷ completed job_cards earned), not attendance_records.
   const efficiencyStat = useMemo(() => {
     const days = (employee?.performance.byDay ?? []).filter((d) => inFocus(period, d.date));
-    const totalWorking = days.reduce((a, d) => a + d.workingMinutes, 0);
-    const totalProduction = days.reduce((a, d) => a + d.productionMinutes, 0);
     const last7 = [...days].sort((a, b) => (a.date < b.date ? -1 : 1)).slice(-7).map((d) => ({
       date: d.date,
       pct: d.workingMinutes > 0 ? (d.productionMinutes / d.workingMinutes) * 100 : 0,
     }));
     return {
-      pct: totalWorking > 0 ? (totalProduction / totalWorking) * 100 : null,
+      pct: overallEfficiencyPct(days, period), // same helper as the Employees overview card
       sparkline: last7,
     };
   }, [employee, period]);
@@ -181,6 +178,7 @@ export function OperationsView({
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-lg font-semibold text-[#1F1D1B]">Operations</h2>
         <LiveBadge live={prodLive && invLive} />
+        {!period.day && <span className="text-xs text-[#6B7280]">{periodLabel(period)}</span>}
         {period.day && (
           <button
             type="button"
@@ -203,34 +201,21 @@ export function OperationsView({
                 label="Overdue Orders"
                 value={fmtN(totalOverdue)}
                 sub="all departments"
-                icon={AlertTriangle}
-                iconBgClass="bg-[#FBE7E3]"
-                iconColorClass="text-[#9A3A2D]"
                 valueColorClass="text-[#9A3A2D]"
               />
               <Kpi
                 label="Due Within 3 Days"
                 value={fmtN((production?.dueSoon3Days ?? []).length)}
                 sub="early warning"
-                icon={Clock}
-                iconBgClass="bg-[#FAEFCB]"
-                iconColorClass="text-[#9C6F1E]"
                 valueColorClass="text-[#9C6F1E]"
               />
               <div className="col-span-2 md:col-span-1">
                 <Card>
                   <CardContent className="p-4">
-                    <div className="flex items-center gap-3">
-                      <div className="rounded-lg p-2.5 shrink-0 bg-[#EEF3E4]">
-                        <CalendarClock className="h-5 w-5 text-[#4F7C3A]" />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="font-bold truncate tabular-nums text-2xl text-[#1F1D1B]">
-                          {stageCompletion.pct == null ? "—" : `${stageCompletion.pct.toFixed(1)}%`}
-                        </p>
-                        <p className="text-xs text-[#6B7280]">Plan vs Actual</p>
-                      </div>
-                    </div>
+                    <p className="text-xs text-[#6B7280] truncate">Plan vs Actual</p>
+                    <p className="mt-1 font-bold truncate tabular-nums text-2xl text-[#1F1D1B]">
+                      {stageCompletion.pct == null ? "—" : `${stageCompletion.pct.toFixed(1)}%`}
+                    </p>
                     <div className="mt-2.5">
                       <div className="h-1.5 w-full rounded-full bg-[#E2DDD8] overflow-hidden">
                         <div
@@ -255,9 +240,6 @@ export function OperationsView({
                 label="Material Shortage"
                 value={fmtN((inventory?.materialShortage ?? []).length)}
                 sub="at zero/negative stock"
-                icon={PackageX}
-                iconBgClass="bg-[#F0ECE9]"
-                iconColorClass="text-[#6B5C32]"
               />
               <Kpi
                 label="Production Cost"
@@ -267,9 +249,6 @@ export function OperationsView({
                     ? `${production.productionCost.batchesWithCost}/${production.productionCost.totalBatches} batches costed`
                     : undefined
                 }
-                icon={DollarSign}
-                iconBgClass="bg-[#E6F0F3]"
-                iconColorClass="text-[#3E6570]"
                 valueColorClass="text-[#3E6570]"
                 valueSizeClass="text-xl"
               />
@@ -282,24 +261,14 @@ export function OperationsView({
                 label="Attendance"
                 value={attendanceStat.pct == null ? "—" : `${attendanceStat.pct.toFixed(1)}%`}
                 sub={`${fmtN(attendanceStat.present)} / ${fmtN(attendanceStat.headcount)} recorded, latest day`}
-                icon={UserCheck}
-                iconBgClass="bg-[#E6F0F3]"
-                iconColorClass="text-[#3E6570]"
               />
               <div className="col-span-1">
                 <Card>
                   <CardContent className="p-4">
-                    <div className="flex items-center gap-3">
-                      <div className="rounded-lg p-2.5 shrink-0 bg-[#E6F0F3]">
-                        <Gauge className="h-5 w-5 text-[#3E6570]" />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="font-bold truncate tabular-nums text-2xl text-[#3E6570]">
-                          {efficiencyStat.pct == null ? "—" : `${efficiencyStat.pct.toFixed(1)}%`}
-                        </p>
-                        <p className="text-xs text-[#6B7280]">Efficiency (Prod ÷ Working)</p>
-                      </div>
-                    </div>
+                    <p className="text-xs text-[#6B7280] truncate">Efficiency (Prod ÷ Working)</p>
+                    <p className="mt-1 font-bold truncate tabular-nums text-2xl text-[#3E6570]">
+                      {efficiencyStat.pct == null ? "—" : `${efficiencyStat.pct.toFixed(1)}%`}
+                    </p>
                     <div style={{ width: "100%", height: 32 }} className="mt-1.5">
                       {efficiencyStat.sparkline.length > 1 && (
                         <ResponsiveContainer width="100%" height="100%">
@@ -384,7 +353,7 @@ export function OperationsView({
                   <div className="overflow-x-auto" style={{ maxHeight: 300, overflowY: "auto" }}>
                     <table className="w-full text-[12px]">
                       <thead>
-                        <tr className="border-t border-b border-[#E2DDD8] sticky top-0 bg-white">
+                        <tr className="*:sticky *:top-0 *:z-10 *:bg-white *:shadow-[inset_0_1px_0_#E2DDD8,inset_0_-1px_0_#E2DDD8]">
                           {["PO No", "Plan", "Actual", "Variance"].map((h) => (
                             <th key={h} className="text-left px-3 py-1.5 font-semibold uppercase text-[10px] tracking-wide text-[#6B7280]">{h}</th>
                           ))}
@@ -465,7 +434,7 @@ export function OperationsView({
                 <div className="overflow-x-auto" style={{ maxHeight: 260, overflowY: "auto" }}>
                   <table className="w-full text-[12.5px]">
                     <thead>
-                      <tr className="border-t border-b border-[#E2DDD8] sticky top-0 bg-white">
+                      <tr className="*:sticky *:top-0 *:z-10 *:bg-white *:shadow-[inset_0_1px_0_#E2DDD8,inset_0_-1px_0_#E2DDD8]">
                         {["Code", "Description", "Group", "Balance Qty"].map((h) => (
                           <th key={h} className="text-left px-4 py-2 font-semibold uppercase text-[10.5px] tracking-wide text-[#6B7280]">{h}</th>
                         ))}

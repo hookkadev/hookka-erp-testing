@@ -103,6 +103,10 @@ export function OcrView({ period }: { period: Period }) {
 
   return (
     <div className="space-y-6 max-md:space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="text-lg font-semibold text-[#1F1D1B]">OCR</h2>
+        <span className="text-xs text-[#6B7280]">{label}</span>
+      </div>
       <Section
         title="Model comparison"
         note={`${label} · every finished scan counts, including failed and discarded ones · accuracy = imported with no edits · * = fewer than ${MIN_SAMPLE}, not enough to judge`}

@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-25**: branch `feat/dashboard-kpi-no-icons` (PR #524 to `main`, open) is the newest entry below, items 1 to 17 checked against the branch. The Attendance log, time audit dates and Department Status branches are folded into it (#525, #526, #527 closed).
 > **Last verified: 2026-09-25** — branch `feat/ocr-dashboard-tab` entry below updated: PR #522 open, BUG-2026-09-25-192 fixed, historical model fallback added.
 > **Last verified: 2026-09-24** — branch `feat/dashboard-exp-ops-layout` added below (not committed, its entry is the newest).
 > **Last verified: 2026-09-24** — DEV-14 entry below updated: #510 MERGED; the per-line column was the wrong shape — branch `fix/pi-document-discount` (→ `main`) moves it to ONE invoice-level discount (BUG-2026-09-24-188).
@@ -24,6 +25,30 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+---
+
+## 2026-09-25 — 🔵 Experimental dashboard: icon-free KPI cards, Sales values, sticky tables, Attendance log, time-audit dates, Department Status (branch `feat/dashboard-kpi-no-icons` → `main`)
+
+1. 🔵 `Kpi` (`dashboard-shared.tsx`) no longer takes an icon: label → value → sub; a ±% delta sub is a green/red pill, any other sub stays plain wrapping text. Applies to Sales / Finance / Operations (incl. its 2 custom cards) / Production / Service / Employees; All-Overview Hero + DomainCard label icons and the Service approvals header icon removed too.
+2. 🔵 Kept only icons that carry meaning or affordance: ↑/↓ delta arrows, → on CTA buttons, search-field magnifier, ↗ case links, OCR error/retry, widget info chips.
+3. 🔵 Sales › Pending Delivery card shows its value (`pendingDeliverySen` in `computeSalesKpis`, sum of SHIPPED orders); mirrored on the `/m` Sales tab. Test: `tests/dashboard-m-lib.test.mjs`.
+4. 🔵 Sales › Completed card shows its value too (`completedSen`, DELIVERED/INVOICED/CLOSED sum; desktop + `/m`).
+5. 🔵 Sales › Revenue trend: Both / Revenue / Orders switch at the card top-right hides either series and its axis.
+6. 🔵 Sticky table headers no longer let scrolled rows show through: sticky/bg/borders moved from the `<tr>` onto its cells (inset-shadow borders) on the 7 dashboard tables — Operations ×2, Employees, Sales, OverdueCards, Service ×2. Sweep of the Attendance-log instance, item 8 (BUG-2026-09-25-193).
+7. 🔵 Attendance log — "Listed rows" / "Total (N days)" footer pinned to the bottom of the scrolling table (`*:sticky *:bottom-0` on its cells, white background, 2px inset top rule).
+8. 🔵 Attendance log — Header no longer shows scrolled rows through/above it: sticky, background, z-index and borders moved from the `<tr>` onto each `<th>` (BUG-2026-09-25-193).
+9. 🔵 Time audit — Each flagged person in "Time audit warning tiers" (desktop `EmployeesInsights.tsx` `EfficiencyPanels`) and "Time audit warnings" (`/m` `PeopleTab.tsx` `EfficiencySub`) now shows the days it happened: the days whose own production ÷ working ratio sits on the flagged side of the 90–110% band (`warnDays` + `dayList` in `dashboard-shared-lib.ts`). Desktop: new "Dates" column, first 3 + "+N more", full list on hover. `/m`: sub-line "N days: …". Client-side only, same `/api/dashboard/prototype` feed — no API change.
+10. 🔵 Department Status — `CountPill` (`DashboardWidgets.tsx`): a zero now renders in the same centred pill box as a count (no fill, `CHART_AXIS` grey, normal weight) instead of right-aligned bare text, so Overdue / Due ≤3d zeros line up with the pills.
+11. 🔵 Department Status — Overdue / Due ≤3d headers centred to match.
+12. 🔵 Department Status — The "—" for a department with no backlog data is centred in the days cell instead of hugging its right edge.
+13. 🔵 Cards on the experimental dashboard are flat with a tighter radius (rounded-md) and only get a shadow on hover. Scoped through a `data-slot="card"` hook on `Card` plus a descendant rule on the dashboard root, so other pages keep the default look.
+14. 🔵 Every tab shows the selected period next to its heading (added on Overview, Operations, Employees, Service and OCR; Sales and Finance already had it).
+15. 🔵 Worker Efficiency (/m Home and /dashboard) showed raw worker ids for PRODUCTION, which cannot read `/api/workers`. The hours summary now carries each worker name and department and the cards stopped fetching the directory (BUG-2026-09-25-194, test `tests/working-hours-summary-names.test.mjs`).
+16. 🔵 Employees › Overview: the efficiency card is now "Overall Efficiency" (sub: production ÷ working hours, all production staff). It is total earned production minutes ÷ total clocked working minutes over the period (`performance.byDay` from `/api/dashboard/prototype`), a weighted total, not an average of personal %s; a dash when nobody clocked time. The maths moved into `overallEfficiencyPct` (`dashboard-shared-lib.ts`), which the Operations "Efficiency (Prod ÷ Working)" card now reads too, so the two cannot disagree. No API change. tsc strict 0; `tests/dashboard-period.test.mjs` 15 pass. Browser check NOT done (no login); prod data UNMEASURED.
+17. 🔵 PRODUCTION can open the experimental dashboard (desktop and `/m`), limited to Sales, Operations, Employees and Service. Built as a per-role tab map, `DASHBOARD_TABS_BY_ROLE` in `role-policy.ts`: the feed hands a listed role only its tabs' sections, `/me/permissions` returns `dashboardTabs` plus a derived `dashboard-experimental:read` (also held by every `dashboard:read` viewer, so nobody loses the page), the page hides the other tabs and shows "Under maintenance" for them by URL. DO stats / pending value and the service approvals list open for the tab; no module permission is granted (still 403 on `/api/workers`, approve/reject still gated). Roles not in the map are unchanged. Test `tests/dashboard-tab-access.test.mjs`. Browser check NOT done (no login); PRODUCTION's real grants UNMEASURED.
+   Department Status: tsc strict 0, `tests/ops-floor-lib.test.mjs` pass. Browser check NOT done (no login in the agent session).
+   Time audit: tsc strict 0; `tests/dashboard-period.test.mjs` 14 pass. Browser check NOT done (no login); prod data UNMEASURED.
 
 ---
 

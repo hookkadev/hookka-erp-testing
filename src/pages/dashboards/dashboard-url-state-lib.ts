@@ -60,10 +60,11 @@ export const defaultSub = (tab: string): string => TAB_SUBS[tab]?.[0]?.key ?? ""
 
 export type DashboardUrlState = { tab: string; sub: string; period: Period };
 
-export function parseDashboardUrl(params: URLSearchParams, tabKeys: readonly string[]): DashboardUrlState {
+/** `landingTab`: where a bare or unknown `tab` lands (a tab-restricted role lands on its first tab). */
+export function parseDashboardUrl(params: URLSearchParams, tabKeys: readonly string[], landingTab: string = DEFAULT_TAB): DashboardUrlState {
   const legacy = LEGACY[`${params.get("tab")}:${params.get("sub")}`] ?? LEGACY[params.get("tab") ?? ""];
   const t = legacy?.[0] ?? params.get("tab");
-  const tab = t && tabKeys.includes(t) ? t : DEFAULT_TAB;
+  const tab = t && tabKeys.includes(t) ? t : landingTab;
   const s = legacy?.[1] ?? params.get("sub");
   const sub = s && TAB_SUBS[tab]?.some((x) => x.key === s) ? s : defaultSub(tab);
 

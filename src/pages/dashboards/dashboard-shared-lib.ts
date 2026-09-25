@@ -168,6 +168,27 @@ export function dayLabel(d: string): string {
 }
 
 /**
+ * The days a time-audit warning happened on. A person is flagged on their
+ * PERIOD ratio (sum production / sum working); these are the days whose own
+ * ratio sits on the same side of the band. Never empty for a flagged person:
+ * the period ratio is a working-weighted average of the daily ones. Compared
+ * by multiplication, so a day with production but no working minutes counts
+ * as over, not as a divide-by-zero.
+ */
+export function warnDays(days: { date: string; w: number; p: number }[], over: boolean, low: number, high: number): string[] {
+  return days
+    .filter((d) => (over ? d.p * 100 > d.w * high : d.p * 100 < d.w * low))
+    .map((d) => d.date)
+    .sort();
+}
+
+/** "3 Sep, 5 Sep, 9 Sep +2 more": the first `max` days, year dropped (the period label carries it). */
+export function dayList(dates: string[], max = 3): string {
+  const shown = dates.slice(0, max).map((d) => dayLabel(d).replace(/ \d{4}$/, ""));
+  return shown.join(", ") + (dates.length > max ? ` +${dates.length - max} more` : "");
+}
+
+/**
  * The period a view actually reads, from the period in the URL.
  *
  * A BARE URL (nothing picked yet: monthly, no month, no day) opens on TODAY -
@@ -363,6 +384,27 @@ export function previousPeriod(p: Period, months: string[]): Period | null {
 export function inFocus(p: Period, date: string | null | undefined): boolean {
   if (p.day) return String(date ?? "").slice(0, 10) === p.day;
   return inPeriod(p, date);
+}
+
+/**
+ * Overall efficiency for the period: total earned production minutes divided
+ * by total clocked working minutes (performance.byDay from the prototype
+ * route). A weighted total, not an average of each person's %. Null when
+ * nobody clocked any time, so the card shows a dash, not 0%. The Employees
+ * and Operations overview cards both read this, so they cannot disagree.
+ */
+export function overallEfficiencyPct(
+  byDay: readonly { date: string; workingMinutes: number; productionMinutes: number }[],
+  p: Period,
+): number | null {
+  let w = 0;
+  let prod = 0;
+  for (const d of byDay) {
+    if (!inFocus(p, d.date)) continue;
+    w += d.workingMinutes;
+    prod += d.productionMinutes;
+  }
+  return w > 0 ? (prod / w) * 100 : null;
 }
 
 // Sub-tab strips live in the page's sticky row (next to the period picker), so

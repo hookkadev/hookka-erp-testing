@@ -22,7 +22,12 @@ export function DashboardScreen() {
   const { tab } = useParams();
   const { search } = useLocation();
   const navigate = useNavigate();
-  const { isNavAllowed } = usePermissions();
+  const { isNavAllowed, dashboardTabs, loading: permsLoading } = usePermissions();
+  // Tab-restricted role (role-policy.ts DASHBOARD_TABS_BY_ROLE): only its tabs
+  // are offered, a bare /m/dashboard lands on the first, and any other tab
+  // reached by URL shows "Under maintenance". Same rule as the desktop page.
+  const tabs = dashboardTabs ? MOBILE_TABS.filter((t) => dashboardTabs.includes(t.key)) : MOBILE_TABS;
+  const landing = tabs[0]?.key ?? "overview";
   const { feed, months } = useDashboardFeed();
   // Newest day that carries data: the period sheet anchors its presets to it.
   const latestDay = (feed?.sales?.byDay ?? []).reduce((m, d) => (d.date > m ? d.date : m), "");
@@ -33,7 +38,11 @@ export function DashboardScreen() {
     [navigate, search],
   );
 
-  if (!isMobileTab(tab)) return <Navigate to={`/m/dashboard/overview${search}`} replace />;
+  // Wait for the permission set (first visit only; it is cached after), so a
+  // restricted role never lands on, or fetches for, a tab it may not see.
+  if (permsLoading) return null;
+  if (!isMobileTab(tab)) return <Navigate to={`/m/dashboard/${landing}${search}`} replace />;
+  const blocked = !tabs.some((t) => t.key === tab);
 
   if (!isNavAllowed(DASHBOARD_NAV_HREF)) {
     return (
@@ -64,10 +73,15 @@ export function DashboardScreen() {
             backgroundColor: M.card, color: M.raisin, fontSize: 16, fontWeight: 700,
           }}
         >
-          {MOBILE_TABS.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+          {blocked && <option value={tab} disabled>Choose a section</option>}
+          {tabs.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
         </select>
       </div>
-      <Tab period={period} setPeriod={setPeriod} months={months} openTab={openTab} />
+      {blocked ? (
+        <MState kind="empty" text="Under maintenance" />
+      ) : (
+        <Tab period={period} setPeriod={setPeriod} months={months} openTab={openTab} />
+      )}
     </>
   );
 }

@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, Tooltip, ReferenceLine, ResponsiveContainer } from "recharts";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { TAUPE, TEAL, MUTED, BORDER, AMBER, GREEN, fmtN, inPeriod, inFocus, dayLabel, periodLabel, type Period } from "./dashboard-shared-lib";
+import { TAUPE, TEAL, MUTED, BORDER, AMBER, GREEN, fmtN, inPeriod, inFocus, dayLabel, dayList, warnDays, periodLabel, type Period } from "./dashboard-shared-lib";
 
 // The Employees tab's time/efficiency panels. Everything here is derived from
 // the SAME cached /api/dashboard/prototype `employee` slice the rest of the
@@ -239,13 +239,14 @@ export function EfficiencyPanels({ employee, period, target, onPeriodChange, onP
   // says reads ~94% where the office reads ~84%. Headcount workers only.
   const people = useMemo(() => {
     const byId = new Map(employee.workers.map((w) => [w.id, w]));
-    const m = new Map<string, { w: number; p: number }>();
+    const m = new Map<string, { w: number; p: number; days: { date: string; w: number; p: number }[] }>();
     for (const d of employee.performance.byDay) {
       if (!inFocus(period, d.date)) continue;
       for (const x of d.workers ?? []) {
-        const cur = m.get(x.workerId) ?? { w: 0, p: 0 };
+        const cur = m.get(x.workerId) ?? { w: 0, p: 0, days: [] };
         cur.w += x.workingMinutes;
         cur.p += x.productionMinutes;
+        cur.days.push({ date: d.date, w: x.workingMinutes, p: x.productionMinutes });
         m.set(x.workerId, cur);
       }
     }
@@ -253,7 +254,7 @@ export function EfficiencyPanels({ employee, period, target, onPeriodChange, onP
       .flatMap(([id, v]) => {
         const w = byId.get(id);
         if (!w || !w.countsToHeadcount || v.w < MIN_RANK_MINUTES) return [];
-        return [{ key: id, name: w.name ?? "—", sub: [w.role, w.dept].filter(Boolean).join(" · "), avg: (v.p / v.w) * 100 }];
+        return [{ key: id, name: w.name ?? "—", sub: [w.role, w.dept].filter(Boolean).join(" · "), avg: (v.p / v.w) * 100, days: v.days }];
       })
       .sort((a, b) => b.avg - a.avg);
   }, [employee.performance.byDay, employee.workers, period]);
@@ -261,7 +262,10 @@ export function EfficiencyPanels({ employee, period, target, onPeriodChange, onP
   const top = people.slice(0, 5);
   const bottom = people.slice(-5).reverse();
   const flagged = useMemo(
-    () => people.filter((p) => p.avg < WARN_LOW || p.avg > WARN_HIGH).sort((a, b) => a.avg - b.avg),
+    () => people
+      .filter((p) => p.avg < WARN_LOW || p.avg > WARN_HIGH)
+      .map((p) => ({ ...p, dates: warnDays(p.days, p.avg > WARN_HIGH, WARN_LOW, WARN_HIGH) }))
+      .sort((a, b) => a.avg - b.avg),
     [people],
   );
 
@@ -285,7 +289,7 @@ export function EfficiencyPanels({ employee, period, target, onPeriodChange, onP
         <CardHeader className="pb-3">
           <CardTitle>Employee efficiency warning audit</CardTitle>
           <p className="text-xs text-[#6B7280]">
-            Efficiency vs the {target}% baseline · flags under {WARN_LOW}% (under-performance) and over {WARN_HIGH}% (over-reporting)
+            Efficiency vs the {target}% baseline · flags under {WARN_LOW}% (under-performance) and over {WARN_HIGH}% (over-reporting) · Dates are the days that person's own ratio was outside the band (hover for the full list)
           </p>
         </CardHeader>
         <CardContent className="p-0">
@@ -293,7 +297,7 @@ export function EfficiencyPanels({ employee, period, target, onPeriodChange, onP
             <table className="w-full text-[12.5px]">
               <thead>
                 <tr className="border-t border-b border-[#E2DDD8]">
-                  {["Employee", "Role / Dept", "Actual", "Target", "Efficiency", "Status"].map((h, i) => (
+                  {["Employee", "Role / Dept", "Actual", "Target", "Efficiency", "Dates", "Status"].map((h, i) => (
                     <th key={h} className={`px-4 py-2 font-semibold uppercase text-[10.5px] tracking-wide text-[#6B7280] ${i === 2 || i === 3 ? "text-right" : "text-left"}`}>{h}</th>
                   ))}
                 </tr>
@@ -316,6 +320,9 @@ export function EfficiencyPanels({ employee, period, target, onPeriodChange, onP
                           <div className="h-full rounded-full bg-[#8A5A14]" style={{ width: `${Math.min(100, (p.avg / target) * 100)}%` }} />
                         </div>
                       </td>
+                      <td className="px-4 py-2.5 text-[#6B7280] whitespace-nowrap" title={p.dates.map(dayLabel).join(", ")}>
+                        {dayList(p.dates)}
+                      </td>
                       <td className="px-4 py-2.5">
                         <span className="inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold" style={over ? { background: "#FBE7E3", color: "#9A3A2D" } : { background: "#FAEFCB", color: "#9C6F1E" }}>
                           {over ? "Over-reporting" : "Needs Attention"}
@@ -325,7 +332,7 @@ export function EfficiencyPanels({ employee, period, target, onPeriodChange, onP
                   );
                 })}
                 {flagged.length === 0 && (
-                  <tr><td colSpan={6} className="px-4 py-6 text-center text-[#6B7280]">Nobody is outside the {WARN_LOW}–{WARN_HIGH}% band.</td></tr>
+                  <tr><td colSpan={7}className="px-4 py-6 text-center text-[#6B7280]">Nobody is outside the {WARN_LOW}–{WARN_HIGH}% band.</td></tr>
                 )}
               </tbody>
             </table>

@@ -18,7 +18,7 @@
 //
 // Usage in a Hono route handler:
 //   import { requirePermission } from "../lib/rbac";
-import { permissionsForRole } from "./role-policy";
+import { permissionsForRole, dashboardTabsForRole, dashboardReadsForRole } from "./role-policy";
 //   app.post("/", async (c) => {
 //     const denied = await requirePermission(c, "sales-orders", "create");
 //     if (denied) return denied;       // 403 response, abort handler
@@ -351,4 +351,28 @@ export async function invalidateRolePermissions(
 ): Promise<void> {
   if (!kv || !role) return;
   await kv.delete(permKey(role));
+}
+
+/**
+ * The feed sections the caller's dashboard tab map lets it read, or null when
+ * its role is not tab-restricted (see DASHBOARD_TABS_BY_ROLE in role-policy.ts).
+ */
+export function dashboardReadsFor(c: Context<Env>): Set<string> | null {
+  const role = (c as unknown as { get: (k: string) => string | undefined }).get("userRole");
+  return dashboardReadsForRole(role ?? "");
+}
+
+/**
+ * requirePermission(resource, "read"), except that a role whose dashboard tab
+ * map includes `tab` may read this endpoint because that tab draws on it.
+ * For small aggregate reads a dashboard card needs; never for a write.
+ */
+export async function requireReadOrDashboardTab(
+  c: Context<Env>,
+  resource: string,
+  tab: string,
+): Promise<Response | null> {
+  const role = (c as unknown as { get: (k: string) => string | undefined }).get("userRole");
+  if (dashboardTabsForRole(role ?? "")?.includes(tab)) return null;
+  return requirePermission(c, resource, "read");
 }

@@ -3,7 +3,7 @@
 // exchange gate live in ../lib/service-approval.ts.
 import { Hono } from "hono";
 import type { Env } from "../worker";
-import { requirePermission } from "../lib/rbac";
+import { requirePermission, requireReadOrDashboardTab } from "../lib/rbac";
 import { emitAudit } from "../lib/audit";
 import {
   APPROVAL_KINDS, ensureApprovalColumns, fileApprovalRequest, type ApprovalKind,
@@ -18,7 +18,9 @@ const actorOf = (c: unknown): string | null =>
 
 // GET /api/service-cases/approvals — cases waiting for a decision, oldest first.
 app.get("/approvals", async (c) => {
-  const denied = await requirePermission(c, "service-cases", "read");
+  // The dashboard Service tab lists these, so a role whose dashboard tab map
+  // includes Service may READ the list. Deciding stays on service-cases:approve.
+  const denied = await requireReadOrDashboardTab(c, "service-cases", "service");
   if (denied) return denied;
   try {
     await ensureApprovalColumns(c.var.DB);

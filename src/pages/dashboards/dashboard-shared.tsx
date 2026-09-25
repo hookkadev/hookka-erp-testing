@@ -1,11 +1,10 @@
 import { cn } from "@/lib/utils";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
+import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight, TrendingDown, TrendingUp } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
-import type { LucideIcon } from "lucide-react";
 import {
   CHART_AXIS, monthLabel, periodLabel, ymd, stepPeriod, stepDay, yearsWithData, periodPresets, presetActive,
   calendarCells, shiftMonth,
@@ -537,40 +536,47 @@ export function Kpi({
   label,
   value,
   sub,
-  icon: Icon,
-  iconBgClass,
-  iconColorClass,
   valueColorClass,
   valueSizeClass,
 }: {
   label: string;
   value: string;
   sub?: string;
-  icon: LucideIcon;
-  iconBgClass: string;
-  iconColorClass: string;
   valueColorClass?: string;
   valueSizeClass?: string;
 }) {
+  // Label on top, big value, then the sub line. A "+x% / -x%" delta sub is a
+  // green / red pill; any other sub is plain text so it can wrap, not truncate.
+  const delta = sub ? /^[+-]/.test(sub) : false;
+  const down = sub?.startsWith("-");
+  const Trend = down ? TrendingDown : TrendingUp;
   return (
     <Card>
-      <CardContent className="p-4 max-md:p-3 flex items-center gap-3 max-md:gap-2">
-        <div className={cn("rounded-lg p-2.5 shrink-0 max-[420px]:hidden", iconBgClass)}>
-          <Icon className={cn("h-5 w-5", iconColorClass)} />
-        </div>
-        <div className="min-w-0">
-          <p
-            className={cn(
-              "font-bold truncate tabular-nums max-md:text-xl",
-              valueSizeClass ?? "text-2xl",
-              valueColorClass ?? "text-[#1F1D1B]",
-            )}
-          >
-            {value}
-          </p>
-          <p className="text-xs text-[#6B7280]">{label}</p>
-          {sub && <p className="text-xs text-[#6B7280]">{sub}</p>}
-        </div>
+      <CardContent className="p-4 max-md:p-3 min-w-0">
+        <p className="text-xs text-[#6B7280] truncate">{label}</p>
+        <p
+          className={cn(
+            "mt-1 font-bold truncate tabular-nums max-md:text-xl",
+            valueSizeClass ?? "text-2xl",
+            valueColorClass ?? "text-[#1F1D1B]",
+          )}
+        >
+          {value}
+        </p>
+        {sub &&
+          (delta ? (
+            <span
+              className={cn(
+                "mt-2 inline-flex max-w-full items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium",
+                down ? "bg-[#F9E5E1] text-[#B3452F]" : "bg-[#EEF3E4] text-[#4F7C3A]",
+              )}
+            >
+              <Trend className="h-3 w-3 shrink-0" />
+              <span className="truncate">{sub}</span>
+            </span>
+          ) : (
+            <p className="mt-1 text-xs text-[#6B7280]">{sub}</p>
+          ))}
       </CardContent>
     </Card>
   );

@@ -514,7 +514,9 @@ app.get("/summary", async (c) => {
     tableName: "whe_summary_snapshot",
     sourceTables: ["working_hour_entries"],
   };
-  const _cacheKeySum = `from=${from}&to=${to}`;
+  // v2: each entry gained name + departmentCode. A v1 snapshot has neither,
+  // so the key changes rather than serving it until the source moves.
+  const _cacheKeySum = `v2:from=${from}&to=${to}`;
   const _checkSum = await Promise.all([
     _snapMod.readSnapshot(c.var.DB, _snapCfgSum, _orgIdSum, _cacheKeySum),
     _snapMod.getSourceSignature(c.var.DB, _snapCfgSum.sourceTables),
@@ -565,13 +567,35 @@ app.get("/summary", async (c) => {
     daysByWorker.set(r.workerId, Number(r.dayCount) || 0);
   }
 
-  const byWorker = new Map<string, { workerId: string; totalHours: number; byDept: Record<string, number>; daysWithEntries: number }>();
+  // Name and home department travel with the hours. The efficiency cards used
+  // to look them up in /api/workers, which needs workers:read, so a role that
+  // can read hours but not the directory (PRODUCTION) saw raw worker ids.
+  const namesRes = await c.var.DB
+    .prepare(
+      `SELECT w.id, w.name, w.departmentCode
+         FROM workers w
+        WHERE w.id IN (SELECT DISTINCT workerId FROM working_hour_entries
+                        WHERE date >= ? AND date <= ?)`,
+    )
+    .bind(from, to)
+    .all<Record<string, unknown>>();
+  const infoByWorker = new Map<string, { name: string | null; departmentCode: string | null }>();
+  for (const r of namesRes.results ?? []) {
+    infoByWorker.set(String(r.id), {
+      name: (r.name as string | null) ?? null,
+      departmentCode: ((r.departmentCode ?? r.department_code) as string | null) ?? null,
+    });
+  }
+
+  const byWorker = new Map<string, { workerId: string; name: string | null; departmentCode: string | null; totalHours: number; byDept: Record<string, number>; daysWithEntries: number }>();
   for (const r of rowsRes.results ?? []) {
     const hours = typeof r.hours === "number" ? r.hours : Number(r.hours) || 0;
     let entry = byWorker.get(r.workerId);
     if (!entry) {
       entry = {
         workerId: r.workerId,
+        name: infoByWorker.get(r.workerId)?.name ?? null,
+        departmentCode: infoByWorker.get(r.workerId)?.departmentCode ?? null,
         totalHours: 0,
         byDept: {},
         daysWithEntries: daysByWorker.get(r.workerId) ?? 0,
