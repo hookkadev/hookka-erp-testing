@@ -16,7 +16,7 @@
 import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { useCachedJson } from "@/lib/cached-fetch";
 import {
-  AMBER, GREEN, dayLabel, fmtN, inFocus, inPeriod, periodLabel, type Period,
+  AMBER, GREEN, dayLabel, dayList, fmtN, inFocus, inPeriod, periodLabel, warnDays, type Period,
 } from "../../../../dashboards/dashboard-shared-lib";
 import type { EmployeeSlice } from "../../../../dashboards/EmployeesInsights";
 import { filterSlice } from "../../../../dashboards/employee-filter";
@@ -137,13 +137,14 @@ function buildLog(e: EmployeeSlice, period: Period, perDay: boolean) {
 // EfficiencyPanels: per-person production / working, headcount workers with >= 1h clocked.
 function rankPeople(e: EmployeeSlice, period: Period) {
   const byId = new Map(e.workers.map((w) => [w.id, w]));
-  const m = new Map<string, { w: number; p: number }>();
+  const m = new Map<string, { w: number; p: number; days: { date: string; w: number; p: number }[] }>();
   for (const d of e.performance.byDay) {
     if (!inFocus(period, d.date)) continue;
     for (const x of d.workers ?? []) {
-      const cur = m.get(x.workerId) ?? { w: 0, p: 0 };
+      const cur = m.get(x.workerId) ?? { w: 0, p: 0, days: [] };
       cur.w += x.workingMinutes;
       cur.p += x.productionMinutes;
+      cur.days.push({ date: d.date, w: x.workingMinutes, p: x.productionMinutes });
       m.set(x.workerId, cur);
     }
   }
@@ -151,7 +152,7 @@ function rankPeople(e: EmployeeSlice, period: Period) {
     .flatMap(([id, v]) => {
       const w = byId.get(id);
       if (!w || !w.countsToHeadcount || v.w < MIN_RANK_MINUTES) return [];
-      return [{ key: id, name: w.name ?? "—", sub: [w.role, w.dept].filter(Boolean).join(" · "), avg: (v.p / v.w) * 100 }];
+      return [{ key: id, name: w.name ?? "—", sub: [w.role, w.dept].filter(Boolean).join(" · "), avg: (v.p / v.w) * 100, days: v.days }];
     })
     .sort((a, b) => b.avg - a.avg);
 }
@@ -410,7 +411,10 @@ function EfficiencySub({ employee, period, setPeriod, target, onPickEmployee }: 
   const dept = useMemo(() => deptEfficiency(employee, period), [employee, period]);
   const people = useMemo(() => rankPeople(employee, period), [employee, period]);
   const flagged = useMemo(
-    () => people.filter((p) => p.avg < WARN_LOW || p.avg > WARN_HIGH).sort((a, b) => a.avg - b.avg),
+    () => people
+      .filter((p) => p.avg < WARN_LOW || p.avg > WARN_HIGH)
+      .map((p) => ({ ...p, dates: warnDays(p.days, p.avg > WARN_HIGH, WARN_LOW, WARN_HIGH) }))
+      .sort((a, b) => a.avg - b.avg),
     [people],
   );
   const rankItem = (p: (typeof people)[number]) => ({
@@ -481,6 +485,7 @@ function EfficiencySub({ employee, period, setPeriod, target, onPickEmployee }: 
                   key={p.key}
                   code={p.sub || "—"}
                   title={p.name}
+                  subLine={`${p.dates.length === 1 ? "On" : `${fmtN(p.dates.length)} days:`} ${dayList(p.dates)}`}
                   meta={[{ label: "Actual", value: pct1(p.avg) }, { label: "Target", value: `${target}%` }]}
                   pill={<StatusPill style={over ? SEMANTIC.DANGER : SEMANTIC.WARNING} label={over ? "Over-reporting" : "Needs Attention"} size="sm" />}
                   onClick={() => onPickEmployee(p.key)}
@@ -491,7 +496,7 @@ function EfficiencySub({ employee, period, setPeriod, target, onPickEmployee }: 
         )}
         <Note>
           Flags under {WARN_LOW}% (under-performance) and over {WARN_HIGH}% (over-reporting) against the {target}% baseline.
-          The bands are display choices, not policy.
+          The bands are display choices, not policy. The dates are the days that person&apos;s own ratio was outside the band.
         </Note>
       </MSection>
     </>

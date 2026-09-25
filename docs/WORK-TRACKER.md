@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-25** — branch `fix/time-audit-warning-dates` added below (PR open, its entry is the newest).
 > **Last verified: 2026-09-25** — branch `feat/ocr-dashboard-tab` entry below updated: PR #522 open, BUG-2026-09-25-192 fixed, historical model fallback added.
 > **Last verified: 2026-09-24** — branch `feat/dashboard-exp-ops-layout` added below (not committed, its entry is the newest).
 > **Last verified: 2026-09-24** — DEV-14 entry below updated: #510 MERGED; the per-line column was the wrong shape — branch `fix/pi-document-discount` (→ `main`) moves it to ONE invoice-level discount (BUG-2026-09-24-188).
@@ -24,6 +25,13 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+---
+
+## 2026-09-25 — 🔵 Employees dashboard: time audit warnings show the dates (branch `fix/time-audit-warning-dates`)
+
+1. 🔵 Each flagged person in "Time audit warning tiers" (desktop `EmployeesInsights.tsx` `EfficiencyPanels`) and "Time audit warnings" (`/m` `PeopleTab.tsx` `EfficiencySub`) now shows the days it happened: the days whose own production ÷ working ratio sits on the flagged side of the 90–110% band (`warnDays` + `dayList` in `dashboard-shared-lib.ts`). Desktop: new "Dates" column, first 3 + "+N more", full list on hover. `/m`: sub-line "N days: …". Client-side only, same `/api/dashboard/prototype` feed — no API change.
+tsc strict 0; `tests/dashboard-period.test.mjs` 14 pass. Browser check NOT done (no login); prod data UNMEASURED.
 
 ---
 
