@@ -180,6 +180,7 @@ export function OperationsView({
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-lg font-semibold text-[#1F1D1B]">Operations</h2>
         <LiveBadge live={prodLive && invLive} />
+        {!period.day && <span className="text-xs text-[#6B7280]">{periodLabel(period)}</span>}
         {period.day && (
           <button
             type="button"

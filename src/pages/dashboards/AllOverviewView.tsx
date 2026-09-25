@@ -73,7 +73,7 @@ function ActionTile({ label, value, hint, onOpen }: { label: string; value: numb
     <button
       type="button"
       onClick={onOpen}
-      className="text-left rounded-lg border border-[#E2DDD8] bg-white shadow-sm p-4 max-md:p-3 min-h-11 hover:bg-[#F7F5F3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#6B5C32]"
+      className="text-left rounded-md border border-[#E2DDD8] bg-white transition-shadow hover:shadow-md p-4 max-md:p-3 min-h-11 hover:bg-[#F7F5F3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#6B5C32]"
     >
       <p className="text-2xl max-md:text-xl font-bold tabular-nums" style={{ color: value ? RED : value === 0 ? GREEN : MUTED }}>
         {value == null ? "—" : fmtN(value)}
@@ -274,10 +274,11 @@ export function AllOverviewView({
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-lg font-semibold text-[#1F1D1B]">Overview</h2>
         <LiveBadge live={!!data.availability?.sales?.live} />
+        <span className="text-xs text-[#6B7280]">{periodName}</span>
       </div>
 
       <p className="text-sm" style={{ color: MUTED }}>
-        {periodName} · Key operational bottlenecks &amp; priority action items
+        Key operational bottlenecks &amp; priority action items
       </p>
 
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
@@ -348,7 +349,7 @@ export function AllOverviewView({
               /dashboard tile. Failed = "—", partial = a floor ("+"). */}
           <Link
             to="/daily-report"
-            className="text-left rounded-lg border border-[#E2DDD8] bg-white shadow-sm p-4 max-md:p-3 min-h-11 hover:bg-[#F7F5F3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#6B5C32]"
+            className="text-left rounded-md border border-[#E2DDD8] bg-white transition-shadow hover:shadow-md p-4 max-md:p-3 min-h-11 hover:bg-[#F7F5F3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#6B5C32]"
           >
             <p
               className="text-2xl max-md:text-xl font-bold tabular-nums"

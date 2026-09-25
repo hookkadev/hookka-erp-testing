@@ -113,7 +113,9 @@ export default function DashboardPrototypePage() {
   );
 
   return (
-    <div className="space-y-6 max-md:space-y-4">
+    // Dashboard cards are flat with a tighter radius and only lift on hover.
+    // Scoped here so every other page keeps the default Card look.
+    <div className="space-y-6 max-md:space-y-4 [&_[data-slot=card]]:rounded-md [&_[data-slot=card]]:shadow-none [&_[data-slot=card]]:transition-shadow [&_[data-slot=card]:hover]:shadow-md">
       {/* Sticky: the title, the tab strip and the period control stay put while
           a long tab scrolls, so you can switch tab or month without scrolling
           back up. -mx/px cancels the page gutter so the backdrop reaches the

@@ -41,7 +41,9 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 9. 🔵 Time audit — Each flagged person in "Time audit warning tiers" (desktop `EmployeesInsights.tsx` `EfficiencyPanels`) and "Time audit warnings" (`/m` `PeopleTab.tsx` `EfficiencySub`) now shows the days it happened: the days whose own production ÷ working ratio sits on the flagged side of the 90–110% band (`warnDays` + `dayList` in `dashboard-shared-lib.ts`). Desktop: new "Dates" column, first 3 + "+N more", full list on hover. `/m`: sub-line "N days: …". Client-side only, same `/api/dashboard/prototype` feed — no API change.
 10. 🔵 Department Status — `CountPill` (`DashboardWidgets.tsx`): a zero now renders in the same centred pill box as a count (no fill, `CHART_AXIS` grey, normal weight) instead of right-aligned bare text, so Overdue / Due ≤3d zeros line up with the pills.
 11. 🔵 Department Status — Overdue / Due ≤3d headers centred to match.
-12. 🔵 Department Status — The "—" for a department with no backlog data is centred in the days cell instead of hugging its right edge.
+12. 🔵 Department Status — The "—" for a department with no backlog data is centred in the days cell instead of hugging its right edge.
+13. 🔵 Cards on the experimental dashboard are flat with a tighter radius (rounded-md) and only get a shadow on hover. Scoped through a `data-slot="card"` hook on `Card` plus a descendant rule on the dashboard root, so other pages keep the default look.
+14. 🔵 Every tab shows the selected period next to its heading (added on Overview, Operations, Employees, Service and OCR; Sales and Finance already had it).
    Department Status: tsc strict 0, `tests/ops-floor-lib.test.mjs` pass. Browser check NOT done (no login in the agent session).
    Time audit: tsc strict 0; `tests/dashboard-period.test.mjs` 14 pass. Browser check NOT done (no login); prod data UNMEASURED.
 

@@ -149,6 +149,7 @@ export function ServiceView({
       <div className="flex items-center gap-2 flex-wrap">
         <h2 className="text-lg font-semibold text-[#1F1D1B]">Service</h2>
         <LiveBadge live={data.availability?.service?.live ?? false} />
+        {!period.day && <span className="text-xs text-[#6B7280]">{periodLabel(period)}</span>}
         {period.day && (
           <button
             type="button"
