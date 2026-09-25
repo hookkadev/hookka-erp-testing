@@ -1,7 +1,7 @@
 import { cn } from "@/lib/utils";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight, TrendingDown, TrendingUp } from "lucide-react";
+import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Info, TrendingDown, TrendingUp } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
@@ -538,12 +538,18 @@ export function Kpi({
   sub,
   valueColorClass,
   valueSizeClass,
+  hint,
+  children,
 }: {
   label: string;
   value: string;
   sub?: string;
   valueColorClass?: string;
   valueSizeClass?: string;
+  /** Scope / definition note, shown on hover of an info icon next to the label. */
+  hint?: string;
+  /** Extra content under the sub line (e.g. a baseline bar). */
+  children?: ReactNode;
 }) {
   // Label on top, big value, then the sub line. A "+x% / -x%" delta sub is a
   // green / red pill; any other sub is plain text so it can wrap, not truncate.
@@ -552,8 +558,15 @@ export function Kpi({
   const Trend = down ? TrendingDown : TrendingUp;
   return (
     <Card>
-      <CardContent className="p-4 max-md:p-3 min-w-0">
-        <p className="text-xs text-[#6B7280] truncate">{label}</p>
+      <CardContent className="p-3 min-w-0">
+        <p className="text-xs text-[#6B7280] truncate">
+          {label}
+          {hint && (
+            <span title={hint} aria-label={hint} role="img" className="ml-1 inline-flex align-[-2px] cursor-help">
+              <Info className="h-3 w-3" />
+            </span>
+          )}
+        </p>
         <p
           className={cn(
             "mt-1 font-bold truncate tabular-nums max-md:text-xl",
@@ -577,6 +590,7 @@ export function Kpi({
           ) : (
             <p className="mt-1 text-xs text-[#6B7280]">{sub}</p>
           ))}
+        {children}
       </CardContent>
     </Card>
   );

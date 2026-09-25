@@ -13,7 +13,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { useCachedJson } from "@/lib/cached-fetch";
 import { formatCurrency } from "@/lib/utils";
 import {
-  dayLabel, fmtN, fmtRMAxis, inFocus, inPeriod, periodLabel, type Period,
+  dayLabel, fmtN, fmtRMAxis, inFocus, inPeriod, overallEfficiencyPct, periodLabel, type Period,
 } from "../../../../dashboards/dashboard-shared-lib";
 import { ListRow, MobileCard } from "../../../components";
 import { M, M_ACCENT, M_DELTA } from "../../../theme";
@@ -212,12 +212,11 @@ function OverviewPanel({ data, period, go }: { data: Feed; period: Period; go: (
     return { pct: (present / headcount) * 100, present, headcount };
   }, [employee]);
 
-  const efficiencyPct = useMemo(() => {
-    const days = (employee?.performance?.byDay ?? []).filter((d) => inFocus(period, d.date));
-    const working = days.reduce((a, d) => a + d.workingMinutes, 0);
-    const prod = days.reduce((a, d) => a + d.productionMinutes, 0);
-    return working > 0 ? (prod / working) * 100 : null;
-  }, [employee, period]);
+  // Same helper as the desktop Employees and Operations cards.
+  const efficiencyPct = useMemo(
+    () => overallEfficiencyPct(employee?.performance?.byDay ?? [], period),
+    [employee, period],
+  );
 
   const dueSoon = useMemo(
     () => [...(production?.dueSoon3Days ?? [])].sort((a, b) => (a.daysToDD ?? 0) - (b.daysToDD ?? 0)),

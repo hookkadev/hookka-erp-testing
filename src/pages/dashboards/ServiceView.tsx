@@ -14,7 +14,7 @@ import { ServiceIssuesPanel } from "./ServiceIssuesPanel";
 import { ServicePerformancePanel } from "./ServicePerformancePanel";
 import { ServiceCaseNo, OpenServiceCasesLink } from "./ServiceCaseLink";
 import { useServiceCaseLinks } from "./use-service-case-links";
-import { causeKeys, causeLabel } from "../../api/lib/service-issue-stats";
+import { byCause, causeKeys, causeLabel } from "../../api/lib/service-issue-stats";
 
 // Service tab: service-case report, overdue tracking, and the
 // approvals queue. Reads the `service` slice of the same cached
@@ -115,6 +115,8 @@ export function ServiceView({
       .filter((c) => !q || [c.caseNo, c.customer, c.issue].some((v) => (v ?? "").toLowerCase().includes(q)))
       .sort((a, b) => (a.createdDate < b.createdDate ? 1 : -1));
   }, [logged, search, causeFilter]);
+  // Picker options: categories present in the period's cases (plus the active one, so it never vanishes).
+  const causeOptions = useMemo(() => byCause(logged).filter((r) => r.count > 0 || r.key === causeFilter), [logged, causeFilter]);
 
   // Overdue is a live backlog, not a period slice: a case stuck for 20 days is
   // overdue whichever month is selected.
@@ -128,14 +130,14 @@ export function ServiceView({
   if (error || !data?.success) {
     return (
       <Card className="border-[#F0D9AE] bg-[#FDF3E4]">
-        <CardContent className="p-4 text-sm text-[#B5701A]">Couldn't load Service: {error ?? "unknown error"}</CardContent>
+        <CardContent className="p-3 text-sm text-[#B5701A]">Couldn't load Service: {error ?? "unknown error"}</CardContent>
       </Card>
     );
   }
   if (!slice) {
     return (
       <Card>
-        <CardContent className="p-4 text-sm text-[#6B7280]">
+        <CardContent className="p-3 text-sm text-[#6B7280]">
           Service data isn't available: {data.availability?.service?.reason ?? "the feed has no service section yet (try again in a minute)."}
         </CardContent>
       </Card>
@@ -145,7 +147,7 @@ export function ServiceView({
   const ageNote = `Age = whole days since the case was logged (created date), while it is still Open or In progress. Overdue = more than ${threshold} days.`;
 
   return (
-    <div className="space-y-5 max-md:space-y-4">
+    <div className="space-y-4 max-md:space-y-3">
       <div className="flex items-center gap-2 flex-wrap">
         <h2 className="text-lg font-semibold text-[#1F1D1B]">Service</h2>
         <LiveBadge live={data.availability?.service?.live ?? false} />
@@ -200,15 +202,17 @@ export function ServiceView({
           <Card>
             <CardHeader className="pb-3 flex flex-row items-center justify-between gap-3 flex-wrap">
               <CardTitle>Service cases logged ({fmtN(listRows.length)})</CardTitle>
-              {causeFilter && (
-                <button
-                  type="button"
-                  onClick={() => setCauseFilter(null)}
-                  className="text-xs rounded-md border border-[#E5E0D8] bg-[#F7F5F3] px-2 py-0.5 text-[#6B5C32] hover:bg-white max-md:min-h-10 max-md:px-3 max-md:text-left"
-                >
-                  Showing: {causeLabel(causeFilter)} — click to go back
-                </button>
-              )}
+              <select
+                aria-label="Category"
+                value={causeFilter ?? ""}
+                onChange={(e) => setCauseFilter(e.target.value || null)}
+                className="h-8 max-md:h-10 max-md:w-full rounded-md border border-[#E2DDD8] bg-white px-2 text-xs max-md:text-sm text-[#1F1D1B] focus:outline-none"
+              >
+                <option value="">All categories</option>
+                {causeOptions.map((r) => (
+                  <option key={r.key} value={r.key}>{r.label} ({fmtN(r.count)})</option>
+                ))}
+              </select>
               <div className="relative w-full max-w-[220px] max-md:max-w-none">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[#9CA3AF]" />
                 <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search case, customer, issue…" className="h-8 max-md:h-10 pl-8 text-xs max-md:text-sm" />
@@ -219,7 +223,7 @@ export function ServiceView({
                 <table className="w-full text-[12.5px]">
                   <thead>
                     <tr className="*:sticky *:top-0 *:z-10 *:bg-white *:shadow-[inset_0_1px_0_#E2DDD8,inset_0_-1px_0_#E2DDD8]">
-                      {["Case", "Customer", "Issue", "Logged", "Status", "Approval"].map((h) => (
+                      {["Case", "Customer", "Issue", "Category", "Logged", "Status", "Approval"].map((h) => (
                         <th key={h} className="text-left px-3 py-2 font-semibold uppercase text-[10.5px] tracking-wide text-[#6B7280]">{h}</th>
                       ))}
                     </tr>
@@ -230,6 +234,7 @@ export function ServiceView({
                         <td className="px-3 py-2 font-mono text-[#1F1D1B] whitespace-nowrap"><ServiceCaseNo id={c.id} caseNo={c.caseNo} canOpen={canOpen} /></td>
                         <td className="px-3 py-2 text-[#1F1D1B]">{c.customer ?? "—"}</td>
                         <td className="px-3 py-2 text-[#6B7280] max-w-[320px] truncate">{c.issue || "—"}</td>
+                        <td className="px-3 py-2 text-[#6B7280]">{c.causes?.length ? c.causes.map(causeLabel).join(", ") : "—"}</td>
                         <td className="px-3 py-2 text-[#6B7280] whitespace-nowrap">{dayLabel(c.createdDate)}</td>
                         <td className="px-3 py-2 whitespace-nowrap"><StatusPill status={c.status} /></td>
                         <td className="px-3 py-2 whitespace-nowrap text-[11.5px] font-semibold" style={{ color: APPROVAL_STYLE[c.approvalStatus ?? ""] ?? MUTED }}>
@@ -238,7 +243,7 @@ export function ServiceView({
                       </tr>
                     ))}
                     {listRows.length === 0 && (
-                      <tr><td colSpan={6} className="px-4 py-6 text-center text-[#6B7280]">No cases match.</td></tr>
+                      <tr><td colSpan={7} className="px-4 py-6 text-center text-[#6B7280]">No cases match.</td></tr>
                     )}
                   </tbody>
                 </table>

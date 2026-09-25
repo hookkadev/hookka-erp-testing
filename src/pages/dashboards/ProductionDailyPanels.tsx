@@ -211,14 +211,14 @@ export function ProductionDailyPanels({
   if (error || !data?.success) {
     return (
       <Card className="border-[#F0D9AE] bg-[#FDF3E4]">
-        <CardContent className="p-4 text-sm text-[#B5701A]">Couldn't load daily production: {error ?? "unknown error"}</CardContent>
+        <CardContent className="p-3 text-sm text-[#B5701A]">Couldn't load daily production: {error ?? "unknown error"}</CardContent>
       </Card>
     );
   }
 
   const missingSlice = (what: string) => (
     <Card className="border-[#F0D9AE] bg-[#FDF3E4]">
-      <CardContent className="p-4 text-sm text-[#B5701A]">
+      <CardContent className="p-3 text-sm text-[#B5701A]">
         {what} isn't available: {data.availability?.lim?.reason ?? "the feed carries no daily production slice (it may be an older cached response — reload in a minute, or you may lack production-orders access)"}.
       </CardContent>
     </Card>
@@ -325,7 +325,7 @@ export function ProductionDailyPanels({
 
       {sub === "revenue" && (!lim ? missingSlice("Production revenue") : !lim.revenue ? (
         <Card className="border-[#F0D9AE] bg-[#FDF3E4]">
-          <CardContent className="p-4 text-sm text-[#B5701A]">Production revenue isn't available: order values could not be loaded ({lim.revenueError ?? "unknown error"}).</CardContent>
+          <CardContent className="p-3 text-sm text-[#B5701A]">Production revenue isn't available: order values could not be loaded ({lim.revenueError ?? "unknown error"}).</CardContent>
         </Card>
       ) : (
         <>

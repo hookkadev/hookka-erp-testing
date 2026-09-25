@@ -448,7 +448,7 @@ export function SalesOrdersView({
   if (error || !data?.success) {
     return (
       <Card className="border-[#F0D9AE] bg-[#FDF3E4]">
-        <CardContent className="p-4 text-sm text-[#B5701A]">
+        <CardContent className="p-3 text-sm text-[#B5701A]">
           Couldn't load Sales Orders: {error ?? "unknown error"}
         </CardContent>
       </Card>
@@ -456,7 +456,7 @@ export function SalesOrdersView({
   }
 
   return (
-    <div className="space-y-6 max-md:space-y-4">
+    <div className="space-y-4 max-md:space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-lg font-semibold text-[#1F1D1B]">Sales Orders</h2>
         <LiveBadge live={live} />
@@ -475,7 +475,7 @@ export function SalesOrdersView({
         )}
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         <Kpi
           label="Total Orders"
           value={fmtN(kpis.soCount)}
@@ -521,7 +521,7 @@ export function SalesOrdersView({
           axis: two lines on one plot were unreadable where the scales differ
           by ~100x. Clicking a bar drills in — a month in YTD, a day in
           Monthly. The Both / Revenue / Orders switch hides either series. */}
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className="grid gap-3 lg:grid-cols-3">
         <Card className="lg:col-span-2 bg-white border-[#E5E0D8]">
           <CardHeader className="pb-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -742,7 +742,7 @@ export function SalesOrdersView({
 
       {/* Attribution and forecast sit side by side, as the design
           prototype pairs them. */}
-      <div className="grid gap-4 xl:grid-cols-2">
+      <div className="grid gap-3 xl:grid-cols-2">
         <Card>
           <CardHeader className="pb-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -977,7 +977,7 @@ export function SalesOrdersView({
       </div>
 
       {/* Widgets ported from /dashboard (same URLs + formulas). */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <OrderPipelineCard period={period} />
         <RevenueTrendCard period={period} />
       </div>
@@ -1014,7 +1014,7 @@ export function SalesOrdersView({
           </CardContent>
         </Card>
 
-      <div className="grid gap-4 xl:grid-cols-2">
+      <div className="grid gap-3 xl:grid-cols-2">
         <Card className="bg-white border-[#E5E0D8]">
           <CardHeader className="pb-3">
             <CardTitle>Sales by state &amp; category</CardTitle>
@@ -1022,7 +1022,7 @@ export function SalesOrdersView({
               Share of revenue · {selectedDetail ? selectedDetail.label : periodLabel(period)} · click a state to filter the SKU list
             </p>
           </CardHeader>
-          <CardContent className="grid gap-4 sm:grid-cols-2 items-center">
+          <CardContent className="grid gap-3 sm:grid-cols-2 items-center">
             {/* Donut with outside labels + leader lines, and the leading share
                 called out in the hole — the shape the design reference uses. */}
             <div

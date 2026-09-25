@@ -392,6 +392,12 @@ export function inFocus(p: Period, date: string | null | undefined): boolean {
  * route). A weighted total, not an average of each person's %. Null when
  * nobody clocked any time, so the card shows a dash, not 0%. The Employees
  * and Operations overview cards both read this, so they cannot disagree.
+ *
+ * Days with no clocked production time are skipped entirely. Job cards finish
+ * during the day but working hours are entered after it, so today (and any day
+ * whose hours are not in yet) carries earned minutes with nothing to divide
+ * them by. Counting them pushed the month's figure up (MEASURED 2026-09-25:
+ * 95.0% with today's 105.8h of earned time vs 92.9% without).
  */
 export function overallEfficiencyPct(
   byDay: readonly { date: string; workingMinutes: number; productionMinutes: number }[],
@@ -400,11 +406,50 @@ export function overallEfficiencyPct(
   let w = 0;
   let prod = 0;
   for (const d of byDay) {
-    if (!inFocus(p, d.date)) continue;
+    if (!inFocus(p, d.date) || d.workingMinutes <= 0) continue;
     w += d.workingMinutes;
     prod += d.productionMinutes;
   }
   return w > 0 ? (prod / w) * 100 : null;
+}
+
+/**
+ * One worker's day-by-day hours for the Efficiency drill-down, read from
+ * performance.byDay[].workers. EVERY calendar day of a monthly or range period
+ * is returned, so a day off shows as an empty slot and the x axis reads as the
+ * month. YTD would be 365 slots, so it keeps only the days the person worked.
+ * `eff` is null when nothing was clocked that day: no ratio to draw.
+ */
+export function workerDays(
+  byDay: readonly { date: string; workers?: readonly { workerId: string; workingMinutes: number; productionMinutes: number }[] }[],
+  workerId: string,
+  p: Period,
+): { date: string; workingMinutes: number; productionMinutes: number; eff: number | null }[] {
+  const hit = new Map<string, { w: number; p: number }>();
+  for (const d of byDay) {
+    if (!inPeriod(p, d.date)) continue;
+    const x = d.workers?.find((r) => r.workerId === workerId);
+    if (!x) continue;
+    const k = d.date.slice(0, 10);
+    const cur = hit.get(k) ?? { w: 0, p: 0 };
+    hit.set(k, { w: cur.w + x.workingMinutes, p: cur.p + x.productionMinutes });
+  }
+  let dates = [...hit.keys()].sort();
+  if (p.mode !== "ytd") {
+    const [y, m] = p.month.split("-").map(Number);
+    const from = p.mode === "range" ? p.from : `${p.month}-01`;
+    const to = p.mode === "range" ? p.to : `${p.month}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, "0")}`;
+    dates = [];
+    if (from && to) {
+      for (let t = Date.parse(`${from}T00:00:00Z`); t <= Date.parse(`${to}T00:00:00Z`); t += 86400000) {
+        dates.push(new Date(t).toISOString().slice(0, 10));
+      }
+    }
+  }
+  return dates.map((date) => {
+    const v = hit.get(date) ?? { w: 0, p: 0 };
+    return { date, workingMinutes: v.w, productionMinutes: v.p, eff: v.w > 0 ? (v.p / v.w) * 100 : null };
+  });
 }
 
 // Sub-tab strips live in the page's sticky row (next to the period picker), so
@@ -439,3 +484,17 @@ export const FIN_SUBS = [
   { key: "outlook", label: "Outlook & P/E" },
 ] as const;
 export type FinSub = (typeof FIN_SUBS)[number]["key"];
+
+/** Over-reporting steps of the daily warning audit, highest first. */
+export const OVER_TIERS = [1000, 500, 300, 150] as const;
+export type AuditTier = (typeof OVER_TIERS)[number] | "low";
+
+/**
+ * Tier for one person-day efficiency %: the highest over-reporting step it is
+ * ABOVE, "low" under the floor, null inside the band (floor..150 inclusive).
+ */
+export function auditTier(effPct: number, low = 90): AuditTier | null {
+  const over = OVER_TIERS.find((t) => effPct > t);
+  if (over) return over;
+  return effPct < low ? "low" : null;
+}
