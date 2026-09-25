@@ -130,14 +130,14 @@ export function ServiceView({
   if (error || !data?.success) {
     return (
       <Card className="border-[#F0D9AE] bg-[#FDF3E4]">
-        <CardContent className="p-4 text-sm text-[#B5701A]">Couldn't load Service: {error ?? "unknown error"}</CardContent>
+        <CardContent className="p-3 text-sm text-[#B5701A]">Couldn't load Service: {error ?? "unknown error"}</CardContent>
       </Card>
     );
   }
   if (!slice) {
     return (
       <Card>
-        <CardContent className="p-4 text-sm text-[#6B7280]">
+        <CardContent className="p-3 text-sm text-[#6B7280]">
           Service data isn't available: {data.availability?.service?.reason ?? "the feed has no service section yet (try again in a minute)."}
         </CardContent>
       </Card>
@@ -147,7 +147,7 @@ export function ServiceView({
   const ageNote = `Age = whole days since the case was logged (created date), while it is still Open or In progress. Overdue = more than ${threshold} days.`;
 
   return (
-    <div className="space-y-5 max-md:space-y-4">
+    <div className="space-y-4 max-md:space-y-3">
       <div className="flex items-center gap-2 flex-wrap">
         <h2 className="text-lg font-semibold text-[#1F1D1B]">Service</h2>
         <LiveBadge live={data.availability?.service?.live ?? false} />

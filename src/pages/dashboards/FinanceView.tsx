@@ -69,7 +69,7 @@ export function FinanceView({
   if (cur.status === "forbidden") {
     return (
       <Card className="border-[#F0D9AE] bg-[#FDF3E4]">
-        <CardContent className="p-4 text-sm text-[#B5701A]">
+        <CardContent className="p-3 text-sm text-[#B5701A]">
           The Finance tab requires accounting access. Ask an administrator to grant your role the Accounting permission.
         </CardContent>
       </Card>
@@ -78,7 +78,7 @@ export function FinanceView({
   if (cur.status === "error" || !cur.data) {
     return (
       <Card className="border-[#F0D9AE] bg-[#FDF3E4]">
-        <CardContent className="p-4 text-sm text-[#B5701A]">Couldn't load Finance: {cur.error ?? "unknown error"}</CardContent>
+        <CardContent className="p-3 text-sm text-[#B5701A]">Couldn't load Finance: {cur.error ?? "unknown error"}</CardContent>
       </Card>
     );
   }
@@ -86,7 +86,7 @@ export function FinanceView({
   const goMonth = (ym: string) => { if (months.includes(ym)) onPeriodChange({ mode: "monthly", month: ym }); };
 
   return (
-    <div className="space-y-5 max-md:space-y-4">
+    <div className="space-y-4 max-md:space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-lg font-semibold text-[#1F1D1B]">Finance</h2>
         <span className="rounded-full bg-[#F0ECE9] px-2 py-0.5 text-[11px] text-[#6B7280]">
@@ -194,7 +194,7 @@ function PerHead({ d, onMonth }: { d: Resp; onMonth: (ym: string) => void }) {
   const anyData = data.some((r) => r["Revenue / head"] !== null || r["Labour cost / head"] !== null);
   return (
     <>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 max-md:gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <Kpi label="Avg employee cost" value={rm(p.labourPerHeadSen)} sub={d.period.mode === "ytd" ? "labour cost ÷ avg headcount, YTD" : "labour cost ÷ headcount, month"} valueSizeClass="text-xl" />
         <Kpi label="Avg employee revenue" value={rm(p.revenuePerHeadSen)} sub="revenue ÷ headcount" valueSizeClass="text-xl" />
         <Kpi label="Headcount" value={p.headcount === null ? "—" : p.headcount.toLocaleString("en-MY", { maximumFractionDigits: 1 })} sub="ACTIVE, excl. TEST" valueSizeClass="text-xl" />
@@ -244,7 +244,7 @@ function PerHead({ d, onMonth }: { d: Resp; onMonth: (ym: string) => void }) {
         ]}
       />
       <Card>
-        <CardContent className="space-y-1 p-4">
+        <CardContent className="space-y-1 p-3">
           <Note><b>Labour cost</b> = the P&amp;L's direct labour (750-x) plus salary expense (900-S00x) — the payroll cost the P&amp;L already carries. <b>Revenue</b> = P&amp;L net sales.</Note>
           <Note>{d.meta.headcountBasis}</Note>
         </CardContent>
@@ -261,13 +261,13 @@ function Returns({ d }: { d: Resp }) {
   const roiSub = r.investedCapitalSen === null ? "no balance sheet" : `on ${rm(r.investedCapitalSen)} invested`;
   return (
     <>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 max-md:gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <Kpi label="ROA" value={pct(r.roa)} sub={`net profit ÷ total assets · ${tag}`} valueSizeClass="text-xl" />
         <Kpi label="ROE" value={pct(r.roe)} sub={`net profit ÷ total equity · ${tag}`} valueSizeClass="text-xl" />
         <Kpi label="ROI" value={pct(r.roi)} sub={`net profit ÷ invested capital · ${roiSub}`} valueSizeClass="text-xl" />
         <Kpi label="Net profit" value={rm(r.netProfitSen)} sub={r.annualised ? `annualised ${rm(r.basisProfitSen)}` : "year to date"} valueSizeClass="text-xl" />
       </div>
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 max-md:gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
         <Kpi label="Total assets" value={rm(l?.assetsSen)} valueSizeClass="text-xl" />
         <Kpi label="Total liabilities" value={rm(l?.liabilitiesSen)} valueSizeClass="text-xl" />
         <Kpi label="Total equity" value={rm(l?.equitySen)} valueSizeClass="text-xl" />
@@ -310,7 +310,7 @@ function Returns({ d }: { d: Resp }) {
         ]}
       />
       <Card>
-        <CardContent className="space-y-1 p-4">
+        <CardContent className="space-y-1 p-3">
           <Note><b>ROA</b> = {r.definitions.roa}. <b>ROE</b> = {r.definitions.roe}. <b>ROI</b> = {r.definitions.roi}.</Note>
           <Note>{r.definitions.basis}</Note>
           <Note>Assets, liabilities and equity are the posted general ledger's balances (same sections as the Balance Sheet tab). A ratio shows "—" when its denominator is zero or negative.</Note>
@@ -363,7 +363,7 @@ function Outlook({ d, onSaved }: { d: Resp; onSaved: () => void }) {
   };
   return (
     <>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 max-md:gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <Kpi label="Forecast revenue, next 12 mo" value={rm(f.next12RevenueSen)} sub="estimate" valueSizeClass="text-xl" />
         <Kpi label="Forecast net profit, next 12 mo" value={rm(f.next12ProfitSen)} sub="estimate" valueSizeClass="text-xl" />
         <Kpi label="Trailing net margin" value={f.marginPct === null ? "—" : `${f.marginPct.toFixed(1)}%`} sub={`last ${f.trailingMonths} months with data`} valueSizeClass="text-xl" />

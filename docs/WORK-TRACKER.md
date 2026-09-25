@@ -1,5 +1,7 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-25**: branch `feat/dashboard-efficiency-employee-drill` (stacked on `fix/dashboard-tighter-padding`, PR #533) added below (committed, not pushed, its entry is the newest).
+> **Last verified: 2026-09-25**: branch `fix/dashboard-tighter-padding` added below (not committed, its entry is the newest).
 > **Last verified: 2026-09-25**: branch `feat/dashboard-kpi-no-icons` (PR #524 to `main`, open) is the newest entry below, items 1 to 17 checked against the branch. The Attendance log, time audit dates and Department Status branches are folded into it (#525, #526, #527 closed).
 > **Last verified: 2026-09-25** — branch `feat/ocr-dashboard-tab` entry below updated: PR #522 open, BUG-2026-09-25-192 fixed, historical model fallback added.
 > **Last verified: 2026-09-24** — branch `feat/dashboard-exp-ops-layout` added below (not committed, its entry is the newest).
@@ -25,6 +27,28 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+---
+
+## 2026-09-25 — 🔵 /dashboard-experimental: Employees > Efficiency drills into one employee day by day (branch `feat/dashboard-efficiency-employee-drill`, stacked on #533)
+
+1. 🔵 The Efficiency sub-tab had no chart (only tables and the ranking). It now opens with the Daily efficiency chart (the Time & attendance one, extracted to `DailyEfficiencyCard` in `EmployeesInsights.tsx`; Time & attendance renders it unchanged).
+2. 🔵 With an employee picked, that chart shows the person for every day of the selected month: working vs production hours as bars and their own efficiency as the line, days off as empty slots. Driven by the existing `emp` filter in `EmployeesView.tsx`, so the Employee select, Reset and a new "← All employees" button on the chart header all return to the pool view. Data is the already-fetched `performance.byDay[].workers`; no API change. New pure helper `workerDays` in `dashboard-shared-lib.ts` (test in `tests/dashboard-period.test.mjs`).
+3. 🔵 Warning audit rows and Top/Bottom 5 rows are keyboard operable (Tab + Enter/Space) and scroll the chart into view when picked.
+4. 🔵 The warning audit is now its own `WarningAuditPanel` (shared `useRankedPeople` in `EmployeesInsights.tsx`). Efficiency keeps it; Time & attendance shows a COPY under the Attendance log, rendered through the log's new `below` slot so it follows the log's Today / Yesterday switch. That copy ignores the employee pick (dept filter only) so the list stays whole; a row click opens that person's log above it and highlights the row, a second click goes back.
+5. 🔵 The Time & attendance copy is now `DailyWarningAudit`: one row per person PER DAY outside the band (Employee, Role/Dept, Date, Production time, Prod hours, Efficiency, Status), highest first, so a single wild day (e.g. 0.4h clocked / 2.3h earned = 583%) shows even when the month average is inside the band. No minimum-minutes cut on this list. The over-reporting threshold is now 150% (was 110%) for both audits, and its status pill reads "Over 150%".
+6. 🔵 Daily warning audit: over-reporting is stepped, with status pills Over 150% / Over 300% / Over 500% / Over 1000% (pure `auditTier` + `OVER_TIERS` in `dashboard-shared-lib.ts`, test in `tests/dashboard-period.test.mjs`). A filter menu in the card header picks All / each Over step (cumulative, so Over 300% includes 500% and 1000% days) / Needs Attention, with a count per option. 10 rows a page with prev / next.
+
+Verified: `tsc -p tsconfig.app.json` exit 0, `npm test` 4881 pass / 0 fail. Visual check NOT done (local preview needs a login + worker).
+
+---
+
+## 2026-09-25 — 🔵 /dashboard-experimental: tighter padding + even Materials & cost cards (branch `fix/dashboard-tighter-padding`)
+
+1. 🔵 Tighter padding across every dashboard tab: Card header/content padding now reads `--card-pad` (default unchanged: 1.5rem desktop / 1rem mobile), the dashboard root sets it to 0.75rem; KPI / hero tiles p-4 → p-3; section spacing space-y-5/6 → space-y-4; card grids gap-4 → gap-3.
+2. 🔵 Operations overview: Materials & cost cards split 1:1 like People (was 2fr/3fr, short left, long right).
+
+Verified: `tsc -p tsconfig.app.json` exit 0. Visual check NOT done (local preview needs a login + worker).
 
 ---
 

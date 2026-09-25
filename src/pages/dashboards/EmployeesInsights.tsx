@@ -1,7 +1,8 @@
-import { useMemo } from "react";
-import { PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, Tooltip, ReferenceLine, ResponsiveContainer } from "recharts";
+import { useMemo, useState } from "react";
+import { ChevronDown, ChevronLeft, ChevronRight, Filter } from "lucide-react";
+import { PieChart, Pie, Cell, ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, Legend, ReferenceLine, ResponsiveContainer } from "recharts";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { TAUPE, TEAL, MUTED, BORDER, AMBER, GREEN, fmtN, inPeriod, inFocus, dayLabel, dayList, warnDays, periodLabel, type Period } from "./dashboard-shared-lib";
+import { TAUPE, TEAL, MUTED, BORDER, AMBER, GREEN, fmtN, inPeriod, inFocus, dayLabel, dayList, warnDays, workerDays, auditTier, OVER_TIERS, periodLabel, type AuditTier, type Period } from "./dashboard-shared-lib";
 
 // The Employees tab's time/efficiency panels. Everything here is derived from
 // the SAME cached /api/dashboard/prototype `employee` slice the rest of the
@@ -42,7 +43,7 @@ const TOOLTIP = { background: "#FFFFFF", border: `1px solid ${BORDER}`, borderRa
 // Audit bands around the 100% baseline. The feed carries no configured warning
 // threshold, so these are display choices, not policy.
 const WARN_LOW = 90;
-const WARN_HIGH = 110;
+const WARN_HIGH = 150;
 // A person clocking under an hour in the window has no meaningful ratio.
 const MIN_RANK_MINUTES = 60;
 
@@ -85,15 +86,6 @@ export function TimeAttendancePanels({ employee, period, target, onPeriodChange 
     return { w, p, nonProd: Math.max(0, all - w) };
   }, [employee.performance.byDay, period]);
 
-  const daily = useMemo(
-    () => employee.performance.byDay
-      .filter((d) => inPeriod(period, d.date) && d.workingMinutes > 0)
-      .sort((a, b) => (a.date < b.date ? -1 : 1))
-      .map((d) => ({ iso: d.date, date: d.date.slice(5), Efficiency: Math.round((d.productionMinutes / d.workingMinutes) * 1000) / 10 })),
-    [employee.performance.byDay, period],
-  );
-  const below = daily.filter((d) => d.Efficiency < target).length;
-
   const donut = [
     { name: "Regular", value: t.regular, color: TAUPE },
     { name: "Overtime", value: t.ot, color: AMBER },
@@ -106,7 +98,7 @@ export function TimeAttendancePanels({ employee, period, target, onPeriodChange 
   ];
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
       <Card>
         <CardHeader className="pb-3">
           <CardTitle>Time &amp; attendance</CardTitle>
@@ -157,45 +149,117 @@ export function TimeAttendancePanels({ employee, period, target, onPeriodChange 
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle>Daily efficiency</CardTitle>
-          <p className="text-xs text-[#6B7280]">
-            Pool (production ÷ working) per day against the {target}% target · {below} of {daily.length} days below · click a point to focus that day
-          </p>
-        </CardHeader>
-        <CardContent>
-          <div className="select-none [&_*]:outline-none [&_.recharts-wrapper]:outline-none" style={{ width: "100%", height: 260 }}>
-            {daily.length === 0 ? (
-              <div className="flex items-center justify-center h-full text-xs text-[#6B7280]">No clocked hours in range.</div>
-            ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart
-                  data={daily}
-                  margin={{ top: 6, right: 8, bottom: 0, left: 0 }}
-                  style={{ cursor: "pointer" }}
-                  onClick={(e) => {
-                    const hit = daily.find((d) => d.date === e?.activeLabel);
-                    if (hit) onPeriodChange({ ...period, day: period.day === hit.iso ? undefined : hit.iso });
-                  }}
-                >
-                  <XAxis dataKey="date" tick={{ fontSize: 10, fill: MUTED }} axisLine={{ stroke: BORDER }} tickLine={false} />
-                  <YAxis tick={{ fontSize: 10, fill: MUTED }} axisLine={false} tickLine={false} width={38} unit="%" domain={[0, "auto"]} />
-                  <Tooltip cursor={{ stroke: BORDER }} contentStyle={TOOLTIP} formatter={(v) => `${v}%`} />
-                  {period.day && <ReferenceLine x={period.day.slice(5)} stroke={TAUPE} strokeDasharray="3 3" />}
-                  <ReferenceLine y={target} stroke={MUTED} strokeDasharray="4 3" label={{ value: `${target}% target`, fontSize: 10, fill: MUTED, position: "insideTopRight" }} />
-                  <Line type="monotone" dataKey="Efficiency" stroke={TEAL} strokeWidth={1.75} dot={{ r: 2.5 }} activeDot={{ r: 5.5, fill: "#FFFFFF", stroke: TEAL, strokeWidth: 2 }} />
-                </LineChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+      <DailyEfficiencyCard employee={employee} period={period} target={target} onPeriodChange={onPeriodChange} />
     </div>
   );
 }
 
+// Pool efficiency per day. With `workerId` set it drills into that one person:
+// every day of the period on the x axis, their working vs production hours as
+// bars (right axis) and their own efficiency as the line. `workerId` is
+// EmployeesView's `emp` filter, so the filter bar, Reset, a picked row and the
+// back button all move the same state.
+export function DailyEfficiencyCard({ employee, period, target, onPeriodChange, workerId, onBack }: Common & {
+  workerId?: string; onBack?: () => void;
+}) {
+  const worker = workerId ? employee.workers.find((w) => w.id === workerId) : undefined;
+  const daily = useMemo(() => {
+    const r1 = (v: number) => Math.round(v * 10) / 10;
+    if (workerId) {
+      return workerDays(employee.performance.byDay, workerId, period).map((d) => ({
+        iso: d.date, date: d.date.slice(5),
+        Efficiency: d.eff == null ? null : r1(d.eff),
+        "Working hours": r1(d.workingMinutes / 60),
+        "Production hours": r1(d.productionMinutes / 60),
+      }));
+    }
+    return employee.performance.byDay
+      .filter((d) => inPeriod(period, d.date) && d.workingMinutes > 0)
+      .sort((a, b) => (a.date < b.date ? -1 : 1))
+      .map((d) => ({ iso: d.date, date: d.date.slice(5), Efficiency: r1((d.productionMinutes / d.workingMinutes) * 100) as number | null }));
+  }, [employee.performance.byDay, period, workerId]);
+  const measured = daily.filter((d) => d.Efficiency != null);
+  const below = measured.filter((d) => d.Efficiency! < target).length;
+  const month = periodLabel({ ...period, day: undefined });
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <CardTitle>{workerId ? `Daily efficiency · ${worker?.name ?? "Employee"}` : "Daily efficiency"}</CardTitle>
+          {workerId && onBack && (
+            <button
+              type="button"
+              onClick={onBack}
+              className="ml-auto text-xs rounded-md border border-[#E5E0D8] bg-[#F7F5F3] px-2 py-0.5 font-medium text-[#6B5C32] hover:bg-white max-md:min-h-10 max-md:px-3"
+            >
+              ← All employees
+            </button>
+          )}
+        </div>
+        <p className="text-xs text-[#6B7280]">
+          {workerId
+            ? `Working vs production hours and efficiency for each day of ${month} against the ${target}% target · ${below} of ${measured.length} days worked below · click a day to focus it`
+            : `Pool (production ÷ working) per day against the ${target}% target · ${below} of ${daily.length} days below · click a point to focus that day`}
+        </p>
+      </CardHeader>
+      <CardContent>
+        <div className="select-none [&_*]:outline-none [&_.recharts-wrapper]:outline-none" style={{ width: "100%", height: 260 }}>
+          {measured.length === 0 ? (
+            <div className="flex items-center justify-center h-full text-xs text-[#6B7280]">
+              {workerId ? `No clocked hours for ${worker?.name ?? "this employee"} in ${month}.` : "No clocked hours in range."}
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart
+                data={daily}
+                margin={{ top: 6, right: 8, bottom: 0, left: 0 }}
+                style={{ cursor: "pointer" }}
+                onClick={(e) => {
+                  const hit = daily.find((d) => d.date === e?.activeLabel);
+                  if (hit) onPeriodChange({ ...period, day: period.day === hit.iso ? undefined : hit.iso });
+                }}
+              >
+                <XAxis dataKey="date" tick={{ fontSize: 10, fill: MUTED }} axisLine={{ stroke: BORDER }} tickLine={false} />
+                <YAxis yAxisId="pct" tick={{ fontSize: 10, fill: MUTED }} axisLine={false} tickLine={false} width={38} unit="%" domain={[0, "auto"]} />
+                {workerId && <YAxis yAxisId="h" orientation="right" tick={{ fontSize: 10, fill: MUTED }} axisLine={false} tickLine={false} width={32} unit="h" />}
+                <Tooltip cursor={{ stroke: BORDER }} contentStyle={TOOLTIP} formatter={(v, name) => (v == null ? "—" : name === "Efficiency" ? `${v}%` : `${v}h`)} />
+                {workerId && <Legend wrapperStyle={{ fontSize: 11 }} />}
+                {period.day && <ReferenceLine yAxisId="pct" x={period.day.slice(5)} stroke={TAUPE} strokeDasharray="3 3" />}
+                <ReferenceLine yAxisId="pct" y={target} stroke={MUTED} strokeDasharray="4 3" label={{ value: `${target}% target`, fontSize: 10, fill: MUTED, position: "insideTopRight" }} />
+                {/* activeBar off + pointer-events none: see SalesOrdersView, the
+                    hovered bar would cover the line and swallow the day click. */}
+                {workerId && <Bar yAxisId="h" dataKey="Working hours" fill={TAUPE} fillOpacity={0.35} radius={[3, 3, 0, 0]} maxBarSize={14} activeBar={false} isAnimationActive={false} style={{ pointerEvents: "none" }} />}
+                {workerId && <Bar yAxisId="h" dataKey="Production hours" fill={TAUPE} radius={[3, 3, 0, 0]} maxBarSize={14} activeBar={false} isAnimationActive={false} style={{ pointerEvents: "none" }} />}
+                <Line yAxisId="pct" type="monotone" dataKey="Efficiency" stroke={TEAL} strokeWidth={1.75} dot={{ r: 2.5 }} activeDot={{ r: 5.5, fill: "#FFFFFF", stroke: TEAL, strokeWidth: 2 }} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 type RankRow = { key: string; name: string; sub: string; avg: number };
+
+// A row that opens that person's day-by-day chart: clickable, and reachable +
+// operable from the keyboard (Tab, then Enter or Space).
+const PICK_CLS = "cursor-pointer hover:bg-[#F7F5F3] focus-visible:bg-[#F7F5F3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#6B5C32]";
+function pickable(onPick: ((key: string) => void) | undefined, key: string, name: string) {
+  if (!onPick) return {};
+  return {
+    role: "button",
+    tabIndex: 0,
+    "aria-label": `Show ${name} day by day`,
+    onClick: () => onPick(key),
+    onKeyDown: (e: React.KeyboardEvent) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      onPick(key);
+    },
+  };
+}
 
 function RankCard({ title, hint, rows, total, fromTop, color, onPick }: {
   title: string; hint: string; rows: RankRow[]; total: number; fromTop: boolean; color: string;
@@ -211,8 +275,8 @@ function RankCard({ title, hint, rows, total, fromTop, color, onPick }: {
         {rows.map((r, i) => (
           <div
             key={r.key}
-            className={`flex items-center gap-3 ${onPick ? "cursor-pointer rounded-md hover:bg-[#F7F5F3]" : ""}`}
-            onClick={() => onPick?.(r.key)}
+            className={`flex items-center gap-3 ${onPick ? `rounded-md ${PICK_CLS}` : ""}`}
+            {...pickable(onPick, r.key, r.name)}
           >
             <span className="w-5 font-mono text-xs text-[#6B7280]">{fromTop ? i + 1 : total - i}</span>
             <div className="min-w-0 flex-1">
@@ -231,13 +295,15 @@ function RankCard({ title, hint, rows, total, fromTop, color, onPick }: {
   );
 }
 
-export function EfficiencyPanels({ employee, period, target, onPeriodChange, onPickEmployee }: Common) {
+// The HOUSE metric per person, shared by the ranking (Efficiency) and the
+// warning audit (Time & attendance) so both read the same numbers.
+function useRankedPeople(employee: EmployeeSlice, period: Period) {
   // The HOUSE metric, per person: earned production minutes ÷ clocked working
   // minutes (performance.byDay[].workers) — the same numbers the Employees
   // KPI and the pool line use, so the ranking reconciles with them. NOT
   // attendance_records.efficiency_pct, a looser number the route's own header
   // says reads ~94% where the office reads ~84%. Headcount workers only.
-  const people = useMemo(() => {
+  return useMemo(() => {
     const byId = new Map(employee.workers.map((w) => [w.id, w]));
     const m = new Map<string, { w: number; p: number; days: { date: string; w: number; p: number }[] }>();
     for (const d of employee.performance.byDay) {
@@ -258,9 +324,36 @@ export function EfficiencyPanels({ employee, period, target, onPeriodChange, onP
       })
       .sort((a, b) => b.avg - a.avg);
   }, [employee.performance.byDay, employee.workers, period]);
+}
+
+export function EfficiencyPanels({ employee, period, target, onPeriodChange, onPickEmployee }: Common) {
+  const people = useRankedPeople(employee, period);
 
   const top = people.slice(0, 5);
   const bottom = people.slice(-5).reverse();
+
+  return (
+    <div className="space-y-4 max-md:space-y-3">
+      <div className="flex items-center gap-2">
+        <h3 className="text-base font-semibold text-[#1F1D1B]">Efficiency ranking</h3>
+        <span className="rounded-full bg-[#F0ECE9] px-2 py-0.5 text-[11px] text-[#6B7280]">{people.length} ranked · {period.day ? dayLabel(period.day) : periodLabel(period)}</span>
+        <DayChip period={period} onPeriodChange={onPeriodChange} />
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <RankCard title="Top 5 performers" hint="Highest efficiency in the period · click a row to see that person day by day" rows={top} total={people.length} fromTop color={GREEN} onPick={onPickEmployee} />
+        <RankCard title="Bottom 5 · needs attention" hint="Lowest efficiency (production ÷ working) in the period" rows={bottom} total={people.length} fromTop={false} color={AMBER} onPick={onPickEmployee} />
+      </div>
+
+      <WarningAuditPanel employee={employee} period={period} target={target} onPickEmployee={onPickEmployee} />
+    </div>
+  );
+}
+
+// Efficiency: people whose period average sits outside the audit band (a
+// click drills the Daily efficiency chart). Time & attendance lists the same
+// band per day instead: DailyWarningAudit below.
+function WarningAuditPanel({ employee, period, target, onPickEmployee }: Omit<Common, "onPeriodChange">) {
+  const people = useRankedPeople(employee, period);
   const flagged = useMemo(
     () => people
       .filter((p) => p.avg < WARN_LOW || p.avg > WARN_HIGH)
@@ -270,17 +363,7 @@ export function EfficiencyPanels({ employee, period, target, onPeriodChange, onP
   );
 
   return (
-    <div className="space-y-5 max-md:space-y-4">
-      <div className="flex items-center gap-2">
-        <h3 className="text-base font-semibold text-[#1F1D1B]">Efficiency ranking</h3>
-        <span className="rounded-full bg-[#F0ECE9] px-2 py-0.5 text-[11px] text-[#6B7280]">{people.length} ranked · {period.day ? dayLabel(period.day) : periodLabel(period)}</span>
-        <DayChip period={period} onPeriodChange={onPeriodChange} />
-      </div>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <RankCard title="Top 5 performers" hint="Highest efficiency in the period · click a row to filter to that person" rows={top} total={people.length} fromTop color={GREEN} onPick={onPickEmployee} />
-        <RankCard title="Bottom 5 · needs attention" hint="Lowest efficiency (production ÷ working) in the period" rows={bottom} total={people.length} fromTop={false} color={AMBER} onPick={onPickEmployee} />
-      </div>
-
+    <div className="space-y-4 max-md:space-y-3">
       <div className="flex items-center gap-2">
         <h3 className="text-base font-semibold text-[#1F1D1B]">Time audit warning tiers</h3>
         <span className="rounded-full bg-[#F0ECE9] px-2 py-0.5 text-[11px] text-[#6B7280]">{flagged.length} flagged · {periodLabel(period)}</span>
@@ -289,7 +372,7 @@ export function EfficiencyPanels({ employee, period, target, onPeriodChange, onP
         <CardHeader className="pb-3">
           <CardTitle>Employee efficiency warning audit</CardTitle>
           <p className="text-xs text-[#6B7280]">
-            Efficiency vs the {target}% baseline · flags under {WARN_LOW}% (under-performance) and over {WARN_HIGH}% (over-reporting) · Dates are the days that person's own ratio was outside the band (hover for the full list)
+            Efficiency vs the {target}% baseline · flags under {WARN_LOW}% (under-performance) and over {WARN_HIGH}% (over-reporting) · Dates are the days that person's own ratio was outside the band (hover for the full list) · click a row to see that person day by day
           </p>
         </CardHeader>
         <CardContent className="p-0">
@@ -308,8 +391,8 @@ export function EfficiencyPanels({ employee, period, target, onPeriodChange, onP
                   return (
                     <tr
                       key={p.key}
-                      className={`border-b border-[#E2DDD8] ${onPickEmployee ? "cursor-pointer hover:bg-[#F7F5F3]" : ""}`}
-                      onClick={() => onPickEmployee?.(p.key)}
+                      className={`border-b border-[#E2DDD8] ${onPickEmployee ? PICK_CLS : ""}`}
+                      {...pickable(onPickEmployee, p.key, p.name)}
                     >
                       <td className="px-4 py-2.5 font-medium text-[#1F1D1B]">{p.name}</td>
                       <td className="px-4 py-2.5 text-[#6B7280]">{p.sub || "—"}</td>
@@ -325,7 +408,7 @@ export function EfficiencyPanels({ employee, period, target, onPeriodChange, onP
                       </td>
                       <td className="px-4 py-2.5">
                         <span className="inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold" style={over ? { background: "#FBE7E3", color: "#9A3A2D" } : { background: "#FAEFCB", color: "#9C6F1E" }}>
-                          {over ? "Over-reporting" : "Needs Attention"}
+                          {over ? `Over ${WARN_HIGH}%` : "Needs Attention"}
                         </span>
                       </td>
                     </tr>
@@ -337,6 +420,178 @@ export function EfficiencyPanels({ employee, period, target, onPeriodChange, onP
               </tbody>
             </table>
           </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// Time & attendance: the same band, but per person PER DAY. A person whose
+// month averages inside the band can still have one wild day (e.g. 0.4h
+// clocked, 2.3h earned = 583%); the per-person audit hides that, this lists it.
+// Any clocked production time counts here (no MIN_RANK_MINUTES): the tiny
+// denominators are exactly the days worth checking. Over-reporting is split
+// into steps (auditTier), the menu filters by step, 10 rows a page.
+const TIER_STYLE: Record<AuditTier, { background: string; color: string }> = {
+  1000: { background: "#9A3A2D", color: "#FFFFFF" },
+  500: { background: "#E9A89A", color: "#6E2418" },
+  300: { background: "#F6CFC6", color: "#9A3A2D" },
+  150: { background: "#FBE7E3", color: "#B3452F" },
+  low: { background: "#FAEFCB", color: "#9C6F1E" },
+};
+const tierLabel = (t: AuditTier) => (t === "low" ? "Needs Attention" : `Over ${t}%`);
+type AuditFilter = "all" | AuditTier;
+const PAGE_SIZE = 10;
+
+export function DailyWarningAudit({ employee, period, target, onPickEmployee, selectedId }: Omit<Common, "onPeriodChange"> & { selectedId?: string }) {
+  const rows = useMemo(() => {
+    const byId = new Map(employee.workers.map((w) => [w.id, w]));
+    const out: { key: string; workerId: string; name: string; sub: string; date: string; w: number; p: number; eff: number; tier: AuditTier }[] = [];
+    for (const d of employee.performance.byDay) {
+      if (!inFocus(period, d.date)) continue;
+      for (const x of d.workers ?? []) {
+        const wk = byId.get(x.workerId);
+        if (!wk?.countsToHeadcount || x.workingMinutes <= 0) continue;
+        const eff = (x.productionMinutes / x.workingMinutes) * 100;
+        const tier = auditTier(eff, WARN_LOW);
+        if (!tier) continue;
+        out.push({
+          key: `${x.workerId}|${d.date}`, workerId: x.workerId, name: wk.name ?? "—",
+          sub: [wk.role, wk.dept].filter(Boolean).join(" · "), date: d.date,
+          w: x.workingMinutes, p: x.productionMinutes, eff, tier,
+        });
+      }
+    }
+    // Highest first: the over-reporting days lead, the weakest days close the list.
+    return out.sort((a, b) => b.eff - a.eff);
+  }, [employee, period]);
+
+  // "Over N%" filters are cumulative (Over 300% includes the 500% and 1000%
+  // days), matching the label; Needs Attention is the under-floor days.
+  const [filter, setFilter] = useState<AuditFilter>("all");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [page, setPage] = useState(1);
+  const matches = (f: AuditFilter, r: (typeof rows)[number]) =>
+    f === "all" ? true : f === "low" ? r.tier === "low" : r.eff > f;
+  const options: AuditFilter[] = ["all", ...OVER_TIERS, "low"];
+  const shown = rows.filter((r) => matches(filter, r));
+  const pageCount = Math.max(1, Math.ceil(shown.length / PAGE_SIZE));
+  const cur = Math.min(page, pageCount); // a shorter list after a period change clamps, no effect needed
+  const pageRows = shown.slice((cur - 1) * PAGE_SIZE, cur * PAGE_SIZE);
+  const pick = (f: AuditFilter) => { setFilter(f); setPage(1); setMenuOpen(false); };
+  const optLabel = (f: AuditFilter) => (f === "all" ? "All flagged days" : tierLabel(f));
+  const pagerBtn = "h-8 max-md:h-10 rounded-md border border-[#E2DDD8] bg-white px-3 text-xs font-medium text-[#1F1D1B] hover:bg-[#F7F5F3] disabled:opacity-40 disabled:hover:bg-white";
+
+  return (
+    <div className="space-y-4 max-md:space-y-3">
+      <div className="flex items-center gap-2">
+        <h3 className="text-base font-semibold text-[#1F1D1B]">Time audit warning tiers</h3>
+        <span className="rounded-full bg-[#F0ECE9] px-2 py-0.5 text-[11px] text-[#6B7280]">{rows.length} flagged days · {rows.filter((r) => r.tier !== "low").length} over {WARN_HIGH}% · {periodLabel(period)}</span>
+      </div>
+      <Card>
+        <CardHeader className="pb-3 flex-row flex-wrap items-start justify-between gap-2 space-y-0">
+          <div className="min-w-0 flex-1 space-y-1.5">
+            <CardTitle>Employee efficiency warning audit</CardTitle>
+            <p className="text-xs text-[#6B7280]">
+              Each person's efficiency ON EACH DAY vs the {target}% baseline · flags days under {WARN_LOW}% (under-performance) and over {WARN_HIGH}% (over-reporting, stepped at 300 / 500 / 1000%), highest first · click a row to open that person's attendance log above, click it again to go back
+            </p>
+          </div>
+          {/* Status filter menu. The transparent backdrop closes it on any outside click. */}
+          <div className="relative">
+            <button
+              type="button"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen((o) => !o)}
+              className="flex h-8 max-md:h-10 items-center gap-1.5 rounded-md border border-[#E2DDD8] bg-white px-3 text-xs font-medium text-[#1F1D1B] hover:bg-[#F7F5F3]"
+            >
+              <Filter className="h-3.5 w-3.5 text-[#6B7280]" />
+              {optLabel(filter)}
+              <ChevronDown className="h-3.5 w-3.5 text-[#6B7280]" />
+            </button>
+            {menuOpen && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
+                <div role="menu" className="absolute right-0 z-20 mt-1 w-52 rounded-md border border-[#E2DDD8] bg-white py-1 shadow-md">
+                  {options.map((f) => (
+                    <button
+                      key={f}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={filter === f}
+                      onClick={() => pick(f)}
+                      className={`flex w-full items-center justify-between gap-2 px-3 py-1.5 max-md:py-2.5 text-left text-xs hover:bg-[#F7F5F3] ${filter === f ? "font-semibold text-[#1F1D1B]" : "text-[#4B4540]"}`}
+                    >
+                      <span className="flex items-center gap-2">
+                        <span
+                          className="h-2 w-2 rounded-full"
+                          style={f === "all" ? { background: MUTED } : { background: TIER_STYLE[f].background, boxShadow: `inset 0 0 0 1px ${TIER_STYLE[f].color}` }}
+                        />
+                        {optLabel(f)}
+                      </span>
+                      <span className="font-mono text-[#6B7280]">{rows.filter((r) => matches(f, r)).length}</span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="overflow-x-auto">
+            <table className="w-full text-[12.5px]">
+              <thead>
+                <tr className="border-t border-b border-[#E2DDD8]">
+                  {["Employee", "Role / Dept", "Date", "Production time", "Prod hours", "Efficiency", "Status"].map((h, i) => (
+                    <th key={h} className={`px-4 py-2 font-semibold uppercase text-[10.5px] tracking-wide text-[#6B7280] ${i >= 3 && i <= 5 ? "text-right" : "text-left"}`}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {pageRows.map((r) => (
+                  <tr
+                    key={r.key}
+                    className={`border-b border-[#E2DDD8] ${onPickEmployee ? PICK_CLS : ""} ${r.workerId === selectedId ? "bg-[#F0ECE9]" : ""}`}
+                    aria-pressed={onPickEmployee ? r.workerId === selectedId : undefined}
+                    {...pickable(onPickEmployee, r.workerId, r.name)}
+                  >
+                    <td className="px-4 py-2.5 font-medium text-[#1F1D1B]">{r.name}</td>
+                    <td className="px-4 py-2.5 text-[#6B7280]">{r.sub || "—"}</td>
+                    <td className="px-4 py-2.5 text-[#6B7280] whitespace-nowrap">{dayLabel(r.date)}</td>
+                    <td className="px-4 py-2.5 text-right font-mono">{hrs(r.w)}</td>
+                    <td className="px-4 py-2.5 text-right font-mono">{hrs(r.p)}</td>
+                    <td className="px-4 py-2.5 text-right font-mono font-semibold" style={{ color: r.tier === "low" ? "#9C6F1E" : "#9A3A2D" }}>{pct1(r.eff)}</td>
+                    <td className="px-4 py-2.5">
+                      <span className="inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold" style={TIER_STYLE[r.tier]}>
+                        {tierLabel(r.tier)}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+                {shown.length === 0 && (
+                  <tr><td colSpan={7} className="px-4 py-6 text-center text-[#6B7280]">
+                    {rows.length === 0 ? `No day is outside the ${WARN_LOW}–${WARN_HIGH}% band.` : `No days match "${optLabel(filter)}".`}
+                  </td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          {/* Controls sit LEFT: the floating chat button (FloatingChatButton,
+              fixed bottom-right) would otherwise cover the next-page arrow. */}
+          {shown.length > PAGE_SIZE && (
+            <div className="flex flex-wrap items-center gap-2 px-4 py-2.5 text-xs text-[#6B7280]">
+              <button type="button" className={pagerBtn} disabled={cur <= 1} onClick={() => setPage(cur - 1)} aria-label="Previous page">
+                <ChevronLeft className="h-3.5 w-3.5" />
+              </button>
+              <span className="tabular-nums">Page {cur} of {pageCount}</span>
+              <button type="button" className={pagerBtn} disabled={cur >= pageCount} onClick={() => setPage(cur + 1)} aria-label="Next page">
+                <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+              <span className="ml-2 tabular-nums">
+                {(cur - 1) * PAGE_SIZE + 1}–{Math.min(cur * PAGE_SIZE, shown.length)} of {shown.length}
+              </span>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

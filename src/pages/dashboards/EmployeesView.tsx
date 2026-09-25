@@ -1,9 +1,9 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { ComposedChart, Area, Line, XAxis, YAxis, Tooltip, Legend, ReferenceLine, ResponsiveContainer } from "recharts";
 import { useCachedJson } from "@/lib/cached-fetch";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { TimeAttendancePanels, EfficiencyPanels, type EmployeeSlice } from "./EmployeesInsights";
+import { TimeAttendancePanels, EfficiencyPanels, DailyEfficiencyCard, DailyWarningAudit, type EmployeeSlice } from "./EmployeesInsights";
 import { DeptEfficiencyCard } from "./ProductionDailyPanels";
 import { DepartmentsView } from "./DepartmentsView";
 import { AttendanceLogCard } from "./AttendanceLogCard";
@@ -97,7 +97,26 @@ export function EmployeesView({
   const depts = useMemo(() => [...new Set(headcountWorkers.map((w) => w.dept).filter((d): d is string => !!d))].sort(), [headcountWorkers]);
   const empOptions = useMemo(() => headcountWorkers.filter((w) => !dept || w.dept === dept), [headcountWorkers, dept]);
   const filtered = useMemo(() => (employee ? filterSlice(employee, dept, emp) : undefined), [employee, dept, emp]);
+  // The Time & attendance warning audit ignores the employee pick, so the
+  // flagged list stays whole while one person's log is open above it.
+  const deptOnly = useMemo(() => (employee ? filterSlice(employee, dept, "") : undefined), [employee, dept]);
   const shownCount = emp ? 1 : empOptions.length;
+
+  // Picking a person in the ranking or the warning audit drills the Daily
+  // efficiency chart into them (same `emp` as the filter bar) and brings the
+  // chart back into view, since those rows sit below it.
+  const effChartRef = useRef<HTMLDivElement>(null);
+  const pickEmployee = (id: string) => {
+    setEmp(id);
+    effChartRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  };
+  // Time & attendance: a warning-audit row opens that person's Attendance log
+  // (just above the audit); clicking the same row again goes back to everyone.
+  const logRef = useRef<HTMLDivElement>(null);
+  const pickForLog = (id: string) => {
+    setEmp(id === emp ? "" : id);
+    logRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   if (loading) {
     return <div className="py-16 text-center text-sm text-[#6B7280]">Loading…</div>;
@@ -105,7 +124,7 @@ export function EmployeesView({
   if (error || !data?.success) {
     return (
       <Card className="border-[#F0D9AE] bg-[#FDF3E4]">
-        <CardContent className="p-4 text-sm text-[#B5701A]">
+        <CardContent className="p-3 text-sm text-[#B5701A]">
           Couldn't load Employees:{error ?? "unknown error"}
         </CardContent>
       </Card>
@@ -113,8 +132,11 @@ export function EmployeesView({
   }
 
   const selectCls = "h-9 max-md:h-10 rounded-md border border-[#E2DDD8] bg-[#E8E1D6] px-3 text-sm text-[#1F1D1B] focus:outline-none";
+  // Sticky under the dashboard header (--dash-sticky-top, dashboard-prototype.tsx)
+  // so department / employee stay switchable while scrolling. md+ only: on a
+  // phone the stacked filters would eat most of the screen.
   const filterBar = (
-    <Card>
+    <Card className="md:sticky md:top-[var(--dash-sticky-top,0px)] md:z-20">
       <CardContent className="p-3 flex flex-wrap items-end gap-3">
         <label className="text-[11px] text-[#6B7280] space-y-1 block max-md:w-full">
           Department
@@ -145,7 +167,7 @@ export function EmployeesView({
   );
 
   return (
-    <div className="space-y-6 max-md:space-y-4">
+    <div className="space-y-4 max-md:space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-lg font-semibold text-[#1F1D1B]">Employees</h2>
         <LiveBadge live={live} />
@@ -159,7 +181,7 @@ export function EmployeesView({
       {/* Two real metrics; the config constants (target, working day) ride
           along as a baseline line and a subtitle instead of their own tiles. */}
       <div className="space-y-2">
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <Kpi
           label="Headcount"
           value={fmtN(headcount)}
@@ -274,16 +296,38 @@ export function EmployeesView({
           {filterBar}
           <TimeAttendancePanels employee={filtered} period={period} onPeriodChange={onPeriodChange} target={config?.efficiencyTargetPct ?? 100} />
 
-      <AttendanceLogCard employee={filtered ?? employee} period={period} perDay={!!emp} />
+          {/* The audit rides inside the log's `below` slot so it follows the log's
+              Today / Yesterday switch; the wrapper spaces the two like siblings. */}
+          <div ref={logRef} className="space-y-4 max-md:space-y-3 scroll-mt-[var(--dash-sticky-top,0px)] md:scroll-mt-[calc(var(--dash-sticky-top,0px)+96px)]">
+            <AttendanceLogCard
+              employee={filtered ?? employee}
+              period={period}
+              perDay={!!emp}
+              below={(logPeriod) => deptOnly && (
+                <DailyWarningAudit
+                  employee={deptOnly}
+                  period={logPeriod}
+                  target={config?.efficiencyTargetPct ?? 100}
+                  onPickEmployee={pickForLog}
+                  selectedId={emp || undefined}
+                />
+              )}
+            />
+          </div>
         </>
       )}
 
       {sub === "efficiency" && employee && filtered && (
         <>
           {filterBar}
+          {/* scroll-margin clears the sticky page header, plus the sticky
+              filter bar on md+ (~90px), so the card top lands in view. */}
+          <div ref={effChartRef} className="scroll-mt-[var(--dash-sticky-top,0px)] md:scroll-mt-[calc(var(--dash-sticky-top,0px)+96px)]">
+            <DailyEfficiencyCard employee={filtered} period={period} onPeriodChange={onPeriodChange} target={config?.efficiencyTargetPct ?? 100} workerId={emp || undefined} onBack={() => setEmp("")} />
+          </div>
           <DeptEfficiencyCard employee={filtered} period={period} target={config?.efficiencyTargetPct ?? 100} />
           <DepartmentsView employee={filtered} period={period} />
-          <EfficiencyPanels employee={filtered} period={period} onPeriodChange={onPeriodChange} onPickEmployee={(id) => setEmp(id)} target={config?.efficiencyTargetPct ?? 100} />
+          <EfficiencyPanels employee={filtered} period={period} onPeriodChange={onPeriodChange} onPickEmployee={pickEmployee} target={config?.efficiencyTargetPct ?? 100} />
         </>
       )}
     </div>

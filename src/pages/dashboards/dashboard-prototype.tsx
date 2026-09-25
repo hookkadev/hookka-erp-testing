@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useCachedJson } from "@/lib/cached-fetch";
 import { PeriodPicker } from "./dashboard-shared";
 import { resolvePeriod, opensOnToday, ymd, type Period, type PeopleSub, type OpsSub, type ServiceSub, type FinSub } from "./dashboard-shared-lib";
@@ -129,15 +129,31 @@ export default function DashboardPrototypePage() {
     [period, months, tab],
   );
 
+  // Publishes the sticky header's live height as --dash-sticky-top so a tab's
+  // own sticky bar (Employees filter) docks right under it at any width.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const header = headerRef.current;
+    if (!header) return;
+    const ro = new ResizeObserver(() =>
+      rootRef.current?.style.setProperty("--dash-sticky-top", `${header.offsetHeight}px`),
+    );
+    ro.observe(header);
+    return () => ro.disconnect();
+  }, []);
+
   return (
     // Dashboard cards are flat with a tighter radius and only lift on hover.
-    // Scoped here so every other page keeps the default Card look.
-    <div className="space-y-6 max-md:space-y-4 [&_[data-slot=card]]:rounded-md [&_[data-slot=card]]:shadow-none [&_[data-slot=card]]:transition-shadow [&_[data-slot=card]:hover]:shadow-md">
+    // Scoped here so every other page keeps the default Card look. pb-20
+    // lets the last card scroll clear of the floating chat button (56px at
+    // bottom-6).
+    <div ref={rootRef} className="space-y-4 max-md:space-y-3 pb-20 [--card-pad:0.75rem] [&_[data-slot=card]]:rounded-md [&_[data-slot=card]]:shadow-none [&_[data-slot=card]]:transition-shadow [&_[data-slot=card]:hover]:shadow-md">
       {/* Sticky: the title, the tab strip and the period control stay put while
           a long tab scrolls, so you can switch tab or month without scrolling
           back up. -mx/px cancels the page gutter so the backdrop reaches the
           full width; the bottom border separates it from the content beneath. */}
-      <div className="sticky top-0 z-30 -mx-4 px-4 md:-mx-6 md:px-6 pt-1 pb-3 max-md:pb-2 bg-[#F7F5F3]/95 backdrop-blur border-b border-[#E2DDD8] space-y-3 max-md:space-y-2">
+      <div ref={headerRef} className="sticky top-0 z-30 -mx-4 px-4 md:-mx-6 md:px-6 pt-1 pb-3 max-md:pb-2 bg-[#F7F5F3]/95 backdrop-blur border-b border-[#E2DDD8] space-y-3 max-md:space-y-2">
         {/* Phones: no big title and no tab strip (keeps the sticky block to two
             short rows) - the tab is a native <select> beside the period button
             below, which opens the OS picker. md+: the PageHeader, unchanged. */}

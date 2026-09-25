@@ -103,7 +103,7 @@ export function ServiceIssuesPanel({
   const maxProd = Math.max(1, ...products.map((p) => p.count));
 
   return (
-    <div className="space-y-5 max-md:space-y-4">
+    <div className="space-y-4 max-md:space-y-3">
       <Card>
         <CardHeader className="pb-1">
           <CardTitle>Issues by category ({fmtN(cases.length)} cases)</CardTitle>

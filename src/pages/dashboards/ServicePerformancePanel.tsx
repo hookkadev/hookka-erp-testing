@@ -92,7 +92,7 @@ export function ServicePerformancePanel({
   if (!slice) {
     return (
       <Card className="border-[#F0D9AE] bg-[#FDF3E4]">
-        <CardContent className="p-4 text-sm text-[#B5701A]">
+        <CardContent className="p-3 text-sm text-[#B5701A]">
           Service isn't available: the feed carries no service-case slice (it may be an older cached response — reload in a minute, or you may lack service-cases access).
         </CardContent>
       </Card>

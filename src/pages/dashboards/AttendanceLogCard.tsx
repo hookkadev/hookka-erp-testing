@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { MUTED, inFocus, periodLabel, stepDay, ymd, type Period } from "./dashboard-shared-lib";
 import type { EmployeeSlice } from "./EmployeesInsights";
@@ -26,7 +26,11 @@ const lateMin = (t: string | null) => {
 // perDay is an explicit prop (set when the filter bar has ONE employee picked) rather than
 // derived from "one distinct employee in the slice": a department that happens to have a
 // single active worker should still read as the department view.
-export function AttendanceLogCard({ employee, period: pagePeriod, perDay = false }: { employee: EmployeeSlice; period: Period; perDay?: boolean }) {
+// `below` renders under the card with the card's EFFECTIVE period, so a panel there
+// (the Time & attendance warning audit) follows the Today / Yesterday switch too.
+export function AttendanceLogCard({ employee, period: pagePeriod, perDay = false, below }: {
+  employee: EmployeeSlice; period: Period; perDay?: boolean; below?: (period: Period) => ReactNode;
+}) {
   // Today / Yesterday switch for THIS card only. "Today" is the browser's calendar day, the
   // same one resolvePeriod opens the page on. A pick remembers the page period it was made
   // against, so moving the page picker drops it (derived, no effect); pressing the lit chip
@@ -86,6 +90,7 @@ export function AttendanceLogCard({ employee, period: pagePeriod, perDay = false
   const h = (v: number | null) => (v == null ? "—" : hrs(v));
 
   return (
+    <>
     <Card>
       <CardHeader className="pb-3 flex-row flex-wrap items-start justify-between gap-2 space-y-0">
         <CardTitle>
@@ -185,5 +190,7 @@ export function AttendanceLogCard({ employee, period: pagePeriod, perDay = false
         </p>
       </CardContent>
     </Card>
+    {below?.(period)}
+    </>
   );
 }
