@@ -8,7 +8,6 @@ import { DeptEfficiencyCard } from "./ProductionDailyPanels";
 import { DepartmentsView } from "./DepartmentsView";
 import { AttendanceLogCard } from "./AttendanceLogCard";
 import { filterSlice } from "./employee-filter";
-import { Users, Target, Clock, Gauge } from "lucide-react";
 import { TAUPE, TEAL, MUTED, BORDER, fmtN, inPeriod, type Period, type PeopleSub } from "./dashboard-shared-lib";
 import { Kpi, LiveBadge, MissingNote } from "./dashboard-shared";
 
@@ -155,33 +154,21 @@ export function EmployeesView({
           label="Headcount"
           value={fmtN(headcount)}
           sub="ACTIVE, excl. TEST accounts"
-          icon={Users}
-          iconBgClass="bg-[#F0ECE9]"
-          iconColorClass="text-[#6B5C32]"
         />
         <Kpi
           label="Efficiency (Prod ÷ Working)"
           value={efficiencyPct == null ? "—" : `${efficiencyPct.toFixed(1)}%`}
           sub="earned standard time, not measured"
-          icon={Gauge}
-          iconBgClass="bg-[#E6F0F3]"
-          iconColorClass="text-[#3E6570]"
           valueColorClass="text-[#3E6570]"
         />
         <Kpi
           label="Efficiency Target"
           value={config?.efficiencyTargetPct != null ? `${config.efficiencyTargetPct}%` : "—"}
-          icon={Target}
-          iconBgClass="bg-[#EEF3E4]"
-          iconColorClass="text-[#4F7C3A]"
           valueColorClass="text-[#4F7C3A]"
         />
         <Kpi
           label="Working Hours / Day"
           value={config?.workingHoursPerDay != null ? `${config.workingHoursPerDay}h` : "—"}
-          icon={Clock}
-          iconBgClass="bg-[#FAEFCB]"
-          iconColorClass="text-[#9C6F1E]"
           valueColorClass="text-[#9C6F1E]"
         />
       </div>

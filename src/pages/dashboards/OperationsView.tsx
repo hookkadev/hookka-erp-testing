@@ -6,7 +6,6 @@ import {
 import { useCachedJson } from "@/lib/cached-fetch";
 import { formatCurrency } from "@/lib/utils";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { AlertTriangle, Clock, CalendarClock, PackageX, DollarSign, UserCheck, Gauge } from "lucide-react";
 import { TAUPE, TEAL, AMBER, MUTED, BORDER, fmtN, fmtRMAxis, inPeriod, inFocus, dayLabel, periodLabel, type Period, type OpsSub } from "./dashboard-shared-lib";
 import { Kpi, LiveBadge } from "./dashboard-shared";
 import { AttendanceLogCard } from "./AttendanceLogCard";
@@ -203,34 +202,21 @@ export function OperationsView({
                 label="Overdue Orders"
                 value={fmtN(totalOverdue)}
                 sub="all departments"
-                icon={AlertTriangle}
-                iconBgClass="bg-[#FBE7E3]"
-                iconColorClass="text-[#9A3A2D]"
                 valueColorClass="text-[#9A3A2D]"
               />
               <Kpi
                 label="Due Within 3 Days"
                 value={fmtN((production?.dueSoon3Days ?? []).length)}
                 sub="early warning"
-                icon={Clock}
-                iconBgClass="bg-[#FAEFCB]"
-                iconColorClass="text-[#9C6F1E]"
                 valueColorClass="text-[#9C6F1E]"
               />
               <div className="col-span-2 md:col-span-1">
                 <Card>
                   <CardContent className="p-4">
-                    <div className="flex items-center gap-3">
-                      <div className="rounded-lg p-2.5 shrink-0 bg-[#EEF3E4]">
-                        <CalendarClock className="h-5 w-5 text-[#4F7C3A]" />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="font-bold truncate tabular-nums text-2xl text-[#1F1D1B]">
-                          {stageCompletion.pct == null ? "—" : `${stageCompletion.pct.toFixed(1)}%`}
-                        </p>
-                        <p className="text-xs text-[#6B7280]">Plan vs Actual</p>
-                      </div>
-                    </div>
+                    <p className="text-xs text-[#6B7280] truncate">Plan vs Actual</p>
+                    <p className="mt-1 font-bold truncate tabular-nums text-2xl text-[#1F1D1B]">
+                      {stageCompletion.pct == null ? "—" : `${stageCompletion.pct.toFixed(1)}%`}
+                    </p>
                     <div className="mt-2.5">
                       <div className="h-1.5 w-full rounded-full bg-[#E2DDD8] overflow-hidden">
                         <div
@@ -255,9 +241,6 @@ export function OperationsView({
                 label="Material Shortage"
                 value={fmtN((inventory?.materialShortage ?? []).length)}
                 sub="at zero/negative stock"
-                icon={PackageX}
-                iconBgClass="bg-[#F0ECE9]"
-                iconColorClass="text-[#6B5C32]"
               />
               <Kpi
                 label="Production Cost"
@@ -267,9 +250,6 @@ export function OperationsView({
                     ? `${production.productionCost.batchesWithCost}/${production.productionCost.totalBatches} batches costed`
                     : undefined
                 }
-                icon={DollarSign}
-                iconBgClass="bg-[#E6F0F3]"
-                iconColorClass="text-[#3E6570]"
                 valueColorClass="text-[#3E6570]"
                 valueSizeClass="text-xl"
               />
@@ -282,24 +262,14 @@ export function OperationsView({
                 label="Attendance"
                 value={attendanceStat.pct == null ? "—" : `${attendanceStat.pct.toFixed(1)}%`}
                 sub={`${fmtN(attendanceStat.present)} / ${fmtN(attendanceStat.headcount)} recorded, latest day`}
-                icon={UserCheck}
-                iconBgClass="bg-[#E6F0F3]"
-                iconColorClass="text-[#3E6570]"
               />
               <div className="col-span-1">
                 <Card>
                   <CardContent className="p-4">
-                    <div className="flex items-center gap-3">
-                      <div className="rounded-lg p-2.5 shrink-0 bg-[#E6F0F3]">
-                        <Gauge className="h-5 w-5 text-[#3E6570]" />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="font-bold truncate tabular-nums text-2xl text-[#3E6570]">
-                          {efficiencyStat.pct == null ? "—" : `${efficiencyStat.pct.toFixed(1)}%`}
-                        </p>
-                        <p className="text-xs text-[#6B7280]">Efficiency (Prod ÷ Working)</p>
-                      </div>
-                    </div>
+                    <p className="text-xs text-[#6B7280] truncate">Efficiency (Prod ÷ Working)</p>
+                    <p className="mt-1 font-bold truncate tabular-nums text-2xl text-[#3E6570]">
+                      {efficiencyStat.pct == null ? "—" : `${efficiencyStat.pct.toFixed(1)}%`}
+                    </p>
                     <div style={{ width: "100%", height: 32 }} className="mt-1.5">
                       {efficiencyStat.sparkline.length > 1 && (
                         <ResponsiveContainer width="100%" height="100%">

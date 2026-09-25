@@ -5,7 +5,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useToast } from "@/components/ui/toast";
-import { ShieldCheck } from "lucide-react";
 import { BORDER, MUTED } from "./dashboard-shared-lib";
 import { ServiceCaseNo } from "./ServiceCaseLink";
 import { useServiceCaseLinks } from "./use-service-case-links";
@@ -96,7 +95,6 @@ export function ServiceApprovalsPanel({
   return (
     <Card>
       <CardHeader className="pb-3 flex flex-row items-center gap-2">
-        <ShieldCheck className="h-4 w-4 text-[#6B5C32]" />
         <CardTitle>{title}</CardTitle>
         <span className="text-xs text-[#6B7280] tabular-nums">{rows.length}</span>
       </CardHeader>

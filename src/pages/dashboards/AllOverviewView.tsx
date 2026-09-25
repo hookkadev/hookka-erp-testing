@@ -4,18 +4,7 @@ import { isUnknownOutcome, useCachedJson } from "@/lib/cached-fetch";
 import { formatCurrency } from "@/lib/utils";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import {
-  ArrowRight,
-  TrendingUp,
-  TrendingDown,
-  Factory,
-  AlertTriangle,
-  ShoppingCart,
-  Truck,
-  Users,
-  Package,
-  FileText,
-} from "lucide-react";
+import { ArrowRight, TrendingUp, TrendingDown } from "lucide-react";
 import {
   MUTED, GREEN, RED, AMBER, fmtN, fmtRM2, widgetPeriod, widgetPeriodLabel,
   periodLabel, dayLabel, isConfirmedOrder, type Period,
@@ -118,19 +107,16 @@ function Delta({ pct, vs }: { pct: number | null; vs: string }) {
 function Hero({
   label,
   value,
-  icon: Icon,
   children,
 }: {
   label: string;
   value: string;
-  icon: typeof Factory;
   children?: React.ReactNode;
 }) {
   return (
     <Card>
       <CardContent className="p-4 space-y-1">
-        <p className="text-[11px] uppercase tracking-wide flex items-center gap-1.5" style={{ color: MUTED }}>
-          <Icon className="h-3.5 w-3.5 shrink-0" />
+        <p className="text-[11px] uppercase tracking-wide" style={{ color: MUTED }}>
           {label}
         </p>
         <p className="text-2xl font-bold tabular-nums truncate text-[#1F1D1B]">{value}</p>
@@ -151,7 +137,6 @@ function Stat({ label, value }: { label: string; value: string }) {
 
 function DomainCard({
   title,
-  icon: Icon,
   stats,
   note,
   noteTone,
@@ -159,7 +144,6 @@ function DomainCard({
   onOpen,
 }: {
   title: string;
-  icon: typeof Factory;
   stats: { label: string; value: string }[];
   note?: string;
   noteTone?: string;
@@ -169,8 +153,7 @@ function DomainCard({
   return (
     <Card className="flex flex-col">
       <CardContent className="p-4 flex flex-col gap-3 flex-1">
-        <p className="text-sm font-semibold flex items-center gap-2 text-[#1F1D1B]">
-          <Icon className="h-4 w-4 shrink-0" style={{ color: MUTED }} />
+        <p className="text-sm font-semibold text-[#1F1D1B]">
           {title}
         </p>
         <div className="grid grid-cols-2 gap-3 flex-1">
@@ -298,24 +281,24 @@ export function AllOverviewView({
       </p>
 
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-        <Hero label={`Total Revenue (${period.day ? "day" : period.mode === "monthly" ? "MTD" : "YTD"})`} value={formatCurrency(totals.revenueSen)} icon={TrendingUp}>
+        <Hero label={`Total Revenue (${period.day ? "day" : period.mode === "monthly" ? "MTD" : "YTD"})`} value={formatCurrency(totals.revenueSen)}>
           <Delta pct={deltaPct} vs={totals.prevLabel || "—"} />
           <p className="text-xs" style={{ color: MUTED }}>{fmtN(totals.orders)} orders recorded</p>
         </Hero>
 
-        <Hero label="Active Factory Backlog" value={prod ? fmtN(prod.backlogCards) : "—"} icon={Factory}>
+        <Hero label="Active Factory Backlog" value={prod ? fmtN(prod.backlogCards) : "—"}>
           <p className="text-xs" style={{ color: MUTED }}>
             {prod ? `${fmtN(prod.active)} active production orders` : "no production feed"}
           </p>
         </Hero>
 
-        <Hero label="Operational Bottleneck" value={neck?.dept || "—"} icon={AlertTriangle}>
+        <Hero label="Operational Bottleneck" value={neck?.dept || "—"}>
           <p className="text-xs" style={{ color: MUTED }}>
             {neck?.dept ? `${fmtN(neck.cards)} cards · ${fmtN(neck.orders)} orders` : "no production feed"}
           </p>
         </Hero>
 
-        <Hero label="Critical Alerts" value={prod ? `${fmtN(prod.critical)} Critical` : "—"} icon={AlertTriangle}>
+        <Hero label="Critical Alerts" value={prod ? `${fmtN(prod.critical)} Critical` : "—"}>
           <p className="text-xs" style={{ color: prod && prod.atRisk > 0 ? AMBER : MUTED }}>
             {prod ? `${fmtN(prod.atRisk)} more at risk` : "no production feed"}
           </p>
@@ -326,7 +309,7 @@ export function AllOverviewView({
         <Hero
           label={`Invoices (${wpLabel})`}
           value={ovData ? fmtRM2(ovData.invoicesThisMonthSen ?? 0) : ovLoading ? "…" : "—"}
-          icon={FileText}
+         
         >
           <p className="text-xs" style={{ color: ovData || ovLoading ? MUTED : AMBER }}>
             {ovData ? "issued, by invoice date" : ovLoading ? "loading" : "Couldn't load invoices — not shown as zero"}
@@ -476,7 +459,6 @@ export function AllOverviewView({
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <DomainCard
           title="Sales &amp; Demand Snapshot"
-          icon={ShoppingCart}
           stats={[
             { label: "Top customer", value: sales.topCustomer },
             { label: `Revenue ${period.day ? "this day" : period.mode === "monthly" ? "this period" : "YTD"}`, value: formatCurrency(totals.revenueSen) },
@@ -489,7 +471,6 @@ export function AllOverviewView({
 
         <DomainCard
           title="Production &amp; Floor Status"
-          icon={Factory}
           stats={[
             { label: "Active jobs", value: prod ? fmtN(prod.active) : "—" },
             { label: "Bottleneck", value: neck?.dept || "—" },
@@ -502,7 +483,6 @@ export function AllOverviewView({
 
         <DomainCard
           title="Fulfillment &amp; Deliveries"
-          icon={Truck}
           stats={[
             { label: "Outstanding", value: outstanding ? fmtN(outstanding.count) : "—" },
             { label: "Value", value: outstanding ? formatCurrency(outstanding.valueSen) : "—" },
@@ -513,7 +493,6 @@ export function AllOverviewView({
 
         <DomainCard
           title="Workforce &amp; Attendance"
-          icon={Users}
           stats={[
             { label: workforce.presentDay ? `Present (${dayLabel(workforce.presentDay)})` : "Present", value: workforce.presentLabel },
             { label: "Team efficiency avg", value: workforce.avg == null ? "—" : `${workforce.avg.toFixed(1)}%` },
@@ -528,7 +507,6 @@ export function AllOverviewView({
 
         <DomainCard
           title="Inventory &amp; Supply Chain"
-          icon={Package}
           stats={[
             { label: "Stock value on hand", value: inv ? formatCurrency(inv.stockValueSen) : "—" },
             { label: "Items tracked", value: inv ? fmtN(inv.items) : "—" },

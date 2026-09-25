@@ -3,7 +3,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLin
 import { useCachedJson } from "@/lib/cached-fetch";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { AlertTriangle, CircleDot, Wrench, CheckCircle2, XCircle, FilePlus2, Search } from "lucide-react";
+import { Search } from "lucide-react";
 import {
   TAUPE, TEAL, RED, AMBER, GREEN, MUTED, BORDER, CHART_GOLD, fmtN,
   inPeriod, inFocus, dayLabel, periodLabel, type Period, type ServiceSub,
@@ -164,12 +164,12 @@ export function ServiceView({
       {sub === "overview" && (
         <>
           <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
-            <Kpi label="New cases" value={fmtN(logged.length)} sub={`logged, ${periodLabel(period)}`} icon={FilePlus2} iconBgClass="bg-[#F0ECE9]" iconColorClass="text-[#6B5C32]" />
-            <Kpi label="Open" value={fmtN(count("OPEN"))} sub="of those logged" icon={CircleDot} iconBgClass="bg-[#FAEFCB]" iconColorClass="text-[#9C6F1E]" valueColorClass="text-[#9C6F1E]" />
-            <Kpi label="In progress" value={fmtN(count("IN_PROGRESS"))} sub="of those logged" icon={Wrench} iconBgClass="bg-[#E6F0F3]" iconColorClass="text-[#3E6570]" valueColorClass="text-[#3E6570]" />
-            <Kpi label="Closed" value={fmtN(count("CLOSED"))} sub="of those logged" icon={CheckCircle2} iconBgClass="bg-[#EEF3E4]" iconColorClass="text-[#4F7C3A]" valueColorClass="text-[#4F7C3A]" />
-            <Kpi label="Cancelled" value={fmtN(count("CANCELLED"))} sub="of those logged" icon={XCircle} iconBgClass="bg-[#F0ECE9]" iconColorClass="text-[#6B7280]" />
-            <Kpi label="Overdue now" value={fmtN(overdue.length)} sub={`open > ${threshold} days, all time`} icon={AlertTriangle} iconBgClass="bg-[#FBE7E3]" iconColorClass="text-[#9A3A2D]" valueColorClass="text-[#9A3A2D]" />
+            <Kpi label="New cases" value={fmtN(logged.length)} sub={`logged, ${periodLabel(period)}`} />
+            <Kpi label="Open" value={fmtN(count("OPEN"))} sub="of those logged" valueColorClass="text-[#9C6F1E]" />
+            <Kpi label="In progress" value={fmtN(count("IN_PROGRESS"))} sub="of those logged" valueColorClass="text-[#3E6570]" />
+            <Kpi label="Closed" value={fmtN(count("CLOSED"))} sub="of those logged" valueColorClass="text-[#4F7C3A]" />
+            <Kpi label="Cancelled" value={fmtN(count("CANCELLED"))} sub="of those logged" />
+            <Kpi label="Overdue now" value={fmtN(overdue.length)} sub={`open > ${threshold} days, all time`} valueColorClass="text-[#9A3A2D]" />
           </div>
 
           <Card>
@@ -252,9 +252,9 @@ export function ServiceView({
       {sub === "overdue" && (
         <>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            <Kpi label="Overdue cases" value={fmtN(overdue.length)} sub={`open > ${threshold} days`} icon={AlertTriangle} iconBgClass="bg-[#FBE7E3]" iconColorClass="text-[#9A3A2D]" valueColorClass="text-[#9A3A2D]" />
-            <Kpi label="Worst" value={overdue[0] ? `${overdue[0].daysOverdue} d` : "—"} sub={overdue[0]?.caseNo ?? undefined} icon={Wrench} iconBgClass="bg-[#FAEFCB]" iconColorClass="text-[#9C6F1E]" valueColorClass="text-[#9C6F1E]" />
-            <Kpi label="Pending approvals" value={fmtN(pendingApprovals)} sub="cases waiting for a decision" icon={CircleDot} iconBgClass="bg-[#E6F0F3]" iconColorClass="text-[#3E6570]" valueColorClass="text-[#3E6570]" />
+            <Kpi label="Overdue cases" value={fmtN(overdue.length)} sub={`open > ${threshold} days`} valueColorClass="text-[#9A3A2D]" />
+            <Kpi label="Worst" value={overdue[0] ? `${overdue[0].daysOverdue} d` : "—"} sub={overdue[0]?.caseNo ?? undefined} valueColorClass="text-[#9C6F1E]" />
+            <Kpi label="Pending approvals" value={fmtN(pendingApprovals)} sub="cases waiting for a decision" valueColorClass="text-[#3E6570]" />
           </div>
           <Card>
             <CardHeader className="pb-1">

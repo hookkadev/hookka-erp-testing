@@ -107,6 +107,14 @@ test("sales KPIs count confirmed orders only; previous is null while a day is fo
   const k = computeSalesKpis(orders.slice(0, 2));
   assert.equal(k.soCount, 1);
   assert.equal(k.revenueSen, 1000);
+  // Pending Delivery card carries its value: sum of SHIPPED orders only.
+  const pd = computeSalesKpis([
+    { customer: "A", status: "SHIPPED", totalSen: 700, createdAt: "2026-08-03" },
+    { customer: "B", status: "SHIPPED", totalSen: 300, createdAt: "2026-08-04" },
+    { customer: "C", status: "CONFIRMED", totalSen: 5000, createdAt: "2026-08-04" },
+  ]);
+  assert.equal(pd.pendingDelivery, 2);
+  assert.equal(pd.pendingDeliverySen, 1000);
   const p = { mode: "monthly", month: "2026-08" };
   assert.deepEqual(previousSalesKpis(orders, p, months, false), { label: "Jul 2026", count: 1, revenueSen: 3000 });
   assert.equal(previousSalesKpis(orders, p, months, true), null);

@@ -18,7 +18,7 @@ import {
 import { useCachedJson } from "@/lib/cached-fetch";
 import { formatCurrency } from "@/lib/utils";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { ShoppingCart, DollarSign, Truck, CheckCircle, CalendarX2 } from "lucide-react";
+import { CalendarX2 } from "lucide-react";
 import {
   TAUPE, GREEN, AMBER, TEAL, fmtN, fmtRMAxis, ymd, dayLabel,
   CHART_INK, CHART_GOLD, CHART_AXIS, CARD_BORDER, CARD_BG, CHART_SERIES,
@@ -481,9 +481,6 @@ export function SalesOrdersView({
               ? `${pctDelta(kpis.soCount, prevKpis.count)} vs ${prevKpis.label}`
               : undefined
           }
-          icon={ShoppingCart}
-          iconBgClass="bg-[#F0ECE9]"
-          iconColorClass="text-[#6B5C32]"
         />
         <Kpi
           label="Revenue"
@@ -493,9 +490,6 @@ export function SalesOrdersView({
               ? `${pctDelta(kpis.revenueSen, prevKpis.revenueSen)} vs ${prevKpis.label}`
               : undefined
           }
-          icon={DollarSign}
-          iconBgClass="bg-[#F0ECE9]"
-          iconColorClass="text-[#6B5C32]"
           valueColorClass="text-[#6B5C32]"
           valueSizeClass="text-xl"
         />
@@ -503,25 +497,17 @@ export function SalesOrdersView({
           label="Outstanding"
           value={fmtN(kpis.outstandingCount)}
           sub={`${formatCurrency(kpis.outstandingSen)} value`}
-          icon={DollarSign}
-          iconBgClass="bg-[#FAEFCB]"
-          iconColorClass="text-[#9C6F1E]"
           valueColorClass="text-[#9C6F1E]"
         />
         <Kpi
           label="Pending Delivery"
           value={fmtN(kpis.pendingDelivery)}
-          icon={Truck}
-          iconBgClass="bg-[#E6F0F3]"
-          iconColorClass="text-[#3E6570]"
+          sub={`${formatCurrency(kpis.pendingDeliverySen)} value`}
           valueColorClass="text-[#3E6570]"
         />
         <Kpi
           label="Completed"
           value={fmtN(kpis.completedCount)}
-          icon={CheckCircle}
-          iconBgClass="bg-[#EEF3E4]"
-          iconColorClass="text-[#4F7C3A]"
           valueColorClass="text-[#4F7C3A]"
         />
       </div>
