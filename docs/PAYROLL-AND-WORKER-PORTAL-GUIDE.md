@@ -73,8 +73,15 @@ Workers log in with their employee PIN at `/worker`. Pages:
     public holiday 3×.
   - **Efficiency allowance** — the flat bonus when the month's cumulative
     efficiency reaches the worker's target (otherwise RM0).
-  - **Gross** — basic + OT + allowance. Statutory deductions (EPF/SOCSO/EIS)
-    then produce net pay on the payslip.
+  - **Leadership allowance** *(added 2026-09, migration 0233, DEV-06)* — a flat
+    per-worker bonus with **no efficiency/performance threshold**, pro-rated by
+    attendance using the same `worked / workingDays` formula as the efficiency
+    allowance (`src/api/lib/leadership-allowance.ts`,
+    `resolveLeadershipAllowanceSen`). On the payslip / My Pay it is summed into
+    the same "Allowance" line as the efficiency allowance rather than shown as
+    a separate row.
+  - **Gross** — basic + OT + allowance (efficiency + leadership combined).
+    Statutory deductions (EPF/SOCSO/EIS) then produce net pay on the payslip.
 
 ---
 
@@ -95,13 +102,14 @@ Workers log in with their employee PIN at `/worker`. Pages:
 | Absence | − salary ÷ 26 per confirmed absent working day; a blank day is "Pending" for 2 working days before it becomes an absence; backfilling the hours removes it automatically |
 | Join / resign mid-month | No proration — working days not worked (before joining or after the last day) simply count as absences at the ÷26 day rate (e.g. RM4,000: each missed working day deducts RM153.85) |
 | Efficiency allowance | Flat per-worker amount, paid only when monthly cumulative efficiency ≥ the worker's target; no proration |
+| Leadership allowance | Flat per-worker amount, **no threshold** — always pays, pro-rated by `worked / workingDays` (migration 0233, DEV-06) |
 | Statutory | EPF 11% / 13%, SOCSO ~RM7.45 / 26.15, EIS ~RM3.90 / 3.90 — per-worker toggle |
 
 Maintained where:
 - **Public holidays** → the Public Holidays panel (drives 3× OT and
   working-day counts).
 - **Salary (with effective date), OT multiplier, hours/day, statutory
-  toggles, efficiency allowance** → Employee Master.
+  toggles, efficiency allowance, leadership allowance** → Employee Master.
 - **Shift times, lunch, late grace/blocks, the fallback hour divisor, Sunday /
   holiday multipliers, absence grace, statutory rates** → the **Pay Rules
   panel** on the Payroll tab. Changes are scheduled with an effective date

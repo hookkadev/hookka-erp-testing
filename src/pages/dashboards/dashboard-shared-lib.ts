@@ -2,6 +2,8 @@
 // dashboard-shared.tsx because a file mixing component exports with
 // constant/function exports breaks Vite Fast Refresh (react-refresh/only-
 // export-components).
+import { formatCurrency } from "../../lib/utils";
+
 export const TAUPE = "#6B5C32";
 export const TEAL = "#3E6570";
 export const MUTED = "#6B7280";
@@ -31,6 +33,38 @@ export function fmtRMAxis(n: number): string {
   if (v >= 1_000_000) return `RM ${(n / 1_000_000).toFixed(v >= 10_000_000 ? 0 : 1)}m`;
   if (v >= 1_000) return `RM ${Math.round(n / 1_000)}k`;
   return `RM ${n}`;
+}
+
+// ---------------------------------------------------------------------------
+// DashboardWidgets.tsx formatters — owner rule 2026-09-23: no
+// rounding, TRUNCATE to 2 decimals (0.299 -> 0.29, -0.001 -> 0.00).
+// toPrecision(15) first so a float like 0.29*100 = 28.999999999999996 is read
+// as the 29 it means before the cut; `|| 0` turns -0 (and NaN) into 0.
+// ---------------------------------------------------------------------------
+export function truncDp(n: number, dp = 2): number {
+  return Math.trunc(Number((n * 10 ** dp).toPrecision(15))) / 10 ** dp || 0;
+}
+export function fmtDec2(n: number): string {
+  return truncDp(n).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+export function fmtPct2(n: number | null | undefined): string {
+  return n == null ? "—" : `${fmtDec2(n)}%`;
+}
+/** Integer sen, truncated (never rounded) — formatCurrency prints 2dp. */
+export function fmtRM2(sen: number | null | undefined): string {
+  return formatCurrency(Math.trunc(sen ?? 0) || 0);
+}
+/** Minutes as "Xh Ym", truncated to the whole minute. */
+export function fmtHM(min: number | null | undefined): string {
+  const m = Math.max(0, Math.trunc(min ?? 0));
+  return `${Math.floor(m / 60).toLocaleString("en-MY")}h ${m % 60}m`;
+}
+/** /dashboard's `period` query value: YTD reads all-time, else the month. */
+export function widgetPeriod(p: Period): string {
+  return p.mode === "ytd" ? "all" : p.month;
+}
+export function widgetPeriodLabel(p: Period): string {
+  return widgetPeriod(p) === "all" ? "All-time" : monthLabel(p.month);
 }
 
 // ---------------------------------------------------------------------------
@@ -134,6 +168,27 @@ export function dayLabel(d: string): string {
 }
 
 /**
+ * The days a time-audit warning happened on. A person is flagged on their
+ * PERIOD ratio (sum production / sum working); these are the days whose own
+ * ratio sits on the same side of the band. Never empty for a flagged person:
+ * the period ratio is a working-weighted average of the daily ones. Compared
+ * by multiplication, so a day with production but no working minutes counts
+ * as over, not as a divide-by-zero.
+ */
+export function warnDays(days: { date: string; w: number; p: number }[], over: boolean, low: number, high: number): string[] {
+  return days
+    .filter((d) => (over ? d.p * 100 > d.w * high : d.p * 100 < d.w * low))
+    .map((d) => d.date)
+    .sort();
+}
+
+/** "3 Sep, 5 Sep, 9 Sep +2 more": the first `max` days, year dropped (the period label carries it). */
+export function dayList(dates: string[], max = 3): string {
+  const shown = dates.slice(0, max).map((d) => dayLabel(d).replace(/ \d{4}$/, ""));
+  return shown.join(", ") + (dates.length > max ? ` +${dates.length - max} more` : "");
+}
+
+/**
  * The period a view actually reads, from the period in the URL.
  *
  * A BARE URL (nothing picked yet: monthly, no month, no day) opens on TODAY -
@@ -162,7 +217,7 @@ export function resolvePeriod(period: Period, months: string[], today: string, o
 }
 
 /** Tabs whose bare URL opens on the MONTH, not on today. Same keys on desktop and /m. */
-const MONTHLY_TABS = new Set(["overview", "sales"]);
+const MONTHLY_TABS = new Set(["overview", "sales", "ocr"]);
 
 export function opensOnToday(tab: string | undefined): boolean {
   return !MONTHLY_TABS.has(tab ?? "");
@@ -331,6 +386,27 @@ export function inFocus(p: Period, date: string | null | undefined): boolean {
   return inPeriod(p, date);
 }
 
+/**
+ * Overall efficiency for the period: total earned production minutes divided
+ * by total clocked working minutes (performance.byDay from the prototype
+ * route). A weighted total, not an average of each person's %. Null when
+ * nobody clocked any time, so the card shows a dash, not 0%. The Employees
+ * and Operations overview cards both read this, so they cannot disagree.
+ */
+export function overallEfficiencyPct(
+  byDay: readonly { date: string; workingMinutes: number; productionMinutes: number }[],
+  p: Period,
+): number | null {
+  let w = 0;
+  let prod = 0;
+  for (const d of byDay) {
+    if (!inFocus(p, d.date)) continue;
+    w += d.workingMinutes;
+    prod += d.productionMinutes;
+  }
+  return w > 0 ? (prod / w) * 100 : null;
+}
+
 // Sub-tab strips live in the page's sticky row (next to the period picker), so
 // the keys are shared between the shell and the views.
 // Tabs and sub-tabs are named after the FUNCTION, never the person who reads
@@ -338,8 +414,7 @@ export function inFocus(p: Period, date: string | null | undefined): boolean {
 export const PEOPLE_SUBS = [
   { key: "overview", label: "Overview" },
   { key: "time", label: "Time & attendance" },
-  { key: "efficiency", label: "Efficiency" },
-  { key: "departments", label: "Departments" },
+  { key: "efficiency", label: "Efficiency" }, // also holds the department ledger (was its own "departments" sub)
 ] as const;
 export const OPS_SUBS = [
   { key: "overview", label: "Overview" },

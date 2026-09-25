@@ -39,6 +39,7 @@ import { AnnouncementsScreen } from "./screens/AnnouncementsScreen";
 import { MailCenterScreen, MailThreadScreen } from "./screens/MailCenterScreen";
 import { MODULE_CONFIGS } from "./config/modules";
 import { preloadMobileCritical } from "./lib/preload";
+import { useAutoUpdateOnNavigate } from "@/lib/use-version-check";
 import { bootstrapMobileTheme } from "./lib/theme-mode";
 import "./theme-vars.css";
 
@@ -89,6 +90,10 @@ export default function MobileLayout() {
   useEffect(() => {
     preloadMobileCritical();
   }, []);
+
+  // Phones never checked for a new deploy at all — pick it up on the next
+  // screen change (BUG-2026-09-23-184).
+  useAutoUpdateOnNavigate();
 
   // Fold detection — owner 2026-06-30: "折叠如果没有展开,应该是在电话
   // 版本的;展开了之后,才在 Fold 版本". Galaxy Z Fold inner screen is

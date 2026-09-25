@@ -35,6 +35,8 @@ export type PurchaseInvoicePdfLine = {
   lineTotalSen: number;
   // Per-line SST in sen (owner 2026-06-30). 0 for non-taxable lines.
   taxSen?: number | null;
+  // Per-line discount in sen (DEV-14); lineTotalSen is already net of it.
+  discountSen?: number | null;
   lineType?: string | null;
 };
 
@@ -203,7 +205,8 @@ export function generatePurchaseInvoicePdf(
       item.supplierSku || "-",
       String(item.qty),
       fmtCurrency(item.unitPriceSen),
-      fmtCurrency(item.lineTotalSen),
+      // Gross, as the supplier prints it; the invoice discount is in the totals.
+      fmtCurrency((Number(item.lineTotalSen) || 0) + (Number(item.discountSen) || 0)),
     ];
   });
 
@@ -269,7 +272,9 @@ export function generatePurchaseInvoicePdf(
   // --- Totals (mirrors the Sales Invoice: Subtotal → rule → GRAND TOTAL big
   //     + amount in words, right-aligned label + value pairs) ---
   y += 8;
-  if (y > pageH - 70) {
+  // Invoice-level discount (DEV-14) = the lines' shares added back together.
+  const discountSen = (pi.items ?? []).reduce((s, i) => s + (Number(i.discountSen) || 0), 0);
+  if (y > pageH - 70 - (discountSen > 0 ? 12 : 0)) {
     doc.addPage();
     y = 36;
   }
@@ -301,6 +306,10 @@ export function generatePurchaseInvoicePdf(
     .reduce((s, i) => s + (Number(i.lineTotalSen) || 0), 0);
   const subtotalSen = pi.subtotalSen || goodsLineSen || pi.amountSen;
   const taxSen = pi.taxSen || perLineTaxSen + legacyTaxLineSen;
+  if (discountSen > 0) {
+    sumLine("Gross", fmtRM(subtotalSen + discountSen), false);
+    sumLine("Less: Discount", `(${fmtRM(discountSen)})`, false);
+  }
   sumLine("Subtotal", fmtRM(subtotalSen), false);
   sumLine("SST", fmtRM(taxSen), false);
   // Rule clears the 11pt TOTAL cap height (matches the Sales Invoice spacing).

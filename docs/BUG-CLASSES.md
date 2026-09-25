@@ -1,5 +1,12 @@
 # Recurring bug classes — the index that makes P5 executable
 
+> **Last verified: 2026-09-25**: restamped on branch `feat/dashboard-kpi-no-icons` (PR #524): C15 gains row 5, the Worker Efficiency card that printed worker ids after a refused `/api/workers` read (BUG-2026-09-25-194). Nothing else re-checked.
+> **Last verified: 2026-09-25** — restamped on branch `feat/ocr-dashboard-tab`: C23 gains the OCR-tab row (BUG-2026-09-25-192, `readQueueRow` dual-key fix); no other class re-checked.
+> **Last verified: 2026-09-23** — branch `fix/invoice-line-so-ref` adds **C16 row 8** (invoice PDF read the DO field names for per-line SO/REF/CO SO). Nothing else re-checked.
+>
+> **Last verified: 2026-09-23** — restamped on branch `fix/so-duplicate-ref-saves-draft`: only C21 row 11
+> (the SO duplicate-reference guard is now a warning, anchor re-derived to `sales-orders.ts:1795`).
+>
 > **Last verified: 2026-09-24 (later)** — restamped on branch `fix/staging-legacy-convert-bugs`:
 > C21 gains rows 16 (GRN stock by shared description — fixed) and 17 (BOM consumption, same
 > shape — open).
@@ -868,6 +875,7 @@ class must not use it.
 | 2 | **detail pages / edit forms / one embedded panel / the public QR page** — 11 printed a false absence, 4 hung on `Loading…`, 1 asserted an empty child set | ✅ 2026-08-13 (BUG-2026-08-13-016) — `useCachedJson().failure` + `isUnknownOutcome` + `<RecordLoadError>`; 19 files changed, 6 more repaired by the primitive alone |
 | 3 | **list pages** — ~25 grids whose empty caption (*"No draft orders."*, `DataGrid`'s default *"No data found."*) renders over a failed fetch | ⬜ **open, enumerated.** Each page owns its own caption and its own fetch shape, so this is a separate PR with its own before/after — not a blind sweep. Start from the files that import `useCachedJson` and pass an `emptyMessage`, and give `DataGrid` a `loadFailure` prop rather than editing 25 captions by hand |
 | 4 | **`cachedFetchJson` callers outside this class** | ⬜ unswept. The function returns `null` on every failure; any caller that renders that null as a factual empty state is row 1/2/3 wearing a different hat. `products/bom.tsx` and `products/documents.tsx` were two, found by this pass |
+| 5 | **Worker Efficiency card** (/m Home and /dashboard): `/api/workers` refused with 403 for PRODUCTION, and every row printed the raw worker id as if it were the name | ✅ 2026-09-25 (BUG-2026-09-25-194): the name now travels with the hours in `/api/working-hour-entries/summary`, so there is no second request left to fail. Test `tests/working-hours-summary-names.test.mjs` |
 
 Rows 3 and 4 are why this section exists rather than a note in the bug entry.
 Row 2's pass fixed **19 files across 11 modules**; every one would have been
@@ -1157,6 +1165,7 @@ narrowing has to state what it is dropping.
 | 5 | `createdAt` | `rowToMinimalPO` | `production/index.tsx:2862` | ⬜ open — `?axis=created_at` is a silent no-op; URL-only since the dropdown was removed 2026-05-07 |
 | 6 | `finishedGoods` / `finishedProducts` | `/api/inventory` | `suppliers/detail.tsx:214` | ✅ 2026-08-13 (-024) — and note the fix was to DELETE the read, not rename it; the two payload halves are different entities |
 | 7 | `regNo` / `tin` / `address` | the PERMISSION projection on `GET /api/organisations` | `letterheadForPurchaseOrg` → the PO / GRN / PI letterhead | ✅ 2026-08-13 (-100) — caught **before** merge, by looking for this class rather than by an incident |
+| 8 | `customerSOLine` / `customerRefLine` / `companySO` (read as the DO names `customerSO` / `customerRef` / `salesOrderNo`) | `computeInvoicePrintExtras` | `buildUnifiedInvoiceData` → invoice download + customer e-mail PDF | ✅ 2026-09-23 (-186) — a RENAMED field, not a dropped one: the invoice and DO extras share the `DocLineExtra` type, so `tsc` saw every name as optional-and-valid. Every line printed the invoice-level SO/REF and a blank CO SO. Enforced by `tests/invoice-pdf-line-refs.test.mjs` |
 
 **Row 7 adds an axis: a projection can be narrowed by PERMISSION, not only by payload
 size, and it is the more dangerous variant.** The slim-payload kind at least drops the same
@@ -1461,7 +1470,7 @@ IDENTITY or MONEY.
 | 8 | `admin.ts:1229`, `delivery-orders/_helpers.ts:1419` — `inv.salesOrderId ?? soIds[0]` as `priceForItem`'s `fallbackSoId` | a price, but only for lines with **no production-order link** | ⬜ **deliberate, do not "fix" in isolation** — this is `priceForItem`'s documented first-one-wins, whose last resort is `byAnyCode` anyway. Closed as the price half of BUG-2026-07-17-001 (2026-08-07) |
 | 9 | `delivery-orders/_helpers.ts:1741`, `delivery-orders.ts:1651` — `doRow.salesOrderId \|\| soIds[0]` | the **header** SO id on a combined invoice | ✅ benign, and labelled in place: the authoritative link is `deliveryOrderId`, and identity is per-line via `invoice_items.so_item_id` |
 | 10 | `worker/scan.tsx:1107` — `?? wkCards[0]` | which card of a compartment is DISPLAYED | ✅ benign: `wkCards` is already filtered to ONE production order **and** ONE `wipKey`, so every candidate is the same physical compartment, and the server decides the completion from the worker's token |
-| 11 | `purchase-invoices.ts:1178`, `sales-orders.ts:1653` — `?? dupNums[0]` | which reference is **named** in a duplicate-rejection message | ✅ benign: the `.find` covers the real case and the authoritative `duplicateOf` is exact. (Sub-note: their `LIMIT 1` has no `ORDER BY`, so with two duplicates it names an arbitrary one — still a rejection either way) |
+| 11 | `purchase-invoices.ts:1178`, `sales-orders.ts:1795` — `?? dupNums[0]` / `?? soRefs[0]` | which reference is **named** in a duplicate-rejection message (SO: a duplicate-reference *warning* since BUG-2026-09-23-185 — the SO is saved as DRAFT) | ✅ benign: the `.find` covers the real case and the authoritative `duplicateOf` is exact. (Sub-note: their `LIMIT 1` has no `ORDER BY`, so with two duplicates it names an arbitrary one — still a rejection either way) |
 | 12 | `mail-center.ts:401` — `recipients.find(/@hookka\.com/) \|\| recipients[0]` | which mailbox an inbound email is filed under | ✅ low-risk: a stated preference rule, no configured mailbox matched, and the message is stored intact |
 | 13 | UI selection defaults — `default-bank.ts:12`, `bom.tsx` ×6, `procurement/{create,detail,index}.tsx` + `pi/create.tsx` (`bindings.find(isMainSupplier) ?? bindings[0]`), `employees.tsx:5376`, `finance-dashboard.tsx:549`, `leads/index.tsx:402`, `m/FormSheet.tsx:527`, `m/ModuleListScreen.tsx:220-221`, `mail-center/index.tsx:3301`, `maintenance/sofa-combos.tsx:1212`, `inventory/index.tsx:2607`, `scan-supplier-modal.tsx` ×4 (`activeOrgs[0]?.code ?? "HOOKKA"`) | a **pre-filled** value the user sees and can change before saving | ✅ benign — see "Not every `[0]` is this class" above |
 | 14 | `accounting.ts:11043` (`others[0]` + `"+N"`), `delivery-orders.ts:2274` (error text) | display only, and the truncation is visible | ✅ benign |
@@ -1619,6 +1628,7 @@ snake_case throughout — 260 reads across 74 identifiers. Live effect:
 | `r.total_sen` | `undefined` | Revenue **RM 0** |
 | `r.is_service_order` | `undefined` → `!!` → `false` | no service order ever filtered; **1804 orders** where the house page shows 1713 |
 | `r.created_at` | `undefined` → `dayKey()` → `null` | revenue trend **empty**, and a `TypeError` at `:754` on a non-null-asserted map lookup |
+| `r.created_at` / `r.sample_id` / `r.ocr_model` (BUG-2026-09-25-192, OCR tab) | `undefined` | When **"undefined"**, Accuracy **—** on every row, Model **"Not recorded"** |
 
 The crash was read as "a delivery order with a NULL `created_at`" and patched
 with a null guard. The guard was correct but the diagnosis was not — there was

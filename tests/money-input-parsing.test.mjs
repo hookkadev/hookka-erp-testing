@@ -314,7 +314,8 @@ test("every `?? 0` on a money parse is a listed display fallback, not a payload"
     ["src/pages/invoices/payments.tsx", 1],  // receivedSen preview; `canSubmit` blocks the post
     ["src/pages/invoices/index.tsx", 1],     // the Record Payment button predicate
     ["src/pages/invoices/detail.tsx", 1],    // the Record Payment button predicate
-    ["src/pages/procurement/PurchaseInvoiceDetail.tsx", 7], // draft subtotal / tax / discount-base previews
+    // draft gross (one shared parse since BUG-2026-09-24-188) / DISCOUNT-line base previews
+    ["src/pages/procurement/PurchaseInvoiceDetail.tsx", 6],
     ["src/pages/invoices/supplier-payments.tsx", 1], // advanceSen preview; handlePost refuses first
   ]);
   const FILES = [...new Set([...NO_PARSEFLOAT.map((r) => r[0]), ...NON_MONEY_PARSEFLOAT.map((r) => r[0]),

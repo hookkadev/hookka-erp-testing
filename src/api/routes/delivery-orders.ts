@@ -23,7 +23,7 @@ import {
   loadDoValueMapCached,
   loadPoValueMap,
 } from "../lib/do-value";
-import { requirePermission } from "../lib/rbac";
+import { requirePermission, requireReadOrDashboardTab } from "../lib/rbac";
 import { readIdempotencyKey, withIdempotency } from "../lib/idempotency";
 import { customerScopeSql, salesOrderScopeSql, isCustomerScoped } from "../lib/customer-scope";
 import { getOrgId } from "../lib/tenant";
@@ -362,7 +362,9 @@ app.get("/", async (c) => {
 // ---------------------------------------------------------------------------
 app.get("/stats", async (c) => {
   // RBAC gate — stats are aggregate reads of the same data, gated identically.
-  const denied = await requirePermission(c, "delivery-orders", "read");
+  // A role whose dashboard Sales tab reads it (Order Pipeline card) passes too,
+  // see DASHBOARD_TABS_BY_ROLE in role-policy.ts.
+  const denied = await requireReadOrDashboardTab(c, "delivery-orders", "sales");
   if (denied) return denied;
 
   const orgId = getOrgId(c);
@@ -765,7 +767,9 @@ app.get("/ready-planning", async (c) => {
 // exact — no float ever enters. Registered BEFORE /:id (Hono static-first).
 // ---------------------------------------------------------------------------
 app.get("/pending-value", async (c) => {
-  const denied = await requirePermission(c, "delivery-orders", "read");
+  // One total, read by the dashboard Sales tab's Order Pipeline card, so a role
+  // whose dashboard tab map includes Sales passes too.
+  const denied = await requireReadOrDashboardTab(c, "delivery-orders", "sales");
   if (denied) return denied;
   const { ready } = await loadDeliveryReadyPlanning(c);
   let pendingDeliveryValueSen = 0;

@@ -155,13 +155,12 @@ type JcSummaryResp = {
 type WheSummaryResp = {
   data?: {
     workerId: string;
+    name?: string | null;
+    departmentCode?: string | null;
     totalHours: number;
     byDept: Record<string, number>;
     daysWithEntries?: number;
   }[];
-};
-type WorkersResp = {
-  data?: { id: string; name: string; departmentCode?: string }[];
 };
 // Orders-due row — the SEVEN fields OrderDueCard renders, and nothing else.
 // This is the whole payload of /api/sales-orders?fields=orders-due.
@@ -406,8 +405,9 @@ export default function MobileHome() {
     pdEnabled ? "/api/delivery-orders/stats" : null,
   );
 
-  // ---- Worker Efficiency — 3 extra fetches (job-card prod mins + clocked
-  // hours + worker directory), merged exactly like the desktop dashboard-b.
+  // ---- Worker Efficiency: 2 extra fetches (job-card prod mins + clocked
+  // hours, which carries each worker name and department), merged exactly
+  // like the desktop dashboard-b.
   // Gated behind the same `pdEnabled` idle flag so first paint stays the KPI
   // rail. Window = current month [1st..today]. ----
   const effWin = useMemo(() => monthWindow(period), [period]);
@@ -418,9 +418,6 @@ export default function MobileHome() {
     pdEnabled
       ? `/api/working-hour-entries/summary?from=${effWin.from}&to=${effWin.to}`
       : null,
-  );
-  const { data: workersRaw } = useCachedJson<WorkersResp>(
-    pdEnabled ? "/api/workers" : null,
   );
   // Daily Report chips now read the SAME compliance engine the desktop Daily
   // Report + Command Center card use (owner tally audit 2026-07-11). The old
@@ -636,12 +633,6 @@ export default function MobileHome() {
     const prodMin = new Map<string, number>();
     for (const r of jcSumRaw?.data ?? [])
       prodMin.set(r.workerId, Number(r.productionMinutes) || 0);
-    const name = new Map<string, string>();
-    const dept = new Map<string, string>();
-    for (const w of workersRaw?.data ?? []) {
-      name.set(w.id, w.name || w.id);
-      dept.set(w.id, DEPT_LABEL[w.departmentCode || ""] ?? w.departmentCode ?? "");
-    }
     const rows: { name: string; dept: string; pct: number }[] = [];
     for (const e of wheSumRaw?.data ?? []) {
       if ((e.daysWithEntries ?? 0) === 0) continue;
@@ -650,15 +641,15 @@ export default function MobileHome() {
         if (PROD_DEPTS.has(d)) prodHours += Number(h) || 0;
       if (prodHours <= 0) continue;
       rows.push({
-        name: name.get(e.workerId) ?? e.workerId,
-        dept: dept.get(e.workerId) ?? "",
+        name: e.name || e.workerId,
+        dept: DEPT_LABEL[e.departmentCode || ""] ?? e.departmentCode ?? "",
         pct: ((prodMin.get(e.workerId) ?? 0) / (prodHours * 60)) * 100,
       });
     }
     if (rows.length === 0) return null;
     rows.sort((a, b) => b.pct - a.pct);
     return { top: rows.slice(0, 5), low: rows.slice(-5).reverse() };
-  }, [jcSumRaw, wheSumRaw, workersRaw]);
+  }, [jcSumRaw, wheSumRaw]);
 
   // Low efficiency: production workers with eff% < 70 this period (the same
   // band Worker Efficiency card colours red). Daily-report chips + total

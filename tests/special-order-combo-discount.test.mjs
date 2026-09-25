@@ -81,13 +81,22 @@ test("a third option is added on top of the discounted pair", () => {
   );
 });
 
-test("ONE implementation — the create form no longer carries its own copy", () => {
+test("ONE implementation — no SO/CO form carries its own copy", () => {
   // Two implementations of one money rule is how the two sides drift, and a
-  // price that drifts is not a display bug.
-  const create = readFileSync("src/pages/sales/create.tsx", "utf8");
-  assert.match(create, /deriveSpecialOrderSurchargeSen\(names\.join\("; "\)\)/);
-  assert.doesNotMatch(create, /total \+= 10000/);
-  assert.doesNotMatch(create, /DIVAN_BTM_COVER/);
+  // price that drifts is not a display bug. BUG-2026-09-23: sales/edit and both
+  // consignment forms still had the stale RM 100 copy, and every copy dropped
+  // config-only options (RM 0 charged for a "+RM 100" checkbox).
+  for (const f of [
+    "src/pages/sales/create.tsx",
+    "src/pages/sales/edit.tsx",
+    "src/pages/consignment/create.tsx",
+    "src/pages/consignment/edit.tsx",
+  ]) {
+    const src = readFileSync(f, "utf8");
+    assert.match(src, /calcSpecialsSurchargeSen\(/, f);
+    assert.doesNotMatch(src, /\+= 10000/, f);
+    assert.doesNotMatch(src, /DIVAN_BTM_COVER/, f);
+  }
 });
 
 test("the catalog note says what the code does", () => {

@@ -26,6 +26,7 @@ import {
   legHeightOptions,
   specialOrderOptions,
 } from "@/lib/pricing-options";
+import { calcSpecialsSurchargeSen, specialCodeForName, specialNameForCode } from "@/lib/special-order-surcharge";
 import { fetchVariantsConfig, getVariantsConfigSync, subscribeKvConfig, VARIANTS_CONFIG_KEY } from "@/lib/kv-config";
 import { useCachedJson, invalidateCache, invalidateCachePrefix, isUnknownOutcome } from "@/lib/cached-fetch";
 import { RecordLoadError } from "@/components/ui/record-load-error";
@@ -104,19 +105,6 @@ function parseInches(h: string): number | null {
   return m ? parseFloat(m[1]) : null;
 }
 
-function calcSpecialOrderSurcharge(codes: string[]): number {
-  const hasHB = codes.includes("HB_FULL_COVER");
-  const hasBtm = codes.includes("DIVAN_BTM_COVER");
-  let total = 0;
-  for (const code of codes) {
-    const opt = specialOrderOptions.find(o => o.code === code);
-    if (!opt) continue;
-    if (hasHB && hasBtm && (code === "HB_FULL_COVER" || code === "DIVAN_BTM_COVER")) continue;
-    total += opt.surcharge;
-  }
-  if (hasHB && hasBtm) total += 10000;
-  return total;
-}
 
 /** Extract FT portion from sizeLabel, e.g. "Queen 5FT" → "5FT" */
 function extractSizeSuffix(sizeLabel: string): string {
@@ -459,9 +447,11 @@ export default function EditSalesOrderPage() {
   const buildSpecialOrderText = (
     codes: string[],
     customs: CustomSpecial[],
+    isSofa: boolean,
   ): string => {
+    const cfg = maintenanceConfig?.[isSofa ? "sofaSpecials" : "specials"];
     const predefinedTokens = codes
-      .map((c) => specialOrderOptions.find((o) => o.code === c)?.name || c);
+      .map((c) => specialNameForCode(c, cfg) || c);
     const customTokens = customs
       .map((c) => c.description.trim())
       .filter(Boolean)
@@ -472,16 +462,10 @@ export default function EditSalesOrderPage() {
   const calcPredefinedSurcharge = (
     codes: string[],
     isSofa: boolean,
-  ): number => {
-    const available = getAvailableSpecials(isSofa);
-    const sumSurcharge = codes.reduce((s, c) => {
-      const opt = available.find((o) => o.code === c);
-      if (!opt) return s;
-      return s + getConfigSurcharge(isSofa ? "sofaSpecials" : "specials", opt.name, opt.surcharge);
-    }, 0);
-    const combinedSurcharge = calcSpecialOrderSurcharge(codes);
-    return isSofa ? sumSurcharge : combinedSurcharge;
-  };
+  ): number =>
+    // Same shared rule as sales/create.tsx — config-only options included,
+    // owner's combo discount, no stale hardcoded RM 100 (BUG-2026-09-23).
+    calcSpecialsSurchargeSen(codes, maintenanceConfig?.[isSofa ? "sofaSpecials" : "specials"]);
 
   const toggleSpecialOrder = (idx: number, code: string) => {
     const item = items[idx];
@@ -494,7 +478,7 @@ export default function EditSalesOrderPage() {
     const surcharge = isServiceOrderMode
       ? 0
       : calcPredefinedSurcharge(next, isSofa) + sumCustomSpecials(item.customSpecials);
-    const label = buildSpecialOrderText(next, item.customSpecials);
+    const label = buildSpecialOrderText(next, item.customSpecials, isSofa);
     updateItem(idx, {
       specialOrders: next,
       specialOrder: label,
@@ -511,7 +495,7 @@ export default function EditSalesOrderPage() {
     const surcharge = isServiceOrderMode
       ? 0
       : calcPredefinedSurcharge(item.specialOrders, isSofa) + sumCustomSpecials(customs);
-    const label = buildSpecialOrderText(item.specialOrders, customs);
+    const label = buildSpecialOrderText(item.specialOrders, customs, isSofa);
     updateItem(idx, {
       customSpecials: customs,
       specialOrder: label,
@@ -651,11 +635,7 @@ export default function EditSalesOrderPage() {
                 return tokens
                   // Skip "OTHER: <desc>" tokens — they belong to customSpecials.
                   .filter((tok) => !tok.toUpperCase().startsWith("OTHER:"))
-                  .map((tok) => {
-                    const matched = specialOrderOptions.find((o) => o.name === tok);
-                    if (matched) return matched.code;
-                    return tok.toUpperCase().replace(/[^A-Z0-9]+/g, "_");
-                  })
+                  .map((tok) => specialCodeForName(tok))
                   .filter((c): c is string => Boolean(c));
               })(),
               specialOrder: (item.specialOrder as string) || "",
@@ -1429,7 +1409,7 @@ export default function EditSalesOrderPage() {
                       {item.specialOrders.length > 0 && !isOpen && (
                         <div className="flex flex-wrap gap-1 mt-1.5">
                           {item.specialOrders.map(code => {
-                            const opt = specialOrderOptions.find(o => o.code === code);
+                            const opt = available.find(o => o.code === code);
                             if (!opt) return null;
                             const sc = getConfigSurcharge(isSofa ? "sofaSpecials" : "specials", opt.name, opt.surcharge);
                             return (

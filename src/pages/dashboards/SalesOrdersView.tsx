@@ -18,13 +18,14 @@ import {
 import { useCachedJson } from "@/lib/cached-fetch";
 import { formatCurrency } from "@/lib/utils";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { ShoppingCart, DollarSign, Truck, CheckCircle, CalendarX2 } from "lucide-react";
+import { CalendarX2 } from "lucide-react";
 import {
   TAUPE, GREEN, AMBER, TEAL, fmtN, fmtRMAxis, ymd, dayLabel,
   CHART_INK, CHART_GOLD, CHART_AXIS, CARD_BORDER, CARD_BG, CHART_SERIES,
   inPeriod, inFocus, periodLabel, isConfirmedOrder, type Period,
 } from "./dashboard-shared-lib";
 import { Kpi, LiveBadge } from "./dashboard-shared";
+import { CustomerRevenueCard, OrderPipelineCard, RevenueTrendCard, TopSellersCard } from "./DashboardWidgets";
 import { rollingForecast } from "@/lib/revenue-forecast";
 import { pctDelta, buildSalesTrend, previousSalesKpis, computeSalesKpis } from "./dashboard-sales-lib";
 
@@ -134,6 +135,9 @@ export function SalesOrdersView({
   const [stateFilter, setStateFilter] = useState<string | null>(null);
   const [skuCat, setSkuCat] = useState<string | null>(null);
   const [skuSort, setSkuSort] = useState<"revenue" | "units">("revenue");
+  const [trendShow, setTrendShow] = useState<"both" | "revenue" | "orders">("both");
+  const showRev = trendShow !== "orders";
+  const showOrd = trendShow !== "revenue";
 
   // `?? []` allocates a fresh array each render, which would make every
   // downstream useMemo re-run regardless of its deps. Memoised so the deps
@@ -480,9 +484,6 @@ export function SalesOrdersView({
               ? `${pctDelta(kpis.soCount, prevKpis.count)} vs ${prevKpis.label}`
               : undefined
           }
-          icon={ShoppingCart}
-          iconBgClass="bg-[#F0ECE9]"
-          iconColorClass="text-[#6B5C32]"
         />
         <Kpi
           label="Revenue"
@@ -492,9 +493,6 @@ export function SalesOrdersView({
               ? `${pctDelta(kpis.revenueSen, prevKpis.revenueSen)} vs ${prevKpis.label}`
               : undefined
           }
-          icon={DollarSign}
-          iconBgClass="bg-[#F0ECE9]"
-          iconColorClass="text-[#6B5C32]"
           valueColorClass="text-[#6B5C32]"
           valueSizeClass="text-xl"
         />
@@ -502,25 +500,18 @@ export function SalesOrdersView({
           label="Outstanding"
           value={fmtN(kpis.outstandingCount)}
           sub={`${formatCurrency(kpis.outstandingSen)} value`}
-          icon={DollarSign}
-          iconBgClass="bg-[#FAEFCB]"
-          iconColorClass="text-[#9C6F1E]"
           valueColorClass="text-[#9C6F1E]"
         />
         <Kpi
           label="Pending Delivery"
           value={fmtN(kpis.pendingDelivery)}
-          icon={Truck}
-          iconBgClass="bg-[#E6F0F3]"
-          iconColorClass="text-[#3E6570]"
+          sub={`${formatCurrency(kpis.pendingDeliverySen)} value`}
           valueColorClass="text-[#3E6570]"
         />
         <Kpi
           label="Completed"
           value={fmtN(kpis.completedCount)}
-          icon={CheckCircle}
-          iconBgClass="bg-[#EEF3E4]"
-          iconColorClass="text-[#4F7C3A]"
+          sub={`${formatCurrency(kpis.completedSen)} value`}
           valueColorClass="text-[#4F7C3A]"
         />
       </div>
@@ -529,21 +520,42 @@ export function SalesOrdersView({
           has them. Revenue is BARS and orders a LINE on its own right-hand
           axis: two lines on one plot were unreadable where the scales differ
           by ~100x. Clicking a bar drills in — a month in YTD, a day in
-          Monthly. */}
+          Monthly. The Both / Revenue / Orders switch hides either series. */}
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2 bg-white border-[#E5E0D8]">
           <CardHeader className="pb-3">
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <CardTitle>Revenue trend</CardTitle>
-              {selectedBucket && (
-                <button
-                  type="button"
-                  onClick={clearDay}
-                  className="text-xs text-[#6B5C32] underline underline-offset-2"
-                >
-                  clear selection
-                </button>
-              )}
+              <div className="flex items-center gap-3">
+                {selectedBucket && (
+                  <button
+                    type="button"
+                    onClick={clearDay}
+                    className="text-xs text-[#6B5C32] underline underline-offset-2"
+                  >
+                    clear selection
+                  </button>
+                )}
+                <div className="flex rounded-lg border border-[#E2DDD8] overflow-hidden">
+                  {([
+                    { k: "both", label: "Both" },
+                    { k: "revenue", label: "Revenue" },
+                    { k: "orders", label: "Orders" },
+                  ] as const).map((v) => (
+                    <button
+                      key={v.k}
+                      type="button"
+                      onClick={() => setTrendShow(v.k)}
+                      className={
+                        "px-2.5 py-1 max-md:py-2.5 text-xs font-medium " +
+                        (trendShow === v.k ? "bg-[#F0ECE9] text-[#1F1D1B]" : "text-[#6B7280] hover:bg-[#F7F5F3]")
+                      }
+                    >
+                      {v.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
             <p className="text-xs text-[#6B7280]">
               {selectedDetail
@@ -580,6 +592,7 @@ export function SalesOrdersView({
                     />
                     <YAxis
                       yAxisId="rev"
+                      hide={!showRev}
                       tick={{ fontSize: 10, fill: CHART_AXIS }}
                       axisLine={false}
                       tickLine={false}
@@ -589,6 +602,7 @@ export function SalesOrdersView({
                     <YAxis
                       yAxisId="ord"
                       orientation="right"
+                      hide={!showOrd}
                       tick={{ fontSize: 10, fill: CHART_AXIS }}
                       axisLine={false}
                       tickLine={false}
@@ -613,47 +627,51 @@ export function SalesOrdersView({
                       }}
                     />
                     <Legend wrapperStyle={{ fontSize: 11 }} />
-                    <Bar
-                      yAxisId="rev"
-                      dataKey="Revenue"
-                      fill={CHART_INK}
-                      radius={[4, 4, 0, 0]}
-                      maxBarSize={28}
-                      // activeBar MUST stay off. On hover Recharts lifts the
-                      // hovered bar out of the bar layer (zIndex 300) and
-                      // redraws it in an active-bar layer at zIndex 1000 —
-                      // above the line at 400 — so the line vanished behind
-                      // whichever bar the pointer was over. Styling the active
-                      // bar to match does not help: the layer is the problem,
-                      // not the colour. Selection is already shown via Cell
-                      // fill, so nothing is lost by removing it.
-                      activeBar={false}
-                      isAnimationActive={false}
-                      // The bar shapes render into Recharts' `inactive-bar`
-                      // layer, which swallows the click without invoking any
-                      // handler — clicking a bar did nothing while clicking the
-                      // line or empty plot worked. Letting pointer events fall
-                      // THROUGH the bars hands the click to the chart-level
-                      // handler below, which resolves the bucket from
-                      // activeLabel and already worked everywhere else.
-                      style={{ pointerEvents: "none" }}
-                    >
-                      {chartData.map((d) => (
-                        <Cell
-                          key={d.date}
-                          fill={selectedBucket && selectedBucket !== d.date ? "#D9D2CA" : CHART_INK}
-                        />
-                      ))}
-                    </Bar>
-                    <Line
-                      yAxisId="ord"
-                      type="monotone"
-                      dataKey="Orders"
-                      stroke={CHART_GOLD}
-                      strokeWidth={3}
-                      dot={{ r: 3.5, fill: "#FFFFFF", stroke: CHART_GOLD, strokeWidth: 2 }}
-                      activeDot={{ r: 5.5, fill: "#FFFFFF", stroke: CHART_GOLD, strokeWidth: 2 }}
-                    />
+                    {showRev && (
+                      <Bar
+                        yAxisId="rev"
+                        dataKey="Revenue"
+                        fill={CHART_INK}
+                        radius={[4, 4, 0, 0]}
+                        maxBarSize={28}
+                        // activeBar MUST stay off. On hover Recharts lifts the
+                        // hovered bar out of the bar layer (zIndex 300) and
+                        // redraws it in an active-bar layer at zIndex 1000 —
+                        // above the line at 400 — so the line vanished behind
+                        // whichever bar the pointer was over. Styling the active
+                        // bar to match does not help: the layer is the problem,
+                        // not the colour. Selection is already shown via Cell
+                        // fill, so nothing is lost by removing it.
+                        activeBar={false}
+                        isAnimationActive={false}
+                        // The bar shapes render into Recharts' `inactive-bar`
+                        // layer, which swallows the click without invoking any
+                        // handler — clicking a bar did nothing while clicking the
+                        // line or empty plot worked. Letting pointer events fall
+                        // THROUGH the bars hands the click to the chart-level
+                        // handler below, which resolves the bucket from
+                        // activeLabel and already worked everywhere else.
+                        style={{ pointerEvents: "none" }}
+                      >
+                        {chartData.map((d) => (
+                          <Cell
+                            key={d.date}
+                            fill={selectedBucket && selectedBucket !== d.date ? "#D9D2CA" : CHART_INK}
+                          />
+                        ))}
+                      </Bar>
+                    )}
+                    {showOrd && (
+                      <Line
+                        yAxisId="ord"
+                        type="monotone"
+                        dataKey="Orders"
+                        stroke={CHART_GOLD}
+                        strokeWidth={3}
+                        dot={{ r: 3.5, fill: "#FFFFFF", stroke: CHART_GOLD, strokeWidth: 2 }}
+                        activeDot={{ r: 5.5, fill: "#FFFFFF", stroke: CHART_GOLD, strokeWidth: 2 }}
+                      />
+                    )}
                   </ComposedChart>
                 </ResponsiveContainer>
               )}
@@ -958,6 +976,14 @@ export function SalesOrdersView({
         </Card>
       </div>
 
+      {/* Widgets ported from /dashboard (same URLs + formulas). */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <OrderPipelineCard period={period} />
+        <RevenueTrendCard period={period} />
+      </div>
+      <CustomerRevenueCard period={period} />
+      <TopSellersCard period={period} />
+
       {/* Fulfillment pipeline keeps its own row; the state/category donut
           and Top SKUs share one split, the way the design prototype pairs
           them — a donut beside the ranked table it filters. */}
@@ -1141,7 +1167,7 @@ export function SalesOrdersView({
             <div className="overflow-x-auto" style={{ maxHeight: 300, overflowY: "auto" }}>
               <table className="w-full text-[12.5px]">
                 <thead>
-                  <tr className="border-t border-b border-[#E5E0D8] sticky top-0 bg-white">
+                  <tr className="*:sticky *:top-0 *:z-10 *:bg-white *:shadow-[inset_0_1px_0_#E5E0D8,inset_0_-1px_0_#E5E0D8]">
                     <th className="text-left px-3 py-2 font-semibold uppercase text-[10.5px] tracking-wide" style={{ color: CHART_AXIS }}>#</th>
                     <th className="text-left px-3 py-2 font-semibold uppercase text-[10.5px] tracking-wide" style={{ color: CHART_AXIS }}>SKU</th>
                     <th className="text-left px-3 py-2 font-semibold uppercase text-[10.5px] tracking-wide" style={{ color: CHART_AXIS }}>Category</th>

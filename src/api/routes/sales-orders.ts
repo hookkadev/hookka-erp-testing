@@ -1785,11 +1785,16 @@ app.post("/", async (c) => {
       }
     }
 
-    // Duplicate-document guard (owner 2026-07): a customer PO/SO reference
-    // already on a non-cancelled sales order for THIS customer is almost always
-    // a re-scan or double-entry — block it with a clear message. (One customer
-    // PO = one SO; partial deliveries are handled by multiple DOs off the same
-    // SO, not multiple SOs, so a repeat reference is a duplicate.)
+    // Duplicate-reference WARNING (owner 2026-07; softened DEV-12 2026-09-23):
+    // a customer PO/SO reference already on a non-cancelled sales order for
+    // THIS customer is usually a re-scan or double-entry — but not always
+    // (Houzs reuses its S/O no. across POs, e.g. HC-SO-013492). This used to
+    // 409, and the PO-scan modal then consumed the scan, so the order was lost
+    // instead of saved. Now the SO is saved as DRAFT (every new SO is DRAFT)
+    // and the response carries `duplicateOf` + `warning` for the UI to show.
+    // A true duplicate customer PO still cannot be CONFIRMED — BR-SO-010 in
+    // the confirm handler blocks it.
+    let duplicateWarning: { duplicateOf: string | null; warning: string } | null = null;
     {
       const soRefs = [body.customerPOId, body.customerSOId]
         .map((v) => (v == null ? "" : String(v).trim()))
@@ -1818,14 +1823,10 @@ app.post("/", async (c) => {
             soRefs.find(
               (r) => r === dup.customerPOId || r === dup.customerSOId,
             ) ?? soRefs[0];
-          return c.json(
-            {
-              success: false,
-              error: `Customer reference "${matched}" is already on sales order ${dup.companySOId ?? "(an existing SO)"} for this customer — looks like a duplicate. Open that SO, or change the reference if it's genuinely a different order.`,
-              duplicateOf: dup.companySOId,
-            },
-            409,
-          );
+          duplicateWarning = {
+            duplicateOf: dup.companySOId,
+            warning: `Customer reference "${matched}" is also on sales order ${dup.companySOId ?? "(an existing SO)"} for this customer. Saved as DRAFT — check it isn't a duplicate before confirming.`,
+          };
         }
       }
     }
@@ -2027,6 +2028,7 @@ app.post("/", async (c) => {
     // specialOrderPriceSen — i.e. the scan-a-customer-PO paths. null degrades
     // to the static catalog in src/lib/pricing-options.ts.
     const cfgSpecialsForPricing = await loadSpecialsConfig(c.var.DB);
+    const cfgSofaSpecialsForPricing = await loadSpecialsConfig(c.var.DB, "sofaSpecials");
     // Owner-editable divan / leg height price lists (2026-07-22). Same
     // one-read-per-order pattern, consulted only for items that omit the price
     // — i.e. the scan-a-customer-PO paths.
@@ -2161,7 +2163,9 @@ app.post("/", async (c) => {
         // (Service Orders are free by design) and a hand-discounted price.
         const specialOrderPriceSen = resolveSpecialOrderPriceSen(
           item,
-          cfgSpecialsForPricing,
+          String(item.itemCategory ?? "") === "SOFA"
+            ? cfgSofaSpecialsForPricing
+            : cfgSpecialsForPricing,
         );
         // 2026-07-23: total-height (gap+divan+leg) now derives server-side like
         // divan/leg — the typed form sends it, the scan/import paths never did,
@@ -2500,7 +2504,7 @@ app.post("/", async (c) => {
       action: "create",
       after: created,
     });
-    return c.json({ success: true, data: created }, 201);
+    return c.json({ success: true, data: created, ...duplicateWarning }, 201);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[POST /api/sales-orders] failed:", msg, err);
@@ -3662,6 +3666,7 @@ app.put("/:id", async (c) => {
       // request (BUG-2026-07-17-002). Needed on PUT too — without it, editing a
       // scanned SO would re-store the surcharge as 0.
       const cfgSpecialsForPricing = await loadSpecialsConfig(c.var.DB);
+      const cfgSofaSpecialsForPricing = await loadSpecialsConfig(c.var.DB, "sofaSpecials");
       // Ditto for the divan / leg height price lists (2026-07-22). Same
       // reasoning: an edit that omits the price must not zero a height that the
       // owner's list prices.
@@ -3775,7 +3780,9 @@ app.put("/:id", async (c) => {
         // (Service Orders are free by design) and a hand-discounted price.
         const specialOrderPriceSen = resolveSpecialOrderPriceSen(
           item,
-          cfgSpecialsForPricing,
+          String(item.itemCategory ?? "") === "SOFA"
+            ? cfgSofaSpecialsForPricing
+            : cfgSpecialsForPricing,
         );
         // 2026-07-23 — same as the POST path: derive total-height server-side so
         // an SO EDIT re-prices the line WITH its total-height surcharge (stored

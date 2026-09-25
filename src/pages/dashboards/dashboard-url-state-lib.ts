@@ -31,12 +31,14 @@ export const TAB_SUBS: Record<string, readonly { key: string; label: string }[]>
 };
 
 // Links saved while tabs were named after staff (and Employees / Departments
-// were separate tabs) still open the chart they pointed at. Keyed "tab:sub",
-// then "tab"; a missing sub in the value keeps the sub from the URL.
-const LEGACY: Record<string, [tab: string, sub?: string]> = {
+// were separate tabs, later a Departments sub-tab, now inside Efficiency) still
+// open the chart they pointed at. Keyed "tab:sub", then "tab"; a missing sub in
+// the value keeps the sub from the URL.
+export const LEGACY: Record<string, [tab: string, sub?: string]> = {
   siti: ["operations"],
   employee: ["people"],
-  department: ["people", "departments"],
+  department: ["people", "efficiency"],
+  "people:departments": ["people", "efficiency"],
   lim: ["people", "efficiency"],
   "lim:plan": ["operations", "plan"],
   "lim:revenue": ["operations", "cost"],
@@ -58,10 +60,11 @@ export const defaultSub = (tab: string): string => TAB_SUBS[tab]?.[0]?.key ?? ""
 
 export type DashboardUrlState = { tab: string; sub: string; period: Period };
 
-export function parseDashboardUrl(params: URLSearchParams, tabKeys: readonly string[]): DashboardUrlState {
+/** `landingTab`: where a bare or unknown `tab` lands (a tab-restricted role lands on its first tab). */
+export function parseDashboardUrl(params: URLSearchParams, tabKeys: readonly string[], landingTab: string = DEFAULT_TAB): DashboardUrlState {
   const legacy = LEGACY[`${params.get("tab")}:${params.get("sub")}`] ?? LEGACY[params.get("tab") ?? ""];
   const t = legacy?.[0] ?? params.get("tab");
-  const tab = t && tabKeys.includes(t) ? t : DEFAULT_TAB;
+  const tab = t && tabKeys.includes(t) ? t : landingTab;
   const s = legacy?.[1] ?? params.get("sub");
   const sub = s && TAB_SUBS[tab]?.some((x) => x.key === s) ? s : defaultSub(tab);
 

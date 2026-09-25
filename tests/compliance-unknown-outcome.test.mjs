@@ -222,6 +222,22 @@ test("a per-check tile renders an em dash, not a green zero", () => {
   );
 });
 
+test("the experimental Overview's Daily Report tile cannot print a clean day off a dead read", () => {
+  // The same tile on /dashboard-experimental (AllOverviewView). Its verdict
+  // comes from complianceSummary, which only says "failed" when it is TOLD the
+  // fetch failed — so the call must pass the fetch outcome, and the render
+  // must print a dash on failure rather than `total`.
+  const src = stripComments(read("src/pages/dashboards/AllOverviewView.tsx"));
+  assert.ok(
+    /complianceSummary\(compRaw, isUnknownOutcome\(compFailure\)\)/.test(src),
+    "the tile must hand the fetch outcome to complianceSummary",
+  );
+  assert.ok(
+    /comp\.failed \? "—"/.test(src),
+    "a failed read must render —, never a number it did not measure",
+  );
+});
+
 test("the Command Center tile refuses 'All clear' over a partial sweep", () => {
   const src = stripComments(read(DASH));
   assert.ok(

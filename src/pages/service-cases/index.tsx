@@ -128,6 +128,8 @@ type ServiceCaseListItem = {
   // derivation can tell SV (sales_orders) from legacy service_orders and
   // date the Service Order stage.
   orders: { id: string; serviceOrderNo: string; status: string; mode: string | null; isSv?: boolean; createdAt?: string }[];
+  externalRef?: string; // operator's free-text ref for EXTERNAL cases ("" when none)
+  customerPO?: string; // source SO/CO's customer PO — list GET only ("" when none)
 };
 
 type SourceOrderOption = {
@@ -207,7 +209,7 @@ function categoriesLabel(codes: string[]): string {
 // for those features to see what the cell shows. Same shape feeds the CSV
 // export so the download matches the grid exactly.
 type CaseRow = ServiceCaseListItem & {
-  source: string; // "SO-2605-198" / "EXTERNAL"
+  source: string; // "SO-2605-198" / "EXTERNAL" / "EXTERNAL (art 058-026)"
   rootCause: string; // legacy single rootCauseCategory or "" (back-compat)
   categoryCodes: string[]; // all category codes on the case (multi)
   categoriesText: string; // joined human labels (sort / filter / CSV / search)
@@ -440,8 +442,13 @@ export default function ServiceCasesListPage() {
       return {
         ...c,
         // sourceNo already carries its own prefix (SO-…, CO-…), so show it
-        // alone for SO/CO; EXTERNAL has no number → show the type word.
-        source: c.sourceNo || (c.sourceType === "EXTERNAL" ? "EXTERNAL" : c.sourceType),
+        // alone for SO/CO; EXTERNAL has no number → show the type word plus
+        // the operator's ref, same as the detail header ("EXTERNAL (art 058-026)").
+        source:
+          c.sourceNo ||
+          (c.sourceType === "EXTERNAL"
+            ? `EXTERNAL${c.externalRef ? ` (${c.externalRef})` : ""}`
+            : c.sourceType),
         rootCause: c.rootCauseCategory ?? "",
         categoryCodes,
         categoriesText: categoriesLabel(categoryCodes),
@@ -487,9 +494,26 @@ export default function ServiceCasesListPage() {
         label: "Source",
         width: "150px",
         sortable: true,
+        // Grow to the full value — "EXTERNAL (<externalRef>)" can be long and
+        // an ellipsis hides the ref the operator needs.
+        noClip: true,
         render: (value) => (
           <span className="text-[#6B7280]">{String(value ?? "")}</span>
         ),
+      },
+      {
+        // Source order's customer PO (DEV-13) — customers quote their own PO.
+        key: "customerPO",
+        label: "Customer PO",
+        width: "130px",
+        sortable: true,
+        filterAccessor: (row) => row.customerPO || "—",
+        render: (value) =>
+          value ? (
+            <span className="text-[#6B7280]">{String(value)}</span>
+          ) : (
+            <span className="text-[#9CA3AF]">—</span>
+          ),
       },
       {
         // Root Cause category, relabelled "Category" (owner: the category is
@@ -636,6 +660,7 @@ export default function ServiceCasesListPage() {
         { header: "Case No", accessor: (r) => r.caseNo },
         { header: "Customer", accessor: (r) => r.customerName },
         { header: "Source", accessor: (r) => r.source },
+        { header: "Customer PO", accessor: (r) => r.customerPO ?? "" },
         // Joined human labels for all the case's categories (multi).
         { header: "Category", accessor: (r) => r.categoriesText },
         { header: "Department", accessor: (r) => r.department },

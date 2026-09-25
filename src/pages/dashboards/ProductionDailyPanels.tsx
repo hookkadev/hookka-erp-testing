@@ -4,7 +4,6 @@ import { useCachedJson } from "@/lib/cached-fetch";
 import { formatCurrency } from "@/lib/utils";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Tabs } from "@/components/ui/tabs";
-import { ClipboardList, Target, TrendingUp, Banknote, PackageCheck, AlertTriangle } from "lucide-react";
 import {
   TAUPE, MUTED, BORDER, GREEN, AMBER, RED, CHART_GOLD, fmtN, fmtRMAxis, inPeriod, inFocus,
   dayLabel, periodLabel, type Period,
@@ -260,10 +259,10 @@ export function ProductionDailyPanels({
       {sub === "plan" && (!lim ? missingSlice("Plan vs Actual") : (
         <>
           <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
-            <Kpi label="Planned (orders)" value={fmtN(planTotals.po)} sub={`${fmtN(planTotals.pu)} units`} icon={Target} iconBgClass="bg-[#F0ECE9]" iconColorClass="text-[#6B5C32]" />
-            <Kpi label="Completed (orders)" value={fmtN(planTotals.ao)} sub={`${fmtN(planTotals.au)} units`} icon={PackageCheck} iconBgClass="bg-[#EEF3E4]" iconColorClass="text-[#4F7C3A]" valueColorClass="text-[#4F7C3A]" />
-            <Kpi label="Variance (orders)" value={`${planTotals.ao - planTotals.po > 0 ? "+" : ""}${fmtN(planTotals.ao - planTotals.po)}`} sub="completed − planned" icon={TrendingUp} iconBgClass="bg-[#E6F0F3]" iconColorClass="text-[#3E6570]" valueColorClass={planTotals.ao >= planTotals.po ? "text-[#4F7C3A]" : "text-[#9A3A2D]"} />
-            <Kpi label="Variance (units)" value={`${planTotals.au - planTotals.pu > 0 ? "+" : ""}${fmtN(planTotals.au - planTotals.pu)}`} sub="completed − planned" icon={ClipboardList} iconBgClass="bg-[#E6F0F3]" iconColorClass="text-[#3E6570]" valueColorClass={planTotals.au >= planTotals.pu ? "text-[#4F7C3A]" : "text-[#9A3A2D]"} />
+            <Kpi label="Planned (orders)" value={fmtN(planTotals.po)} sub={`${fmtN(planTotals.pu)} units`} />
+            <Kpi label="Completed (orders)" value={fmtN(planTotals.ao)} sub={`${fmtN(planTotals.au)} units`} valueColorClass="text-[#4F7C3A]" />
+            <Kpi label="Variance (orders)" value={`${planTotals.ao - planTotals.po > 0 ? "+" : ""}${fmtN(planTotals.ao - planTotals.po)}`} sub="completed − planned" valueColorClass={planTotals.ao >= planTotals.po ? "text-[#4F7C3A]" : "text-[#9A3A2D]"} />
+            <Kpi label="Variance (units)" value={`${planTotals.au - planTotals.pu > 0 ? "+" : ""}${fmtN(planTotals.au - planTotals.pu)}`} sub="completed − planned" valueColorClass={planTotals.au >= planTotals.pu ? "text-[#4F7C3A]" : "text-[#9A3A2D]"} />
           </div>
 
           <Card>
@@ -331,9 +330,9 @@ export function ProductionDailyPanels({
       ) : (
         <>
           <div className="grid grid-cols-2 xl:grid-cols-3 gap-3">
-            <Kpi label="Production revenue" value={formatCurrency(revTotals.sen)} sub={period.day ? dayLabel(period.day) : periodLabel(period)} icon={Banknote} iconBgClass="bg-[#E6F0F3]" iconColorClass="text-[#3E6570]" valueColorClass="text-[#3E6570]" valueSizeClass="text-xl" />
-            <Kpi label="Orders upholstered" value={fmtN(revTotals.orders)} icon={PackageCheck} iconBgClass="bg-[#EEF3E4]" iconColorClass="text-[#4F7C3A]" />
-            <Kpi label="Completed with no price" value={fmtN(revTotals.unpriced)} sub="value could not be resolved (counted as RM 0)" icon={AlertTriangle} iconBgClass="bg-[#FAEFCB]" iconColorClass="text-[#9C6F1E]" valueColorClass={revTotals.unpriced ? "text-[#9C6F1E]" : undefined} />
+            <Kpi label="Production revenue" value={formatCurrency(revTotals.sen)} sub={period.day ? dayLabel(period.day) : periodLabel(period)} valueColorClass="text-[#3E6570]" valueSizeClass="text-xl" />
+            <Kpi label="Orders upholstered" value={fmtN(revTotals.orders)} />
+            <Kpi label="Completed with no price" value={fmtN(revTotals.unpriced)} sub="value could not be resolved (counted as RM 0)" valueColorClass={revTotals.unpriced ? "text-[#9C6F1E]" : undefined} />
           </div>
           <Card>
             <CardHeader className="pb-3">

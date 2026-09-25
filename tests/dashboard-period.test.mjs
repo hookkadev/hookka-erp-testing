@@ -4,6 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   stepPeriod, stepDay, yearsWithData, periodLabel, periodPresets, presetActive, calendarCells, shiftMonth,
+  warnDays, dayList, overallEfficiencyPct,
 } from "../src/pages/dashboards/dashboard-shared-lib.ts";
 
 const months = ["2025-11", "2025-12", "2026-06", "2026-08", "2026-09"];
@@ -121,4 +122,35 @@ test("periodLabel: YTD reads '(Jan – Present)' for the real current year, '(Ja
   // never shows the current in-progress year must keep working unchanged.
   assert.equal(periodLabel({ mode: "ytd", month: "2026-06" }), "2026");
   assert.equal(periodLabel({ mode: "monthly", month: "2026-08" }, "2026-09-17"), "Aug 2026", "monthly/day untouched by `today`");
+});
+
+test("warnDays: a time-audit flag carries the days that person's own ratio was outside the band", () => {
+  const days = [
+    { date: "2026-09-25", w: 480, p: 300 }, // 62.5% under
+    { date: "2026-09-03", w: 480, p: 480 }, // 100% inside
+    { date: "2026-09-10", w: 480, p: 400 }, // 83.3% under
+    { date: "2026-09-12", w: 0, p: 60 },    // production with no clock: over, not NaN
+    { date: "2026-09-13", w: 0, p: 0 },     // nothing: neither side
+    { date: "2026-09-15", w: 480, p: 432 }, // exactly 90%: inside
+  ];
+  assert.deepEqual(warnDays(days, false, 90, 110), ["2026-09-10", "2026-09-25"], "under, sorted");
+  assert.deepEqual(warnDays(days, true, 90, 110), ["2026-09-12"]);
+  assert.equal(dayList(["2026-09-25"]), "25 Sep");
+  assert.equal(dayList(["2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04", "2026-09-05"]), "1 Sep, 2 Sep, 3 Sep +2 more");
+  assert.equal(dayList([]), "");
+});
+
+test("overall efficiency is a weighted total over the period, not an average of daily %", () => {
+  const byDay = [
+    { date: "2026-09-01", workingMinutes: 600, productionMinutes: 300 }, // 50%
+    { date: "2026-09-02", workingMinutes: 60, productionMinutes: 60 }, // 100%
+    { date: "2026-08-31", workingMinutes: 999, productionMinutes: 1 }, // other month
+  ];
+  const sep = { mode: "monthly", month: "2026-09" };
+  // (300 + 60) / (600 + 60) = 54.5%, where the mean of 50% and 100% would be 75%.
+  assert.equal(overallEfficiencyPct(byDay, sep).toFixed(1), "54.5");
+  assert.equal(overallEfficiencyPct(byDay, { ...sep, day: "2026-09-02" }), 100);
+  // No clocked time in the period: null (the card shows a dash), never 0.
+  assert.equal(overallEfficiencyPct(byDay, { mode: "monthly", month: "2026-07" }), null);
+  assert.equal(overallEfficiencyPct([], sep), null);
 });

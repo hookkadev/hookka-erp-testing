@@ -52,7 +52,7 @@ import {
   CachedScanNotice,
 } from "@/components/scan-cached-hint";
 import { bestMatch } from "@/lib/party-fuzzy-match";
-import { roundUnitPriceSen } from "@/lib/unit-price";
+import { roundUnitPriceSen, lineTotalSen, allocateDiscountSen } from "@/lib/unit-price";
 import { resolvePoLink, splitPoRefs } from "@/lib/po-ref-match";
 import {
   allocateLinesToPos,
@@ -69,6 +69,7 @@ import {
   resolveMaterialForLine,
   supplierCodeOf,
   supplierSkuIndex,
+  sameSupplierCode,
   MIN_SKU_SUFFIX_MATCH,
   type CandidateTier,
 } from "@/lib/supplier-material-candidates";
@@ -96,6 +97,9 @@ export type ExtractedSupplierLine = {
   unitPrice?: number | null;
   amount?: number | null;
   tax?: number | null;
+  // Per-line discount AMOUNT the OCR pulled (scan-engine.ts already asks for
+  // it). Carried onto the PI line as discountSen (DEV-14).
+  discount?: number | null;
   // Foam/sponge spec the OCR pulled (scan-engine.ts extracts + populates
   // these already) — density grade (e.g. "NLY22GH") and thickness with unit
   // (e.g. "25MM"). null for non-foam items or when not printed.
@@ -122,6 +126,8 @@ export type SupplierExtraction = {
   subtotal?: number | null;
   tax?: number | null;
   total?: number | null;
+  /** Footer "Less: Discount" AMOUNT (scan-engine.ts extracts it). */
+  discount?: number | null;
 };
 
 // ─── Props ────────────────────────────────────────────────────────────────
@@ -286,7 +292,12 @@ function poOrderedFor(
  * a strong precedent, and a catalogue hit is the scanner reading text with
  * nothing to corroborate it. The wording escalates accordingly.
  */
-function matchTierHint(tier: CandidateTier | null | undefined): string {
+function matchTierHint(
+  tier: CandidateTier | null | undefined,
+  via?: "sku" | "code" | "text" | null,
+): string {
+  // The supplier's code is ours in another form (NICCA-6-FOG ↔ NICCA-06).
+  if (via === "code") return "Matched on the supplier's code — check the code before creating.";
   switch (tier) {
     case "po":
       return "Matched to a line on the linked PO — confirm the quantity.";
@@ -1010,6 +1021,8 @@ type PreviewLine = {
    * while a catalogue hit is the scanner reading text and nothing more.
    */
   matchTier?: CandidateTier | null;
+  /** HOW it matched — the supplier's code in another form, or the wording. */
+  matchVia?: "sku" | "code" | "text" | null;
   /**
    * The PO this invoice line bills (`purchase_invoice_items.po_id`). An
    * invoice may cover several of our orders, so ownership lives on the line
@@ -1068,6 +1081,12 @@ type PreviewCard = {
   // sample as a corrected few-shot example.
   originalExtraction: SupplierExtraction;
   /**
+   * Invoice-level discount in RM (DEV-14) — the supplier's footer "Less:
+   * Discount", pre-filled from the scan and editable. Spread across the lines
+   * pro-rata at Create (`cardLineDiscountsSen`).
+   */
+  discountRM?: number;
+  /**
    * PO references the DOCUMENT named, when it named more than one. Kept for
    * display: the operator should see that this invoice spans two orders even
    * though every line is now allocated to its own.
@@ -1089,6 +1108,16 @@ type PreviewCard = {
    */
   purchaseOrderIds?: string[];
 };
+
+/** Qty × unit price in sen — the line amount the supplier prints. */
+function scanLineGrossSen(l: PreviewLine): number {
+  return lineTotalSen(Number(l.qty) || 0, roundUnitPriceSen((Number(l.unitPriceRM) || 0) * 100));
+}
+
+/** Each line's share of the card's invoice discount (DEV-14), in sen. */
+function cardLineDiscountsSen(lines: PreviewLine[], discountRM: number | undefined): number[] {
+  return allocateDiscountSen(lines.map(scanLineGrossSen), Math.round((Number(discountRM) || 0) * 100));
+}
 
 function makeBlankLine(): PreviewLine {
   return {
@@ -1313,6 +1342,13 @@ function CreatePIWizard({
       if (!sku || !supplierId) return null;
       const exact = bindingsBySupplierSku.get(`${supplierId}__${sku}`);
       if (exact) return exact;
+      // Same code, different zero-padding: the invoice prints NICCA-6-FOG, the
+      // binding was saved as NICCA-06-FOG (Meditex, 2026-09-24). Checked before
+      // the suffix fallback so a looser hit can never shadow it.
+      const padded = bindings.find(
+        (b) => b.supplierId === supplierId && sameSupplierCode(b.supplierSku, supplierSku),
+      );
+      if (padded) return padded;
       // Fallback for supplier-side SKU prefixing: "OST- SL 27" (binding)
       // vs "SL.27" (OCR) — exact normalised match fails because the
       // binding has a vendor prefix. Try endsWith / contains either way
@@ -1555,6 +1591,7 @@ function CreatePIWizard({
         //    stock against the wrong item and surfaces far later than a click.
         let autoMatched = false;
         let matchTier: CandidateTier | null = null;
+        let matchVia: "sku" | "code" | "text" | null = null;
         if (!binding && !rm) {
           const text = `${rawSku} ${ln.description ?? ""}`.trim();
           const hit = resolveMaterialForLine(text, tiers, {
@@ -1565,6 +1602,7 @@ function CreatePIWizard({
             rm = hit.item;
             autoMatched = true;
             matchTier = hit.tier;
+            matchVia = hit.via;
           }
         }
         // Use the binding's canonical supplier SKU once we resolved it, so
@@ -1614,6 +1652,7 @@ function CreatePIWizard({
           materialCode: rm?.itemCode ?? binding?.materialCode ?? "",
           autoMatched,
           matchTier,
+          matchVia,
           materialName: rm?.description ?? descOut,
           supplierSku: sku,
           description: descOut,
@@ -1681,6 +1720,11 @@ function CreatePIWizard({
         markedGold: false,
         lines: linesWithPriceFill,
         originalExtraction: ex,
+        // The supplier's footer "Less: Discount", plus any per-line discounts
+        // the OCR read — one invoice discount either way (DEV-14).
+        discountRM:
+          Math.max(0, Number(ex.discount) || 0) +
+          (ex.lines ?? []).reduce((s, l) => s + Math.max(0, Number(l.discount) || 0), 0),
       };
     },
     [suppliers, supplierAliases, defaultSupplierId, defaultPurchaseOrderId, purchaseOrders, supplierById, activeOrgs, resolveBindingForMaterial, resolveBindingAnyWay, materialByCode, tiersFor, skuIndexFor],
@@ -2048,9 +2092,10 @@ function CreatePIWizard({
             (l) => (Number(l.taxRM) || 0) > 0,
           );
           const footerTaxRM = Number(card.originalExtraction.tax) || 0;
-          const lineAmtsSen = pricedLines.map(
-            (l) => Math.round((Number(l.qty) || 0) * (Number(l.unitPriceRM) || 0) * 100),
-          );
+          // Each line's share of the invoice discount (DEV-14); the SST base is
+          // the net amount — the same amount the API stores.
+          const lineDiscSen = cardLineDiscountsSen(pricedLines, card.discountRM);
+          const lineAmtsSen = pricedLines.map((l, i) => scanLineGrossSen(l) - lineDiscSen[i]);
           const subTotalSen = lineAmtsSen.reduce((s, v) => s + v, 0);
           const footerTaxSen = Math.max(0, Math.round(footerTaxRM * 100));
           let allocated = 0;
@@ -2076,6 +2121,7 @@ function CreatePIWizard({
               // reached the (now NUMERIC(14,4)) column.
               unitPriceSen: roundUnitPriceSen((Number(l.unitPriceRM) || 0) * 100),
               taxSen: lineTaxSen < 0 ? 0 : lineTaxSen,
+              discountSen: lineDiscSen[idx],
               lineType: "STOCKED" as const,
               grnItemId: null,
               // Which of our orders this line bills. The backend's per-PO
@@ -3028,10 +3074,9 @@ function PICard({
   onSupplierChange: (newId: string) => void;
 }) {
   const totalQty = card.lines.reduce((s, l) => s + (Number(l.qty) || 0), 0);
-  const totalRM = card.lines.reduce(
-    (s, l) => s + (Number(l.qty) || 0) * (Number(l.unitPriceRM) || 0),
-    0,
-  );
+  const grossSen = card.lines.reduce((s, l) => s + scanLineGrossSen(l), 0);
+  const cardDiscountSen = cardLineDiscountsSen(card.lines, card.discountRM).reduce((s, v) => s + v, 0);
+  const totalRM = (grossSen - cardDiscountSen) / 100;
   const supplierLabel =
     suppliers.find((s) => s.id === card.supplierId)?.name ??
     card.originalExtraction.supplierName ??
@@ -3434,8 +3479,7 @@ function PICard({
                 <th className="text-left px-2 py-1.5 font-medium">Description</th>
                 <th className="text-right px-2 py-1.5 font-medium w-20">Qty</th>
                 <th className="text-left px-2 py-1.5 font-medium w-16">UoM</th>
-                <th className="text-right px-2 py-1.5 font-medium w-24">Unit Price</th>
-                <th className="text-right px-2 py-1.5 font-medium w-20">SST</th>
+                <th className="text-right px-2 py-1.5 font-medium w-24">Unit Price</th>                <th className="text-right px-2 py-1.5 font-medium w-20">SST</th>
                 <th className="text-right px-2 py-1.5 font-medium w-24">Amount</th>
                 <th className="w-8" />
               </tr>
@@ -3481,6 +3525,12 @@ function PICard({
                           materialName: o.description,
                           supplierSku: reverse?.supplierSku ?? line.supplierSku,
                           uom: rm?.baseUOM || line.uom,
+                          // An operator's pick is not a machine guess: clear the
+                          // flags so the hint goes and Create may learn the
+                          // supplier code ↔ this material binding.
+                          autoMatched: false,
+                          matchTier: null,
+                          matchVia: null,
                         });
                       }}
                       onTyped={() => {}}
@@ -3574,7 +3624,7 @@ function PICard({
                     />
                   </td>
                   <td className="px-1 py-1 text-right text-xs text-[#1F1D1B]">
-                    {((Number(line.qty) || 0) * (Number(line.unitPriceRM) || 0)).toLocaleString("en-MY", {
+                    {(scanLineGrossSen(line) / 100).toLocaleString("en-MY", {
                       minimumFractionDigits: 2,
                       maximumFractionDigits: 2,
                     })}
@@ -3600,7 +3650,7 @@ function PICard({
                   <tr className="bg-[#FBF4E6]">
                     <td colSpan={8} className="px-3 py-1">
                       <div className="text-[11px] text-[#9C6F1E]">
-                        {matchTierHint(line.matchTier)}
+                        {matchTierHint(line.matchTier, line.matchVia)}
                       </div>
                     </td>
                   </tr>
@@ -3676,6 +3726,37 @@ function PICard({
             extracted by OCR. Read-only display; at Create time we distribute
             this tax pro-rata across goods lines into purchase_invoice_items.
             tax_sen so the persisted invoice has the same breakdown. */}
+        {/* Invoice-level discount (DEV-14) — the supplier's footer "Less:
+            Discount", pre-filled from the scan; editable until Create. */}
+        <div className="flex flex-wrap items-center justify-end gap-x-6 gap-y-1 text-xs pl-7 pt-1">
+          <span className="text-[#6B7280]">
+            Gross:{" "}
+            <span className="text-[#1F1D1B] font-medium">
+              RM {(grossSen / 100).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </span>
+          </span>
+          <label className="flex items-center gap-2 text-[#6B7280]">
+            Less: Discount (RM)
+            <Input
+              type="number"
+              step="0.01"
+              min={0}
+              className="h-7 w-28 text-xs text-right"
+              value={num(card.discountRM ?? 0)}
+              onChange={(e) =>
+                onPatch({ discountRM: e.target.value === "" ? 0 : Math.max(0, Number(e.target.value)) })
+              }
+              onFocus={(e) => e.currentTarget.select()}
+              disabled={!!card.createdPiNo}
+            />
+          </label>
+          <span className="text-[#6B7280]">
+            Net:{" "}
+            <span className="text-[#1F1D1B] font-medium">
+              RM {totalRM.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </span>
+          </span>
+        </div>
         {(card.originalExtraction.subtotal != null
           || card.originalExtraction.tax != null
           || card.originalExtraction.total != null) && (
@@ -3806,6 +3887,9 @@ function serialiseCardAsExtraction(card: PreviewCard): SupplierExtraction {
     subtotal: card.originalExtraction.subtotal ?? null,
     tax: card.originalExtraction.tax ?? null,
     total: card.originalExtraction.total ?? null,
+    // The corrected footer discount, so a gold sample teaches the extractor to
+    // read it (DEV-14).
+    discount: Number(card.discountRM) || null,
   };
 }
 
@@ -3839,6 +3923,8 @@ type GRNPreviewLine = {
   autoMatched?: boolean;
   /** Which search space produced it — see the create-PI line type. */
   matchTier?: CandidateTier | null;
+  /** HOW it matched — the supplier's code in another form, or the wording. */
+  matchVia?: "sku" | "code" | "text" | null;
   /**
    * The PO line THIS receipt line draws down. A delivery note may cover
    * several of our orders, so ownership lives here rather than on the card:
@@ -4071,6 +4157,13 @@ function CreateGRNWizard({
       if (!sku || !supplierId) return null;
       const exact = bindingsBySupplierSku.get(`${supplierId}__${sku}`);
       if (exact) return exact;
+      // Same code, different zero-padding: the invoice prints NICCA-6-FOG, the
+      // binding was saved as NICCA-06-FOG (Meditex, 2026-09-24). Checked before
+      // the suffix fallback so a looser hit can never shadow it.
+      const padded = bindings.find(
+        (b) => b.supplierId === supplierId && sameSupplierCode(b.supplierSku, supplierSku),
+      );
+      if (padded) return padded;
       // Prefix-tolerant fallback (e.g. binding "OST-SL 157" vs OCR "SL 157"):
       // try endsWith / contains either way for this supplier's bindings.
       for (const b of bindings) {
@@ -4264,6 +4357,7 @@ function CreateGRNWizard({
         //    against the wrong item and surfaces far later than one click.
         let autoMatched = false;
         let matchTier: CandidateTier | null = null;
+        let matchVia: "sku" | "code" | "text" | null = null;
         if (!binding && !rm) {
           const text = `${rawSku} ${ln.description ?? ""}`.trim();
           const hit = resolveMaterialForLine(text, tiers, {
@@ -4274,6 +4368,7 @@ function CreateGRNWizard({
             rm = hit.item;
             autoMatched = true;
             matchTier = hit.tier;
+            matchVia = hit.via;
           }
         }
         // The supplier's own code for whatever we ended up resolving to.
@@ -4310,6 +4405,7 @@ function CreateGRNWizard({
           materialCode: rm?.itemCode ?? binding?.materialCode ?? "",
           autoMatched,
           matchTier,
+          matchVia,
           materialName: rm?.description ?? descOut,
           supplierSku: sku,
           description: descOut,
@@ -5649,6 +5745,12 @@ function GRNCard({
                           materialName: o.description,
                           supplierSku: reverse?.supplierSku ?? line.supplierSku,
                           uom: rm?.baseUOM || line.uom,
+                          // An operator's pick is not a machine guess: clear the
+                          // flags so the hint goes and Create may learn the
+                          // supplier code ↔ this material binding.
+                          autoMatched: false,
+                          matchTier: null,
+                          matchVia: null,
                         });
                       }}
                       onTyped={() => {}}
@@ -5754,7 +5856,7 @@ function GRNCard({
                   <tr className="bg-[#FBF4E6]">
                     <td colSpan={8} className="px-3 py-1">
                       <div className="text-[11px] text-[#9C6F1E]">
-                        {matchTierHint(line.matchTier)}
+                        {matchTierHint(line.matchTier, line.matchVia)}
                       </div>
                     </td>
                   </tr>

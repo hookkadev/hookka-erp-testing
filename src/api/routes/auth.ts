@@ -18,7 +18,7 @@
 // /me round-trip, but the token itself never touches localStorage.
 // ---------------------------------------------------------------------------
 import { Hono } from "hono";
-import { permissionsForRole } from "../lib/role-policy";
+import { permissionsForRole, withDashboardAccess, dashboardTabsForRole } from "../lib/role-policy";
 import { requirePermission } from "../lib/rbac";
 import { hiddenNavPrefixes, hiddenNavForRole, homeForPermissions } from "../lib/nav-permissions";
 import type { Context } from "hono";
@@ -529,10 +529,10 @@ app.get("/me/permissions", async (c) => {
 
   // Defensive wrap (2026-04-26 prod 500 dogfood report): if the roles /
   // role_permissions tables are missing or the JOIN throws, degrade to a
-  // legacy lookup against users.role TEXT and surface a permissive
-  // ["*:read"] set so the UI keeps gating reads sensibly. SUPER_ADMIN /
-  // ADMIN still get the wildcard. Mutations stay forbidden until the
-  // operator re-applies migrations.
+  // legacy lookup against users.role TEXT. SUPER_ADMIN / ADMIN still get the
+  // wildcard, an explicit READ_ONLY role keeps `*:read`, and every other role
+  // gets NO permissions — the same answer the gate gives on a failed lookup.
+  // (Until the RBAC audit of 2026-09-11 this returned `*:read` for everyone.)
   try {
     // Look up the user's role (id + name). Empty roleId -> READ_ONLY fallback,
     // mirroring rbac.ts's role resolution.
@@ -583,12 +583,14 @@ app.get("/me/permissions", async (c) => {
     // the API enforces: menus for pages that 403, or pages hidden that work.
     const coded = permissionsForRole(roleName);
     if (coded) {
+      const codedPerms = new Set(withDashboardAccess(coded, roleName));
       return c.json({
         success: true,
         role: roleName,
-        permissions: [...coded],
-        navHidden: [...new Set([...hiddenNavPrefixes(coded), ...hiddenNavForRole(roleName)])],
-        home: homeForPermissions(coded, roleName),
+        permissions: [...codedPerms],
+        navHidden: [...new Set([...hiddenNavPrefixes(codedPerms), ...hiddenNavForRole(roleName)])],
+        home: homeForPermissions(codedPerms, roleName),
+        dashboardTabs: dashboardTabsForRole(roleName),
       });
     }
 
@@ -602,7 +604,10 @@ app.get("/me/permissions", async (c) => {
       .all<{ resource: string; action: string }>();
 
     const rows = permsRes.results ?? [];
-    const permissions = rows.map((r) => `${r.resource}:${r.action}`);
+    // Plus the derived dashboard-experimental:read (role-policy withDashboardAccess):
+    // every dashboard viewer keeps the experimental page, and a tab-restricted
+    // role (DASHBOARD_TABS_BY_ROLE) gets that page and only that page.
+    const permissions = withDashboardAccess(rows.map((r) => `${r.resource}:${r.action}`), roleName);
 
     return c.json({
       success: true,
@@ -612,6 +617,8 @@ app.get("/me/permissions", async (c) => {
       // which link (owner: "直接从 backend 就挡掉嘛").
       navHidden: [...new Set([...hiddenNavPrefixes(new Set(permissions)), ...hiddenNavForRole(roleName)])],
       home: homeForPermissions(new Set(permissions), roleName),
+      // null: every tab, gated as before. A list: the only tabs this role may open.
+      dashboardTabs: dashboardTabsForRole(roleName),
     });
   } catch (err) {
     console.warn(
@@ -621,7 +628,7 @@ app.get("/me/permissions", async (c) => {
     );
     // Fallback: legacy users.role TEXT lookup. Same query the
     // auth-middleware already runs to stamp userRole on the context.
-    let legacyRole = "READ_ONLY";
+    let legacyRole: string | null = null;
     try {
       const r = await c.var.DB.prepare(
         "SELECT role FROM users WHERE id = ? LIMIT 1",
@@ -630,15 +637,19 @@ app.get("/me/permissions", async (c) => {
         .first<{ role: string | null }>();
       if (r?.role) legacyRole = r.role.toUpperCase();
     } catch {
-      // Even the legacy lookup failed — return read-only against unknown role.
+      // Even the legacy lookup failed — the role is unknown, so it gets nothing.
     }
     if (legacyRole === "SUPER_ADMIN" || legacyRole === "ADMIN") {
       return c.json({ success: true, role: legacyRole, permissions: ["*"] });
     }
+    // The menu mirrors the GATE's failure path (rbac.ts requirePermission
+    // catch): an explicit READ_ONLY role keeps its legacy `*:read`, every other
+    // role gets nothing. This used to hand `*:read` to every role, which put
+    // links in the menu for pages the gate refuses. RBAC audit 2026-09-11.
     return c.json({
       success: true,
-      role: legacyRole,
-      permissions: ["*:read"],
+      role: legacyRole ?? "READ_ONLY",
+      permissions: legacyRole === "READ_ONLY" ? ["*:read"] : [],
     });
   }
 });

@@ -308,6 +308,10 @@ type CreateSOResponse = {
   success?: boolean;
   error?: string;
   data?: { companySOId?: string; id?: string };
+  // Set when the customer PO/SO ref is already on another active SO — the SO
+  // is still created (as DRAFT); the operator is told to check it (DEV-12).
+  duplicateOf?: string | null;
+  warning?: string;
 };
 
 // Customer + delivery hub resolution lives in @/lib/scan-party-resolve — see
@@ -926,6 +930,10 @@ export function ScanPOModal({ open, onClose, onCreated }: Props) {
     // One download per scanned PDF for this whole create pass. Several POs can
     // come off one scan, and each used to pull the same file down again.
     const originalBytes = newQueueBytesCache();
+    // Rows whose SO was actually created. Only these are consumed below — a
+    // failed create must leave its scan in the queue, not silently drop it
+    // (DEV-12: a rejected duplicate used to vanish with the scan).
+    const createdRows = new Set<(typeof selectedClaude)[number]>();
 
     // --- Claude-extracted rows ----------------------------------------
     for (const row of selectedClaude) {
@@ -1147,6 +1155,8 @@ export function ScanPOModal({ open, onClose, onCreated }: Props) {
             poNo: po.customerPO,
             itemCount: po.items.length,
           });
+          createdRows.add(row);
+          if (data.warning) errs.push(`⚠ ${po.customerPO}: ${data.warning}`);
           // TEACH: this letterhead (`po.customerName`, exactly as OCR read it)
           // belongs to `resolvedCustomerId` — whether the matcher got it right
           // or the operator corrected it in the picker. Remembering it here is
@@ -1232,6 +1242,7 @@ export function ScanPOModal({ open, onClose, onCreated }: Props) {
             poNo: po.poNo,
             itemCount: po.items.length,
           });
+          if (data.warning) errs.push(`⚠ ${po.poNo}: ${data.warning}`);
           // Same rule as the Claude branch above: every SO-creation path keeps
           // its original. This branch had no call at all, so a template-matched
           // PO silently produced an SO with nothing on record.
@@ -1281,7 +1292,7 @@ export function ScanPOModal({ open, onClose, onCreated }: Props) {
     }
     const seenPairs = new Set<string>();
     for (const row of selectedClaude) {
-      if (!row.scanQueueRowId) continue;
+      if (!row.scanQueueRowId || !createdRows.has(row)) continue;
       const key = `${row.scanQueueRowId}#${row.scanQueueDocIdx}`;
       if (seenPairs.has(key)) continue;
       seenPairs.add(key);
@@ -2958,11 +2969,19 @@ function DoneStep({
         </div>
       )}
 
-      {/* Errors */}
-      {errors.length > 0 && (
+      {/* Warnings ("⚠ …" lines — the SO WAS created) vs real failures */}
+      {errors.some((e) => e.startsWith("⚠")) && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 space-y-2">
+          <p className="font-medium text-amber-800">Check before confirming:</p>
+          {errors.filter((e) => e.startsWith("⚠")).map((err, i) => (
+            <p key={i} className="text-sm text-amber-700">{err}</p>
+          ))}
+        </div>
+      )}
+      {errors.some((e) => !e.startsWith("⚠")) && (
         <div className="bg-red-50 border border-red-200 rounded-lg p-4 space-y-2">
           <p className="font-medium text-red-800">Some POs failed to create:</p>
-          {errors.map((err, i) => (
+          {errors.filter((e) => !e.startsWith("⚠")).map((err, i) => (
             <p key={i} className="text-sm text-red-700">{err}</p>
           ))}
         </div>

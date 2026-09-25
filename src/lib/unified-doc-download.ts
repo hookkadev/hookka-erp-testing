@@ -171,6 +171,13 @@ export async function downloadUnifiedInvoicePdf(inv: AnyInvoice, extras: AnyExtr
   triggerDownload(bytes, `${s(inv.invoiceNo) || "INVOICE"}.pdf`);
 }
 
+// "View Documentation": render into a tab the caller opened synchronously on
+// click (a window.open after an await would be popup-blocked).
+export async function viewUnifiedInvoicePdf(inv: AnyInvoice, extras: AnyExtras, w: Window): Promise<void> {
+  const bytes = await renderUnifiedInvoiceBytes(inv, extras);
+  w.location.href = URL.createObjectURL(new Blob([bytes.slice()], { type: "application/pdf" }));
+}
+
 export async function renderUnifiedInvoiceBytes(inv: AnyInvoice, extras: AnyExtras): Promise<Uint8Array> {
   return buildUnifiedDocPdf(buildUnifiedInvoiceData(invoiceInputFromInvoice(inv, extras), HOOKKA_LOGO_PNG_BASE64));
 }
