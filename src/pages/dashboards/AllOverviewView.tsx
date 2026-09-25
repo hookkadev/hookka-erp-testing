@@ -73,7 +73,7 @@ function ActionTile({ label, value, hint, onOpen }: { label: string; value: numb
     <button
       type="button"
       onClick={onOpen}
-      className="text-left rounded-md border border-[#E2DDD8] bg-white transition-shadow hover:shadow-md p-4 max-md:p-3 min-h-11 hover:bg-[#F7F5F3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#6B5C32]"
+      className="text-left rounded-md border border-[#E2DDD8] bg-white transition-shadow hover:shadow-md p-3 min-h-11 hover:bg-[#F7F5F3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#6B5C32]"
     >
       <p className="text-2xl max-md:text-xl font-bold tabular-nums" style={{ color: value ? RED : value === 0 ? GREEN : MUTED }}>
         {value == null ? "—" : fmtN(value)}
@@ -115,7 +115,7 @@ function Hero({
 }) {
   return (
     <Card>
-      <CardContent className="p-4 space-y-1">
+      <CardContent className="p-3 space-y-1">
         <p className="text-[11px] uppercase tracking-wide" style={{ color: MUTED }}>
           {label}
         </p>
@@ -152,7 +152,7 @@ function DomainCard({
 }) {
   return (
     <Card className="flex flex-col">
-      <CardContent className="p-4 flex flex-col gap-3 flex-1">
+      <CardContent className="p-3 flex flex-col gap-3 flex-1">
         <p className="text-sm font-semibold text-[#1F1D1B]">
           {title}
         </p>
@@ -252,7 +252,7 @@ export function AllOverviewView({
   if (error || !data?.success) {
     return (
       <Card className="border-[#F0D9AE] bg-[#FDF3E4]">
-        <CardContent className="p-4 text-sm text-[#B5701A]">
+        <CardContent className="p-3 text-sm text-[#B5701A]">
           Couldn't load Overview: {error ?? "unknown error"}
         </CardContent>
       </Card>
@@ -270,7 +270,7 @@ export function AllOverviewView({
   const overdueByDept = data.production?.overdueByDept;
 
   return (
-    <div className="space-y-6 max-md:space-y-4">
+    <div className="space-y-4 max-md:space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-lg font-semibold text-[#1F1D1B]">Overview</h2>
         <LiveBadge live={!!data.availability?.sales?.live} />
@@ -281,7 +281,7 @@ export function AllOverviewView({
         Key operational bottlenecks &amp; priority action items
       </p>
 
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         <Hero label={`Total Revenue (${period.day ? "day" : period.mode === "monthly" ? "MTD" : "YTD"})`} value={formatCurrency(totals.revenueSen)}>
           <Delta pct={deltaPct} vs={totals.prevLabel || "—"} />
           <p className="text-xs" style={{ color: MUTED }}>{fmtN(totals.orders)} orders recorded</p>
@@ -320,7 +320,7 @@ export function AllOverviewView({
 
       <section aria-label="Needs action" className="space-y-2">
         <h3 className="text-sm font-semibold text-[#1F1D1B]">Needs action</h3>
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 max-md:gap-3">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
           <ActionTile
             label="Pending approvals"
             value={svc ? svc.filter((c) => c.approvalStatus === "PENDING").length : null}
@@ -349,7 +349,7 @@ export function AllOverviewView({
               /dashboard tile. Failed = "—", partial = a floor ("+"). */}
           <Link
             to="/daily-report"
-            className="text-left rounded-md border border-[#E2DDD8] bg-white transition-shadow hover:shadow-md p-4 max-md:p-3 min-h-11 hover:bg-[#F7F5F3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#6B5C32]"
+            className="text-left rounded-md border border-[#E2DDD8] bg-white transition-shadow hover:shadow-md p-3 min-h-11 hover:bg-[#F7F5F3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#6B5C32]"
           >
             <p
               className="text-2xl max-md:text-xl font-bold tabular-nums"
@@ -376,7 +376,7 @@ export function AllOverviewView({
       {/* Whole-book reconciliation — the panel to compare against the house
           Sales page. Ignores the period picker on purpose. */}
       <Card className="bg-white border-[#E5E0D8]">
-        <CardContent className="p-4 space-y-3">
+        <CardContent className="p-3 space-y-3">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <p className="text-sm font-semibold text-[#1F1D1B]">Book totals</p>
             <p className="text-xs" style={{ color: MUTED }}>
@@ -384,7 +384,7 @@ export function AllOverviewView({
             </p>
           </div>
 
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <div>
               <p className="text-2xl font-bold tabular-nums text-[#1F1D1B]">{fmtN(book.orders)}</p>
               <p className="text-xs" style={{ color: MUTED }}>
@@ -457,7 +457,7 @@ export function AllOverviewView({
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         <DomainCard
           title="Sales &amp; Demand Snapshot"
           stats={[

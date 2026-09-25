@@ -164,7 +164,7 @@ export function OperationsView({
   if (error || !data?.success) {
     return (
       <Card className="border-[#F0D9AE] bg-[#FDF3E4]">
-        <CardContent className="p-4 text-sm text-[#B5701A]">
+        <CardContent className="p-3 text-sm text-[#B5701A]">
           Couldn't load Operations: {error ?? "unknown error"}
         </CardContent>
       </Card>
@@ -174,7 +174,7 @@ export function OperationsView({
   const pva = production?.planVsActual;
 
   return (
-    <div className="space-y-5 max-md:space-y-4">
+    <div className="space-y-4 max-md:space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-lg font-semibold text-[#1F1D1B]">Operations</h2>
         <LiveBadge live={prodLive && invLive} />
@@ -193,7 +193,7 @@ export function OperationsView({
       {sub === "overview" && (
         <>
             {/* ---- KPI groups: Orders (3) on top, Materials & cost | People (2+2) below at xl ---- */}
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-x-5 gap-y-4">
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
              <div className="xl:col-span-2">
               <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[#6B7280]">Orders</p>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
@@ -211,7 +211,7 @@ export function OperationsView({
               />
               <div className="col-span-2 md:col-span-1">
                 <Card>
-                  <CardContent className="p-4">
+                  <CardContent className="p-3">
                     <p className="text-xs text-[#6B7280] truncate">Plan vs Actual</p>
                     <p className="mt-1 font-bold truncate tabular-nums text-2xl text-[#1F1D1B]">
                       {stageCompletion.pct == null ? "—" : `${stageCompletion.pct.toFixed(1)}%`}
@@ -234,8 +234,7 @@ export function OperationsView({
              </div>
              <div>
               <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[#6B7280]">Materials &amp; cost</p>
-              {/* Cost gets the wider slot so an RM figure doesn't truncate. */}
-              <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Kpi
                 label="Material Shortage"
                 value={fmtN((inventory?.materialShortage ?? []).length)}
@@ -264,7 +263,7 @@ export function OperationsView({
               />
               <div className="col-span-1">
                 <Card>
-                  <CardContent className="p-4">
+                  <CardContent className="p-3">
                     <p className="text-xs text-[#6B7280] truncate">Efficiency (Prod ÷ Working)</p>
                     <p className="mt-1 font-bold truncate tabular-nums text-2xl text-[#3E6570]">
                       {efficiencyStat.pct == null ? "—" : `${efficiencyStat.pct.toFixed(1)}%`}
@@ -287,7 +286,7 @@ export function OperationsView({
 
             {/* How loaded is the plant (dial) · where is it stuck (per-dept board:
                 queue days + overdue + due-soon) · what's due next (lanes). */}
-            <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 items-start">
+            <div className="grid grid-cols-1 lg:grid-cols-5 gap-3 items-start">
               <div className="lg:col-span-2 min-w-0">
                 <PlantLoadCard period={period} />
               </div>

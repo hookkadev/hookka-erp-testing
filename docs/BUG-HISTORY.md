@@ -1,9 +1,10 @@
 # Bug History
 
+> **Last verified: 2026-09-25**: newest entry BUG-2026-09-25-195 (branch `feat/employees-kpi-layout`, PR #530); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-25**: newest entry BUG-2026-09-25-194 (branch `feat/dashboard-kpi-no-icons`, PR #524); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-25** — newest entry BUG-2026-09-25-192 (branch `feat/ocr-dashboard-tab`, PR #522); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-25** — newest entry BUG-2026-09-24-191 (branch `fix/so-customer-po-view`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
-> **Last verified: 2026-09-25** — newest entry BUG-2026-09-25-195 (branch `feat/m-warehouse-locate`; renumbered from 193 in the staging←main sync). **Numbering follows `main`:** staging entries that reused a sequence number main had already given a different bug were renumbered 196-207 (see WORK-TRACKER 2026-09-25 sync entry for the map). Previously: newest entry BUG-2026-09-23-182 (branch `laphii/fix/dashboard-exp-production-revenue`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-09-25** — newest entry BUG-2026-09-25-208 (renumbered from -195 on the staging sync; branch `feat/m-warehouse-locate`; renumbered from 193 in the staging←main sync). **Numbering follows `main`:** staging entries that reused a sequence number main had already given a different bug were renumbered 196-207 (see WORK-TRACKER 2026-09-25 sync entry for the map). Previously: newest entry BUG-2026-09-23-182 (branch `laphii/fix/dashboard-exp-production-revenue`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 
 Living log of bugs we've identified, diagnosed, and fixed in Hookka ERP.
 
@@ -39,7 +40,19 @@ Entries themselves stay newest-first.
 
 ---
 
-## BUG-2026-09-25-195 — rack-scan movements showed the rack ID, "Public scan", and no trace of a move `warehouse` `data-integrity` 🟢
+## BUG-2026-09-25-195: Overall Efficiency showed a dash on the People tab, and the month figure counted days with no hours `dashboard` `employees` 🟡
+
+🟡 **Fix in progress** (branch `feat/employees-kpi-layout`, PR #530, not verified in a browser).
+
+**Symptom.** Employees > Overview showed "Overall Efficiency: —" with no explanation. MEASURED on prod 2026-09-25 via the dashboard feed: September has 5,054h clocked and 4,801h earned, so the data was there.
+
+**Root cause.** Two parts. (1) The People tab opens on today (`resolvePeriod`), and working hours are entered after the day, so today has earned job-card minutes but 0 clocked minutes and the tile had nothing to divide by. The dash was correct but read as broken. (2) `overallEfficiencyPct` summed earned minutes from every day in the period, including days whose hours were not in yet, so the month read 95.0% instead of 92.9% on 2026-09-25 (today's 105.8h of earned time with no hours against it). The /m Operations tab carried its own copy of the same sum.
+
+**Fix.** `overallEfficiencyPct` (`src/pages/dashboards/dashboard-shared-lib.ts`) skips days with no clocked production time. The /m Operations tab now calls the helper instead of its copy. The Employees tile says "No production hours clocked on <day>" (or "in <period>") instead of a bare dash. Regression: `tests/dashboard-period.test.mjs` ("skips days whose hours are not in yet").
+
+---
+
+## BUG-2026-09-25-208 — rack-scan movements showed the rack ID, "Public scan", and no trace of a move `warehouse` `data-integrity` 🟢
 
 🟢 **Fixed** · found planning DEV-09 (Mobile Warehouse — movement history).
 
