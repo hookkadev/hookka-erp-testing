@@ -1,6 +1,6 @@
 # Hookka ERP — Work Tracker
 
-> **Last verified: 2026-09-25** — branch `feat/dashboard-kpi-no-icons` (PR #524 → `main`) is the newest entry below; the Attendance-log, time-audit-dates and Department-Status branches are folded into it. Item 17 (PRODUCTION dashboard tabs) added.
+> **Last verified: 2026-09-25**: branch `feat/dashboard-kpi-no-icons` (PR #524 to `main`, open) is the newest entry below, items 1 to 17 checked against the branch. The Attendance log, time audit dates and Department Status branches are folded into it (#525, #526, #527 closed).
 > **Last verified: 2026-09-25** — branch `feat/ocr-dashboard-tab` entry below updated: PR #522 open, BUG-2026-09-25-192 fixed, historical model fallback added.
 > **Last verified: 2026-09-24** — branch `feat/dashboard-exp-ops-layout` added below (not committed, its entry is the newest).
 > **Last verified: 2026-09-24** — DEV-14 entry below updated: #510 MERGED; the per-line column was the wrong shape — branch `fix/pi-document-discount` (→ `main`) moves it to ONE invoice-level discount (BUG-2026-09-24-188).
