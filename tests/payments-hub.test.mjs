@@ -65,9 +65,22 @@ test("the ladder, edit and attachments stay voucher-only; batch print / export c
   assert.match(tab, /const pvSel = useRowSelection\(visibleRows, \(r\) => r\.key\);/);
 });
 
-test("supplier_payments keeps no bank column — a bank pick says what it hid instead of hiding silently", () => {
+// Owner 2026-09-28 「supplier payment 也没记银行户口?那怎么对账」: the table
+// keeps no bank column; the ledger's CR leg is the record (reconciliation
+// already reads it). GET /api/supplier-payments now surfaces that leg as
+// `bankAccount`, and the hub shows it as "Paid From".
+test("a supplier payment's bank is read from its ledger CR leg — newest, never the AP control / FX account", () => {
+  const api = readFileSync("src/api/routes/supplier-payments.ts", "utf8").replace(/\r\n/g, "\n");
+  const get = api.slice(api.indexOf('app.get("/", async (c) => {'), api.indexOf("\napp.post(", api.indexOf('app.get("/", async (c) => {')));
+  assert.match(get, /SELECT sourceId, accountCode, postedAt FROM ledger_journal_entries\s*\n\s*WHERE orgId = \? AND hidden = 0 AND creditSen > 0\s*\n\s*AND sourceType LIKE 'supplier_payment%'\s*\n\s*AND accountCode NOT IN \(\?, \?\)\s*\n\s*ORDER BY postedAt DESC/);
+  assert.match(get, /\.bind\(orgId, AP_CONTROL, FX_GAIN_ACCT\)/);
+  // First seen per payment = newest leg (a restate re-posts; a void reverses with a DR leg, which creditSen > 0 excludes).
+  assert.match(get, /if \(no && !bankByNo\.has\(no\)\) bankByNo\.set\(no, String\(l\.accountCode \?\? l\.account_code \?\? ""\)\);/);
+  assert.match(get, /for \(const g of groups\) g\.bankAccount = bankByNo\.get\(g\.paymentNo\) \?\? null;/);
+  assert.match(merge, /via: g\.bankAccount \?\? ""/);
+  // A payment with no bank leg (contra) is the only one a bank pick hides — and it says so.
   assert.match(tab, /const bankHiddenSp = bankFilter \? payRows\.filter\(\(r\) => r\.door === "SP" && !r\.via\)\.length : 0;/);
-  assert.match(tab, /supplier payment\{bankHiddenSp === 1 \? "" : "s"\} hidden — that document records no bank account/);
+  assert.match(tab, /supplier payment\{bankHiddenSp === 1 \? "" : "s"\} hidden — no bank leg on their ledger posting/);
 });
 
 test("one supplier-payment voucher builder, in a lib, used by both pages", () => {

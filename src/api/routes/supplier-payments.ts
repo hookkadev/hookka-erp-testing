@@ -89,7 +89,29 @@ app.get("/", async (c) => {
 
   // Map iteration order (inside groupSupplierPaymentRows) preserves
   // first-seen, which (given the ORDER BY) is already newest-first.
-  return c.json({ success: true, data: groupSupplierPaymentRows(res.results ?? []) });
+  const groups = groupSupplierPaymentRows(res.results ?? []);
+  // The bank / cash account each payment left from. supplier_payments keeps
+  // no bank column — the CR leg on the ledger is the only record of it (owner
+  // 2026-09-28 「supplier payment 也没记银行户口?那怎么对账」: reconciliation
+  // reads that leg, so nothing was ever missing there; the Payments hub shows
+  // it from here too). Newest CR leg that is not the AP control / FX account:
+  // a restate re-posts under its own source, a void reverses with a DR leg.
+  if (groups.length) {
+    const legRes = await c.var.DB.prepare(
+      `SELECT sourceId, accountCode, postedAt FROM ledger_journal_entries
+        WHERE orgId = ? AND hidden = 0 AND creditSen > 0
+          AND sourceType LIKE 'supplier_payment%'
+          AND accountCode NOT IN (?, ?)
+        ORDER BY postedAt DESC`,
+    ).bind(orgId, AP_CONTROL, FX_GAIN_ACCT).all<Record<string, unknown>>().catch(() => ({ results: [] as Record<string, unknown>[] }));
+    const bankByNo = new Map<string, string>();
+    for (const l of legRes.results ?? []) {
+      const no = String(l.sourceId ?? l.source_id ?? "");
+      if (no && !bankByNo.has(no)) bankByNo.set(no, String(l.accountCode ?? l.account_code ?? ""));
+    }
+    for (const g of groups) g.bankAccount = bankByNo.get(g.paymentNo) ?? null;
+  }
+  return c.json({ success: true, data: groups });
 });
 
 // ---------------------------------------------------------------------------
