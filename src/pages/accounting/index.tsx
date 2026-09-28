@@ -8870,7 +8870,9 @@ function buildPayRows(pv: PvRow[] | null, sp: SupplierPaymentGroup[] | null, ocp
     if (pvNos.has(g.paymentNo)) continue;
     rows.push({
       door: "SP", key: `s:${g.paymentNo}`, no: g.paymentNo, date: String(g.date ?? "").slice(0, 10),
-      payee: g.supplierName ?? "", via: "", note: `${g.lines.length} invoice${g.lines.length === 1 ? "" : "s"}`,
+      // The bank comes from the ledger's CR leg (GET /supplier-payments fills
+      // it); blank only when the payment has no bank leg at all (contra).
+      payee: g.supplierName ?? "", via: g.bankAccount ?? "", note: `${g.lines.length} invoice${g.lines.length === 1 ? "" : "s"}`,
       totalSen: g.totalBankSen, state: g.lifecycleState ?? "ACTIVE",
       advanceOpen: spAdvanceOpenSen(g) > 0, sp: g,
     });
@@ -9191,8 +9193,8 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
     if (bankFilter && row.via !== bankFilter) return false;
     return true;
   });
-  // `supplier_payments` keeps no bank column (its bank leg lives in the GL), so
-  // picking a bank hides those rows — say so instead of letting them vanish.
+  // A supplier payment with no bank leg on the ledger (contra) has no bank to
+  // match, so picking a bank hides it — say so instead of letting it vanish.
   const bankHiddenSp = bankFilter ? payRows.filter((r) => r.door === "SP" && !r.via).length : 0;
 
   const pvSel = useRowSelection(visibleRows, (r) => r.key);
@@ -9882,7 +9884,7 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
           {(["PV", "AP", "SP", "OCP"] as PayDoor[]).map((d) => <option key={d} value={d}>{PAY_DOOR_LABEL[d]}</option>)}
         </select>
         {bankHiddenSp > 0 && (
-          <span className="text-[11px] text-[#9A3A2D]">{bankHiddenSp} supplier payment{bankHiddenSp === 1 ? "" : "s"} hidden — that document records no bank account (its bank leg is in the GL); pick All banks to see them</span>
+          <span className="text-[11px] text-[#9A3A2D]">{bankHiddenSp} supplier payment{bankHiddenSp === 1 ? "" : "s"} hidden — no bank leg on their ledger posting (contra settlement); pick All banks to see them</span>
         )}
       </div>
 
@@ -9996,7 +9998,7 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
                           </td>
                           <td className="px-3 py-1.5 text-xs text-[#6B7280] whitespace-nowrap">{g.date}</td>
                           <td className="px-3 py-1.5">{[g.payee, g.ocp?.reference].filter(Boolean).join(" · ")}</td>
-                          <td className="px-3 py-1.5 text-xs">{g.via || <span className="text-[#9CA3AF]" title="The Supplier Payment document records no bank account — its bank leg is in the GL">—</span>}</td>
+                          <td className="px-3 py-1.5 text-xs">{g.via || <span className="text-[#9CA3AF]" title="No bank leg on this payment's ledger posting (contra settlement)">—</span>}</td>
                           <td className="px-3 py-1.5 text-xs text-[#6B7280]">
                             {g.sp
                               ? <span title={g.sp.lines.map((l) => `${l.piNo || "Advance"} ${formatCurrency(l.amountSen)}`).join("\n")}>{g.sp.lines.filter((l) => l.purchaseInvoiceId).length} invoice{g.sp.lines.filter((l) => l.purchaseInvoiceId).length === 1 ? "" : "s"}{spAdvanceOpenSen(g.sp) > 0 ? " + advance" : ""}</span>
@@ -10304,7 +10306,7 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <DetailField label="Date">{g.date}</DetailField>
               <DetailField label={g.sp ? "Supplier" : "Other creditor"} span={2}>{g.payee || "—"}</DetailField>
-              <DetailField label="Paid from">{g.via ? accountLabel(accounts, g.via) : <span title="The Supplier Payment document records no bank account — its bank leg is in the GL">— (see GL)</span>}</DetailField>
+              <DetailField label="Paid from">{g.via ? accountLabel(accounts, g.via) : <span title="No bank leg on this payment's ledger posting (contra settlement)">—</span>}</DetailField>
               <DetailField label="Reference" span={3}>{g.ocp?.reference || "—"}</DetailField>
               <DetailField label="Total"><span className="tabular-nums">{formatCurrency(g.totalSen)}</span></DetailField>
             </div>

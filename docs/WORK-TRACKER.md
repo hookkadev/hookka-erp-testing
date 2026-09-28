@@ -30,6 +30,21 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
+## 2026-09-28 — 🔵 Payments hub: Supplier Payment rows show Paid From (owner「supplier payment 也没记银行户口?那怎么对账」→「做」)(branch `feat/sp-bank-from-ledger`)
+
+1. 🔵 Answer first: nothing was ever missing for reconciliation — `supplier_payments`
+   keeps no bank column, but every payment's CR leg on `ledger_journal_entries`
+   carries the bank (`buildSupplierPaymentCreate` leg 2 = `payFrom`), and Cash
+   Book reads exactly that leg (`loadBankRecoState`). Only the merged list's
+   "Paid From" cell was blank for SP rows.
+2. 🔵 `GET /api/supplier-payments` now fills `bankAccount` per payment from the
+   newest CR leg with `sourceType LIKE 'supplier_payment%'` that is not the AP
+   control / FX account (a restate re-posts under its own source; a void
+   reverses with a DR leg). The hub's `buildPayRows` uses it as `via`, so the
+   Paid From column, the popup and the bank filter all work for SP rows; only a
+   payment with no bank leg (contra) is hidden by a bank pick, with the hint.
+   Read-side only.
+
 ## 2026-09-28 — ✅ Payment Vouchers 清单合并三门（owner「other creditor 的 payment 没出现在 payment voucher?」→「做」）(#537 MERGED ed38a8b2, deployed, prod-verified)
 
 Prod verification (erp.hookka.com, right after the deploy): header reads

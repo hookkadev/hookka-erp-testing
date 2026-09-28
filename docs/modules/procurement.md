@@ -1,5 +1,7 @@
 # Procurement — Module Guide
 
+> **Last verified: 2026-09-28** (`feat/sp-bank-from-ledger`) — `supplier-payments.ts` anchors re-derived after `GET /` gained the ledger bank-leg lookup (+22 lines above them): POST `/` :146, `/knock-off` :643, `/un-knock` :804, `buildSupplierPaymentCreate` :432, `buildSupplierPaymentLifecycle` :898. `GET /api/supplier-payments` now returns `bankAccount` per payment (from the ledger's newest CR leg; the table has no bank column). Nothing else re-checked.
+>
 > **Last verified: 2026-09-24** (`feat/pi-line-discount-main`) — `purchase-invoices.ts` anchors re-derived (POST `/` :1085, PUT `/:id` :1939, `checkInvoicedQtyCeilingAfterEdit` :699) after the DEV-14 per-line discount added lines above them.
 >
 > **Last verified: 2026-09-22** (`ProcurementPage` anchor re-derived: `index.tsx:812`; grid search now covers line items; `supplier-payments.ts` anchors re-derived after the `buildSupplierPaymentCreate` extraction — `buildSupplierPaymentCreate` :410, `/knock-off` :621, `/un-knock` :782, `buildSupplierPaymentLifecycle` :876). Previously: **Last verified: 2026-08-19** against `src/api/routes/{purchase-orders,grn,purchase-invoices,three-way-match,supplier-payments,supplier-materials}.ts`,
@@ -98,9 +100,9 @@ Owns the buy-side document chain: **Purchase Orders** (PO) → **Goods Receipt N
 | `isPiEditable` / `checkGrnLineQtyEdit` | `src/lib/purchase-edit-rules.ts:34 / 135` | Shared FE+BE edit gates |
 | `checkConvertAvailability` / `clampDecrement` | `src/lib/convert-chain.ts:81 / 138` | Line-level 409 guard + floor |
 | `app.get("/by-po/:poId")` | `src/api/routes/three-way-match.ts:303` | PO-scoped variance read |
-| `app.post("/")` / `/knock-off` / `/un-knock` | `src/api/routes/supplier-payments.ts:124 / 621 / 782` | Pay PIs, apply/reverse advance |
-| `buildSupplierPaymentCreate` | `src/api/routes/supplier-payments.ts:410` | THE builder (rows + PI bumps + GL) shared by POST / and the Payment Vouchers AP road (2026-09-22) |
-| `buildSupplierPaymentLifecycle` | `src/api/routes/supplier-payments.ts:876` | Void/delete/unvoid shared core (exported — the AP voucher's cancel delegates here) |
+| `app.post("/")` / `/knock-off` / `/un-knock` | `src/api/routes/supplier-payments.ts:146 / 643 / 804` | Pay PIs, apply/reverse advance |
+| `buildSupplierPaymentCreate` | `src/api/routes/supplier-payments.ts:432` | THE builder (rows + PI bumps + GL) shared by POST / and the Payment Vouchers AP road (2026-09-22) |
+| `buildSupplierPaymentLifecycle` | `src/api/routes/supplier-payments.ts:898` | Void/delete/unvoid shared core (exported — the AP voucher's cancel delegates here) |
 
 ## Gotchas
 - **GRN Post-to-Stock is a cascade, not a label.** Crossing DRAFT/CONFIRMED→POSTED in `grn.ts` writes stock/WIP + `cost_ledger` AND flips the parent PO. Never write stock outside this boundary. `COMMITTED_STATUSES = {CONFIRMED,POSTED}`; POSTED is never born before arrival = ARRIVED (gate structurally honoured).
