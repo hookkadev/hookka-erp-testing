@@ -30,7 +30,16 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
-## 2026-09-28 — 🔵 Payment Vouchers 清单合并三门（owner「other creditor 的 payment 没出现在 payment voucher?」→「做」）(branch `feat/payments-hub-three-doors`)
+## 2026-09-28 — ✅ Payment Vouchers 清单合并三门（owner「other creditor 的 payment 没出现在 payment voucher?」→「做」）(#537 MERGED ed38a8b2, deployed, prod-verified)
+
+Prod verification (erp.hookka.com, right after the deploy): header reads
+**250 payments · 95 voucher · 1 AP · 112 supplier · 42 other creditor**
+(= 96 + 113 − 1: HPV-2609-050 is an AP voucher whose settlement doc carries
+the same number, listed once as the voucher); door filter counts OCP 42 / SP
+112 / AP 1 / All 250; HPV-2609-040 (GVP, RM 2,850.00, OCB-2609-003) shows with
+its OCP badge, double-click opens "Other Creditor Payment HPV-2609-040" with
+Paid from 310-0010 · CASH AT BANK - HLBB, the bill line and Print / Open on
+its page / Void; Escape closes it. Nothing written on prod.
 
 Owner's ask, measured on prod first (erp.hookka.com, 2026-09-28): the Payment
 Vouchers list carried **96** rows (95 expense vouchers + 1 AP payment) while
