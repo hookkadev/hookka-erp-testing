@@ -320,6 +320,43 @@ export async function checkRawMaterialDeleteLocked(
 }
 
 /**
+ * Raw Material UOM-change guard (DEV-20). Every quantity on a material —
+ * balanceQty, rm_batches, open PO lines, BOM qtyPerUnit — is a bare number
+ * read in its baseUOM, and nothing converts on a change: MTR → ROLL would turn
+ * 50 metres into "50 rolls". So the unit may only change while none of those
+ * quantities exist. PO lines match on material_code, falling back to the
+ * "CODE - name" prefix of materialName for older lines (same key as mrp.ts).
+ */
+export async function checkRawMaterialUomLocked(
+  db: D1Database,
+  rm: { id: string; itemCode: string; balanceQty: number | null },
+): Promise<string | null> {
+  const parts: string[] = [];
+  const bal = Number(rm.balanceQty) || 0;
+  if (bal !== 0) parts.push(`stock balance ${bal}`);
+  const refs = await db
+    .prepare(
+      `SELECT
+         (SELECT COUNT(*) FROM rm_batches WHERE rmId = ? AND remainingQty > 0) AS batches,
+         (SELECT COUNT(*) FROM purchase_order_items poi
+            JOIN purchase_orders po ON po.id = poi.purchaseOrderId
+           WHERE po.status NOT IN ('RECEIVED', 'CLOSED', 'CANCELLED')
+             AND COALESCE(NULLIF(TRIM(poi.material_code), ''),
+                          TRIM(SPLIT_PART(poi.materialName, ' - ', 1))) = ?) AS pos`,
+    )
+    .bind(rm.id, rm.itemCode)
+    // Lowercase single-word aliases: Postgres folds unquoted aliases, and
+    // COUNT(*) can arrive as a string (bigint).
+    .first<{ batches: number | string; pos: number | string }>();
+  const batches = Number(refs?.batches) || 0;
+  const poLines = Number(refs?.pos) || 0;
+  if (batches) parts.push(`${batches} batch(es) on hand`);
+  if (poLines) parts.push(`${poLines} open purchase order line(s)`);
+  if (parts.length === 0) return null;
+  return `Cannot change the UOM of ${rm.itemCode}: it has ${parts.join(", ")}, all counted in the current unit. Clear those first.`;
+}
+
+/**
  * Standardised JSON response for a 403 lock denial. Each route returns this
  * with the message from one of the helpers above. Keeping the shape identical
  * to other error responses so the frontend can render the same toast / banner.

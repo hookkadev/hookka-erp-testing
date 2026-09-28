@@ -24,6 +24,7 @@
 > tab entry gained the Payments hub paragraph (three money-out doors merged read-side,
 > `buildPayRows`, `src/lib/supplier-payment-voucher.ts`, guard `tests/payments-hub.test.mjs`).
 > Nothing else re-checked.
+> **Restamped 2026-09-28 on branch `feat/rm-uom-options`:** Inventory row — RM tab / BatchEditRMDialog line ranges re-measured, RM Settings modal and the DEV-20 UOM rules noted. Nothing else re-checked.
 
 > **Restamped 2026-09-25 on branch `feat/service-dashboard-rework`:** the dashboard Service row (`ServiceView.tsx`): Report list category column + category picker (desktop and `/m`); Top issues Root cause card redrawn as a root cause × day heatmap; unit / prevention / Top 3 cards removed; products card shows per-product root causes; `causeLabel` now uses the case page's root-cause wording ("Transport / 3PL", "Customer (not our fault)", ...).
 
@@ -635,12 +636,13 @@ authoritative current detail.** New here? Start with [ONBOARDING-PATH.md](ONBOAR
   - InventoryPage default export — header + tab switcher (TABS at 117) — L1088-2960
   - FINISHED PRODUCTS tab render — L1821-2116
   - WIP tab render — L2118-2171
-  - RAW MATERIALS tab render — L2173-2960
-  - BatchEditRMDialog component — L2961-3446
+  - RAW MATERIALS tab render — L2583-2962 (re-measured 2026-09-28; the other ranges above are older). **RM Settings** modal (toolbar button, was "Categories") at L2825: per-group variants, allowed UOMs, default sheet size
+  - BatchEditRMDialog component — L3630-4124 (re-measured 2026-09-28)
 
 **Gotchas**
 - fabrics.ts is DEPRECATED: writes return HTTP 410 — all fabric mutation goes through `fabric-tracking.ts`. Don't add write logic to fabrics.ts.
 - raw-materials.ts has `_unlock-duplicate-codes` / `_relock-duplicate-codes` one-shot endpoints; the dup-code unique index is intentionally OFF (distinct items BO315-21/23, 9MM AA/AB) — don't relock without owner sign-off.
+- **RM UOM (DEV-20):** allowed units per item group live in kv `variants-config.uomOptions` (edited in RM Settings; a group with no list allows all of `ALL_RM_UOMS`). Helpers `uomOptionsFor` / `isUomAllowed` / `sameUom` in `src/lib/material-variants.ts` are shared by the page AND `raw-materials.ts`, which rejects an off-list unit on POST / PUT / bulk-import. A unit change is refused while the material has stock, open batches or open PO lines (`checkRawMaterialUomLocked`, `src/api/lib/lock-helpers.ts`) — nothing converts quantities. Test: `tests/rm-uom-options.test.mjs`.
 - `raw_materials.itemGroup` is the AutoCount **stock-group code**, not a label: purchase / stock / opening / closing GL accounts hang off it (`src/api/lib/stock-group-accounts.ts`). Changing it re-routes future postings and re-attributes stock value retroactively, so both write paths (single update + bulk import) emit an audit event with the account delta — see BUG-2026-08-21-160.
 - fg-units.ts holds `backfill-dedupe-fg-units` + `backfill-hub` one-shot migration endpoints and an optional-Bearer public GET; COMPLETED/non-PENDING fg_units inviolate.
 - Stock writes go through stock_movements + stock_adjustments together — a reversal/adjustment must carry batch_no/unit_cost_sen (prior bug B3 dropped these). WIP idempotency guarded via wip_cascade_log only when callers pass orgId.

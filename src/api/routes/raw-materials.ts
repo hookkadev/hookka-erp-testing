@@ -24,7 +24,17 @@
 import { Hono } from "hono";
 import type { Env } from "../worker";
 import { getOrgId } from "../lib/tenant";
-import { checkRawMaterialDeleteLocked, lockedResponse } from "../lib/lock-helpers";
+import {
+  checkRawMaterialDeleteLocked,
+  checkRawMaterialUomLocked,
+  lockedResponse,
+} from "../lib/lock-helpers";
+import {
+  isUomAllowed,
+  sameUom,
+  uomOptionsFor,
+  type UomOptions,
+} from "../../lib/material-variants";
 import { requirePermission } from "../lib/rbac";
 import {
   buildFabricDeleteStatements,
@@ -177,6 +187,26 @@ function pickUnit(body: RawMaterialBody, fallback = "PCS"): string {
   return fallback;
 }
 
+/** Per-group allowed UOMs from kv `variants-config.uomOptions` (DEV-20, set
+ * in Inventory → RM Settings). A missing / malformed blob means "no group is
+ * restricted" — it must never block a raw-material write on its own. */
+async function loadUomOptions(db: D1Database): Promise<UomOptions> {
+  try {
+    const row = await db
+      .prepare("SELECT value FROM kv_config WHERE key = ?")
+      .bind("variants-config")
+      .first<{ value: string | null }>();
+    const opts = JSON.parse(row?.value ?? "null")?.uomOptions;
+    return opts && typeof opts === "object" ? (opts as UomOptions) : {};
+  } catch {
+    return {};
+  }
+}
+
+function uomNotAllowedMsg(group: string, uom: string, opts: UomOptions): string {
+  return `UOM "${uom}" is not allowed for item group ${group}. Allowed: ${uomOptionsFor(group, opts).join(", ")} (Inventory → RM Settings).`;
+}
+
 function statusFromBody(body: RawMaterialBody, fallback = "ACTIVE"): string {
   if (typeof body.status === "string" && body.status.trim()) return body.status.trim();
   if (body.isActive === false) return "INACTIVE";
@@ -284,6 +314,10 @@ app.post("/", async (c) => {
   const id = genId();
   const baseUOM = pickUnit(body);
   const itemGroup = (body.itemGroup ?? "OTHERS").trim() || "OTHERS";
+  const uomOpts = await loadUomOptions(c.var.DB);
+  if (!isUomAllowed(itemGroup, baseUOM, uomOpts)) {
+    return c.json({ success: false, error: uomNotAllowedMsg(itemGroup, baseUOM, uomOpts) }, 400);
+  }
   const status = statusFromBody(body);
   const isActive = status === "ACTIVE" ? 1 : 0;
   const balanceQty = Number(body.balanceQty) || 0;
@@ -428,6 +462,23 @@ app.put("/:id", async (c) => {
         ? numOrNull(body.sheetWidthIn)
         : (existing.sheet_width_in ?? existing.sheetWidthIn ?? null),
   };
+  // DEV-20. Only a change to the unit or the group is checked, so an edit
+  // that leaves both alone never trips over a legacy off-list UOM.
+  const uomChanged = !sameUom(existing.baseUOM, merged.baseUOM);
+  if (uomChanged || (existing.itemGroup ?? "") !== (merged.itemGroup ?? "")) {
+    const uomOpts = await loadUomOptions(c.var.DB);
+    if (!isUomAllowed(merged.itemGroup, merged.baseUOM, uomOpts)) {
+      return c.json(
+        { success: false, error: uomNotAllowedMsg(merged.itemGroup, merged.baseUOM, uomOpts) },
+        400,
+      );
+    }
+  }
+  if (uomChanged) {
+    const lockMsg = await checkRawMaterialUomLocked(c.var.DB, existing);
+    if (lockMsg) return c.json(lockedResponse(lockMsg), 409);
+  }
+
   const isActive = merged.status === "ACTIVE" ? 1 : 0;
   const nowIso = new Date().toISOString();
   await ensureSheetDimCols(c.var.DB);
@@ -515,6 +566,16 @@ app.put("/:id", async (c) => {
       { success: false, error: "Failed to reload raw material" },
       500,
     );
+  }
+
+  if (uomChanged) {
+    await emitAudit(c, {
+      resource: "raw-materials",
+      resourceId: id,
+      action: "update",
+      before: { itemCode: existing.itemCode, baseUOM: existing.baseUOM },
+      after: { itemCode: merged.itemCode, baseUOM: merged.baseUOM },
+    });
   }
 
   // A group change is an ACCOUNTING change — leave a trace.
@@ -638,17 +699,27 @@ app.post("/bulk-import", async (c) => {
   // Fetch existing itemCodes in one shot for the match test.
   // itemGroup rides along so a bulk sheet cannot RE-GROUP materials
   // silently — see the audit note on the single-row update.
+  // baseUOM / balanceQty ride along for the DEV-20 UOM rules below.
   const existingRes = await c.var.DB.prepare(
-    "SELECT id, itemCode, itemGroup FROM raw_materials",
-  ).all<{ id: string; itemCode: string; itemGroup: string | null }>();
+    "SELECT id, itemCode, itemGroup, baseUOM, balanceQty FROM raw_materials",
+  ).all<{
+    id: string;
+    itemCode: string;
+    itemGroup: string | null;
+    baseUOM: string | null;
+    balanceQty: number | null;
+  }>();
   const codeToId = new Map<string, string>();
   const codeToGroup = new Map<string, string>();
   const idToCode = new Map<string, string>();
+  const idToUnit = new Map<string, { baseUOM: string; balanceQty: number | null }>();
   for (const r of existingRes.results ?? []) {
     codeToId.set(r.itemCode, r.id);
     codeToGroup.set(r.itemCode, r.itemGroup ?? "");
     idToCode.set(r.id, r.itemCode);
+    idToUnit.set(r.id, { baseUOM: r.baseUOM ?? "", balanceQty: r.balanceQty });
   }
+  const uomOpts = await loadUomOptions(c.var.DB);
   const regrouped: { itemCode: string; from: string; to: string }[] = [];
   const rejected: { row: number; reason: string }[] = [];
 
@@ -664,8 +735,8 @@ app.post("/bulk-import", async (c) => {
 
     const bodyId = typeof r.id === "string" ? r.id.trim() : "";
     const priorCode = bodyId ? idToCode.get(bodyId) : undefined;
-    let renamedFromGroup: string | undefined;
-    if (priorCode && priorCode !== itemCode) {
+    const renaming = !!priorCode && priorCode !== itemCode;
+    if (renaming) {
       const collisionId = codeToId.get(itemCode);
       if (collisionId && collisionId !== bodyId) {
         rejected.push({
@@ -674,15 +745,43 @@ app.post("/bulk-import", async (c) => {
         });
         continue;
       }
+    }
+    const description = (r.description ?? "").trim() || itemCode;
+    const itemGroup = (r.itemGroup ?? "OTHERS").trim() || "OTHERS";
+    const existingId = priorCode ? bodyId : codeToId.get(itemCode);
+    const priorGroup = existingId ? codeToGroup.get(priorCode ?? itemCode) ?? "" : "";
+
+    // DEV-20 UOM rules — checked BEFORE the rename re-keys the maps, so a
+    // rejected row leaves them untouched. A blank UOM cell keeps the current
+    // unit (it used to reset an existing material to PCS).
+    const prior = existingId ? idToUnit.get(existingId) : undefined;
+    const baseUOM = pickUnit(r, prior?.baseUOM || "PCS");
+    const uomChanged = !!prior && !sameUom(prior.baseUOM, baseUOM);
+    if (
+      (!existingId || uomChanged || priorGroup !== itemGroup) &&
+      !isUomAllowed(itemGroup, baseUOM, uomOpts)
+    ) {
+      rejected.push({ row: rowIdx + 1, reason: uomNotAllowedMsg(itemGroup, baseUOM, uomOpts) });
+      continue;
+    }
+    if (uomChanged && existingId) {
+      const lockMsg = await checkRawMaterialUomLocked(c.var.DB, {
+        id: existingId,
+        itemCode: priorCode ?? itemCode,
+        balanceQty: prior?.balanceQty ?? 0,
+      });
+      if (lockMsg) {
+        rejected.push({ row: rowIdx + 1, reason: lockMsg });
+        continue;
+      }
+    }
+
+    if (renaming && priorCode) {
       // Rename — re-key the maps so the rest of this loop, and any later
       // duplicate row in the same sheet, sees the material under its new code.
-      renamedFromGroup = codeToGroup.get(priorCode);
       codeToId.delete(priorCode);
       codeToGroup.delete(priorCode);
     }
-    const description = (r.description ?? "").trim() || itemCode;
-    const baseUOM = pickUnit(r);
-    const itemGroup = (r.itemGroup ?? "OTHERS").trim() || "OTHERS";
     const status = statusFromBody(r);
     const isActive = status === "ACTIVE" ? 1 : 0;
     const minStock = Number(r.minStock) || 0;
@@ -699,9 +798,7 @@ app.post("/bulk-import", async (c) => {
       ? r.mainSupplierCode.trim()
       : null;
 
-    const existingId = priorCode ? bodyId : codeToId.get(itemCode);
     if (existingId) {
-      const priorGroup = renamedFromGroup ?? codeToGroup.get(itemCode) ?? "";
       if (priorGroup !== itemGroup) {
         regrouped.push({ itemCode, from: priorGroup, to: itemGroup });
       }
@@ -735,6 +832,7 @@ app.post("/bulk-import", async (c) => {
       codeToId.set(itemCode, existingId);
       codeToGroup.set(itemCode, itemGroup);
       idToCode.set(existingId, itemCode);
+      idToUnit.set(existingId, { baseUOM, balanceQty: prior?.balanceQty ?? 0 });
       updated++;
     } else {
       // INSERT — balanceQty defaults to 0; the sheet's Total Bal. Qty is ignored.
@@ -770,6 +868,7 @@ app.post("/bulk-import", async (c) => {
       codeToId.set(itemCode, id);
       codeToGroup.set(itemCode, itemGroup);
       idToCode.set(id, itemCode);
+      idToUnit.set(id, { baseUOM, balanceQty: 0 });
       created++;
     }
 

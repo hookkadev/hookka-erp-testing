@@ -3,6 +3,7 @@
 > **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-212 (branch `fix/customer-price-invoices-main`; ids 196-210 are on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-211 (branch `fix/customer-price-invoices-main`; ids 196-210 are on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-196 (branch `fix/tf-interest-account-collision`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-09-28**: newest entry BUG-2026-09-28-209 (branch `feat/rm-uom-options`, DEV-20; ids 196-208 are taken on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-25**: newest entry BUG-2026-09-25-195 (branch `feat/employees-kpi-layout`, PR #530); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-25**: newest entry BUG-2026-09-25-194 (branch `feat/dashboard-kpi-no-icons`, PR #524); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-25** — newest entry BUG-2026-09-25-192 (branch `feat/ocr-dashboard-tab`, PR #522); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
@@ -94,6 +95,20 @@ real run → 900-I001 reads 0 legs / 0.00, 900-I004 carries the 20 (DR 2,458.96 
 row is "INTEREST ON TRADE FINANCE", EXPENSE, parent 902-0000. Sep'26 P&L re-read: INTEREST ON TRADE
 FINANCE RM 1,637.08 under Operating Expenses (beside LOAN INTEREST), INCORPORATION EXPENSE WRITTEN OFF
 gone. Guard `tests/tf-interest-account.test.mjs`.
+
+---
+
+## BUG-2026-09-28-209: A raw material's UOM could change with no conversion; a blank UOM cell on import reset it to PCS `inventory` `procurement` 🟡
+
+🟡 **Fix in progress** (branch `feat/rm-uom-options` → `staging`, DEV-20; not verified in a browser).
+
+**Symptom.** Found while building DEV-20, not reported. (1) Edit / Batch Edit / Import let anyone switch a material's unit (e.g. MTR → ROLL) while it held stock. Nothing converts, so "50 MTR" becomes "50 ROLL" and open PO lines, rm_batches and BOM consumption all read the old number in the new unit. (2) Bulk import set `baseUOM = pickUnit(r)` on UPDATE, whose fallback is `"PCS"`, so a row with the UOM cell blank silently turned an existing fabric into PCS. Prod impact UNMEASURED (no prod access this session).
+
+**Root cause.** `baseUOM` was a plain editable field with no guard on any of the three write paths (`src/api/routes/raw-materials.ts` PUT and bulk-import), and bulk-import's UPDATE did not fall back to the stored value.
+
+**Fix.** `checkRawMaterialUomLocked` (`src/api/lib/lock-helpers.ts`) refuses a unit change while the material has a non-zero balance, a batch with remaining qty, or an open PO line (matched on `material_code`, else the "CODE - name" prefix, same key as `mrp.ts`). PUT returns 409; bulk-import rejects the row; the Edit dialog disables the Unit select when the balance is non-zero. Bulk-import now falls back to the stored unit when the cell is blank. A unit change is audited. Regression: `tests/rm-uom-options.test.mjs`.
+
+---
 
 ## BUG-2026-09-25-195: Overall Efficiency showed a dash on the People tab, and the month figure counted days with no hours `dashboard` `employees` 🟡
 
