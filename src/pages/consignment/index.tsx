@@ -14,7 +14,7 @@ import { tabValueSen } from "@/lib/status-tab-strip";
 import { formatCurrency, cn } from "@/lib/utils";
 import { getPrimarySoCategory } from "@/lib/so-category";
 import { buildCoDetailListingAoa } from "@/lib/doc-detail-listings";
-import { Plus, ShoppingCart, Download, Filter, X, Eye, Pencil, Printer, Truck, FileText, ClipboardList, RefreshCw, Package, CheckCircle, ScanLine } from "lucide-react";
+import { Plus, ShoppingCart, Download, Filter, X, Eye, Pencil, Printer, Truck, FileText, ClipboardList, RefreshCw, CheckCircle, ScanLine } from "lucide-react";
 // generateCOPdf is dynamic-imported at the click handler so the 1MB jspdf
 // vendor chunk only ships when the user actually prints.
 import { ScanPOModal } from "@/components/scan-po-modal";
@@ -40,7 +40,6 @@ const DOListSchema = z
     data: z.array(DeliveryOrderSchema).optional(),
   })
   .passthrough();
-const DOMutationSchema = mutationWithData(DeliveryOrderSchema);
 const InvoiceMutationSchema = mutationWithData(InvoiceSchema);
 
 type LinkedPOSummary = {
@@ -182,13 +181,11 @@ export default function SalesPage() {
   const [tab, setTab] = useUrlState<"DRAFT" | "CONFIRMED">("tab", "CONFIRMED");
   const [scanPOOpen, setScanPOOpen] = useState(false);
 
-  // Transfer to DO / Invoice states
-  const [transferDORow, setTransferDORow] = useState<ConsignmentOrder | null>(null);
+  // Transfer to Invoice states. The Transfer-to-DO dialog and its
+  // delivery-date / driver / vehicle fields went with the button that could
+  // only ever fail — see the "Create Consignment Note" action below.
   const [transferInvRow, setTransferInvRow] = useState<ConsignmentOrder | null>(null);
   const [transferLoading, setTransferLoading] = useState(false);
-  const [doDeliveryDate, setDoDeliveryDate] = useState("");
-  const [doDriverName, setDoDriverName] = useState("");
-  const [doVehicleNo, setDoVehicleNo] = useState("");
   const [transferSuccess, setTransferSuccess] = useState<{ type: "do" | "inv"; docNo: string } | null>(null);
   const [matchedDO, setMatchedDO] = useState<DeliveryOrder | null>(null);
 
@@ -507,14 +504,21 @@ export default function SalesPage() {
       action: () => {},
     },
     {
-      label: "Transfer to Delivery Order",
+      label: "Create Consignment Note",
       icon: <Truck className="h-3.5 w-3.5" />,
+      // T-006 R1 follow-up — this used to open a "Transfer to Delivery Order"
+      // dialog that hand-built `items` and posted them with a salesOrderId
+      // (actually this Consignment Order's id) and no productionOrderIds,
+      // which is exactly the shape that bypassed the once-only-delivery
+      // guard. It could never legitimately succeed anyway: _helpers.ts
+      // already refuses any production order carrying a consignmentOrderId
+      // from reaching a Delivery Order ("Use a Consignment Note instead"),
+      // and every PO under a Consignment Order carries one. Since R1's
+      // server-side refusal it fails on every click. Consignment stock moves
+      // on a Consignment Note — send the operator to the page that does it.
       action: () => {
-        setDoDeliveryDate("");
-        setDoDriverName("");
-        setDoVehicleNo("");
-        setTransferSuccess(null);
-        setTransferDORow(row);
+        toast.info("Consignment stock moves on a Consignment Note, not a Delivery Order.");
+        navigate("/consignment/note");
       },
     },
     {
@@ -944,186 +948,6 @@ export default function SalesPage() {
           </div>
         </CardContent>
       </Card>
-
-      {/* Transfer to Delivery Order Dialog */}
-      {transferDORow && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/40" onClick={() => { if (!transferLoading) setTransferDORow(null); }} />
-          <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto border border-[#E2DDD8]">
-            {/* Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-[#E2DDD8]">
-              <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-lg bg-[#6B5C32]/10 flex items-center justify-center">
-                  <Truck className="h-5 w-5 text-[#6B5C32]" />
-                </div>
-                <div>
-                  <h2 className="text-lg font-semibold text-[#1F1D1B]">Transfer to Delivery Order</h2>
-                  <p className="text-xs text-[#6B7280]">Create a DO from {transferDORow.companyCOId}</p>
-                </div>
-              </div>
-              <button
-                onClick={() => { if (!transferLoading) setTransferDORow(null); }}
-                className="text-[#9CA3AF] hover:text-[#374151] transition-colors"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            {transferSuccess?.type === "do" ? (
-              <div className="p-6 text-center space-y-4">
-                <div className="mx-auto h-16 w-16 rounded-full bg-[#EEF3E4] flex items-center justify-center">
-                  <CheckCircle className="h-8 w-8 text-[#4F7C3A]" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-semibold text-[#1F1D1B]">Delivery Order Created</h3>
-                  <p className="text-xs text-[#6B7280] mt-0.5">DO No: <span className="font-mono font-semibold text-[#6B5C32]">{transferSuccess.docNo}</span></p>
-                </div>
-                <div className="flex justify-center gap-3 pt-2">
-                  <Button variant="outline" onClick={() => { setTransferDORow(null); setTransferSuccess(null); }}>Close</Button>
-                  <Button variant="primary" onClick={() => { setTransferDORow(null); setTransferSuccess(null); navigate("/delivery"); }}>
-                    Go to Delivery Orders
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <>
-                {/* SO Info */}
-                <div className="px-6 py-4 bg-[#FAF9F7] border-b border-[#E2DDD8]">
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
-                    <div>
-                      <span className="text-[#9CA3AF]">SO No.</span>
-                      <p className="font-semibold text-[#1F1D1B]">{transferDORow.companyCOId}</p>
-                    </div>
-                    <div>
-                      <span className="text-[#9CA3AF]">Customer</span>
-                      <p className="font-semibold text-[#1F1D1B]">{transferDORow.customerName}</p>
-                    </div>
-                    <div>
-                      <span className="text-[#9CA3AF]">Items</span>
-                      <p className="font-semibold text-[#1F1D1B]">{transferDORow.items.length} item(s)</p>
-                    </div>
-                    <div>
-                      <span className="text-[#9CA3AF]">Total</span>
-                      <p className="font-semibold text-[#1F1D1B]">{formatCurrency(transferDORow.totalSen)}</p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Delivery fields */}
-                <div className="px-6 py-4 space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <div>
-                      <label className="block text-xs text-[#9CA3AF] mb-1">Delivery Date (optional)</label>
-                      <Input
-                        type="date"
-                        value={doDeliveryDate}
-                        onChange={(e) => setDoDeliveryDate(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-[#9CA3AF] mb-1">Driver Name (optional)</label>
-                      <Input
-                        type="text"
-                        placeholder="e.g. Ahmad"
-                        value={doDriverName}
-                        onChange={(e) => setDoDriverName(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-[#9CA3AF] mb-1">Vehicle No. (optional)</label>
-                      <Input
-                        type="text"
-                        placeholder="e.g. WA1234B"
-                        value={doVehicleNo}
-                        onChange={(e) => setDoVehicleNo(e.target.value)}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Items table */}
-                  <div>
-                    <h3 className="text-sm font-medium text-[#1F1D1B] mb-2 flex items-center gap-2">
-                      <Package className="h-4 w-4 text-[#6B5C32]" /> Items to Transfer
-                    </h3>
-                    <div className="border border-[#E2DDD8] rounded-lg overflow-hidden overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="bg-[#FAF9F7] border-b border-[#E2DDD8]">
-                            <th className="text-left px-3 py-2 text-[#9CA3AF] font-medium">Product Code</th>
-                            <th className="text-left px-3 py-2 text-[#9CA3AF] font-medium">Product Name</th>
-                            <th className="text-left px-3 py-2 text-[#9CA3AF] font-medium">Size</th>
-                            <th className="text-left px-3 py-2 text-[#9CA3AF] font-medium">Fabric</th>
-                            <th className="text-right px-3 py-2 text-[#9CA3AF] font-medium">Qty</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {transferDORow.items.map((item, idx) => (
-                            <tr key={idx} className="border-b border-[#E2DDD8] last:border-b-0">
-                              <td className="px-3 py-2 font-mono text-xs">{item.productCode}</td>
-                              <td className="px-3 py-2">{item.productName}</td>
-                              <td className="px-3 py-2">{item.sizeLabel}</td>
-                              <td className="px-3 py-2">{item.fabricCode}</td>
-                              <td className="px-3 py-2 text-right tabular-nums">{item.quantity}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Footer */}
-                <div className="px-6 py-4 border-t border-[#E2DDD8] flex justify-end gap-3">
-                  <Button variant="outline" onClick={() => setTransferDORow(null)} disabled={transferLoading}>Cancel</Button>
-                  <Button
-                    variant="primary"
-                    disabled={transferLoading}
-                    onClick={async () => {
-                      setTransferLoading(true);
-                      try {
-                        const mappedItems = transferDORow.items.map(item => ({
-                          productCode: item.productCode,
-                          productName: item.productName,
-                          sizeLabel: item.sizeLabel,
-                          fabricCode: item.fabricCode,
-                          quantity: item.quantity,
-                          itemM3: 0,
-                          rackingNumber: "",
-                          packingStatus: "PENDING",
-                        }));
-                        const d = await fetchJson("/api/delivery-orders", DOMutationSchema, {
-                          method: "POST",
-                          body: {
-                            salesOrderId: transferDORow.id,
-                            items: mappedItems,
-                            ...(doDeliveryDate && { deliveryDate: doDeliveryDate }),
-                            ...(doDriverName && { driverName: doDriverName }),
-                            ...(doVehicleNo && { vehicleNo: doVehicleNo }),
-                          },
-                        });
-                        if (d.success) {
-                          invalidateCachePrefix("/api/delivery-orders");
-                          invalidateCachePrefix("/api/consignment-orders");
-                          setTransferSuccess({ type: "do", docNo: (d.data?.doNo as string) || "Created" });
-                          fetchAll();
-                        } else {
-                          toast.error(d.error || "Failed to create Delivery Order.");
-                        }
-                      } catch {
-                        toast.error("Failed to create Delivery Order. Please try again.");
-                      } finally {
-                        setTransferLoading(false);
-                      }
-                    }}
-                  >
-                    {transferLoading ? "Creating..." : "Create DO"}
-                  </Button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
 
       {/* Transfer to Invoice Dialog */}
       {transferInvRow && matchedDO && (

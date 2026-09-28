@@ -90,6 +90,22 @@ export async function ensurePurchaseReturnTables(db: D1Database): Promise<void> 
         /* column already exists */
       }
     }
+    // T-006 R6 — a return draws down the same counters a GRN/PI receipt built
+    // up (grn_items.invoiced_qty, grn_items.po_id/po_item_id). Those columns
+    // are self-applied by grn.ts/purchase-invoices.ts when THOSE routes run,
+    // but this module writes to them too and cannot assume that has already
+    // happened in this isolate — migrations don't auto-apply on deploy.
+    for (const stmt of [
+      "ALTER TABLE grn_items ADD COLUMN IF NOT EXISTS invoiced_qty NUMERIC DEFAULT 0",
+      "ALTER TABLE grn_items ADD COLUMN IF NOT EXISTS po_id TEXT",
+      "ALTER TABLE grn_items ADD COLUMN IF NOT EXISTS po_item_id TEXT",
+    ]) {
+      try {
+        await db.prepare(stmt).run();
+      } catch {
+        /* column already exists */
+      }
+    }
     tablesEnsured = true;
   } catch (err) {
     console.warn(
@@ -178,9 +194,98 @@ export async function loadPiItemsForReturn(
   return out;
 }
 
+// The item code a GRN line was ORDERED as — through the PO line it draws down.
+// A PO-sourced GRN line stores a blank material_code (BUG-2026-08-13-052), so
+// without this a return of it listed nothing and its stock-out moved nothing
+// (measured on staging 2026-09-24). Same resolution grn.ts posts stock with
+// since BUG-2026-09-24-202, so goods leave from the material they arrived on.
+async function orderedCodeForGrnItem(
+  db: D1Database,
+  grnItemId: string | null | undefined,
+): Promise<string | null> {
+  if (!grnItemId) return null;
+  try {
+    const row = await db
+      .prepare(
+        `SELECT poi.materialCode AS "code"
+           FROM grn_items gi JOIN purchase_order_items poi ON poi.id = gi.po_item_id
+          WHERE gi.id::text = ?`,
+      )
+      .bind(String(grnItemId))
+      .first<{ code?: string | null }>();
+    return row?.code?.trim() || null;
+  } catch {
+    // grn_items.po_item_id not self-applied on this DB yet — no PO link to follow.
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Returned-before-billing quantities (BUG-2026-09-24-206). A return raised off
+// the GRN itself (no purchase_invoice_id) sends back goods nobody has billed
+// yet, so those units must come off what is still billable: GRN line
+// available = accepted − invoiced − returned. A return raised off a PI is
+// already-billed goods — the debit note is its credit — and never counts here.
+// Both helpers fail soft to "nothing returned" on a DB that has never had a
+// return (the tables are created on first use).
+// ---------------------------------------------------------------------------
+/** grn_items.id → qty returned off the GRN before billing. */
+export async function loadGrnReturnedQty(
+  db: D1Database,
+  grnItemIds: Array<string | number>,
+): Promise<Map<string, number>> {
+  const ids = [...new Set(grnItemIds.map(String).filter(Boolean))];
+  const out = new Map<string, number>();
+  if (ids.length === 0) return out;
+  try {
+    const res = await db
+      .prepare(
+        `SELECT pri.grn_item_id AS "grnItemId", COALESCE(SUM(pri.quantity), 0) AS "qty"
+           FROM purchase_return_items pri
+           JOIN purchase_returns pr ON pr.id = pri.purchase_return_id
+          WHERE COALESCE(pr.purchase_invoice_id, '') = ''
+            AND pri.grn_item_id IN (${ids.map(() => "?").join(", ")})
+          GROUP BY pri.grn_item_id`,
+      )
+      .bind(...ids)
+      .all<{ grnItemId: string; qty: number }>();
+    for (const r of res.results ?? []) out.set(String(r.grnItemId), Number(r.qty) || 0);
+  } catch {
+    /* no purchase_return tables yet — nothing returned */
+  }
+  return out;
+}
+
+/** purchase_order_items.id → qty returned off that PO line's GRNs before billing. */
+export async function loadPoReturnedQty(
+  db: D1Database,
+  poId: string,
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  try {
+    const res = await db
+      .prepare(
+        `SELECT gi.po_item_id AS "poItemId", COALESCE(SUM(pri.quantity), 0) AS "qty"
+           FROM purchase_return_items pri
+           JOIN purchase_returns pr ON pr.id = pri.purchase_return_id
+           JOIN grn_items gi ON gi.id::text = pri.grn_item_id
+          WHERE COALESCE(pr.purchase_invoice_id, '') = ''
+            AND gi.po_item_id IN (SELECT id FROM purchase_order_items WHERE purchaseOrderId = ?)
+          GROUP BY gi.po_item_id`,
+      )
+      .bind(poId)
+      .all<{ poItemId: string; qty: number }>();
+    for (const r of res.results ?? []) out.set(String(r.poItemId), Number(r.qty) || 0);
+  } catch {
+    /* no purchase_return tables / po_item_id yet — nothing returned */
+  }
+  return out;
+}
+
 // Load a GRN's received lines as return candidates (owner 2026-07-30 — "convert
 // from PI or GR"). SELECT * + dual-keyed read (runtime-added columns). Any line
-// with a material code is returnable; qty seeds from the accepted/received qty.
+// with a material code — its own, or its PO line's — is returnable; qty seeds
+// from the accepted/received qty.
 export async function loadGrnItemsForReturn(
   db: D1Database,
   grnId: string,
@@ -195,7 +300,9 @@ export async function loadGrnItemsForReturn(
   };
   const out: PRCreateItem[] = [];
   for (const r of res.results ?? []) {
-    const materialCode = (pick(r, "material_code", "materialCode") ?? null) as string | null;
+    const materialCode =
+      ((pick(r, "material_code", "materialCode") ?? null) as string | null) ||
+      (await orderedCodeForGrnItem(db, String(r.id ?? "")));
     if (!materialCode) continue;
     out.push({
       grnItemId: String(r.id ?? ""),
@@ -247,8 +354,13 @@ export async function applyPurchaseReturnStockOut(
   let ledgerN = 0;
   let reversedItems = 0;
   for (const it of items) {
-    const materialCode = String((it.material_code ?? it.materialCode) ?? "").trim();
     const qty = Number(it.quantity ?? 0);
+    // A line off a PO-sourced GRN (or a PI raised from one) carries no code of
+    // its own — take the one its GRN line was ordered as.
+    const materialCode =
+      String((it.material_code ?? it.materialCode) ?? "").trim() ||
+      (await orderedCodeForGrnItem(db, (it.grn_item_id ?? it.grnItemId) as string | null)) ||
+      "";
     if (!materialCode || !(qty > 0)) continue;
     const rm = await db
       .prepare("SELECT id FROM raw_materials WHERE itemCode = ? LIMIT 1")
@@ -457,69 +569,174 @@ export async function issuePurchaseReturnDebitNote(
   return { ok: true, noteNumber, amountSen };
 }
 
-// Write a Purchase Return header + its item snapshot. Returns the new id +
-// return_no. No ledger movement (slice 1).
+export type CreatePurchaseReturnResult =
+  | { ok: true; id: string; returnNo: string }
+  | { ok: false; error: string };
+
+// Write a Purchase Return header + its item snapshot, and (T-006 R6) give
+// back the counters the original receipt/invoice drew down. No ledger
+// movement here — that's slices 2/3 (applyPurchaseReturnStockOut /
+// issuePurchaseReturnDebitNote).
 export async function createPurchaseReturn(
   db: D1Database,
   input: PRCreateInput,
-): Promise<{ id: string; returnNo: string }> {
+): Promise<CreatePurchaseReturnResult> {
   await ensurePurchaseReturnTables(db);
   const id = genPurchaseReturnId();
   const returnNo = await nextPurchaseReturnNo(db);
   const now = new Date().toISOString();
-  await db
-    .prepare(
-      `INSERT INTO purchase_returns
-         (id, return_no, purchase_invoice_id, pi_no, grn_id, grn_no,
-          supplier_id, supplier_name, status, resolution, reason, notes,
-          returned_at, created_by, created_at, updated_at, org_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .bind(
-      id,
-      returnNo,
-      input.purchaseInvoiceId ?? "",
-      input.piNo ?? "",
-      input.grnId ?? "",
-      input.grnNo ?? "",
-      input.supplierId ?? "",
-      input.supplierName ?? "",
-      input.resolution ?? "REFUND",
-      input.reason ?? "",
-      input.notes ?? "",
-      now,
-      input.createdBy ?? null,
-      now,
-      now,
-      input.orgId ?? null,
-    )
-    .run();
-  for (const it of input.items) {
+
+  const validItems = input.items.filter((it) => {
     const qty = Number(it.quantity ?? 0);
-    if (!Number.isFinite(qty) || qty <= 0) continue; // skip zero/blank lines
-    const unit = roundUnitPriceSen(Number(it.unitCostSen ?? 0));
-    await db
+    return Number.isFinite(qty) && qty > 0;
+  });
+
+  // T-006 R6 — cap cumulative returns per GRN line at what was actually
+  // accepted (the physical ceiling on what can ever come back), and reject
+  // a duplicate/over-return BEFORE writing anything. Lines with no
+  // grnItemId (a PI line never linked to a GRN) have no receipt counter to
+  // check against, so they skip this cap — same as they always did.
+  const grnItemIds = [
+    ...new Set(validItems.map((it) => it.grnItemId).filter((v): v is string => !!v)),
+  ];
+  const poItemIdByGrnItemId = new Map<string, string | null>();
+  for (const giId of grnItemIds) {
+    const grnLine = await db
+      .prepare("SELECT accepted_qty, po_item_id FROM grn_items WHERE id = ?")
+      .bind(giId)
+      .first<{
+        acceptedQty?: number | null;
+        accepted_qty?: number | null;
+        poItemId?: string | null;
+        po_item_id?: string | null;
+      }>();
+    if (!grnLine) continue; // unresolvable line — nothing to cap or draw down
+    // Dual-keyed: the Postgres client hands rows back camelCased
+    // (accepted_qty → acceptedQty), so a snake-only read is always undefined.
+    poItemIdByGrnItemId.set(giId, grnLine.poItemId ?? grnLine.po_item_id ?? null);
+    const alreadyReturned = await db
       .prepare(
-        `INSERT INTO purchase_return_items
-           (id, purchase_return_id, purchase_invoice_item_id, material_code,
-            material_name, supplier_sku, grn_item_id, quantity, unit_cost_sen,
-            line_total_sen, problem)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        "SELECT COALESCE(SUM(quantity),0) AS qty FROM purchase_return_items WHERE grn_item_id = ?",
+      )
+      .bind(giId)
+      .first<{ qty: number }>();
+    const already = Number(alreadyReturned?.qty ?? 0) || 0;
+    const accepted = Number(grnLine.acceptedQty ?? grnLine.accepted_qty ?? 0) || 0;
+    const thisReturn = validItems
+      .filter((it) => it.grnItemId === giId)
+      .reduce((s, it) => s + (Number(it.quantity) || 0), 0);
+    if (already + thisReturn > accepted) {
+      return {
+        ok: false,
+        error: `Return exceeds what was received on this line: already returned ${already} + this return ${thisReturn} > accepted ${accepted}.`,
+      };
+    }
+  }
+
+  const stmts: D1PreparedStatement[] = [
+    db
+      .prepare(
+        `INSERT INTO purchase_returns
+           (id, return_no, purchase_invoice_id, pi_no, grn_id, grn_no,
+            supplier_id, supplier_name, status, resolution, reason, notes,
+            returned_at, created_by, created_at, updated_at, org_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
-        genItemId(),
         id,
-        it.purchaseInvoiceItemId ?? null,
-        it.materialCode ?? null,
-        it.materialName ?? "",
-        it.supplierSku ?? null,
-        it.grnItemId ?? null,
-        qty,
-        unit,
-        Math.round(qty * unit),
-        it.problem ?? "",
-      )
-      .run();
+        returnNo,
+        input.purchaseInvoiceId ?? "",
+        input.piNo ?? "",
+        input.grnId ?? "",
+        input.grnNo ?? "",
+        input.supplierId ?? "",
+        input.supplierName ?? "",
+        input.resolution ?? "REFUND",
+        input.reason ?? "",
+        input.notes ?? "",
+        now,
+        input.createdBy ?? null,
+        now,
+        now,
+        input.orgId ?? null,
+      ),
+  ];
+  for (const it of validItems) {
+    const qty = Number(it.quantity) || 0;
+    const unit = roundUnitPriceSen(Number(it.unitCostSen ?? 0));
+    stmts.push(
+      db
+        .prepare(
+          `INSERT INTO purchase_return_items
+             (id, purchase_return_id, purchase_invoice_item_id, material_code,
+              material_name, supplier_sku, grn_item_id, quantity, unit_cost_sen,
+              line_total_sen, problem)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(
+          genItemId(),
+          id,
+          it.purchaseInvoiceItemId ?? null,
+          it.materialCode ?? null,
+          it.materialName ?? "",
+          it.supplierSku ?? null,
+          it.grnItemId ?? null,
+          qty,
+          unit,
+          Math.round(qty * unit),
+          it.problem ?? "",
+        ),
+    );
+    // R6 — give the PO line back what the receipt drew down, so replacement
+    // goods can be received against it. Clamped at 0 so a rounding/race edge
+    // never drives the counter negative.
+    //
+    // grn_items.invoiced_qty is deliberately NOT written back: the purchase
+    // invoice still bills these units (the supplier's credit comes via the
+    // debit note), so lowering it re-opened the GRN line and the returned
+    // goods could be invoiced a second time (measured live on staging
+    // 2026-09-24). Undoing a return is deletePurchaseReturnRestoreStatements.
+    if (it.grnItemId) {
+      const poItemId = poItemIdByGrnItemId.get(it.grnItemId);
+      if (poItemId) {
+        stmts.push(
+          db
+            .prepare(
+              "UPDATE purchase_order_items SET receivedQty = GREATEST(0, receivedQty - ?) WHERE id = ?",
+            )
+            .bind(qty, poItemId),
+        );
+      }
+    }
   }
-  return { id, returnNo };
+  await db.batch(stmts);
+  return { ok: true, id, returnNo };
+}
+
+/**
+ * The inverse of createPurchaseReturn's PO write-back, for deleting an OPEN
+ * return: put back the receivedQty each GRN-linked line took off its PO line.
+ * Without it a deleted return left the PO line permanently under-received,
+ * so the same goods could be received (and stocked) again.
+ */
+export async function deletePurchaseReturnRestoreStatements(
+  db: D1Database,
+  returnId: string,
+): Promise<D1PreparedStatement[]> {
+  const res = await db
+    .prepare(
+      `SELECT gi.po_item_id AS "poItemId", pri.quantity AS qty
+         FROM purchase_return_items pri
+         JOIN grn_items gi ON gi.id::text = pri.grn_item_id
+        WHERE pri.purchase_return_id = ?`,
+    )
+    .bind(returnId)
+    .all<{ poItemId?: string | null; po_item_id?: string | null; qty: number }>();
+  return (res.results ?? [])
+    .filter((r) => (r.poItemId ?? r.po_item_id) && Number(r.qty) > 0)
+    .map((r) =>
+      db
+        .prepare("UPDATE purchase_order_items SET receivedQty = receivedQty + ? WHERE id = ?")
+        .bind(Number(r.qty), r.poItemId ?? r.po_item_id),
+    );
 }

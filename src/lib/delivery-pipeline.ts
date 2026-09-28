@@ -18,6 +18,14 @@ export type PipelinePO = {
   id: string;
   status: string;
   consignmentOrderId?: string;
+  // 0236 — TRUE when this PO was BUILT for stock. It stays true for life: it
+  // records how the piece came into the world, not who owns it now.
+  isStock?: boolean;
+  // 0237 — the stock order it was built under. Ownership has moved to a real
+  // customer exactly when salesOrderId no longer equals this. See
+  // poReadyForDelivery.
+  stockOriginSoId?: string | null;
+  salesOrderId?: string | null;
   itemCategory?: string;
   specialOrder?: string;
   // Service-order Repair Scope snapshot (0160, JSON string or null).
@@ -86,6 +94,20 @@ export function poReadyForDelivery(po: PipelinePO, linkedPOIds: Set<string>): bo
   // even if its upholstery cards happened to complete before it was put on hold.
   if (po.status === "ON_HOLD") return false;
   if (po.consignmentOrderId) return false;
+  // An UNALLOCATED stock PO has no customer behind it — it is still booked
+  // against the internal Factory Stock customer. Before this gate a finished
+  // stock PO walked into Pending Delivery and could be picked onto a real
+  // customer's delivery note, where the invoice then resolved back to a
+  // placeholder at price zero.
+  //
+  // Allocation moves salesOrderId to the customer's order, and from that moment
+  // the piece IS that order's piece — it flows through delivery, the
+  // one-customer check and the invoice exactly like any other, with no special
+  // case anywhere downstream. So the gate asks whether it still belongs to the
+  // stock order, not whether it was born for stock.
+  if (po.isStock && po.stockOriginSoId && po.salesOrderId === po.stockOriginSoId) {
+    return false;
+  }
   if (linkedPOIds.has(po.id)) return false;
   const uphCards = pickRelevantUphCards(po);
   if (uphCards.length === 0) {

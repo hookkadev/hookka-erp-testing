@@ -21,6 +21,7 @@ import { buildAuditStatement } from "../lib/audit";
 import {
   shapeProductBulkRow,
   type ProductBulkImportInput,
+  type ShapedProductBulkRow,
 } from "../lib/product-bulk-import";
 
 const app = new Hono<Env>();
@@ -796,6 +797,30 @@ app.post("/bulk-import", async (c) => {
   let created = 0;
   let updated = 0;
 
+  // Replace only the materials the sheet named; queued after the product's
+  // own INSERT/UPDATE so the FK holds inside the one batch. One DELETE + one
+  // multi-row INSERT per product: batch() runs statements one by one, and a
+  // full sheet (360 SKUs × 9 materials) would otherwise be ~6k round trips.
+  const pushMaterials = (productId: string, materials: ShapedProductBulkRow["materials"]) => {
+    if (!materials?.length) return;
+    statements.push(
+      c.var.DB.prepare(
+        `DELETE FROM bom_components WHERE productId = ? AND materialName IN (${materials.map(() => "?").join(", ")})`,
+      ).bind(productId, ...materials.map((m) => m.materialName)),
+    );
+    const keep = materials.filter((m) => m.qtyPerUnit > 0);
+    if (keep.length === 0) return;
+    statements.push(
+      c.var.DB.prepare(
+        `INSERT INTO bom_components (id, productId, materialCategory, materialName,
+           qtyPerUnit, unit, wastePct)
+         VALUES ${keep.map(() => "(?, ?, ?, ?, ?, ?, 0)").join(", ")}`,
+      ).bind(
+        ...keep.flatMap((m) => [genBomId(), productId, m.materialCategory, m.materialName, m.qtyPerUnit, m.unit]),
+      ),
+    );
+  };
+
   rows.forEach((raw, i) => {
     const shaped = shapeProductBulkRow(raw ?? {});
     if (!shaped.ok) {
@@ -857,6 +882,7 @@ app.post("/bulk-import", async (c) => {
           merged.id,
         ),
       );
+      pushMaterials(merged.id, r.materials);
       if (renaming) codeToState.delete(prior.code);
       codeToState.set(r.code, merged);
       idToState.set(merged.id, merged);
@@ -911,6 +937,7 @@ app.post("/bulk-import", async (c) => {
           nowIso,
         ),
       );
+      pushMaterials(id, r.materials);
       codeToState.set(r.code, fresh);
       idToState.set(id, fresh);
       created++;

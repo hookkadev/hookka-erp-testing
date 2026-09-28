@@ -14,6 +14,7 @@ import { useNavGuard } from "@/lib/use-nav-guard";
 import { familyOf } from "@/lib/product-family";
 import { MasterPriceHistoryDialog } from "./MasterPriceHistoryDialog";
 import { BatchImportDialog, type ImportColumn } from "@/components/ui/batch-import-dialog";
+import { PRODUCT_BULK_MATERIALS } from "@/api/lib/product-bulk-import";
 import { exportImportRows } from "@/components/ui/batch-import-dialog";
 import {
   EffectiveDateConfirmModal,
@@ -304,6 +305,7 @@ type Product = {
   productionTimeMinutes: number;
   subAssemblies: string[];
   deptWorkingTimes: DeptWorkingTime[];
+  bomComponents?: { materialName: string; qtyPerUnit: number }[];
   // Set by /api/products when a future-dated row exists in product_prices.
   // Surfaced as a "Pending" badge next to the price columns so the operator
   // sees a scheduled change at a glance (countdown UI in MasterPriceHistoryDialog).
@@ -2830,6 +2832,12 @@ export default function ProductsPage() {
     { key: "status", label: "Status", enum: ["ACTIVE", "INACTIVE"], example: "ACTIVE" },
     { key: "costPriceSen", label: "Cost Price (RM)", type: "money", example: 1500 },
     { key: "basePriceSen", label: "Base Price (RM)", type: "money", example: 2500 },
+    ...PRODUCT_BULK_MATERIALS.map((m): ImportColumn => ({
+      key: m.key,
+      label: m.label,
+      type: "number",
+      help: `Per unit → BOM component "${m.materialName}". Blank keeps it, 0 removes it.`,
+    })),
   ];
 
   async function handleProductBulkImport(rows: Record<string, unknown>[]) {
@@ -5170,6 +5178,12 @@ export default function ProductsPage() {
           status: p.status,
           costPriceSen: (p.costPriceSen ?? 0) / 100,
           basePriceSen: (p.basePriceSen ?? 0) / 100,
+          ...Object.fromEntries(
+            PRODUCT_BULK_MATERIALS.map((m) => [
+              m.key,
+              p.bomComponents?.find((b) => b.materialName === m.materialName)?.qtyPerUnit,
+            ]),
+          ),
         }))}
       />
 

@@ -240,6 +240,16 @@ costing model. See `docs/BUG-CLASSES.md`.
   ≠ feature works (stale chunks, silent schema-apply failures, cache bite).
 - Rapid back-to-back deploys make open tabs throw "Something went wrong" (stale
   dynamic-import chunk) — not a code bug; a hard refresh fixes it.
+- **Staging vs prod share bindings; only the hostname splits them** (measured 2026-09-21).
+  `*.hookka-erp-testing.pages.dev` → `HYPERDRIVE_STAGING` = Hyperdrive `hookka-erp-staging`
+  → Supabase `kahxgvbfanbraazetefr`; anything else → `HYPERDRIVE` = `hookka-erp-supabase` →
+  `vpwdqtsxexpiqxzweivd` (prod). `SESSION_CACHE` KV is ONE namespace for both: preview hosts
+  get every key prefixed `stg:` (`src/api/lib/kv-prefix.ts`). Before that, staging and prod
+  read/wrote each other's cached dashboard/permissions. Preview has NO Supabase Storage
+  secrets (uploads 503). `.dev.vars` `*_STAGING` vars point at a stale project (`zaxy…`) —
+  local wrangler takes Hyperdrive strings from `.env`; check the ref, not the variable name.
+- **Local dev with real data:** `npm run build` once, then `npm run dev:worker` (API, :8787)
+  + `npm run dev` (UI with hot reload, :3000 — proxies `/api` to :8787).
 
 ## Data shapes
 

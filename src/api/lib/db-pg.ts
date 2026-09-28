@@ -58,6 +58,22 @@ const columnFrom = (col: string): string =>
   snakeToCamel[col] ?? postgres.toCamel(col)
 
 /**
+ * Undo columnFrom for code that reads rows by their SQL (snake_case) names:
+ * returns the row with each key ALSO under its snake_case column name, keeping
+ * the camelCase key too so dual-keyed reads (`r.fooBar ?? r.foo_bar`) still
+ * work. Exact inverse via the rename map; postgres.fromCamel for the rest.
+ */
+export function withSnakeKeys<T extends object>(row: T): T {
+  const map = renameMap as Record<string, string>
+  const out = { ...row } as Record<string, unknown>
+  for (const [k, v] of Object.entries(row)) {
+    const snake = map[k] ?? postgres.fromCamel(k)
+    if (!(snake in out)) out[snake] = v
+  }
+  return out as T
+}
+
+/**
  * Returns a fresh postgres.js client for the given connection URL.
  *
  * MUST NOT be cached across requests in Cloudflare Workers: sockets and

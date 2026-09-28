@@ -771,9 +771,27 @@ test("'who completed it' is the upholsterer, not the packer", () => {
 });
 
 test("the panel and the grid call the same two numbers by the same name", () => {
-  assert.match(drawerSrc, /label="Available · Reserved"/);
+  assert.match(drawerSrc, /label="Available · On draft DO"/);
   assert.doesNotMatch(drawerSrc, /Assigned · Free/);
-  assert.match(inventoryPageSrc, /Available · Reserved/);
+  assert.match(inventoryPageSrc, /Available · On draft DO/);
+});
+
+test("R17: neither screen calls a draft delivery note a RESERVATION", () => {
+  // The word sent people looking for a reservation mechanism that existed
+  // nowhere in the system — the number only ever counted pieces named on a
+  // DRAFT delivery note, which is downstream of production and says nothing
+  // about an order commitment. An order commitment is a stock_allocations row
+  // and is a different number entirely.
+  for (const [name, src] of [
+    ["the grid", inventoryPageSrc],
+    ["the panel", drawerSrc],
+  ]) {
+    assert.doesNotMatch(
+      src,
+      /label: "Reserved"|label="Available · Reserved"|>Reserved</,
+      `${name} must not label the draft-DO count "Reserved"`,
+    );
+  }
 });
 
 // ---------------------------------------------------------------------------

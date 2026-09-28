@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DataGrid, type Column } from "@/components/ui/data-grid";
 import { useCachedJson, invalidateCachePrefix } from "@/lib/cached-fetch";
+import { useIdempotencyKey } from "@/lib/idempotency-key";
 import { useToast } from "@/components/ui/toast";
 import { Undo2, Plus, X, Loader2 } from "lucide-react";
 
@@ -227,6 +228,10 @@ function CreateReturnModal({
   const [loadingItems, setLoadingItems] = useState(false);
   const [ticked, setTicked] = useState<TickState>({});
   const [creating, setCreating] = useState(false);
+  // T-006 R10 — the create route is wrapped in withIdempotency server-side; a
+  // retry after a lost response must not raise a second return for the same
+  // goods (which the R7 cap would then reject as an over-return).
+  const createIdem = useIdempotencyKey();
 
   const pickDo = async (id: string) => {
     setDoId(id);
@@ -298,9 +303,10 @@ function CreateReturnModal({
       (dos.find((d) => d.id === doId)?.status || "").toUpperCase() === "INVOICED";
     setCreating(true);
     try {
-      const res = await fetch("/api/delivery-returns", {
+      const res = await createIdem.withKey((key) =>
+        fetch("/api/delivery-returns", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Idempotency-Key": key },
         body: JSON.stringify({
           deliveryOrderId: doId,
           items: chosen.map((it) => ({
@@ -317,7 +323,8 @@ function CreateReturnModal({
             salesOrderNo: it.salesOrderNo ?? "",
           })),
         }),
-      });
+        }),
+      );
       const json = (await res.json()) as {
         success?: boolean;
         error?: string;

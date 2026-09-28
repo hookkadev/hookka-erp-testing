@@ -53,6 +53,12 @@ function po(overrides = {}) {
     consignmentOrderId: overrides.consignmentOrderId,
     itemCategory: overrides.itemCategory ?? "SOFA",
     specialOrder: overrides.specialOrder,
+    // DEV-05 — built for stock (stays true for life), the stock order it was
+    // born against, and who owns it now. Ownership has moved exactly when
+    // salesOrderId no longer equals stockOriginSoId.
+    isStock: overrides.isStock,
+    stockOriginSoId: overrides.stockOriginSoId,
+    salesOrderId: overrides.salesOrderId,
     jobCards:
       overrides.jobCards ??
       [{ departmentCode: "UPHOLSTERY", status: "IN_PROGRESS" }],
@@ -658,4 +664,67 @@ test("buildCnReadyPlanning: legacy-customer dedup hides an otherwise-ready PO", 
     productM3Map: new Map(),
   });
   assert.deepEqual(out.ready.map((r) => r.id), []); // hidden by legacy-customer dedup
+});
+
+// ---------------------------------------------------------------------------
+// DEV-05 / PRD T-014 R2 + R12 — stock orders and the moment they become
+// deliverable.
+//
+// A production order built for stock has no customer behind it: it is booked
+// against the internal Factory Stock customer. Before the gate below, a
+// finished stock order walked straight into Pending Delivery and could be
+// picked onto a real customer's delivery note — where the invoice then
+// resolved back through the production order to a placeholder at price zero.
+//
+// Allocation moves salesOrderId to the customer's own order. From that moment
+// the piece IS that order's piece and flows through delivery, the one-customer
+// check and the invoice with no special case anywhere. So the gate asks
+// whether the order still belongs to the STOCK order, not whether it was born
+// for stock — `is_stock` records how a piece came into the world and stays
+// true for life.
+// ---------------------------------------------------------------------------
+const FINISHED = [{ departmentCode: "UPHOLSTERY", status: "COMPLETED" }];
+
+test("R2: a finished but UNALLOCATED stock order is not deliverable", () => {
+  assert.equal(
+    dp.poReadyForDelivery(
+      po({
+        jobCards: FINISHED,
+        isStock: true,
+        stockOriginSoId: "so-stock",
+        salesOrderId: "so-stock",
+      }),
+      EMPTY_LINKED,
+    ),
+    false,
+    "unallocated stock must never reach a customer's delivery note",
+  );
+});
+
+test("R12: once allocated, the same order IS deliverable", () => {
+  assert.equal(
+    dp.poReadyForDelivery(
+      po({
+        jobCards: FINISHED,
+        isStock: true,
+        stockOriginSoId: "so-stock",
+        salesOrderId: "so-customer",
+      }),
+      EMPTY_LINKED,
+    ),
+    true,
+    "the allocation, not the birth link, decides who owns the piece",
+  );
+});
+
+test("R12: is_stock alone does not block — it records birth, not ownership", () => {
+  // A stock-born order whose origin was never recorded (legacy row) must not
+  // be blocked forever on a flag nobody can clear.
+  assert.equal(
+    dp.poReadyForDelivery(
+      po({ jobCards: FINISHED, isStock: true, stockOriginSoId: null }),
+      EMPTY_LINKED,
+    ),
+    true,
+  );
 });

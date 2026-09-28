@@ -5,6 +5,7 @@
 > **Last verified: 2026-09-25**: newest entry BUG-2026-09-25-194 (branch `feat/dashboard-kpi-no-icons`, PR #524); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-25** — newest entry BUG-2026-09-25-192 (branch `feat/ocr-dashboard-tab`, PR #522); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-25** — newest entry BUG-2026-09-24-191 (branch `fix/so-customer-po-view`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-09-25** — newest entry BUG-2026-09-25-208 (renumbered from -195 on the staging sync; branch `feat/m-warehouse-locate`; renumbered from 193 in the staging←main sync). **Numbering follows `main`:** staging entries that reused a sequence number main had already given a different bug were renumbered 196-207 (see WORK-TRACKER 2026-09-25 sync entry for the map). Previously: newest entry BUG-2026-09-23-182 (branch `laphii/fix/dashboard-exp-production-revenue`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 
 Living log of bugs we've identified, diagnosed, and fixed in Hookka ERP.
 
@@ -64,6 +65,243 @@ Entries themselves stay newest-first.
 
 ---
 
+## BUG-2026-09-25-208 — rack-scan movements showed the rack ID, "Public scan", and no trace of a move `warehouse` `data-integrity` 🟢
+
+🟢 **Fixed** · found planning DEV-09 (Mobile Warehouse — movement history).
+
+**Symptom.** Every stock-in made by scanning a rack QR (`/r/<rackId>`) wrote a movement whose
+Rack column held the rack's id, whose "by" read `Public scan` even for a logged-in
+storekeeper, and a piece re-scanned into a different rack left only a plain `STOCK_IN` at the
+new rack — nothing recorded where it came from. **Measured on prod 2026-09-25 (read-only):** 21
+racks, 20 of which have `id = label` ("Rack 11"), so the id-for-label bug only shows on the
+one whose id is a UUID — `Floor`, also the fullest rack (701 items). Of the newest 500
+`STOCK_IN` movements, 333 are rack scans and all 333 read `Public scan`.
+
+**Root cause.** `buildRackStockInStatements` (`public-rack-qr.ts`) bound `rackLocationId` into
+BOTH the id and the `rackLabel` column, hard-coded `performedBy = "Public scan"`, and the
+stock-in POST's move-detect deleted the old `rack_items` row without telling the movement write.
+
+**Fix.** The builder takes the rack label; `performedBy` = `scannerName(c)` — the session user's
+`displayName` (the auth middleware still attaches a valid session on this auth-bypassed path),
+else `Public scan`, never the request body; a detected move sets `movedFromLabel` so the movement
+is a `TRANSFER` "Moved from <old rack>". Rows written before this keep the id / "Public scan".
+
+**Verified.** `tests/warehouse-scan-history.test.mjs` runs the real route on node:sqlite: label,
+name, no-session fallback, TRANSFER from → to, same-rack re-scan stays `STOCK_IN`. 2 of its
+cases fail on the pre-fix code. **Not yet verified live** (not deployed; prod counts UNMEASURED).
+
+---
+
+## BUG-2026-09-24-207 — voiding a CN's invoice left its consignment order DELIVERED `consignment` `data-integrity` 🟢
+
+🟢 **Fixed** · completes T-006 R4 at the order level (-201 / -204 released the CN and its items).
+
+**Root cause.** Convert-to-invoice runs `cascadeCNCompletionToCO`: once every CN of a
+consignment order is sold, the CO goes `DELIVERED`. The void and delete release put the CN back
+to `ACTIVE` but never ran the existing inverse, `cascadeCNReversalToCO`, so the CO kept reading
+complete — counted under "Completed", not "Outstanding" — with goods still at the branch.
+
+**Fix.** `consignmentOrderForInvoice` reads the CO **before** the void/delete batch (the release
+clears `convertedInvoiceId`); `reopenConsignmentOrderAfterRelease` runs `cascadeCNReversalToCO`
+**after** it lands, best-effort like the completion cascade on convert. The reversal only moves
+a `DELIVERED` CO whose CNs are no longer all sold (→ `READY_TO_SHIP`), so a non-CN invoice or a
+CO with other unsold CNs is untouched. (`consignment-note-shared.ts`, `invoices.ts` PUT void +
+DELETE.)
+
+**Verified.** Live on the staging DB (rolled back; the "last unsold CN on its CO" state was
+created inside the transaction — staging had no such CN): convert → CO `DELIVERED` → void → CO
+`READY_TO_SHIP`; convert again → delete the draft → CO `READY_TO_SHIP`. 8/8 on this branch, 6/8
+on deployed `81c77972` (both CO checks stayed `DELIVERED`). Tests: `t006-live-findings`
+(read-before / reopen-after ordering on both paths; best-effort never throws).
+
+---
+
+## BUG-2026-09-24-206 — goods returned off a GRN before billing stayed billable `procurement` `data-integrity` 🟢
+
+🟢 **Fixed** · pre-existing on `main` (left open by -200, which covered PI-sourced returns only).
+
+**Root cause.** Two ceilings limit a purchase invoice and neither counted returns. The GRN
+line's available was `accepted − invoiced`; the PO ceiling was `max(ordered, received)`, and a
+return lowers `received` but not `ordered`, so it fell back to the full order. Measured on the
+deployed staging commit `81c77972`: receive 140, return 2 off the GRN → the GRN still showed 140
+available, a PI for 139 was accepted, and a further PO-direct PI for 1 was accepted too — 141
+billable against 138 kept.
+
+**Fix.** `loadGrnReturnedQty` / `loadPoReturnedQty` (`purchase-return-create.ts`) sum returns
+raised off the GRN (`purchase_invoice_id` empty — a PI-sourced return is billed goods, credited
+by its debit note, and never counts). Subtracted in the GRN list/detail `availableQty`
+(`grn.ts`, what the invoice-from-GRN picker reads), PI create (GRN branch), PI edit ceiling, PI
+un-void re-draw, and the PO ceiling, now `max(ordered − returned, received)` so a replacement
+receipt becomes billable again. Both helpers fail soft on a DB with no return tables.
+
+**Verified.** Live on the staging DB (rolled back), 16/16: returned 2 → available 138; PI 139
+refused, 138 accepted; PO-direct +1 refused; PI edit up refused, down accepted; replacement
+receipt of 2 billable; un-void refused after 3 more returned; a PI-sourced return is not counted.
+Same run against `81c77972`: 5/15. Tests: `t006-live-findings` (helpers, fail-soft, every site),
+`pi-void` pin updated.
+
+---
+
+## BUG-2026-09-24-205 — a purchase return of a PO-sourced GRN line never left stock `procurement` `inventory-cascade` 🟢
+
+🟢 **Fixed** · pre-existing on `main`; same root as -186 (blank `material_code` on PO-sourced GRN lines).
+
+**Root cause.** `applyPurchaseReturnStockOut` resolved the raw material only from the return
+line's `material_code` and skipped the line when it was blank — while still flipping the return
+to `STOCK_OUT`. A PO-sourced GRN line (and any PI raised from one) has a blank code, so the
+return "succeeded" and moved no stock. `loadGrnItemsForReturn` dropped those lines outright, so a
+GRN-sourced return could not even offer them. Staging's existing 45 GRN lines all carry codes
+(imports), so nothing there was affected yet; every new PO receipt would have been.
+
+**Fix** (`purchase-return-create.ts`). `orderedCodeForGrnItem`: the GRN line's `po_item_id` →
+the PO line's item code, used by both the stock-out and the GRN return picker — the same
+resolution GRN posting uses since -186, so goods leave from the material they arrived on.
+
+**Verified.** Live lifecycle run on the staging DB (rolled back), 23/23: return 3 off a PI →
+confirm → `NLY-D12-6MM` 5355 → 5352, same-named materials untouched (was 5355 → 5355). Tests:
+`t006-live-findings` (stock-out of a blank-code line; picker offers it with the PO line's code).
+
+---
+
+## BUG-2026-09-24-202 — GRN stock posted to the wrong raw material when several share a name `procurement` `inventory-cascade` 🟢
+
+🟢 **Fixed** · pre-existing on `main`; [C21](BUG-CLASSES.md) row 16. Found by the same live run as 182-185.
+
+**Root cause.** A PO-sourced GRN line stores a blank `material_code` (BUG-2026-08-13-052,
+deliberately not filled), so `resolveRmForGRNItem` fell through to
+`raw_materials WHERE description = ? LIMIT 1`. 37 descriptions are shared on staging; five
+materials are "WHITE SPONGE". Receiving 140 of `NLY-D12-6MM` posted `rm_batches`, `cost_ledger`
+and `balanceQty` onto `D12-0.5`.
+
+**Fix** (`grn.ts`). Resolve through the GRN line's `po_item_id` → the PO line's `materialCode`
+first. The description fallback now accepts only a unique name; a shared one resolves to nothing
+and the line is returned in `unresolvedLines` instead of guessed. A POSTED-line edit adjusts the
+raw material its original batch was posted to (`rm_batches.rmId`), so an edit can never move
+stock between materials.
+
+**Verified.** Live (staging DB, rolled back): the same receipt now posts to `NLY-D12-6MM`.
+Staging exposure measured: 45 posted GRN lines, **0** with a blank code — nothing to repair
+there. **Prod exposure UNMEASURED.** Test: `tests/grn-rm-resolution.test.mjs`. Same shape still
+open in `po-cost-cascade.ts` `resolveRmFromBom` (C21 row 17).
+
+---
+
+## BUG-2026-09-24-203 — a delivery order returned in full still invoiced the whole sales order `delivery-orders` `data-integrity` 🟢
+
+🟢 **Fixed** · pre-existing on `main`.
+
+**Root cause.** `computeDoInvoiceLines` falls back to billing the SO lines directly when
+"nothing priced" (BUG-2026-05-18-004). It read an empty `invItems` as "priced at zero" — but a
+DO whose every line came back on a Delivery Return is empty because nothing is left. A
+single-line DO returned in full would invoice RM 830.00 on staging.
+
+**Fix** (`delivery-orders/_helpers.ts`). The fallbacks fire only when there is something
+delivered to bill (a line that survived but priced at zero, or a legacy DO with no lines). The
+auto-invoice-on-delivery path raises no invoice when nothing is left, rather than an empty RM 0
+one; the manual path already 409s and now says "already billed or were returned".
+
+**Verified.** Live: the fully-returned DO now shows 0 invoiceable. Tests:
+`t006-r7-delivery-return` (single line returned in full → nothing), `invoice-death-releases-source`.
+
+---
+
+## BUG-2026-09-24-204 — voiding/deleting a CN's invoice left its items SOLD and units DELIVERED `consignment` `inventory-cascade` 🟢
+
+🟢 **Fixed** · completes T-006 R4 (BUG-2026-09-24-201 released the CN header only).
+
+**Root cause.** Convert flips the CN's AT_BRANCH items to SOLD and its LOADED units to
+DELIVERED; the release put the CN back to ACTIVE and left both. The CN read as unsold with
+every item sold, and `/return` matched no LOADED unit.
+
+**Fix** (`consignment-note-shared.ts`). Convert stamps ONE `now` on the invoice's `created_at`,
+each item's `soldDate` and each unit's `deliveredAt`. The release reads that stamp and reverts
+exactly those rows (items → AT_BRANCH, units → LOADED with a counter-row in the FG stock ledger,
+and the CN's `deliveredAt` if convert set it). Anything sold or delivered at another moment is
+left alone.
+
+**Verified.** Live: convert → void → items back to `AT_BRANCH:5`. Staging has no LOADED
+consignment units, so the unit half is proven by `t006-live-findings` only. **Still open:** a
+parent consignment order that convert's `cascadeCNCompletionToCO` marked complete is not
+reopened.
+
+---
+
+> **How this batch was found (182-185).** T-006 (#448) passed 4,635 mocked tests and was on
+> `staging`. Nobody could log in to click it, so its real route code was run against the staging
+> DB inside one transaction that was always rolled back (`zz-live` harness, 2026-09-24; staging
+> re-read afterwards and unchanged). Every bug below passed the mocks: they return snake_case
+> keys and have no column types, the real client does neither.
+
+## BUG-2026-09-24-198 — every PO/GRN-linked purchase invoice create 500'd: `bigint = text` `procurement` `data-integrity` 🟢
+
+🟢 **Fixed** · found by the live staging run; `staging` only (T-006 never reached `main`).
+
+**Root cause.** T-006 R8 added `LEFT JOIN grn_items gi ON gi.id = pii.grn_item_id` to
+`checkPoRemaining`. `grn_items.id` is BIGINT, `purchase_invoice_items.grn_item_id` is TEXT;
+Postgres has no such operator (`42883`). `checkPoRemaining` runs for GRN-sourced, PO-direct and
+line-`poId` PIs — so every one of them 500'd, and R8/R9/R10-on-PI could not work at all.
+
+**Fix.** `gi.id::text = pii.grn_item_id` (`purchase-invoices.ts` `checkPoRemaining`).
+
+**Verified.** Live: PI off a GRN 200; R8 PO-direct over ceiling 409; R9 line-only `poId` 409;
+R10 replay returns the same PI id, one row. Test: `t006-live-findings` "no join compares
+grn_items.id (BIGINT) to a TEXT grn_item_id"; `pi-multi-po` pin updated.
+
+---
+
+## BUG-2026-09-24-199 — purchase return always refused, CN void restored the wrong status: snake-only reads `data-migration` `procurement` 🟢
+
+🟢 **Fixed** · [C23](BUG-CLASSES.md#c23--sql-says-snake_case-the-row-comes-back-camelcase) instances 8-9.
+
+**Root cause.** `createPurchaseReturn` read `grnLine.accepted_qty` / `grnLine.po_item_id`; the
+client returns `acceptedQty` / `poItemId`. Accepted read as 0, so **every** GRN-linked return
+409'd "accepted 0", and the PO counter was never given back. `buildInvoiceDeathCnReleaseStatements`
+read `cn.status_before_conversion` → always `undefined` → every voided CN went to
+`PARTIALLY_SOLD`, never the status it had.
+
+**Fix.** Dual-keyed reads (`purchase-return-create.ts`, `consignment-note-shared.ts`).
+
+**Verified.** Live: return of 1 accepted, PO line 154 → 153; CN void → back to `ACTIVE`. Test:
+`t006-live-findings` drives both functions with a fake DB that returns camelCase rows.
+
+---
+
+## BUG-2026-09-24-200 — a purchase return re-opened billing; deleting one kept the PO counter it took `procurement` `data-integrity` 🟢
+
+🟢 **Fixed** · deviates from PRD T-006 R6's literal wording — needs the PRD author's sign-off.
+
+**Root cause.** R6 lowered `grn_items.invoiced_qty` on every return. The PI still bills those
+units (the supplier's credit is the debit note), so the GRN line re-opened and the returned goods
+could be invoiced again — live: 139 of 140 billed, return 2 from the PI, a new PI for 2 went
+through. Separately, `DELETE /purchase-returns/:id` removed the rows but not the `receivedQty`
+the create had taken off the PO line, so the same goods could be received again.
+
+**Fix.** No `invoiced_qty` write-back (`createPurchaseReturn`). New
+`deletePurchaseReturnRestoreStatements` puts `receivedQty` back in the same batch as the delete.
+
+**Verified.** Live: after a PI-sourced return, billing 2 more → 409; delete of an OPEN return →
+`receivedQty` 151 → 152. **Still open (also on `main`):** a return raised off the GRN *before*
+billing leaves those units billable — closing it needs a returned-qty counter in every GRN
+availability read; owner decision, not patched here.
+
+---
+
+## BUG-2026-09-24-201 — CN → invoice convert never worked on staging; deleting the draft stranded the CN `consignment` `data-integrity` 🟢
+
+🟢 **Fixed** · convert bug pre-dates T-006 (`7701e1aa`, 2026-05-04); delete-path gap is T-006 R4.
+
+**Root cause.** Convert (and the CN-edit A/R refund) wrote `customers.updated_at`, a column the
+staging `customers` table does not have — the whole batch failed 400, and no CN on staging had
+ever converted (0 of 21, measured). Prod's `customers` columns are **UNMEASURED**. And R4 hooked
+the CN release into invoice void only; the convert creates a DRAFT, whose natural death is
+DELETE, which left the CN `FULLY_SOLD`.
+
+**Fix.** Dropped `updated_at` from both `UPDATE customers` (`consignment-notes.ts`); invoice
+DELETE now pushes `buildInvoiceDeathCnReleaseStatements` into its batch (`invoices.ts`).
+
+**Verified.** Live: convert 201 → void → CN `ACTIVE` → convert again 201 → delete the draft →
+CN `ACTIVE`. **Still open:** void/delete leave the CN's items `SOLD` and units `DELIVERED`;
+re-convert still works (it reads every item regardless of status).
 ## BUG-2026-09-25-194: Worker Efficiency showed raw worker ids ("worker-45109bfc") instead of names for PRODUCTION `dashboard` `employees` 🟡
 
 🟡 **Fix in progress** (PR #524, not verified in a browser).
@@ -762,6 +1000,34 @@ number on a screen, never by a test.
 **Gap left open.** No test covers this route, and no test anywhere asserts that
 a money field in a payload is non-zero for a book that has sales. That single
 assertion would have caught all five instances of this class. Logged as C23 row 7.
+## BUG-2026-09-21-181 — the Dashboard Prototype feed read every row by its SQL name, and the driver had renamed them all `dashboard` `api` 🟢
+
+🟢 Fixed on `staging` (the route is also on `main` — prod impact **UNMEASURED**, no prod
+read access). `/test/dashboard-prototype` on staging showed no values: the page got a
+**500** from `GET /api/dashboard/prototype` (and a 504 on the page).
+
+**Root cause.** `src/api/routes/dashboard-prototype.ts` reads rows as `r.created_at`,
+`r.driver_name`, … (105 snake_case reads, 5 dual-keyed). `getSql` (`src/api/lib/db-pg.ts`,
+`columnFrom`) returns every row **camelCased**, so all of them were `undefined`. The DO loop
+then threw on `touchDay(dayKey(r.created_at))!.created++` (null day key), taking the whole
+feed down. The file's own header says its SQL "cannot be executed anywhere but production",
+so it was never run against a real driver before shipping.
+
+**Fix.** One place: `section()` — which all 17 queries go through — now maps each row
+through the new `withSnakeKeys` (`db-pg.ts`), the exact inverse of `columnFrom` (rename map,
+then `postgres.fromCamel`), keeping the camelCase keys too. Reproduced in-process against
+staging data (`kahx…`) as SUPER_ADMIN: 500 before, 200 after, every section `live: true`.
+
+**Regression test.** `tests/dashboard-prototype-snake-reads.test.mjs` — unit-tests
+`withSnakeKeys` and pins that every `prepare` in the route is inside a `section()`.
+Class: [BUG-CLASSES C23](BUG-CLASSES.md).
+
+**Superseded 2026-09-22 (staging↔main sync, PR #463).** `main` had rewritten the same route
+independently (`/dashboard-experimental`, `src/pages/dashboards/`), reading every row
+camelCased — 0 snake reads — so the sync took that version and the `withSnakeKeys` wrap in
+`section()` no longer exists. `withSnakeKeys` stays in `db-pg.ts`; the guard test now
+asserts the route has no `r.snake_case` read and every `prepare` is inside `section()`.
+Nothing about this entry's root cause changes — it is how the bug is prevented that moved.
 
 ---
 
@@ -821,6 +1087,162 @@ correctness bug in the key, and mixing them into one change would have made the
 2-line fix unreviewable.
 
 ---
+
+## BUG-2026-09-24-202b — the note said six, the factory would have queued ten `sales` `production` 🟢
+
+🟢 Fixed before it could reach anyone — found while testing DEV-05 on staging,
+in the window where no stock had finished yet, so the double-build never
+actually happened.
+
+Confirm called `createProductionOrdersForSO` for the FULL line quantity and
+THEN allocated stock beside it. The two steps did not know about each other.
+Order ten with four finished in the yard and you would have got **ten fresh
+production orders plus four re-pointed ones — fourteen pieces for a ten-piece
+order**, under an autoActions line reading `(6 to be produced)`.
+
+That is not a cosmetic slip. Building ten when four already exist is exactly
+the waste make-to-stock exists to prevent, so the feature would have shipped
+doing the opposite of its purpose, while telling the operator it had not.
+
+**A5 says it plainly** — *"A sales order can be allocated four pieces from
+stock and PRODUCE THE REMAINING SIX."*
+
+**Why the tests passed.** `tests/stock-allocations.test.mjs` had a case named
+"A5: order ten, take the four that exist, produce the other six". It asserted
+that four production orders changed hands and that the note said "6 to be
+produced". **It never asserted that six were built.** The note is a string
+assembled in the same function — the test checked the wording and called it
+the behaviour.
+
+**Fix**: allocation now runs BEFORE the builder, and the builder is fed the
+remainder — each line's quantity reduced by what stock covered, and a line
+covered entirely is DROPPED rather than left at zero (the builder floors piece
+count at 1, `production-builder.ts:519`, so a zero-quantity line would still
+queue one order). Four new tests assert the ORDER of the two steps and the
+arithmetic that reaches the builder, not the sentence.
+
+## BUG-2026-09-23-197 — the fix for 196 deployed correctly and still did not reach the screen: the list snapshot had no payload-shape version `production` `caching` 🟢
+
+🟢 Fixed. Same symptom as BUG-2026-09-23-196, second and independent cause —
+caught because the STOCK chip still did not render after 184 shipped, while the
+dialog copy in the same deploy plainly had.
+
+`production_orders_list_snapshot` is rebuilt only when a SOURCE TABLE changes.
+`snapshotCacheKey` was built purely from the URL query params, so it carried no
+notion of what SHAPE the stored payload had. After 184 widened the projection,
+every existing snapshot row kept being served — without the new fields — until
+somebody happened to touch a production order. The code was right and the data
+on the wire was old.
+
+**The repo already had the answer**, one endpoint over: `overdueCountsCacheKey`
+carries a `vN` token whose test says *"Bump the version on any payload SHAPE
+change"* — because that payload's meaning had changed twice before. The list
+key simply never got one.
+
+**Fix**: the key is now `v2&<sorted params>`, with the reason written at the
+call site, and a test pins that a vN token is present.
+
+**The lesson is about verification, not caching.** 184 was found by clicking
+staging; so was this. Both were invisible to a full green test run, and the
+second one was invisible even to a correct deploy of a correct fix. A payload
+that changes shape is not shipped when the code merges — it is shipped when the
+cache holding the old shape is gone.
+
+## BUG-2026-09-23-196 — the stock delivery gate shipped as a no-op: its two fields were not on the payload it reads `production` `delivery` 🟢
+
+🟢 Fixed. **Found by clicking it on staging, not by a test.**
+
+`poReadyForDelivery` keeps an unallocated stock order out of Pending Delivery by
+comparing `salesOrderId` against `stockOriginSoId` (BUG-2026-09-17-183). The
+Delivery page's ready-planning fetch asks for the MINIMAL projection —
+`delivery-orders.ts:592` passes `minimal=true` — and `MinimalPOOut` carried
+neither field. Both read `undefined`, `if (po.isStock && …)` was never true, and
+the gate never fired. The fix for 183 was live and doing nothing.
+
+**Why the tests passed the whole time.** They hand the predicate a PO object
+with the fields already populated. That proves the LOGIC is correct and says
+nothing about whether the DATA reaches it. Two separate claims; only the first
+had ever been tested, and the gap between them is exactly where this lived.
+
+**Same class as the 2026-04-28 CO fix four lines away in the same file**:
+*"previously only `rowToMinimalPO` carried these fields; `rowToPO` silently
+dropped them, leaving CO POs misclassified as SO-source on the FE."* A routing
+field present on one mapper and absent on the other. Ownership is routing too.
+
+**Fix**: both fields declared on `MinimalPOOut` and emitted at all three
+construction sites. Two new guards in `tests/minimal-po-stocked-in.test.mjs` —
+one pins the declarations, one asserts all three mappers emit them — because
+the predicate test could never have caught this and a second copy of it would
+not have either.
+
+Same payload, same missing field, also fixed: the STOCK chip never rendered on
+the production grid.
+
+## BUG-2026-09-17-183 — a finished stock order walked into Pending Delivery and could ride a customer's delivery note at price zero `production` `delivery` `invoicing` 🟢
+
+🟢 Fixed (DEV-05, PRD T-014 findings 14 + 15). Two halves of one hole.
+
+**The gate had no case for it.** `poReadyForDelivery` (`src/lib/delivery-pipeline.ts`)
+excluded CANCELLED, ON_HOLD and consignment orders, but not a stock order — so
+the moment its upholstery cards completed, a stock PO appeared in Pending
+Delivery beside real customers' pieces, with no check that its order had ever
+been confirmed (it never is; it sits in DRAFT).
+
+**The one-customer check could not see it.** The delivery order's
+customer-consistency guard (`delivery-orders/_helpers.ts:2168`) builds its set
+with `if (r.customerId) custMap.set(...)`. A stock order's `customerId` was the
+empty string — falsy — so it was never added, never conflicted, and passed
+silently. The invoice then resolved back through the production order to the
+placeholder order at price zero (`invoice-so-item-link.ts` walks
+`production_order_id` → SO line; the placeholder's lines were all RM 0).
+
+**Fix.** (1) The gate now blocks a stock PO while it still belongs to its stock
+order (`is_stock AND sales_order_id = stock_origin_so_id`), and lets it through
+once allocated — allocation moves `sales_order_id` to the customer, so from then
+on it is that order's piece with no special case anywhere downstream
+(`delivery-pipeline.ts poReadyForDelivery`). (2) The stock order is now booked
+against a real row, `cust-factory-stock`, so a truthy `customerId` makes the
+existing one-customer check see it — no change to that check.
+
+**Verified**: `tests/delivery-pipeline.test.mjs` — unallocated stock → not
+deliverable; the same order after allocation → deliverable. Prod exposure
+before the fix: UNMEASURED by this session; owner-reported zero stock orders on
+2026-09-07, so the path had never been exercised.
+
+## BUG-2026-09-17-182 — Create Stock PO bound the empty string into a foreign-key column `production` `schema` 🟢
+
+🟢 Fixed (DEV-05, PRD T-014 finding 13). `POST /production-orders/stock` wrote
+`customerId = ""` into `sales_orders`, under a comment reading *"NOT NULL but
+empty string OK"*. The column is `TEXT NOT NULL REFERENCES customers(id)`
+(`0001_init.sql:382,400`). The empty string only ever survived because D1 does
+not enforce foreign keys by default; Supabase Postgres does, so on the current
+engine every call was an FK violation and the button could not have worked.
+
+**Why nobody noticed.** Owner measured 2026-09-07: 1,617 sales orders, 3,354
+production orders, **zero** stock orders. The button had never once run to
+completion, so there was no failure to see — only an absence, which reads as
+"nobody used it".
+
+**Fix**: the stock order is booked against a real internal customer,
+`cust-factory-stock` ("Factory Stock", `is_active = 0` so it stays out of the
+pickers), seeded by `ensureStockOrderSchema` (`src/api/lib/stock-orders.ts`)
+before the first write. Migration 0235 is the record copy.
+
+**Verified** by type + column-existence tests only; the INSERT has not been run
+against Postgres by this session — first exercise is on the preview deploy.
+
+## BUG-2026-09-17-181 — the "Reserved" column never meant reserved `inventory` `naming` 🟢
+
+🟢 Fixed (DEV-05, PRD T-014 finding 6 / R17). The Finished Products grid, its
+KPI tile and the breakdown drawer all called a number "Reserved" that only ever
+counted pieces named on a **DRAFT delivery note** (`src/lib/fg-stock.ts`
+`deriveFGStock`, `poStatusByDO` DRAFT → `reservedQty`). That is downstream of
+production and says nothing about an order commitment; the word sent people
+looking for a reservation mechanism that existed nowhere in the system — there
+was no way to reserve anything for a sales order at all. Renamed "On draft DO"
+on all three surfaces (`tests/stock-breakdown.test.mjs` pins the parity and
+that neither screen calls it a reservation again). An order commitment is now a
+`stock_allocations` row, and is a different number.
 
 ## BUG-2026-09-07-179 — the unlock audit wrote to a column that rejects its own code `production` `audit` 🟢
 

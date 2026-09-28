@@ -270,3 +270,33 @@ test('Products page id column is hidden, like Inventory', () => {
   const src = readFileSync('src/pages/products/index.tsx', 'utf8');
   assert.match(src, /\{ key: "id", label: "ID", hidden: true \}/);
 });
+
+// --- BOM material usage columns -------------------------------------------
+
+test('material usage cells become BOM components; blank cells are absent', () => {
+  const r = shapeProductBulkRow({ code: '1003-(K)', usagePin: '0.39', usageScrew: 24, usageLeg: '', usageBracket: 0 });
+  assert.equal(r.ok, true);
+  assert.deepEqual(
+    r.row.materials.map((m) => [m.materialName, m.qtyPerUnit, m.unit]),
+    [['Pin', 0.39, 'BOX'], ['Screw', 24, 'PCS'], ['Bracket', 0, 'PCS']],
+    'blank Leg is skipped (keeps what is saved); 0 is kept so the route can remove it',
+  );
+});
+
+test('a row with no usage cells has no materials key at all', () => {
+  const r = shapeProductBulkRow({ code: '1003-(K)' });
+  assert.equal(r.ok, true);
+  assert.equal('materials' in r.row, false);
+});
+
+test('a non-numeric or negative usage cell rejects the row', () => {
+  assert.equal(shapeProductBulkRow({ code: 'X', usagePin: 'abc' }).ok, false);
+  assert.equal(shapeProductBulkRow({ code: 'X', usagePin: -1 }).ok, false);
+});
+
+test('bulk-import route replaces only the named materials, after the product write', () => {
+  const src = readFileSync('src/api/routes/products.ts', 'utf8');
+  assert.match(src, /DELETE FROM bom_components WHERE productId = \? AND materialName IN \(/);
+  assert.match(src, /pushMaterials\(merged\.id, r\.materials\)/);
+  assert.match(src, /pushMaterials\(id, r\.materials\)/);
+});

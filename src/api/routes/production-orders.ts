@@ -34,7 +34,17 @@ import { postJobCardLabor } from "../lib/po-cost-cascade";
 import { resolveWorkerToken } from "./worker-auth";
 import { workerCoversDept } from "../../lib/worker";
 import { requirePermission } from "../lib/rbac";
+import {
+  sequenceBlockers,
+  blockerMessage,
+  type SequenceCard,
+} from "../lib/sequence-lock";
 import { salesOrderScopeSql, isCustomerScoped } from "../lib/customer-scope";
+import {
+  ensureStockOrderSchema,
+  STOCK_CUSTOMER_ID,
+  STOCK_CUSTOMER_NAME,
+} from "../lib/stock-orders";
 import {
   ensureJobCardQrTokenColumn,
   getOrCreateJobCardQrToken,
@@ -63,6 +73,7 @@ import {
   PO_LIST_BODY_TTL_S,
   applyPoStatusChange,
   applyPoUpdate,
+  recordSequenceUnlock,
   applyWipInventoryChange,
   attachCustomerSO,
   buildPoListBodyKey,
@@ -875,7 +886,17 @@ app.get("/", async (c) => {
       return { success: true as const, data: data as unknown[], total: data.length };
     }
     const { withSnapshot } = await import("../lib/snapshot");
+    // The version token is NOT decoration. A stored snapshot row is only
+    // rebuilt when a source table changes, so a change to the payload's SHAPE
+    // keeps being served from rows built by the previous code until somebody
+    // happens to touch a production order. v2 (2026-09-23, DEV-05): the
+    // projection gained isStock + stockOriginSoId, and without a bump the
+    // Delivery page kept reading a payload that had neither — the same
+    // BUG-2026-09-23-196 symptom a second time, from a different cause.
+    // Bump this on ANY payload shape change; `overdueCountsCacheKey` carries
+    // its own vN for exactly this reason.
     const snapshotCacheKey =
+      "v2&" +
       new URL(c.req.url).searchParams.toString().split("&").sort().join("&");
     return withSnapshot<{
       success: true;
@@ -1200,6 +1221,10 @@ app.post("/stock", async (c) => {
   const denied = await requirePermission(c, "production-orders", "create");
   if (denied) return denied;
   const db = c.var.DB;
+  // is_stock and the cust-factory-stock row reach prod ONLY through this —
+  // migration 0236 is inert on deploy. Awaited before the first write below,
+  // which binds both.
+  await ensureStockOrderSchema(db);
   const body = await c.req.json().catch(() => ({}));
   const type = body?.type as "WIP" | "FG" | undefined;
   const sourcePoId = body?.sourcePoId as string | undefined;
@@ -1319,9 +1344,21 @@ app.post("/stock", async (c) => {
     jcsToCopy[0].sequence,
   );
 
-  const newJcIds = jcsToCopy.map(() => genJcId());
-  const newPoId = genPoId();
-  const newPoNo = `${sohNo}-01`;
+  // One production order PER PIECE, exactly as a customer order is built
+  // (_shared/production-builder.ts:518-520). This endpoint used to create ONE
+  // order carrying the whole quantity, which was the only place in the system
+  // that did — and it is what made allocation hard: a customer taking 4 of 10
+  // would have had to SPLIT a production order, dragging its job cards, its
+  // stickered fg_units and its cost rows along. Built per piece, allocation is
+  // always a whole order changing hands and nothing is ever split.
+  //
+  // A SOFA is the exception here for the same reason it is there: a set is one
+  // thing. Owner 2026-09-17 — a stock sofa set goes out whole, never broken up.
+  const isSofaSet = (sourcePO.itemCategory ?? "").toUpperCase() === "SOFA";
+  const pieceCount = isSofaSet ? 1 : quantity;
+  const perPoQty = isSofaSet ? quantity : 1;
+
+  const poIds = Array.from({ length: pieceCount }, () => genPoId());
 
   const statements: D1PreparedStatement[] = [];
 
@@ -1333,8 +1370,8 @@ app.post("/stock", async (c) => {
             customerSO, customerSOId, reference, customerId, customerName,
             customerState, hubId, hubName, companySO, companySOId, companySODate,
             customerDeliveryDate, hookkaExpectedDD, hookkaDeliveryOrder,
-            subtotalSen, totalSen, status, overdue, notes, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            subtotalSen, totalSen, status, overdue, isStock, notes, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         soId,
@@ -1344,8 +1381,11 @@ app.post("/stock", async (c) => {
         "",
         "",
         type === "WIP" ? `Stock WIP (${selectedWipLabel})` : "Stock FG",
-        "", // customerId — stock SO has no customer; NOT NULL but empty string OK
-        "— Stock —",
+        // customer_id is NOT NULL REFERENCES customers(id). The empty string this
+        // used to bind only survived because D1 did not enforce foreign keys;
+        // Postgres does. cust-factory-stock is created by the self-apply above.
+        STOCK_CUSTOMER_ID,
+        STOCK_CUSTOMER_NAME,
         "",
         null,
         null,
@@ -1359,7 +1399,12 @@ app.post("/stock", async (c) => {
         0,
         "DRAFT",
         "PENDING",
-        "Stock placeholder — will be renamed to the customer SO when a real order lands.",
+        true,
+        // The old note promised this row would be "renamed to the customer SO
+        // when a real order lands". That renaming was never written, and is not
+        // the design: the goods are handed over by an allocation record, and
+        // this order stays what it is.
+        "Make-to-stock order. Goods are handed to a customer order by allocation.",
         nowIso,
         nowIso,
       ),
@@ -1407,6 +1452,11 @@ app.post("/stock", async (c) => {
   const firstDept = [...jcsToCopy].sort((a, b) => a.sequence - b.sequence)[0]
     ?.departmentCode || "WOOD_CUT";
 
+  for (let pieceIdx = 0; pieceIdx < pieceCount; pieceIdx++) {
+  const newPoId = poIds[pieceIdx];
+  const newPoNo = `${sohNo}-${String(pieceIdx + 1).padStart(2, "0")}`;
+  const newJcIds = jcsToCopy.map(() => genJcId());
+
   // Insert PO.
   statements.push(
     db
@@ -1416,18 +1466,19 @@ app.post("/stock", async (c) => {
            productId, productCode, productName, itemCategory, sizeCode, sizeLabel,
            fabricCode, quantity, gapInches, divanHeightInches, legHeightInches,
            specialOrder, notes, status, currentDepartment, progress, startDate,
-           targetEndDate, completedDate, rackingNumber, stockedIn, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           targetEndDate, completedDate, rackingNumber, stockedIn, isStock,
+           stockOriginSoId, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         newPoId,
         newPoNo,
         soId,
         sohNo,
-        1,
+        pieceIdx + 1,
         "",
         type === "WIP" ? `Stock WIP (${selectedWipLabel})` : "Stock FG",
-        "— Stock —",
+        STOCK_CUSTOMER_NAME,
         "",
         sohNo,
         sourcePO.productId,
@@ -1437,7 +1488,7 @@ app.post("/stock", async (c) => {
         sourcePO.sizeCode,
         sourcePO.sizeLabel,
         sourcePO.fabricCode,
-        quantity,
+        perPoQty,
         sourcePO.gapInches,
         sourcePO.divanHeightInches,
         sourcePO.legHeightInches,
@@ -1453,6 +1504,8 @@ app.post("/stock", async (c) => {
         null,
         "",
         0,
+        true,
+        soId,
         nowIso,
         nowIso,
       ),
@@ -1463,7 +1516,7 @@ app.post("/stock", async (c) => {
     const jc = jcsToCopy[i];
     const newId = newJcIds[i];
     const perUnit = (jc.wipQty ?? sourceQty) / sourceQty;
-    const newWipQty = Math.max(1, Math.round(perUnit * quantity));
+    const newWipQty = Math.max(1, Math.round(perUnit * perPoQty));
     statements.push(
       db
         .prepare(
@@ -1506,11 +1559,13 @@ app.post("/stock", async (c) => {
         ),
     );
   }
+  }
 
   await db.batch(statements);
 
-  const fresh = await fetchPO(db, newPoId);
-  return c.json({ success: true, data: fresh });
+  // The first order, for callers that expect one; `created` is the real count.
+  const fresh = await fetchPO(db, poIds[0]);
+  return c.json({ success: true, data: fresh, created: poIds.length });
 });
 
 // ---------------------------------------------------------------------------
@@ -2031,6 +2086,41 @@ app.post("/:id/scan-complete", async (c) => {
       409,
     );
   }
+  // ---- Upstream sequence lock (owner 2026-09-06) --------------------------
+  // A scan completes the card, so it consumes upstream WIP — the same reason
+  // the desktop PATCH path is gated in _helpers.ts. Gating one surface and not
+  // the other only moves the skipping to whichever screen stayed open.
+  //
+  // The floor keeps a way out during the shadow phase (`unlock`), but it is
+  // recorded. `force` was the old flag for this; it went in 760d08b3 together
+  // with the unreliable `prerequisiteMet` predicate it guarded. This is the
+  // same escape hatch behind a rule that holds up.
+  {
+    const siblings = await db
+      .prepare(
+        "SELECT id, departmentCode, status, sequence, wipKey, branchKey FROM job_cards WHERE productionOrderId = ?",
+      )
+      .bind(scannedId)
+      .all<SequenceCard>();
+    const blockers = sequenceBlockers(scannedJc, siblings.results ?? []);
+    if (blockers.length > 0) {
+      const unlock = (body as { unlock?: { reason?: string } })?.unlock;
+      if (!unlock) {
+        return c.json(
+          {
+            success: false,
+            code: "UPSTREAM_INCOMPLETE",
+            error: blockerMessage(blockers),
+            blockedBy: blockers,
+            canSelfUnlock: true,
+          },
+          409,
+        );
+      }
+      await recordSequenceUnlock(db, c, scannedJc, blockers, unlock.reason);
+    }
+  }
+
   const stickerKey = `${scannedPo.id}::${scannedJc.id}::${pieceNo}`;
   const slots = await ensurePiecePicsForJc(db, scannedJc);
   // Mirror a legacy JC-level PIC onto slot[0] so the same-worker / share / full
@@ -2500,6 +2590,60 @@ app.post("/:id/scan-complete", async (c) => {
 // set is filtered to status NOT IN (COMPLETED,TRANSFERRED) — a re-scan finds
 // nothing to do and returns success-empty.
 // ---------------------------------------------------------------------------
+/**
+ * The sequence gate for the two FAN-OUT scan endpoints, which complete several
+ * cards in one post. One definition for both — the single-card gate lives
+ * inline in /scan-complete because it already holds the row it needs.
+ *
+ * Reports EVERY blocked card, not the first. A fan-out that names one problem,
+ * gets unlocked, then names the next is three round trips on a factory floor.
+ *
+ * Returns a Response to send, or null to continue.
+ */
+async function gateFanOutSequence(
+  db: D1Database,
+  c: Context<Env>,
+  productionOrderId: string,
+  cards: Array<{ id: string; departmentCode?: string | null; status?: string | null; sequence?: number | null; wipKey?: string | null; branchKey?: string | null }>,
+  body: unknown,
+): Promise<Response | null> {
+  const siblings = await db
+    .prepare(
+      "SELECT id, departmentCode, status, sequence, wipKey, branchKey FROM job_cards WHERE productionOrderId = ?",
+    )
+    .bind(productionOrderId)
+    .all<SequenceCard>();
+  const all = siblings.results ?? [];
+  const blocked = cards
+    .map((jc) => ({ jc, blockers: sequenceBlockers(jc, all) }))
+    .filter((x) => x.blockers.length > 0);
+  if (blocked.length === 0) return null;
+
+  const unlock = (body as { unlock?: { reason?: string } } | null)?.unlock;
+  if (!unlock) {
+    const merged = [
+      ...new Map(
+        blocked.flatMap((b) => b.blockers).map((b) => [b.id, b]),
+      ).values(),
+    ];
+    return c.json(
+      {
+        success: false,
+        code: "UPSTREAM_INCOMPLETE",
+        error: blockerMessage(merged),
+        blockedBy: merged,
+        blockedCards: blocked.map((b) => b.jc.id),
+        canSelfUnlock: true,
+      },
+      409,
+    );
+  }
+  for (const b of blocked) {
+    await recordSequenceUnlock(db, c, b.jc as never, b.blockers, unlock.reason);
+  }
+  return null;
+}
+
 app.post("/:id/scan-complete-dept", async (c) => {
   // Two auth paths (mirrors /scan-complete): a dashboard user (userId stamped
   // by auth-middleware) is authorised via RBAC; a shop-floor worker call
@@ -2629,11 +2773,14 @@ app.post("/:id/scan-complete-dept", async (c) => {
     });
   }
 
-  // Prerequisite gate — soft-warn (202) if ANY compartment's upstream dept
-  // hasn't completed, unless the worker already acknowledged and re-posted
-  // with force:true. Mirrors /scan-complete's single-card gate.
-  // prerequisiteMet warning REMOVED (Wei Siang 2026-06-08) — workers may
-  // complete any dept directly; no "earlier dept hasn't completed" gate.
+  // Upstream sequence lock (owner 2026-09-06). Replaces the note that stood
+  // here since 2026-06-08 saying workers may complete any dept directly — that
+  // is the permission this change withdraws, and leaving the sentence would
+  // have left the file arguing with itself.
+  {
+    const gate = await gateFanOutSequence(db, c, poId, cards, body);
+    if (gate) return gate;
+  }
 
   const nowIso = new Date().toISOString();
   const today = nowIso.split("T")[0];
@@ -3011,6 +3158,13 @@ app.post("/:id/scan-complete-shared", async (c) => {
     .bind(...(wipKey ? [poId, targetDept, wipKey] : [poId, targetDept]))
     .all<JobCardRow>();
   const cards = cardsRes.results ?? [];
+  // Upstream sequence lock (owner 2026-09-06). Placed AFTER the empty check
+  // below would have been wrong: an already-finished compartment must still
+  // report "already done", not "blocked" — the work is not being repeated.
+  if (cards.length > 0) {
+    const gate = await gateFanOutSequence(db, c, poId, cards, body);
+    if (gate) return gate;
+  }
   if (cards.length === 0) {
     // No open cards of THIS worker's dept on this compartment → it's already
     // done. Report it for the worker's own dept (never advance to the next),
@@ -3073,8 +3227,10 @@ app.post("/:id/scan-complete-shared", async (c) => {
     }
   }
 
-  // prerequisiteMet warning REMOVED (Wei Siang 2026-06-08) — workers may
-  // complete any dept directly; no "earlier dept hasn't completed" gate.
+  // The sequence lock is applied above, on the resolved card set (owner
+  // 2026-09-06). The 2026-06-08 note that used to sit here — workers may
+  // complete any dept directly — described the permission this change
+  // withdraws.
 
   const nowIso = new Date().toISOString();
   const today = nowIso.split("T")[0];
@@ -3644,13 +3800,29 @@ app.post("/bulk-patch", async (c) => {
           return { poId, jobCardId, success: true };
         }
         let msg = `HTTP ${res.status}`;
+        // The sequence lock's refusal is STRUCTURED — which departments, and
+        // whether this user may release it. Flattening it to a string here
+        // would leave the grid unable to tell "waiting on Framing" from a
+        // network blip, and the operator would get "error 409" on a batch of
+        // twenty. Carry the shape through; the client parses it in one place
+        // (src/lib/sequence-unlock.ts).
+        let code: string | undefined;
+        let blockedBy: unknown;
+        let canSelfUnlock: boolean | undefined;
         try {
-          const errBody = (await res.json()) as { error?: string } | null;
+          const errBody = (await res.json()) as
+            | { error?: string; code?: string; blockedBy?: unknown; canSelfUnlock?: boolean }
+            | null;
           if (errBody && typeof errBody.error === "string") msg = errBody.error;
+          if (errBody && typeof errBody.code === "string") code = errBody.code;
+          if (errBody && Array.isArray(errBody.blockedBy)) blockedBy = errBody.blockedBy;
+          if (errBody && typeof errBody.canSelfUnlock === "boolean") {
+            canSelfUnlock = errBody.canSelfUnlock;
+          }
         } catch {
           /* non-json error body */
         }
-        return { poId, jobCardId, success: false, error: msg };
+        return { poId, jobCardId, success: false, error: msg, code, blockedBy, canSelfUnlock };
       } catch (err) {
         return {
           poId,

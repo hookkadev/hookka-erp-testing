@@ -8,8 +8,17 @@
 //   • Stock In/Out  — a Stock-In form (completed PO chip + rack chip + notes →
 //     Confirm Stock In) and a Stock-Out form (occupied-rack chip + reason →
 //     Confirm Stock Out), plus a Recent Movements list.
-//   • Movement      — All / Stock In / Stock Out filter chips + a movement
-//     history list.
+//   • Find          — DEV-09 "where is it?": search by SO / PO / customer PO /
+//     item code / model / customer → one card per piece with its rack, and a
+//     Move button (scan the new rack → the /r/ page's existing move prompt).
+//   • Movement      — All / Stock In / Stock Out / Move filter chips + a
+//     movement history list (a Move reads "from → to · by <name>").
+//
+// SCAN RACK (DEV-09): the printed rack QR already encodes `/r/<rackId>`, and
+// that page is the whole scan-items-into-rack flow (continuous QR + Code 128,
+// per-piece resolve, move-aware stock-in). So /m does NOT re-implement it: the
+// Scan Rack button decodes the rack QR and navigates there. Opened from /m the
+// session cookie rides along, so the movement records the storekeeper's name.
 //
 // EVERYTHING is wired to REAL endpoints (no fabricated data):
 //   • racks      → GET  /api/warehouse                  (data[] + summary)
@@ -17,6 +26,7 @@
 //   • stock in   → POST /api/warehouse/movements {type:"STOCK_IN", ...}
 //   • stock out  → POST /api/warehouse/movements {type:"STOCK_OUT", ...}
 //   • item-QR    → GET  /api/inventory (finishedProducts) for the FG code list
+//   • find       → GET  /api/warehouse/locate?q=         (data[] per piece)
 // QR values reuse the shared desktop scheme (rackScanUrl / itemQrValue) so a
 // phone-generated sticker scans identically to a desktop one.
 //
@@ -36,6 +46,9 @@ import {
   Eye,
   CheckCircle2,
   Search,
+  ScanLine,
+  ArrowRightLeft,
+  MapPin,
 } from "lucide-react";
 import { useCachedJson } from "@/lib/cached-fetch";
 import { useDebounced } from "../lib/use-debounced";
@@ -43,8 +56,9 @@ import {
   getQRCodeDataURL,
   rackScanUrl,
   itemQrValue,
+  parseRackQr,
 } from "@/lib/qr-utils";
-import { MobileHeader, MobileCard, StatusPill, SubTabs } from "../components";
+import { MobileHeader, MobileCard, StatusPill, SubTabs, ScanSheet } from "../components";
 import { QrModal, type QrChoice } from "../components/QrModal";
 import { M } from "../theme";
 import { resolveStatus, PAYMENT_STATUS_MAP, str, num } from "../config/helpers";
@@ -81,6 +95,20 @@ type Movement = {
   docRef?: string;
 };
 type MovementsResp = { success?: boolean; data?: Movement[] };
+type LocateHit = {
+  rackItemId: string;
+  rackLocationId: string;
+  rackLabel: string;
+  description: string;
+  notes: string;
+  stockedInDate: string;
+  poNo: string;
+  customerPO: string;
+  salesOrderNo: string;
+  itemCode: string;
+  customerName: string;
+};
+type LocateResp = { success?: boolean; data?: LocateHit[] };
 type InventoryResp = {
   success?: boolean;
   data?: { finishedProducts?: { code?: string; name?: string }[] };
@@ -94,9 +122,24 @@ const RACK_STATUS_MAP = {
 
 const TABS = [
   { key: "rack", label: "Rack Overview" },
+  { key: "find", label: "Find" },
   { key: "io", label: "Stock In/Out" },
   { key: "move", label: "Movement" },
 ];
+
+// A scanned rack QR → its rack id. Accepts the printed `/r/<id>` URL (path-
+// based, so any print-time domain works) and the in-app `HKRACK:<id>` token.
+function rackIdFromScan(value: string): string | null {
+  const token = parseRackQr(value);
+  if (token) return token;
+  const m = value.match(/\/r\/([^/?#]+)/);
+  if (!m) return null;
+  try {
+    return decodeURIComponent(m[1]);
+  } catch {
+    return m[1];
+  }
+}
 
 function rackLabel(r: Rack): string {
   return [str(r, "rack"), str(r, "position")].filter(Boolean).join("-") || str(r, "rack");
@@ -263,6 +306,19 @@ export function WarehouseScreen() {
     window.setTimeout(() => setToast(null), 2400);
   };
 
+  // Scan Rack (DEV-09). `scanTitle` non-null = the scanner is open; the Find
+  // tab's Move reuses it with its own title.
+  const [scanTitle, setScanTitle] = useState<string | null>(null);
+  const onRackScanned = (value: string) => {
+    setScanTitle(null);
+    const id = rackIdFromScan(value);
+    if (!id) {
+      showToast({ kind: "err", text: "That isn’t a rack QR code." });
+      return;
+    }
+    navigate(`/r/${encodeURIComponent(id)}`);
+  };
+
   return (
     <>
       <MobileHeader title="Warehouse" onBack={() => navigate(-1)} />
@@ -308,7 +364,12 @@ export function WarehouseScreen() {
             }}
             onView={(r) => navigate(`/m/warehouse/${encodeURIComponent(r.id)}`)}
             onRackQr={openRackQr}
+            onScanRack={() => setScanTitle("Scan rack QR")}
           />
+        ) : null}
+
+        {tab === "find" ? (
+          <FindLocation onMove={() => setScanTitle("Scan the NEW rack")} />
         ) : null}
 
         {tab === "io" ? (
@@ -317,6 +378,13 @@ export function WarehouseScreen() {
 
         {tab === "move" ? <MovementHistory /> : null}
       </div>
+
+      <ScanSheet
+        open={scanTitle !== null}
+        title={scanTitle ?? undefined}
+        onClose={() => setScanTitle(null)}
+        onResult={onRackScanned}
+      />
 
       {qr ? (
         <QrModal
@@ -344,6 +412,7 @@ function RackOverview({
   onRefresh,
   onView,
   onRackQr,
+  onScanRack,
 }: {
   racks: Rack[];
   total: number;
@@ -354,6 +423,7 @@ function RackOverview({
   onRefresh: () => void;
   onView: (r: Rack) => void;
   onRackQr: (r: Rack) => void;
+  onScanRack: () => void;
 }) {
   // Rack search — scans the rack no / zone AND EVERY item inside the rack
   // (product · customer · PO · SO · SKU), so searching any stocked item finds
@@ -393,7 +463,15 @@ function RackOverview({
   }, [racks, ql]);
   return (
     <>
-      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+      {/* DEV-09 primary action: scan a rack → its scan-items page. */}
+      <ConfirmBtn
+        label="Scan Rack"
+        icon={<ScanLine size={18} strokeWidth={1.9} color="#fff" />}
+        enabled
+        bg={M.taupe}
+        onClick={onScanRack}
+      />
+      <div style={{ display: "flex", gap: 8, margin: "10px 0 14px" }}>
         <ActionBtn icon={<QrCode size={17} strokeWidth={1.75} color={M.taupe} />} label="Item QR" onClick={onItemQr} />
         <ActionBtn
           icon={<Download size={17} strokeWidth={1.75} color={M.taupe} />}
@@ -566,6 +644,133 @@ function RackOverview({
                     label="Rack QR"
                     onClick={() => onRackQr(r)}
                   />
+                </div>
+              </MobileCard>
+            );
+          })}
+        </div>
+      )}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// FIND (DEV-09) — "Search order → find rack". One card per PIECE (a bedframe's
+// Divan and Headboard can sit in different racks). Move = scan the new rack,
+// which opens its /r/ page; scanning this piece's sticker there fires the
+// existing "Move here?" prompt — the one move path, so the old rack row is
+// removed and the history records a TRANSFER from → to.
+// ---------------------------------------------------------------------------
+function FindLocation({ onMove }: { onMove: () => void }) {
+  const [q, setQ] = useState("");
+  const term = useDebounced(q).trim();
+  const url =
+    term.length >= 2 ? `/api/warehouse/locate?q=${encodeURIComponent(term)}` : null;
+  // Short TTL: a location is exactly the thing that changes under you.
+  const { data, loading, error } = useCachedJson<LocateResp>(url, 10);
+  const hits = url ? (data?.data ?? []) : [];
+  return (
+    <>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 9,
+          padding: "11px 13px",
+          backgroundColor: M.card,
+          border: `1px solid ${M.hairline}`,
+          borderRadius: 12,
+          marginBottom: 14,
+        }}
+      >
+        <Search size={18} strokeWidth={1.75} color={M.faint} />
+        <input
+          value={q}
+          placeholder="SO / PO / customer PO / item code / model / customer"
+          onChange={(e) => setQ(e.target.value)}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            border: "none",
+            outline: "none",
+            background: "transparent",
+            fontSize: 14,
+            color: M.raisin,
+          }}
+        />
+      </div>
+
+      {!url ? (
+        <MobileCard radius={16} style={{ padding: 20 }}>
+          <div style={{ color: M.muted, fontSize: 13, textAlign: "center" }}>
+            Type at least 2 characters to find where an item is racked.
+          </div>
+        </MobileCard>
+      ) : hits.length === 0 ? (
+        <MobileCard radius={16} style={{ padding: 20 }}>
+          <div style={{ color: M.muted, fontSize: 13, textAlign: "center" }}>
+            {/* A failed search must never read as "not racked" — that is the
+                answer that sends someone to the wrong place. */}
+            {loading ? "Searching…" : error ? "Search failed — try again." : "Not in any rack."}
+          </div>
+        </MobileCard>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
+          <div style={{ fontSize: 11.5, color: M.muted, fontWeight: 600, margin: "0 2px" }}>
+            {hits.length === 50 ? "First 50 matches — narrow the search" : `${hits.length} found`}
+          </div>
+          {hits.map((h) => {
+            const piece = h.notes.match(/·\s*(pc .*)$/)?.[1] ?? "";
+            const refs = [
+              h.salesOrderNo,
+              h.poNo,
+              h.customerPO ? `Cust PO ${h.customerPO}` : "",
+              h.itemCode,
+            ].filter(Boolean);
+            return (
+              <MobileCard key={h.rackItemId} radius={16} style={{ padding: "14px 15px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <MapPin size={17} strokeWidth={2} color={M.taupe} />
+                  <span style={{ fontSize: 16, fontWeight: 800, color: M.raisin }}>
+                    {h.rackLabel || "—"}
+                  </span>
+                  {h.stockedInDate ? (
+                    <span style={{ marginLeft: "auto", fontSize: 11, color: M.muted, fontWeight: 600 }}>
+                      since {dateShort(h.stockedInDate)}
+                    </span>
+                  ) : null}
+                </div>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: M.ink, marginTop: 8 }}>
+                  {h.description || "Item"}
+                  {piece ? (
+                    <span style={{ color: M.muted, fontWeight: 500 }}> · {piece}</span>
+                  ) : null}
+                </div>
+                {refs.length ? (
+                  <div style={{ fontSize: 11.5, color: M.muted, marginTop: 3 }}>
+                    {refs.join(" · ")}
+                  </div>
+                ) : null}
+                {h.customerName ? (
+                  <div style={{ fontSize: 11.5, color: M.muted, marginTop: 1 }}>
+                    {h.customerName}
+                  </div>
+                ) : null}
+                <div
+                  style={{
+                    marginTop: 12,
+                    paddingTop: 12,
+                    borderTop: `1px solid ${M.divider}`,
+                  }}
+                >
+                  <RowBtn
+                    icon={<ArrowRightLeft size={15} strokeWidth={1.75} color={M.taupe} />}
+                    label="Move to another rack"
+                    onClick={onMove}
+                  />
+                  <div style={{ fontSize: 11, color: M.muted, marginTop: 7, textAlign: "center" }}>
+                    Scan the new rack, then scan this item’s sticker.
+                  </div>
                 </div>
               </MobileCard>
             );
@@ -759,7 +964,7 @@ function StockInOut({
 // MOVEMENT HISTORY
 // ---------------------------------------------------------------------------
 function MovementHistory() {
-  const [filter, setFilter] = useState<"all" | "STOCK_IN" | "STOCK_OUT">("all");
+  const [filter, setFilter] = useState<"all" | "STOCK_IN" | "STOCK_OUT" | "TRANSFER">("all");
   const url =
     filter === "all"
       ? "/api/warehouse/movements"
@@ -771,6 +976,7 @@ function MovementHistory() {
     { key: "all", label: "All" },
     { key: "STOCK_IN", label: "Stock In" },
     { key: "STOCK_OUT", label: "Stock Out" },
+    { key: "TRANSFER", label: "Move" },
   ];
 
   return (
@@ -835,6 +1041,22 @@ function dateShort(iso?: string): string {
   return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
 }
 
+// IN green, OUT red, MOVE (TRANSFER) neutral. A move's reason is written as
+// "Moved from <rack>" (public-rack-qr.ts), so from → to is recovered from it.
+function movementLook(m: Movement) {
+  if (m.type === "STOCK_IN") return { tag: "IN", bg: "#EEF3E4", fg: "#4F7C3A" };
+  if (m.type === "TRANSFER") return { tag: "MOVE", bg: "#EDE8F5", fg: "#5B4B8A" };
+  return { tag: "OUT", bg: "#F9E1DA", fg: "#9A3A2D" };
+}
+function movedFrom(m: Movement): string {
+  return (str(m, "reason").match(/^Moved from (.+)$/)?.[1] ?? "").trim();
+}
+function rackText(m: Movement): string {
+  const from = movedFrom(m);
+  const to = str(m, "rackLabel");
+  return from ? `${from} → ${to || "—"}` : to;
+}
+
 function MovementRow({
   m,
   first,
@@ -844,9 +1066,7 @@ function MovementRow({
   /** Reserved for a denser variant; layout is identical today. */
   compact?: boolean;
 }) {
-  const isIn = m.type === "STOCK_IN";
-  const tileBg = isIn ? "#EEF3E4" : "#F9E1DA";
-  const tileFg = isIn ? "#4F7C3A" : "#9A3A2D";
+  const { tag, bg: tileBg, fg: tileFg } = movementLook(m);
   return (
     <div
       style={{
@@ -869,8 +1089,10 @@ function MovementRow({
           flex: "none",
         }}
       >
-        {isIn ? (
+        {tag === "IN" ? (
           <ArrowDownToLine size={16} strokeWidth={1.75} color={tileFg} />
+        ) : tag === "MOVE" ? (
+          <ArrowRightLeft size={16} strokeWidth={1.75} color={tileFg} />
         ) : (
           <ArrowUpFromLine size={16} strokeWidth={1.75} color={tileFg} />
         )}
@@ -897,7 +1119,7 @@ function MovementRow({
             whiteSpace: "nowrap",
           }}
         >
-          {[str(m, "docRef"), str(m, "rackLabel"), dateShort(m.createdAt)]
+          {[str(m, "docRef"), rackText(m), dateShort(m.createdAt)]
             .filter(Boolean)
             .join(" · ")}
         </div>
@@ -915,7 +1137,7 @@ function MovementRow({
             color: tileFg,
           }}
         >
-          {isIn ? "IN" : "OUT"}
+          {tag}
         </span>
         <div style={{ fontSize: 12, fontWeight: 700, color: M.raisin, marginTop: 4 }}>
           ×{num(m, "quantity") || 1}
@@ -926,9 +1148,8 @@ function MovementRow({
 }
 
 function MovementCard({ m }: { m: Movement }) {
-  const isIn = m.type === "STOCK_IN";
-  const tileBg = isIn ? "#EEF3E4" : "#F9E1DA";
-  const tileFg = isIn ? "#4F7C3A" : "#9A3A2D";
+  const { tag, bg: tileBg, fg: tileFg } = movementLook(m);
+  const from = movedFrom(m);
   return (
     <MobileCard radius={14} style={{ padding: "13px 14px" }}>
       <div
@@ -951,7 +1172,7 @@ function MovementCard({ m }: { m: Movement }) {
             color: tileFg,
           }}
         >
-          {isIn ? "IN" : m.type === "STOCK_OUT" ? "OUT" : "MOVE"}
+          {tag}
         </span>
         <span style={{ fontSize: 11, color: M.muted, fontWeight: 600 }}>
           {dateShort(m.createdAt)}
@@ -980,7 +1201,7 @@ function MovementCard({ m }: { m: Movement }) {
           borderTop: `1px solid ${M.divider}`,
         }}
       >
-        <MovMeta label="Rack" value={str(m, "rackLabel") || "—"} />
+        <MovMeta label="Rack" value={rackText(m) || "—"} />
         <div style={{ minWidth: 0, flex: 1 }}>
           <MetaCaption>Document</MetaCaption>
           <div
@@ -1003,9 +1224,9 @@ function MovementCard({ m }: { m: Movement }) {
           </div>
         </div>
       </div>
-      {str(m, "reason") || str(m, "performedBy") ? (
+      {(str(m, "reason") && !from) || str(m, "performedBy") ? (
         <div style={{ fontSize: 11, color: M.muted, marginTop: 9 }}>
-          {[str(m, "reason"), str(m, "performedBy") ? `by ${str(m, "performedBy")}` : ""]
+          {[from ? "" : str(m, "reason"), str(m, "performedBy") ? `by ${str(m, "performedBy")}` : ""]
             .filter(Boolean)
             .join(" · ")}
         </div>

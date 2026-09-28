@@ -26,7 +26,8 @@
 // Write reuse: the INSERT block (rack_items + STOCK_IN stock_movements + flip
 // rack OCCUPIED) is the SHARED helper buildRackStockInStatements below — the
 // EXACT same statements the worker route builds — so the two paths can never
-// drift. performedBy is "Public scan" here (no worker identity on this route).
+// drift. performedBy is the logged-in user's name when a session cookie rides
+// along (scannerName), else "Public scan" (no worker identity on this route).
 //
 // SCHEMA NOTE (deviation from the original spec — see the agent report): the
 // rack tables (rack_locations / rack_items / stock_movements) are NOT org-
@@ -100,6 +101,11 @@ export type RackStockInItem = {
   // piece / no-pieceNo piece writes the legacy "SO <no>" notes (byte-identical).
   pieceNo?: number | null;
   totalPieces?: number | null;
+  // DEV-09: the rack label this piece was MOVED out of (set by the stock-in POST
+  // when its move-detect deletes the old row). Present → the movement is written
+  // as a TRANSFER "Moved from <label>" so the history reads from → to; absent →
+  // the plain STOCK_IN it always was.
+  movedFromLabel?: string | null;
 };
 
 // ---------------------------------------------------------------------------
@@ -114,7 +120,7 @@ export type RackStockInItem = {
 // `orgId` is accepted for signature stability (the worker route can call this
 // verbatim) but is intentionally NOT bound into the INSERTs — the rack tables
 // have no orgId column in this schema (see the SCHEMA NOTE above). `performedBy`
-// is the human who scanned: the worker's name on the portal, "Public scan" here.
+// is the human who scanned: the worker's name on the portal, scannerName() here.
 //
 // rack_items.id is BIGSERIAL — NOT supplied. production_order_id is stored NULL
 // (not "") when absent so the movements-view PO JOIN reads "no document".
@@ -134,6 +140,10 @@ export function buildRackStockInStatements(
   rackLocationId: string,
   items: RackStockInItem[],
   performedBy: string,
+  // The rack's human label (rack_locations.rack, e.g. "Rack 3"). Until DEV-09
+  // the movement's rackLabel was bound to the rack ID, so the history showed
+  // ids. Falls back to the id only when a caller has no label.
+  rackLabel?: string | null,
 ): D1PreparedStatement[] {
   const today = new Date().toISOString().split("T")[0];
   const now = new Date().toISOString();
@@ -174,6 +184,7 @@ export function buildRackStockInStatements(
           notes,
         ),
     );
+    const movedFrom = (item.movedFromLabel ?? "").trim();
     statements.push(
       db
         .prepare(
@@ -184,14 +195,14 @@ export function buildRackStockInStatements(
         )
         .bind(
           genId("sm"),
-          "STOCK_IN",
+          movedFrom ? "TRANSFER" : "STOCK_IN",
           rackLocationId,
-          rackLocationId,
+          (rackLabel ?? "").trim() || rackLocationId,
           poId,
           "",
           item.productName ?? "",
           qty,
-          "Bulk stock-in (scan)",
+          movedFrom ? `Moved from ${movedFrom}` : "Bulk stock-in (scan)",
           performedBy,
           now,
         ),
@@ -203,6 +214,27 @@ export function buildRackStockInStatements(
       .bind(rackLocationId),
   );
   return statements;
+}
+
+// Who did the scan, for stock_movements.performedBy (DEV-09 "Updated by").
+// This route is auth-BYPASSED, but the auth middleware still attaches the
+// session when a valid cookie rides along (it only skips the 401 — see
+// auth-middleware.ts). So a storekeeper logged into the ERP (WAREHOUSE role,
+// opening /r/ from /m) is recorded by name; a no-login camera scan stays
+// "Public scan". Identity comes from the session, never from the request body.
+async function scannerName(c: Context<Env>): Promise<string> {
+  const userId = (c as unknown as { get: (k: string) => unknown }).get("userId");
+  if (typeof userId !== "string" || !userId) return "Public scan";
+  try {
+    const row = await c.var.DB.prepare(
+      "SELECT displayName, email FROM users WHERE id = ? LIMIT 1",
+    )
+      .bind(userId)
+      .first<{ displayName: string | null; email: string | null }>();
+    return (row?.displayName || row?.email || "").trim() || "Public scan";
+  } catch {
+    return "Public scan";
+  }
 }
 
 type RackRow = { id: string; rack: string };
@@ -779,10 +811,11 @@ app.get("/:rackId/item", async (c: Context<Env>) => {
 // PER-PIECE: every entry is one UNIQUE scanned sticker, so this writes ONE
 // rack_items row per entry (qty forced to 1) — never an aggregated ×N line. Each
 // row stores its description (as productName) + its SO number (in notes, "SO …").
-// Writes via buildRackStockInStatements (performedBy="Public scan", flips the
+// Writes via buildRackStockInStatements (performedBy=scannerName(), flips the
 // rack OCCUPIED). An item whose productionOrderId is already in a DIFFERENT
 // rack is MOVED — the old rack_items row(s) are deleted first, in the SAME
-// atomic batch. Manual items (productionOrderId null) always add. The page
+// atomic batch, and its movement is a TRANSFER "Moved from <old rack>" (DEV-09).
+// Manual items (productionOrderId null) always add. The page
 // already de-dups a re-scanned sticker, so each posted piece is distinct.
 app.post("/:rackId/stock-in", async (c: Context<Env>) => {
   const rackId = (c.req.param("rackId") || "").trim();
@@ -877,6 +910,9 @@ app.post("/:rackId/stock-in", async (c: Context<Env>) => {
         it.totalPieces ?? null,
       );
       if (cur.currentRackId && cur.currentRackId !== rackId) {
+        // DEV-09: record the move as a TRANSFER from the old rack, not a bare
+        // STOCK_IN (the delete below used to leave no trace of where it came from).
+        it.movedFromLabel = cur.currentRackLabel || cur.currentRackId;
         moveDeletes.push(
           c.var.DB
             .prepare(
@@ -899,7 +935,8 @@ app.post("/:rackId/stock-in", async (c: Context<Env>) => {
       null,
       rackId,
       items,
-      "Public scan",
+      await scannerName(c),
+      rack.rack,
     );
 
     // Auto-stamp each scanned piece's Rack onto its job card so the Packing

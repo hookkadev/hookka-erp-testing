@@ -24,6 +24,7 @@ import {
   updateConsignmentNoteById,
   validatePOMutex,
   CN_VALID_TRANSITIONS,
+  ensureCnStatusBeforeConversionColumn,
 } from "../lib/consignment-note-shared";
 import { cascadeCNCompletionToCO, cascadeCNReversalToCO } from "./production-orders";
 import {
@@ -44,6 +45,7 @@ import { getOrgId, withOrgScope } from "../lib/tenant";
 import { loadCnValueMap, loadCnCustomerRefMap } from "../lib/cn-value";
 import { emitAudit } from "../lib/audit";
 import { requirePermission } from "../lib/rbac";
+import { readIdempotencyKey, withIdempotency } from "../lib/idempotency";
 import { customerScopeSql } from "../lib/customer-scope";
 import { enqueueEmail } from "../lib/email-outbox";
 import {
@@ -1326,11 +1328,12 @@ app.post("/:id/return", async (c) => {
       const refundSen = cn.totalValue - nextTotalValue;
       statements.push(
         c.var.DB.prepare(
+          // No updated_at: `customers` has no such column (the write made
+          // this whole batch fail — see convert-to-invoice below).
           `UPDATE customers
-              SET outstandingSen = GREATEST(0, COALESCE(outstandingSen, 0) - ?),
-                  updated_at = ?
+              SET outstandingSen = GREATEST(0, COALESCE(outstandingSen, 0) - ?)
             WHERE id = ?`,
-        ).bind(refundSen, now, cn.customerId),
+        ).bind(refundSen, cn.customerId),
       );
     }
 
@@ -1419,6 +1422,11 @@ app.post("/:id/return", async (c) => {
 app.post("/:id/convert-to-invoice", async (c) => {
   const denied = await requirePermission(c, "consignment-notes", "create");
   if (denied) return denied;
+  // T-006 R10 — a retried convert (network blip on the round-trip) must not
+  // mint a second invoice off the same CN. No-op when the client sends no
+  // Idempotency-Key.
+  const idemKey = readIdempotencyKey(c);
+  return withIdempotency(c, "consignment-notes", idemKey, async () => {
   try {
     const id = c.req.param("id");
     const body = (await c.req.json().catch(() => ({}))) as {
@@ -1558,6 +1566,7 @@ app.post("/:id/convert-to-invoice", async (c) => {
     // FG stock ledger — read the FROM side with the SAME predicate the flip
     // below uses, before anything is written.
     await ensureFgStockEventsSchema(c.var.DB);
+    await ensureCnStatusBeforeConversionColumn(c.var.DB);
     const soldUnits = await loadFgUnitsForEvent(
       c.var.DB,
       "cnId = ? AND status = 'LOADED'",
@@ -1619,14 +1628,17 @@ app.post("/:id/convert-to-invoice", async (c) => {
       ),
       // Flip CN to FULLY_SOLD + link the new invoice id back. Stamp
       // deliveredAt if not already (a sale-conversion implies the goods
-      // reached the customer's hands).
+      // reached the customer's hands). status_before_conversion (T-006 R4)
+      // records what to restore if the invoice is later voided — there is no
+      // single fixed prior status since this route has no status gate.
       c.var.DB.prepare(
         `UPDATE consignment_notes
             SET status = 'FULLY_SOLD',
+                status_before_conversion = ?,
                 deliveredAt = COALESCE(deliveredAt, ?),
                 convertedInvoiceId = ?
           WHERE id = ?`,
-      ).bind(now, invoiceId, id),
+      ).bind(cn.status ?? "ACTIVE", now, invoiceId, id),
       // Mark every CN item SOLD with soldDate=now. The legacy enum allows
       // AT_BRANCH / SOLD / RETURNED / DAMAGED — SOLD is the right tag for
       // the convert-to-invoice action.
@@ -1666,12 +1678,14 @@ app.post("/:id/convert-to-invoice", async (c) => {
       // invoice total, mirroring DO's DELIVERED → invoice flow
       // (delivery-orders.ts:1857-1861). Without this, every CN-origin
       // invoice was off-ledger from the customer's A/R balance.
+      // No updated_at: `customers` has no such column, and writing it failed
+      // the whole convert batch — no CN on staging had ever converted
+      // (measured 2026-09-24). Same shape as the DO-side bump.
       c.var.DB.prepare(
         `UPDATE customers
-            SET outstandingSen = COALESCE(outstandingSen, 0) + ?,
-                updated_at = ?
+            SET outstandingSen = COALESCE(outstandingSen, 0) + ?
           WHERE id = ?`,
-      ).bind(totalSen, now, cn.customerId),
+      ).bind(totalSen, cn.customerId),
     ];
 
     await c.var.DB.batch(statements);
@@ -1719,6 +1733,7 @@ app.post("/:id/convert-to-invoice", async (c) => {
     console.error("[POST /api/consignment-notes/:id/convert-to-invoice] failed:", msg);
     return c.json({ success: false, error: msg || "Invalid request body" }, 400);
   }
+  });
 });
 
 // ---------------------------------------------------------------------------

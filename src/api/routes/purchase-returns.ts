@@ -13,10 +13,12 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import type { Env } from "../worker";
 import { requirePermission } from "../lib/rbac";
+import { readIdempotencyKey, withIdempotency } from "../lib/idempotency";
 import { getOrgId } from "../lib/tenant";
 import {
   ensurePurchaseReturnTables,
   createPurchaseReturn,
+  deletePurchaseReturnRestoreStatements,
   loadPiItemsForReturn,
   loadGrnItemsForReturn,
   applyPurchaseReturnStockOut,
@@ -124,6 +126,10 @@ app.post("/", async (c) => {
   const denied = await requirePermission(c, "purchase-returns", "create");
   if (denied) return denied;
   await ensurePurchaseReturnTables(c.var.DB);
+  // T-006 R10 — a retried create (network blip on the round-trip) must not
+  // raise a second return. No-op when the client sends no Idempotency-Key.
+  const idemKey = readIdempotencyKey(c);
+  return withIdempotency(c, "purchase-returns", idemKey, async () => {
   const b = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
   const purchaseInvoiceId = String(b.purchaseInvoiceId ?? b.purchase_invoice_id ?? "").trim();
   const grnId = String(b.grnId ?? b.grn_id ?? "").trim();
@@ -187,7 +193,11 @@ app.post("/", async (c) => {
     orgId: getOrgId(c),
     items,
   });
-  return c.json({ success: true, data: created });
+  if (!created.ok) {
+    return c.json({ success: false, error: created.error }, 409);
+  }
+  return c.json({ success: true, data: { id: created.id, returnNo: created.returnNo } });
+  });
 });
 
 // POST /api/purchase-returns/:id/confirm — slice 2: reverse the stock (the
@@ -242,8 +252,12 @@ app.delete("/:id", async (c) => {
   if ((row.status ?? "OPEN") !== "OPEN") {
     return c.json({ success: false, error: "only OPEN returns can be deleted" }, 409);
   }
-  await c.var.DB.prepare("DELETE FROM purchase_return_items WHERE purchase_return_id = ?").bind(id).run();
-  await c.var.DB.prepare("DELETE FROM purchase_returns WHERE id = ?").bind(id).run();
+  // One batch: the PO counter comes back together with the rows going away.
+  await c.var.DB.batch([
+    ...(await deletePurchaseReturnRestoreStatements(c.var.DB, id)),
+    c.var.DB.prepare("DELETE FROM purchase_return_items WHERE purchase_return_id = ?").bind(id),
+    c.var.DB.prepare("DELETE FROM purchase_returns WHERE id = ?").bind(id),
+  ]);
   return c.json({ success: true });
 });
 

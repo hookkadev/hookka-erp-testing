@@ -42,6 +42,12 @@ import {
 } from "./_shared/item-catalog-snap";
 import { withOrgScope, getOrgId } from "../lib/tenant";
 import {
+  ensureStockAllocationSchema,
+  planAutoAllocation,
+  SYSTEM_ALLOCATION_ACTOR,
+} from "../lib/stock-allocations";
+import { ensureStockOrderSchema } from "../lib/stock-orders";
+import {
   resolveCompanyCode,
   readCompanyCode,
   classifyBatchReassign,
@@ -164,6 +170,10 @@ const app = new Hono<Env>();
 // the moment a second tenant is seeded.
 app.get("/", async (c) => {
   const db = c.var.DB;
+  // This list filters on is_stock, which a fresh DB may not have yet — no SO
+  // write need ever have run here. Memoized per isolate, so only the first
+  // request pays for it.
+  await ensurePendingMigrations(db);
   const pageParam = c.req.query("page");
   const limitParam = c.req.query("limit");
   const paginate = pageParam !== undefined || limitParam !== undefined;
@@ -209,12 +219,22 @@ app.get("/", async (c) => {
   // Tenant scope — first bind param on every query against soSourceSql.
   // Items are scoped transitively via salesOrderId IN (...) so they don't
   // need their own orgId filter (the archive table doesn't have orgId yet).
-  const extraWhere =
+  // 0236 — make-to-stock orders are booked against the internal Factory Stock
+  // customer and are not what a salesperson is looking for here. Excluded by
+  // default, the way service orders are; ?isStock=all brings them back for
+  // admin/reporting. There is deliberately no "stock only" mode — the stock
+  // orders' own surface is the Production page.
+  const stockWhere =
+    c.req.query("isStock") === "all"
+      ? ""
+      : "(is_stock = FALSE OR is_stock IS NULL)";
+  const serviceWhere =
     serviceOrderFilter === "true"
       ? "is_service_order = TRUE"
       : serviceOrderFilter === "false"
         ? "(is_service_order = FALSE OR is_service_order IS NULL)"
         : "";
+  const extraWhere = [serviceWhere, stockWhere].filter(Boolean).join(" AND ");
   const { whereSql: orgWhere, params: orgParams } = withOrgScope(
     c,
     "sales_orders",
@@ -983,6 +1003,8 @@ app.get("/status-changes", async (c) => {
 
 app.get("/stats", async (c) => {
   const orgId = getOrgId(c);
+  // Reads is_stock — ensure it exists on this DB first, same as GET / above.
+  await ensurePendingMigrations(c.var.DB);
   // 0134 — Service Order vs Sales Order scope. Same semantics as the GET
   // list above so /service-order's tab badges + dashboard cards read off
   // a SV-only aggregate instead of the combined ~570-row total.
@@ -996,12 +1018,20 @@ app.get("/stats", async (c) => {
       : isServiceOrderParam === "all"
         ? "all"
         : "false";
-  const extraWhere =
+  // Stock orders are excluded from the list above, so they are excluded from
+  // its tile cards too — a card that counts rows the grid below cannot show is
+  // exactly the "No confirmed orders / 1,229 orders" mismatch noted below.
+  const stockWhere =
+    c.req.query("isStock") === "all"
+      ? ""
+      : "(is_stock = FALSE OR is_stock IS NULL)";
+  const serviceWhere =
     serviceOrderFilter === "true"
       ? "is_service_order = TRUE"
       : serviceOrderFilter === "false"
         ? "(is_service_order = FALSE OR is_service_order IS NULL)"
         : "";
+  const extraWhere = [serviceWhere, stockWhere].filter(Boolean).join(" AND ");
 
   // A salesperson's totals must come from a NARROWED aggregate — there is no
   // row here for the response filter to drop, which is how the grid could read
@@ -2672,12 +2702,82 @@ app.post("/:id/confirm", async (c) => {
     );
   }
 
+  // DEV-05 — hand already-built stock to this order (owner 2026-09-07:
+  // allocation is automatic on confirm), and do it BEFORE the production orders
+  // are built.
+  //
+  // THE ORDER OF THESE TWO STEPS IS THE WHOLE FEATURE. Allocating four pieces
+  // and then queueing all ten for production is not a cosmetic slip — it is
+  // precisely the waste this exists to prevent, and it would have shipped under
+  // a note reading "(6 to be produced)" while ten were on the floor. A5 says
+  // "allocate four pieces from stock AND PRODUCE THE REMAINING SIX".
+  //
+  // The statements ride the SAME batch as the confirm below, so an allocation
+  // can never land without the confirm that caused it. Best-effort: a factory
+  // must still be able to confirm an order when the ledger is unreachable, but
+  // the failure is LOUD rather than a silent "nothing was available" — those
+  // two read identically on screen and that is how a planner's "0 items" came
+  // to mean "cannot see".
+  let allocationStmts: D1PreparedStatement[] = [];
+  let allocatedByItemId = new Map<string, number>();
+  const allocationNotes: string[] = [];
+  try {
+    await ensureStockOrderSchema(c.var.DB);
+    await ensureStockAllocationSchema(c.var.DB);
+    const userId = (c as unknown as { get: (k: string) => unknown }).get("userId");
+    const plan = await planAutoAllocation(
+      c.var.DB,
+      getOrgId(c),
+      existing,
+      items.map((it) => ({
+        productCode: it.productCode ?? "",
+        soItemId: it.id ?? null,
+        soLineNo: it.lineNo ?? null,
+        quantity: Number(it.quantity) || 0,
+      })),
+      typeof userId === "string" && userId
+        ? { type: "USER", id: userId, name: null }
+        : SYSTEM_ALLOCATION_ACTOR,
+      now,
+    );
+    allocationStmts = plan.statements;
+    allocatedByItemId = plan.allocatedByItemId;
+    allocationNotes.push(...plan.notes);
+  } catch (err) {
+    console.error(
+      `[dev-05] auto-allocation failed for SO ${id} — order confirmed WITHOUT stock allocation. err=${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    allocationNotes.push(
+      "Stock allocation could not be checked — allocate from the order detail page.",
+    );
+  }
+
+  // Produce only what stock could not cover. A line taken entirely from stock
+  // is DROPPED, not left at quantity 0 — the builder floors piece count at 1
+  // (`Math.max(1, item.quantity)`, production-builder.ts:519), so a zero-qty
+  // line would still queue one production order.
+  const itemsToProduce = items
+    .map((it) => {
+      const taken = allocatedByItemId.get(it.id) ?? 0;
+      if (taken <= 0) return it;
+      return { ...it, quantity: (Number(it.quantity) || 0) - taken };
+    })
+    .filter((it) => (Number(it.quantity) || 0) > 0);
+
   const { statements: poStmts, created: productionOrders, preExisting } =
-    await createProductionOrdersForSO(c.var.DB, existing, items);
+    itemsToProduce.length > 0
+      ? await createProductionOrdersForSO(c.var.DB, existing, itemsToProduce)
+      : { statements: [], created: [], preExisting: false };
 
   const autoActions = preExisting
     ? ["Production orders already exist for this SO — skipped duplicate creation."]
     : productionOrders.map((po) => `Created PO ${po.poNo}`);
+  autoActions.push(...allocationNotes);
+  if (allocatedByItemId.size > 0 && itemsToProduce.length === 0) {
+    autoActions.push("Filled entirely from stock — nothing to produce.");
+  }
 
   // 2026-04-28: confirm lands at IN_PRODUCTION directly. The PO cascade
   // below kicks off lead-time scheduling, so the SO IS in production the
@@ -2702,6 +2802,7 @@ app.post("/:id/confirm", async (c) => {
       JSON.stringify(autoActions),
     ),
     ...poStmts,
+    ...allocationStmts,
   ]);
 
   const order = await fetchSOWithItems(c.var.DB, id);

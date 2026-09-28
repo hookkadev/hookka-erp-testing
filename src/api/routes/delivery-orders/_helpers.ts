@@ -1442,34 +1442,33 @@ export async function computeDoInvoiceLines(
   ]);
   const doItems = doItemsRes.results ?? [];
 
-  // Partial-delivery: a line that went into a Delivery Return is NOT delivered,
-  // so it's excluded from the invoice (the good lines are billed; the returned
-  // ones drop out). Best-effort — if the delivery_return tables don't exist yet
-  // (no returns raised on this deployment), the query throws and we bill all.
-  let returnedPoIds = new Set<string>();
+  // Partial-delivery (T-006 R7): a line with a Delivery Return against it is
+  // invoiceable only for what WASN'T returned — return 1 of 3 still leaves 2
+  // billable, it doesn't drop the whole line. Was a Set<productionOrderId>
+  // membership filter that excluded the entire line on ANY return against it,
+  // so a 1-of-3 return zeroed out the other 2 that were still good. Best-effort
+  // — if the delivery_return tables don't exist yet (no returns raised on this
+  // deployment), the query throws and nothing is excluded.
+  let returnedQtyByPoId = new Map<string, number>();
   try {
     const retRes = await db
       .prepare(
-        `SELECT dri.production_order_id AS "poId"
+        `SELECT dri.production_order_id AS "poId", COALESCE(SUM(dri.quantity),0) AS "qty"
            FROM delivery_return_items dri
            JOIN delivery_returns dr ON dr.id = dri.delivery_return_id
-          WHERE dr.delivery_order_id = ? AND dr.status <> 'CANCELLED'`,
+          WHERE dr.delivery_order_id = ? AND dr.status <> 'CANCELLED'
+          GROUP BY dri.production_order_id`,
       )
       .bind(doId)
-      .all<{ poId: string | null }>();
-    returnedPoIds = new Set(
+      .all<{ poId: string | null; qty: number }>();
+    returnedQtyByPoId = new Map(
       (retRes.results ?? [])
-        .map((r) => r.poId)
-        .filter((x): x is string => !!x),
+        .filter((r): r is { poId: string; qty: number } => !!r.poId)
+        .map((r) => [r.poId, Number(r.qty) || 0]),
     );
   } catch {
     /* delivery_return tables not present — nothing to exclude */
   }
-  const activeDoItems = returnedPoIds.size
-    ? doItems.filter(
-        (di) => !di.productionOrderId || !returnedPoIds.has(di.productionOrderId),
-      )
-    : doItems;
 
   // How much of each line this invoice is allowed to take. Default: everything
   // still un-invoiced. With a `select`, only what was ticked — clamped to the
@@ -1490,10 +1489,14 @@ export async function computeDoInvoiceLines(
 
   const draws: DoLineSelection[] = [];
   let invItems: InvItem[] = [];
-  for (const di of activeDoItems) {
+  for (const di of doItems) {
     const delivered = Number(di.quantity) || 0;
+    const returned = di.productionOrderId
+      ? returnedQtyByPoId.get(di.productionOrderId) ?? 0
+      : 0;
+    const effectiveDelivered = Math.max(0, delivered - returned);
     const already = Number(di.invoicedQty ?? di.invoiced_qty ?? 0) || 0;
-    const remaining = availableQty(delivered, already);
+    const remaining = availableQty(effectiveDelivered, already);
     const billQty = select
       ? Math.min(wanted.get(di.id) ?? 0, remaining)
       : remaining;
@@ -1537,8 +1540,18 @@ export async function computeDoInvoiceLines(
   // invoice would bill the whole sales order again on top of what the first
   // invoice already charged. Restrict them to what they were always for — the
   // FIRST, whole-document bill of a delivery nothing has drawn on yet.
+  //
+  // And only when there IS something delivered to bill: lines that survived to
+  // invItems but priced at zero, or a legacy DO with no lines at all. A DO whose
+  // lines all came back on a Delivery Return has an empty invItems for the
+  // right reason — nothing is left — and must bill RM 0, not fall through to
+  // billing the whole SO (a fully-returned single-line DO billed RM 830.00 on
+  // staging, 2026-09-24).
+  const somethingToBill = invItems.length > 0 || doItems.length === 0;
   const freshWholeDo =
-    !select && activeDoItems.every((di) => (Number(di.invoicedQty ?? di.invoiced_qty ?? 0) || 0) === 0);
+    somethingToBill &&
+    !select &&
+    doItems.every((di) => (Number(di.invoicedQty ?? di.invoiced_qty ?? 0) || 0) === 0);
 
   // Fallback 1: nothing priced at all → bill the linked SO lines directly.
   if (computedTotal === 0 && freshWholeDo) {
@@ -1710,12 +1723,14 @@ export async function buildDoDeliveredSoAndInvoice(
   await ensureDoPartialInvoiceColumns(db);
   const billing = await loadDoBillingState(db, doRow.id);
 
-  if (!billing.fullyInvoiced && soIds.length > 0 && !incomplete) {
-    const { invItems, computedTotal, draws } = await computeDoInvoiceLines(
-      db,
-      doRow.id,
-      soIds,
-    );
+  const lines =
+    !billing.fullyInvoiced && soIds.length > 0 && !incomplete
+      ? await computeDoInvoiceLines(db, doRow.id, soIds)
+      : null;
+  // Nothing left to bill (every line came back on a Delivery Return) → raise
+  // no invoice at all, rather than an empty RM 0 one.
+  if (lines && (lines.invItems.length > 0 || lines.computedTotal > 0)) {
+    const { invItems, computedTotal, draws } = lines;
 
     const invId = genInvoiceId();
     const invoiceNo = await nextInvoiceNo(db);
@@ -2337,6 +2352,24 @@ export async function createDeliveryOrderForPOs(
     }
 
     const salesOrderId: string | undefined = resolvedSalesOrderId;
+
+    // T-006 R1 — server-side backstop. An SO-linked DO with NO
+    // productionOrderIds is exactly the Sales-page "Transfer to Delivery
+    // Order" bug that bypassed validateDoComposition's once-only-delivery
+    // guard (BUG-2026-05-16: 13 duplicate DOs, RM 24,647 double-consumed) —
+    // it built `items` by hand instead of going through a production order,
+    // so the guard above never ran because productionOrderIds was empty.
+    // Refuse outright rather than silently accepting hand-built items again.
+    if (salesOrderId && productionOrderIds.length === 0) {
+      return {
+        ok: false,
+        status: 400,
+        body: {
+          success: false,
+          error: "A delivery order for a sales order must be created from its production orders (productionOrderIds), not hand-built items — this is what makes the once-only-delivery guard run.",
+        },
+      };
+    }
 
     // Validate customer (salesOrder link optional at this phase).
     let salesOrderRow: {

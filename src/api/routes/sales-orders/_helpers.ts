@@ -1368,6 +1368,15 @@ export function ensurePendingMigrations(db: D1Database): Promise<void> {
       // self-apply because deploy.yml does NOT replay migration files.
       "ALTER TABLE sales_orders ADD COLUMN IF NOT EXISTS sales_org_code TEXT NOT NULL DEFAULT 'HOOKKA'",
       "UPDATE sales_orders SET sales_org_code = 'HOOKKA' WHERE sales_org_code IS NULL OR sales_org_code = ''",
+      // 0236 — make-to-stock flag (DEV-05). The SO LIST filters on this column,
+      // and the list is a read path that can run before any SO write has ever
+      // touched this DB (a fresh preview deploy), so it is ensured here and
+      // awaited by GET / too — same reason production-orders ensures the
+      // hold_reason trio on its read path (BUG-2026-06-20-002).
+      // The archive twin is altered as well: ?includeArchive=true unions the two
+      // tables and the filter must resolve on both sides.
+      "ALTER TABLE sales_orders ADD COLUMN IF NOT EXISTS is_stock BOOLEAN NOT NULL DEFAULT FALSE",
+      "ALTER TABLE sales_orders_archive ADD COLUMN IF NOT EXISTS is_stock BOOLEAN NOT NULL DEFAULT FALSE",
     ];
       await runSelfApply(db, "sales-orders", stmts);
     },

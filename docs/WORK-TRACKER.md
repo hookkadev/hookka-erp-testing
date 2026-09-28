@@ -1,7 +1,14 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-25**: branch `chore/sync-staging-from-main-0925b` (second staging<-main sync today): Service > Top issues takes main's version (staging's 09-22 redesign `ecc78625` dropped); staging's rack-scan BUG-2026-09-25-195 renumbered to -208 (ID collided with main's).
 > **Last verified: 2026-09-25**: branch `feat/dashboard-efficiency-employee-drill` (stacked on `fix/dashboard-tighter-padding`, PR #533) added below (committed, not pushed, its entry is the newest).
 > **Last verified: 2026-09-25**: branch `fix/dashboard-tighter-padding` added below (not committed, its entry is the newest).
+> **Last verified: 2026-09-25** — branch `chore/sync-staging-from-main-0925` (staging←main sync) added below (its entry is the newest).
+> **Last verified: 2026-09-25** — branch `feat/m-warehouse-locate` (DEV-09) added below (open, its entry is the newest).
+> **Last verified: 2026-09-22** — branch `fix/delivery-loading-gate-po-paging` added below (open, its entry is the newest). Previously: branch `fix/delivery-tab-switch-pagination` (MERGED as #467). Previously: branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
+> **Last verified: 2026-09-22** — branch `fix/delivery-tab-switch-pagination` added below (open, its entry is the newest). Previously: branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
+> **Last verified: 2026-09-22** — branch `claude/nice-sanderson-27be32` (dashboard Service > Top issues redesign) added below (open, its entry is the newest). Previously: branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
+> **Last verified: 2026-09-22** — branch `feat/po-supplier-searchable-select` added below (open, pushed, no PR). NOTE: the 2026-09-22 Houzs entry below still carries committed merge-conflict markers (`<<<<<<< HEAD` … `>>>>>>> 85e58b40`) on `main`; left for its owner to resolve.
 > **Last verified: 2026-09-25**: branch `feat/dashboard-kpi-no-icons` (PR #524 to `main`, open) is the newest entry below, items 1 to 17 checked against the branch. The Attendance log, time audit dates and Department Status branches are folded into it (#525, #526, #527 closed).
 > **Last verified: 2026-09-25** — branch `feat/ocr-dashboard-tab` entry below updated: PR #522 open, BUG-2026-09-25-192 fixed, historical model fallback added.
 > **Last verified: 2026-09-24** — branch `feat/dashboard-exp-ops-layout` added below (not committed, its entry is the newest).
@@ -11,8 +18,6 @@
 > **Last verified: 2026-09-23** — branch `fix/so-duplicate-ref-saves-draft` added below (open, its entry is the newest).
 > **Last verified: 2026-09-22** — branch `fix/scan-queue-client-driven` added below (open, its entry is the newest).
 > **Last verified: 2026-09-22** — branch `fix/datagrid-selection-loop` added below (open, its entry is the newest). Previously: branch `fix/delivery-tab-switch-pagination` (MERGED as #467). Previously: branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
-> **Last verified: 2026-09-22** — branch `fix/delivery-loading-gate-po-paging` added below (open, its entry is the newest). Previously: branch `fix/delivery-tab-switch-pagination` (MERGED as #467). Previously: branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
-> **Last verified: 2026-09-22** — branch `feat/po-supplier-searchable-select` added below (open, pushed, no PR). NOTE: the 2026-09-22 Houzs entry below still carries committed merge-conflict markers (`<<<<<<< HEAD` … `>>>>>>> 85e58b40`) on `main`; left for its owner to resolve.
 > **Last verified: 2026-09-22** — branch `feat/service-dashboard-root-cause-graph` added below (stacked on the staging sync PR).
 > **Last verified: 2026-09-22** — branch `fix/service-dashboard-other-catch-all` added below (open, pushed, no PR).
 > **Last verified: 2026-09-22** — branch `feat/po-search-line-items` added below (open, pushed, its entry is the newest). Previously: branch `feat/po-supplier-searchable-select` (MERGED as #459). The committed merge-conflict markers that sat inside the Houzs entry on `main` were resolved here (kept the full text, which is a superset).
@@ -28,6 +33,15 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
+
+## 2026-09-25 — 🔵 Sync `staging` from `main` (branch `chore/sync-staging-from-main-0925` → `staging`)
+
+105 `main` commits merged into `staging` (75 staging-only). Conflicts: 2 code, 9 docs.
+1. 🔵 `delivery-orders.ts` imports: both kept (`requireReadOrDashboardTab` from main, idempotency from staging).
+2. 🔵 `purchase-invoices.ts` PUT: main's `priorPairs` read kept BEFORE staging's 23514-guarded `db.batch` (it must see the pre-edit rows).
+3. 🔵 Docs: stamps/logs unioned; module-guide + map anchors re-derived; `API.md` regenerated.
+4. 🔵 **Bug-id collisions — followed `main`:** main's numbers stand; staging's colliding entries renumbered after main's max (194) and every staging-side reference (code comments, tests, docs, short forms) moved with them: 09-23-184→196, 185→197; 09-24-182→198, 183→199, 184→200, 185→201, 186→202 (186b→202b), 187→203, 188→204, 189→205, 190→206, 191→207; rack-scan 09-25-193→195.
+tsc strict 0; `npm test` 5047 pass / 0 fail.
 ---
 
 ## 2026-09-28 — 🔵 DEV-20 Raw Material UOM options per category (branch `feat/rm-uom-options` → `staging`)
@@ -63,6 +77,65 @@ Verified: `tsc -p tsconfig.app.json` exit 0. Visual check NOT done (local previe
 
 ---
 
+## 2026-09-25 — 🔵 Experimental dashboard: icon-free KPI cards (uncommitted, on `feat/m-warehouse-locate` working tree — move to its own branch → `staging`)
+
+1. 🔵 Sales first-row KPI cards lose their icons; stacked layout (label → value → sub; a ±% delta sub is a green/red pill, any other sub stays plain wrapping text).
+3. 🔵 Same sweep across every tab: `Kpi` (`dashboard-shared.tsx`) no longer takes an icon at all — Finance / Operations (incl. its 2 custom cards) / Production / Service / Employees tiles, All-Overview Hero + DomainCard label icons, Service approvals header icon removed. Kept only icons that carry meaning or affordance: ↑/↓ delta arrows, → on CTA buttons, search-field magnifier, ↗ on case links.
+2. 🔵 Pending Delivery shows its value (`pendingDeliverySen` in `computeSalesKpis`, same confirmed-order sum as Outstanding); mirrored on `/m` Sales tab.
+
+## 2026-09-25 — 🔵 DEV-09 Mobile Warehouse: scan rack / locate / move / history (branch `feat/m-warehouse-locate` → `staging`)
+
+Ticket asks 1-6 (scan rack, scan item into rack, search location, move rack, movement history). Asks 1/2/4 already exist as the rack-QR `/r/<rackId>` page (rack QR encodes that URL); the build is the gaps:
+1. 🔵 B3 — scan stock-in movements stored the rack ID as `rackLabel` (history showed ids, not "Rack 3").
+2. 🔵 B1 — `performedBy` = the logged-in user's name (soft session on the public path; WAREHOUSE role logs in), else "Public scan".
+3. 🔵 B2 — a cross-rack move now writes a `TRANSFER` movement ("Moved from <rack>") instead of a silent delete.
+4. 🔵 B4 — `GET /api/warehouse/locate?q=` per-piece search (PO / customer PO / SO / item code / model / customer), `warehouse:read` gated.
+5. 🔵 F1-F3 — `/m/warehouse`: Scan Rack button → `/r/<id>`; Find tab (locate + Move → scan new rack); Movement tab Move chip + from→to + by.
+6. 🔵 `/m` `ScanSheet` rework (shared by every /m scan button): square aiming box + dimmed surround, a real error screen with Retry when the camera fails (was a black screen forever), torch when supported, vibrate + tone + green box on a hit, native BarcodeDetector else jsQR on a ≤960px frame at ~9/s (was full-res on every frame). **Scan only — no typed rack code, by owner rule.** Verified in the pane: the blocked-camera screen + Retry; the live decode could NOT be exercised (pane hidden → no paint, 0 rAF/s) — test on a real phone.
+Out of scope v1 (owner default): office Packing dropdown / worker rack-assign (`applyPackingRack`) still write no movement row.
+State: all five built on the branch, NOT committed / pushed. tsc strict 0; `npm test` 4926 pass / 0 fail; `tests/warehouse-scan-history.test.mjs` (11, real route SQL on node:sqlite; 2 fail on pre-fix code). Browser (`npm run dev` → prod proxy, read-only): Scan Rack opens the scanner (camera blocked in the pane, so no decode tested), Find renders and shows "Search failed" against prod (no `/locate` there yet), Move chip renders. Prod measured: 21 racks, only `Floor` has id ≠ label; 333/333 recent scan stock-ins read "Public scan". BUG-2026-09-25-208.
+
+## 2026-09-24 — 🔵 Staging: the three pre-existing convert-chain bugs the T-006 live check found (branch `fix/staging-legacy-convert-bugs` → `staging`)
+
+Ask: continue fixing on staging after #506. All three were on `main` before T-006.
+
+- [x] GRN stock posted to the wrong raw material when several share a name (BUG-2026-09-24-202).
+- [x] Fully-returned DO still invoiced the whole SO (-203).
+- [x] CN void/delete left items SOLD / units DELIVERED (-204).
+- [x] tsc exit 0; full suite green; live re-run on staging DB (rolled back): procurement 25/25, sales/delivery/consignment 18/18.
+- [x] PR → `staging` (#508, merged); deployed `e19db151` re-verified: 25/25 + 18/18.
+- [x] Carried to `main` via #448 (`13d5287e`).
+- [x] Staging-only lifecycle run (edit / confirm / void / cancel / delete / stock-out) + UI
+  click-through (Consignment menu, Sales → Transfer to DO created DO-2609-071, duplicate refused
+  409). Found BUG-2026-09-24-205 (return stock-out moved nothing for PO-sourced lines) — fixed on
+  `fix/staging-return-stockout`, lifecycle 23/23.
+- [x] Side quest G (owner chose option A): goods returned off a GRN before billing no longer
+  billable — BUG-2026-09-24-206, branch `fix/staging-grn-return-billable`, live 16/16 (5/15 on
+  deployed `81c77972`). PR → `staging` needs a human merge; then carry to #448.
+- [x] Side quest H: voiding/deleting a CN's invoice now reopens the consignment order the
+  conversion completed — BUG-2026-09-24-207, branch `fix/staging-co-reopen-on-void` (on top of
+  #516), live 8/8 (6/8 on deployed `81c77972`). PR → `staging` needs a human merge after #516.
+- Note: `/ready-planning` is serve-stale cached, so for ~2-3 min after a DO is created the Sales
+  "Transfer to DO" dialog still offers its production orders; the server refuses the duplicate.
+- 🟡 Open: BOM consumption resolves by shared description (C21 row 17); convert's CO completion cascade is not reopened on void; prod exposure of -186 UNMEASURED.
+
+---
+
+## 2026-09-24 — 🔵 T-006 live check on staging: fix what the real DB broke (branch `fix/t006-live-findings` → `fix/t006-transfer-convert-guards` + `staging`)
+
+A live run of the T-006 routes against the staging DB (real route code, one rolled-back
+transaction) failed where the mocked tests passed. Asks: fix, push to `staging`, re-test.
+
+- [x] PI create 500s for every PO/GRN-linked invoice — R8 join `bigint = text` (BUG-2026-09-24-198).
+- [x] Purchase return always refused — R6 reads `accepted_qty` / `po_item_id` single-keyed (-183).
+- [x] R4 void restores `PARTIALLY_SOLD`, not the saved status — single-keyed read (-183).
+- [x] R6 re-opens billing of returned goods — `invoiced_qty` write-back removed (-200, **PRD sign-off needed**).
+- [x] Deleting an OPEN purchase return keeps the PO counter it lowered (-200).
+- [x] Deleting a CN-sourced invoice leaves the CN stuck `FULLY_SOLD` (-201).
+- [x] CN → invoice convert 400s on staging: writes `customers.updated_at`, which does not exist (-201, pre-existing).
+- [x] `tsc -p tsconfig.app.json` exit 0; full suite 4779 pass / 0 fail / 3 skips; live re-run on the fixed code: procurement 24/25, sales 16/18 (misses are the pre-existing items below).
+- [x] Push; PR → `staging` (#506, merged); live check re-run against the deployed commit `f434916e`: 24/25 + 16/18, misses were the three pre-existing bugs (entry above).
+- 🟡 Needs a decision: GRN-sourced return of unbilled goods leaves them billable (needs a returned-qty counter); CN items stay `SOLD` after void; GRN stock resolves by description when `material_code` is blank (wrong raw material); single-line DO fully returned still invoices in full.
 ## 2026-09-25 — 🔵 Experimental dashboard: icon-free KPI cards, Sales values, sticky tables, Attendance log, time-audit dates, Department Status (branch `feat/dashboard-kpi-no-icons` → `main`)
 
 1. 🔵 `Kpi` (`dashboard-shared.tsx`) no longer takes an icon: label → value → sub; a ±% delta sub is a green/red pill, any other sub stays plain wrapping text. Applies to Sales / Finance / Operations (incl. its 2 custom cards) / Production / Service / Employees; All-Overview Hero + DomainCard label icons and the Service approvals header icon removed too.
@@ -257,6 +330,29 @@ for here instead of loading 335 or 481 stuff every time I press".
 - [x] tests + `tsc -p tsconfig.app.json` (exit 0); docs restamped (CODEBASE-MAP delivery index, modules/delivery.md, BUG-HISTORY).
 - [ ] Bug fix → `main`. Live tab-switch timing on prod is UNMEASURED (dev server needs login).
 
+
+---
+
+## 2026-09-22 — 🔵 Dashboard Service > Top issues: charts that fit the question (branch `claude/nice-sanderson-27be32`, feature → `staging`)
+
+Owner (screenshot of the sub-panel): "see what graph you can produce better than the current one … maybe don't use all bar chart".
+
+**What was wrong.** Four identical bar tables (cause / unit / prevention / products) answered four different questions with one
+picture; the bar only repeated the Cases column. Customer (5 open) and Production (0 open) drew the same bar. The "Top 3 causes by day"
+line smoothed counts of 0/1/3 into curves between days that never happened. Products charted bars for counts of 1. The most actionable
+fact ("7 of 18 have no root cause") was a sentence.
+
+**Done.** `src/pages/dashboards/ServiceIssuesPanel.tsx` rewritten (no recharts): **Analysis progress** meters (root cause recorded → unit
+set → prevention recorded → prevention done; amber = the missing share), **Cases by cause** bar split closed|open (rows still click to
+filter the Report list), **Days to close** one dot per closed case + an avg tick (inline SVG), **cause × day heatmap** on the period's fixed
+day/month grid (empty days visible), **products** as a table with the top recorded cause. Pure helpers in `src/api/lib/service-issue-stats.ts`:
+`analysisProgress`, `closeDaysByCause`, `causeGrid`, `dayBuckets`, `monthBuckets`, `topCauseByProduct` (+5 tests, suite 18/18).
+`TallyList` and `causeOnly` kept for the Performance panel. `/m` twin: unit + prevention lists became one Analysis-progress list.
+`tsc -p tsconfig.app.json --noEmit`: exit 0. Docs: CODEBASE-MAP Service row + `modules/service-repair.md` gotcha restamped.
+
+**Not verified in a browser.** The dev server proxies `/api` to prod behind a login the agent cannot enter; the panel was server-rendered
+with 18 sample cases across monthly / ytd / range periods and the empty + `causeOnly` states (all markers present). **Look at it on
+staging before merging** — label collisions in the heatmap at 31 day columns on a narrow window are the thing to check.
 ---
 
 ## 2026-09-22 晚 — ✅ 所有单据清单双击弹明细（owner「其他的类似 payment voucher, receipt 这些都要双击点开」；#486 已上线已验）
@@ -510,6 +606,79 @@ the `??`-blank-overwrite bug at the PUT merge block — NOT fixed, only the new 
 it), R9 export fields (`price1`, sofa tier prices, `skuCode`, pricing-permission banner), R11-R13
 (grid "export all" / invoice 200 cap / mobile placeholder), R1/R2 (shared `src/lib/import-export/`
 client lib), R15 doc updates beyond products.md.
+## 2026-09-14 — 🔵 PRD T-006 · Transfer/Convert foundation (R1-R10 all implemented, pending merge)
+## 2026-09-21 — 🔵 T-006 follow-through: the four gaps in the R1-R10 work (branch `fix/t006-transfer-convert-guards`)
+
+Review of the merged T-006 work (on `staging`, NOT on `main`) turned up four gaps, plus a bigger
+one found while checking them. All fixed on this branch except where stated.
+
+**The big one: R10 was inert in the product.** `withIdempotency` no-ops without an
+`Idempotency-Key` header, and not one of the six wrapped routes had a caller sending one — the
+requirement passed its test (which greps the route files) and protected nothing. Added
+`src/lib/idempotency-key.ts` (`useIdempotencyKey` / `useIdempotencyKeys`) and wired all eight
+call sites. The rule it encodes: hold ONE key across an unanswered attempt (fetchJson reports a
+timeout or drop as status 0, and such a request may well have committed), rotate it the moment
+any response arrives — including 4xx, which the server caches deliberately, so a held key would
+replay an old rejection onto a corrected form forever. Per-row keys in the scan modal, where each
+card is its own document. `tests/t006-r10-client-key.test.mjs` fails if a call site loses its key
+or mints one inline at the fetch.
+
+**R8 regression, found by writing the test first:** R8's switch from `material_code` to
+`po_item_id` silently dropped the old code's aggregation, so a PO listing the same material on
+two lines measured a PO-direct invoice against ONE line — billing the full ordered quantity
+409'd. The ceiling is now bucketed (material code when the PO line has one, line id when it
+doesn't), restoring the old aggregation without losing R8. The block message also stopped
+printing a raw PO-line UUID.
+
+**A2 and A3 had no behavioural coverage** — both were regexes over `grn.ts`. A2 now drives two
+receipts through the real route and asserts the second is refused, the PO counter is untouched
+and no GRN row is left behind; A3 asserts a born-POSTED create issues exactly ONE `db.batch()`
+carrying header + line + stock + PO counter. The mock D1 grew a `raw_materials` lookup, without
+which every line resolved as unresolved and A3 would have passed vacuously.
+
+**Consignment page's dead "Transfer to Delivery Order" button** (flagged in the plan, not fixed
+then): since R1's server-side refusal it 400'd on every click. Replaced with "Create Consignment
+Note" pointing at `/consignment/note`; the unreachable dialog and its four state hooks are gone.
+
+**NOT fixed, deliberately — see the foot of [T-006-TRANSFER-CONVERT-FIX-PLAN.md](T-006-TRANSFER-CONVERT-FIX-PLAN.md):**
+R2's concurrency window (a CHECK constraint would refuse the legitimate ADMIN-approved
+over-receipt path; closing it needs a conditional UPDATE or a row lock, and a live DB to test
+against), and R7's cancel-after-restock dead end (the refusal is correct, but an erroneous
+restocked return can never be cancelled and its quantity never re-invoiced — writing the inverse
+of a FIFO cost reversal blind is the bigger risk; **owner decision needed**). The R5 `NOT VALID`
+constraint and R8's newly-enforced ceilings both rest on **UNMEASURED** prod data — no DB access
+from this session.
+
+Verified: `tsc -p tsconfig.app.json --noEmit` clean, `npm test` 4635 pass / 0 fail / 3
+pre-existing skips, eslint clean on every touched file (pre-existing hook-dep warnings only).
+Prod impact **UNMEASURED**.
+
+---
+
+## 2026-09-10 — ⚪ PRD T-006 · Transfer/Convert foundation (fix plan written — SUPERSEDED, see 2026-09-21 above: R1-R10 all shipped)
+
+Requested by Mr Lim, PRD dated 2026-09-07, priority **Low (to be raised later)**. Full PRD:
+`T-006-Hookka-transfer-convert - wei siang.pdf` (user's local Downloads). Branch
+`fix/transfer-convert-duplicate-guard`, off `origin/main`. Plan:
+[T-006-TRANSFER-CONVERT-FIX-PLAN.md](T-006-TRANSFER-CONVERT-FIX-PLAN.md).
+
+**All 10 requirements (R1-R10) implemented and independently re-verified against the actual diff**
+(not just commit messages) — R1 SO→DO server-side refusal when `productionOrderIds` is empty, R2 GRN
+over-receipt now cumulative against `receivedQty`, R3 GRN create folded into one atomic `db.batch()`,
+R4 CN-invoice void now releases via a new `status_before_conversion` column, R5 DB `CHECK` constraint
+on `grn_items.invoiced_qty` (`NOT VALID`, self-applied, race translated to 409), R6 purchase-return
+writeback + cap, R7 delivery-return qty cap + cancel-after-restock refusal, R8 PO ceiling matched by
+`po_item_id` instead of the PRD's literal (and previously-rejected, BUG-2026-08-13-052)
+`material_code` fill, R9 line-level-only PO id ceiling gap closed, R10 idempotency wrapped on all 6
+create/convert routes. Verified 2026-09-14: `npx tsc --noEmit` clean, 49/49 new `tests/t006-*.test.mjs`
+pass, full `npm test` 4621/4624 pass (3 pre-existing skips, 0 fail).
+
+**Known open follow-up, not fixed here (flagged in the plan itself):** Consignment page's own
+"Transfer to Delivery Order" button (`consignment/index.tsx` ~line 1094) has the identical
+hand-built-items bug: R1's new server-side refusal means this button now fails on every click
+instead of silently succeeding wrong (it could never have legitimately succeeded — CO-linked POs are
+already blocked from DOs elsewhere). Needs a follow-up: redirect to `/consignment/note`, disable with
+a message, or remove if provably dead.
 
 ---
 
@@ -4776,3 +4945,53 @@ unapplied advances 0.00.
 **Next:** Houzs and The Conts openings (the Carress playbook, written into the
 checkpoint); the 18 Carress ghosts await a void ruling; the 10 CN/DN invoices;
 SUNMAT K26050470; May labour unposted.
+
+## 2026-09-17 — DEV-05 / PRD T-014: build for stock, then hand the goods to the order that arrives
+
+Ticket: DEV-05 (tracker row "Samuel · On Going · Low"), PRD `T-014-Hookka-make-to-stock-allocation`.
+Branch `feature/dev-05-make-to-stock-allocation` off `origin/staging` @ `ac9c3a6b`. Not pushed.
+
+**The ask, in one line:** the factory can build for stock, but nothing could
+hand those goods to a sales order when one arrived, and an unallocated stock
+order could ride a customer's delivery note at price zero.
+
+**Verified against source before building** (every PRD file:line citation
+re-read; only drift was `production/index.tsx:7148` → the button is at ~7045):
+the placeholder SO, the `""` customer into an FK column, `isStock` declared in
+`src/types` but in no migration and never written or read, the one-customer
+check blind to a blank id, the June 2026 WYSIWYG removal (`production-orders.ts:2011`).
+
+**Owner decisions applied** (tracker, 2026-09-07 + 2026-09-17): never used
+(1,617 SO / 3,354 PO / 0 stock — free to redesign); automatic on confirm with
+the four rails; earliest order wins; one internal customer; reversible until
+the delivery note; sofa sets go out whole. PRD §9 Q3/Q6/Q8 were already
+answered by R13/A5/A7; Q9 by the zero count.
+
+**Built** (7 commits, 4700 tests / 0 fail, all on fake DBs):
+- R4/R5 `is_stock` + `stock_origin_so_id` + `cust-factory-stock`; `POST /stock`
+  no longer writes an FK violation (BUG-182).
+- R2/R3 stock gated out of Pending Delivery until allocated; real customer id
+  makes the DO one-customer check see it (BUG-183).
+- R6 SO list + `/stats` exclude stock by default; both list reads now await the
+  self-apply (fresh-DB column race, BUG-2026-06-20-002 class).
+- R8–R13 `stock_allocations` append-only ledger, availability RECOMPUTED from
+  production_orders, allocate/release endpoints, auto-allocation in the confirm
+  batch, whole-order ownership transfer (never bare). `POST /stock` now builds
+  one order per piece like `production-builder.ts:518` — the only place that
+  had created a single order carrying the whole quantity.
+- R7 button gated on `production-orders:create`; R14 create screen shows
+  available/being-made per line; R15 detail-page allocate/release card; R16
+  STOCK chip on the production grid; R17 "Reserved" → "On draft DO" on all
+  three surfaces (BUG-181).
+- Q5: release refused once the piece is on a live delivery order.
+
+**NOT done / UNMEASURED:** nothing has touched a real Postgres — every
+`ALTER`/`CREATE` and every new SQL statement is unexecuted. No UI has been
+opened in a browser. A2–A8 unverified; verification is on the preview deploy
+(`pickDbUrl` routes preview hosts to `HYPERDRIVE_STAGING`). Flagged for infra,
+out of scope: the local `CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING*` values
+for prod and staging carry the SAME Supabase project ref.
+
+**Docs:** `API.md` regenerated (141 mounts / 962 handlers); `CODEBASE-MAP.md`
+Sales row + gotcha; `modules/sales.md` + `modules/inventory.md` restamped with
+re-derived anchors; BUG-181/182/183 logged.
