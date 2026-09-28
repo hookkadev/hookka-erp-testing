@@ -42,10 +42,8 @@ import {
   type ReadyPlanningPO,
   type ReadyPORow,
 } from "../../lib/delivery-pipeline";
-import {
-  groupPosByCustomerHub,
-  projectCreditFailure,
-} from "../lib/pl-first-grouping";
+import { groupPosByCustomerHub } from "../lib/pl-first-grouping";
+import { checkCustomerCredit, gateCredit } from "../lib/customer-credit";
 import {
   ensureDoPartialInvoiceColumns,
   loadDoBillingState,
@@ -2084,7 +2082,7 @@ app.post("/", async (c) => {
 // driver / delivery date ONCE, and this endpoint:
 //   1. Groups the POs by (customerId, hubId) — one DO per customer per hub.
 //   2. PRE-VALIDATES everything (CO guard, once-only-delivery, customer
-//      resolution, credit limit summed ACROSS each customer's groups)
+//      resolution, customer credit summed ACROSS each customer's groups)
 //      BEFORE creating anything — any failure creates NOTHING.
 //   3. Creates one DRAFT DO per group SEQUENTIALLY through the same
 //      createDeliveryOrderForPOs core as POST / (genNextDoNo is read-MAX+1,
@@ -2117,6 +2115,7 @@ app.post("/packing-list-first", async (c) => {
       deliveryDate?: string | null;
       remarks?: string | null;
       preview?: boolean;
+      creditOverride?: unknown;
     }>();
     const productionOrderIds = Array.isArray(body.productionOrderIds)
       ? [
@@ -2291,14 +2290,12 @@ app.post("/packing-list-first", async (c) => {
     const customerIds = [...new Set(groups.map((g) => g.customerId))];
     const cph = customerIds.map(() => "?").join(",");
     const custRes = await c.var.DB.prepare(
-      `SELECT id, name, creditLimitSen, outstandingSen FROM customers WHERE id IN (${cph})`,
+      `SELECT id, name FROM customers WHERE id IN (${cph})`,
     )
       .bind(...customerIds)
       .all<{
         id: string;
         name: string;
-        creditLimitSen: number;
-        outstandingSen: number;
       }>();
     const customerById = new Map((custRes.results ?? []).map((r) => [r.id, r]));
     for (const g of groups) {
@@ -2314,73 +2311,44 @@ app.post("/packing-list-first", async (c) => {
       }
     }
 
-    // ---- Step 4: credit pre-validation per customer ACROSS groups ---------
-    // The per-DO gate inside the core only sees one group at a time and
-    // outstandingSen doesn't move at DO create, so N same-customer groups
-    // would each pass individually even when their SUM blows the limit.
-    // projectCreditFailure (pl-first-grouping.ts) checks the sum up front.
-    const creditGroups = groups.map((g) => {
-      const soSet = new Set<string>();
-      const items: { productCode: string; quantity: number }[] = [];
-      for (const poId of g.poIds) {
-        const po = poById.get(poId);
-        if (!po) continue;
-        if (po.salesOrderId) soSet.add(po.salesOrderId);
-        items.push({
-          productCode: po.productCode ?? "",
-          quantity: Number(po.quantity) || 0,
-        });
-      }
-      return { customerId: g.customerId, soIds: [...soSet], items };
-    });
-    let priceRows: {
-      salesOrderId: string;
-      productCode: string | null;
-      unitPriceSen: number;
-    }[] = [];
-    if (soIds.length > 0) {
-      const ph = soIds.map(() => "?").join(",");
-      const priceRes = await c.var.DB.prepare(
-        `SELECT salesOrderId, productCode, unitPriceSen
-           FROM sales_order_items
-          WHERE salesOrderId IN (${ph})`,
-      )
-        .bind(...soIds)
-        .all<{
-          salesOrderId: string;
-          productCode: string | null;
-          unitPriceSen: number;
-        }>();
-      priceRows = priceRes.results ?? [];
-    }
-    const creditFail = projectCreditFailure(
-      creditGroups,
-      priceRows,
-      [...customerById.values()].map((r) => ({
-        id: r.id,
-        creditLimitSen: Number(r.creditLimitSen) || 0,
-        outstandingSen: Number(r.outstandingSen) || 0,
-      })),
-    );
-    if (creditFail) {
-      const failName =
-        customerById.get(creditFail.customerId)?.name ?? creditFail.customerId;
-      return c.json(
-        {
-          success: false,
-          error: `Credit limit exceeded for ${failName}. The selected orders together exceed the remaining credit — nothing was created.`,
-          code: "CREDIT_LIMIT_EXCEEDED",
-          details: {
-            customerId: creditFail.customerId,
-            customerName: failName,
-            limit: creditFail.limitSen,
-            outstanding: creditFail.outstandingSen,
-            doTotal: creditFail.doTotalSen,
-            projected: creditFail.projectedSen,
-          },
-        },
-        409,
+    // ---- Step 4: customer credit per customer ACROSS groups ---------------
+    // The same shared gate the core runs (customer-credit.ts: overdue term +
+    // limit), fed ALL of a customer's groups at once. The core only sees one
+    // group, so N same-customer groups would each pass while their SUM blows
+    // the limit. An allowed body.creditOverride passes here and in the core.
+    // A preview for a user who MAY override reports the block as a warning
+    // (so the dialog stays usable) instead of refusing.
+    const creditWarnings: string[] = [];
+    for (const customerId of customerIds) {
+      const items = groups
+        .filter((g) => g.customerId === customerId)
+        .flatMap((g) =>
+          g.poIds.map((poId) => {
+            const po = poById.get(poId);
+            return {
+              productionOrderId: poId,
+              productCode: po?.productCode ?? null,
+              quantity: Number(po?.quantity) || 0,
+              salesOrderId: po?.salesOrderId ?? null,
+            };
+          }),
+        );
+      const gate = await gateCredit(
+        c,
+        await checkCustomerCredit(c.var.DB, customerId, items),
+        body.creditOverride,
+        { resource: "customers", resourceId: customerId },
       );
+      if (!gate.ok) {
+        if (body.preview === true && gate.body.overrideAllowed === true) {
+          creditWarnings.push(String(gate.body.error));
+          continue;
+        }
+        return c.json(
+          { ...gate.body, error: `${String(gate.body.error)} Nothing was created.` },
+          gate.status,
+        );
+      }
     }
 
     // ---- Step 5: packing_lists storage pre-flight -------------------------
@@ -2432,6 +2400,7 @@ app.post("/packing-list-first", async (c) => {
         preview: true,
         doCount: groups.length,
         groups: groupMeta,
+        creditWarnings,
       });
     }
 
@@ -2531,6 +2500,7 @@ app.post("/packing-list-first", async (c) => {
             deliveryDate:
               typeof body.deliveryDate === "string" ? body.deliveryDate : "",
             remarks: typeof body.remarks === "string" ? body.remarks : "",
+            creditOverride: body.creditOverride,
           },
           (info) => createdDos.push(info),
         );

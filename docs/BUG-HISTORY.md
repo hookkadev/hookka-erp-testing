@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-09-28**: newest entry BUG-2026-09-28-209 (branch `feat/customer-credit-control`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-25**: newest entry BUG-2026-09-25-195 (branch `feat/employees-kpi-layout`, PR #530); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-25**: newest entry BUG-2026-09-25-194 (branch `feat/dashboard-kpi-no-icons`, PR #524); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-25** — newest entry BUG-2026-09-25-192 (branch `feat/ocr-dashboard-tab`, PR #522); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
@@ -37,6 +38,20 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-09-28-209 — customer credit control let DOs through: no overdue-term block, undelivered DOs not counted `delivery-orders` `accounting` 🟡
+
+🟡 **Fix in progress** (branch `feat/customer-credit-control` → `staging`). Client tracker BUG-34.
+
+**Symptom.** A customer over their credit limit, or with last month's invoice unpaid past their term, could still get goods out on a DO.
+
+**Root cause.** (1) The only gate was the credit limit at DO create (`createDeliveryOrderForPOs`). It compared `outstandingSen + this DO`, but `outstandingSen` only rises when a DO is DELIVERED, so DOs created but not yet delivered were invisible: several DOs in a row each passed on their own. (2) Nothing read the customer's credit term (COD / NET30 / NET60 / NET90) at all, so there was no overdue block. The DO auto-invoice stamped `dueDate` as invoice date + 30 days, while manual invoices used end of next month. (3) The gate ran only at create, not at dispatch.
+
+**Fix.** One shared gate, `src/api/lib/customer-credit.ts` (`checkCustomerCredit` + `gateCredit`): PAYMENT_OVERDUE when an issued, unpaid invoice is past `dueDateForTerms(invoiceDate, creditTerms)` (`src/lib/terms.ts`, last day of invoice month + term months), and CREDIT_LIMIT_EXCEEDED on outstanding + undelivered DOs (DRAFT / LOADED / IN_TRANSIT, priced by `do-value.ts`) + this DO. Run at DO create (all paths, incl. the delivery agent), packing-list-first (summed per customer, replaces `projectCreditFailure`) and DRAFT→LOADED (office button and driver QR). Admin override: `creditOverride: { reason }`, allowed for `delivery-orders:credit-override` (ADMIN / SUPER_ADMIN always) while kv_config `credit-override-enabled` is not `false`; each override is an audit event (`credit-override`). Invoice due dates now follow the customer's term on the DO auto-invoice and the manual invoice. Consignment-note convert keeps its limit-only check (it bills goods already out).
+
+**Verified.** `tsc -p tsconfig.app.json` exit 0; `tests/customer-credit-gate.test.mjs` + `tests/terms.test.mjs` + full `npm test` pass. NOT verified on staging yet; staging data impact UNMEASURED.
 
 ---
 

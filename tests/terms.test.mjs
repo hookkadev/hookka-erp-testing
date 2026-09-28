@@ -51,3 +51,23 @@ test("nextMonthDueDate — last day of the next month", () => {
   assert.equal(m.nextMonthDueDate("2026-06-15"), "2026-07-31");
   assert.equal(m.nextMonthDueDate("2026-12-10"), "2027-01-31");
 });
+
+// BUG-34: customer credit term drives the due date (by calendar month).
+test("termMonths — COD / NET30 / NET60 / NET90 / unknown", () => {
+  assert.equal(m.termMonths("COD"), 0);
+  assert.equal(m.termMonths("NET30"), 1);
+  assert.equal(m.termMonths("net 60"), 2);
+  assert.equal(m.termMonths("NET90"), 3);
+  assert.equal(m.termMonths(""), 1);
+  assert.equal(m.termMonths(null), 1);
+  assert.equal(m.termMonths("C.O.D."), 0);
+});
+
+test("dueDateForTerms — last day of invoice month + term", () => {
+  assert.equal(m.dueDateForTerms("2026-01-15", "NET30"), "2026-02-28");
+  assert.equal(m.dueDateForTerms("2026-01-15", "NET60"), "2026-03-31");
+  assert.equal(m.dueDateForTerms("2026-01-15", "NET90"), "2026-04-30");
+  assert.equal(m.dueDateForTerms("2026-01-15", "COD"), "2026-01-31");
+  assert.equal(m.dueDateForTerms("2026-11-03", "NET60"), "2027-01-31");
+  assert.equal(m.dueDateForTerms("2026-06-15", "NET30"), m.nextMonthDueDate("2026-06-15"));
+});

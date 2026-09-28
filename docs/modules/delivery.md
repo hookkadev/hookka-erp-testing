@@ -1,5 +1,6 @@
 # Delivery & Consignment — Module Guide
 
+> **Last verified: 2026-09-28** (branch `feat/customer-credit-control`, BUG-34) — anchors for `DeliveryPage`, `runBulkDoTransition`, `resendCustomerNotice` / `warnIfNoCustomerEmail`, `detailLive`, `lineSpec` re-derived; credit gate rows added. Nothing else re-checked.
 > **Last verified: 2026-09-25** (branch `chore/sync-staging-from-main-0925`) — `POST /packing-list-first` anchor re-derived against the staging←main merge; nothing else re-checked.
 
 > **Last verified: 2026-09-22** (branch `fix/delivery-loading-gate-po-paging`, BUG-2026-09-22-004) — the page's
@@ -96,13 +97,15 @@ deliver write `stock_movements` and read `fg_units`, and fire idempotent custome
 ## Key functions / sections (locate-to-function)
 | Symbol / section | file:line | Role |
 |---|---|---|
-| `DeliveryPage` | `src/pages/delivery/index.tsx:902` | DO workbench + 3PL + agent, `pageTab` toggle |
-| `runBulkDoTransition` | `src/pages/delivery/index.tsx:3059` | FE bulk status move (all guards/cascades) |
-| `resendCustomerNotice` / `warnIfNoCustomerEmail` | `delivery/index.tsx:2948 / :2930` | Feature A per-DO resend / Feature B no-email warning |
+| `DeliveryPage` | `src/pages/delivery/index.tsx:903` | DO workbench + 3PL + agent, `pageTab` toggle |
+| `runBulkDoTransition` | `src/pages/delivery/index.tsx:3090` | FE bulk status move (all guards/cascades); asks for a credit override per blocked DO |
+| `askCreditOverride` / `isCreditBlock` | `src/pages/delivery/credit-override.tsx` | Credit block dialog (BUG-34): shows why, takes the override reason when the server allows it |
+| `checkCustomerCredit` / `gateCredit` | `src/api/lib/customer-credit.ts` | THE customer credit gate (overdue by term + limit incl. undelivered DOs), run at DO create, packing-list-first and DRAFT→LOADED |
+| `resendCustomerNotice` / `warnIfNoCustomerEmail` | `delivery/index.tsx:2979 / :2961` | Feature A per-DO resend / Feature B no-email warning |
 | `columns` (DataGrid) | `src/pages/delivery/index.tsx` (~3.9k) | DO grid column defs |
 | `getContextMenuItems` | `src/pages/delivery/index.tsx` (~4.4k) | THE DO status table — row menu **and** the drawer's action bar |
-| `detailLive` | `src/pages/delivery/index.tsx:3710` | Drawer's document re-read from the list; its bar filtered from the row menu |
-| `lineSpec` | `src/pages/delivery/index.tsx:3743` | One-line build spec per DO line, via the shared `buildSpec` |
+| `detailLive` | `src/pages/delivery/index.tsx:3751` | Drawer's document re-read from the list; its bar filtered from the row menu |
+| `lineSpec` | `src/pages/delivery/index.tsx:3784` | One-line build spec per DO line, via the shared `buildSpec` |
 | `drawerActionBar` / `drawerLineSpec` / `DRAWER_DOC_CONFIG` | `src/lib/document-drawer.ts` | Drawer model: full-page route, action-bar filter, spec-line delegation |
 | `DocumentDetailDrawer` | `src/components/ui/document-detail-drawer.tsx` | Shared slide-over chrome (chrome only, no domain knowledge) |
 | 3PL Providers block | `src/pages/delivery/index.tsx` (~6.5k) | `pageTab==="3pl"` list + Create/Edit dialog |

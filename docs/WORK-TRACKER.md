@@ -34,6 +34,17 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
 
+## 2026-09-28 — 🔵 BUG-34 Customer credit control: quota + overdue-term DO block, admin override (branch `feat/customer-credit-control` → `staging`, BUG-2026-09-28-209)
+
+1. 🔵 Term-aware due date: `termMonths` / `dueDateForTerms` in `src/lib/terms.ts` (COD/NET30/NET60/NET90 = 0/1/2/3 months, due = last day of invoice month + N). Used by the DO auto-invoice and the manual invoice POST (was +30 days / fixed 1 month).
+2. 🔵 One shared gate `src/api/lib/customer-credit.ts`: PAYMENT_OVERDUE (issued unpaid invoice past its term due date, derived from invoiceDate + the customer's current term) and CREDIT_LIMIT_EXCEEDED (outstanding + undelivered DRAFT/LOADED/IN_TRANSIT DOs + this DO). Limit 0 = no quota check.
+3. 🔵 Wired into DO create (every path incl. delivery agent), packing-list-first (per customer; replaces `projectCreditFailure`) and DRAFT→LOADED (office + driver QR). Consignment-note convert left limit-only (bills goods already out).
+4. 🔵 Admin override: `creditOverride: { reason }`, allowed for `delivery-orders:credit-override` (ADMIN / SUPER_ADMIN always) unless kv_config `credit-override-enabled` = `false`. Audited as action `credit-override`. No settings UI: flip it with `PUT /api/kv-config/credit-override-enabled` body `false`.
+5. 🔵 Delivery page (`credit-override.tsx`): block dialog with the overdue invoices or the limit breakdown, reason box, re-send. Single create, packing-list-first (preview shows a warning), single + bulk dispatch. `/m` only shows the server message.
+
+Verified: `tsc -p tsconfig.app.json` exit 0; `npm test` all pass. NOT verified on staging or in a browser; staging data impact UNMEASURED.
+
+
 ## 2026-09-25 — 🔵 Sync `staging` from `main` (branch `chore/sync-staging-from-main-0925` → `staging`)
 
 105 `main` commits merged into `staging` (75 staging-only). Conflicts: 2 code, 9 docs.

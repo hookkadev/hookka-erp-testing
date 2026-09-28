@@ -49,7 +49,7 @@ import { loadSoLinePriceIndex } from "../lib/do-value";
 import { checkInvoiceLocked, lockedResponse } from "../lib/lock-helpers";
 import { readIdempotencyKey, withIdempotency } from "../lib/idempotency";
 import { parseDebtorCode } from "../../lib/debtor";
-import { nextMonthDueDate } from "../../lib/terms";
+import { dueDateForTerms } from "../../lib/terms";
 import { readGstRatePct } from "../lib/note-ledger";
 import {
   planInvoicePriceImport,
@@ -2082,7 +2082,10 @@ app.post("/", async (c) => {
     const invoiceDate = now.split("T")[0];
     // Owner term: fixed 1 month, by calendar month — due = end of next
     // month (src/lib/terms.ts). Enforced server-side, not client-supplied.
-    const dueDate = nextMonthDueDate(invoiceDate);
+    const termsRow = await c.var.DB.prepare("SELECT creditTerms FROM customers WHERE id = ?")
+      .bind(doRow.customerId)
+      .first<{ creditTerms: string | null }>();
+    const dueDate = dueDateForTerms(invoiceDate, termsRow?.creditTerms);
     const id = genInvoiceId();
     const invoiceNo = body.invoiceNo || (await nextInvoiceNo(c.var.DB));
 

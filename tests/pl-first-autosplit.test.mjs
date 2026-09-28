@@ -6,10 +6,9 @@
 //
 //   1. UNIT — src/api/lib/pl-first-grouping.ts:
 //      groupPosByCustomerHub  (the enforced one-DO-per-customer-per-hub
-//      split: deterministic order, blank hub is its own group) and
-//      projectCreditFailure   (credit limit summed ACROSS a customer's
-//      groups — the property that makes the flow all-or-nothing where the
-//      per-DO gate alone would let combined-over-limit selections through).
+//      split: deterministic order, blank hub is its own group). The credit
+//      pre-check (summed ACROSS a customer's groups) is the shared gate in
+//      customer-credit.ts, tested in customer-credit-gate.test.mjs.
 //
 //   2. STRUCTURAL — pin that POST /api/delivery-orders now delegates to the
 //      extracted createDeliveryOrderForPOs core (so the new flow and the old
@@ -31,7 +30,7 @@ try {
   /* native type-stripping on Node 22+ */
 }
 
-const { groupPosByCustomerHub, projectCreditFailure } = await import(
+const { groupPosByCustomerHub } = await import(
   pathToFileURL(resolve(process.cwd(), "src/api/lib/pl-first-grouping.ts")).href
 );
 
@@ -92,99 +91,7 @@ test("grouping: empty input → no groups", () => {
 });
 
 // ═════════════════════════════════════════════════════════════════════════
-// 2. projectCreditFailure — credit summed ACROSS a customer's groups
-// ═════════════════════════════════════════════════════════════════════════
-
-const PRICES = [
-  { salesOrderId: "so1", productCode: "BED-A", unitPriceSen: 10000 },
-  { salesOrderId: "so2", productCode: "BED-B", unitPriceSen: 20000 },
-];
-
-function grp(customerId, soIds, items) {
-  return { customerId, soIds, items };
-}
-
-test("credit: within limit → null (no failure)", () => {
-  const fail = projectCreditFailure(
-    [grp("c1", ["so1"], [{ productCode: "BED-A", quantity: 2 }])], // 20000
-    PRICES,
-    [{ id: "c1", creditLimitSen: 100000, outstandingSen: 50000 }], // 70000 <= 100000
-  );
-  assert.equal(fail, null);
-});
-
-test("credit: TWO groups of one customer sum over the limit → failure (each alone would pass the per-DO gate)", () => {
-  const groups = [
-    grp("c1", ["so1"], [{ productCode: "BED-A", quantity: 3 }]), // 30000
-    grp("c1", ["so2"], [{ productCode: "BED-B", quantity: 2 }]), // 40000
-  ];
-  const customers = [{ id: "c1", creditLimitSen: 100000, outstandingSen: 50000 }];
-  // Per-DO gate would pass each: 50000+30000 and 50000+40000 are both <= 100000.
-  // The combined projection 50000+70000 = 120000 must fail.
-  const fail = projectCreditFailure(groups, PRICES, customers);
-  assert.ok(fail, "combined projection must fail");
-  assert.equal(fail.customerId, "c1");
-  assert.equal(fail.doTotalSen, 70000);
-  assert.equal(fail.projectedSen, 120000);
-  assert.equal(fail.limitSen, 100000);
-  assert.equal(fail.outstandingSen, 50000);
-});
-
-test("credit: other customers' groups never pollute the sum", () => {
-  const groups = [
-    grp("c1", ["so1"], [{ productCode: "BED-A", quantity: 3 }]), // c1: 30000
-    grp("c2", ["so2"], [{ productCode: "BED-B", quantity: 9 }]), // c2: 180000
-  ];
-  const fail = projectCreditFailure(groups, PRICES, [
-    { id: "c1", creditLimitSen: 100000, outstandingSen: 50000 }, // 80000 ok
-    { id: "c2", creditLimitSen: 0, outstandingSen: 0 }, // no limit configured
-  ]);
-  assert.equal(fail, null, "c1 within limit; c2 has no limit → unchecked");
-});
-
-test("credit: creditLimitSen <= 0 means no limit configured → unchecked", () => {
-  const fail = projectCreditFailure(
-    [grp("c1", ["so1"], [{ productCode: "BED-A", quantity: 1000 }])],
-    PRICES,
-    [{ id: "c1", creditLimitSen: 0, outstandingSen: 999999999 }],
-  );
-  assert.equal(fail, null);
-});
-
-test("credit: price resolution is first-wins per productCode within the group's SOs", () => {
-  const dupPrices = [
-    { salesOrderId: "soX", productCode: "BED-A", unitPriceSen: 11111 },
-    { salesOrderId: "soY", productCode: "BED-A", unitPriceSen: 99999 },
-  ];
-  const fail = projectCreditFailure(
-    [grp("c1", ["soX", "soY"], [{ productCode: "BED-A", quantity: 1 }])],
-    dupPrices,
-    [{ id: "c1", creditLimitSen: 11110, outstandingSen: 0 }],
-  );
-  assert.ok(fail, "11111 > 11110 must fail");
-  assert.equal(fail.doTotalSen, 11111, "first price (11111) wins, not 99999");
-});
-
-test("credit: unknown productCode prices as 0 (same as the per-DO gate)", () => {
-  const fail = projectCreditFailure(
-    [grp("c1", ["so1"], [{ productCode: "NOT-IN-SO", quantity: 5 }])],
-    PRICES,
-    [{ id: "c1", creditLimitSen: 1, outstandingSen: 0 }],
-  );
-  assert.equal(fail, null, "0-priced lines project 0 — gate stays silent");
-});
-
-test("credit: exactly AT the limit passes (gate is strictly greater-than)", () => {
-  const fail = projectCreditFailure(
-    [grp("c1", ["so1"], [{ productCode: "BED-A", quantity: 5 }])], // 50000
-    PRICES,
-    [{ id: "c1", creditLimitSen: 50000, outstandingSen: 0 }],
-  );
-  assert.equal(fail, null, "projected == limit must pass, mirroring `>` in the per-DO gate");
-});
-
-// ═════════════════════════════════════════════════════════════════════════
-// 3. STRUCTURAL — the extraction + the new endpoint stay wired
+// 2. STRUCTURAL — the extraction + the new endpoint stay wired
 // ═════════════════════════════════════════════════════════════════════════
 
 const root = process.cwd();
@@ -223,7 +130,6 @@ test("structural: every original DO-create guard still exists exactly once (insi
     /A DO can only deliver for one customer — split into separate DOs, one per customer\./g,
     /A DO can only deliver to one hub — split into separate DOs, one per hub\./g,
     /"customerId or salesOrderId is required"/g,
-    /error: "Credit limit exceeded",/g,
   ];
   for (const re of onceOnly) {
     assert.equal(count(doSrc, re), 1, `guard ${re} must appear exactly once`);
@@ -275,7 +181,7 @@ test("structural: pre-validation + preview run BEFORE any creation; creation is 
   const endpointStart = doSrc.indexOf('app.post("/packing-list-first"');
   assert.ok(endpointStart > 0, "endpoint must exist");
   const endpoint = doSrc.slice(endpointStart);
-  const idxCredit = endpoint.indexOf("projectCreditFailure(");
+  const idxCredit = endpoint.indexOf("checkCustomerCredit(");
   const idxPreview = endpoint.indexOf("body.preview === true");
   const idxCreate = endpoint.indexOf("await createDeliveryOrderForPOs(");
   const idxPl = endpoint.indexOf("await createPackingListCore(");
