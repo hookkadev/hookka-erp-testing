@@ -44,6 +44,10 @@ const sep = () => cf.buildStatement({
     leg("310-0020", 3346649, 0, "OCEAN SKY TRADING SDN. BHD. (via TF)", "PV-2609-004"),
     leg("310-0020", 3398819, 0, "MEDITEX INDUSTRIES SDN. BHD. (via TF)", "PV-2609-007"),
     leg("310-0020", 3032088, 0, "NLY SDN BHD (via TF)", "PV-2609-006"),
+    // The lender's interest (tf_interest legs) — one row per facility, with
+    // an adjustment netting inside it.
+    leg("310-0020", 8255, 0, "Interest charged by HOUZS CENTURY SDN BHD", "tfint-1", "tf_interest"),
+    leg("310-0020", 0, 1000, "Interest charged by HOUZS CENTURY SDN BHD", "tfint-2", "tf_interest"),
     leg("310-0020", 0, 6460103, "Repaid to HOUZS CENTURY SDN BHD", "HPV-2609-030"),
     leg("900-0001", 100000, 0, undefined, "pv-9", "payment_voucher"),
   ],
@@ -69,22 +73,25 @@ test("draws show positive per supplier, the repayment negative, under the facili
   assert.ok(group, "facility account group missing");
   assert.equal(group.section, "TRADE_FINANCE");
   assert.equal(group.groupId, "TRADE_FINANCE>310-0020");
-  assert.equal(group.values[m], 9777556 - 6460103, "the block nets to what is still owed this month");
+  const owed = 9777556 + (8255 - 1000) - 6460103;
+  assert.equal(group.values[m], owed, "the block nets to what is still owed this month");
   const lines = st.rows.filter((r) => r.kind === "line" && r.section === "TRADE_FINANCE");
   assert.deepEqual(lines.map((r) => r.label), [
     "MEDITEX INDUSTRIES SDN. BHD. (via TF)",
     "NLY SDN BHD (via TF)",
     "OCEAN SKY TRADING SDN. BHD. (via TF)",
+    "Interest charged by HOUZS CENTURY SDN BHD",
     "Repaid to HOUZS CENTURY SDN BHD",
   ]);
   const val = (label) => lines.find((r) => r.label === label).values[m];
   assert.equal(val("OCEAN SKY TRADING SDN. BHD. (via TF)"), 3346649);
+  assert.equal(val("Interest charged by HOUZS CENTURY SDN BHD"), 8255 - 1000, "interest and its adjustment net on one row");
   assert.equal(val("Repaid to HOUZS CENTURY SDN BHD"), -6460103);
   for (const l of lines) assert.equal(l.groupId, "TRADE_FINANCE>310-0020");
   // The section head carries the same net, and lives in COST / EXPENSE OUT
   // between Raw Materials and the operating result.
   const head = st.rows.find((r) => r.kind === "group" && r.groupId === "TRADE_FINANCE");
-  assert.equal(head.values[m], 9777556 - 6460103);
+  assert.equal(head.values[m], owed);
   const idx = (pred) => st.rows.findIndex(pred);
   assert.ok(idx((r) => r.kind === "section" && r.label === "COST / EXPENSE OUT") < idx((r) => r === head));
   assert.ok(idx((r) => r === head) < idx((r) => r.kind === "result"));
@@ -94,8 +101,8 @@ test("total spend counts the draws and not the repayment; the bank surplus stays
   const st = sep();
   const m = st.columns.findIndex((c) => c.key === "2026-09");
   const result = st.rows.find((r) => r.kind === "result");
-  // Operating: draws −9,777,556 + repayment offset +6,460,103 + transport −100,000.
-  assert.equal(result.values[m], -(9777556 - 6460103) - 100000);
+  // Operating: draws −9,777,556 − interest 7,255 + repayment offset +6,460,103 + transport −100,000.
+  assert.equal(result.values[m], -(9777556 + 7255 - 6460103) - 100000);
   const total = st.rows.find((r) => r.kind === "total");
   assert.equal(total.values[m], -(6460103 + 100000), "Cash Surplus is the bank movement only — a draw never touched a bank");
 });
@@ -140,6 +147,10 @@ test("a draw (no bank leg) becomes a positive supplier row; a repayment (bank le
   assert.match(draw, /debitSen: net > 0 \? net : 0, creditSen: net < 0 \? -net : 0,/);
   assert.match(draw, /\(via TF\)`/);
   assert.match(draw, /if \(tfAccounts\.size && !opening\)/, "an opening balance on the facility is not a draw");
+  // Prod 2026-09-28 showed 20+ "TF interest · PV-… (via TF)" rows: the lender's
+  // interest (tf_interest legs + adjustments) folds into ONE row per facility.
+  assert.match(draw, /lineLabel: l\.sourceType\.startsWith\("tf_interest"\)\s*\n\s*\? `Interest charged by \$\{tfAccounts\.get\(l\.code\)!\.lenderName \|\| "lender"\}`/);
+  assert.ok(cf.tfLineOrder("Interest charged by X") > cf.tfLineOrder("A (via TF)") && cf.tfLineOrder("Interest charged by X") < cf.tfLineOrder("Repaid to X"));
   const repay = body.slice(body.indexOf("if (tfAccounts.has(l.code)) {"), body.indexOf('if (l.sourceType.startsWith("other_party_payment"))'));
   assert.match(repay, /accountCode: l\.code, debitSen: l\.creditSen, creditSen: l\.debitSen,/, "flipped: the real leg is DR facility");
   assert.match(repay, /lineLabel: `Repaid to \$\{tfAccounts\.get\(l\.code\)!\.lenderName \|\| "lender"\}`/);

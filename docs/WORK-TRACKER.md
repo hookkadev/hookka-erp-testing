@@ -52,6 +52,19 @@ Unallocated as (64,601.03). Prod 2026-09-28: 8 draws — Jul 95,513.04 / Aug
    split; the facility account defaults to the block unless the owner dragged
    it elsewhere. Cash Surplus / bank b/f–c/f unchanged (bank legs only).
 3. 🔵 Guard `tests/cashflow-trade-finance.test.mjs` (engine rows + caller scan).
+4. 🔵 First prod read after #541 (764ebe82): block live (MEDITEX 33,807.30 /
+   NLY 30,000.00 / OCEAN SKY 33,352.38 / Repaid (64,601.03)), Unallocated clean,
+   Cash Surplus 53,600.71 bank-true — but the lender's interest arrived as 20
+   per-draw rows ("TF interest · PV-… (via TF)", net 1,637.08). Follow-up:
+   `tf_interest` entries fold into one "Interest charged by <lender>" row
+   (order: draws → interest → repaid).
+5. 🟡 **Found while measuring (not fixed — owner's call): `TF_INTEREST_ACCT`
+   posts to code `900-I001`, but that code already exists in the COA as
+   "INCORPORATION EXPENSE WRITTEN OFF" (EXPENSE, parent 900-0000), so every
+   trade-finance interest leg lands there — the Sep'26 P&L line
+   "INCORPORATION EXPENSE WRITTEN OFF RM 1,637.08" IS the TF interest.** Fix
+   needs a free code for "INTEREST ON TRADE FINANCE" + a re-point of the
+   existing `tf_interest` DR legs (ledger edit → owner presses).
 
 ## 2026-09-28 — ✅ Payments hub: Supplier Payment rows show Paid From (owner「supplier payment 也没记银行户口?那怎么对账」→「做」)(#538 MERGED 3ecc42c1, deployed, prod-verified)
 

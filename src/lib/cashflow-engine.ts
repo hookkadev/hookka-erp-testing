@@ -189,10 +189,10 @@ export type ClassifiedLeg = {
   lineLabel?: string;
 };
 
-// Inside the Trade Finance block: the draws (spend) first, the repayment
-// (offset) last.
+// Inside the Trade Finance block: the draws (spend) first, the lender's
+// interest next, the repayment (offset) last.
 export function tfLineOrder(label: string): number {
-  return label.startsWith("Repaid to ") ? 20 : 10;
+  return label.startsWith("Repaid to ") ? 20 : label.startsWith("Interest charged by ") ? 15 : 10;
 }
 export type BankLeg = {
   accountCode: string;
