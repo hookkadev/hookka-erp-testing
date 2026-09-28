@@ -1,6 +1,6 @@
 # Hookka ERP — Codebase Map (the single authoritative map)
 
-> **Restamped 2026-09-28 on branch `feat/customer-credit-control`:** Delivery & Consignment gotcha for the shared customer credit gate (BUG-2026-09-28-210).
+> **Last verified: 2026-09-28 on branch `feat/customer-credit-control`** — Delivery & Consignment gotcha for the shared customer credit gate (BUG-2026-09-28-210).
 > **Restamped 2026-09-28 on branch `feat/rm-uom-options`:** Inventory row — RM tab / BatchEditRMDialog line ranges re-measured, RM Settings modal and the DEV-20 UOM rules noted. Nothing else re-checked.
 
 > **Restamped 2026-09-25 on branch `feat/m-warehouse-locate`:** the `warehouse.ts` row (864 lines, `GET /locate`) and the
