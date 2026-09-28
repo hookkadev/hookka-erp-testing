@@ -3,6 +3,7 @@ import { useUrlState, useUrlStateNumber, useUrlBatch } from "@/lib/use-url-state
 import { pageSlice } from "@/lib/delivery-list-filters";
 import { useToast } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/confirm-dialog";
+import { askCreditOverride, isCreditBlock } from "./credit-override";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -971,6 +972,8 @@ export default function DeliveryPage() {
   // with a non-empty selection).
   const [plFirstGroups, setPlFirstGroups] = useState<PlFirstPreviewGroup[] | null>(null);
   const [plFirstPreviewError, setPlFirstPreviewError] = useState<string | null>(null);
+  // Credit blocks this user may override (BUG-34) — shown, not blocking.
+  const [plFirstCreditWarnings, setPlFirstCreditWarnings] = useState<string[]>([]);
   const [plFirstCreating, setPlFirstCreating] = useState(false);
   // When set, the packing-list dialog is in EDIT mode (re-assign driver/lorry/
   // provider on an existing list) rather than CREATE mode. pendingDriverName
@@ -2511,15 +2514,27 @@ export default function DeliveryPage() {
     }
 
     setCreatingDOFromPO(true);
-    try {
-      const data = await createDoIdem.withKey((key) =>
+    const postDo = (b: Record<string, unknown>) =>
+      createDoIdem.withKey((key) =>
         fetchJson("/api/delivery-orders", DOMutationSchema, {
           method: "POST",
           headers: { "Idempotency-Key": key },
-          body,
+          body: b,
         }),
       );
-      if (!data.success) {
+    try {
+      let data: Awaited<ReturnType<typeof postDo>> | null;
+      try {
+        data = await postDo(body);
+      } catch (e) {
+        // Customer credit block (BUG-34): explain it, and re-send with the
+        // override reason when the server allows one.
+        const eb = e instanceof FetchJsonError ? e.body : null;
+        if (!isCreditBlock(eb)) throw e;
+        const reason = await askCreditOverride(confirm, toast, eb);
+        data = reason ? await postDo({ ...body, creditOverride: { reason } }) : null;
+      }
+      if (data && !data.success) {
         toast.error(data.error || "Failed to create delivery order");
       }
     } catch (e) {
@@ -2549,6 +2564,7 @@ export default function DeliveryPage() {
     setCreateDOForm({ driverId: "", vehicleId: "", driverPersonId: "", remarks: "", deliveryDate: "" });
     setPlFirstGroups(null);
     setPlFirstPreviewError(null);
+    setPlFirstCreditWarnings([]);
     setPlFirstDialogOpen(true);
     try {
       const r = await fetch("/api/delivery-orders/packing-list-first", {
@@ -2559,6 +2575,7 @@ export default function DeliveryPage() {
       const j = (await r.json().catch(() => ({}))) as {
         success?: boolean;
         groups?: PlFirstPreviewGroup[];
+        creditWarnings?: string[];
         error?: string;
       };
       if (!r.ok || !j.success) {
@@ -2566,6 +2583,7 @@ export default function DeliveryPage() {
         return;
       }
       setPlFirstGroups(j.groups ?? []);
+      setPlFirstCreditWarnings(j.creditWarnings ?? []);
     } catch (e) {
       setPlFirstPreviewError(
         e instanceof Error ? e.message : "Could not load the grouping preview.",
@@ -2592,18 +2610,31 @@ export default function DeliveryPage() {
     }
     setPlFirstCreating(true);
     try {
-      const r = await fetch("/api/delivery-orders/packing-list-first", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          productionOrderIds: poIds,
-          providerId: createDOForm.driverId || null,
-          vehicleId: createDOForm.vehicleId || null,
-          driverId: createDOForm.driverPersonId || null,
-          deliveryDate: createDOForm.deliveryDate || "",
-          remarks: createDOForm.remarks,
-        }),
-      });
+      const plBody: Record<string, unknown> = {
+        productionOrderIds: poIds,
+        providerId: createDOForm.driverId || null,
+        vehicleId: createDOForm.vehicleId || null,
+        driverId: createDOForm.driverPersonId || null,
+        deliveryDate: createDOForm.deliveryDate || "",
+        remarks: createDOForm.remarks,
+      };
+      const postPl = () =>
+        fetch("/api/delivery-orders/packing-list-first", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(plBody),
+        });
+      let r = await postPl();
+      if (r.status === 409 || r.status === 403) {
+        // Customer credit block (BUG-34) — ask for the override reason.
+        const eb: unknown = await r.clone().json().catch(() => null);
+        if (isCreditBlock(eb)) {
+          const reason = await askCreditOverride(confirm, toast, eb);
+          if (!reason) return;
+          plBody.creditOverride = { reason };
+          r = await postPl();
+        }
+      }
       const j = (await r.json().catch(() => ({}))) as {
         success?: boolean;
         data?: {
@@ -3066,11 +3097,21 @@ export default function DeliveryPage() {
     const succeededIds: string[] = [];
     for (const id of doIds) {
       try {
-        const r = await fetch(`/api/delivery-orders/${id}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status: nextStatus }),
-        });
+        const put = (extra: Record<string, unknown> = {}) =>
+          fetch(`/api/delivery-orders/${id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: nextStatus, ...extra }),
+          });
+        let r = await put();
+        if (r.status === 409 || r.status === 403) {
+          // Customer credit block at dispatch (BUG-34) — asked per DO.
+          const eb: unknown = await r.clone().json().catch(() => null);
+          if (isCreditBlock(eb)) {
+            const reason = await askCreditOverride(confirm, toast, eb);
+            if (reason) r = await put({ creditOverride: { reason } });
+          }
+        }
         if (!r.ok) {
           const body = (await r.json().catch(() => ({}))) as { error?: string };
           failures.push(body?.error || `HTTP ${r.status}`);
@@ -4456,10 +4497,10 @@ export default function DeliveryPage() {
         action: async () => {
           // 2026-05-27 verifiedSave migration — confirms the status flip
           // landed before reporting success.
-          const result = await verifiedSave<DeliveryOrder>({
+          const dispatch = (extra: Record<string, unknown> = {}) => verifiedSave<DeliveryOrder>({
             endpoint: `/api/delivery-orders/${row.id}`,
             method: "PUT",
-            body: { status: "LOADED" },
+            body: { status: "LOADED", ...extra },
             readback: async () => {
               const r = await fetch(`/api/delivery-orders/${row.id}?_v=${Date.now()}`, {
                 credentials: "include",
@@ -4471,6 +4512,21 @@ export default function DeliveryPage() {
             },
             expect: { status: "LOADED" },
           });
+          let result = await dispatch();
+          // Customer credit block (BUG-34): explain it; re-send with the
+          // override reason when the server allows one.
+          if (!result.ok && result.reason === "http") {
+            let eb: unknown = null;
+            try { eb = JSON.parse(result.body); } catch { /* not JSON */ }
+            if (isCreditBlock(eb)) {
+              const reason = await askCreditOverride(confirm, toast, eb);
+              if (!reason) {
+                fetchData();
+                return;
+              }
+              result = await dispatch({ creditOverride: { reason } });
+            }
+          }
           if (!result.ok) {
             if (result.reason === "mismatch") toast.error(formatMismatchError(result.diffs));
             else if (result.reason === "http") {
@@ -5598,6 +5654,14 @@ export default function DeliveryPage() {
                     ? ` — will create ${plFirstGroups.length} delivery order${plFirstGroups.length === 1 ? "" : "s"}`
                     : ""}
                 </label>
+                {plFirstCreditWarnings.length > 0 && (
+                  <div className="mb-2 bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800 space-y-1">
+                    {plFirstCreditWarnings.map((w) => (
+                      <p key={w}>{w}</p>
+                    ))}
+                    <p className="font-medium">Creating will ask for an override reason.</p>
+                  </div>
+                )}
                 {plFirstPreviewError ? (
                   <div className="bg-rose-50 border border-rose-200 rounded-lg p-3 text-xs text-rose-700">
                     {plFirstPreviewError}

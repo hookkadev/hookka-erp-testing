@@ -5,7 +5,9 @@
 // "current" through the end of M+1 for DUE-DATE purposes. AGING, however, is
 // reported by CALENDAR month (owner rule 2026-06-30): this month = current,
 // last month = 1 month, etc. — see monthsOverdue below. The same 1-month term
-// governs the due date stamped on both sales invoices and purchase invoices.
+// governs the due date stamped on purchase invoices. Sales invoices follow
+// the CUSTOMER's term instead (dueDateForTerms, BUG-34): same calendar-month
+// rule, N months = COD 0 / NET30 1 / NET60 2 / NET90 3.
 //
 // Single source of truth — imported by invoices.ts / purchase-invoices.ts
 // (stamp dueDate) and accounting.ts (aging buckets) so the rule can't drift.
@@ -30,6 +32,36 @@ export function nextMonthDueDate(invoiceDate: string | null | undefined): string
   // Date.UTC(y, m, 0): m is the 0-based index of the month AFTER the
   // invoice month, day 0 = its last day → last day of (invoice month + 1).
   return new Date(Date.UTC(p.y, p.m + 1, 0)).toISOString().slice(0, 10);
+}
+
+/**
+ * Customer credit term → months of payment window (BUG-34, 2026-09-28).
+ * NET30 = 1, NET60 = 2, NET90 = 3 — by calendar MONTH, same as the owner rule
+ * above. COD = 0 (due by the end of the invoice's own month). Anything else
+ * (blank, free text) falls back to the house 1-month term.
+ */
+export function termMonths(creditTerms: string | null | undefined): number {
+  const t = String(creditTerms ?? "").toUpperCase().replace(/[\s._-]/g, "");
+  if (t === "COD") return 0;
+  const days = t.match(/^NET(\d+)$/);
+  if (days) return Math.max(0, Math.round(Number(days[1]) / 30));
+  return 1;
+}
+
+/**
+ * Due date for an invoice under the customer's term = last day of
+ * (invoice month + termMonths). NET30 January → Feb 28/29 (block from Mar 1),
+ * NET60 January → Mar 31. Falls back to today if the date can't be parsed.
+ */
+export function dueDateForTerms(
+  invoiceDate: string | null | undefined,
+  creditTerms: string | null | undefined,
+): string {
+  const p = ym(invoiceDate);
+  if (!p) return new Date().toISOString().slice(0, 10);
+  return new Date(Date.UTC(p.y, p.m + termMonths(creditTerms), 0))
+    .toISOString()
+    .slice(0, 10);
 }
 
 /**

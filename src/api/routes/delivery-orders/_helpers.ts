@@ -76,6 +76,8 @@ import {
   type FgEventActor,
 } from "../../lib/fg-stock-events";
 import { availableQty } from "../../../lib/convert-chain";
+import { dueDateForTerms } from "../../../lib/terms";
+import { checkCustomerCredit, gateCredit } from "../../lib/customer-credit";
 
 // Status transitions allowed by the mock-data impl. Preserved here so the
 // frontend sees identical error messages.
@@ -1745,11 +1747,13 @@ export async function buildDoDeliveredSoAndInvoice(
       (doRow.deliveryDate && doRow.deliveryDate.split("T")[0]) ||
       now.split("T")[0];
     const invoiceDate = shipDate;
-    // Due date stays relative to the invoice (dispatch) date so terms remain
-    // consistent with when the invoice is dated.
-    const due = new Date(`${shipDate}T00:00:00.000Z`);
-    due.setDate(due.getDate() + 30);
-    const dueDate = due.toISOString().split("T")[0];
+    // Due date = last day of (invoice month + the customer's term), the same
+    // calendar-month rule the credit check uses (BUG-34). Was +30 days.
+    const termsRow = await db
+      .prepare("SELECT creditTerms FROM customers WHERE id = ?")
+      .bind(doRow.customerId)
+      .first<{ creditTerms: string | null }>();
+    const dueDate = dueDateForTerms(invoiceDate, termsRow?.creditTerms);
     // Combined invoice spans multiple SOs — anchor the header SO to the
     // DO's own (legacy single-SO) or the first resolved one so the row
     // isn't orphaned; the authoritative link is deliveryOrderId.
@@ -1995,7 +1999,7 @@ export type DoCreateOutcome =
       /** Single-SO id stamped onto the DO row (null for multi-SO DOs). */
       salesOrderId: string | null;
     }
-  | { ok: false; status: 400 | 409 | 500; body: Record<string, unknown> };
+  | { ok: false; status: 400 | 403 | 409 | 500; body: Record<string, unknown> };
 
 // Service-PO destination metadata. Service POs (production_orders.
 // serviceOrderId set, salesOrderId NULL) carry their delivery hub on the
@@ -2658,70 +2662,28 @@ export async function createDeliveryOrderForPOs(
     const totalItems = items.reduce((s, i) => s + i.quantity, 0);
 
     // -------------------------------------------------------------------
-    // Credit-limit gate (Policy A — gate at DO POST):
-    //   Customer can place SO of any amount; pickup (DO dispatch) is
-    //   gated by credit limit. This is the only gate — DELIVERED
-    //   transition no longer rechecks (option B/C is intentionally
-    //   not implemented).
-    //
-    //   The "DO total" we project here matches the auto-DRAFT-invoice
-    //   total computed at the DELIVERED cascade (delivery-orders.ts
-    //   ~L1647-1685): DO line quantity × the SO line unit price for the
-    //   matching productCode. We sum across every SO referenced by
-    //   either body.salesOrderId OR the production_orders attached to
-    //   the DO's items (multi-SO DOs leave salesOrderId null but still
-    //   pull prices from each item's parent SO).
-    //
-    //   When creditLimitSen <= 0 the customer has no limit configured
-    //   (common during onboarding) — let the DO through unchecked.
+    // Customer credit gate (BUG-34) — overdue invoice past the customer's
+    // term, or outstanding + undelivered DOs + this DO over the limit.
+    // One shared rule for every path that releases goods; see
+    // src/api/lib/customer-credit.ts. body.creditOverride = { reason }
+    // passes a block when the override switch + permission allow it.
     // -------------------------------------------------------------------
-    let projectedDoTotalSen = 0;
-    if (customerRow.creditLimitSen > 0) {
-      const soIdsForPricing = new Set<string>();
-      if (salesOrderId) soIdsForPricing.add(salesOrderId);
-      for (const po of poRowsForItems) {
-        if (po.salesOrderId) soIdsForPricing.add(po.salesOrderId);
-      }
-      const priceByCode = new Map<string, number>();
-      if (soIdsForPricing.size > 0) {
-        const ph = [...soIdsForPricing].map(() => "?").join(",");
-        const priceRes = await c.var.DB.prepare(
-          `SELECT productCode, unitPriceSen
-             FROM sales_order_items
-            WHERE salesOrderId IN (${ph})`,
-        )
-          .bind(...soIdsForPricing)
-          .all<{ productCode: string | null; unitPriceSen: number }>();
-        for (const r of priceRes.results ?? []) {
-          if (r.productCode && !priceByCode.has(r.productCode)) {
-            priceByCode.set(r.productCode, r.unitPriceSen);
-          }
-        }
-      }
-      for (const it of items) {
-        const unit = priceByCode.get(it.productCode) ?? 0;
-        projectedDoTotalSen += unit * it.quantity;
-      }
-      const projectedOutstanding =
-        customerRow.outstandingSen + projectedDoTotalSen;
-      if (projectedOutstanding > customerRow.creditLimitSen) {
-        return {
-          ok: false,
-          status: 409,
-          body: {
-            success: false,
-            error: "Credit limit exceeded",
-            code: "CREDIT_LIMIT_EXCEEDED",
-            details: {
-              limit: customerRow.creditLimitSen,
-              outstanding: customerRow.outstandingSen,
-              doTotal: projectedDoTotalSen,
-              projected: projectedOutstanding,
-            },
-          },
-        };
-      }
-    }
+    const creditOutcome = await gateCredit(
+      c,
+      await checkCustomerCredit(
+        c.var.DB,
+        customerRow.id,
+        items.map((it) => ({
+          productionOrderId: it.productionOrderId || null,
+          productCode: it.productCode,
+          quantity: it.quantity,
+          salesOrderId: salesOrderId ?? null,
+        })),
+      ),
+      body.creditOverride,
+      { resource: "customers", resourceId: customerRow.id },
+    );
+    if (!creditOutcome.ok) return creditOutcome;
 
     const now = new Date().toISOString();
     const id = genDoId();
@@ -4362,6 +4324,21 @@ export async function applyDeliveryOrderUpdate(
           },
           409,
         );
+      }
+      // Customer credit re-check at dispatch (BUG-34): a DRAFT raised while
+      // the customer was clear must not leave once an invoice has gone
+      // overdue or the undelivered total passes the limit. This DO is still
+      // DRAFT, so it is already inside the undelivered total — no extra
+      // items. Covers the office button and the public QR scan (both land
+      // here); only a signed-in user with the override can pass a block.
+      if (body.status === "LOADED" && existing.status === "DRAFT") {
+        const gate = await gateCredit(
+          c,
+          await checkCustomerCredit(c.var.DB, existing.customerId, []),
+          body.creditOverride,
+          { resource: "delivery-orders", resourceId: id },
+        );
+        if (!gate.ok) return c.json(gate.body, gate.status);
       }
       // A cancel is a whole-document reversal (see the `cancelled` block
       // below). Replacing the line items in the SAME request would make it
