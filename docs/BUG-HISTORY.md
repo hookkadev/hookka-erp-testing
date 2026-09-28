@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-09-28**: newest entry BUG-2026-09-28-209 (branch `feat/rm-uom-options`, DEV-20; ids 196-208 are taken on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-25**: newest entry BUG-2026-09-25-195 (branch `feat/employees-kpi-layout`, PR #530); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-25**: newest entry BUG-2026-09-25-194 (branch `feat/dashboard-kpi-no-icons`, PR #524); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-25** — newest entry BUG-2026-09-25-192 (branch `feat/ocr-dashboard-tab`, PR #522); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
@@ -37,6 +38,18 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-09-28-209: A raw material's UOM could change with no conversion; a blank UOM cell on import reset it to PCS `inventory` `procurement` 🟡
+
+🟡 **Fix in progress** (branch `feat/rm-uom-options` → `staging`, DEV-20; not verified in a browser).
+
+**Symptom.** Found while building DEV-20, not reported. (1) Edit / Batch Edit / Import let anyone switch a material's unit (e.g. MTR → ROLL) while it held stock. Nothing converts, so "50 MTR" becomes "50 ROLL" and open PO lines, rm_batches and BOM consumption all read the old number in the new unit. (2) Bulk import set `baseUOM = pickUnit(r)` on UPDATE, whose fallback is `"PCS"`, so a row with the UOM cell blank silently turned an existing fabric into PCS. Prod impact UNMEASURED (no prod access this session).
+
+**Root cause.** `baseUOM` was a plain editable field with no guard on any of the three write paths (`src/api/routes/raw-materials.ts` PUT and bulk-import), and bulk-import's UPDATE did not fall back to the stored value.
+
+**Fix.** `checkRawMaterialUomLocked` (`src/api/lib/lock-helpers.ts`) refuses a unit change while the material has a non-zero balance, a batch with remaining qty, or an open PO line (matched on `material_code`, else the "CODE - name" prefix, same key as `mrp.ts`). PUT returns 409; bulk-import rejects the row; the Edit dialog disables the Unit select when the balance is non-zero. Bulk-import now falls back to the stored unit when the cell is blank. A unit change is audited. Regression: `tests/rm-uom-options.test.mjs`.
 
 ---
 
