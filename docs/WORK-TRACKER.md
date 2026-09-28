@@ -30,6 +30,32 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
+## 2026-09-28 — 🔵 Payment Vouchers 清单合并三门（owner「other creditor 的 payment 没出现在 payment voucher?」→「做」）(branch `feat/payments-hub-three-doors`)
+
+Owner's ask, measured on prod first (erp.hookka.com, 2026-09-28): the Payment
+Vouchers list carried **96** rows (95 expense vouchers + 1 AP payment) while
+**42** other-creditor payments (RM 338,498.00, May–Sep, all ACTIVE) and **113**
+supplier payments were invisible on it — they live in `other_party_payments` /
+`supplier_payments` with no `payment_vouchers` row, yet they are minted from the
+SAME counter and carry the same `HPV-…` series (e.g. HPV-2609-050, 24/09,
+INFAB). One numbering book, three lists.
+
+1. 🔵 The list now merges all three money-out doors (the money-out twin of the
+   Receipts hub): Payment Voucher / AP Payment (`payment_vouchers`), Supplier
+   Payment (`/api/supplier-payments`), Other Creditor Payment
+   (`/api/accounting/other-party-payments?type=CREDITOR`). Read-side only —
+   no engine, no write path and no recorded entry is touched.
+2. 🔵 Each row carries its door badge; a foreign row shows its bills / invoices
+   on expand, opens the same `DocDetailModal` on double-click, prints its own
+   voucher and voids / unvoids through its own endpoint (exactly what the
+   Receipts hub does). A door filter sits beside the bank filter.
+3. 🔵 `buildSupplierPaymentVoucher` moved to `src/lib/supplier-payment-voucher.ts`
+   so both the Supplier Payment page and the hub print the identical voucher
+   (react-refresh forbids a plain-function export from a component module —
+   the #471 lesson).
+
+---
+
 ## 2026-09-25 — 🔵 /dashboard-experimental: Employees > Efficiency drills into one employee day by day (branch `feat/dashboard-efficiency-employee-drill`, stacked on #533)
 
 1. 🔵 The Efficiency sub-tab had no chart (only tables and the ranking). It now opens with the Daily efficiency chart (the Time & attendance one, extracted to `DailyEfficiencyCard` in `EmployeesInsights.tsx`; Time & attendance renders it unchanged).
