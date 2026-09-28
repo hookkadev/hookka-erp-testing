@@ -8622,7 +8622,12 @@ async function computeCashflowStatement(
           classified.push({
             accountCode: l.code, debitSen: net > 0 ? net : 0, creditSen: net < 0 ? -net : 0,
             ym: l.ym, sourceType: l.sourceType, sourceId: l.sourceId,
-            lineLabel: `${tfPayee(l.sourceType, l.sourceId, l.description) || "Trade finance draw"} (via TF)`,
+            // Interest the lender charges (tf_interest legs, DR interest expense
+            // · CR facility, adjustments included) is owed and repaid through the
+            // same account — one row per facility, not one per draw.
+            lineLabel: l.sourceType.startsWith("tf_interest")
+              ? `Interest charged by ${tfAccounts.get(l.code)!.lenderName || "lender"}`
+              : `${tfPayee(l.sourceType, l.sourceId, l.description) || "Trade finance draw"} (via TF)`,
           });
         }
       }
