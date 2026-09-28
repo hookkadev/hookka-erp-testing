@@ -30,6 +30,29 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
+## 2026-09-28 — 🔵 Cash Flow: Trade Finance block (owner「用 trade finance 还我要当做 trade finance - Houzs Century」→「倒反 … 我会看 total spend」→「对，做」)(branch `feat/cashflow-trade-finance-block`)
+
+Checked first (code + prod): the statement only counts SBK/SCH bank legs, so a
+supplier paid from 310-0020 TRADE FINANCE - HOUZS CENTURY (DR 400 · CR 310-0020)
+appeared nowhere, while the repayment (DR 310-0020 · CR bank) sat under
+Unallocated as (64,601.03). Prod 2026-09-28: 8 draws — Jul 95,513.04 / Aug
+31,741.29 / Sep 97,775.56 — repaid 64,601.03 (Sep), owing 160,428.86.
+
+1. 🔵 New section `TRADE_FINANCE` in `src/lib/cashflow-engine.ts`: inside COST /
+   EXPENSE OUT right after Raw Materials, spend-signed and operating (= the
+   owner's total spend). Rows nest under the facility account as the group
+   ("TRADE FINANCE - HOUZS CENTURY SDN BHD"): one positive row per supplier
+   "(via TF)" in the month of the draw, one negative "Repaid to <lender>" row
+   when repaid; the block nets to what is still owed. `ClassifiedLeg.lineLabel`
+   + `tfLineOrder`.
+2. 🔵 `computeCashflowStatement`: facility accounts from `getTfSources` (no
+   hard-coded code); an entry with no bank leg but a CR on the facility becomes
+   a debit pseudo-leg (a void's DR reversal nets it out); a bank-touching entry's
+   facility leg (repayment) is flipped to a credit and skips the raw-material
+   split; the facility account defaults to the block unless the owner dragged
+   it elsewhere. Cash Surplus / bank b/f–c/f unchanged (bank legs only).
+3. 🔵 Guard `tests/cashflow-trade-finance.test.mjs` (engine rows + caller scan).
+
 ## 2026-09-28 — ✅ Payments hub: Supplier Payment rows show Paid From (owner「supplier payment 也没记银行户口?那怎么对账」→「做」)(#538 MERGED 3ecc42c1, deployed, prod-verified)
 
 Prod verification (erp.hookka.com, right after the deploy): `GET /api/supplier-payments`

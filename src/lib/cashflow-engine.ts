@@ -5,6 +5,14 @@
 export type CfSection =
   | "REVENUE_COLLECTION"
   | "RAW_MATERIALS"
+  // Owner 2026-09-28 「用 trade finance 还我要当做 trade finance - Houzs Century」
+  // then 「倒反 … 我会看 total spend」: a supplier paid from the trade-finance
+  // facility is SPEND in the month of the draw (shown positive, one row per
+  // supplier "(via TF)"), and the later repayment to the lender is the offset
+  // (negative) — the section nets to what is still owed. Counted in the
+  // operating surplus like any other spend; the bank surplus below stays
+  // bank-true because a draw never touches a bank.
+  | "TRADE_FINANCE"
   | "DIRECT_LABOUR"
   | "FACTORY_OVERHEAD"
   | "GENERAL_EXPENSE"
@@ -28,19 +36,19 @@ export type CoaLite = {
 // Sections presented as cash OUT (payments shown positive, subtracted).
 // REVENUE_COLLECTION, LOAN, UNALLOCATED present cash IN (inflow positive).
 export const OUTFLOW_SECTIONS: ReadonlySet<CfSection> = new Set<CfSection>([
-  "RAW_MATERIALS", "DIRECT_LABOUR", "FACTORY_OVERHEAD", "GENERAL_EXPENSE",
+  "RAW_MATERIALS", "TRADE_FINANCE", "DIRECT_LABOUR", "FACTORY_OVERHEAD", "GENERAL_EXPENSE",
   "TAXATION", "FINANCE_COST", "CAPEX", "DEPOSIT",
 ]);
 
 // Operating sections feed "Net operation surplus / (deficit)".
 export const OPERATING_SECTIONS: ReadonlySet<CfSection> = new Set<CfSection>([
-  "REVENUE_COLLECTION", "RAW_MATERIALS", "DIRECT_LABOUR", "FACTORY_OVERHEAD",
+  "REVENUE_COLLECTION", "RAW_MATERIALS", "TRADE_FINANCE", "DIRECT_LABOUR", "FACTORY_OVERHEAD",
   "GENERAL_EXPENSE", "TAXATION",
 ]);
 
 // Display order of sections in the statement.
 export const SECTION_ORDER: CfSection[] = [
-  "REVENUE_COLLECTION", "RAW_MATERIALS", "DIRECT_LABOUR", "FACTORY_OVERHEAD",
+  "REVENUE_COLLECTION", "RAW_MATERIALS", "TRADE_FINANCE", "DIRECT_LABOUR", "FACTORY_OVERHEAD",
   "GENERAL_EXPENSE", "TAXATION", "FINANCE_COST", "CAPEX", "DEPOSIT", "LOAN",
   "UNALLOCATED",
 ];
@@ -48,6 +56,7 @@ export const SECTION_ORDER: CfSection[] = [
 export const SECTION_LABELS: Record<CfSection, string> = {
   REVENUE_COLLECTION: "REVENUE COLLECTION",
   RAW_MATERIALS: "Raw Materials",
+  TRADE_FINANCE: "Trade Finance",
   DIRECT_LABOUR: "Direct Labour",
   FACTORY_OVERHEAD: "Factory Overhead",
   GENERAL_EXPENSE: "General Expense",
@@ -174,7 +183,17 @@ export type ClassifiedLeg = {
   ym: string; // YYYY-MM (opening-adjusted by caller)
   sourceType: string;
   sourceId: string;
+  // Row label instead of the account's name (the trade-finance rows: one per
+  // supplier "(via TF)", "Repaid to <lender>"); the account still decides the
+  // section and the group the row nests under.
+  lineLabel?: string;
 };
+
+// Inside the Trade Finance block: the draws (spend) first, the repayment
+// (offset) last.
+export function tfLineOrder(label: string): number {
+  return label.startsWith("Repaid to ") ? 20 : 10;
+}
 export type BankLeg = {
   accountCode: string;
   debitSen: number;
@@ -319,8 +338,11 @@ export function buildStatement(opts: {
       const sign = delta < 0 ? -1 : 1;
       for (const [line, sen] of Object.entries(parts))
         addToLine("DIRECT_LABOUR", line, 10, leg.ym, sign * sen);
+    } else if (place.section === "TRADE_FINANCE") {
+      const label = leg.lineLabel ?? place.name;
+      addToLine("TRADE_FINANCE", label, tfLineOrder(label), leg.ym, delta, leg.accountCode);
     } else {
-      addToLine(place.section, place.name, place.order, leg.ym, delta, leg.accountCode);
+      addToLine(place.section, leg.lineLabel ?? place.name, place.order, leg.ym, delta, leg.accountCode);
     }
   }
 
@@ -372,7 +394,11 @@ export function buildStatement(opts: {
     const flat: Agg[] = [];
     for (const a of aggs) {
       let pCode: string | undefined;
-      if (a.accountCode) {
+      if (sec === "TRADE_FINANCE" && a.accountCode && coa.has(a.accountCode)) {
+        // The facility account itself is the group ("TRADE FINANCE - HOUZS
+        // CENTURY SDN BHD"), its supplier / repayment rows sit under it.
+        pCode = a.accountCode;
+      } else if (a.accountCode) {
         const p = coa.get(a.accountCode)?.parentCode ?? undefined;
         if (p && p !== a.accountCode && coa.has(p)) pCode = p;
       } else if (sec === "RAW_MATERIALS") {
@@ -398,7 +424,7 @@ export function buildStatement(opts: {
     // A lone child under a COA parent stays flat (the nest would add a row
     // saying nothing); Raw-Material template categories keep single members.
     for (const [k, cl] of [...clusters]) {
-      if (cl.members.length < 2 && sec !== "RAW_MATERIALS") { flat.push(...cl.members); clusters.delete(k); }
+      if (cl.members.length < 2 && sec !== "RAW_MATERIALS" && sec !== "TRADE_FINANCE") { flat.push(...cl.members); clusters.delete(k); }
     }
     flat.sort((x, y) => x.order - y.order || x.label.localeCompare(y.label));
     const line = (a: Agg, depth: number, gid?: string) =>
@@ -426,7 +452,7 @@ export function buildStatement(opts: {
   emitSection("REVENUE_COLLECTION", false);
   push({ kind: "gap", label: "", depth: 0, values: columns.map(() => null) });
   push({ kind: "section", label: "COST / EXPENSE OUT", depth: 0, values: columns.map(() => null) });
-  for (const sec of ["RAW_MATERIALS", "DIRECT_LABOUR", "FACTORY_OVERHEAD", "GENERAL_EXPENSE", "TAXATION"] as CfSection[])
+  for (const sec of ["RAW_MATERIALS", "TRADE_FINANCE", "DIRECT_LABOUR", "FACTORY_OVERHEAD", "GENERAL_EXPENSE", "TAXATION"] as CfSection[])
     emitSection(sec, true);
 
   const opAggs = [...lines.values()].filter((a) => OPERATING_SECTIONS.has(a.section));
