@@ -192,11 +192,17 @@ test("the connector bus has no holes — no flex gap between the boxes", () => {
 test("every card carries a face, in BOTH views", () => {
   // Owner:「他们的头像啊,好像没有」. The board's cards had an avatar and the
   // tree's did not, so the same person looked like two different things
-  // depending on which view you were in.
+  // depending on which view you were in. 2026-09-28: a face is now a real
+  // photo once one is set (see org-chart-photos.test.mjs), initials until
+  // then — both live inside the shared PersonAvatar, not inlined per card.
   const src = readFileSync("src/components/org-chart.tsx", "utf8");
   const treeCard = src.slice(src.indexOf("const TreeCard ="), src.indexOf("const Branch ="));
-  assert.match(treeCard, /\{initials\(node\.name\)\}/);
-  assert.match(treeCard, /node\.source === "worker"/, "worker and office are told apart by colour");
+  assert.match(treeCard, /<PersonAvatar\b/);
+  assert.match(
+    src,
+    /person\.source === "worker"/,
+    "worker and office are told apart by colour, inside PersonAvatar",
+  );
 });
 
 test("EVERY department gets a box — one person is still a department", () => {

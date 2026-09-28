@@ -56,7 +56,9 @@ test("a worker's REAL department reaches the chart", () => {
   // already carry FAB_CUT / FAB_SEW / WOOD_CUT etc.; the query was not even
   // selecting the column.
   const org = readFileSync("src/api/routes/org-chart.ts", "utf8");
-  assert.match(org, /SELECT id, empNo, name, position, status, departmentCode FROM workers/);
+  // Trailing `, ...` allowed — photoFileId joined the same SELECT in 2026-09-28
+  // (org-chart-photos.test.mjs) without displacing departmentCode.
+  assert.match(org, /SELECT id, empNo, name, position, status, departmentCode(?:, \w+)* FROM workers/);
   assert.match(
     org,
     /\(w\.departmentCode \?\? w\.departmentcode \?\? ""\)\.trim\(\) \|\| WORKER_DEPARTMENT/,
