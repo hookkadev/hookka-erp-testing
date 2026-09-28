@@ -36,6 +36,8 @@ export type OrgPerson = {
   active: boolean;
   /** Who this person reports to, or null at the top of a tree. */
   managerKey: string | null;
+  /** /api/files id of their photo, or null — render initials as the fallback. */
+  photoFileId: string | null;
 };
 
 export type OrgNode = OrgPerson & { children: OrgNode[] };

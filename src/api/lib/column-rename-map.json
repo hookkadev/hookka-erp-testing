@@ -597,6 +597,7 @@
   "performedBy": "performed_by",
   "permissionId": "permission_id",
   "photoDataUrl": "photo_data_url",
+  "photoFileId": "photo_file_id",
   "photoUrl": "photo_url",
   "physicalCountValue": "physical_count_value",
   "pieceLabel": "piece_label",

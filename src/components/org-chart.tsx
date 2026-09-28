@@ -22,9 +22,11 @@ import {
   Users,
   Pencil,
   Printer,
+  Loader2,
 } from "lucide-react";
 import { useCachedJson, invalidateCachePrefix } from "@/lib/cached-fetch";
 import { buildOrgTree, countSubtree, type OrgNode, type OrgPerson } from "@/lib/org-people";
+import { uploadFileAsset } from "@/lib/upload-file";
 
 /**
  * Fallback column order, used only until the server's department list arrives
@@ -60,6 +62,94 @@ function initials(name: string): string {
   if (parts.length === 0) return "?";
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+// Accepted image types the upload input offers — mirrors the image subset of
+// ALLOWED_MIME in src/api/routes/files.ts (that list also allows PDF/video,
+// which a headshot never is).
+const PHOTO_ACCEPT = "image/png,image/jpeg,image/webp,image/gif,image/heic,image/heif";
+
+/**
+ * The circle every card shows: the person's photo once they have one,
+ * initials until they do (owner 2026-08-02: "他们的头像啊,好像没有" — a face is
+ * what makes a row of boxes read as people; initials was the placeholder until
+ * there was somewhere to store a photo. There is now — 2026-09-28).
+ *
+ * A MODULE-LEVEL component, not a closure defined inside TreeCard/the board
+ * loop: a component recreated on every render of its parent remounts (loses
+ * its own state, e.g. mid-upload) every time anything else on the chart
+ * changes. Takes its data and callback as props instead.
+ */
+function PersonAvatar({
+  person,
+  canManage,
+  uploading,
+  onUpload,
+}: {
+  person: Pick<OrgPerson, "key" | "name" | "source" | "photoFileId">;
+  canManage: boolean;
+  uploading: boolean;
+  onUpload: (file: File) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const tint =
+    person.source === "worker"
+      ? "bg-[#F0ECE9] text-[#6B5C32]"
+      : "bg-[#E0EDF0] text-[#3E6570]";
+  const label = person.source === "worker" ? "Factory employee" : "Office account";
+  return (
+    <span
+      className={`relative flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full text-[10px] font-bold ${
+        person.photoFileId ? "" : tint
+      } ${canManage ? "cursor-pointer" : ""}`}
+      role={canManage ? "button" : undefined}
+      tabIndex={canManage ? 0 : undefined}
+      title={canManage ? `Click to change ${person.name}'s photo` : label}
+      onClick={canManage ? () => inputRef.current?.click() : undefined}
+      onKeyDown={
+        canManage
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                inputRef.current?.click();
+              }
+            }
+          : undefined
+      }
+    >
+      {person.photoFileId ? (
+        <img
+          src={`/api/files/${person.photoFileId}/download`}
+          alt=""
+          className="h-full w-full object-cover"
+        />
+      ) : (
+        initials(person.name)
+      )}
+      {uploading && (
+        <span className="absolute inset-0 flex items-center justify-center bg-black/45">
+          <Loader2 className="h-3 w-3 animate-spin text-white" />
+        </span>
+      )}
+      {canManage && (
+        <input
+          ref={inputRef}
+          type="file"
+          accept={PHOTO_ACCEPT}
+          className="hidden"
+          // Reset so picking the SAME file again (e.g. after a failed upload)
+          // still fires onChange — the browser only fires it on a value change.
+          onClick={(e) => {
+            (e.target as HTMLInputElement).value = "";
+          }}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) onUpload(file);
+          }}
+        />
+      )}
+    </span>
+  );
 }
 
 function deptOf(p: OrgPerson): string {
@@ -109,6 +199,7 @@ export function OrgChart({ canManage }: Props) {
   const [zoom, setZoom] = useState(100);
   const [showInactive, setShowInactive] = useState(false);
   const [saving, setSaving] = useState<string | null>(null);
+  const [uploadingPhoto, setUploadingPhoto] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   /** Which card has its reporting-line picker open. */
   const [editing, setEditing] = useState<string | null>(null);
@@ -335,6 +426,45 @@ ${styles}
     [refresh],
   );
 
+  // Two-step: the file goes to the EXISTING /api/files store (same helper
+  // every other upload surface uses — size cap, timeout, read-back
+  // verification), then only its id is handed to this endpoint. This route
+  // never sees image bytes.
+  const uploadPhoto = useCallback(
+    async (personKey: string, file: File) => {
+      setUploadingPhoto(personKey);
+      setError(null);
+      try {
+        const uploaded = await uploadFileAsset({
+          file,
+          resourceType: "org-photo",
+          resourceId: personKey,
+        });
+        if (!uploaded.ok) {
+          setError(uploaded.error);
+          return;
+        }
+        const res = await fetch("/api/org-chart/photo", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ personKey, fileId: uploaded.id }),
+        });
+        const body = (await res.json()) as { success?: boolean; error?: string };
+        if (!res.ok || !body.success) {
+          setError(body.error || `Could not save the photo (HTTP ${res.status})`);
+          return;
+        }
+        invalidateCachePrefix("/api/org-chart");
+        refresh();
+      } catch {
+        setError("Could not reach the server.");
+      } finally {
+        setUploadingPhoto(null);
+      }
+    },
+    [refresh],
+  );
+
   // Who this person may report to: everyone except themselves and anyone who
   // already reports up through them — choosing one of those is exactly the loop
   // the server rejects, so it is not offered.
@@ -409,18 +539,14 @@ ${styles}
               the same person looked like two different things depending on the
               view. Owner 2026-08-02:「他们的头像啊,好像没有」— Houzs put a face
               on every card, and a face is what makes a row of boxes read as
-              people. Initials until there is somewhere to store a photo. */}
+              people. Photo once set, initials until then. */}
           <div className="flex items-center gap-2">
-            <span
-              className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${
-                node.source === "worker"
-                  ? "bg-[#F0ECE9] text-[#6B5C32]"
-                  : "bg-[#E0EDF0] text-[#3E6570]"
-              }`}
-              title={node.source === "worker" ? "Factory employee" : "Office account"}
-            >
-              {initials(node.name)}
-            </span>
+            <PersonAvatar
+              person={node}
+              canManage={canManage}
+              uploading={uploadingPhoto === node.key}
+              onUpload={(file) => void uploadPhoto(node.key, file)}
+            />
             <div className="min-w-0 flex-1 text-left">
               <div className="truncate text-[11px] font-semibold uppercase leading-tight text-[#1F1D1B]">
                 {node.name}
@@ -931,20 +1057,12 @@ ${styles}
                                 }`}
                               >
                                 <div className="flex items-start gap-2">
-                                  <span
-                                    className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${
-                                      p.source === "worker"
-                                        ? "bg-[#F0ECE9] text-[#6B5C32]"
-                                        : "bg-[#E0EDF0] text-[#3E6570]"
-                                    }`}
-                                    title={
-                                      p.source === "worker"
-                                        ? "Factory employee"
-                                        : "Office account"
-                                    }
-                                  >
-                                    {initials(p.name)}
-                                  </span>
+                                  <PersonAvatar
+                                    person={p}
+                                    canManage={canManage}
+                                    uploading={uploadingPhoto === p.key}
+                                    onUpload={(file) => void uploadPhoto(p.key, file)}
+                                  />
                                   <div className="min-w-0 flex-1 pr-4">
                                     <div className="truncate text-[11px] font-semibold uppercase leading-tight text-[#1F1D1B]">
                                       {p.name}

@@ -1,6 +1,15 @@
 # Hookka ERP — Codebase Map (the single authoritative map)
 
 > **Last verified: 2026-09-28 on branch `feat/customer-credit-control`** — Delivery & Consignment gotcha for the shared customer credit gate (BUG-2026-09-28-210).
+
+> **Last verified: 2026-09-28** on branch `feat/org-chart-photos`, against `src/api/routes/org-chart.ts`,
+> `src/lib/org-people.ts`, `src/components/org-chart.tsx` — the new Org Chart photo columns/endpoint
+> documented in the Customers & Platform row below. This is the file's genuine freshness stamp
+> (`scripts/check-docs-freshness.mjs` reads only "Last verified:" / "Last generated:"); every
+> `**Restamped …**` note below is real work that used a keyword the checker cannot see, so this line
+> exists to keep the stamp readable at all — it does not re-verify their claims. Only the lines below
+> that name THIS date's files were actually re-checked today.
+
 > **Restamped 2026-09-28 on branch `feat/rm-uom-options`:** Inventory row — RM tab / BatchEditRMDialog line ranges re-measured, RM Settings modal and the DEV-20 UOM rules noted. Nothing else re-checked.
 
 > **Restamped 2026-09-25 on branch `feat/m-warehouse-locate`:** the `warehouse.ts` row (864 lines, `GET /locate`) and the
@@ -799,6 +808,7 @@ that proves those locks can actually go red.
 | `src/pages/mail-center/compose.tsx` — compose | `src/api/routes/mail-center.ts` — email engine (2476) | | |
 | | `src/api/routes/files.ts` — generic upload/download (571) | | |
 | | `src/api/routes/kv-config.ts` — KV config store (93) | | |
+| | `src/api/routes/org-chart.ts` — reporting lines + photos, both `users` and `workers` on one board | `org_reporting` / `users.photo_file_id` / `workers.photo_file_id` | `tests/org-chart-board.test.mjs`, `org-people.test.mjs`, `org-reporting-wiring.test.mjs`, `org-chart-photos.test.mjs` |
 
 **Big-file section index**
 - `src/pages/customers.tsx`
@@ -835,6 +845,7 @@ that proves those locks can actually go red.
 - Customer hubs feed the DO/Service hub chain (delivery_hubs, customer_hubs); hub-cascade-completeness + service-hub-chain tests guard the cascade — editing hub routes can break downstream delivery/consignment integrity.
 - Hub deletions are EXPLICIT-ONLY (BUG-2026-07-27-002, `tests/hub-wipe-guard.test.mjs`): customers.ts PUT deletes only ids named in `body.deletedHubIds` and UPSERTs the rest — never reintroduce the replace-diff (it let stale-tab saves wipe hubs). Hub INSERT inherits the customer's org; hub state pickers include SGR (canonical Selangor, `malaysia-states.ts`); scan-PO create shows a confirm gate before creating hub-less SOs.
 - /api/files (files.ts) serves customer, product-doc and modular uploads with attachment disposition but `<img src=.../download>` still renders — shared endpoint, don't special-case per resourceType.
+- **Org Chart photos (2026-09-28)** live on `users.photo_file_id` / `workers.photo_file_id` — one column per table, NOT a join, because `users` and `workers` already have no link between them by design (org-chart.ts header comment) and `org_reporting` exists only because an EDGE needs a place that can point at either table; a photo is a fact about one row, so it goes directly on that row. The upload itself goes through the existing `/api/files` store (resourceType `"org-photo"`, resourceId the person's composite key `user:<id>` / `worker:<id>`) — `PUT /api/org-chart/photo` only ever receives the resulting file id, never image bytes. Both columns need `ensureOrgPhotoColumns` awaited before any query that names `photoFileId`, mirroring how `ensureOrgReporting` guards `org_reporting`.
 - kv_config is a shared generic store (e.g. public_holidays consumed by payroll) — changing its shape can affect unrelated modules.
 - **Mail Center permissions are TWO independent layers, and confusing them is the mistake.**
   (1) RBAC `mail-center:<action>` — what you may DO. The action names mislead: `create` is

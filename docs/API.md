@@ -31,7 +31,7 @@ as a Cloudflare Pages Function via `functions/api/[[route]].ts`. There is no
   route module) and is exempt from the rate limiter.
 
 **Counts at generation time:** 142 mounts, 140 route files in
-`src/api/routes/`, 984 top-level handler registrations discovered.
+`src/api/routes/`, 985 top-level handler registrations discovered.
 
 ## Scope and limits of this file
 
@@ -198,7 +198,7 @@ offsets pointing past the end of their own file.
 | `/api/assistant/conversations` | `src/api/routes/assistant-history.ts` | `GET /` <sub>:87</sub><br>`GET /:id` <sub>:112</sub><br>`PUT /:id` <sub>:140</sub><br>`PATCH /:id` <sub>:204</sub><br>`DELETE /:id` <sub>:234</sub> | gated |
 | `/api/assistant` | `src/api/routes/assistant.ts` | `POST /chat` <sub>:522</sub> | gated |
 | `/api/agents` | `src/api/routes/agent-console.ts` | `GET /status` <sub>:165</sub><br>`GET /review` <sub>:410</sub><br>`POST /run-now` <sub>:562</sub><br>`POST /pause` <sub>:703</sub><br>`POST /kill-all` <sub>:730</sub><br>`POST /gate` <sub>:757</sub><br>`POST /phase` <sub>:787</sub><br>`POST /rollback-last-batch` <sub>:839</sub><br>`GET /config-proposals` <sub>:953</sub><br>`POST /config-proposals/decide` <sub>:983</sub> | gated |
-| `/api/org-chart` | `src/api/routes/org-chart.ts` | `GET /` <sub>:172</sub><br>`POST /auto-wire-production` <sub>:230</sub><br>`PUT /reporting` <sub>:334</sub> | gated |
+| `/api/org-chart` | `src/api/routes/org-chart.ts` | `GET /` <sub>:204</sub><br>`POST /auto-wire-production` <sub>:262</sub><br>`PUT /reporting` <sub>:366</sub><br>`PUT /photo` <sub>:427</sub> | gated |
 
 ---
 
