@@ -8585,14 +8585,64 @@ async function computeCashflowStatement(
   // is the month whose payslip department mix splits the cash (owner
   // 2026-08-27 「salary 那边也是要拆散成department」).
   const salaryLegs: { sourceId: string; description: string; ym: string }[] = [];
+  // Trade finance (owner 2026-09-28 「用 trade finance 还我要当做 trade finance -
+  // Houzs Century」, then 「倒反 … 我会看 total spend」): a supplier paid from the
+  // facility is SPEND in the month of the draw, the repayment to the lender is
+  // the offset. A draw (DR 400 · CR TF) never touches a bank, so it needs its
+  // own road below; a repayment (DR TF · CR bank) does, and would read as
+  // spend a second time, so its leg is flipped to a credit — the engine then
+  // shows it negative under the same Trade Finance block.
+  const tfSources = await getTfSources(c.var.DB).catch(() => [] as TfSource[]);
+  const tfAccounts = new Map<string, TfSource>();
+  for (const s of tfSources) tfAccounts.set(resolveAcct(s.accountCode), s);
+  const tfSupplierByNo = new Map<string, string>();
+  if (tfAccounts.size) {
+    const spRes = await c.var.DB.prepare(
+      "SELECT payment_no, MAX(supplier_name) AS supplier_name FROM supplier_payments WHERE org_id = ? GROUP BY payment_no",
+    ).bind(orgId).all<Record<string, unknown>>().catch(() => ({ results: [] as Record<string, unknown>[] }));
+    for (const r of spRes.results ?? []) {
+      const no = String(r.paymentNo ?? r.payment_no ?? "");
+      const nm = String(r.supplierName ?? r.supplier_name ?? "").trim();
+      if (no && nm) tfSupplierByNo.set(no, nm);
+    }
+  }
+  const tfPayee = (sourceType: string, sourceId: string, description: string): string =>
+    (sourceType.startsWith("supplier_payment") ? tfSupplierByNo.get(sourceId) : undefined) ?? description.trim() ?? "Trade finance draw";
   for (const legs of byEntry.values()) {
     const hasBank = legs.some((l) => bankCodes.has(l.code));
-    if (!hasBank) continue;
     const opening = legs.some((l) => isOpeningSource(l.sourceType));
+    if (!hasBank) {
+      // A draw: the lender paid the supplier for us. CR on the facility =
+      // drawn (spend, positive); a void's DR reversal cancels it.
+      if (tfAccounts.size && !opening) {
+        for (const l of legs) {
+          if (!tfAccounts.has(l.code)) continue;
+          const net = l.creditSen - l.debitSen;
+          if (!net) continue;
+          classified.push({
+            accountCode: l.code, debitSen: net > 0 ? net : 0, creditSen: net < 0 ? -net : 0,
+            ym: l.ym, sourceType: l.sourceType, sourceId: l.sourceId,
+            lineLabel: `${tfPayee(l.sourceType, l.sourceId, l.description) || "Trade finance draw"} (via TF)`,
+          });
+        }
+      }
+      continue;
+    }
     for (const l of legs) {
       if (bankCodes.has(l.code)) {
         bankLegs.push({ accountCode: l.code, debitSen: l.debitSen, creditSen: l.creditSen, ym: l.ym });
       } else if (!opening) {
+        if (tfAccounts.has(l.code)) {
+          // Repayment to the lender — the offset, not spend: flipped so the
+          // outflow block shows it negative. Never split as a raw-material
+          // payment (no paymentNos entry).
+          classified.push({
+            accountCode: l.code, debitSen: l.creditSen, creditSen: l.debitSen,
+            ym: l.ym, sourceType: l.sourceType, sourceId: l.sourceId,
+            lineLabel: `Repaid to ${tfAccounts.get(l.code)!.lenderName || "lender"}`,
+          });
+          continue;
+        }
         if (l.sourceType.startsWith("other_party_payment")) {
           opLegs.push({
             accountCode: l.code, debitSen: l.debitSen, creditSen: l.creditSen,
@@ -8611,7 +8661,10 @@ async function computeCashflowStatement(
     }
   }
 
-  const map = await getCashflowMap(c.var.DB);
+  const map: CfMap = { ...(await getCashflowMap(c.var.DB)) };
+  // The facility account belongs to the Trade Finance block unless the owner
+  // has dragged it somewhere himself.
+  for (const code of tfAccounts.keys()) if (!map[code]) map[code] = { section: "TRADE_FINANCE", order: 10 };
   const sgOverride = await getCashflowStockGroupMap(c.var.DB);
   const rmSplit: RmSplit = {};
   if (paymentNos.size || opLegs.length) {
