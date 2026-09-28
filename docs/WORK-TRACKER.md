@@ -30,7 +30,7 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
-## 2026-09-28 — 🔵 Cash Flow: Trade Finance block (owner「用 trade finance 还我要当做 trade finance - Houzs Century」→「倒反 … 我会看 total spend」→「对，做」)(branch `feat/cashflow-trade-finance-block`)
+## 2026-09-28 — ✅ Cash Flow: Trade Finance block (owner「用 trade finance 还我要当做 trade finance - Houzs Century」→「倒反 … 我会看 total spend」→「对，做」)(#541 764ebe82 + #542 b187526b MERGED, deployed, prod-verified; item 5 stays 🟡)
 
 Checked first (code + prod): the statement only counts SBK/SCH bank legs, so a
 supplier paid from 310-0020 TRADE FINANCE - HOUZS CENTURY (DR 400 · CR 310-0020)
