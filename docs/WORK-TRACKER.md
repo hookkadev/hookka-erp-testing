@@ -30,7 +30,13 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
-## 2026-09-28 — 🔵 Payments hub: Supplier Payment rows show Paid From (owner「supplier payment 也没记银行户口?那怎么对账」→「做」)(branch `feat/sp-bank-from-ledger`)
+## 2026-09-28 — ✅ Payments hub: Supplier Payment rows show Paid From (owner「supplier payment 也没记银行户口?那怎么对账」→「做」)(#538 MERGED 3ecc42c1, deployed, prod-verified)
+
+Prod verification (erp.hookka.com, right after the deploy): `GET /api/supplier-payments`
+returns 113 rows; **every ACTIVE one (83/83) carries `bankAccount`** — 75 × 310-0010
+(HLBB) + 8 × 310-0020 (trade-finance repayments); the 30 without a bank are all VOID
+(shown as "—"). Page header still 250 = 95 + 1 + 112 + 42; the 112 SP rows' Paid From
+cells read 310-0010 × 74, 310-0020 × 8, — × 30. Nothing written on prod.
 
 1. 🔵 Answer first: nothing was ever missing for reconciliation — `supplier_payments`
    keeps no bank column, but every payment's CR leg on `ledger_journal_entries`
