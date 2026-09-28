@@ -67,7 +67,7 @@ import {
   Layers,
   ChevronDown,
   ChevronRight,
-  
+  Plus,
 } from "lucide-react";
 import { getCurrentUser } from "@/lib/auth";
 import { copyText } from "@/lib/copy-text";
@@ -84,17 +84,27 @@ import { copyText } from "@/lib/copy-text";
 
 // ---------- Org Chart taxonomy (mirrors Houzs-Century) ---------------------
 // The Org Chart tab is a Houzs-style TABLE (Name · Department · Position ·
-// Reports to), NOT a kanban — owner kept asking for "like Houzs ERP". This
-// mirrors AdminUsersPage.tsx's POSITIONS_BY_DEPARTMENT (lines 17-23): the
-// chosen Department scopes the Position dropdown. These are sensible
-// furniture-factory roles for HOOKKA (Production / Sales / Office / Warehouse /
-// Management) and stay free-text on the user row, so the list can be extended
-// later without a migration. ORG_DEPARTMENTS drives the Department <select>.
-// Owner 2026-08-01. Every FACTORY employee (the `workers` table) sits under
-// Production regardless of their production sub-department (Fab Cut, Framing,
-// …) — that split is a costing dimension, not a reporting line. Office accounts
-// pick from the rest.
-const ORG_DEPARTMENTS = [
+// Reports to), NOT a kanban — owner kept asking for "like Houzs ERP". These
+// are sensible furniture-factory roles for HOOKKA (Production / Sales /
+// Office / Warehouse / Management) and stay free-text on the user row (no
+// migration needed to widen it).
+//
+// The list itself lives in kv_config under "org-departments" (BUG request
+// 2026-09-28: "can I add another department" — there was no way to, short of
+// editing this file). DEFAULT_ORG_DEPARTMENTS is the seed / fallback: what a
+// brand-new environment starts with, and what renders for the one request
+// before the kv row exists. Once someone uses "Add Department" below, the kv
+// value is the source of truth and this constant is never read again.
+//
+// Deliberately NOT the same table as the manufacturing departments (Fabric
+// Cutting, Wood Cutting, …) managed from Employees → Department Labor — those
+// feed Working Hours / Job Cards / Labor Cost, so adding "IT" there would let
+// someone log production hours against it and silently wrong the labor-cost
+// math. Owner 2026-08-01: every FACTORY employee (the `workers` table) sits
+// under Production on this chart regardless of their production
+// sub-department — that split is a costing dimension, not a reporting line.
+// Office accounts pick from the list here instead.
+const DEFAULT_ORG_DEPARTMENTS = [
   "Management",
   "Production",
   "R&D",
@@ -103,15 +113,11 @@ const ORG_DEPARTMENTS = [
   "Office",
   "Finance",
   "HR",
+  "IT",
   "Others",
 ] as const;
 
-// Department options for an @hookka.com mailbox. ONE list, shared with the org
-// chart below — the alias dialog itself says "Department … feed the org chart",
-// but the two used to be different sets ("Support / Finance / HR" here versus
-// "Management / Production / Sales / Office / Warehouse" there), so a person
-// filed under Support could not be placed on the chart at all.
-const DEPT_OPTIONS = ORG_DEPARTMENTS;
+const ORG_DEPARTMENTS_KV_KEY = "org-departments";
 
 
 // ---------- Row types ------------------------------------------------------
@@ -327,6 +333,60 @@ export default function UsersPage() {
     [],
   );
 
+  // The office-department taxonomy — see DEFAULT_ORG_DEPARTMENTS above for
+  // why this is a separate list from the manufacturing departments table.
+  // Falls back to the default set until someone saves once (no kv_config row
+  // yet on a fresh environment, or the request is still in flight).
+  const { data: orgDeptsResp, refresh: refreshOrgDepts } = useCachedJson<{
+    success?: boolean;
+    data?: string[] | null;
+  }>(`/api/kv-config/${ORG_DEPARTMENTS_KV_KEY}`);
+  const orgDepartments = useMemo<readonly string[]>(
+    () =>
+      orgDeptsResp?.data && orgDeptsResp.data.length > 0
+        ? orgDeptsResp.data
+        : DEFAULT_ORG_DEPARTMENTS,
+    [orgDeptsResp],
+  );
+  const [addDeptOpen, setAddDeptOpen] = useState(false);
+  const [newDeptName, setNewDeptName] = useState("");
+  const [savingNewDept, setSavingNewDept] = useState(false);
+
+  const addOrgDepartment = useCallback(async () => {
+    const name = newDeptName.trim();
+    if (!name) return;
+    if (orgDepartments.some((d) => d.toLowerCase() === name.toLowerCase())) {
+      showFlash("err", `"${name}" is already in the list.`);
+      return;
+    }
+    // "Others" stays the last option, matching how it already reads as a
+    // catch-all — a new department landing after it would look like an
+    // afterthought tacked onto the end.
+    const othersIdx = orgDepartments.indexOf("Others");
+    const next =
+      othersIdx === -1
+        ? [...orgDepartments, name]
+        : [...orgDepartments.slice(0, othersIdx), name, ...orgDepartments.slice(othersIdx)];
+    setSavingNewDept(true);
+    try {
+      const res = await fetch(`/api/kv-config/${ORG_DEPARTMENTS_KV_KEY}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(next),
+      });
+      if (!res.ok) throw new Error(`save failed (${res.status})`);
+      setNewDeptName("");
+      setAddDeptOpen(false);
+      invalidateCachePrefix(`/api/kv-config/${ORG_DEPARTMENTS_KV_KEY}`);
+      refreshOrgDepts();
+      showFlash("ok", `Added "${name}".`);
+    } catch (err) {
+      showFlash("err", humanizeError(err, "Couldn't save the new department. Please retry."));
+    } finally {
+      setSavingNewDept(false);
+    }
+  }, [newDeptName, orgDepartments, refreshOrgDepts, showFlash]);
+
   // ---------- Fetchers -----------------------------------------------------
 
   const { data: usersResp, loading: loadingUsers, refresh: refreshUsersHook } = useCachedJson<ApiEnvelope<UserRow[]>>("/api/users");
@@ -416,37 +476,6 @@ export default function UsersPage() {
   // pendingLevels below drops each override the moment the server agrees, so
   // this never masks a genuine later change from another admin.
   const [savedLevels, setSavedLevels] = useState<Map<string, string>>(new Map());
-
-  // ----- Org Chart edit state (Edit → Save, no naked edits) -----
-  // REBUILT 2026-06-17 to match Houzs-Century's AdminUsersPage (the owner kept
-  // asking for "like Houzs ERP"). The chart is now a TABLE — Name · Department ·
-  // Position · Reports to — exactly like Houzs (AdminUsersPage.tsx lines
-  // 243-300), NOT the old department kanban. It is READ-ONLY until the operator
-  // clicks "Edit layout"; in edit mode each row exposes three selectors
-  // (Department / Position scoped to the department / Reports-to upline) whose
-  // changes accumulate in local draft maps keyed by userId. Save PUTs every
-  // changed user (PUT /api/users/:id { department, position, reportsTo }) then
-  // refreshes; Cancel discards. No cell ever auto-saves (no naked edits).
-  //
-  // Department, position and the reporting line live on the USER row (owner
-  // 2026-06-17, "這個是看 position，不需要 alias"), so EVERY active user appears
-  // and is editable — no @hookka.com alias required. All three read straight
-  // from GET /api/users (u.department / u.position / u.reportsTo).
-  const [orgEdit, setOrgEdit] = useState(false);
-  // userId → target department. "Unassigned" clears the department on Save.
-  const [orgDeptDraft, setOrgDeptDraft] = useState<Map<string, string>>(
-    new Map(),
-  );
-  // userId → position (scoped to the chosen department). "" clears it.
-  const [orgPosDraft, setOrgPosDraft] = useState<Map<string, string>>(
-    new Map(),
-  );
-  // userId → upline user id ("" clears the reporting line). Mirrors Houzs's
-  // Upline picker; persisted as reportsTo on PUT /api/users/:id.
-  const [orgReportsDraft, setOrgReportsDraft] = useState<Map<string, string>>(
-    new Map(),
-  );
-  const [orgSaving, setOrgSaving] = useState(false);
 
   const beginMailEdit = () => {
     // Seed drafts from the committed server values so an untouched cell stays
@@ -663,85 +692,6 @@ export default function UsersPage() {
   );
   // Flatten the tree to a render list (depth-first) so the hierarchy block is a
   // simple indented list of rows.
-
-  // ----- Org Chart edit handlers -----
-  const beginOrgEdit = () => {
-    setOrgDeptDraft(new Map());
-    setOrgPosDraft(new Map());
-    setOrgReportsDraft(new Map());
-    setOrgEdit(true);
-  };
-  const cancelOrgEdit = () => {
-    setOrgEdit(false);
-    setOrgDeptDraft(new Map());
-    setOrgPosDraft(new Map());
-    setOrgReportsDraft(new Map());
-  };
-  // Count of distinct users with a queued change (for the Save button badge).
-  const orgDraftCount = useMemo(() => {
-    const ids = new Set<string>([
-      ...orgDeptDraft.keys(),
-      ...orgPosDraft.keys(),
-      ...orgReportsDraft.keys(),
-    ]);
-    return ids.size;
-  }, [orgDeptDraft, orgPosDraft, orgReportsDraft]);
-
-  // Save every queued change. One PUT per changed user merging the queued
-  // department / position / reportsTo; "Unassigned" clears the department (sent
-  // as "" → stored NULL by the backend), "" clears position / reporting line.
-  const saveOrgEdit = async () => {
-    const changedIds = new Set<string>([
-      ...orgDeptDraft.keys(),
-      ...orgPosDraft.keys(),
-      ...orgReportsDraft.keys(),
-    ]);
-    if (changedIds.size === 0) {
-      cancelOrgEdit();
-      showFlash("ok", "No changes to save");
-      return;
-    }
-    setOrgSaving(true);
-    try {
-      const ops = [...changedIds].map((userId) => {
-        const body: Record<string, string> = {};
-        if (orgDeptDraft.has(userId)) {
-          const dept = orgDeptDraft.get(userId)!;
-          body.department = dept === "Unassigned" ? "" : dept;
-        }
-        if (orgPosDraft.has(userId)) {
-          body.position = orgPosDraft.get(userId)!;
-        }
-        if (orgReportsDraft.has(userId)) {
-          body.reportsTo = orgReportsDraft.get(userId)!;
-        }
-        return fetch(`/api/users/${userId}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
-      });
-      const results = await Promise.all(ops);
-      const failed = results.filter((r) => !r.ok).length;
-      fetchUsers();
-      if (failed > 0) {
-        showFlash(
-          "err",
-          `${ops.length - failed} change(s) saved, ${failed} failed. Review and retry.`,
-        );
-      } else {
-        showFlash("ok", `Org chart saved (${ops.length} change(s))`);
-        cancelOrgEdit();
-      }
-    } catch (err) {
-      showFlash(
-        "err",
-        humanizeError(err, "Couldn't save the org chart. Please retry."),
-      );
-    } finally {
-      setOrgSaving(false);
-    }
-  };
 
   const activeAddresses = useMemo(
     () => (addressesResp ?? []).filter((a) => a.active),
@@ -1358,7 +1308,7 @@ export default function UsersPage() {
     // Existing aliases still carry the retired "Support" value; it is not in
     // the list any more, so fall back rather than render a blank select.
     setAliasDept(
-      existing?.assignedDept && (DEPT_OPTIONS as readonly string[]).includes(existing.assignedDept)
+      existing?.assignedDept && orgDepartments.includes(existing.assignedDept)
         ? existing.assignedDept
         : "Others",
     );
@@ -2076,10 +2026,9 @@ export default function UsersPage() {
                     {canManageUsers ? (
                       <>
                         {" "}
-                        Click <strong>Edit</strong>, set each person&apos;s
-                        Department &rarr; Position &rarr; Reports&nbsp;to, then{" "}
-                        <strong>Save</strong>. Changes apply only after you click
-                        Save.
+                        Edit a person&apos;s Department or Position from{" "}
+                        <strong>Edit details</strong> on the Users tab. The
+                        pencil on a card here changes only who they report to.
                       </>
                     ) : (
                       <>
@@ -2091,47 +2040,62 @@ export default function UsersPage() {
                   </CardDescription>
                 </div>
               </div>
-              {/* Edit / Save / Cancel — Super Admin only (PUT /api/users/:id is
-                  requireSuperAdmin). Mirrors the Mailbox Access bar: read-only
-                  until Edit, Save commits every changed user in one go, no naked
-                  edits. */}
+              {/* Add a new office department — the list office accounts pick
+                  from (Management / Production / Sales / …), NOT the
+                  manufacturing departments (Employees → Department Labor).
+                  Super Admin only (PUT /api/kv-config/org-departments is
+                  requirePermission("users","update")). This used to be a dead
+                  Edit/Save/Cancel bar left over from a table removed in
+                  2026-08 — repurposed 2026-09-28 instead of deleting it
+                  outright, since "add a department" belongs in exactly this
+                  spot. */}
               {canManageUsers && (
-                <div className="flex shrink-0 gap-2">
-                  {!orgEdit ? (
-                    <Button variant="outline" size="sm" onClick={beginOrgEdit}>
-                      <Pencil className="h-3.5 w-3.5" />
-                      Edit
-                    </Button>
-                  ) : (
-                    <>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={cancelOrgEdit}
-                        disabled={orgSaving}
-                      >
-                        <X className="h-3.5 w-3.5" />
-                        Cancel
-                      </Button>
-                      <Button
-                        variant="primary"
-                        size="sm"
-                        onClick={saveOrgEdit}
-                        disabled={orgSaving}
-                      >
-                        {orgSaving ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <Check className="h-3.5 w-3.5" />
-                        )}
-                        {orgSaving
-                          ? "Saving…"
-                          : orgDraftCount > 0
-                            ? `Save (${orgDraftCount})`
-                            : "Save"}
-                      </Button>
-                    </>
+                <div className="flex shrink-0 items-center gap-2">
+                  {addDeptOpen && (
+                    <Input
+                      autoFocus
+                      value={newDeptName}
+                      onChange={(e) => setNewDeptName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") void addOrgDepartment();
+                        if (e.key === "Escape") setAddDeptOpen(false);
+                      }}
+                      placeholder="e.g. IT"
+                      className="h-8 w-40 text-xs"
+                      disabled={savingNewDept}
+                    />
                   )}
+                  {addDeptOpen && (
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={() => void addOrgDepartment()}
+                      disabled={savingNewDept || !newDeptName.trim()}
+                    >
+                      {savingNewDept ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Check className="h-3.5 w-3.5" />
+                      )}
+                      Save
+                    </Button>
+                  )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (addDeptOpen) setNewDeptName("");
+                      setAddDeptOpen((v) => !v);
+                    }}
+                    disabled={savingNewDept}
+                  >
+                    {addDeptOpen ? (
+                      <X className="h-3.5 w-3.5" />
+                    ) : (
+                      <Plus className="h-3.5 w-3.5" />
+                    )}
+                    {addDeptOpen ? "Cancel" : "Add Department"}
+                  </Button>
                 </div>
               )}
             </div>
@@ -2151,28 +2115,12 @@ export default function UsersPage() {
               </div>
             ) : (
               <>
-                {/* Edit-mode banner — department, position and reporting line
-                    all live on the USER record, so EVERY active person is
-                    editable here, no @hookka.com alias required (owner
-                    2026-06-17). */}
-                {orgEdit && (
-                  <div className="mb-4 rounded-md border border-[#CFE0F3] bg-[#F2F7FD] px-3 py-2 text-xs text-[#2C5B8F]">
-                    <Pencil className="mr-1 inline h-3.5 w-3.5 -mt-0.5" />
-                    Set each person&apos;s <strong>Department</strong>, then their{" "}
-                    <strong>Position</strong> (the list narrows to that
-                    department), and <strong>Reports&nbsp;to</strong> (their
-                    upline). Every active user can be placed — no email alias
-                    needed. Changes apply only after you click Save.
-                  </div>
-                )}
-
                 {/* The board. Replaces an indented tree drawn from `users`
                     alone — which is ten people, while the other forty-two work
                     on the floor and live in `workers` with no account. The
                     component reads /api/org-chart, where both tables arrive as
                     one list, so the factory is on the same board and a
-                    reporting line can run between them (owner 2026-08-01). The
-                    TABLE below still edits department and position. */}
+                    reporting line can run between them (owner 2026-08-01). */}
                 <div className="mb-5 rounded-lg border border-[#E5E7EB] bg-white p-3">
                   <OrgChart canManage={canManageUsers} />
                 </div>
@@ -2640,7 +2588,7 @@ export default function UsersPage() {
       {/* =========================================================== */}
       {addingUser && (
         <AddUserDrawer
-          departments={ORG_DEPARTMENTS}
+          departments={orgDepartments}
           roleOptions={ROLE_OPTIONS}
           onClose={() => setAddingUser(false)}
           onCreated={() => {
@@ -2677,7 +2625,7 @@ export default function UsersPage() {
               id: p.key,
               label: `${p.name}${p.position ? ` · ${p.position}` : ""}`,
             }))}
-          departments={ORG_DEPARTMENTS}
+          departments={orgDepartments}
           roleOptions={ROLE_OPTIONS}
           currentUserId={currentUser?.id ?? ""}
           canManage={canManageUsers}
@@ -2769,7 +2717,7 @@ export default function UsersPage() {
                 onChange={(e) => setAliasDept(e.target.value)}
                 className="flex h-10 w-full rounded-md border border-[#E2DDD8] bg-white px-3 py-2 text-sm text-[#1F1D1B] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6B5C32]"
               >
-                {DEPT_OPTIONS.map((d) => (
+                {orgDepartments.map((d) => (
                   <option key={d} value={d}>
                     {d}
                   </option>
