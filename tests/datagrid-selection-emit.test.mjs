@@ -26,3 +26,17 @@ test("no page rebuilds a selectable grid's columns from the selection it stores"
   assert.doesNotMatch(memo, /\[selectedReadyPOs, updateExpectedDD\]/);
   assert.match(memo, /\[updateExpectedDD\]\s*\);\s*$/);
 });
+
+// BUG-12 / C24 #2 — the same loop through onFilteredDataChange: Department
+// Labor stored the emission in printRows state and passed un-memoised columns.
+test("DataGrid emits onFilteredDataChange only when the rows actually changed", () => {
+  const grid = read("../src/components/ui/data-grid.tsx");
+  const effect = grid.slice(grid.indexOf("const lastEmittedFiltered"), grid.indexOf("onFilteredDataChange(sortedData);"));
+  assert.ok(effect.length > 0, "filtered-data effect not found");
+  assert.match(effect, /prev\.length === sortedData\.length && prev\.every\(\(row, i\) => row === sortedData\[i\]\)/);
+});
+
+test("Department Labor memoises the columns it hands to its echoing grid", () => {
+  const page = read("../src/pages/employees.tsx");
+  assert.match(page, /const columns: Column<DepartmentLaborRow>\[\] = useMemo\(\(\) => \[/);
+});
