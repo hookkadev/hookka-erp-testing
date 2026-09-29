@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-29**: Cash Flow "Unallocated · STOCK - FABRIC M" entry added below — no code; branch `feat/cashflow-stock-accounts-raw-materials` dropped.
 > **Last verified: 2026-09-29**: #575 (AP Invoices popups) and #578 (Cash Flow cash view) closed ✅ below with their prod measurements.
 > **Last verified: 2026-09-29**: branch `feat/ap-invoices-popup` added below (its entry is the newest); the 410-0000 entry (#573) closed ✅ with its prod measurements.
 > **Last verified: 2026-09-29**: branch `fix/staging-no-nightly-wipe` added below (PR #570 open, its entry is the newest).
@@ -33,6 +34,19 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
 ---
+
+## 2026-09-29 — 🟡 Cash Flow Unallocated "STOCK - FABRIC M": booking fix is the owner's, no code (owner「2. 不明白」→ answers → 「就放着」)
+
+1. Measured (prod): the stock account 330-0001 holds exactly three other-creditor bill lines (Jun / Aug / Sep); the P&L
+   reads purchases from the 701~705 GL accounts, so none of them reaches the P&L today. Figures and parties are in the
+   owner's handoff notes, not here (this repo is public).
+2. Owner: two lines are fabric purchases, one is a related-party loan repayment. Fix = the owner re-books the three
+   lines himself (AP Invoices › double-click › Edit): two to 701-0010, one to 440-0030.
+   Branch `feat/cashflow-stock-accounts-raw-materials` ("every stock-account payment is raw material") DROPPED — it
+   would have filed the loan repayment as a purchase. Not merged.
+3. 🟡 Parked by the owner (「就放着」): the related-party loan itself was never booked (no 440-0030 line in the 22/05
+   opening, no inflow in the bank), while the June and August bills repay it, so 440-0030 reads as a debit until an
+   opening credit is added. Opening fix = the owner's / accountant's.
 
 ## 2026-09-29 — ✅ Cash Flow: cash-view signs — money in positive, money out negative everywhere (owner「这个 cash flow 我想要更改，全部进钱 positive，出钱 negative」)(#578 0a24bdea MERGED, deployed, prod-verified)
 
