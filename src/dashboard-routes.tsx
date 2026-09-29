@@ -154,6 +154,9 @@ const Notifications = lazy(() => import('./pages/notifications'))
 // sidebar link is permission-filtered too.
 const Announcements = lazy(() => import('./pages/announcements'))
 const MailCenter = lazy(() => import('./pages/mail-center'))
+// Staging patch notes — PRs on staging not yet on main. Data only exists on
+// staging builds (scripts/gen-staging-notes.mjs).
+const StagingNotes = lazy(() => import('./pages/staging-notes'))
 const MailCenterDetail = lazy(() => import('./pages/mail-center/detail'))
 const Maintenance = lazy(() => import('./pages/maintenance'))
 const MaintenanceSofaCombos = lazy(() => import('./pages/maintenance/sofa-combos'))
@@ -494,6 +497,7 @@ export const DASHBOARD_ROUTES: RouteObject[] = [
   // Announcements — post a notice that shows on every worker's phone.
   { path: '/announcements', element: <S><Announcements /></S> },
   { path: '/mail-center', element: <S><MailCenter /></S> },
+  { path: '/staging-notes', element: <S><StagingNotes /></S> },
   { path: '/mail-center/:id', element: <S><MailCenterDetail /></S> },
   { path: '/maintenance', element: <S><Maintenance /></S> },
   { path: '/maintenance/sofa-combos', element: <S><MaintenanceSofaCombos /></S> },

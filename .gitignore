@@ -64,3 +64,6 @@ scripts/verify-*.ts
 # Scratch space for one-off audit / backfill scripts. Never part of the app —
 # these carry DB connection strings and get swept into unrelated commits.
 tmp/
+
+# Generated on staging deploys (scripts/gen-staging-notes.mjs)
+public/staging-notes.json

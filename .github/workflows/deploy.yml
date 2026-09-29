@@ -58,6 +58,9 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Staging needs main's history too, for the patch-notes step below.
+          fetch-depth: ${{ github.ref == 'refs/heads/staging' && 0 || 1 }}
 
       - uses: actions/setup-node@v4
         with:
@@ -135,6 +138,14 @@ jobs:
           key: asset-history-${{ github.ref_name }}-${{ github.run_id }}
           restore-keys: |
             asset-history-${{ github.ref_name }}-
+
+      # /staging-notes page data: PRs on staging that main does not have yet.
+      # Goes into public/ so vite copies it into dist. Staging only; prod
+      # never has the file and the page says so.
+      - name: Staging patch notes
+        if: github.ref == 'refs/heads/staging'
+        continue-on-error: true
+        run: node scripts/gen-staging-notes.mjs origin/main
 
       # Staging skips the typecheck (63s of this step's 68s, measured
       # 2026-09-28); vite still builds TS with errors, and the PR into main
