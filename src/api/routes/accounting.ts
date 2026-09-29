@@ -9104,9 +9104,12 @@ async function computeCashflowStatement(
   // month the voucher description names (payrollMonthFrom: "… - May'26",
   // "… - MAY'26", "… - JULY'26", "LATE SALARY JUNE" — owner 2026-09-29
   // 「月份一起修」); a leg naming no month uses its own document month; a named
-  // month with no payslips falls back to the document month's mix (what it
-  // got before); no payslips there either → no split, the leg stays on the
-  // account line.
+  // month with no payslips falls back to the document month's mix (before,
+  // an unreadable name got that mix and a readable one — "Salaries - Apr'26",
+  // paid 22/05 — stayed unsplit on the account line; now both split); no
+  // payslips there either → no split, the leg stays on the account line.
+  // The month comes from the LEG's text (the voucher line), which can differ
+  // from the voucher header the drill shows.
   const deptSplit: RmSplit = {};
   if (salaryLegs.length) {
     if (!map[LABOUR_ACCRUAL_ACCT]) map[LABOUR_ACCRUAL_ACCT] = { section: "DIRECT_LABOUR", order: 10 };
