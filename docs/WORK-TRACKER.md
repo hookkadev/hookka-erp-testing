@@ -32,6 +32,18 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
+## 2026-09-29 — 🔵 410-0000 ACCRUALS: parent accounts never postable + Cash Flow accrual family → Direct Labour (owner「by right 410-0000 不能选吧？我有注意到 410-0000 pv 开过去」→「做 a b d，c 的不做，要 park 回去对的 accrual」)(branch `fix/parent-accounts-not-postable`)
+
+1. Measured (prod): 410-0000 ACCRUALS was the ONLY account with children still flagged postable; PVs had been paid
+   against it. The owner re-parked the September ones himself at 15:04–15:26 (HPV-2609-026 / -027 → 410-0010,
+   HPV-2609-029 → 410-0020 EPF, HPV-2609-030 → 410-0030 SOCSO); 6 older legs (11,192.45) remain on 410-0000 for him.
+   c (restating them) is the owner`s, not ours — the restate path validates only the NEW lines, so locking 410-0000
+   does not block his re-parking.
+2. 🔵 a — flip 410-0000 to non-postable on prod (PUT /coa, owner-ordered).
+3. 🔵 b — parents never postable: validation / JE post / pickers / COA editor. Guard `tests/parent-accounts-not-postable.test.mjs`.
+4. 🔵 d — Cash Flow: ACCRUALS parent + ACCRUAL - EPF / SOCSO / EIS → Direct Labour (Sep: ACCRUAL - EPF 7,801.00,
+   ACCRUAL - SOCSO 1,035.50, ACCRUALS 255.05 leave Unallocated).
+
 ## 2026-09-29 — 🔵 Staging wiped every night; refresh must keep test data (branch `fix/staging-no-nightly-wipe` → `main`)
 - 1. 🔵 Cause: `sync-staging.yml` cron (18:00 UTC) on `main` dropped staging's public schema. Cron removed, manual dispatch only. BUG-2026-09-29-216.
 - 2. 🔵 New `mode=merge` (default): `scripts/merge-prod-into-staging.mjs` inserts prod rows staging lacks, never deletes or overwrites. `mode=reset` = old full clone, needs `confirm=SYNC`.
