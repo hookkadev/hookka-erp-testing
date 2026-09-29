@@ -8668,6 +8668,16 @@ async function computeCashflowStatement(
   // every account filed under the chart's FINANCE COSTS parent (902-0000 on
   // this chart — found by name, not code) defaults to the Finance Cost
   // section unless the owner has dragged it somewhere himself.
+  // Raw-material stock accounts (special type SBS — "STOCK - FABRIC M",
+  // "STOCK - B.FILLER" …) paid straight from the bank are material purchases
+  // (owner 2026-09-29: the Gallery Dominance 442.00 fabric bill booked to
+  // STOCK - FABRIC M) — Raw Materials by default, nested by name under the
+  // matching purchase parent. Work-in-progress / finished-goods stock is not
+  // raw material and keeps its old placement. The owner's drag still wins.
+  for (const a of coa.values()) {
+    if (a.sat !== "SBS" || map[a.code] || /WORK-IN-PROGRESS|FINISHED GOODS|\bWIP\b/i.test(a.name)) continue;
+    map[a.code] = { section: "RAW_MATERIALS", order: 10 };
+  }
   const financeParents = new Set([...coa.values()].filter((a) => /^FINANCE COSTS?$/i.test(a.name.trim())).map((a) => a.code));
   for (const a of coa.values()) if (a.parentCode && financeParents.has(a.parentCode) && !map[a.code]) map[a.code] = { section: "FINANCE_COST", order: 10 };
   const sgOverride = await getCashflowStockGroupMap(c.var.DB);

@@ -432,6 +432,13 @@ export function buildStatement(opts: {
         // The facility account itself is the group ("TRADE FINANCE - HOUZS
         // CENTURY SDN BHD"), its supplier / repayment rows sit under it.
         pCode = a.accountCode;
+      } else if (sec === "RAW_MATERIALS" && a.accountCode && coa.get(a.accountCode)?.sat === "SBS") {
+        // A raw-material stock account paid straight from the bank (owner
+        // 2026-09-29: "STOCK - FABRIC M" 442.00) files under the purchase
+        // parent its name belongs to — FABRIC → PURCHASE - FABRIC — not under
+        // the balance-sheet STOCK parent.
+        const p = RM_LINE_PARENT[rawMaterialLineFor(a.label, stockGroupOverride)];
+        if (p && coa.has(p)) pCode = p;
       } else if (a.accountCode) {
         const p = coa.get(a.accountCode)?.parentCode ?? undefined;
         if (p && p !== a.accountCode && coa.has(p)) pCode = p;

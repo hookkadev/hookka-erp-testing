@@ -32,6 +32,15 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
+## 2026-09-29 — 🟡 Cash Flow: raw-material stock accounts → Raw Materials (owner「442.00 - 可以」) — built, merge HELD for the owner (branch `feat/cashflow-stock-accounts-raw-materials`)
+
+1. 🔵 SBS stock accounts (not WIP / FG) default to Raw Materials, nested by name under the matching purchase parent.
+   Guard `tests/cashflow-stock-accounts.test.mjs`.
+2. 🟡 Held because the same rule also moves, on prod (measured 2026-09-29, GL 330-0001 since 22/05): Jun OCB-2606-017
+   (Houzs Venture) 10,000.00 and Aug OCB-2608-008 (Houzs Century, "HOOKKA TRANSFER TO HOUZS") 107,898.90 from
+   Unallocated into Raw Materials › PURCHASE - FABRIC — Aug operating surplus 213,219.57 → 105,320.67, Jun 7,678.77 →
+   −2,321.23; Cash Surplus unchanged. The owner approved the rule on the 442.00 example; the Aug effect is shown before merge.
+
 ## 2026-09-29 — 🔵 Staging wiped every night; refresh must keep test data (branch `fix/staging-no-nightly-wipe` → `main`)
 - 1. 🔵 Cause: `sync-staging.yml` cron (18:00 UTC) on `main` dropped staging's public schema. Cron removed, manual dispatch only. BUG-2026-09-29-216.
 - 2. 🔵 New `mode=merge` (default): `scripts/merge-prod-into-staging.mjs` inserts prod rows staging lacks, never deletes or overwrites. `mode=reset` = old full clone, needs `confirm=SYNC`.
