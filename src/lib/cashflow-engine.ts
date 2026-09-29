@@ -34,11 +34,19 @@ export type CoaLite = {
   parentCode?: string | null;
 };
 
-// Sections presented as cash OUT (payments shown positive, subtracted).
-// REVENUE_COLLECTION, LOAN, UNALLOCATED present cash IN (inflow positive).
+// Sections presented as cash OUT (payments shown positive, receipts in
+// brackets). Only REVENUE_COLLECTION presents cash IN positive.
+//
+// Owner 2026-09-29 「确定一下整体的符号哦，有点乱」→「做，统一符号」: LOAN and
+// UNALLOCATED used to be inflow-signed, so below the operating result the
+// same bracket meant opposite things — CAPEX (61,400.00) was money IN (a
+// machine sold to Houzs) while Loan (71,457.13) was money OUT (lent to Houzs
+// Venture). Every section except the collection block now reads the same
+// way: amount = money out, (amount) = money in. Figures and the cash surplus
+// are unchanged; only the direction of those two blocks flips.
 export const OUTFLOW_SECTIONS: ReadonlySet<CfSection> = new Set<CfSection>([
   "RAW_MATERIALS", "TRADE_FINANCE", "DIRECT_LABOUR", "FACTORY_OVERHEAD", "GENERAL_EXPENSE",
-  "TAXATION", "FINANCE_COST", "CAPEX", "DEPOSIT",
+  "TAXATION", "FINANCE_COST", "CAPEX", "DEPOSIT", "LOAN", "UNALLOCATED",
 ]);
 
 // Operating sections feed "Net operation surplus / (deficit)".
@@ -66,7 +74,7 @@ export const SECTION_LABELS: Record<CfSection, string> = {
   FINANCE_COST: "Finance Cost",
   CAPEX: "Capital Expenditure (CAPEX)",
   DEPOSIT: "Deposit Incurred / (Repay)",
-  LOAN: "Loan / (Repayment)",
+  LOAN: "Loan repaid / lent · (received)",
   UNALLOCATED: "Unallocated",
 };
 
