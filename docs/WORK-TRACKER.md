@@ -84,8 +84,9 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 ## 2026-09-29 — 🔵 Staging wiped every night; refresh must keep test data (branch `fix/staging-no-nightly-wipe` → `main`)
 - 1. 🔵 Cause: `sync-staging.yml` cron (18:00 UTC) on `main` dropped staging's public schema. Cron removed, manual dispatch only. BUG-2026-09-29-216.
 - 2. 🔵 New `mode=merge` (default): `scripts/merge-prod-into-staging.mjs` inserts prod rows staging lacks, never deletes or overwrites. `mode=reset` = old full clone, needs `confirm=SYNC`.
-- 3. 🔵 `sanitize-staging.mjs` STAGING_REF `zaxy...` changed to `kahx...` (it was refusing to run, so the scrub and PIN steps were skipped after each wipe).
+- 3. 🔵 `sanitize-staging.mjs` STAGING_REF changed from the old staging project to the current one (it was refusing to run, so the scrub and PIN steps were skipped after each wipe).
 - 4. 🟡 UNMEASURED: merge not run against a live DB (no credentials in this session). First step after merge: dispatch `Sync prod → staging` with mode=merge and read the per-table log. The sanitiser also re-fakes contact fields and passwords on ALL staging rows, including test rows.
+- 5. 🔵 Project refs out of the repo: scripts read `SUPABASE_PROJECT_REF` / `SUPABASE_STAGING_REF` from env (`scripts/_db.mjs` `projectRef`), `.mcp.json` uses `${SUPABASE_STAGING_REF}`, docs name the variable. Needs GitHub secret `SUPABASE_STAGING_REF` before the next staging sync (branch `fix/staging-ref-cleanup`).
 
 ## 2026-09-29 — ✅ Cash Flow: one sign convention (owner「确定一下整体的符号哦，有点乱，loan from houzs … 应该是我借出去吧」→「做，统一符号」)(#569 e96e89c5 MERGED, deployed, prod-verified)
 
@@ -2069,7 +2070,7 @@ Owner 早前的指示：**「假的acc就不要放了 放空都好过放假的�
 
 **没做的：已经生成并存起来的 payslip 列。** 那些是真正会印出来交给 HR 的东西。
 
-实测 prod（`vpwdqtsxexpiqxzweivd`）：
+实测 prod：
 
 | period | rows | fake | status |
 |---|---|---|---|
@@ -3688,7 +3689,7 @@ mobile (`/worker`, `/m`) must not lag (currently laggy). Plus OCR + research.
 **Asks logged (so none drop):**
 1. ✅ Pool size 50 (owner set in Supabase). ⏳ Compute → Small blocked by a
    Supabase platform incident (project resizing failing globally). Re-do once
-   status.supabase.com clears; verify it lands on prod `vpwdqtsxexpiqxzweivd`.
+   status.supabase.com clears; verify it lands on prod (`SUPABASE_PROJECT_REF`).
 2. 🔵 **B — DB connection retry + graceful 503 login** (`supabase-compat.ts`,
    `auth.ts`) — written, shipping now.
 3. ⬜ **Keep-warm heartbeat** — ping `/api/pg-ping` every 1–5 min (GitHub Action

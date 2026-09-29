@@ -4,16 +4,10 @@
 //
 // Usage: $env:DATABASE_URL="postgresql://…"; node scripts/audit-do-hub-composition-2026-07-22.mjs
 import postgres from "postgres";
-import fs from "node:fs";
 
 // Fall back to the connection string already committed in the older one-shot
 // scripts so this runs without re-entering it. Never printed.
-let url = process.env.DATABASE_URL;
-if (!url) {
-  const s = fs.readFileSync(new URL("./audit-wip-both-dbs.mjs", import.meta.url), "utf8");
-  const m = s.match(/"(postgresql:\/\/[^"]*vpwdqtsxexpiqxzweivd[^"]*)"/);
-  if (m) url = m[1];
-}
+const url = process.env.DATABASE_URL;
 if (!url) throw new Error("set DATABASE_URL");
 const sql = postgres(url, { ssl: "require", max: 1, idle_timeout: 15 });
 

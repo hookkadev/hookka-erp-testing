@@ -11,8 +11,8 @@
 //   const sql = postgres(prodUrl(), { ssl: "require", max: 1 });
 //
 // Set before running:
-//   export HOOKKA_PROD_DB_URL='postgresql://postgres:<YOUR-DB-PASSWORD>@db.vpwdqt....supabase.co:5432/postgres'
-//   export HOOKKA_STAGING_DB_URL='postgresql://postgres:<YOUR-DB-PASSWORD>@db.zaxygx....supabase.co:5432/postgres'
+//   export HOOKKA_PROD_DB_URL='postgresql://postgres:<YOUR-DB-PASSWORD>@db.<prod-ref>.supabase.co:5432/postgres'
+//   export HOOKKA_STAGING_DB_URL='postgresql://postgres:<YOUR-DB-PASSWORD>@db.<staging-ref>.supabase.co:5432/postgres'
 //
 // Fails loudly rather than defaulting. A script that silently connected to the
 // wrong database would be worse than one that refuses to start — several of
@@ -50,4 +50,22 @@ export function stagingUrl() {
  */
 export function prodPoolerUrl() {
   return need("HOOKKA_PROD_POOLER_URL", "production, via the connection pooler");
+}
+
+/**
+ * A Supabase project ref, read from the environment and never written in source
+ * (this repo is public). Set them in your local .env and as GitHub secrets:
+ *   SUPABASE_PROJECT_REF  production
+ *   SUPABASE_STAGING_REF  staging
+ * Scripts use the ref to prove which database a URL points at, so a missing or
+ * malformed one stops the script instead of skipping the check.
+ */
+export function projectRef(which) {
+  const name = { prod: "SUPABASE_PROJECT_REF", staging: "SUPABASE_STAGING_REF" }[which];
+  const v = (process.env[name] ?? "").trim();
+  if (!/^[a-z]{20}$/.test(v)) {
+    console.error(`\n✗ ${name} is not set to a Supabase project ref (${which}) — refusing to run.\n`);
+    process.exit(1);
+  }
+  return v;
 }

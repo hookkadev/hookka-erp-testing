@@ -19,11 +19,6 @@ import postgres from "postgres";
 import fs from "node:fs";
 
 let url = process.env.DATABASE_URL;
-if (!url) {
-  const s = fs.readFileSync(new URL("./audit-wip-both-dbs.mjs", import.meta.url), "utf8");
-  const m = s.match(/"(postgresql:\/\/[^"]*vpwdqtsxexpiqxzweivd[^"]*)"/);
-  if (m) url = m[1];
-}
 if (!url) throw new Error("set DATABASE_URL");
 const EXECUTE = process.argv.includes("--execute");
 const sql = postgres(url, { ssl: "require", max: 1, idle_timeout: 30 });

@@ -49,10 +49,10 @@ is fast (LCP 0.86 s, INP 48 ms) — the pain is (a) downloading a big JS bundle,
 
 ## The fix plan — 3 prongs (real ERPs get all three right)
 1. **Supabase capacity — OWNER (their account).** Check prod Supabase
-   (`vpwdqtsxexpiqxzweivd`, Singapore): active connection count vs the tier
+   (Singapore): active connection count vs the tier
    limit, compute size, and whether it auto-pauses/scales. **Right-size it.**
-   This is the biggest lever on the 3–30 s / 500. (Stage = `zaxygxwadidiqcphibma`,
-   Tokyo.)
+   This is the biggest lever on the 3–30 s / 500. (Stage was then an older
+   Tokyo project, since replaced.)
 2. **Code — THE DEV WORK:**
    - **Login/DB resilience (URGENT).** In the per-request DB middleware
      (`src/api/worker.ts` ~line 285, runs before authMiddleware) or in `getSql`,
@@ -73,7 +73,7 @@ is fast (LCP 0.86 s, INP 48 ms) — the pain is (a) downloading a big JS bundle,
 ## Diagnosis specifics (scoped diagnosis, 2026-06-30) — exact findings
 
 ### Supabase — THE BIGGEST LEVER (owner's dashboard; may fix the login NOW, no code)
-Prod = `vpwdqtsxexpiqxzweivd` (Singapore). The prod-30s-vs-staging-1-4s pattern
+Prod is in Singapore. The prod-30s-vs-staging-1-4s pattern
 points straight here:
 1. **Connection Pooling → Supavisor → Max Connections: raise to ≥ 50.** The
    default (~10-15) is FAR too low — every Cloudflare Worker request opens its
