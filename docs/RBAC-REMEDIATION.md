@@ -1,5 +1,7 @@
 # RBAC Remediation — current state and the way through
 
+> **Last verified: 2026-09-29** (branch `docs/staging-env-table`) — Environment rules only: staging's database ref corrected to `kahxgvbfanbraazetefr`. Nothing else re-checked.
+
 > **Last verified: 2026-09-24** — rebased onto `main` (215 commits of drift, cherry-picked clean) and
 > re-measured: scanner against this branch, plus the PRODUCTION grant counts quoted below. Previously against `src/api/lib/rbac.ts` (fail-opens closed) and `src/api/routes/{attendance,leaves,files,working-hour-entries,cash-flow,stock-value,forecasts,sessions}.ts`,
 > `src/api/lib/{rbac,nav-permissions}.ts`, `src/dashboard-routes.tsx`. Every claim below was
@@ -266,7 +268,8 @@ the queue above. Also unread: session and token handling, `public-do-qr.ts`, and
 ## Environment rules — these are not negotiable
 
 - **Sandbox for development.** Supabase `cjnewpxxmiucwirlcqpj`. Staging
-  (`zaxygxwadidiqcphibma`) is a production clone and is for read-only confirmation only,
+  (database `kahxgvbfanbraazetefr`; `zaxygxwadidiqcphibma` is its file storage only — see
+  CLAUDE.md) is a production clone and is for read-only confirmation only,
   never the surface a fix is developed against. Production (`vpwdqtsxexpiqxzweivd`) is never
   written to from this work.
 - **Say which environment** any command or query touches, every time, before running it.

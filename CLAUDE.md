@@ -1,5 +1,10 @@
 # Hookka ERP — Start Here (read before any task)
 
+> **Last verified: 2026-09-29** (branch `docs/staging-env-table`) — corrected the
+> Environment table: staging's database is `kahxgvbfanbraazetefr`, measured from the Cloudflare
+> Hyperdrive config `hookka-erp-staging`; `zaxygxwadidiqcphibma` is staging's file storage only.
+> Nothing else on this page re-checked.
+
 > **Last verified: 2026-09-22** (branch `fix/scan-queue-client-driven`) — re-measured the tracked-file
 > count and the API.md mount/handler counts quoted below; nothing else re-checked.
 
@@ -87,8 +92,17 @@ Doc map: [`docs/DOCS-INDEX.md`](docs/DOCS-INDEX.md). The big picture: [`docs/DEV
 | | Supabase project | Use |
 |---|---|---|
 | Sandbox | `cjnewpxxmiucwirlcqpj` | Where development happens. Seed it; never mind that it is fake. |
-| Staging | `zaxygxwadidiqcphibma` | A **production clone**. Read-only confirmation of a finished fix. Never the surface a fix is developed against. |
+| Staging — **database** | `kahxgvbfanbraazetefr` (`hookka-erp-staging-sg`, Singapore) | A **production clone**. Read-only confirmation of a finished fix. Never the surface a fix is developed against. |
+| Staging — **file storage only** | `zaxygxwadidiqcphibma` (`hookka-erp-staging`, Tokyo) | Holds the `hookka-files` bucket staging uploads to. Its own database is **stale and unused** (`file_assets` stops at 2026-09-12; no `photo_file_id` column) — never query it to answer a question about staging data. |
 | Production | `vpwdqtsxexpiqxzweivd` | Never written to from development work. |
+
+**Staging is split across two Supabase projects** (measured 2026-09-29). The database is
+whatever the Cloudflare Hyperdrive config `hookka-erp-staging` (id `759227c0…`, bound as
+`HYPERDRIVE_STAGING`) connects to — its user is `postgres.kahxgvbfanbraazetefr`. File storage
+is whatever `SUPABASE_PROJECT_REF` is set to on the Pages **Preview** environment — currently
+`zaxygxwadidiqcphibma`. The two similar names cost an afternoon on 2026-09-29: an org-chart photo
+bug was chased through the Tokyo project's database, which staging never writes to. If either
+setting changes, update this table.
 
 - **Fixes are finished and verified locally first.** Pushing is never a way to get something
   testable — if the only way to try a change is to deploy it, the change is not ready.

@@ -1,5 +1,7 @@
 # Pre-Deploy Checklist — IRON LAW
 
+> **Last verified: 2026-09-29** (branch `docs/staging-env-table`) — step 2 only: staging's database is `kahxgvbfanbraazetefr` (from the Hyperdrive config), and `canary-*` hosts route to production per `src/api/worker.ts`. Rest of the page not re-checked.
+
 > **Last verified: 2026-08-13** against `migrations-postgres/0049_multi_tenant_skeleton.sql`, `package.json` (`test` = `node --import tsx/esm --test tests/*.test.mjs`; `build` is a bare `vite build`), `src/api/lib/auth-middleware.ts:196` (`SESSION_CACHE_TTL_S = 300`), `src/api/lib/tenant.ts`, and `.github/workflows/deploy.yml`.
 > Corrected 2026-08-13: added the staging-DB shortcut that now exists (`wrangler.toml` binds `HYPERDRIVE_STAGING`), and flagged that `npm run build` alone does not type-check — the gate is `build:strict`.
 > **UNVERIFIED ASSERTION** (as of 2026-08-13): the 2026-04-29 outage narrative and the "reviewer MUST refuse to merge" process rule are owner/process intent. Neither is checkable from source. The technical claims around them were re-checked and hold.
@@ -29,9 +31,11 @@
    what the code assumes).
 2. **Use the staging DB** — one already exists and is bound as
    `HYPERDRIVE_STAGING` in `wrangler.toml` (Supabase project
-   `zaxygxwadidiqcphibma`). Any `*.hookka-erp-testing.pages.dev` preview
-   URL, including a PR canary, routes to it automatically
-   (`isPreviewHostname` / `pickDbUrl`, `src/api/worker.ts:294-310`).
+   `kahxgvbfanbraazetefr`, `hookka-erp-staging-sg` — measured 2026-09-29 from the
+   Hyperdrive config; `zaxygxwadidiqcphibma` is staging's *file storage* only and its
+   database is stale). Any `*.hookka-erp-testing.pages.dev` preview URL routes to it
+   automatically — **except PR canaries**: a `canary-*` host is sent to the
+   **production** database (`isPreviewHostname` / `pickDbUrl`, `src/api/worker.ts`).
    Confirm it holds a representative slice of production data before
    trusting a walkthrough against it; `.github/workflows/sync-staging.yml`
    and `trim-staging.yml` maintain it.
