@@ -464,7 +464,37 @@ const PAGE_CSS = `
   .num { font-variant-numeric: tabular-nums; }
 `;
 
-export function renderScheduleHtml(data: ScheduleReport): string {
+// Phone layout for the Schedule and Overdue emails (BUG-36): below 900px
+// (phones, and the narrow reading pane of Gmail or Outlook) each table row
+// becomes a card and the 4 summary boxes go two per row. `screen` only, so
+// the A4 print is unchanged. The small labels are hidden on desktop, where
+// the table header names the columns.
+const PHONE_CSS = `
+  .m-lbl { display: none; }
+  @media screen and (max-width: 900px) {
+    body { font-size: 11pt; }
+    .page { padding: 10px 12px; }
+    h1 { font-size: 16pt; }
+    .summary { display: block; overflow: hidden; }
+    .summary .cell { display: block; float: left; width: 50%; padding: 6px 8px; }
+    .summary .val { font-size: 14pt; }
+    table.data, table.data tbody, table.data tr, table.data td { display: block; width: auto !important; }
+    table.data colgroup, table.data thead { display: none; }
+    table.data tbody tr { border: 1px solid #E5E1DC; border-radius: 6px; margin-bottom: 8px; padding: 8px 10px; }
+    table.data tbody tr:last-child td, table.data tbody td { border: 0; padding: 1px 0; overflow: visible; text-align: left !important; font-size: 10.5pt; }
+    table.data tbody td.m-inline { display: inline-block; margin-right: 14px; }
+    table.data tbody td:empty { display: none; }
+    .m-lbl { display: inline; color: #6B7280; font-weight: 400; font-size: 9pt; }
+    .secondary { font-size: 9pt; }
+    .dept-card { border: 0; }
+    .dept-head { flex-wrap: wrap; gap: 2px 10px; border-radius: 4px; margin-bottom: 8px; }
+  }
+`;
+
+export function renderScheduleHtml(
+  data: ScheduleReport,
+  opts: { email?: boolean } = {},
+): string {
   const { date, totals, byDepartment } = data;
   const longDate = formatDateLong(date);
 
@@ -485,18 +515,18 @@ export function renderScheduleHtml(data: ScheduleReport): string {
     .map((d) => {
       const rows = d.rows
         .map((r) => {
-          const status = `<span style="color:${statusColor(r.status)};font-weight:600;">${escapeHtml(r.status)}</span>`;
+          const status = `<span style="color:${statusColor(r.status)};font-weight:600;">${escapeHtml(r.status.replace(/_/g, " "))}</span>`;
           const pic = [r.pic1Name, r.pic2Name].filter(Boolean).join(", ");
           return `<tr>
-            <td>${escapeHtml(r.poNo)}</td>
+            <td><strong>${escapeHtml(r.poNo)}</strong></td>
             <td>${escapeHtml(r.customerName)}</td>
             <td>${escapeHtml(r.productCode)}<br><span class="secondary">${escapeHtml(r.productName)}</span></td>
-            <td>${escapeHtml(r.sizeLabel ?? "")}</td>
-            <td>${escapeHtml(r.wipLabel ?? "")}</td>
-            <td class="num" style="text-align:right;">${r.quantity}</td>
-            <td class="num" style="text-align:right;">${formatMinutes(r.prodMinutes)}</td>
-            <td>${status}</td>
-            <td>${escapeHtml(pic || "—")}</td>
+            <td class="m-inline">${r.sizeLabel ? `<span class="m-lbl">Size </span>${escapeHtml(r.sizeLabel)}` : ""}</td>
+            <td class="m-inline">${r.wipLabel ? `<span class="m-lbl">Stage </span>${escapeHtml(r.wipLabel)}` : ""}</td>
+            <td class="num m-inline" style="text-align:right;"><span class="m-lbl">Qty </span>${r.quantity}</td>
+            <td class="num m-inline" style="text-align:right;"><span class="m-lbl">Mins </span>${formatMinutes(r.prodMinutes)}</td>
+            <td class="m-inline">${status}</td>
+            <td class="m-inline"><span class="m-lbl">PIC </span>${escapeHtml(pic || "—")}</td>
           </tr>`;
         })
         .join("");
@@ -528,11 +558,12 @@ export function renderScheduleHtml(data: ScheduleReport): string {
 <html lang="en">
 <head>
 <meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Production Schedule — ${escapeHtml(longDate)}</title>
-<style>${PAGE_CSS}</style>
+<style>${PAGE_CSS}${PHONE_CSS}</style>
 </head>
 <body>
-<div class="print-bar no-print"><button onclick="window.print()">Print / Save as PDF</button></div>
+${opts.email ? "" : `<div class="print-bar no-print"><button onclick="window.print()">Print / Save as PDF</button></div>`}
 <div class="page">
   <h1>Production Schedule</h1>
   <div class="meta">${escapeHtml(longDate)} &nbsp;·&nbsp; Hookka Manufacturing ERP</div>
@@ -558,28 +589,6 @@ function formatRM(sen: number): string {
   });
 }
 
-// Phone layout for the Overdue email (BUG-36): below 900px (phones, and the narrow reading pane of Gmail or Outlook) each SO row
-// becomes a card and the 4 summary boxes go two per row. `screen` only, so
-// the A4 print is unchanged. The small labels are hidden on desktop, where
-// the table header names the columns.
-const OVERDUE_PHONE_CSS = `
-  .m-lbl { display: none; }
-  @media screen and (max-width: 900px) {
-    body { font-size: 11pt; }
-    .page { padding: 10px 12px; }
-    h1 { font-size: 16pt; }
-    .summary { display: block; overflow: hidden; }
-    .summary .cell { display: block; float: left; width: 50%; padding: 6px 8px; }
-    .summary .val { font-size: 14pt; }
-    table.data, table.data tbody, table.data tr, table.data td { display: block; width: auto !important; }
-    table.data colgroup, table.data thead { display: none; }
-    table.data tbody tr { border: 1px solid #E5E1DC; border-radius: 6px; margin-bottom: 8px; padding: 8px 10px; }
-    table.data tbody tr:last-child td, table.data tbody td { border: 0; padding: 1px 0; overflow: visible; text-align: left !important; font-size: 10.5pt; }
-    table.data tbody td.m-inline { display: inline-block; margin-right: 14px; }
-    .m-lbl { display: inline; color: #6B7280; font-weight: 400; font-size: 9pt; }
-    .secondary { font-size: 9pt; }
-  }
-`;
 
 export function renderOverdueHtml(
   data: OverdueReport,
@@ -658,7 +667,7 @@ export function renderOverdueHtml(
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Overdue Report — ${escapeHtml(longDate)}</title>
-<style>${PAGE_CSS}${OVERDUE_PHONE_CSS}</style>
+<style>${PAGE_CSS}${PHONE_CSS}</style>
 </head>
 <body>
 ${opts.email ? "" : `<div class="print-bar no-print"><button onclick="window.print()">Print / Save as PDF</button></div>`}

@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-222 (branch `fix/report-emails-mobile`, to staging); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-221 (branch `fix/overdue-email-mobile`, to staging; -220 is taken on staging); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-29** (branch `chore/sync-main-into-staging`, staging<-main merge): both logs merged; staging's customer-credit entry renumbered BUG-2026-09-28-210 to -218 (main's -210 is the RM stock-qty bug) and staging's DEV-05 dual-key BUG-2026-09-29-216 (PR #572) to -219 (main's -216 is the staging nightly wipe). Newest entry is -219.
 
@@ -55,6 +56,36 @@ Entries themselves stay newest-first.
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
 
 ---
+
+## BUG-2026-09-29-222 — the Schedule, Efficiency and Morning Brief emails were unreadable on a phone `reports` `ui-frontend` 🟢
+
+🟢 Fixed on `staging` (branch `fix/report-emails-mobile`, BUG-36 follow-up to -221).
+
+Same cause as the Overdue email (-221): each email is a desktop or A4 page
+with no viewport tag, so a phone shrinks it to fit. The Schedule email is a
+9-column table per department; the Efficiency email a 7-column employee table.
+The Morning Brief was already a 720px email layout but had no viewport tag,
+and one of its notices (pending schedule proposals) was in Chinese, against
+the English-only UI rule.
+
+Fix:
+- `schedule-overdue-report.ts`: the Overdue phone CSS is now `PHONE_CSS`,
+  shared by the Schedule email (job cards become cards below 900px, size /
+  stage / qty / mins / PIC labelled, status with spaces, department header
+  wraps).
+- `efficiency-report.ts`: below 640px the summary boxes go two per row and
+  each employee row becomes a card (name, status, clock, work / prod /
+  efficiency); department table cells stop wrapping hour values.
+- `production-brief.ts`: viewport tag, tighter padding below 640px, SO numbers
+  stay on one line, the proposals notice in English.
+- `renderScheduleHtml` / `renderEfficiencyHtml` take `{ email: true }` from
+  `runAndSendReport` and drop the Print button; the in-app pages keep it.
+
+All phone rules are `screen`-only, so the A4 prints are unchanged. Outlook's
+phone app partly ignores embedded media queries.
+
+Regression test: `tests/report-emails-mobile.test.mjs` (fails on the old
+templates, passes on the new ones).
 
 ## BUG-2026-09-29-221 — the Overdue email was unreadable on a phone `reports` `ui-frontend` 🟢
 
