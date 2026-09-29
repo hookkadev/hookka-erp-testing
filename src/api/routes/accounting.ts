@@ -285,6 +285,21 @@ const PROTECTED_ACCOUNTS = new Set([
   "330-3005", "330-4000", "330-8000", "330-9000",
 ]);
 
+// An account with child accounts is a header (AutoCount convention) and is
+// NEVER postable, whatever its stored flag says. Owner 2026-09-29 「by right
+// 410-0000 不能选吧」: 410-0000 ACCRUALS was the one parent in the chart still
+// flagged postable, so salary vouchers were paid against it instead of
+// 410-0010 ACCRUAL - SALARY. The fragment below replaces the stored flag in the
+// SELECTs that feed line validation; accountHasChildren serves single lookups.
+// (snake_case alias: the PG adapter camelCases it back to isPostable.)
+const EFFECTIVE_POSTABLE_SQL =
+  "CASE WHEN EXISTS (SELECT 1 FROM chart_of_accounts k WHERE k.parentCode = chart_of_accounts.code) THEN 0 ELSE isPostable END AS is_postable";
+async function accountHasChildren(db: Env["Variables"]["DB"], code: string): Promise<boolean> {
+  const r = await db.prepare("SELECT COUNT(*) AS n_children FROM chart_of_accounts WHERE parentCode = ?")
+    .bind(code).first<Record<string, unknown>>();
+  return Number(r?.nChildren ?? r?.n_children ?? 0) > 0;
+}
+
 // "Does this account carry any amount?" — gate before promoting a leaf
 // account into a parent (drag & drop). Checks the immutable ledger plus
 // legacy journal_lines, resolving renamed codes so history posted under
@@ -842,7 +857,13 @@ app.get("/coa", async (c) => {
   const res = await c.var.DB.prepare(
     "SELECT * FROM chart_of_accounts WHERE isActive = 1 ORDER BY code",
   ).all<CoaRow>();
-  const data = (res.results ?? []).map(rowToCoa);
+  // A parent is never postable (see EFFECTIVE_POSTABLE_SQL) — every account
+  // picker filters on isPostable, so a header can no longer be chosen.
+  const parents = new Set((res.results ?? []).map((r) => r.parentCode).filter((x): x is string => !!x));
+  const data = (res.results ?? []).map((r) => {
+    const row = rowToCoa(r);
+    return parents.has(row.code) ? { ...row, isPostable: false } : row;
+  });
   return c.json({ success: true, data, total: data.length });
 });
 
@@ -978,6 +999,15 @@ app.put("/coa", async (c) => {
             ? 1
             : 0,
     };
+    if (await accountHasChildren(c.var.DB, String(code))) {
+      if (body.isPostable === true) {
+        return c.json(
+          { success: false, error: `${code} has child accounts — a parent (header) account can't be postable; post to one of its children` },
+          400,
+        );
+      }
+      merged.isPostable = 0;
+    }
     if (
       merged.cashFlowCategory &&
       !["O", "I", "F"].includes(merged.cashFlowCategory)
@@ -1376,7 +1406,7 @@ app.put("/journals/:id", async (c) => {
             400,
           );
         }
-        if ((acct.isPostable ?? 1) === 0) {
+        if ((acct.isPostable ?? 1) === 0 || (await accountHasChildren(c.var.DB, l.accountCode))) {
           return c.json(
             {
               success: false,
@@ -3978,7 +4008,7 @@ app.post("/other-party-bills", async (c) => {
 
     for (const code of [...new Set(items.map((i) => i.counterAccount))]) {
       const acct = await c.var.DB.prepare(
-        "SELECT code, isPostable FROM chart_of_accounts WHERE code = ?",
+        `SELECT code, ${EFFECTIVE_POSTABLE_SQL} FROM chart_of_accounts WHERE code = ?`,
       )
         .bind(code)
         .first<{ code: string; isPostable: number }>();
@@ -4121,7 +4151,7 @@ app.put("/other-party-bills/:billNo", async (c) => {
     if (shapeErr) return c.json({ success: false, error: shapeErr }, 400);
     for (const code of [...new Set(items.map((i) => i.counterAccount))]) {
       const acct = await c.var.DB.prepare(
-        "SELECT code, isPostable FROM chart_of_accounts WHERE code = ?",
+        `SELECT code, ${EFFECTIVE_POSTABLE_SQL} FROM chart_of_accounts WHERE code = ?`,
       ).bind(code).first<{ code: string; isPostable: number }>();
       if (!acct) return c.json({ success: false, error: `Account ${code} not found` }, 400);
       if (acct.isPostable !== 1)
@@ -8608,6 +8638,10 @@ async function computeCashflowStatement(
   }
   const tfPayee = (sourceType: string, sourceId: string, description: string): string =>
     (sourceType.startsWith("supplier_payment") ? tfSupplierByNo.get(sourceId) : undefined) ?? description.trim();
+  // The salary-accrual family (410-0010's parent ACCRUALS and its ACCRUAL - EPF
+  // / SOCSO / EIS children) is labour money (owner 2026-09-29: salaries paid
+  // against 410-0000 showed as "Unallocated"). Found from the chart, not coded.
+  const salaryAccrualParent = coa.get(LABOUR_ACCRUAL_ACCT)?.parentCode ?? null;
   for (const legs of byEntry.values()) {
     const hasBank = legs.some((l) => bankCodes.has(l.code));
     const opening = legs.some((l) => isOpeningSource(l.sourceType));
@@ -8653,7 +8687,7 @@ async function computeCashflowStatement(
           ym: l.ym, sourceType: l.sourceType, sourceId: l.sourceId,
         });
         if (l.sourceType.startsWith("supplier_payment")) paymentNos.add(l.sourceId);
-        else if (l.code === LABOUR_ACCRUAL_ACCT)
+        else if (l.code === LABOUR_ACCRUAL_ACCT || (salaryAccrualParent && l.code === salaryAccrualParent))
           salaryLegs.push({ sourceId: l.sourceId, description: l.description, ym: l.ym });
       }
     }
@@ -8668,6 +8702,11 @@ async function computeCashflowStatement(
   // every account filed under the chart's FINANCE COSTS parent (902-0000 on
   // this chart — found by name, not code) defaults to the Finance Cost
   // section unless the owner has dragged it somewhere himself.
+  if (salaryAccrualParent) {
+    for (const a of coa.values()) {
+      if ((a.code === salaryAccrualParent || a.parentCode === salaryAccrualParent) && !map[a.code]) map[a.code] = { section: "DIRECT_LABOUR", order: 10 };
+    }
+  }
   const financeParents = new Set([...coa.values()].filter((a) => /^FINANCE COSTS?$/i.test(a.name.trim())).map((a) => a.code));
   for (const a of coa.values()) if (a.parentCode && financeParents.has(a.parentCode) && !map[a.code]) map[a.code] = { section: "FINANCE_COST", order: 10 };
   const sgOverride = await getCashflowStockGroupMap(c.var.DB);
@@ -9986,7 +10025,7 @@ app.post("/payment-vouchers", async (c) => {
         ? body.productLine
         : null;
     const coaRes = await c.var.DB.prepare(
-      "SELECT code, type, specialAccountType, isPostable FROM chart_of_accounts",
+      `SELECT code, type, specialAccountType, ${EFFECTIVE_POSTABLE_SQL} FROM chart_of_accounts`,
     ).all<{ code: string; type: CoaRow["type"]; specialAccountType: string | null; isPostable: number | null }>();
     const coa = new Map((coaRes.results ?? []).map((a) => [a.code, a] as const));
     await ensurePvApprovalCols(c.var.DB);
@@ -10120,7 +10159,7 @@ app.put("/payment-vouchers/:id", async (c) => {
     const date = String(body.date || "");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return c.json({ success: false, error: "date must be YYYY-MM-DD" }, 400);
     const coaRes = await c.var.DB.prepare(
-      "SELECT code, type, specialAccountType, isPostable FROM chart_of_accounts",
+      `SELECT code, type, specialAccountType, ${EFFECTIVE_POSTABLE_SQL} FROM chart_of_accounts`,
     ).all<{ code: string; type: CoaRow["type"]; specialAccountType: string | null; isPostable: number | null }>();
     const coa = new Map((coaRes.results ?? []).map((a) => [a.code, a] as const));
     const now = new Date().toISOString();
@@ -10544,7 +10583,7 @@ app.post("/payment-vouchers/:id/restate", async (c) => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return c.json({ success: false, error: "date must be YYYY-MM-DD" }, 400);
     const accrued = body.accrued === true || body.accrued === 1;
     const productLine = body.productLine === "SOFA" || body.productLine === "BEDFRAME" ? body.productLine : null;
-    const coaRes = await c.var.DB.prepare("SELECT code, type, specialAccountType, isPostable FROM chart_of_accounts").all<{ code: string; type: CoaRow["type"]; specialAccountType: string | null; isPostable: number | null }>();
+    const coaRes = await c.var.DB.prepare(`SELECT code, type, specialAccountType, ${EFFECTIVE_POSTABLE_SQL} FROM chart_of_accounts`).all<{ code: string; type: CoaRow["type"]; specialAccountType: string | null; isPostable: number | null }>();
     const coa = new Map((coaRes.results ?? []).map((a) => [a.code, a] as const));
     const v = validateDocLines(coa, body.lines);
     if (!v.ok) return c.json({ success: false, error: v.error }, 400);
@@ -10629,7 +10668,7 @@ app.post("/official-receipts", async (c) => {
       return c.json({ success: false, error: "date must be YYYY-MM-DD" }, 400);
     }
     const coaRes = await c.var.DB.prepare(
-      "SELECT code, type, specialAccountType, isPostable FROM chart_of_accounts",
+      `SELECT code, type, specialAccountType, ${EFFECTIVE_POSTABLE_SQL} FROM chart_of_accounts`,
     ).all<{ code: string; type: CoaRow["type"]; specialAccountType: string | null; isPostable: number | null }>();
     const coa = new Map((coaRes.results ?? []).map((a) => [a.code, a] as const));
     const v = validateDocLines(coa, body.lines);
@@ -10774,7 +10813,7 @@ app.post("/fund-transfers", async (c) => {
   }
 
   const coaRes = await c.var.DB.prepare(
-    "SELECT code, type, specialAccountType, isPostable FROM chart_of_accounts",
+    `SELECT code, type, specialAccountType, ${EFFECTIVE_POSTABLE_SQL} FROM chart_of_accounts`,
   ).all<{ code: string; type: CoaRow["type"]; specialAccountType: string | null; isPostable: number | null }>();
   const coa = new Map((coaRes.results ?? []).map((a) => [a.code, a] as const));
 
@@ -14451,7 +14490,7 @@ app.post("/bank-reco/book-line", async (c) => {
     const amountSen = Math.round(Number(line.amountSen) || 0);
     if (amountSen === 0) return c.json({ success: false, error: "Zero-amount line" }, 400);
     const coaRes = await c.var.DB.prepare(
-      "SELECT code, type, specialAccountType, isPostable FROM chart_of_accounts",
+      `SELECT code, type, specialAccountType, ${EFFECTIVE_POSTABLE_SQL} FROM chart_of_accounts`,
     ).all<{ code: string; type: CoaRow["type"]; specialAccountType: string | null; isPostable: number | null }>();
     const coa = new Map((coaRes.results ?? []).map((a) => [a.code, a] as const));
     const bank = coa.get(line.accountCode);
