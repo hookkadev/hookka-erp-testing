@@ -22,7 +22,7 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
 import type { Env } from "../worker";
-import { requirePermission } from "../lib/rbac";
+import { requirePermission, requireSuperAdmin } from "../lib/rbac";
 import { sendMail } from "../lib/email";
 import {
   collectEfficiencyData,
@@ -54,6 +54,14 @@ import {
   type OperationsPeriodKind,
 } from "../lib/operations-report";
 import { getOrgId } from "../lib/tenant";
+import {
+  REPORT_KINDS,
+  invalidEmailsIn,
+  loadReportSettings,
+  normalizeReportSettings,
+  saveReportSettings,
+  type ReportKind,
+} from "../lib/report-settings";
 
 const app = new Hono<Env>();
 export default app;
@@ -162,11 +170,23 @@ async function nonWorkingDayReason(c: {
 }
 
 // ---------------------------------------------------------------------------
-// Recipient resolution — DAILY_REPORT_RECIPIENTS env var (comma-separated)
+// Recipient resolution — a report configured on Settings → Email Reports
+// (kv_config['daily_report_settings'], BUG-36) uses its own PIC list, full
+// stop. Unconfigured reports: DAILY_REPORT_RECIPIENTS env var (comma-separated)
 // takes precedence. Fallback: all SUPER_ADMIN users in the users table.
 // ---------------------------------------------------------------------------
 
 async function resolveRecipients(
+  c: { env: Env["Bindings"]; var: Env["Variables"] },
+  kind: ReportKind,
+): Promise<string[]> {
+  const configured = (await loadReportSettings(c.var.DB))[kind];
+  if (configured) return configured.recipients;
+  return legacyRecipients(c);
+}
+
+// The pre-BUG-36 shared list, used by every report not yet configured.
+async function legacyRecipients(
   c: { env: Env["Bindings"]; var: Env["Variables"] },
 ): Promise<string[]> {
   const env = c.env as Env["Bindings"] & { DAILY_REPORT_RECIPIENTS?: string };
@@ -737,8 +757,6 @@ async function buildBriefHtmlCached(
 
 export const internal = new Hono<Env>();
 
-type ReportKind = "efficiency" | "schedule" | "overdue" | "brief";
-
 async function authCron(c: {
   env: Env["Bindings"];
   req: { header(name: string): string | undefined };
@@ -796,7 +814,7 @@ export async function dispatchReport(
       ? body.to.split(",").map((s) => s.trim()).filter(Boolean)
       : [];
   const recipients =
-    overrideTo.length > 0 ? overrideTo : await resolveRecipients(c);
+    overrideTo.length > 0 ? overrideTo : await resolveRecipients(c, kind);
   if (recipients.length === 0) {
     console.warn(`[reports/${kind}-trigger] no recipients — skipping send`);
     return { ok: false, date, sent: 0, failed: 0, errors: ["no recipients"] };
@@ -829,6 +847,11 @@ async function cronGate(
       sent: 0,
       failed: 0,
     });
+  }
+  // Switched off on Settings → Email Reports (BUG-36). Manual sends still work.
+  if ((await loadReportSettings(c.var.DB))[kind]?.enabled === false) {
+    console.log(`[reports/${kind}-trigger] skipping — disabled in Email Reports settings`);
+    return c.json({ ok: true, skipped: true, reason: "disabled", sent: 0, failed: 0 });
   }
   return null;
 }
@@ -869,6 +892,41 @@ internal.post("/brief-trigger", async (c) => {
     return res;
   });
   return c.json(result);
+});
+
+// ---------------------------------------------------------------------------
+// Settings → Email Reports (BUG-36): per-report on/off + PIC list.
+//   GET  /api/reports/settings  → { settings, fallback }
+//        `fallback` is who an UNCONFIGURED report goes to today, so the page
+//        can prefill instead of showing an empty list.
+//   PUT  /api/reports/settings  body = { brief?: {enabled, recipients[]}, ... }
+// SUPER_ADMIN only: the lists are staff emails.
+// ---------------------------------------------------------------------------
+app.get("/settings", async (c) => {
+  const denied = requireSuperAdmin(c);
+  if (denied) return denied;
+  const [settings, fallback] = await Promise.all([
+    loadReportSettings(c.var.DB),
+    legacyRecipients(c),
+  ]);
+  return c.json({ success: true, data: { kinds: REPORT_KINDS, settings, fallback } });
+});
+
+app.put("/settings", async (c) => {
+  const denied = requireSuperAdmin(c);
+  if (denied) return denied;
+  const body = await c.req.json().catch(() => null);
+  if (!body || typeof body !== "object") {
+    return c.json({ success: false, error: "Invalid JSON" }, 400);
+  }
+  const bad = invalidEmailsIn(body);
+  if (bad.length > 0) {
+    return c.json({ success: false, error: `Not a valid email: ${bad.join(", ")}` }, 400);
+  }
+  // Merge so saving one card never wipes another report's settings.
+  const next = { ...(await loadReportSettings(c.var.DB)), ...normalizeReportSettings(body) };
+  await saveReportSettings(c.var.DB, next);
+  return c.json({ success: true, data: next });
 });
 
 // Manual send-now endpoints for schedule + overdue (parallel to /efficiency/send).
