@@ -34,20 +34,14 @@ export type CoaLite = {
   parentCode?: string | null;
 };
 
-// Sections presented as cash OUT (payments shown positive, receipts in
-// brackets). Only REVENUE_COLLECTION presents cash IN positive.
-//
-// Owner 2026-09-29 「确定一下整体的符号哦，有点乱」→「做，统一符号」: LOAN and
-// UNALLOCATED used to be inflow-signed, so below the operating result the
-// same bracket meant opposite things — CAPEX (61,400.00) was money IN (a
-// machine sold to Houzs) while Loan (71,457.13) was money OUT (lent to Houzs
-// Venture). Every section except the collection block now reads the same
-// way: amount = money out, (amount) = money in. Figures and the cash surplus
-// are unchanged; only the direction of those two blocks flips.
-export const OUTFLOW_SECTIONS: ReadonlySet<CfSection> = new Set<CfSection>([
-  "RAW_MATERIALS", "TRADE_FINANCE", "DIRECT_LABOUR", "FACTORY_OVERHEAD", "GENERAL_EXPENSE",
-  "TAXATION", "FINANCE_COST", "CAPEX", "DEPOSIT", "LOAN", "UNALLOCATED",
-]);
+// Sections whose amounts would be shown with the sign flipped (money out
+// positive). NONE any more — owner 2026-09-29 「这个 cash flow 我想要更改，全部
+// 进钱 positive，出钱 negative」: every line reads the bank's way, amount =
+// money in, (amount) = money out, in every block. (History: until then the
+// cost blocks and everything below the operating result showed money out
+// positive, which made the same bracket mean opposite things across blocks.)
+// Kept as an (empty) set so the one sign rule stays in one place.
+export const OUTFLOW_SECTIONS: ReadonlySet<CfSection> = new Set<CfSection>([]);
 
 // Operating sections feed "Net operation surplus / (deficit)".
 export const OPERATING_SECTIONS: ReadonlySet<CfSection> = new Set<CfSection>([
@@ -73,8 +67,8 @@ export const SECTION_LABELS: Record<CfSection, string> = {
   TAXATION: "Taxation",
   FINANCE_COST: "Finance Cost",
   CAPEX: "Capital Expenditure (CAPEX)",
-  DEPOSIT: "Deposit Incurred / (Repay)",
-  LOAN: "Loan repaid / lent · (received)",
+  DEPOSIT: "Deposit refunded / (paid)",
+  LOAN: "Loan received / (repaid · lent)",
   UNALLOCATED: "Unallocated",
 };
 

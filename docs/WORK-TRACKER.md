@@ -33,6 +33,14 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
+## 2026-09-29 — 🔵 Cash Flow: cash-view signs — money in positive, money out negative everywhere (owner「这个 cash flow 我想要更改，全部进钱 positive，出钱 negative」)(branch `feat/cashflow-cash-view-signs`)
+
+1. 🔵 Supersedes the morning`s #569 rule (money out positive below the collection). `OUTFLOW_SECTIONS` is now empty:
+   costs, Trade Finance repayments, finance costs, capex spend, loans repaid / lent, unallocated payments read
+   negative; collections, drawdowns, loans received, asset sales read positive. Labels: Loan received / (repaid ·
+   lent), Deposit refunded / (paid); footer states the rule. Figures, the operating result and Cash Surplus unchanged.
+   Tests re-pointed (engine, trade finance, supplier section, finance cost, unified signs).
+
 ## 2026-09-29 — 🔵 AP Invoices: bill form + bill detail in popups; Other Creditors back in the sidebar (owner「ap invoice 就 pop out 出来给我填相关之类不可以吗？」+「other creditor maintenance 放 sidebar 旁边」→「3. 做」)(branch `feat/ap-invoices-popup`)
 
 1. 🔵 New AP bill opens the other-creditor bill form in a popup (`OtherPartyBillsManager` in `formOnly` mode: form open at once,
