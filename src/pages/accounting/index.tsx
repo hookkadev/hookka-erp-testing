@@ -14851,6 +14851,14 @@ type CfApiData = { period: string; columns: { key: string; label: string; accum?
 // The four raw-material template categories a supplier can be assigned to
 // (mirrors RM_LINES in cashflow-engine.ts).
 const RM_CATEGORIES = ["Purchase of Fabric", "Purchase of Wooden", "Purchase of Filler", "Purchase of Other & Packaging"];
+// …or a section to file the supplier under instead (owner 2026-09-29 「我无法选
+// 其他的 categories, 类似 capex 等等」; mirrors SUPPLIER_SECTION_TARGETS).
+const SECTION_CATEGORIES: { value: string; label: string }[] = [
+  { value: "CAPEX", label: "Capital Expenditure (CAPEX)" },
+  { value: "FACTORY_OVERHEAD", label: "Factory Overhead" },
+  { value: "GENERAL_EXPENSE", label: "General Expense" },
+  { value: "DIRECT_LABOUR", label: "Direct Labour" },
+];
 
 function CashFlowTab() {
   const { toast } = useToast();
@@ -15496,6 +15504,7 @@ function CashFlowTab() {
             <p className="text-[11px] text-[#6B7280] mb-2">
               Opening-creditor and uncoded rows file under the purchase parent of their supplier's category.
               Auto = guessed from that supplier's own recorded purchases; pick a category to override, or "Keep flat".
+              Pick a section instead (Capex, Factory Overhead, General Expense, Direct Labour) and that supplier's uncoded / opening money moves there whole, as a row of its own.
             </p>
             <div className="grid gap-1.5" style={{ gridTemplateColumns: "minmax(220px, 1fr) auto" }}>
               {supRows.map((sup) => {
@@ -15512,6 +15521,7 @@ function CashFlowTab() {
                     >
                       <option value="__auto__">Auto{guess ? ` — ${guess.replace("Purchase of ", "")}` : " — no purchase history"}</option>
                       {RM_CATEGORIES.map((c2) => <option key={c2} value={c2}>{c2.replace("Purchase of ", "")}</option>)}
+                      {SECTION_CATEGORIES.map((c2) => <option key={c2.value} value={c2.value}>{c2.label}</option>)}
                       <option value="__flat__">Keep flat (unclassified)</option>
                     </select>
                   </Fragment>

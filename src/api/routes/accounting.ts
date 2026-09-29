@@ -30,7 +30,7 @@ import { parseDebtorCode } from "../../lib/debtor";
 import { defaultPnlBucket, pnlBucketFor } from "../../lib/pnl-bucket";
 import { bsSectionFor, bsSectionClass } from "../../lib/bs-section";
 import type { BsSection } from "../../lib/bs-section";
-import { buildStatement, splitByLargestRemainder, rawMaterialLineFor, RM_LINES } from "../../lib/cashflow-engine";
+import { buildStatement, splitByLargestRemainder, rawMaterialLineFor, RM_LINES, SUPPLIER_SECTION_TARGETS } from "../../lib/cashflow-engine";
 import type { CfMap, ClassifiedLeg, BankLeg, RmSplit, CoaLite } from "../../lib/cashflow-engine";
 import { getDocNumberPrefixes, issueDocNumber, issueDocNumberWithPrefix } from "../lib/doc-number-service";
 import { computeDiscountAlloc, type PiOpen } from "../../lib/discount-alloc";
@@ -11783,12 +11783,14 @@ app.put("/cashflow/map", async (c) => {
     let supCat: Record<string, string> | undefined;
     if (body.supplierCategoryMap !== undefined) {
       supCat = {};
-      // Value must be one of the four template categories, or "" = pin flat
-      // (suppress the guess). Anything else is dropped.
+      // Value must be one of the four template categories, a section the
+      // supplier can be filed under (Capex, overhead, general, labour — owner
+      // 2026-09-29), or "" = pin flat (suppress the guess). Anything else is
+      // dropped.
       for (const [sup, cat] of Object.entries(body.supplierCategoryMap ?? {})) {
         const s = sup.trim();
         if (!s || typeof cat !== "string") continue;
-        if (cat === "" || (RM_LINES as readonly string[]).includes(cat)) supCat[s] = cat;
+        if (cat === "" || (RM_LINES as readonly string[]).includes(cat) || (SUPPLIER_SECTION_TARGETS as readonly string[]).includes(cat)) supCat[s] = cat;
       }
       await c.var.DB.prepare(
         `INSERT INTO kv_config (key, value, updated_at) VALUES ('cashflow_supplier_category_map', ?, ?)
