@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-29** — branch `feat/org-chart-photo-ux` (→ `staging`) added below (open, its entry is the newest).
 > **Last verified: 2026-09-25**: branch `chore/sync-staging-from-main-0925b` (second staging<-main sync today): Service > Top issues takes main's version (staging's 09-22 redesign `ecc78625` dropped); staging's rack-scan BUG-2026-09-25-195 renumbered to -208 (ID collided with main's).
 > **Last verified: 2026-09-25**: branch `feat/dashboard-efficiency-employee-drill` (stacked on `fix/dashboard-tighter-padding`, PR #533) added below (committed, not pushed, its entry is the newest).
 > **Last verified: 2026-09-25**: branch `fix/dashboard-tighter-padding` added below (not committed, its entry is the newest).
@@ -33,6 +34,14 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
+
+## 2026-09-29 — 🔵 Org Chart photo UX split + Users drawer photo upload (branch `feat/org-chart-photo-ux` → `staging`, continues BUG-2026-09-29-214's feature)
+
+1. ✅ Ask (owner, testing the just-shipped photo feature live): "when i click the picture it send me to change to a new picture, can i have it like when i click it just shows the picture bigger." `PersonAvatar` (`src/components/org-chart.tsx`) now splits the two actions: the circle itself opens a lightbox when a photo exists (falls back to starting an upload only when there is none yet); a small always-visible pencil badge is the one dedicated "change photo" control, distinct from the pre-existing reports-to pencil at the card's own corner.
+2. ✅ Ask: "we can make the add picture in the users list table." `UserDetailDrawer` (`src/components/user-detail-drawer.tsx`) gained an Add/Change/Remove photo control, writing through the SAME `uploadFileAsset` → `PUT /api/org-chart/photo` path the chart uses (keyed `user:<id>`); `Users.tsx` passes the live `photoFileId` through from `/api/org-chart`.
+3. ✅ Follow-up (owner): "if i want to change the picture did the old picture get deleted and replace with the new one?" Found: no — `PUT /photo` only moved the `photo_file_id` pointer; the previous `file_assets` row and its Supabase Storage object were left behind on every change. Fixed: the route now calls the shared `removeStoredFile` (`src/api/routes/files.ts`) for the previous fileId right after the pointer update succeeds, skipped when there was no previous photo or it is unchanged; a storage-side delete failure is logged, not surfaced as a request failure (the pointer write already committed).
+
+Verified: `tsc -p tsconfig.app.json` clean; `npm test` full suite green (5098 pass / 0 fail); all 4 doc gates pass. Regression: `tests/org-chart-photos.test.mjs` (extended), `tests/user-detail-drawer-photo.test.mjs` (new). Not yet verified live on staging for item 3 — pending push + deploy.
 
 ## 2026-09-29 — 🔵 BUG-36 Daily email reports: per-report PIC module (Lim, High) (branch `feat/report-pics` → `staging`)
 - Ask: 3 daily emails (overdue AM, today's production orders AM, today's efficiency + revenue after 6pm), set up "as a full module, insert PIC (multiple), then it triggers and sends".
