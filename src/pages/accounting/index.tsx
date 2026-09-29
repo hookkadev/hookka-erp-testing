@@ -15372,12 +15372,13 @@ function CashFlowTab() {
     } catch { toast.error("Save failed"); }
   };
 
+  // L1–L4 only set the collapse BASELINE: every group whose children sit
+  // deeper than the level starts collapsed. Nothing is filtered by depth, so
+  // any group can still be opened by a click at any level (owner 2026-09-29
+  // 「按了 L2 我还是能自己点开」— the old depth gate swallowed the click).
   const cfCollapseForLevel = (rs: CfApiRow[], L: number): Set<string> => {
     const s = new Set<string>();
-    if (L >= 3) return s;
-    for (const r of rs) if (r.kind === "group" && r.groupId) {
-      if (L <= 1) s.add(r.groupId);
-    }
+    for (const r of rs) if (r.kind === "group" && r.groupId && r.depth >= L) s.add(r.groupId);
     return s;
   };
   const applyLevel = (L: number) => { setCollapsed(cfCollapseForLevel(rows, L)); setLevel(L); };
@@ -15447,9 +15448,7 @@ function CashFlowTab() {
     }
     return false;
   };
-  const visibleRows = (edit ? rows : cleanRows).filter((r) =>
-    r.depth <= (level >= 3 ? 9 : level) && !hiddenByCollapse(r),
-  );
+  const visibleRows = (edit ? rows : cleanRows).filter((r) => !hiddenByCollapse(r));
 
   const buildExport = (): Aoa => {
     const head: (string | number)[] = ["ITEM", ...cols.map((c) => c.label)];

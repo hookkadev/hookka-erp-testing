@@ -38,6 +38,13 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
    accepts the four section keys; the Supplier categories card lists them under the four raw-material
    lines. Guard `tests/cashflow-supplier-section.test.mjs`.
 
+## 2026-09-29 — 🔵 Cash Flow: L2 collapsed groups can be opened by click (owner「这些我希望我按了 L2 我还是能自己点开」)(branch `fix/cashflow-level-expand`)
+
+1. 🔵 `visibleRows` gated rows by `depth <= level`, so at L2 a click on a group flipped the caret but its
+   children stayed hidden. Now L1–L4 only set the collapse baseline (`cfCollapseForLevel` collapses
+   every group at depth ≥ L) and visibility follows the collapse set alone — any group opens on click
+   at any level. Guard `tests/cashflow-level-expand.test.mjs`.
+
 ## 2026-09-29 — ✅ AP Invoices: kind / status chips + supplier picker instead of the two dropdowns (owner「我希望是这样选，而不是往下滑。先确定」→「做」)(#549 62f8a1d8 MERGED, deployed, prod-verified: chips with counts, AP-invoices click filters the list, Purchase invoices count 534, dropdowns gone)
 
 1. ✅ `AP_KIND_CHIPS` (All / AP invoices / Purchase invoices) and `AP_STATUS_CHIPS` (All / Open /
