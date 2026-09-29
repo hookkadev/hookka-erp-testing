@@ -96,7 +96,7 @@ export function Topbar({ user }: TopbarProps) {
         )}
       </div>
 
-      {/* Staging-only marker + link to the PRs not yet on production. */}
+      {/* Staging-only marker + link to the latest PRs merged into staging. */}
       {window.location.hostname.startsWith("staging.") && (
         <Link
           to="/staging-notes"

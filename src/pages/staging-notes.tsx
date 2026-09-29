@@ -1,9 +1,10 @@
 // ============================================================
-// /staging-notes — which PRs are on staging but not yet on main (prod).
+// /staging-notes — the latest PRs merged into staging.
 //
-// Staging only. deploy.yml runs scripts/gen-staging-notes.mjs on `staging`
-// pushes, which writes /staging-notes.json into the build. Prod never
-// generates the file, so this page just says there is nothing to show there.
+// STAGING ONLY: lives on the `staging` branch, never PR this into main.
+// deploy.yml runs scripts/gen-staging-notes.mjs on `staging` pushes, which
+// writes /staging-notes.json into the build. Any other build has no file, so
+// the page just says there is nothing to show.
 // ============================================================
 import { useEffect, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -48,8 +49,8 @@ export default function StagingNotes() {
         title="Staging patch notes"
         subtitle={
           notes
-            ? `${notes.prs.length} PRs on staging that are not on production yet. Build ${notes.commit}, ${formatDateTime(notes.generatedAt)}.`
-            : "PRs on staging that are not on production yet."
+            ? `Latest ${notes.prs.length} PRs merged into staging. Build ${notes.commit}, ${formatDateTime(notes.generatedAt)}.`
+            : "Latest PRs merged into staging."
         }
       />
 
@@ -57,14 +58,6 @@ export default function StagingNotes() {
         <Card>
           <CardContent className="p-6 text-sm text-[#6B7280]">
             No patch notes in this build. They are generated on staging deploys only.
-          </CardContent>
-        </Card>
-      )}
-
-      {notes && notes.prs.length === 0 && (
-        <Card>
-          <CardContent className="p-6 text-sm text-[#6B7280]">
-            Staging and production are in sync.
           </CardContent>
         </Card>
       )}

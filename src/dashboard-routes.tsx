@@ -154,8 +154,8 @@ const Notifications = lazy(() => import('./pages/notifications'))
 // sidebar link is permission-filtered too.
 const Announcements = lazy(() => import('./pages/announcements'))
 const MailCenter = lazy(() => import('./pages/mail-center'))
-// Staging patch notes — PRs on staging not yet on main. Data only exists on
-// staging builds (scripts/gen-staging-notes.mjs).
+// Staging patch notes — latest PRs merged into staging. STAGING ONLY, never
+// PR'd into main; data only exists on staging builds (gen-staging-notes.mjs).
 const StagingNotes = lazy(() => import('./pages/staging-notes'))
 const MailCenterDetail = lazy(() => import('./pages/mail-center/detail'))
 const Maintenance = lazy(() => import('./pages/maintenance'))
