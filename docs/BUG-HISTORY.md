@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-217 (branch `fix/scan-short-supplier-code`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-216 (branch `fix/staging-no-nightly-wipe`; ids 213-215 are on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 
 > **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-212 (branch `fix/customer-price-invoices-main`; ids 196-210 are on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
@@ -43,6 +44,18 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-09-29-217 — Scan PI left Internal Code blank when the supplier code was ours minus the hyphen (KS08 vs KS-08) `purchase-invoices` `scan-ocr` 🟡
+
+**Symptom:** INFAB invoice CS-KL2609232, lines `KS08` and `KS01` showed "Pick from catalog" with Internal Code empty although the Supplier SKU was read correctly. `KS-16 ICE STEEL` on the same invoice filled.
+
+**Root cause:** `codeFamilyMatch` needs >= 5 characters, and `KS08` is 3 (`KS`, `8`). Even without the floor it would tie, because the catalogue holds both `KS-08` and `KS-08 SEA PINK`, and both contain the code. Text scoring cannot help: the invoice says "KISA VELVET 08 SEA PINK", the catalogue says `KS-08 SEA PINK`.
+
+**Fix** (`src/lib/supplier-material-candidates.ts`): `codeFamilyMatch` first looks for an item whose code equals the supplier's code part for part (`sameSupplierCode`), with no length floor. One hit wins, two different codes with identical parts are refused. A second rung covers a catalogue that only has a variant (`KS08` with just `KS-08 SEA PINK`): our code starting with theirs, on whole parts (`KS-1` never matches `KS-10`), needs only 3 characters (`MIN_CODE_PREFIX_CHARS`), and a tie is still refused. Mid-code containment keeps the 5-character floor.
+
+**Regression:** `tests/scan-code-family-match.test.mjs` (BUG-37 case). **Prod UNMEASURED:** re-scan CS-KL2609232 after deploy.
 
 ---
 
