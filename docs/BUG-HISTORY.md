@@ -43,6 +43,16 @@ Entries themselves stay newest-first.
 
 ---
 
+## BUG-2026-09-29-212 — Settings sub-pages showed the breadcrumb "Settings > Settings" `settings` 🟢
+
+**Symptom:** on the new Settings > Email Reports page (BUG-36) the breadcrumb read "Settings > Settings". User Management (`/settings/users`) had the same trail, and System Health read "Admin > Admin".
+
+**Root cause:** `titleForPath` in `src/lib/route-titles.ts` has no entry for these routes, and its fallback titles a path by its FIRST segment, so every unlisted `/settings/*` page is called "Settings".
+
+**Fix:** explicit titles for `/settings/users`, `/settings/email-reports` and `/admin/health`. `tests/route-titles-settings.test.mjs` fails if any `/settings/*` or `/admin/*` route in `src/dashboard-routes.tsx` is left on the generic title.
+
+---
+
 ## BUG-2026-09-29-211 — Conts invoice billed the master price, not the customer price list `sales-orders` `pricing-products` 🟡
 
 **Symptom (BUG-35):** an invoice for customer Conts carried prices different from Conts' own price list (Customers → Conts → Products); they matched the master product price.
