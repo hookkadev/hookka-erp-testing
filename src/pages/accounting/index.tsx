@@ -6695,8 +6695,34 @@ function ApInvoicesTab({ accounts }: { accounts: ChartOfAccount[] }) {
   // the Other Creditor Bills entry folded into this page). The mirror list
   // reloads when the manager posts (ver bump).
   const parties = useOtherPartiesList();
-  const [manage, setManage] = useState(false);
+  const { toast } = useToast();
+  const { confirm } = useConfirm();
   const [ver, setVer] = useState(0);
+  // Owner 2026-09-29 「ap invoice 就 pop out 出来给我填」: New AP bill / Edit /
+  // Copy open the bill form in a popup (no scrolling to an editor below), and
+  // double-clicking an AP bill opens its detail popup. The creditor register
+  // moved to the sidebar (Creditors › Other Creditors).
+  const [billPopup, setBillPopup] = useState<{ mode: "new" | "edit" | "copy"; bill?: OtherPartyBill } | null>(null);
+  const [detailBillNo, setDetailBillNo] = useState<string | null>(null);
+  const [bills, setBills] = useState<OtherPartyBill[]>([]);
+  useEffect(() => {
+    let dead = false;
+    fetch("/api/accounting/other-party-bills?type=CREDITOR")
+      .then((r) => r.json() as Promise<{ success?: boolean; data?: OtherPartyBill[] }>)
+      .then((j) => { if (!dead && j?.success) setBills(j.data ?? []); })
+      .catch(() => {});
+    return () => { dead = true; };
+  }, [ver]);
+  const billLifecycle = async (b: OtherPartyBill, action: "void" | "unvoid") => {
+    const verb = action === "unvoid" ? "Restore" : "Void";
+    if (!(await confirm({ title: `${verb} bill?`, message: `${verb} ${b.billNo}?${action === "void" ? " A reversal entry will be posted (nothing is deleted)." : ""}`, danger: true }))) return;
+    const res = await fetch(`/api/accounting/other-party-bills/${encodeURIComponent(b.billNo)}/lifecycle`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action }),
+    });
+    const j = asMutationResponse(await res.json());
+    if (j?.success) { toast.success(`${b.billNo} ${action === "void" ? "voided" : "restored"}`); setVer((v) => v + 1); }
+    else toast.error(j?.error || `${verb} failed`);
+  };
   const [data, setData] = useState<{ rows: ApInvRow[]; totals: { openSen: number; openCount: number; apOpenSen: number; piOpenSen: number } } | null>(null);
   const [kind, setKind] = useState<"ALL" | "AP" | "PI">("ALL");
   // Owner 2026-09-22: default ALL (the mirror is for looking things up, not only chasing).
@@ -6736,10 +6762,10 @@ function ApInvoicesTab({ accounts }: { accounts: ChartOfAccount[] }) {
       <div className="flex justify-between items-start flex-wrap gap-2">
         <div>
           <h2 className="text-lg font-semibold text-[#1F1D1B]">AP Invoices</h2>
-          <p className="text-[11px] text-[#9CA3AF]">Everything owed on paper in one list. <b>AP</b> = other-creditor bills (raise / edit them below); <b>PI</b> = purchase invoices, read-only mirror — Procurement's page is where they are created and posted.</p>
+          <p className="text-[11px] text-[#9CA3AF]">Everything owed on paper in one list. <b>AP</b> = other-creditor bills (New AP bill opens the form; double-click a bill to see / edit / copy / void it); <b>PI</b> = purchase invoices, read-only mirror — double-click opens the invoice on Procurement's page.</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => setManage((m) => !m)}>{manage ? "Hide bill editor" : "New AP bill"}</Button>
+          <Button variant="outline" size="sm" onClick={() => setBillPopup({ mode: "new" })}>New AP bill</Button>
           <Link to="/accounting?tab=payments"><Button variant="primary" size="sm">New AP Payment</Button></Link>
         </div>
       </div>
@@ -6802,11 +6828,11 @@ function ApInvoicesTab({ accounts }: { accounts: ChartOfAccount[] }) {
                   <tr key={`${r.kind}-${r.id}`} className={`border-b border-[#F0ECE9] hover:bg-[#FAF8F5] ${r.status === "CANCELLED" ? "opacity-50" : ""}`}
                     // Owner 2026-09-29 「直接点开 invoice，而不是跳去 purchase invoice list」:
                     // a PI opens ITS OWN detail page, not the list.
-                    onDoubleClick={() => { if (r.kind === "PI") navigate(`/procurement/pi/${r.id}`); else setManage(true); }}
+                    onDoubleClick={() => { if (r.kind === "PI") navigate(`/procurement/pi/${r.id}`); else setDetailBillNo(r.no); }}
                     title={r.kind === "PI" ? "Double-click: open this purchase invoice" : "Double-click: open the bill editor below"}>
                     <td className="px-3 py-1.5"><span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${r.kind === "PI" ? "bg-[#EEF2FB] text-[#2C4170]" : "bg-[#F6F1E7] text-[#6B5C32]"}`}>{r.kind}</span>{r.opening && <span className="ml-1 text-[10px] text-[#9CA3AF]">opening</span>}</td>
                     <td className="px-3 py-1.5 tabular-nums text-xs whitespace-nowrap">
-                      {r.kind === "PI" ? <Link to={`/procurement/pi/${r.id}`} className="underline decoration-dotted text-[#6B5C32]" title="Open this purchase invoice">{r.no}</Link> : <button type="button" onClick={() => setManage(true)} className="underline decoration-dotted text-[#6B5C32] cursor-pointer" title="Edit below (other-creditor bills)">{r.no}</button>}
+                      {r.kind === "PI" ? <Link to={`/procurement/pi/${r.id}`} className="underline decoration-dotted text-[#6B5C32]" title="Open this purchase invoice">{r.no}</Link> : <button type="button" onClick={() => setDetailBillNo(r.no)} className="underline decoration-dotted text-[#6B5C32] cursor-pointer" title="Open this bill">{r.no}</button>}
                     </td>
                     <td className="px-3 py-1.5">{r.supplier}</td>
                     <td className="px-3 py-1.5 text-xs text-[#6B7280]">{r.supplierRef}</td>
@@ -6831,14 +6857,69 @@ function ApInvoicesTab({ accounts }: { accounts: ChartOfAccount[] }) {
         </CardContent>
       </Card>
 
-      {manage && (
-        <div className="space-y-3">
-          <div className="text-sm font-semibold text-[#1F1D1B]">Other-creditor bills — raise / edit <span className="text-[11px] font-normal text-[#9CA3AF]">press Done to refresh the mirror above</span></div>
-          <OtherPartyBillsManager parties={parties} accounts={accounts} side="CREDITOR" />
-          <FoldSection title="Other creditors — names & contacts" hint="add / edit the parties these bills belong to">
-            <OtherPartiesTab side="CREDITOR" />
-          </FoldSection>
-          <Button variant="outline" size="sm" onClick={() => { setManage(false); setVer((v) => v + 1); }}>Done — refresh the list</Button>
+      {detailBillNo && (() => {
+        const b = bills.find((x) => x.billNo === detailBillNo);
+        if (!b) return null;
+        const close = () => setDetailBillNo(null);
+        const voided = (b.lifecycleState ?? "ACTIVE") !== "ACTIVE" || b.status === "VOID";
+        return (
+          <DocDetailModal
+            title={`Other creditor bill ${b.billNo}`}
+            badges={<span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${voided ? "bg-[#F0ECE9] text-[#9CA3AF]" : b.outstandingSen > 0 ? "bg-[#FBF3E4] text-[#7A5B12]" : "bg-[#EAF3DE] text-[#27500A]"}`}>{voided ? "VOID" : b.outstandingSen > 0 ? "OPEN" : "PAID"}</span>}
+            onClose={close}
+            wide
+            actions={<>
+              <Button variant="outline" size="sm" onClick={() => printVoucher(buildOtherPartyBillVoucher(b, accounts))}><Printer className="h-4 w-4" /> Print</Button>
+              {!voided && <Button variant="outline" size="sm" onClick={() => { close(); setBillPopup({ mode: "edit", bill: b }); }}>Edit</Button>}
+              <Button variant="outline" size="sm" onClick={() => { close(); setBillPopup({ mode: "copy", bill: b }); }}>Copy</Button>
+              {!voided
+                ? <Button variant="outline" size="sm" onClick={() => { close(); void billLifecycle(b, "void"); }}>Void</Button>
+                : <Button variant="outline" size="sm" onClick={() => { close(); void billLifecycle(b, "unvoid"); }}>Unvoid</Button>}
+            </>}
+          >
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <DetailField label="Creditor" span={2}>{b.partyName || "—"}</DetailField>
+              <DetailField label="Bill date">{b.billDate}</DetailField>
+              <DetailField label="Reference">{b.referenceNo || "—"}</DetailField>
+              <DetailField label="Description" span={4}>{b.description || "—"}</DetailField>
+              <DetailField label="Total"><span className="tabular-nums">{formatCurrency(b.totalSen)}</span></DetailField>
+              <DetailField label="Paid"><span className="tabular-nums">{formatCurrency(b.paidAmountSen)}</span></DetailField>
+              <DetailField label="Outstanding"><span className="tabular-nums">{formatCurrency(b.outstandingSen)}</span></DetailField>
+              {b.isOpening && <DetailField label="Kind">Opening balance</DetailField>}
+            </div>
+            <div className="border border-[#E2DDD8] rounded-md overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-[#FAF8F5]"><tr className="text-xs text-[#6B7280]"><th className="text-left px-3 py-1.5 font-medium">Account</th><th className="text-left px-3 py-1.5 font-medium">Description</th><th className="text-right px-3 py-1.5 font-medium">Amount</th></tr></thead>
+                <tbody>
+                  {b.items.map((it, i) => (
+                    <tr key={i} className="border-t border-[#F0ECE9]"><td className="px-3 py-1.5 whitespace-nowrap">{accountLabel(accounts, it.counterAccount)}</td><td className="px-3 py-1.5 text-[#6B7280]">{it.description || "—"}</td><td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(it.amountSen)}</td></tr>
+                  ))}
+                  {b.taxSen ? <tr className="border-t border-[#F0ECE9]"><td className="px-3 py-1.5" colSpan={2}>Tax / SST</td><td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(b.taxSen)}</td></tr> : null}
+                  <tr className="border-t-2 border-[#1F1D1B] font-semibold"><td className="px-3 py-1.5" colSpan={2}>Total</td><td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(b.totalSen)}</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </DocDetailModal>
+        );
+      })()}
+
+      {billPopup && (
+        // Deliberately NOT closed by a click outside — a half-filled bill must
+        // not vanish; ✕ or Cancel closes it.
+        <div className="fixed inset-0 bg-black/40 z-40 flex items-start justify-center overflow-y-auto p-4">
+          <div className="bg-[#F7F5F2] rounded-lg shadow-xl w-full max-w-5xl my-8 p-4 space-y-3" role="dialog" aria-modal="true">
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-semibold text-[#1F1D1B]">{billPopup.mode === "new" ? "New AP bill" : billPopup.mode === "edit" ? `Edit ${billPopup.bill?.billNo ?? ""}` : `Copy of ${billPopup.bill?.billNo ?? ""}`}</h2>
+              <button onClick={() => setBillPopup(null)} className="text-[#9CA3AF] hover:text-[#6B7280] text-lg leading-none" aria-label="Close">✕</button>
+            </div>
+            <OtherPartyBillsManager
+              key={`${billPopup.mode}:${billPopup.bill?.billNo ?? "new"}`}
+              parties={parties}
+              accounts={accounts}
+              side="CREDITOR"
+              formOnly={{ mode: billPopup.mode, bill: billPopup.bill, onDone: () => { setBillPopup(null); setVer((v) => v + 1); } }}
+            />
+          </div>
         </div>
       )}
     </div>
@@ -6924,19 +7005,43 @@ type OtherPartyBill = {
   items: { counterAccount: string; amountSen: number; description: string; lineNo: number }[];
 };
 
-function OtherPartyBillsManager({ parties, accounts, side }: { parties: OtherParty[]; accounts: ChartOfAccount[]; side: "DEBTOR" | "CREDITOR" }) {
+// The bill form opened on its own in a popup (owner 2026-09-29 「ap invoice 就
+// pop out 出来给我填」): AP Invoices hosts the manager in formOnly mode — no
+// list, no toolbar toggle, the form open from the first render; onDone closes
+// the popup (after a save or on Cancel).
+type BillPopupSpec = { mode: "new" | "edit" | "copy"; bill?: OtherPartyBill; onDone: () => void };
+// One builder for the Edit / Copy prefill (and the popup's first render).
+// Copy starts a fresh bill: today's date, no reference, never an opening.
+function billFormFrom(b: OtherPartyBill, mode: "edit" | "copy", today: string) {
+  return {
+    partyId: b.partyId,
+    billDate: mode === "edit" ? b.billDate : today,
+    referenceNo: mode === "edit" ? (b.referenceNo ?? "") : "",
+    description: b.description ?? "",
+    taxStr: b.taxSen ? (b.taxSen / 100).toString() : "",
+    lines: b.items.length
+      ? b.items.map((it) => ({ counterAccount: it.counterAccount, amountStr: (it.amountSen / 100).toString(), description: it.description ?? "" }))
+      : [{ counterAccount: "", amountStr: "", description: "" }],
+    isOpening: mode === "edit" ? !!b.isOpening : false,
+  };
+}
+
+function OtherPartyBillsManager({ parties, accounts, side, formOnly }: { parties: OtherParty[]; accounts: ChartOfAccount[]; side: "DEBTOR" | "CREDITOR"; formOnly?: BillPopupSpec }) {
   const { toast } = useToast();
   const { confirm } = useConfirm();
   const [bills, setBills] = useState<OtherPartyBill[] | null>(null);
-  const [showForm, setShowForm] = useState(false);
+  const [showForm, setShowForm] = useState(!!formOnly);
   const [q, setQ] = useState("");
   const [openBill, setOpenBill] = useState<string | null>(null);
   // Edit-in-place (owner 2026-07-09): non-null = the form saves via PUT to
   // this bill number instead of creating a new bill.
-  const [editingBillNo, setEditingBillNo] = useState<string | null>(null);
+  const [editingBillNo, setEditingBillNo] = useState<string | null>(formOnly?.mode === "edit" && formOnly.bill ? formOnly.bill.billNo : null);
   const today = new Date().toISOString().slice(0, 10);
   const blankLine = (): BillLineDraft => ({ counterAccount: "", amountStr: "", description: "" });
-  const [form, setForm] = useState({ partyId: "", billDate: today, referenceNo: "", description: "", taxStr: "", lines: [blankLine()], isOpening: false });
+  const [form, setForm] = useState(() =>
+    formOnly?.bill && formOnly.mode !== "new"
+      ? billFormFrom(formOnly.bill, formOnly.mode, today)
+      : { partyId: "", billDate: today, referenceNo: "", description: "", taxStr: "", lines: [blankLine()], isOpening: false });
 
   const load = () => {
     fetch(`/api/accounting/other-party-bills?type=${side}`)
@@ -7020,23 +7125,14 @@ function OtherPartyBillsManager({ parties, accounts, side }: { parties: OtherPar
       setEditingBillNo(null);
       setForm({ partyId: "", billDate: today, referenceNo: "", description: "", taxStr: "", lines: [blankLine()], isOpening: false });
       load();
+      formOnly?.onDone();
     } else toast.error(j?.error || (editingBillNo ? "Failed to save changes" : "Failed to create bill"));
   };
 
   // Copy = open a fresh bill prefilled from an existing one. F4 #1.
   const copyBill = (b: OtherPartyBill) => {
     setEditingBillNo(null);
-    setForm({
-      partyId: b.partyId,
-      billDate: today,
-      referenceNo: "",
-      description: b.description ?? "",
-      taxStr: b.taxSen ? (b.taxSen / 100).toString() : "",
-      lines: b.items.length
-        ? b.items.map((it) => ({ counterAccount: it.counterAccount, amountStr: (it.amountSen / 100).toString(), description: it.description ?? "" }))
-        : [blankLine()],
-      isOpening: false,
-    });
+    setForm(billFormFrom(b, "copy", today));
     setShowForm(true);
   };
 
@@ -7044,17 +7140,7 @@ function OtherPartyBillsManager({ parties, accounts, side }: { parties: OtherPar
   // (owner 2026-07-09 「开了无法edit,我要能edit」). Party stays fixed.
   const editBill = (b: OtherPartyBill) => {
     setEditingBillNo(b.billNo);
-    setForm({
-      partyId: b.partyId,
-      billDate: b.billDate,
-      referenceNo: b.referenceNo ?? "",
-      description: b.description ?? "",
-      taxStr: b.taxSen ? (b.taxSen / 100).toString() : "",
-      lines: b.items.length
-        ? b.items.map((it) => ({ counterAccount: it.counterAccount, amountStr: (it.amountSen / 100).toString(), description: it.description ?? "" }))
-        : [blankLine()],
-      isOpening: !!b.isOpening,
-    });
+    setForm(billFormFrom(b, "edit", today));
     setShowForm(true);
   };
 
@@ -7165,8 +7251,8 @@ function OtherPartyBillsManager({ parties, accounts, side }: { parties: OtherPar
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-end gap-3">
-        <ScanPrefillButton label="Scan Bill" onResult={applyScan} />
-        <Button variant="primary" size="sm" onClick={() => {
+        {(!formOnly || formOnly.mode !== "edit") && <ScanPrefillButton label="Scan Bill" onResult={applyScan} />}
+        {!formOnly && <Button variant="primary" size="sm" onClick={() => {
           if (editingBillNo) {
             setEditingBillNo(null);
             setForm({ partyId: "", billDate: today, referenceNo: "", description: "", taxStr: "", lines: [blankLine()], isOpening: false });
@@ -7174,7 +7260,7 @@ function OtherPartyBillsManager({ parties, accounts, side }: { parties: OtherPar
           } else setShowForm(!showForm);
         }}>
           <Plus className="h-4 w-4" /> New Bill
-        </Button>
+        </Button>}
       </div>
 
       {newPartyDraft && (
@@ -7337,11 +7423,12 @@ function OtherPartyBillsManager({ parties, accounts, side }: { parties: OtherPar
           </div>
           <div className="flex gap-2">
             <Button variant="primary" size="sm" disabled={!!billMoneyError} onClick={submit}>{editingBillNo ? "Save Changes (re-post)" : "Save & Post"}</Button>
-            <Button variant="outline" size="sm" onClick={() => { setShowForm(false); setEditingBillNo(null); }}>Cancel</Button>
+            <Button variant="outline" size="sm" onClick={() => { setShowForm(false); setEditingBillNo(null); formOnly?.onDone(); }}>Cancel</Button>
           </div>
         </CardContent></Card>
       )}
 
+      {!formOnly && (<>
       <div className="flex items-center">
         <input type="text" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search bill no / party / reference / description" className="rounded-md border border-[#E2DDD8] px-3 py-1.5 text-sm w-80 focus:outline-none focus:ring-2 focus:ring-[#6B5C32]" />
       </div>
@@ -7511,6 +7598,7 @@ function OtherPartyBillsManager({ parties, accounts, side }: { parties: OtherPar
           </table>
         )}
       </CardContent></Card>
+      </>)}
     </div>
   );
 }
