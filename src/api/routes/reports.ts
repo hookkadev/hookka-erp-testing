@@ -1034,7 +1034,7 @@ async function runAndSendReport(
       console.error("[reports/efficiency] production revenue failed:", err);
       data.revenue = null;
     }
-    html = renderEfficiencyHtml(data);
+    html = renderEfficiencyHtml(data, { email: true });
     text = renderEfficiencyEmailText(data);
     const rev = data.revenue
       ? ` · RM ${(data.revenue.revenueSen / 100).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -1042,7 +1042,7 @@ async function runAndSendReport(
     subject = `[Hookka] Production Efficiency & Revenue — ${date} (${data.totals.efficiencyPct}% overall${rev})`;
   } else if (kind === "schedule") {
     const data = await collectScheduleData(c.var.DB, date);
-    html = renderScheduleHtml(data);
+    html = renderScheduleHtml(data, { email: true });
     text = renderScheduleEmailText(data);
     subject = `[Hookka] Production Schedule — ${date} (${data.totals.jobCards} JC · ${data.totals.quantity} units)`;
   } else {
