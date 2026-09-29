@@ -1175,7 +1175,44 @@ correctness bug in the key, and mixing them into one change would have made the
 
 ---
 
+
+## BUG-2026-09-29-216 — every availability figure was silently zero `production` `inventory` 🟢
+
+🟢 Fixed. **Measured on staging**: four stock production orders created, and
+seconds later `GET /api/stock-allocations/availability?productCodes=1013-(Q)`
+returned `{onHandQty:0, inProductionQty:0, allocatedQty:0, availableQty:0}`
+with `productCode` **absent from the object entirely**.
+
+The Postgres adapter folds snake_case columns AND snake_case SELECT aliases to
+camelCase on read. `SUM(...) AS on_hand_qty` therefore arrives as `onHandQty`,
+and this module read `r.on_hand_qty` — undefined, `Number(undefined ?? 0)` = 0,
+no error anywhere. The missing `productCode` was the tell: the row was being
+keyed by `undefined`.
+
+Sixteen reads across four functions were affected, so the damage was not one
+number: `loadAllocatablePOs` returned pieces with a blank product code (matching
+nothing) and a blank `stockOriginSoId` (leaving release unable to send a piece
+home).
+
+**"No stock available" and "I cannot read the columns" rendered identically** —
+the same shape as BUG-2026-08-13-096, where a planner's "0 items" meant *cannot
+see* rather than *nothing wrong*.
+
+CLAUDE.md lists this under the repo's **#1 trap**, and states the rule outright:
+*"Read rows dual-keyed: `r.camelCase ?? r.snake_case`"*. This walked straight
+into it.
+
+**Fix**: all sixteen reads are dual-keyed, and the row types carry both
+spellings the way `SalesOrderRow` already does for `holdReason` / `hold_reason`.
+Four tests added — three that feed camelCase (the half that was broken; the
+existing tests fed snake_case, which already worked), and one structural guard
+that fails on any bare `r.snake_case` read in the module, because the failure
+mode is silent and a value-based test only covers the columns someone
+remembered.
+
+
 ## BUG-2026-09-24-202b — the note said six, the factory would have queued ten `sales` `production` 🟢
+
 
 🟢 Fixed before it could reach anyone — found while testing DEV-05 on staging,
 in the window where no stock had finished yet, so the double-build never
