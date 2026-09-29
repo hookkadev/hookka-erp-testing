@@ -6681,6 +6681,14 @@ type ApInvRow = {
   kind: "AP" | "PI"; id: string; no: string; supplier: string; partyId?: string; supplierRef: string; date: string; dueDate: string | null;
   description: string; totalSen: number; paidSen: number; outstandingSen: number; status: "OPEN" | "PAID" | "CANCELLED"; opening: boolean;
 };
+// Owner 2026-09-29 「我希望是这样选，而不是往下滑」: kind and status are chip rows
+// (one click, a count on each) instead of two dropdowns to open and scroll.
+const AP_KIND_CHIPS: { key: "ALL" | "AP" | "PI"; label: string }[] = [
+  { key: "ALL", label: "All" }, { key: "AP", label: "AP invoices" }, { key: "PI", label: "Purchase invoices" },
+];
+const AP_STATUS_CHIPS: { key: "ALL" | "OPEN" | "PAID" | "CANCELLED"; label: string }[] = [
+  { key: "ALL", label: "All" }, { key: "OPEN", label: "Open" }, { key: "PAID", label: "Paid" }, { key: "CANCELLED", label: "Cancelled" },
+];
 function ApInvoicesTab({ accounts }: { accounts: ChartOfAccount[] }) {
   const navigate = useNavigate();
   // Raise / edit other-creditor bills right here (sidebar slim-down 2026-09-22:
@@ -6694,19 +6702,32 @@ function ApInvoicesTab({ accounts }: { accounts: ChartOfAccount[] }) {
   // Owner 2026-09-22: default ALL (the mirror is for looking things up, not only chasing).
   const [status, setStatus] = useState<"OPEN" | "PAID" | "CANCELLED" | "ALL">("ALL");
   const [q, setQ] = useState("");
+  // One load of everything, then every filter is client-side: the chips can
+  // carry counts, and a supplier picker narrows without a round-trip.
+  const [supplier, setSupplier] = useState("");
   useEffect(() => {
     let dead = false;
-    fetch(`/api/accounting/ap-invoices${status === "ALL" ? "" : `?status=${status}`}`)
+    fetch("/api/accounting/ap-invoices")
       .then((r) => r.json() as Promise<{ success?: boolean; data?: typeof data }>)
       .then((j) => { if (!dead && j?.success && j.data) setData(j.data); })
       .catch(() => {});
     return () => { dead = true; };
-  }, [status, ver]);
-  const rows = (data?.rows ?? []).filter((r) => {
-    if (kind !== "ALL" && r.kind !== kind) return false;
+  }, [ver]);
+  const all = data?.rows ?? [];
+  const passes = (r: ApInvRow, skip?: "kind" | "status") => {
+    if (skip !== "kind" && kind !== "ALL" && r.kind !== kind) return false;
+    if (skip !== "status" && status !== "ALL" && r.status !== status) return false;
+    if (supplier && r.supplier !== supplier) return false;
     if (q.trim()) { const kw = q.toLowerCase(); if (![r.no, r.supplier, r.supplierRef, r.description].some((s) => s.toLowerCase().includes(kw))) return false; }
     return true;
-  });
+  };
+  const rows = all.filter((r) => passes(r));
+  // Each chip counts what it would show given the OTHER filters.
+  const kindCount = (k: typeof kind) => all.filter((r) => passes(r, "kind") && (k === "ALL" || r.kind === k)).length;
+  const statusCount = (s: typeof status) => all.filter((r) => passes(r, "status") && (s === "ALL" || r.status === s)).length;
+  const supplierOpts = [...new Set(all.map((r) => r.supplier).filter(Boolean))].sort((a, b) => a.localeCompare(b)).map((s) => ({ value: s, label: s }));
+  const chipBtn = (on: boolean, first: boolean) =>
+    `px-3 py-1.5 font-semibold uppercase tracking-wide cursor-pointer ${on ? "bg-[#6B5C32] text-white" : "text-[#6B7280] hover:bg-[#FAF8F5]"} ${first ? "" : "border-l border-[#F0ECE9]"}`;
   const shownSen = rows.reduce((s, r) => s + r.outstandingSen, 0);
   const chip = (r: ApInvRow) =>
     r.status === "PAID" ? "bg-[#EAF3DE] text-[#27500A]" : r.status === "CANCELLED" ? "bg-[#F0ECE9] text-[#9CA3AF]" : "bg-[#FBF3E4] text-[#7A5B12]";
@@ -6730,13 +6751,30 @@ function ApInvoicesTab({ accounts }: { accounts: ChartOfAccount[] }) {
         </div>
       )}
       <div className="flex flex-wrap items-center gap-2">
-        <input type="text" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search no / supplier / ref" className="rounded-md border border-[#E2DDD8] px-3 py-1.5 text-sm w-64" />
-        <select value={kind} onChange={(e) => setKind(e.target.value as typeof kind)} className="rounded-md border border-[#E2DDD8] px-2 py-1.5 text-sm">
-          <option value="ALL">AP + PI</option><option value="AP">AP bills only</option><option value="PI">Purchase invoices only</option>
-        </select>
-        <select value={status} onChange={(e) => setStatus(e.target.value as typeof status)} className="rounded-md border border-[#E2DDD8] px-2 py-1.5 text-sm">
-          <option value="ALL">All</option><option value="OPEN">Open</option><option value="PAID">Paid</option><option value="CANCELLED">Cancelled</option>
-        </select>
+        <div className="inline-flex flex-wrap rounded-md border border-[#E2DDD8] bg-white overflow-hidden text-xs" title="Which kind of invoice">
+          {AP_KIND_CHIPS.map((ch, i) => {
+            const n = kindCount(ch.key); const on = kind === ch.key;
+            return (
+              <button key={ch.key} type="button" onClick={() => setKind(ch.key)} className={chipBtn(on, i === 0)}>
+                {ch.label}<span className={`ml-1 tabular-nums ${on ? "text-white/80" : "text-[#9CA3AF]"}`}>{n}</span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="inline-flex flex-wrap rounded-md border border-[#E2DDD8] bg-white overflow-hidden text-xs" title="Status">
+          {AP_STATUS_CHIPS.map((ch, i) => {
+            const n = statusCount(ch.key); const on = status === ch.key;
+            return (
+              <button key={ch.key} type="button" onClick={() => setStatus(ch.key)} className={chipBtn(on, i === 0)}>
+                {ch.label}<span className={`ml-1 tabular-nums ${on ? "text-white/80" : "text-[#9CA3AF]"}`}>{n}</span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="w-64">
+          <SearchableSelect value={supplier} onChange={setSupplier} options={supplierOpts} placeholder="All suppliers" allowClear />
+        </div>
+        <input type="text" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search no / supplier / ref" className="rounded-md border border-[#E2DDD8] px-3 py-1.5 text-sm w-56" />
         <span className="ml-auto text-xs text-[#6B7280]">Shown outstanding <span className="font-semibold tabular-nums text-[#1F1D1B]">{formatCurrency(shownSen)}</span></span>
       </div>
       <Card>
