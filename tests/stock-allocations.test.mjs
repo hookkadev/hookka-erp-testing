@@ -494,3 +494,84 @@ test("a line filled entirely from stock queues NO production at all", () => {
     .filter((it) => it.quantity > 0);
   assert.equal(toProduce.length, 0);
 });
+
+// ---------------------------------------------------------------------------
+// BUG-2026-09-29-187 — every availability figure was silently zero.
+//
+// The Postgres adapter folds snake_case columns AND snake_case SELECT aliases
+// to camelCase on read. `SUM(...) AS on_hand_qty` therefore arrives as
+// `onHandQty`, and this module read `r.on_hand_qty` — undefined, coerced to 0,
+// with no error anywhere. On staging the endpoint returned
+// {onHandQty:0, inProductionQty:0, availableQty:0} with `productCode` missing
+// entirely, minutes after four stock orders had been created.
+//
+// "No stock available" and "I cannot read the columns" rendered identically.
+// CLAUDE.md's rule — read rows dual-keyed, `r.camelCase ?? r.snake_case` — is
+// listed under the repo's #1 trap, and this walked straight into it.
+//
+// The earlier availability tests could not catch it: their fake returned
+// snake_case, which is the half that was already working.
+// ---------------------------------------------------------------------------
+const camelDb = (row) =>
+  fakeDb((q) => (/FROM production_orders/i.test(q) ? [row] : []));
+
+test("availability reads the camelCase spelling the adapter actually returns", async () => {
+  const map = await loadAvailability(
+    camelDb({
+      productCode: "A100",
+      availableQty: 6,
+      onHandQty: 10,
+      inProductionQty: 3,
+      allocatedQty: 4,
+    }),
+    "hookka",
+    ["A100"],
+  );
+  const a = map.get("A100");
+  assert.ok(a, "the row must be keyed by product code — an undefined key loses it entirely");
+  assert.equal(a.productCode, "A100");
+  assert.equal(a.onHandQty, 10);
+  assert.equal(a.inProductionQty, 3);
+  assert.equal(a.allocatedQty, 4);
+  assert.equal(a.availableQty, 6);
+});
+
+test("availability still reads snake_case, so neither spelling is a regression", async () => {
+  const map = await loadAvailability(
+    camelDb({
+      product_code: "A100",
+      available_qty: 6,
+      on_hand_qty: 10,
+      in_production_qty: 3,
+      allocated_qty: 4,
+    }),
+    "hookka",
+    ["A100"],
+  );
+  assert.equal(map.get("A100").availableQty, 6);
+});
+
+test("allocatable orders read camelCase too", async () => {
+  const { loadAllocatablePOs } = await import(
+    pathToFileURL(resolve(process.cwd(), "src/api/lib/stock-allocations.ts")).href
+  );
+  const db = fakeDb((q) =>
+    /sales_order_id = stock_origin_so_id/i.test(q)
+      ? [{ id: "pord-1", poNo: "SOH-1", productCode: "A100", quantity: 1, stockOriginSoId: "so-stock" }]
+      : [],
+  );
+  const pos = await loadAllocatablePOs(db, "A100");
+  assert.equal(pos.length, 1);
+  assert.equal(pos[0].productCode, "A100", "a blank product code would match nothing and allocate nothing");
+  assert.equal(pos[0].stockOriginSoId, "so-stock", "a blank origin makes release unable to send the piece home");
+});
+
+test("no row read in this module uses a bare snake_case key", () => {
+  // The failure mode is silent, so the guard is structural: every read of a
+  // snake_case column goes through `camel ?? snake`, never snake alone.
+  const src = read("src/api/lib/stock-allocations.ts");
+  const bare = [...src.matchAll(/(?<![?\w.])r\.([a-z]+(?:_[a-z]+)+)/g)]
+    .map((m) => m[0])
+    .filter((hit) => !src.includes(`?? ${hit}`));
+  assert.deepEqual(bare, [], `these reads would be undefined when the adapter camelCases: ${bare.join(", ")}`);
+});
