@@ -143,6 +143,25 @@ export function rmLineOrder(line: string): number {
   return 10;
 }
 
+// Sections a supplier can be filed under INSTEAD of a raw-material category
+// (owner 2026-09-29 「我无法选其他的 categories, 类似 capex 等等」): the
+// supplier's uncoded / opening-creditor money (the "Unallocated — X" and
+// "Opening creditors — X" rows, i.e. payments with no material line behind
+// them) moves there whole, as a row named after the supplier. A payment that
+// settled a PI with real material lines still splits by material.
+export const SUPPLIER_SECTION_TARGETS: readonly CfSection[] = ["CAPEX", "FACTORY_OVERHEAD", "GENERAL_EXPENSE", "DIRECT_LABOUR"];
+export function supplierSectionFor(
+  line: string,
+  supplierCategory: Record<string, string>,
+): { section: CfSection; supplier: string } | null {
+  const m = /^(?:Opening creditors|Unallocated) — (.+)$/.exec(line);
+  if (!m) return null;
+  const cat = supplierCategory[m[1]];
+  return cat && (SUPPLIER_SECTION_TARGETS as readonly string[]).includes(cat)
+    ? { section: cat as CfSection, supplier: m[1] }
+    : null;
+}
+
 // Distribute an integer total (sen) across weighted buckets so the parts sum
 // EXACTLY to total (largest-remainder method). Used to split one supplier
 // payment across the material lines of the PI it settled.
@@ -317,8 +336,13 @@ export function buildStatement(opts: {
           split.map((s) => ({ key: s.line, weight: s.weight })),
         );
         const sign = delta < 0 ? -1 : 1;
-        for (const [line, sen] of Object.entries(parts))
-          addToLine("RAW_MATERIALS", line, rmLineOrder(line), leg.ym, sign * sen);
+        for (const [line, sen] of Object.entries(parts)) {
+          // A supplier the owner filed under a section (Capex, overhead …)
+          // takes its uncoded / opening money there, as a row of its own.
+          const via = supplierSectionFor(line, supplierCategory);
+          if (via) addToLine(via.section, via.supplier, 50, leg.ym, sign * sen);
+          else addToLine("RAW_MATERIALS", line, rmLineOrder(line), leg.ym, sign * sen);
+        }
       } else if (a && !(a.sat === "SCC" || band(leg.accountCode) === 400 || band(leg.accountCode) === 405)) {
         // A non-control account routed here (a PURCHASE - … account, or one
         // the owner dragged in) keeps its own name as the line.

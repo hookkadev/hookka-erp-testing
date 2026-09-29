@@ -30,6 +30,14 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
+## 2026-09-29 — 🔵 Cash Flow: a supplier can be filed under a section — Capex / Factory Overhead / General Expense / Direct Labour (owner「我无法选其他的 categories, 类似 capex 等等」→「做」)(branch `feat/cashflow-supplier-section-categories`)
+
+1. 🔵 Engine `SUPPLIER_SECTION_TARGETS` + `supplierSectionFor`: a supplier's "Unallocated — X" / "Opening
+   creditors — X" money (payments with no material line) moves to the chosen section whole, as a row
+   named after the supplier; a PI with material lines still splits by material. `PUT /cashflow/map`
+   accepts the four section keys; the Supplier categories card lists them under the four raw-material
+   lines. Guard `tests/cashflow-supplier-section.test.mjs`.
+
 ## 2026-09-29 — 🔵 Cash Flow: L2 collapsed groups can be opened by click (owner「这些我希望我按了 L2 我还是能自己点开」)(branch `fix/cashflow-level-expand`)
 
 1. 🔵 `visibleRows` gated rows by `depth <= level`, so at L2 a click on a group flipped the caret but its
