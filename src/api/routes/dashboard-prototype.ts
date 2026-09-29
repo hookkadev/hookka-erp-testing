@@ -53,6 +53,7 @@
 import { Hono } from "hono";
 import type { Env } from "../worker";
 import { getOrgId } from "../lib/tenant";
+import { productionRevenueByDay } from "../lib/production-revenue";
 import { requirePermission, hasPermission, dashboardReadsFor } from "../lib/rbac";
 import { buildServiceSlice } from "../lib/dashboard-service-slice";
 import { isCustomerScoped } from "../lib/customer-scope";
@@ -1361,7 +1362,8 @@ app.get("/", async (c) => {
     doValueError = e instanceof Error ? e.message : String(e);
   }
 
-  // Production revenue per day for the Daily (Lim) tab — the SAME definition
+  // Production revenue per day for the Daily (Lim) tab (query shared with the
+  // evening efficiency email in lib/production-revenue.ts) — the SAME definition
   // and SQL as the main dashboard's Production line (dashboard-overview.ts
   // prodWeekRes) and the Employee page's /production-revenue: a PO books on
   // the day its LAST upholstery job card completes, priced SO line → CO line
@@ -1369,51 +1371,7 @@ app.get("/", async (c) => {
   // status COMPLETED + PO completed_date, which lands days later (after
   // packing) and drifted ~RM 6k/day from the main dashboard.
   const prodRevSec = await section("production revenue", () =>
-    c.var.DB.prepare(
-      `WITH per_po AS (
-         SELECT production_order_id,
-                MAX(CASE WHEN status IN ('COMPLETED','TRANSFERRED')
-                              AND completed_date IS NOT NULL
-                         THEN completed_date END) AS unit_completed_at
-           FROM job_cards
-          WHERE department_code = 'UPHOLSTERY'
-          GROUP BY production_order_id
-         HAVING COUNT(*) > 0
-            AND SUM(CASE WHEN status IN ('COMPLETED','TRANSFERRED')
-                              AND completed_date IS NOT NULL
-                         THEN 1 ELSE 0 END) = COUNT(*)
-       ), priced AS (
-         SELECT to_char(per_po.unit_completed_at::date, 'YYYY-MM-DD') AS day,
-                COALESCE(
-                  soi.unit_price_sen,
-                  coi.unit_price_sen,
-                  (SELECT COALESCE(p.base_price_sen, p.price1_sen)
-                     FROM products p
-                    WHERE p.code = po.product_code
-                    ORDER BY p.base_price_sen DESC NULLS LAST, p.id
-                    LIMIT 1),
-                  0
-                ) * po.quantity AS sen
-           FROM per_po
-           JOIN production_orders po ON po.id = per_po.production_order_id
-           LEFT JOIN sales_order_items soi
-                  ON soi.sales_order_id = po.sales_order_id AND soi.line_no = po.line_no
-           LEFT JOIN consignment_order_items coi
-                  ON coi.consignment_order_id = po.consignment_order_id AND coi.line_no = po.line_no
-          WHERE po.org_id = ?
-            AND po.item_category IN ('SOFA','BEDFRAME','ACCESSORY')
-            AND per_po.unit_completed_at IS NOT NULL
-       )
-       SELECT day AS "date",
-              COUNT(*) AS "orders",
-              SUM(CASE WHEN sen > 0 THEN 0 ELSE 1 END) AS "unpricedOrders",
-              COALESCE(SUM(sen), 0) AS "revenueSen"
-         FROM priced
-        GROUP BY day`,
-    )
-      .bind(orgId)
-      .all<{ date: string; orders: number | string; unpricedOrders: number | string; revenueSen: number | string }>()
-      .then((r) => r.results ?? []),
+    productionRevenueByDay(c.var.DB, orgId),
   );
 
   // Bucketed by day so the frontend can slice "Aug 2026 only" the SAME way

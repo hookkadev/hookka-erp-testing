@@ -76,6 +76,13 @@ export interface EfficiencyData {
   };
   departments: DepartmentSummary[];
   workers: WorkerSummary[]; // sorted by department code, then by name
+  /**
+   * Production revenue for the day (lib/production-revenue.ts), attached by
+   * the EMAIL path only (BUG-36). undefined = not part of this render (the
+   * in-app page is readable by HR, who must not see revenue); null = the
+   * query failed, shown as "unavailable", never as RM 0.
+   */
+  revenue?: { revenueSen: number; orders: number; unpricedOrders: number } | null;
 }
 
 const LOW_EFFICIENCY_THRESHOLD = 60; // <60% flagged as red on the report
@@ -577,7 +584,7 @@ export function renderEfficiencyHtml(data: EfficiencyData): string {
       <div class="lbl">Overall Efficiency</div>
       <div class="val" style="color:${overallColor};">${totals.efficiencyPct}%</div>
       <div class="sub">production / work</div>
-    </div>
+    </div>${revenueCell(data.revenue)}
   </div>
 
   <h2>Department Efficiency</h2>
@@ -619,6 +626,24 @@ export function renderEfficiencyHtml(data: EfficiencyData): string {
 </html>`;
 }
 
+function formatRM(sen: number): string {
+  return "RM " + (sen / 100).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function revenueSub(r: NonNullable<EfficiencyData["revenue"]>): string {
+  return `${r.orders} orders upholstered` + (r.unpricedOrders > 0 ? ` · ${r.unpricedOrders} with no price (RM 0)` : "");
+}
+
+function revenueCell(r: EfficiencyData["revenue"]): string {
+  if (r === undefined) return "";
+  return `
+    <div class="cell">
+      <div class="lbl">Production Revenue</div>
+      <div class="val">${r ? formatRM(r.revenueSen) : "—"}</div>
+      <div class="sub">${r ? escapeHtml(revenueSub(r)) : "unavailable (could not be loaded)"}</div>
+    </div>`;
+}
+
 export function renderEfficiencyEmailText(data: EfficiencyData): string {
   const lines: string[] = [];
   lines.push(`Daily Efficiency Report — ${formatDateLong(data.date)}`);
@@ -628,6 +653,13 @@ export function renderEfficiencyEmailText(data: EfficiencyData): string {
   lines.push(`Production hours: ${formatHours(data.totals.productionMinutes)}`);
   lines.push(`Overall efficiency: ${data.totals.efficiencyPct}%`);
   lines.push(`Job cards completed: ${data.totals.jobsCompleted}`);
+  if (data.revenue !== undefined) {
+    lines.push(
+      data.revenue
+        ? `Production revenue: ${formatRM(data.revenue.revenueSen)} (${revenueSub(data.revenue)})`
+        : "Production revenue: unavailable (could not be loaded)",
+    );
+  }
   lines.push("");
   lines.push("Department efficiency:");
   for (const d of data.departments) {

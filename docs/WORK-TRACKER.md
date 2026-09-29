@@ -46,8 +46,9 @@ Verified: `tsc -p tsconfig.app.json` clean; `npm test` full suite green (5098 pa
 ## 2026-09-29 — 🔵 BUG-36 Daily email reports: per-report PIC module (Lim, High) (branch `feat/report-pics` → `staging`)
 - Ask: 3 daily emails (overdue AM, today's production orders AM, today's efficiency + revenue after 6pm), set up "as a full module, insert PIC (multiple), then it triggers and sends".
 - Found: all report kinds already exist and send on schedule (GitHub `daily-reports.yml`, measured 2026-09-29: last 4 runs `sent 3 · failed 0`). Missing: any UI for recipients (one shared list, DB/env only).
-- 1. ✅ (not pushed; tsc/lint/tests green, UI NOT driven live: only local DB is staging, read-only) PIC module: Settings → Email Reports page, per-report on/off + multiple PICs + send-test. Stored in `kv_config['daily_report_settings']`; unconfigured reports keep today's recipients.
-- 2. ⏸ Overdue to the morning, efficiency to today @ ~18:30 + revenue: waiting on Lim's revenue definition.
+- 1. ✅ #545 merged to staging (+ breadcrumb fix #548, BUG-2026-09-29-213). PIC module: Settings → Email Reports page, per-report on/off + multiple PICs + send-test. Stored in `kv_config['daily_report_settings']`; unconfigured reports keep today's recipients.
+- 2. ✅ (branch `feat/report-evening-revenue` → `staging`) Overdue moved to 08:00 with the schedule; efficiency email now covers TODAY at 18:30 and carries production revenue. Revenue = the dashboard's Daily (Lim) figure (PO booked when its last upholstery JC completes, SO/CO line price × qty); owner confirmed on the dashboard 28 Sep 2026 = RM 12,002.50 (24 orders, 1 unpriced). One shared query `src/api/lib/production-revenue.ts`. Email only, not the HR-readable in-app page. The schedule change only takes effect once it reaches `main` (GitHub cron runs from the default branch).
+- 3. ❓ Open for Lim: overdue scope (production-late only vs any order late to the customer); carry slipped job cards into today's production list.
 
 ## 2026-09-28 — 🔵 BUG-34 Customer credit control: quota + overdue-term DO block, admin override (branch `feat/customer-credit-control` → `staging`, BUG-2026-09-28-210)
 

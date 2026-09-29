@@ -2,16 +2,20 @@ name: Daily Reports — Brief / Schedule / Efficiency / Overdue
 
 # Hits the three /api/internal/reports/*-trigger endpoints at fixed SGT
 # times. Times in cron syntax are UTC, so:
-#   08:00 SGT = 00:00 UTC  → schedule (today's plan, sent at start of day)
-#   12:00 SGT = 04:00 UTC  → efficiency (yesterday's work, summarised at noon)
-#   17:00 SGT = 09:00 UTC  → overdue (any delays as of end of day)
+#   08:00 SGT = 00:00 UTC  → schedule + overdue (today's plan and what is late,
+#                            both at start of day; BUG-36 moved overdue from 17:00)
+#   18:30 SGT = 10:30 UTC  → efficiency + production revenue for TODAY (BUG-36;
+#                            was 12:00 covering the previous working day)
 #
 # Auth: each endpoint expects an x-cron-secret header. Shared secret lives in
 # repo secrets as CRON_SECRET and on Cloudflare Pages env as CRON_SECRET. The
 # Pages worker rejects with 503 if env var missing, 403 if header mismatches.
 #
-# Recipients: defaults to every active SUPER_ADMIN's email. To override, set
-# DAILY_REPORT_RECIPIENTS on the Pages worker (comma-separated).
+# Recipients: set per report on Settings > Email Reports in the ERP. A report
+# never saved there falls back to DAILY_REPORT_RECIPIENTS, then SUPER_ADMINs.
+#
+# NOTE: GitHub runs scheduled workflows from the DEFAULT branch (main) only, so
+# a schedule change here takes effect once it reaches main.
 #
 # Manual trigger: workflow_dispatch lets the operator backfill any single
 # report on demand without waiting for the scheduled hour.
@@ -19,9 +23,8 @@ name: Daily Reports — Brief / Schedule / Efficiency / Overdue
 on:
   schedule:
     - cron: '0 23 * * *'  # 07:00 SGT (next day) — Production Morning Brief
-    - cron: '0 0 * * *'   # 08:00 SGT — Production Schedule
-    - cron: '0 4 * * *'   # 12:00 SGT — Efficiency Report
-    - cron: '0 9 * * *'   # 17:00 SGT — Overdue Report
+    - cron: '0 0 * * *'   # 08:00 SGT — Production Schedule + Overdue Report
+    - cron: '30 10 * * *' # 18:30 SGT — Production Efficiency & Revenue (today)
   workflow_dispatch:
     inputs:
       kind:
@@ -64,9 +67,8 @@ jobs:
           else
             case "$CRON_EXPR" in
               "0 23 * * *") echo "kinds=brief"     >> "$GITHUB_OUTPUT" ;;
-              "0 0 * * *") echo "kinds=schedule"   >> "$GITHUB_OUTPUT" ;;
-              "0 4 * * *") echo "kinds=efficiency" >> "$GITHUB_OUTPUT" ;;
-              "0 9 * * *") echo "kinds=overdue"    >> "$GITHUB_OUTPUT" ;;
+              "0 0 * * *") echo "kinds=schedule overdue" >> "$GITHUB_OUTPUT" ;;
+              "30 10 * * *") echo "kinds=efficiency"   >> "$GITHUB_OUTPUT" ;;
               *)           echo "kinds=brief schedule efficiency overdue" >> "$GITHUB_OUTPUT" ;;
             esac
           fi
