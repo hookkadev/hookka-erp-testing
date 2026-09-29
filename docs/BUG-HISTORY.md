@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-212 (branch `fix/invoice-price-save-check`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-211 (branch `fix/so-customer-price-on-edit`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-28**: newest entry BUG-2026-09-28-210 (branch `feat/customer-credit-control`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-28**: newest entry BUG-2026-09-28-209 (branch `feat/rm-uom-options`, DEV-20; ids 196-208 are taken on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
@@ -43,13 +44,23 @@ Entries themselves stay newest-first.
 
 ---
 
-## BUG-2026-09-29-212 — Settings sub-pages showed the breadcrumb "Settings > Settings" `settings` 🟢
+## BUG-2026-09-29-213 — Settings sub-pages showed the breadcrumb "Settings > Settings" `settings` 🟢
 
 **Symptom:** on the new Settings > Email Reports page (BUG-36) the breadcrumb read "Settings > Settings". User Management (`/settings/users`) had the same trail, and System Health read "Admin > Admin".
 
 **Root cause:** `titleForPath` in `src/lib/route-titles.ts` has no entry for these routes, and its fallback titles a path by its FIRST segment, so every unlisted `/settings/*` page is called "Settings".
 
 **Fix:** explicit titles for `/settings/users`, `/settings/email-reports` and `/admin/health`. `tests/route-titles-settings.test.mjs` fails if any `/settings/*` or `/admin/*` route in `src/dashboard-routes.tsx` is left on the generic title.
+
+---
+
+## BUG-2026-09-29-212 — Invoice "Save Prices" always said the save did NOT take effect `invoices` `ui-frontend` 🟡
+
+**Symptom:** editing a line price on an invoice and pressing Save Prices showed "Save did NOT take effect, totalAmount: tried 44000, system has (empty)", even though the edit had been written.
+
+**Root cause:** the verifiedSave read-back in `src/pages/invoices/detail.tsx` expected `totalAmount`, a field `GET /api/invoices/:id` never returns (it returns `subtotalSen` / `totalSen`). `VerifiedSaveArgs.expect` was typed `Record<string, unknown>`, so the wrong key compiled.
+
+**Fix:** expect `subtotalSen` (the pre-tax sum the PUT recomputes and the page's `expectedTotal` already is). `expect` is now typed `{ [K in keyof T]?: unknown }` in `src/lib/verified-save.ts`, so a key that is not on the readback type fails `tsc` (checked: the old `totalAmount` key now errors; the other 25 callers compile unchanged).
 
 ---
 
