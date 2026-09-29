@@ -242,21 +242,24 @@ export async function loadAvailability(
     )
     .bind(...codes)
     .all<{
-      product_code: string;
-      available_qty: number | null;
-      on_hand_qty: number | null;
-      in_production_qty: number | null;
-      allocated_qty: number | null;
+      // Dual-keyed: the Postgres adapter folds snake_case columns and
+      // aliases to camelCase on read, but a fresh SELECT can surface either.
+      // Reading only one spelling yields undefined -> 0, silently (CLAUDE.md).
+      product_code?: string; productCode?: string;
+      available_qty?: number | null; availableQty?: number | null;
+      on_hand_qty?: number | null; onHandQty?: number | null;
+      in_production_qty?: number | null; inProductionQty?: number | null;
+      allocated_qty?: number | null; allocatedQty?: number | null;
     }>();
 
   const out = new Map<string, ProductAvailability>();
   for (const r of res.results ?? []) {
-    out.set(r.product_code, {
-      productCode: r.product_code,
-      onHandQty: Number(r.on_hand_qty ?? 0),
-      inProductionQty: Number(r.in_production_qty ?? 0),
-      allocatedQty: Number(r.allocated_qty ?? 0),
-      availableQty: Number(r.available_qty ?? 0),
+    out.set((r.productCode ?? r.product_code) ?? "", {
+      productCode: (r.productCode ?? r.product_code) ?? "",
+      onHandQty: Number((r.onHandQty ?? r.on_hand_qty) ?? 0),
+      inProductionQty: Number((r.inProductionQty ?? r.in_production_qty) ?? 0),
+      allocatedQty: Number((r.allocatedQty ?? r.allocated_qty) ?? 0),
+      availableQty: Number((r.availableQty ?? r.available_qty) ?? 0),
     });
   }
   return out;
@@ -298,18 +301,21 @@ export async function loadAllocatablePOs(
     )
     .bind(productCode)
     .all<{
+      // Dual-keyed: the Postgres adapter folds snake_case columns and
+      // aliases to camelCase on read, but a fresh SELECT can surface either.
+      // Reading only one spelling yields undefined -> 0, silently (CLAUDE.md).
       id: string;
       poNo: string | null;
-      product_code: string;
+      product_code?: string; productCode?: string;
       quantity: number | null;
-      stock_origin_so_id: string;
+      stock_origin_so_id?: string; stockOriginSoId?: string;
     }>();
   return (res.results ?? []).map((r) => ({
     id: r.id,
     poNo: r.poNo,
-    productCode: r.product_code,
+    productCode: (r.productCode ?? r.product_code) ?? "",
     quantity: Number(r.quantity ?? 0),
-    stockOriginSoId: r.stock_origin_so_id,
+    stockOriginSoId: (r.stockOriginSoId ?? r.stock_origin_so_id) ?? "",
   }));
 }
 
@@ -406,18 +412,21 @@ export async function loadAllocatedPOsForOrder(
     )
     .bind(salesOrderId)
     .all<{
+      // Dual-keyed: the Postgres adapter folds snake_case columns and
+      // aliases to camelCase on read, but a fresh SELECT can surface either.
+      // Reading only one spelling yields undefined -> 0, silently (CLAUDE.md).
       id: string;
       poNo: string | null;
-      product_code: string;
+      product_code?: string; productCode?: string;
       quantity: number | null;
-      stock_origin_so_id: string;
+      stock_origin_so_id?: string; stockOriginSoId?: string;
     }>();
   return (res.results ?? []).map((r) => ({
     id: r.id,
     poNo: r.poNo,
-    productCode: r.product_code,
+    productCode: (r.productCode ?? r.product_code) ?? "",
     quantity: Number(r.quantity ?? 0),
-    stockOriginSoId: r.stock_origin_so_id,
+    stockOriginSoId: (r.stockOriginSoId ?? r.stock_origin_so_id) ?? "",
   }));
 }
 
@@ -590,19 +599,22 @@ export async function loadOpenAllocationsForOrder(
     )
     .bind(salesOrderId)
     .all<{
-      product_code: string;
-      sales_order_id: string;
-      sales_order_no: string | null;
-      so_item_id: string | null;
-      so_line_no: number | null;
-      net_qty: number | null;
+      // Dual-keyed: the Postgres adapter folds snake_case columns and
+      // aliases to camelCase on read, but a fresh SELECT can surface either.
+      // Reading only one spelling yields undefined -> 0, silently (CLAUDE.md).
+      product_code?: string; productCode?: string;
+      sales_order_id?: string; salesOrderId?: string;
+      sales_order_no?: string | null; salesOrderNo?: string | null;
+      so_item_id?: string | null; soItemId?: string | null;
+      so_line_no?: number | null; soLineNo?: number | null;
+      net_qty?: number | null; netQty?: number | null;
     }>();
   return (res.results ?? []).map((r) => ({
-    productCode: r.product_code,
-    salesOrderId: r.sales_order_id,
-    salesOrderNo: r.sales_order_no,
-    soItemId: r.so_item_id,
-    soLineNo: r.so_line_no,
-    quantity: Number(r.net_qty ?? 0),
+    productCode: (r.productCode ?? r.product_code) ?? "",
+    salesOrderId: (r.salesOrderId ?? r.sales_order_id) ?? "",
+    salesOrderNo: (r.salesOrderNo ?? r.sales_order_no) ?? null,
+    soItemId: (r.soItemId ?? r.so_item_id) ?? null,
+    soLineNo: (r.soLineNo ?? r.so_line_no) ?? null,
+    quantity: Number((r.netQty ?? r.net_qty) ?? 0),
   }));
 }
