@@ -16,6 +16,7 @@ import { MoneyInput } from "@/components/ui/money-input";
 import { useVirtualRows } from "@/components/ui/virtual-rows";
 import { DeferredBlock } from "@/components/ui/deferred-block";
 import { formatCurrency, formatDateDMY, formatRM, roundSen, todayYmdMY } from "@/lib/utils";
+import { monthLabel as drillMonthLabel } from "@/lib/ledger-drill";
 // Every money field on this page is `type="text" inputMode="decimal"` — the
 // browser lets a comma through, and `parseFloat("12,000")` is 12. One parser,
 // and a null the caller must refuse. See src/lib/parse-money.ts.
@@ -4994,6 +4995,9 @@ type PnlStmtRow = {
   badge?: string;
   accountCode?: string;
   bucket?: string;
+  // The account a computed line (a group's PURCHASE, carriage, SST) opens on in
+  // the inline drill — kept apart from accountCode, which also drives the drag.
+  drillCode?: string;
 };
 
 // Material data-quality warnings surfaced on the P&L (from the FIFO engine):
@@ -5567,10 +5571,98 @@ function ExportButtons({ build, filenameBase, title, subtitle, pdfOpts, moneyFor
   );
 }
 
+// P&L inline drill (owner 2026-09-29 「我要点开看 detail，就是这样」— the Houzs
+// P&L's click-a-line view): the ledger lines behind one account line for the
+// statement's period, opened under the row. GET /pl-drill picks them with the
+// same pass as the statement, so they sum to the line; report-layer additions
+// (payroll from payslips not yet posted, the opening month's share) show as
+// their own rows.
+type PlDrillLine = {
+  id: string; date: string; description: string; otherSide: { code: string; name: string }[];
+  ref1: string; ref2: string | null; debitSen: number; creditSen: number; sourceType: string; sourceId: string;
+};
+type PlDrillData = {
+  historical?: boolean;
+  lines: PlDrillLine[];
+  extra: { kind: "payroll" | "opening_slice"; ym: string; sen: number }[];
+  debitSen: number; creditSen: number; netSen: number; tied?: boolean;
+};
+const plDrillAmt = (sen: number) => (sen / 100).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function PlDrillPanel({ period, account, line }: { period: string; account: string; line: "all" | "sofa" | "bedframe" }) {
+  const [data, setData] = useState<PlDrillData | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    let dead = false;
+    fetch(`/api/accounting/pl-drill?period=${encodeURIComponent(period)}&account=${encodeURIComponent(account)}`)
+      .then((r) => r.json() as Promise<{ success?: boolean; data?: PlDrillData; error?: string }>)
+      .then((j) => { if (dead) return; if (j?.success && j.data) setData(j.data); else setErr(j?.error || "Could not load the ledger lines"); })
+      .catch(() => { if (!dead) setErr("Could not load the ledger lines"); });
+    return () => { dead = true; };
+  }, [period, account]);
+  const th = "py-1 pr-3 font-medium text-left";
+  return (
+    <div className="bg-[#FAF8F5] border-y border-dashed border-[#E2DDD8] px-4 py-2">
+      {!data && !err && <div className="text-xs text-[#9CA3AF] py-1">Loading the ledger lines…</div>}
+      {err && <div className="text-xs text-[#9A3412] py-1">{err}</div>}
+      {data?.historical && <div className="text-xs text-[#6B7280] py-1">This month was keyed from the old books (historical P&amp;L), so there are no ledger lines behind it.</div>}
+      {data && !data.historical && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-[12px]">
+            <thead>
+              <tr className="text-[11px] uppercase tracking-wide text-[#6B7280]">
+                <th className={th}>Date</th><th className={th}>Description</th><th className={th}>Other side</th>
+                <th className={th}>Ref. 1</th><th className={th}>Ref. 2</th>
+                <th className="py-1 pl-3 font-medium text-right">Debit</th><th className="py-1 pl-3 font-medium text-right">Credit</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.lines.map((l) => (
+                <tr key={l.id || `${l.sourceType}:${l.sourceId}:${l.debitSen}:${l.creditSen}`} className="border-t border-[#F0ECE9] align-top text-[#374151]">
+                  <td className="py-1 pr-3 whitespace-nowrap">{l.date.replace(/-/g, "/")}</td>
+                  <td className="py-1 pr-3">{l.description || "—"}</td>
+                  <td className="py-1 pr-3">{l.otherSide.length ? l.otherSide.map((o) => `${o.code} ${o.name}`).join(", ") : "—"}</td>
+                  <td className="py-1 pr-3 whitespace-nowrap">{l.ref1}</td>
+                  <td className="py-1 pr-3 whitespace-nowrap">{l.ref2 ?? ""}</td>
+                  <td className="py-1 pl-3 text-right tabular-nums">{l.debitSen ? plDrillAmt(l.debitSen) : ""}</td>
+                  <td className="py-1 pl-3 text-right tabular-nums">{l.creditSen ? plDrillAmt(l.creditSen) : ""}</td>
+                </tr>
+              ))}
+              {data.extra.map((e) => (
+                <tr key={`${e.kind}:${e.ym}`} className="border-t border-[#F0ECE9] align-top italic text-[#6B7280]">
+                  <td className="py-1 pr-3 whitespace-nowrap">{drillMonthLabel(e.ym)}</td>
+                  <td className="py-1 pr-3" colSpan={4}>{e.kind === "payroll"
+                    ? `Payroll ${drillMonthLabel(e.ym)} from the payslips, not posted to the ledger yet`
+                    : `Opening balance: this month's share (${drillMonthLabel(e.ym)})`}</td>
+                  <td className="py-1 pl-3 text-right tabular-nums">{e.sen > 0 ? plDrillAmt(e.sen) : ""}</td>
+                  <td className="py-1 pl-3 text-right tabular-nums">{e.sen < 0 ? plDrillAmt(-e.sen) : ""}</td>
+                </tr>
+              ))}
+              {data.lines.length === 0 && data.extra.length === 0 && (
+                <tr><td colSpan={7} className="py-1 text-[#9CA3AF]">No ledger lines in this period.</td></tr>
+              )}
+              <tr className="border-t border-[#9CA3AF] font-semibold text-[#1F1D1B]">
+                <td className="py-1" colSpan={5}>Total</td>
+                <td className="py-1 pl-3 text-right tabular-nums">{plDrillAmt(data.debitSen)}</td>
+                <td className="py-1 pl-3 text-right tabular-nums">{plDrillAmt(data.creditSen)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+      {line !== "all" && data && !data.historical && (
+        <p className="text-[11px] text-[#9CA3AF] mt-1">Lines are shown at full value; the Sofa / Bedframe view carries a share of them.</p>
+      )}
+    </div>
+  );
+}
+
 function PLStatementTab() {
   const [period, setPeriod] = useState(new Date().toISOString().slice(0, 7));
   const [line, setLine] = useState<"all" | "sofa" | "bedframe">("all");
   const [level, setLevel] = useState(4);
+  // Lines opened in the inline drill, keyed by period + account so a new
+  // period starts with everything closed.
+  const [drillOpen, setDrillOpen] = useState<Set<string>>(new Set());
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [data, setData] = useState<{ rows: PnlStmtRow[]; netSalesSen: number; fyLabel: string; periodLabel: string; materialWarnings?: PnlMaterialWarnings } | null>(null);
   const loading = data === null;
@@ -5815,17 +5907,34 @@ function PLStatementTab() {
                     );
                   }
                   const draggable = edit && !!row.accountCode;
+                  const drillCode = row.drillCode ?? row.accountCode;
+                  const drillKey = drillCode ? `${period}|${drillCode}` : "";
+                  const canDrill = !edit && !!drillCode;
+                  const drilled = canDrill && drillOpen.has(drillKey);
                   return (
-                    <tr key={i} className={`hover:bg-[#F7F4EF] ${draggable ? "cursor-move" : ""} ${dragCode === row.accountCode ? "opacity-40" : ""}`}
+                    <Fragment key={i}>
+                    <tr className={`hover:bg-[#F7F4EF] ${draggable ? "cursor-move" : ""} ${dragCode === row.accountCode ? "opacity-40" : ""} ${drilled ? "bg-[#F7F4EF]" : ""}`}
                       draggable={draggable}
                       onDragStart={draggable ? (e) => { setDragCode(row.accountCode!); setDragClass(classOfBucket(row.bucket)); e.dataTransfer.setData("text/plain", row.accountCode!); e.dataTransfer.effectAllowed = "move"; } : undefined}
                       onDragEnd={draggable ? () => { setDragCode(null); setDragClass(null); setDragOverBucket(null); } : undefined}>
-                      <td className="py-0.5 text-[#4B5563]" style={pad}>{draggable ? "⠿ " : ""}{row.label}{row.badge ? <span className="ml-1 text-[10px] text-[#9CA3AF]">[{row.badge}]</span> : null}</td>
+                      <td className="py-0.5 text-[#4B5563]" style={pad}>
+                        {canDrill ? (
+                          <button type="button" className="text-left hover:underline decoration-dotted cursor-pointer" title="Show the ledger lines behind this figure"
+                            onClick={() => setDrillOpen((prev) => { const n = new Set(prev); if (n.has(drillKey)) n.delete(drillKey); else n.add(drillKey); return n; })}>
+                            <span className="text-[10px] text-[#9CA3AF] mr-1">{drilled ? "▾" : "▸"}</span>{row.label}
+                          </button>
+                        ) : <>{draggable ? "⠿ " : ""}{row.label}</>}
+                        {row.badge ? <span className="ml-1 text-[10px] text-[#9CA3AF]">[{row.badge}]</span> : null}
+                      </td>
                       <td className="text-right px-2 tabular-nums">{numCell(row.ytdSen)}</td>
                       <td className="text-right px-2 text-[#6B7280]">{pct(row.ytdSen)}</td>
                       <td className="text-right px-2 tabular-nums">{numCell(row.periodSen)}</td>
                       <td className="text-right px-2 text-[#6B7280]">{pct(row.periodSen)}</td>
                     </tr>
+                    {drilled && drillCode && (
+                      <tr><td colSpan={5} className="p-0"><PlDrillPanel period={period} account={drillCode} line={line} /></td></tr>
+                    )}
+                    </Fragment>
                   );
                 })}
               </tbody>
