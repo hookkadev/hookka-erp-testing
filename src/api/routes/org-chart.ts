@@ -20,6 +20,7 @@ import { Hono } from "hono";
 import type { Env } from "../worker";
 import { requirePermission } from "../lib/rbac";
 import { getOrgId } from "../lib/tenant";
+import { removeStoredFile } from "./files";
 import {
   personKey,
   parsePersonKey,
@@ -443,9 +444,11 @@ app.put("/photo", async (c) => {
 
   await ensureOrgPhotoColumns(c.var.DB);
   const people = await loadPeople(c.var.DB);
-  if (!people.some((p) => p.key === pk)) {
+  const existing = people.find((p) => p.key === pk);
+  if (!existing) {
     return c.json({ success: false, error: "Person not found" }, 400);
   }
+  const oldFileId = existing.photoFileId;
 
   // Refuse a fileId that isn't a real, uploaded-in-this-org file — otherwise
   // any string handed to this endpoint would render as an <img src> on the
@@ -466,6 +469,23 @@ app.put("/photo", async (c) => {
     .prepare(`UPDATE ${table} SET photoFileId = ? WHERE id = ?`)
     .bind(fileId || null, parsed.id)
     .run();
+
+  // The pointer moved — the PREVIOUS file (if any, and if actually different)
+  // is now unreachable from the app, so free it via the one shared delete
+  // path rather than leaving it in Supabase Storage forever. Best-effort:
+  // the pointer write already succeeded, so a delete failure here (storage
+  // hiccup, already gone) must not turn a successful photo change into an
+  // error — it's logged and left for the sweeper.
+  if (oldFileId && oldFileId !== fileId) {
+    try {
+      const removed = await removeStoredFile(c, oldFileId);
+      if (!removed.ok) {
+        console.warn("[org-chart/photo] could not remove previous photo:", oldFileId, removed.error);
+      }
+    } catch (err) {
+      console.warn("[org-chart/photo] could not remove previous photo:", oldFileId, err);
+    }
+  }
 
   return c.json({ success: true, data: { personKey: pk, fileId: fileId || null } });
 });
