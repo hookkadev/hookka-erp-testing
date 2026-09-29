@@ -53,11 +53,12 @@
 //   node scripts/repair-uncosted-deliveries.mjs --confirm <host>   # writes
 // ============================================================================
 import postgres from "postgres";
+import { projectRef } from "./_db.mjs";
 
 const URL_ = process.env.REPAIR_DATABASE_URL || "";
 const TARGET_ALLOWLIST = [
-  "db.vpwdqtsxexpiqxzweivd.supabase.co", // prod — the only place this matters
-  "db.zaxygxwadidiqcphibma.supabase.co", // staging — rehearse here first
+  `db.${projectRef("prod")}.supabase.co`, // prod — the only place this matters
+  `db.${projectRef("staging")}.supabase.co`, // staging — rehearse here first
 ];
 const MARKER = "repair-uncosted-deliveries";
 

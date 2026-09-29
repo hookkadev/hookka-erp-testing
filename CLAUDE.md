@@ -1,5 +1,8 @@
 # Hookka ERP — Start Here (read before any task)
 
+> **Last verified: 2026-09-29** — Environment table: project refs moved out of the repo (it is
+> public) into `.env` / GitHub secrets; staging measured from the `hookka-erp-staging` Hyperdrive.
+
 > **Last verified: 2026-09-22** (branch `fix/scan-queue-client-driven`) — re-measured the tracked-file
 > count and the API.md mount/handler counts quoted below; nothing else re-checked.
 
@@ -84,11 +87,11 @@ Doc map: [`docs/DOCS-INDEX.md`](docs/DOCS-INDEX.md). The big picture: [`docs/DEV
 
 **Say which environment every command or query touches, before running it. Every time.**
 
-| | Supabase project | Use |
+| | Supabase project ref (in `.env` / GitHub secrets, never in the repo) | Use |
 |---|---|---|
-| Sandbox | `cjnewpxxmiucwirlcqpj` | Where development happens. Seed it; never mind that it is fake. |
-| Staging | `zaxygxwadidiqcphibma` | A **production clone**. Read-only confirmation of a finished fix. Never the surface a fix is developed against. |
-| Production | `vpwdqtsxexpiqxzweivd` | Never written to from development work. |
+| Sandbox | `SUPABASE_SANDBOX_REF` | Where development happens. Seed it; never mind that it is fake. |
+| Staging | `SUPABASE_STAGING_REF` | A **production clone**. Read-only confirmation of a finished fix. Never the surface a fix is developed against. |
+| Production | `SUPABASE_PROJECT_REF` | Never written to from development work. |
 
 - **Fixes are finished and verified locally first.** Pushing is never a way to get something
   testable — if the only way to try a change is to deploy it, the change is not ready.
