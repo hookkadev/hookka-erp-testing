@@ -268,8 +268,8 @@ the queue above. Also unread: session and token handling, `public-do-qr.ts`, and
 ## Environment rules — these are not negotiable
 
 - **Sandbox for development.** Supabase `cjnewpxxmiucwirlcqpj`. Staging
-  (database `kahxgvbfanbraazetefr`; `zaxygxwadidiqcphibma` is its file storage only — see
-  CLAUDE.md) is a production clone and is for read-only confirmation only,
+  (`kahxgvbfanbraazetefr`; the old `zaxygxwadidiqcphibma` is retired — see CLAUDE.md) is a
+  production clone and is for read-only confirmation only,
   never the surface a fix is developed against. Production (`vpwdqtsxexpiqxzweivd`) is never
   written to from this work.
 - **Say which environment** any command or query touches, every time, before running it.

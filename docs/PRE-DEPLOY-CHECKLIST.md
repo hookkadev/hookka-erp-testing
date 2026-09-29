@@ -32,7 +32,7 @@
 2. **Use the staging DB** — one already exists and is bound as
    `HYPERDRIVE_STAGING` in `wrangler.toml` (Supabase project
    `kahxgvbfanbraazetefr`, `hookka-erp-staging-sg` — measured 2026-09-29 from the
-   Hyperdrive config; `zaxygxwadidiqcphibma` is staging's *file storage* only and its
+   Hyperdrive config; the old Tokyo project `zaxygxwadidiqcphibma` is retired and its
    database is stale). Any `*.hookka-erp-testing.pages.dev` preview URL routes to it
    automatically — **except PR canaries**: a `canary-*` host is sent to the
    **production** database (`isPreviewHostname` / `pickDbUrl`, `src/api/worker.ts`).
