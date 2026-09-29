@@ -8663,16 +8663,55 @@ async function computeCashflowStatement(
   // The facility account belongs to the Trade Finance block unless the owner
   // has dragged it somewhere himself.
   for (const code of tfAccounts.keys()) if (!map[code]) map[code] = { section: "TRADE_FINANCE", order: 10 };
+  // Interest and other finance costs sit in their own block below the
+  // operating result (owner 2026-09-29 「这个应该是 finance cost 那边吧」):
+  // every account filed under the chart's FINANCE COSTS parent (902-0000 on
+  // this chart — found by name, not code) defaults to the Finance Cost
+  // section unless the owner has dragged it somewhere himself.
+  const financeParents = new Set([...coa.values()].filter((a) => /^FINANCE COSTS?$/i.test(a.name.trim())).map((a) => a.code));
+  for (const a of coa.values()) if (a.parentCode && financeParents.has(a.parentCode) && !map[a.code]) map[a.code] = { section: "FINANCE_COST", order: 10 };
   const sgOverride = await getCashflowStockGroupMap(c.var.DB);
   const rmSplit: RmSplit = {};
   if (paymentNos.size || opLegs.length) {
     const rmRes = await c.var.DB.prepare("SELECT * FROM raw_materials").all<Record<string, unknown>>();
     const grpByCode = new Map<string, string>();
+    // Exact description → group, kept only when ONE master item carries that
+    // description (an ambiguous description resolves nothing).
+    const grpByDesc = new Map<string, string | null>();
     for (const r of rmRes.results ?? []) {
       const code = String((r.item_code ?? r.itemCode) ?? "");
       const grp = String((r.item_group ?? r.itemGroup) ?? "");
       if (code) grpByCode.set(code, grp);
+      const desc = String(r.description ?? "").trim().toUpperCase();
+      if (desc && grp) grpByDesc.set(desc, grpByDesc.has(desc) && grpByDesc.get(desc) !== grp ? null : grp);
     }
+    // Owner 2026-09-29 「不应该出现 unallocated，就是 meditex 那个」: a PI line
+    // whose code is not in the master used to fall straight to "Unallocated —
+    // <supplier>". Measured: MEDITEX keyed `MED-PSF15.064HCS(A1)` on 44 lines
+    // while the master item is `MED-PSF15.064HCS(14)(L)` — same product name
+    // ("POLYESTER FIBER 15D X 64MM 10KG/BAG"), same price (RM 8.36). The line
+    // now resolves the way GRN receiving already does (resolveRmForGRNItem,
+    // grn.ts): the supplier's SKU in the price list, then the EXACT product
+    // name of one master item. No guessing on the code: a line that matches
+    // neither still shows as "Unallocated — <supplier>", so a real mistake
+    // stays visible.
+    const bindRes = await c.var.DB.prepare("SELECT supplierSku, materialCode FROM supplier_material_bindings")
+      .all<Record<string, unknown>>().catch(() => ({ results: [] as Record<string, unknown>[] }));
+    const codeBySku = new Map<string, string | null>();
+    for (const b of bindRes.results ?? []) {
+      const sku = String(b.supplierSku ?? b.supplier_sku ?? "").trim().toUpperCase();
+      const code = String(b.materialCode ?? b.material_code ?? "").trim();
+      if (!sku || !code) continue;
+      codeBySku.set(sku, codeBySku.has(sku) && codeBySku.get(sku) !== code ? null : code);
+    }
+    const groupForLine = (code: string, name: string): string => {
+      const direct = code ? grpByCode.get(code) : undefined;
+      if (direct) return direct;
+      const viaSku = code ? codeBySku.get(code.trim().toUpperCase()) : undefined;
+      if (viaSku) { const g = grpByCode.get(viaSku); if (g) return g; }
+      const viaName = name ? grpByDesc.get(name.trim().toUpperCase()) : undefined;
+      return viaName ?? "";
+    };
     // Owner 2026-09-29 「load 这么慢」: measured 8.6–9.3 s on prod, and the
     // cause was one query per ticked payment (115) plus one per settled PI
     // (298) — ~415 serial round-trips. The same two reads now come in bulk,
@@ -8720,7 +8759,7 @@ async function computeCashflowStatement(
         const lt = String((it.line_type ?? it.lineType) ?? "STOCKED");
         const amt = Number((it.line_total_sen ?? it.lineTotalSen) ?? 0);
         const mc = String((it.material_code ?? it.materialCode) ?? "");
-        const grp = mc ? grpByCode.get(mc) ?? "" : "";
+        const grp = groupForLine(mc, String((it.material_name ?? it.materialName) ?? ""));
         // Owner 2026-08-27 「拆散」: one row PER STOCK GROUP, not the four
         // rolled-up lines. The stock-group override map still renames a group
         // when set; tax rides its own line; a line with no resolvable group is
