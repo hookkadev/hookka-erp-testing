@@ -42,7 +42,7 @@
 //   export CLONE_SOURCE_URL=postgresql://...        # read-only source
 //   export CLONE_TARGET_URL=postgresql://...        # WILL BE TRUNCATED
 //   node scripts/clone-prod-to-staging.mjs                       # dry run
-//   node scripts/clone-prod-to-staging.mjs --confirm db.zaxy....supabase.co
+//   node scripts/clone-prod-to-staging.mjs --confirm db.kahx....supabase.co
 // ============================================================================
 import postgres from "postgres";
 
@@ -50,7 +50,7 @@ const PROD_URL = process.env.CLONE_SOURCE_URL || "";
 const STAGING_URL = process.env.CLONE_TARGET_URL || "";
 
 /** Hosts this script is ever allowed to WRITE to. Fail closed. */
-const TARGET_ALLOWLIST = ["db.zaxygxwadidiqcphibma.supabase.co"];
+const TARGET_ALLOWLIST = ["db.kahxgvbfanbraazetefr.supabase.co"];
 /** Hosts it must NEVER write to, whatever else is configured. */
 const TARGET_DENYLIST = ["db.vpwdqtsxexpiqxzweivd.supabase.co"];
 

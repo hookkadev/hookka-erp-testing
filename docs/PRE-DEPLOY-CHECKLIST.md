@@ -1,5 +1,7 @@
 # Pre-Deploy Checklist — IRON LAW
 
+> **Last verified: 2026-09-29** — staging project corrected to `kahxgvbfanbraazetefr` (measured: `HYPERDRIVE_STAGING` origin user is `postgres.kahxgvbfanbraazetefr`).
+>
 > **Last verified: 2026-08-13** against `migrations-postgres/0049_multi_tenant_skeleton.sql`, `package.json` (`test` = `node --import tsx/esm --test tests/*.test.mjs`; `build` is a bare `vite build`), `src/api/lib/auth-middleware.ts:196` (`SESSION_CACHE_TTL_S = 300`), `src/api/lib/tenant.ts`, and `.github/workflows/deploy.yml`.
 > Corrected 2026-08-13: added the staging-DB shortcut that now exists (`wrangler.toml` binds `HYPERDRIVE_STAGING`), and flagged that `npm run build` alone does not type-check — the gate is `build:strict`.
 > **UNVERIFIED ASSERTION** (as of 2026-08-13): the 2026-04-29 outage narrative and the "reviewer MUST refuse to merge" process rule are owner/process intent. Neither is checkable from source. The technical claims around them were re-checked and hold.
@@ -29,7 +31,7 @@
    what the code assumes).
 2. **Use the staging DB** — one already exists and is bound as
    `HYPERDRIVE_STAGING` in `wrangler.toml` (Supabase project
-   `zaxygxwadidiqcphibma`). Any `*.hookka-erp-testing.pages.dev` preview
+   `kahxgvbfanbraazetefr`). Any `*.hookka-erp-testing.pages.dev` preview
    URL, including a PR canary, routes to it automatically
    (`isPreviewHostname` / `pickDbUrl`, `src/api/worker.ts:294-310`).
    Confirm it holds a representative slice of production data before

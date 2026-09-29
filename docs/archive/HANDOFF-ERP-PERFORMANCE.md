@@ -51,8 +51,8 @@ is fast (LCP 0.86 s, INP 48 ms) — the pain is (a) downloading a big JS bundle,
 1. **Supabase capacity — OWNER (their account).** Check prod Supabase
    (`vpwdqtsxexpiqxzweivd`, Singapore): active connection count vs the tier
    limit, compute size, and whether it auto-pauses/scales. **Right-size it.**
-   This is the biggest lever on the 3–30 s / 500. (Stage = `zaxygxwadidiqcphibma`,
-   Tokyo.)
+   This is the biggest lever on the 3–30 s / 500. (Stage was then an older
+   Tokyo project, since replaced by `kahxgvbfanbraazetefr`.)
 2. **Code — THE DEV WORK:**
    - **Login/DB resilience (URGENT).** In the per-request DB middleware
      (`src/api/worker.ts` ~line 285, runs before authMiddleware) or in `getSql`,

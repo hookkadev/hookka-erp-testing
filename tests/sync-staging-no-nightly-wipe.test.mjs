@@ -33,3 +33,15 @@ test("merge and sanitiser agree on the real staging project", () => {
   assert.equal(merge.match(ref)[1], sanitize.match(ref)[1]);
   assert.equal(sanitize.match(ref)[1], "kahxgvbfanbraazetefr");
 });
+
+test("config, scripts and live docs name only the known Supabase projects", () => {
+  // sandbox, staging, prod. A 20-letter lowercase token is a Supabase project ref.
+  const known = new Set(["cjnewpxxmiucwirlcqpj", "kahxgvbfanbraazetefr", "vpwdqtsxexpiqxzweivd"]);
+  for (const f of [".mcp.json", "CLAUDE.md", "scripts/_db.mjs", "scripts/clone-prod-to-staging.mjs",
+    "scripts/repair-uncosted-deliveries.mjs", "scripts/sanitize-staging.mjs", "scripts/seed-sandbox-rbac.sql",
+    "docs/PRE-DEPLOY-CHECKLIST.md", "docs/RBAC-REMEDIATION.md", "docs/context-packs/HOOKKA-GOTCHAS.md"]) {
+    for (const ref of readFileSync(f, "utf8").match(/[a-z]{20}/g) ?? []) {
+      assert.ok(known.has(ref), `${f}: unknown Supabase project ${ref}`);
+    }
+  }
+});

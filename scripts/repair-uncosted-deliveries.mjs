@@ -57,7 +57,7 @@ import postgres from "postgres";
 const URL_ = process.env.REPAIR_DATABASE_URL || "";
 const TARGET_ALLOWLIST = [
   "db.vpwdqtsxexpiqxzweivd.supabase.co", // prod — the only place this matters
-  "db.zaxygxwadidiqcphibma.supabase.co", // staging — rehearse here first
+  "db.kahxgvbfanbraazetefr.supabase.co", // staging — rehearse here first
 ];
 const MARKER = "repair-uncosted-deliveries";
 

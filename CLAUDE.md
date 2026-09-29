@@ -1,5 +1,8 @@
 # Hookka ERP — Start Here (read before any task)
 
+> **Last verified: 2026-09-29** — Environment table: staging is `kahxgvbfanbraazetefr`, measured from the
+> `hookka-erp-staging` Hyperdrive origin (`wrangler hyperdrive get`).
+
 > **Last verified: 2026-09-22** (branch `fix/scan-queue-client-driven`) — re-measured the tracked-file
 > count and the API.md mount/handler counts quoted below; nothing else re-checked.
 
@@ -87,7 +90,7 @@ Doc map: [`docs/DOCS-INDEX.md`](docs/DOCS-INDEX.md). The big picture: [`docs/DEV
 | | Supabase project | Use |
 |---|---|---|
 | Sandbox | `cjnewpxxmiucwirlcqpj` | Where development happens. Seed it; never mind that it is fake. |
-| Staging | `zaxygxwadidiqcphibma` | A **production clone**. Read-only confirmation of a finished fix. Never the surface a fix is developed against. |
+| Staging | `kahxgvbfanbraazetefr` | A **production clone**. Read-only confirmation of a finished fix. Never the surface a fix is developed against. |
 | Production | `vpwdqtsxexpiqxzweivd` | Never written to from development work. |
 
 - **Fixes are finished and verified locally first.** Pushing is never a way to get something

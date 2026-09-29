@@ -35,8 +35,8 @@ test("one load, client-side filters, real counts per chip, supplier picker", () 
   assert.match(ap, /const kindCount = \(k: typeof kind\) => all\.filter\(\(r\) => passes\(r, "kind"\) && \(k === "ALL" \|\| r\.kind === k\)\)\.length;/);
   assert.match(ap, /const statusCount = \(s: typeof status\) => all\.filter\(\(r\) => passes\(r, "status"\) && \(s === "ALL" \|\| r\.status === s\)\)\.length;/);
   assert.match(ap, /<SearchableSelect value=\{supplier\} onChange=\{setSupplier\} options=\{supplierOpts\} placeholder="All suppliers" allowClear \/>/);
-  // Double-click: a PI opens its own page; an AP bill opens its detail popup (2026-09-29).
-  assert.match(ap, /onDoubleClick=\{\(\) => \{ if \(r\.kind === "PI"\) navigate\(`\/procurement\/pi\/\$\{r\.id\}`\); else setDetailBillNo\(r\.no\); \}\}/);
+  // The bill editor still opens below on demand; double-click behaviour untouched.
+  assert.match(ap, /onDoubleClick=\{\(\) => \{ if \(r\.kind === "PI"\) navigate\(`\/procurement\/pi\/\$\{r\.id\}`\); else setManage\(true\); \}\}/);
   assert.match(ap, /<Link to=\{`\/procurement\/pi\/\$\{r\.id\}`\}/, "the No. link opens the invoice itself too");
   assert.doesNotMatch(ap, /navigate\("\/procurement\/pi"\)/, "the jump to the LIST is back");
 });

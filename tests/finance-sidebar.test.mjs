@@ -22,14 +22,14 @@ test("seven groups, one door per job", () => {
   assert.deepEqual(groups, ["Reports", "Daily", "Monthly", "Debtors", "Creditors", "Setup"]);
   assert.ok(names.includes("e-Invoice"));
   const leaves = names.filter((n) => !groups.includes(n));
-  assert.equal(leaves.length, 33, `expected 33 menu entries (32 + Other Creditors back 2026-09-29), saw ${leaves.length}: ${leaves.join(", ")}`);
+  assert.equal(leaves.length, 32, `expected 32 menu entries, saw ${leaves.length}: ${leaves.join(", ")}`);
 });
 
 test("the duplicates are gone from the menu", () => {
   for (const gone of ["Customer Payment", "Supplier Payment", "Other Creditor Payments", "Other Debtor Receipts", "Other Creditor Bills", "Other Creditor", "Other Debtor", "Monthly P&L", "Cost Structure", "Maintenance", "Monthly Report", "Daily Operation", "Monthly Operation"]) {
     assert.ok(!names.includes(gone), `"${gone}" should no longer be a menu entry`);
   }
-  for (const gone of ["tab=ocreditorpay", "tab=odebtorpay", "tab=odebtor\"", "tab=ocreditorbills", "tab=plmonthly", "tab=coststruct", "/invoices/payments\"", "/invoices/supplier-payments"]) {
+  for (const gone of ["tab=ocreditorpay", "tab=odebtorpay", "tab=ocreditor\"", "tab=odebtor\"", "tab=ocreditorbills", "tab=plmonthly", "tab=coststruct", "/invoices/payments\"", "/invoices/supplier-payments"]) {
     assert.ok(!finance.includes(gone), `${gone} should no longer be linked from the menu`);
   }
 });
@@ -47,8 +47,6 @@ test("what stayed is filed where it belongs", () => {
   assert.equal(group("Credit Notes"), "Debtors");
   assert.equal(group("Debit Notes"), "Debtors");
   assert.equal(group("AP Invoices"), "Creditors");
-  // Owner 2026-09-29 「other creditor maintenance 放 sidebar 旁边」: the creditor register is a menu entry again.
-  assert.equal(group("Other Creditors"), "Creditors");
   assert.equal(group("Receipts"), "Daily");
   assert.equal(group("Payment Vouchers"), "Daily");
   assert.equal(group("Opening Balance"), "Setup");
@@ -74,13 +72,10 @@ test("the retired jobs live inside the pages that stayed", () => {
   const bills = ui.slice(ui.indexOf("function OtherPartyBillsTab("), ui.indexOf("function OtherPartyPaymentsTab("));
   assert.match(bills, /<OtherPartiesTab side=\{side\} \/>/);
   assert.match(bills, /<OtherPartyPaymentsManager parties=\{parties\} accounts=\{accounts\} side=\{side\} \/>/);
-  // AP Invoices raises / edits other-creditor bills itself — in a popup since
-  // 2026-09-29; the creditor names list is its own menu entry again.
+  // AP Invoices raises / edits other-creditor bills itself.
   const ap = ui.slice(ui.indexOf("function ApInvoicesTab("), ui.indexOf("function FoldSection("));
-  assert.match(ap, /<OtherPartyBillsManager\n\s+key=/);
-  assert.match(ap, /side="CREDITOR"\n\s+formOnly=\{\{/);
-  assert.doesNotMatch(ap, /<OtherPartiesTab /, "the names list moved to Creditors › Other Creditors");
-  assert.match(ui, /\{tab === "ocreditor" && <OtherPartiesTab side="CREDITOR" \/>\}/);
+  assert.match(ap, /<OtherPartyBillsManager parties=\{parties\} accounts=\{accounts\} side="CREDITOR" \/>/);
+  assert.match(ap, /<OtherPartiesTab side="CREDITOR" \/>/);
   assert.doesNotMatch(ap, /tab=ocreditorbills/, "AP Invoices no longer sends the user to the retired page");
   // Payment Vouchers points at the one thing only the Supplier Payment page does.
   assert.match(ui, /<Link to="\/invoices\/supplier-payments" className="underline decoration-dotted text-\[#6B5C32\]">Supplier Payment page<\/Link>/);
