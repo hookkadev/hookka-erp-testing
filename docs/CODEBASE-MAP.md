@@ -1,5 +1,7 @@
 # Hookka ERP — Codebase Map (the single authoritative map)
 
+> **Last verified: 2026-09-29** on branch `fix/ap-invoices-open-pi-detail` — the Accounting entries touched today (AP Invoices, Cash Flow) are current; the "Restamped" notes below itemise each change and everything else keeps its earlier stamp.
+
 > **Restamped 2026-09-29 on branch `fix/ap-invoices-open-pi-detail`:** AP Invoices double-click / No. link open the purchase invoice itself. Nothing else re-checked.
 
 > **Restamped 2026-09-29 on branch `feat/cashflow-supplier-section-categories`:** Cash Flow tab entry — a supplier can be filed under a section (Capex …). Nothing else re-checked.
