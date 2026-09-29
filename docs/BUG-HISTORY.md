@@ -44,6 +44,16 @@ Entries themselves stay newest-first.
 
 ---
 
+## BUG-2026-09-29-213 — Settings sub-pages showed the breadcrumb "Settings > Settings" `settings` 🟢
+
+**Symptom:** on the new Settings > Email Reports page (BUG-36) the breadcrumb read "Settings > Settings". User Management (`/settings/users`) had the same trail, and System Health read "Admin > Admin".
+
+**Root cause:** `titleForPath` in `src/lib/route-titles.ts` has no entry for these routes, and its fallback titles a path by its FIRST segment, so every unlisted `/settings/*` page is called "Settings".
+
+**Fix:** explicit titles for `/settings/users`, `/settings/email-reports` and `/admin/health`. `tests/route-titles-settings.test.mjs` fails if any `/settings/*` or `/admin/*` route in `src/dashboard-routes.tsx` is left on the generic title.
+
+---
+
 ## BUG-2026-09-29-212 — Invoice "Save Prices" always said the save did NOT take effect `invoices` `ui-frontend` 🟡
 
 **Symptom:** editing a line price on an invoice and pressing Save Prices showed "Save did NOT take effect, totalAmount: tried 44000, system has (empty)", even though the edit had been written.
