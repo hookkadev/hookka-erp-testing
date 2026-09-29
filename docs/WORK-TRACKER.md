@@ -38,6 +38,18 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
    Default stays ALL; the bill editor still opens below on "New AP bill"; double-click untouched.
    Guard `tests/ap-invoices-chips.test.mjs`.
 
+## 2026-09-29 — ✅ BUG-2026-09-29-196 TF interest booked to 900-I001 "INCORPORATION EXPENSE WRITTEN OFF" (owner「做,用 900-I002」→ 900-I002 is INTERNET CHARGES, so 900-I004 proposed) (#547 1c693840 MERGED, deployed; repoint run on prod, P&L verified)
+
+1. ✅ `TF_INTEREST_ACCT` → `900-I004 INTEREST ON TRADE FINANCE` under `902-0000 FINANCE COSTS`;
+   `ensureTfInterestAccount` name-checks the code (foreign account → 409, never absorbed).
+2. ✅ `POST /trade-finance/interest-account-repoint?dry=1` moves the 20 `tf_interest` legs
+   (DR 2,458.96 / CR 821.88, net 1,637.08 — measured on prod 2026-09-29, nothing else on 900-I001)
+   off the old code; audited, idempotent. Guard `tests/tf-interest-account.test.mjs`;
+   BUG-HISTORY entry written 🟡.
+3. ✅ Owner: 「那就 900-I004」. Prod run 2026-09-29: dry → 20 legs, DR 2,458.96 / CR 821.88; real →
+   900-I001 now 0 legs, 900-I004 carries the 20; Sep'26 P&L shows INTEREST ON TRADE FINANCE
+   1,637.08 and the INCORPORATION line is gone. BUG-HISTORY → 🟢 (follow-up [no-docs] commit).
+
 ## 2026-09-28 — ✅ Cash Flow: Trade Finance block (owner「用 trade finance 还我要当做 trade finance - Houzs Century」→「倒反 … 我会看 total spend」→「对，做」)(#541 764ebe82 + #542 b187526b MERGED, deployed, prod-verified; item 5 stays 🟡)
 
 Checked first (code + prod): the statement only counts SBK/SCH bank legs, so a
