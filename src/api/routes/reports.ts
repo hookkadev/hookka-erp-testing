@@ -58,8 +58,11 @@ import { productionRevenueByDay } from "../lib/production-revenue";
 import {
   REPORT_KINDS,
   invalidEmailsIn,
+  isDue,
+  loadLastSent,
   loadReportSettings,
   normalizeReportSettings,
+  saveLastSent,
   saveReportSettings,
   type ReportKind,
 } from "../lib/report-settings";
@@ -873,29 +876,61 @@ internal.post("/overdue-trigger", async (c) => {
 internal.post("/brief-trigger", async (c) => {
   const gated = await cronGate(c, "brief");
   if (gated) return gated;
-  // Agent Console gate — a paused Production agent (or the global kill
-  // switch) silences the automatic morning brief. Manual /brief/send and the
-  // console's Run-now stay available (explicit human actions).
+  return c.json(await sendScheduled(c, "brief"));
+});
+
+// One automatic send. The brief also honours the Agent Console: a paused
+// Production agent (or the global kill switch) silences it, and each send is
+// recorded as an agent run. Manual /brief/send and the console's Run-now stay
+// available (explicit human actions).
+async function sendScheduled(c: Parameters<typeof dispatchReport>[0], kind: ReportKind) {
+  if (kind !== "brief") return dispatchReport(c, kind);
   if (await isAgentPaused(c.var.DB, "PRODUCTION")) {
     console.log("[reports/brief-trigger] skipping — agent paused (Agent Console)");
-    return c.json({ ok: true, skipped: "paused", sent: 0, failed: 0 });
+    return { ok: true, skipped: "paused", sent: 0, failed: 0 };
   }
-  const result = await recordAgentRun(c.var.DB, "production-brief", async (run) => {
+  return recordAgentRun(c.var.DB, "production-brief", async (run) => {
     const sink = { tokensIn: 0, tokensOut: 0 };
     const res = await dispatchReport(c, "brief", sink);
     run.addTokens(sink.tokensIn, sink.tokensOut);
     run.setSummary(`${res.date} · sent ${res.sent} · failed ${res.failed}`);
     return res;
   });
-  return c.json(result);
+}
+
+// POST /api/internal/reports/due-trigger — the 15-minute cron
+// (.github/workflows/daily-reports.yml). Sends every report whose schedule on
+// Settings → Email Reports has come due today and has not gone out yet.
+internal.post("/due-trigger", async (c) => {
+  const authDenied = await authCron(c);
+  if (authDenied) return authDenied;
+  const skip = await nonWorkingDayReason(c);
+  if (skip) return c.json({ ok: true, skipped: true, reason: skip, results: {} });
+  const [settings, lastSent] = await Promise.all([
+    loadReportSettings(c.var.DB),
+    loadLastSent(c.var.DB),
+  ]);
+  const now = new Date();
+  const results: Partial<Record<ReportKind, unknown>> = {};
+  for (const kind of REPORT_KINDS) {
+    if (settings[kind]?.enabled === false) continue;
+    if (!isDue(kind, settings[kind], now, lastSent[kind])) continue;
+    // Marked before sending: a failed send is not retried, rather than risk
+    // emailing the same report twice.
+    lastSent[kind] = ymdInSgt(now);
+    await saveLastSent(c.var.DB, lastSent);
+    results[kind] = await sendScheduled(c, kind);
+  }
+  return c.json({ ok: true, results });
 });
 
 // ---------------------------------------------------------------------------
-// Settings → Email Reports (BUG-36): per-report on/off + PIC list.
+// Settings → Email Reports (BUG-36): per-report on/off + PIC list + schedule.
 //   GET  /api/reports/settings  → { settings, fallback }
 //        `fallback` is who an UNCONFIGURED report goes to today, so the page
 //        can prefill instead of showing an empty list.
-//   PUT  /api/reports/settings  body = { brief?: {enabled, recipients[]}, ... }
+//   PUT  /api/reports/settings  body = { brief?: {enabled, recipients[],
+//        frequency, time, weekday, monthDay}, ... }
 // SUPER_ADMIN only: the lists are staff emails.
 // ---------------------------------------------------------------------------
 app.get("/settings", async (c) => {

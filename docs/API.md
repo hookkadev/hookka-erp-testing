@@ -31,7 +31,7 @@ as a Cloudflare Pages Function via `functions/api/[[route]].ts`. There is no
   route module) and is exempt from the rate limiter.
 
 **Counts at generation time:** 142 mounts, 140 route files in
-`src/api/routes/`, 987 top-level handler registrations discovered.
+`src/api/routes/`, 988 top-level handler registrations discovered.
 
 ## Scope and limits of this file
 
@@ -193,8 +193,8 @@ offsets pointing past the end of their own file.
 | `/api/service-orders` | `src/api/routes/service-orders.ts` | `GET /` <sub>:427</sub><br>`GET /:id` <sub>:471</sub><br>`POST /` <sub>:557</sub><br>`PUT /:id` <sub>:950</sub><br>`PUT /:id/status` <sub>:1030</sub><br>`PUT /:id/mode` <sub>:1221</sub><br>`POST /:id/returns` <sub>:1481</sub><br>`PUT /:id/returns/:rid` <sub>:1571</sub><br>`POST /:id/returns/:rid/scrap` <sub>:1682</sub><br>`DELETE /:id` <sub>:1845</sub> | gated |
 | `/api/department-performance` | `src/api/routes/department-performance.ts` | `GET /` <sub>:202</sub> | gated |
 | `/api/wip-times` | `src/api/routes/wip-times.ts` | `GET /` <sub>:117</sub><br>`PUT /` <sub>:252</sub><br>`POST /bulk-import` <sub>:412</sub> | gated |
-| `/api/reports` | `src/api/routes/reports.ts` | `GET /efficiency` <sub>:306</sub><br>`GET /efficiency.json` <sub>:340</sub><br>`GET /operations.json` <sub>:366</sub><br>`POST /efficiency/send` <sub>:395</sub><br>`GET /schedule` <sub>:405</sub><br>`GET /schedule.json` <sub>:424</sub><br>`GET /overdue` <sub>:441</sub><br>`GET /overdue.json` <sub>:460</sub><br>`GET /brief` <sub>:519</sub><br>`POST /brief/send` <sub>:553</sub><br>`GET /cogs-integrity.json` <sub>:575</sub><br>`GET /ocr-code-misses.json` <sub>:603</sub><br>`GET /compliance.json` <sub>:617</sub><br>`GET /settings` <sub>:901</sub><br>`PUT /settings` <sub>:911</sub><br>`POST /schedule/send` <sub>:929</sub><br>`POST /overdue/send` <sub>:934</sub> | gated |
-| `/api/internal/reports` | `src/api/routes/reports.ts` | `POST /efficiency-trigger` <sub>:855</sub><br>`POST /schedule-trigger` <sub>:861</sub><br>`POST /overdue-trigger` <sub>:867</sub><br>`POST /brief-trigger` <sub>:873</sub> | **public** (PUBLIC_PREFIXES) |
+| `/api/reports` | `src/api/routes/reports.ts` | `GET /efficiency` <sub>:309</sub><br>`GET /efficiency.json` <sub>:343</sub><br>`GET /operations.json` <sub>:369</sub><br>`POST /efficiency/send` <sub>:398</sub><br>`GET /schedule` <sub>:408</sub><br>`GET /schedule.json` <sub>:427</sub><br>`GET /overdue` <sub>:444</sub><br>`GET /overdue.json` <sub>:463</sub><br>`GET /brief` <sub>:522</sub><br>`POST /brief/send` <sub>:556</sub><br>`GET /cogs-integrity.json` <sub>:578</sub><br>`GET /ocr-code-misses.json` <sub>:606</sub><br>`GET /compliance.json` <sub>:620</sub><br>`GET /settings` <sub>:936</sub><br>`PUT /settings` <sub>:946</sub><br>`POST /schedule/send` <sub>:964</sub><br>`POST /overdue/send` <sub>:969</sub> | gated |
+| `/api/internal/reports` | `src/api/routes/reports.ts` | `POST /efficiency-trigger` <sub>:858</sub><br>`POST /schedule-trigger` <sub>:864</sub><br>`POST /overdue-trigger` <sub>:870</sub><br>`POST /brief-trigger` <sub>:876</sub><br>`POST /due-trigger` <sub>:904</sub> | **public** (PUBLIC_PREFIXES) |
 | `/api/assistant/conversations` | `src/api/routes/assistant-history.ts` | `GET /` <sub>:87</sub><br>`GET /:id` <sub>:112</sub><br>`PUT /:id` <sub>:140</sub><br>`PATCH /:id` <sub>:204</sub><br>`DELETE /:id` <sub>:234</sub> | gated |
 | `/api/assistant` | `src/api/routes/assistant.ts` | `POST /chat` <sub>:522</sub> | gated |
 | `/api/agents` | `src/api/routes/agent-console.ts` | `GET /status` <sub>:165</sub><br>`GET /review` <sub>:410</sub><br>`POST /run-now` <sub>:562</sub><br>`POST /pause` <sub>:703</sub><br>`POST /kill-all` <sub>:730</sub><br>`POST /gate` <sub>:757</sub><br>`POST /phase` <sub>:787</sub><br>`POST /rollback-last-batch` <sub>:839</sub><br>`GET /config-proposals` <sub>:953</sub><br>`POST /config-proposals/decide` <sub>:983</sub> | gated |
