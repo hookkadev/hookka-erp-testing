@@ -1,0 +1,46 @@
+# Labels every PR, from anyone, into main or staging:
+#   * base `staging`            -> `staging`
+#   * title type (fix:, feat(x): ...) -> bug / enhancement / documentation /
+#     security / performance / ci / chore
+#
+# Must live on main: pull_request_target always runs the default branch's copy
+# of the workflow, whatever the PR's base is. That is why the staging-only
+# label-staging-prs.yml never ran. It never checks out PR code, so the write
+# token is safe; the title arrives via env, never spliced into the script.
+# Labels are only added, so a retitled PR keeps its old type label.
+name: Label PRs
+
+on:
+  pull_request_target:
+    types: [opened, reopened, edited]
+    branches: [main, staging]
+
+permissions:
+  pull-requests: write
+  issues: write
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          labels=()
+          [ "$BASE" = staging ] && labels+=(staging)
+          type=$(printf '%s' "$TITLE" | tr '[:upper:]' '[:lower:]' | sed -nE 's#^([a-z]+)[(:!/].*#\1#p')
+          case "$type" in
+            fix) labels+=(bug) ;;
+            feat) labels+=(enhancement) ;;
+            docs) labels+=(documentation) ;;
+            security) labels+=(security) ;;
+            perf) labels+=(performance) ;;
+            ci) labels+=(ci) ;;
+            chore|build|refactor|test|style) labels+=(chore) ;;
+          esac
+          [ ${#labels[@]} -eq 0 ] && exit 0
+          gh pr edit "$PR" --repo "$REPO" --add-label "$(IFS=,; echo "${labels[*]}")"

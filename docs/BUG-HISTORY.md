@@ -47,6 +47,16 @@ Entries themselves stay newest-first.
 
 ---
 
+## BUG-2026-09-29-218 — Staging PR label workflow never ran; every `staging` label was added by hand `ci-cd` 🟡
+
+**Symptom:** PRs into `staging` (#572, #577 and others) had no `staging` label unless someone added it manually.
+
+**Root cause:** `label-staging-prs.yml` (#552) was merged to `staging` only. `pull_request_target` always runs the workflow file from the default branch (`main`), whatever the PR's base, so the workflow was never triggered. Zero `pull_request_target` runs on 2026-09-29; every `staging` label that day was added by a person.
+
+**Fix:** `.github/workflows/label-prs.yml` on `main`, covering PRs into `main` and `staging`: base `staging` gets `staging`, and the title type prefix gets a type label (`fix` gets `bug`, `feat` gets `enhancement`, and so on). The title is passed through env, never spliced into the script. Checked locally against real PR titles with a stub `gh`, including a title with shell syntax.
+
+---
+
 ## BUG-2026-09-29-217 — Scan PI left Internal Code blank when the supplier code was ours minus the hyphen (KS08 vs KS-08) `purchase-invoices` `scan-ocr` 🟡
 
 **Symptom:** INFAB invoice CS-KL2609232, lines `KS08` and `KS01` showed "Pick from catalog" with Internal Code empty although the Supplier SKU was read correctly. `KS-16 ICE STEEL` on the same invoice filled.
