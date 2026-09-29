@@ -1,5 +1,14 @@
 # Sales — Module Guide
 
+> **Last verified: 2026-09-29** (branch `fix/dev-05-allocation-loser-note`) — DEV-05 A9:
+> a confirm that allocates NOTHING now explains itself when there is something to
+> explain. `planAutoAllocation` (`src/api/lib/stock-allocations.ts:510`, `:534`) reads
+> `loadAvailability` beside the pool **for the notes only** — on hand > 0 with
+> available = 0 means another order holds the goods and `autoActions` says so by
+> number; an oversized stock set gets its own sentence; a product nobody stocks
+> stays silent. The pool remains the only authority on what actually moves.
+> Nothing else on this page re-checked.
+
 > **Last verified: 2026-09-29** (branch `chore/sync-main-into-staging`, staging<-main merge): the symbol table anchors re-derived (create.tsx :2415 / :3052, detail.tsx :559, sales-orders.ts :1748 / :3206 / :2533; sales-orders.ts is 5,954 lines). Nothing else re-checked.
 
 > **Last verified: 2026-09-29** (CopyFromSourceModal / LineItemCard anchors moved to 2390 / 3016 by BUG-2026-09-29-211; the sales-orders.ts line count below is stale, it measured 5,853 on 2026-09-29. Other create.tsx anchors as re-derived 2026-09-23 after BUG-2026-09-23-183; rest as of 2026-08-19) against `src/api/routes/sales-orders.ts` (**5,733** lines),
