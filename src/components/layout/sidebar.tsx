@@ -54,6 +54,7 @@ import {
   Receipt,
   List,
   FlaskConical,
+  ScrollText,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -76,6 +77,10 @@ interface NavGroup {
 }
 
 const navigationGroups: NavGroup[] = [
+  // STAGING ONLY (never PR'd into main): latest PRs merged into staging.
+  ...(window.location.hostname.startsWith("staging.")
+    ? [{ label: "PATCH NOTES", items: [{ name: "Patch Notes", href: "/staging-notes", icon: ScrollText }] }]
+    : []),
   {
     label: "OVERVIEW",
     items: [
