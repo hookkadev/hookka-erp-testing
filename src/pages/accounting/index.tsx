@@ -14997,7 +14997,9 @@ function CashFlowTab() {
         if (!a) { a = zeroCols(); m.set(k, a); }
         return a;
       };
-      const OUTFLOW = new Set(["RAW_MATERIALS", "DIRECT_LABOUR", "FACTORY_OVERHEAD", "GENERAL_EXPENSE", "TAXATION", "FINANCE_COST", "CAPEX", "DEPOSIT"]);
+      // Mirrors OUTFLOW_SECTIONS in cashflow-engine.ts (every block but the
+      // collection block reads money out positive — owner 2026-09-29).
+      const OUTFLOW = new Set(["RAW_MATERIALS", "DIRECT_LABOUR", "FACTORY_OVERHEAD", "GENERAL_EXPENSE", "TAXATION", "FINANCE_COST", "CAPEX", "DEPOSIT", "LOAN", "UNALLOCATED"]);
       const OPERATING = new Set(["REVENUE_COLLECTION", "RAW_MATERIALS", "DIRECT_LABOUR", "FACTORY_OVERHEAD", "GENERAL_EXPENSE", "TAXATION"]);
       const sp = await g("/api/supplier-payments");
       const piCache = new Map<string, Map<string, number>>();
@@ -15286,7 +15288,7 @@ function CashFlowTab() {
       const SEC_LABELS: Record<string, string> = {
         DIRECT_LABOUR: "Direct Labour", FACTORY_OVERHEAD: "Factory Overhead", GENERAL_EXPENSE: "General Expense",
         TAXATION: "Taxation", FINANCE_COST: "Finance Cost", CAPEX: "Capital Expenditure (CAPEX)",
-        DEPOSIT: "Deposit Incurred / (Repay)", LOAN: "Loan / (Repayment)", UNALLOCATED: "Unallocated",
+        DEPOSIT: "Deposit Incurred / (Repay)", LOAN: "Loan repaid / lent · (received)", UNALLOCATED: "Unallocated",
       };
       const SEC_ORDER = ["FINANCE_COST", "CAPEX", "DEPOSIT", "LOAN", "UNALLOCATED"];
       const addInto = (section: string, label: string, values: number[], belowResult: boolean) => {
@@ -15608,6 +15610,7 @@ function CashFlowTab() {
             </>
           )}
           <p className="text-[11px] text-[#9CA3AF] mt-3">Cash basis · classified from bank/cash ledger movements · Raw Materials traced to PI stock groups · Bank c/f = b/f + Cash Surplus.</p>
+          <p className="text-[11px] text-[#9CA3AF]">Signs: Revenue Collection = money in. Every other block, above and below Net operation surplus: amount = money out, (amount) = money in.</p>
         </CardContent>
       </Card>
     </div>
