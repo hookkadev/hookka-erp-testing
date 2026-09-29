@@ -240,8 +240,23 @@ const stockPOs = (n, qtyEach = 1) =>
     stock_origin_so_id: "so-stock",
   }));
 
-const autoDb = ({ pool = [], held = [] }) =>
+const autoDb = ({ pool = [], held = [], avail = null }) =>
   fakeDb((q) => {
+    // The availability aggregate — matched FIRST because its CASE arms contain
+    // both of the shapes the two branches below key on.
+    if (/GROUP BY product_code/i.test(q)) {
+      return avail
+        ? [
+            {
+              productCode: "A100",
+              availableQty: avail.available ?? 0,
+              onHandQty: avail.onHand ?? 0,
+              inProductionQty: 0,
+              allocatedQty: avail.allocated ?? 0,
+            },
+          ]
+        : [];
+    }
     // already-held: the orders this SO has taken from stock
     if (/sales_order_id = \?/i.test(q) && /sales_order_id <> stock_origin_so_id/i.test(q)) {
       return held;
@@ -332,8 +347,44 @@ test("a set that overshoots the line is NOT taken", async () => {
     SYSTEM_ALLOCATION_ACTOR,
     AT,
   );
+  assert.equal(plan.statements.length, 0, "a 3-set cannot satisfy a line of 1");
+  // A9 — and it says WHY. Silence here reads exactly like having no stock.
+  assert.match(
+    plan.notes[0] || "",
+    /set of 3, larger than this line/,
+  );
+});
+
+test("A9: the loser is told — stock exists but another order already has it", async () => {
+  // Losing the race is invisible from the pool alone: once another order claims
+  // the pieces they stop being offered, so an emptied pool looks exactly like a
+  // product the factory never stocked. Availability tells the two apart.
+  const db = autoDb({ pool: [], avail: { onHand: 4, available: 0, allocated: 4 } });
+  const plan = await planAutoAllocation(
+    db,
+    "hookka",
+    ORDER,
+    [{ productCode: "A100", quantity: 4, soItemId: "i1", soLineNo: 1 }],
+    SYSTEM_ALLOCATION_ACTOR,
+    AT,
+  );
+  assert.equal(plan.statements.length, 0, "nothing left to take — no overselling");
+  assert.match(plan.notes[0] || "", /all 4 on hand/);
+  assert.match(plan.notes[0] || "", /already committed to other orders/);
+});
+
+test("a product nobody stocks stays silent — there is nothing to explain", async () => {
+  const db = autoDb({ pool: [], avail: { onHand: 0, available: 0, allocated: 0 } });
+  const plan = await planAutoAllocation(
+    db,
+    "hookka",
+    ORDER,
+    [{ productCode: "A100", quantity: 4, soItemId: "i1", soLineNo: 1 }],
+    SYSTEM_ALLOCATION_ACTOR,
+    AT,
+  );
   assert.equal(plan.statements.length, 0);
-  assert.equal(plan.notes.length, 0);
+  assert.equal(plan.notes.length, 0, "no stock is the normal case, not an event");
 });
 
 test("ownership moves and the reason moves with it — never bare", async () => {
