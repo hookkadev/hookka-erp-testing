@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-29**: #588 (Cash Flow drill tidy + payroll month) closed ✅ below with its prod check; #589 corrected its fallback note.
 > **Last verified: 2026-09-29**: branch `feat/cashflow-drill-tidy` added below (its entry is the newest).
 > **Last verified: 2026-09-29**: #587 (Cash Flow inline drill) closed ✅ below with its prod check.
 > **Last verified: 2026-09-29**: branch `feat/cashflow-inline-drill` added below (its entry is the newest).
@@ -42,14 +43,19 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
-## 2026-09-29 — 🔵 Cash Flow drill tidy + payroll month read right (owner「有一点点乱，有没有优化的建议」→「好像可以，月份一起修」)(branch `feat/cashflow-drill-tidy`)
+## 2026-09-29 — ✅ Cash Flow drill tidy + payroll month read right (owner「有一点点乱，有没有优化的建议」→「好像可以，月份一起修」)(#588 12295837 + #589 MERGED, deployed, prod-verified)
 
-1. 🔵 Panel: Description = the voucher's own purpose; bank by short name; "Whole payment" + "Share" columns when split;
+1. ✅ Panel: Description = the voucher's own purpose; bank by short name; "Whole payment" + "Share" columns when split;
    one Amount column (money out in brackets); "All months" in month blocks, each with its total.
-2. 🔵 Salary department split: the payroll month named in the voucher text is read in any case / full name / without a year
+2. ✅ Salary department split: the payroll month named in the voucher text is read in any case / full name / without a year
    (`payrollMonthFrom`). Before, only "May'26"-style text was read, so most salary payments used the PAYMENT month's payslip
    mix. Totals do not move — only how Direct Labour spreads across departments. A named month without payslips uses the payment month's mix (one April-salary leg paid at opening used to stay unsplit; it now splits by May's payslips).
    Guard `tests/cashflow-drill-tidy.test.mjs`. Prod check after deploy: Direct Labour total, result and Cash Surplus identical.
+3. ✅ Prod (measured, statement snapshot before vs after, FY to Aug'26 and Sep'26): Direct Labour per column, the operating
+   result, Cash Surplus, Bank b/f and c/f identical; only department lines moved. Payments for the same payroll month now carry
+   the same department share. UI: the new columns, month blocks and totals on a department line, tied.
+4. 🟡 For the owner: one voucher's header names a different payroll month than its line; the split follows the line, the panel
+   shows the header. Either the voucher text is corrected or the panel shows the line text — owner to decide.
 
 ## 2026-09-29 — ✅ Cash Flow inline drill: click a line's name, its payments / receipts open underneath (owner「cash flow 也要这样点开看」)(#587 81560c37 MERGED, deployed, prod-verified)
 
