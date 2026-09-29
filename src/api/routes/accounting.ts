@@ -8607,44 +8607,37 @@ async function computeCashflowStatement(
     }
   }
   const tfPayee = (sourceType: string, sourceId: string, description: string): string =>
-    (sourceType.startsWith("supplier_payment") ? tfSupplierByNo.get(sourceId) : undefined) ?? description.trim() ?? "Trade finance draw";
+    (sourceType.startsWith("supplier_payment") ? tfSupplierByNo.get(sourceId) : undefined) ?? description.trim();
   for (const legs of byEntry.values()) {
     const hasBank = legs.some((l) => bankCodes.has(l.code));
     const opening = legs.some((l) => isOpeningSource(l.sourceType));
-    if (!hasBank) {
-      // A draw: the lender paid the supplier for us. CR on the facility =
-      // drawn (spend, positive); a void's DR reversal cancels it.
-      if (tfAccounts.size && !opening) {
-        for (const l of legs) {
-          if (!tfAccounts.has(l.code)) continue;
-          const net = l.creditSen - l.debitSen;
-          if (!net) continue;
-          classified.push({
-            accountCode: l.code, debitSen: net > 0 ? net : 0, creditSen: net < 0 ? -net : 0,
-            ym: l.ym, sourceType: l.sourceType, sourceId: l.sourceId,
-            // Interest the lender charges (tf_interest legs, DR interest expense
-            // · CR facility, adjustments included) is owed and repaid through the
-            // same account — one row per facility, not one per draw.
-            lineLabel: l.sourceType.startsWith("tf_interest")
-              ? `Interest charged by ${tfAccounts.get(l.code)!.lenderName || "lender"}`
-              : `${tfPayee(l.sourceType, l.sourceId, l.description) || "Trade finance draw"} (via TF)`,
-          });
-        }
-      }
-      continue;
-    }
+    // An entry with no bank leg is outside a cash statement — unless it moves
+    // the trade-finance facility: the lender paid for us (a draw) or charged
+    // us (interest). Those are grossed up (owner 2026-09-29 「raw material 加,
+    // drawdown 减, 一加一减」): the contra legs classify exactly as if a bank
+    // had paid (the supplier's PI splits by material, the interest lands on
+    // its expense account) and the facility leg carries the other side.
+    const viaTf = !hasBank && tfAccounts.size > 0 && !opening && legs.some((l) => tfAccounts.has(l.code));
+    if (!hasBank && !viaTf) continue;
     for (const l of legs) {
       if (bankCodes.has(l.code)) {
         bankLegs.push({ accountCode: l.code, debitSen: l.debitSen, creditSen: l.creditSen, ym: l.ym });
       } else if (!opening) {
         if (tfAccounts.has(l.code)) {
-          // Repayment to the lender — the offset, not spend: flipped so the
-          // outflow block shows it negative. Never split as a raw-material
-          // payment (no paymentNos entry).
+          // The facility leg, as posted: CR = the lender lent (negative in the
+          // outflow-signed block), DR = we repaid (positive, real cash out) —
+          // or a void's reversal of either, which nets on the same row.
+          // Interest (tf_interest legs, adjustments included) is one row per
+          // facility. Never split as a raw-material payment (no paymentNos).
+          const lender = tfAccounts.get(l.code)!.lenderName || "lender";
           classified.push({
-            accountCode: l.code, debitSen: l.creditSen, creditSen: l.debitSen,
+            accountCode: l.code, debitSen: l.debitSen, creditSen: l.creditSen,
             ym: l.ym, sourceType: l.sourceType, sourceId: l.sourceId,
-            lineLabel: `Repaid to ${tfAccounts.get(l.code)!.lenderName || "lender"}`,
+            lineLabel: l.sourceType.startsWith("tf_interest")
+              ? `Interest charged by ${lender}`
+              : hasBank
+                ? `Repaid to ${lender}`
+                : `Drawdown — ${tfPayee(l.sourceType, l.sourceId, l.description) || "trade finance"}`,
           });
           continue;
         }
