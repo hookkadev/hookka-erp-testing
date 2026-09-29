@@ -31,12 +31,12 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
-## 2026-09-29 — 🔵 Cash Flow: interest to Finance Cost; MEDITEX `(A1)` no longer Unallocated (owner「这个应该是 finance cost 那边吧 … 不应该出现 unallocated，就是 meditex 那个」→「做，两样都做」)(branch `feat/cashflow-finance-cost-and-name-match`)
+## 2026-09-29 — ✅ Cash Flow: interest to Finance Cost; MEDITEX `(A1)` no longer Unallocated (owner「这个应该是 finance cost 那边吧 … 不应该出现 unallocated，就是 meditex 那个」→「做，两样都做」)(#568 abccf9ab MERGED, deployed, prod-verified by a before/after row diff of 2026-06..09)
 
-1. 🔵 Accounts under the chart's FINANCE COSTS parent (INTEREST ON TRADE FINANCE 900-I004, LOAN INTEREST 900-L002,
+1. ✅ Accounts under the chart's FINANCE COSTS parent (INTEREST ON TRADE FINANCE 900-I004, LOAN INTEREST 900-L002,
    HIRE PURCHASE INTEREST 900-H001) default to the Finance Cost block below Net operation surplus (the owner's
    drag still wins). Sep'26 expected: operating surplus 50,196.35 → 51,832.83; Finance Cost 1,636.48.
-2. 🔵 A PI line whose code is not in the RM master now resolves like GRN receiving does: price-list SKU, then
+2. ✅ A PI line whose code is not in the RM master now resolves like GRN receiving does: price-list SKU, then
    the exact product name of one master item. MEDITEX `MED-PSF15.064HCS(A1)` (44 lines; same name and price
    as `MED-PSF15.064HCS(14)(L)`) → B.FILLER; Sep'26 "Unallocated — MEDITEX" 10,450.00 moves from under
    PURCHASE - FABRIC to PURCHASE - FILLER. Lines matching nothing still show as Unallocated.
@@ -44,6 +44,14 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
    `(14)(L)`. Not done — MEDITEX's price list already carries `(14)(L)` at 836, and PO SKU recovery
    (`fillBlankSupplierSku`, purchase-orders.ts) would find two same-price candidates and blank the SKU on
    MEDITEX fibre PO lines. The name-match rule gives the same result with no data entry.
+4. ✅ Prod row diff (before vs after, every row of 2026-06/07/08/09): Cash Surplus unchanged in all four months
+   (−70,201.45 / 128,430.03 / 52,178.41 / 10,500.86). Only these moved — Sep: "Unallocated — MEDITEX" 10,450.00 gone,
+   PURCHASE - FABRIC 56,568.62 → 46,118.62, PURCHASE - FILLER / B.FILLER +10,450.00; FINANCE COSTS 1,636.48 moved from
+   General Expense to Finance Cost; operating surplus 50,196.35 → 51,832.83. Aug: finance costs 36,717.99 (loan interest
+   32,797.99 + HP interest 3,920.00) moved; operating surplus 176,501.58 → 213,219.57. Jul: "Unallocated — MEDITEX"
+   9,488.80 gone → B.FILLER; and PI-2606-058 (NLY) "GREEN SPONGE" 367.20 — keyed with NO code — resolved by exact name
+   to `NLY-22GH - 1″` (S.FILLER), the code the other two NLY green-sponge PIs carry ("Unallocated — NLY" 4,762.56 →
+   4,395.36). Jun: loan interest 150.00 moved; operating surplus 7,528.77 → 7,678.77.
 
 ## 2026-09-29 — 🟡 System RM stock stopped at end of March; material-code gap `MED-PSF15.064HCS(A1)` (owner: monthly stock-take is enough, stock parked until management decides)
 
