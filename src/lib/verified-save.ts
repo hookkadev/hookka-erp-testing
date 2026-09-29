@@ -135,7 +135,7 @@ export type VerifiedSaveArgs<T> = {
    * shallow on purpose so the mismatch branch's error message stays
    * readable.
    */
-  expect: Record<string, unknown>;
+  expect: { [K in keyof T]?: unknown };
 };
 
 export async function verifiedSave<T>(args: VerifiedSaveArgs<T>): Promise<SaveResult<T>> {

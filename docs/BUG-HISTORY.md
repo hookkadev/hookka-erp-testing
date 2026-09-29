@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-212 (branch `fix/customer-price-invoices-main`; ids 196-210 are on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-211 (branch `fix/customer-price-invoices-main`; ids 196-210 are on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-25**: newest entry BUG-2026-09-25-195 (branch `feat/employees-kpi-layout`, PR #530); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-25**: newest entry BUG-2026-09-25-194 (branch `feat/dashboard-kpi-no-icons`, PR #524); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
@@ -37,6 +38,16 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-09-29-212 — Invoice "Save Prices" always said the save did NOT take effect `invoices` `ui-frontend` 🟡
+
+**Symptom:** editing a line price on an invoice and pressing Save Prices showed "Save did NOT take effect, totalAmount: tried 44000, system has (empty)", even though the edit had been written.
+
+**Root cause:** the verifiedSave read-back in `src/pages/invoices/detail.tsx` expected `totalAmount`, a field `GET /api/invoices/:id` never returns (it returns `subtotalSen` / `totalSen`). `VerifiedSaveArgs.expect` was typed `Record<string, unknown>`, so the wrong key compiled.
+
+**Fix:** expect `subtotalSen` (the pre-tax sum the PUT recomputes and the page's `expectedTotal` already is). `expect` is now typed `{ [K in keyof T]?: unknown }` in `src/lib/verified-save.ts`, so a key that is not on the readback type fails `tsc` (checked: the old `totalAmount` key now errors; the other 25 callers compile unchanged).
 
 ---
 
