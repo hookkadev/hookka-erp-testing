@@ -1,5 +1,10 @@
 # Hookka ERP — Start Here (read before any task)
 
+> **Last verified: 2026-09-29** (branch `feat/org-chart-photo-ux`) — re-ran
+> `node scripts/gen-api-docs.mjs --check` after touching `src/api/routes/org-chart.ts`
+> (an added import shifted its handler line numbers); regenerated and restamped the
+> mount/handler counts below (142 / 987). Nothing else on this page re-checked.
+
 > **Last verified: 2026-09-22** (branch `fix/scan-queue-client-driven`) — re-measured the tracked-file
 > count and the API.md mount/handler counts quoted below; nothing else re-checked.
 
@@ -44,8 +49,8 @@ measured 2026-09-22; this line said 2,122). Use the map's file:line +
 
 5. **Which endpoint** → [`docs/API.md`](docs/API.md) — **generated** from
    `src/api/worker.ts` + `src/api/routes/*.ts` by `node scripts/gen-api-docs.mjs`
-   (141 mounts, **978** handlers, plus the exact public/auth surface — re-measured 2026-09-23
-   by `--check`; this line said 139 / 936).
+   (142 mounts, **987** handlers, plus the exact public/auth surface — re-measured 2026-09-29
+   by `--check`; this line said 141 / 978).
    Regenerate it instead of hand-editing; `--check` tells you if it is stale — **it WAS stale
    on `main` on 2026-08-14**, and the committed copy carried four duplicated mount rows with
    two different line sets for the same handlers. Run `--check` before trusting it.
