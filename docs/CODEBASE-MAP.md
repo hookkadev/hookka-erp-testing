@@ -1,5 +1,9 @@
 # Hookka ERP — Codebase Map (the single authoritative map)
 
+> **Restamped 2026-09-29 on branch `feat/ap-invoices-chips`:** Accounting › main-page entry — `ApInvoicesTab`
+> now filters with kind / status chips + a supplier picker (guard `tests/ap-invoices-chips.test.mjs`).
+> Nothing else re-checked.
+
 > **Restamped 2026-09-28 on branch `feat/cashflow-trade-finance-block`:** Accounting › Cash Flow tab
 > entry added (Trade Finance block: `TRADE_FINANCE` section, draw = spend / repayment = offset,
 > guard `tests/cashflow-trade-finance.test.mjs`). Nothing else re-checked.
@@ -432,7 +436,7 @@ authoritative current detail.** New here? Start with [ONBOARDING-PATH.md](ONBOAR
   - TYPES — L48-77
   - AccountPicker — L78-212
   - Audit Log tab (document lifecycle trail, F3) — EXTRACTED to `src/pages/accounting/tabs/AuditLogTab.tsx` (no longer inline in index.tsx)
-  - MAIN PAGE (tab host / nav) — L322-426. **FINANCE sidebar slimmed 2026-09-22** (`src/components/layout/sidebar.tsx`, groups Reports / Daily / Monthly / Debtors / Creditors / e-Invoice / Setup, 32 entries): Customer Payment, Supplier Payment, Other Creditor Payments, Other Debtor Receipts, Other Debtor/Creditor names, Other Creditor Bills, Monthly P&L, Cost Structure retired from the MENU only — every tab key / route still answers its URL. Hosts: `PlHubTab` (P&L / Monthly P&L / Cost Structure as one entry, `?tab=plmonthly|coststruct` still land on their view), `OtherPartyBillsTab` folds the names list + settle manager (`FoldSection`), `ApInvoicesTab` raises/edits other-creditor bills inline, Payment Vouchers links the Supplier Payment page for FX / advance knock-off / TF. Guard `tests/finance-sidebar.test.mjs`.
+  - MAIN PAGE (tab host / nav) — L322-426. **FINANCE sidebar slimmed 2026-09-22** (`src/components/layout/sidebar.tsx`, groups Reports / Daily / Monthly / Debtors / Creditors / e-Invoice / Setup, 32 entries): Customer Payment, Supplier Payment, Other Creditor Payments, Other Debtor Receipts, Other Debtor/Creditor names, Other Creditor Bills, Monthly P&L, Cost Structure retired from the MENU only — every tab key / route still answers its URL. Hosts: `PlHubTab` (P&L / Monthly P&L / Cost Structure as one entry, `?tab=plmonthly|coststruct` still land on their view), `OtherPartyBillsTab` folds the names list + settle manager (`FoldSection`), `ApInvoicesTab` raises/edits other-creditor bills inline (2026-09-29: kind / status are chip rows with counts — `AP_KIND_CHIPS` / `AP_STATUS_CHIPS` — plus a searchable "All suppliers" picker; one load of `/ap-invoices`, filters client-side; guard `tests/ap-invoices-chips.test.mjs`), Payment Vouchers links the Supplier Payment page for FX / advance knock-off / TF. Guard `tests/finance-sidebar.test.mjs`.
   - Overview tab + cards (Cleanup, Contra, LandedCost, DocNumbering, GstRate, Fye, StockMap, Aging) — L427-1320
   - Chart of Accounts tab (COATab) — L1321-1905
   - Journal Entries tab + JournalEntryForm (`JournalsTab`, anchor by name) — DataGrid list (single click selects for the batch bar; **double-click or ⋮ › View detail opens the line-level modal** with DR/CR totals + the same actions as the menu, 2026-09-22), JournalEntryForm for new / draft edit. Guard `tests/jv-detail-view.test.mjs`.
