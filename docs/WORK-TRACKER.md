@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-29**: #586 (P&L inline drill) closed ✅ below with its prod check.
 > **Last verified: 2026-09-29**: branch `feat/pl-inline-drill` added below (its entry is the newest).
 > **Last verified: 2026-09-29**: #581 (Cash Flow staff-contribution accruals → General Expense) closed ✅ below with its prod check.
 > **Last verified: 2026-09-29**: branch `fix/cashflow-staff-contribution-accruals` added below (its entry is the newest).
@@ -38,16 +39,19 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
-## 2026-09-29 — 🔵 P&L inline drill: click a line's name, its ledger lines open underneath (owner「我要点开看 detail，就是这样」+ Houzs P&L screenshot)(branch `feat/pl-inline-drill`)
+## 2026-09-29 — ✅ P&L inline drill: click a line's name, its ledger lines open underneath (owner「我要点开看 detail，就是这样」+ Houzs P&L screenshot)(#586 5489aa74 MERGED, deployed, prod-verified)
 
-1. 🔵 P&L statement: an account line's name toggles a panel under the row — Date · Description · Other side · Ref. 1 · Ref. 2 ·
+1. ✅ P&L statement: an account line's name toggles a panel under the row — Date · Description · Other side · Ref. 1 · Ref. 2 ·
    Debit · Credit (the screenshot's columns) + a total. Not in edit mode (the drag owns the row there). A new period starts closed.
-2. 🔵 `GET /api/accounting/pl-drill?period&account` (read): the statement's own pass with a trace, so the lines sum to the line;
+2. ✅ `GET /api/accounting/pl-drill?period&account` (read): the statement's own pass with a trace, so the lines sum to the line;
    payroll taken from payslips (not posted yet) and the opening month's share show as their own rows; a month keyed from
    the old books says so. Ref. 1 = the document; Ref. 2 = invoice → SO, PI → supplier invoice no., bill → its reference,
    voucher → payee. Other side = the opposite accounts of the same entry.
-3. 🔵 Computed lines that are one account's ledger figure open too (a group's PURCHASE, carriage, SST); stock / WIP / FG don't.
+3. ✅ Computed lines that are one account's ledger figure open too (a group's PURCHASE, carriage, SST); stock / WIP / FG don't.
    Guard `tests/pl-inline-drill.test.mjs`. Prod check after deploy: every openable line of a month, drill total = line.
+4. ✅ Prod (measured): every openable line of Sep'26 and Aug'26 opened through the endpoint — each drill total equals its
+   P&L line and `tied` is true (none off); roughly half a second per line. UI: the sales line opened under its row with the
+   seven columns, Ref. 1 = invoice, Ref. 2 = its SO, other side = trade debtors, total = the line.
 
 ## 2026-09-29 — ✅ Cash Flow: EPF / SOCSO / EIS accruals are the ordinary staff's → General Expense (owner「这个是普通 staff，不是 direct 的」)(#581 302e67c7 MERGED, deployed, prod-verified)
 
