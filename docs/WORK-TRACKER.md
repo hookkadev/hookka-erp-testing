@@ -30,6 +30,14 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
+## 2026-09-29 — 🔵 Cash Flow: a supplier can be filed under a section — Capex / Factory Overhead / General Expense / Direct Labour (owner「我无法选其他的 categories, 类似 capex 等等」→「做」)(branch `feat/cashflow-supplier-section-categories`)
+
+1. 🔵 Engine `SUPPLIER_SECTION_TARGETS` + `supplierSectionFor`: a supplier's "Unallocated — X" / "Opening
+   creditors — X" money (payments with no material line) moves to the chosen section whole, as a row
+   named after the supplier; a PI with material lines still splits by material. `PUT /cashflow/map`
+   accepts the four section keys; the Supplier categories card lists them under the four raw-material
+   lines. Guard `tests/cashflow-supplier-section.test.mjs`.
+
 ## 2026-09-29 — ✅ AP Invoices: kind / status chips + supplier picker instead of the two dropdowns (owner「我希望是这样选，而不是往下滑。先确定」→「做」)(#549 62f8a1d8 MERGED, deployed, prod-verified: chips with counts, AP-invoices click filters the list, Purchase invoices count 534, dropdowns gone)
 
 1. ✅ `AP_KIND_CHIPS` (All / AP invoices / Purchase invoices) and `AP_STATUS_CHIPS` (All / Open /
