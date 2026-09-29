@@ -1,5 +1,7 @@
 # Bug History
 
+> **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-216 (branch `fix/staging-no-nightly-wipe`; ids 213-215 are on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+
 > **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-212 (branch `fix/customer-price-invoices-main`; ids 196-210 are on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-211 (branch `fix/customer-price-invoices-main`; ids 196-210 are on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-196 (branch `fix/tf-interest-account-collision`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
@@ -44,6 +46,15 @@ Entries themselves stay newest-first.
 
 ---
 
+## BUG-2026-09-29-216 — Staging lost all test data every night `ci-cd` `staging` 🟡
+
+**Symptom:** everything created on staging was gone the next morning; the app looked freshly cloned from prod.
+
+**Root cause:** `.github/workflows/sync-staging.yml` carried `schedule: cron '0 18 * * *'` (02:00 SGT). Schedules fire from the default branch, so the copy on `main` ran nightly: `DROP SCHEMA public CASCADE`, then `pg_restore` of a prod dump. Nothing distinguished a test record from prod data. Separately `scripts/sanitize-staging.mjs` still carried the old staging ref (`zaxy...`), so after the wipe it refused to run and the payroll/PII scrub and PIN steps were skipped.
+
+**Fix:** cron removed (manual `workflow_dispatch` only). New default `mode=merge` runs `scripts/merge-prod-into-staging.mjs`: per table, COPY prod rows into a temp table and `INSERT ... ON CONFLICT DO NOTHING`, so nothing in staging is deleted or overwritten. `mode=reset` keeps the old full clone behind `confirm=SYNC`. Sanitiser `STAGING_REF` is now `kahxgvbfanbraazetefr`. Pinned by `tests/sync-staging-no-nightly-wipe.test.mjs`. NOT run against a live database yet (no credentials in the dev session): the first `mode=merge` run on GitHub is the live check.
+
+---
 ## BUG-2026-09-29-212 — Invoice "Save Prices" always said the save did NOT take effect `invoices` `ui-frontend` 🟡
 
 **Symptom:** editing a line price on an invoice and pressing Save Prices showed "Save did NOT take effect, totalAmount: tried 44000, system has (empty)", even though the edit had been written.

@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-29**: branch `fix/staging-no-nightly-wipe` added below (not pushed, its entry is the newest).
 > **Last verified: 2026-09-29**: branch `feat/production-multi-select-filters` added below (open, its entry is the newest).
 > **Last verified: 2026-09-25**: branch `feat/dashboard-efficiency-employee-drill` (stacked on `fix/dashboard-tighter-padding`, PR #533) added below (committed, not pushed, its entry is the newest).
 > **Last verified: 2026-09-25**: branch `fix/dashboard-tighter-padding` added below (not committed, its entry is the newest).
@@ -30,6 +31,12 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
 ---
+
+## 2026-09-29 — 🔵 Staging wiped every night; refresh must keep test data (branch `fix/staging-no-nightly-wipe` → `main`)
+- 1. 🔵 Cause: `sync-staging.yml` cron (18:00 UTC) on `main` dropped staging's public schema. Cron removed, manual dispatch only. BUG-2026-09-29-216.
+- 2. 🔵 New `mode=merge` (default): `scripts/merge-prod-into-staging.mjs` inserts prod rows staging lacks, never deletes or overwrites. `mode=reset` = old full clone, needs `confirm=SYNC`.
+- 3. 🔵 `sanitize-staging.mjs` STAGING_REF `zaxy...` changed to `kahx...` (it was refusing to run, so the scrub and PIN steps were skipped after each wipe).
+- 4. 🟡 UNMEASURED: merge not run against a live DB (no credentials in this session). First step after merge: dispatch `Sync prod → staging` with mode=merge and read the per-table log. The sanitiser also re-fakes contact fields and passwords on ALL staging rows, including test rows.
 
 ## 2026-09-29 — 🔵 Cash Flow: one sign convention (owner「确定一下整体的符号哦，有点乱，loan from houzs … 应该是我借出去吧」→「做，统一符号」)(branch `feat/cashflow-unified-signs`)
 
