@@ -31,16 +31,19 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
-## 2026-09-29 — 🔵 Cash Flow: one sign convention (owner「确定一下整体的符号哦，有点乱，loan from houzs … 应该是我借出去吧」→「做，统一符号」)(branch `feat/cashflow-unified-signs`)
+## 2026-09-29 — ✅ Cash Flow: one sign convention (owner「确定一下整体的符号哦，有点乱，loan from houzs … 应该是我借出去吧」→「做，统一符号」)(#569 e96e89c5 MERGED, deployed, prod-verified)
 
-1. 🔵 Checked first (prod): Aug'26 "LOAN FROM RELATED PARTY - HOUZS VENTURE (71,457.13)" = OCB-2608-007's three lines
+1. ✅ Checked first (prod): Aug'26 "LOAN FROM RELATED PARTY - HOUZS VENTURE (71,457.13)" = OCB-2608-007's three lines
    (5,702.00 / 22,873.50 / 42,881.63) debited to 440-0030, which was 0 before → a DEBIT balance, Houzs Venture owes
    Hookka 71,457.13 — money lent out, as the owner said (the account's name says FROM; a booking choice left to the
    owner / accountant). CAPEX "PLANT & MACHINERY (61,400.00)" = ODB-2608-001, a machine sold to Houzs → money in.
-2. 🔵 LOAN and UNALLOCATED were inflow-signed while every other block below the result was outflow-signed. Now all
+2. ✅ LOAN and UNALLOCATED were inflow-signed while every other block below the result was outflow-signed. Now all
    blocks except Revenue Collection read amount = money out, (amount) = money in; LOAN renamed "Loan repaid / lent ·
    (received)"; the page footer states the rule. Figures and the cash surplus unchanged. Guard
    `tests/cashflow-unified-signs.test.mjs`.
+3. ✅ Prod row diff (before vs after, every row of 2026-06/07/08/09): 129 rows each — 123 identical, 6 (the Loan /
+   Unallocated rows) exactly sign-flipped, zero other differences; operating surplus and Cash Surplus unchanged in all four
+   months. Aug now reads Loan repaid / lent 71,457.13 and Unallocated 145,676.25 (both money out); the footer states the rule.
 
 ## 2026-09-29 — ✅ Cash Flow: interest to Finance Cost; MEDITEX `(A1)` no longer Unallocated (owner「这个应该是 finance cost 那边吧 … 不应该出现 unallocated，就是 meditex 那个」→「做，两样都做」)(#568 abccf9ab MERGED, deployed, prod-verified by a before/after row diff of 2026-06..09)
 
