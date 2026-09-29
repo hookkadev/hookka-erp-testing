@@ -31,6 +31,20 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
+## 2026-09-29 — 🔵 Cash Flow: interest to Finance Cost; MEDITEX `(A1)` no longer Unallocated (owner「这个应该是 finance cost 那边吧 … 不应该出现 unallocated，就是 meditex 那个」→「做，两样都做」)(branch `feat/cashflow-finance-cost-and-name-match`)
+
+1. 🔵 Accounts under the chart's FINANCE COSTS parent (INTEREST ON TRADE FINANCE 900-I004, LOAN INTEREST 900-L002,
+   HIRE PURCHASE INTEREST 900-H001) default to the Finance Cost block below Net operation surplus (the owner's
+   drag still wins). Sep'26 expected: operating surplus 50,196.35 → 51,832.83; Finance Cost 1,636.48.
+2. 🔵 A PI line whose code is not in the RM master now resolves like GRN receiving does: price-list SKU, then
+   the exact product name of one master item. MEDITEX `MED-PSF15.064HCS(A1)` (44 lines; same name and price
+   as `MED-PSF15.064HCS(14)(L)`) → B.FILLER; Sep'26 "Unallocated — MEDITEX" 10,450.00 moves from under
+   PURCHASE - FABRIC to PURCHASE - FILLER. Lines matching nothing still show as Unallocated.
+3. 🟡 Deviation from what the owner approved, stated: the owner said 做 to ADDING a price-list row `(A1)` →
+   `(14)(L)`. Not done — MEDITEX's price list already carries `(14)(L)` at 836, and PO SKU recovery
+   (`fillBlankSupplierSku`, purchase-orders.ts) would find two same-price candidates and blank the SKU on
+   MEDITEX fibre PO lines. The name-match rule gives the same result with no data entry.
+
 ## 2026-09-29 — 🟡 System RM stock stopped at end of March; material-code gap `MED-PSF15.064HCS(A1)` (owner: monthly stock-take is enough, stock parked until management decides)
 
 Measured on prod 2026-09-29, read-only:
