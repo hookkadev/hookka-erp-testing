@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-211 (branch `fix/so-customer-price-on-edit`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-28**: newest entry BUG-2026-09-28-210 (branch `feat/customer-credit-control`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-28**: newest entry BUG-2026-09-28-209 (branch `feat/rm-uom-options`, DEV-20; ids 196-208 are taken on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-25**: newest entry BUG-2026-09-25-195 (branch `feat/employees-kpi-layout`, PR #530); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
@@ -39,6 +40,18 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-09-29-211 — Conts invoice billed the master price, not the customer price list `sales-orders` `pricing-products` 🟡
+
+**Symptom (BUG-35):** an invoice for customer Conts carried prices different from Conts' own price list (Customers → Conts → Products); they matched the master product price.
+
+**Root cause:** the invoice copies the SO line price, so the wrong number was stored on the SO. The 2026-08 owner ruling (customer price authoritative, `src/lib/so-base-price.ts`) was wired into SO **POST** only. SO **PUT** still used the customer price only when a line arrived at 0, and the edit screen seeds non-sofa lines from the master product, so any SO saved through Edit kept the master price. The create screen also showed master prices on two paths (sofa module add, bedframe Price 2 fallback), corrected on save by POST.
+
+**Fix:** SO PUT now prices every line through `resolveSoBasePriceSen` exactly like POST (sofa lines still pass incoming=0 so they always re-derive), in `src/api/routes/sales-orders.ts` PUT line pricing. `src/pages/sales/edit.tsx` and `src/pages/sales/create.tsx` seed from `/api/customer-products` first. Regression pin in `tests/so-base-price.test.mjs`.
+
+**Not fixed here:** existing invoices/SOs keep their stored price; the affected SO must be re-saved (or invoice lines edited) before re-sending. Prod rows affected are UNMEASURED (no prod read in this session). Known ceiling, pre-existing on POST too: the server seat-height match ignores the fabric tier (PRICE_1/2/3) and bedframe `price1Sen`.
 
 ---
 
