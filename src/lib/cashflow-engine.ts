@@ -166,6 +166,29 @@ export function supplierSectionFor(
     : null;
 }
 
+// Default sections for the payroll accruals, found from the chart — the
+// parent of the salary accrual (410-0000 ACCRUALS on this chart), never a
+// hard-coded code. The salary accrual and that parent carry the production
+// wages → Direct Labour (the caller splits them by department). Every other
+// accrual under the same parent — EPF / SOCSO / EIS — is the ordinary staff's
+// statutory contribution → General Expense (owner 2026-09-29 「这个是普通
+// staff，不是 direct 的」; the P&L books that EPF as STAFFS' EPF, not
+// PRODUCTION - EPF). No parent → no defaults. The owner's own drags win (the
+// caller only fills accounts he has not mapped).
+export function payrollAccrualSections(
+  coa: ReadonlyMap<string, CoaLite>,
+  salaryAccrualCode: string,
+): Map<string, CfSection> {
+  const out = new Map<string, CfSection>();
+  const parent = coa.get(salaryAccrualCode)?.parentCode ?? null;
+  if (!parent) return out;
+  for (const a of coa.values()) {
+    if (a.code === parent || a.code === salaryAccrualCode) out.set(a.code, "DIRECT_LABOUR");
+    else if (a.parentCode === parent) out.set(a.code, "GENERAL_EXPENSE");
+  }
+  return out;
+}
+
 // Distribute an integer total (sen) across weighted buckets so the parts sum
 // EXACTLY to total (largest-remainder method). Used to split one supplier
 // payment across the material lines of the PI it settled.

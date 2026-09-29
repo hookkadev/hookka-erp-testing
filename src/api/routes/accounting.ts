@@ -30,7 +30,7 @@ import { parseDebtorCode } from "../../lib/debtor";
 import { defaultPnlBucket, pnlBucketFor } from "../../lib/pnl-bucket";
 import { bsSectionFor, bsSectionClass } from "../../lib/bs-section";
 import type { BsSection } from "../../lib/bs-section";
-import { buildStatement, splitByLargestRemainder, rawMaterialLineFor, RM_LINES, SUPPLIER_SECTION_TARGETS } from "../../lib/cashflow-engine";
+import { buildStatement, splitByLargestRemainder, rawMaterialLineFor, RM_LINES, SUPPLIER_SECTION_TARGETS, payrollAccrualSections } from "../../lib/cashflow-engine";
 import type { CfMap, ClassifiedLeg, BankLeg, RmSplit, CoaLite } from "../../lib/cashflow-engine";
 import { getDocNumberPrefixes, issueDocNumber, issueDocNumberWithPrefix } from "../lib/doc-number-service";
 import { computeDiscountAlloc, type PiOpen } from "../../lib/discount-alloc";
@@ -8638,9 +8638,11 @@ async function computeCashflowStatement(
   }
   const tfPayee = (sourceType: string, sourceId: string, description: string): string =>
     (sourceType.startsWith("supplier_payment") ? tfSupplierByNo.get(sourceId) : undefined) ?? description.trim();
-  // The salary-accrual family (410-0010's parent ACCRUALS and its ACCRUAL - EPF
-  // / SOCSO / EIS children) is labour money (owner 2026-09-29: salaries paid
-  // against 410-0000 showed as "Unallocated"). Found from the chart, not coded.
+  // The payroll accruals under 410-0010's parent (ACCRUALS) are payroll money,
+  // not "Unallocated" (owner 2026-09-29). The parent's own legs are salary and
+  // split by department like 410-0010's; the section defaults (salary → Direct
+  // Labour, EPF / SOCSO / EIS → General Expense) come from
+  // payrollAccrualSections below. Found from the chart, not coded.
   const salaryAccrualParent = coa.get(LABOUR_ACCRUAL_ACCT)?.parentCode ?? null;
   for (const legs of byEntry.values()) {
     const hasBank = legs.some((l) => bankCodes.has(l.code));
@@ -8702,11 +8704,7 @@ async function computeCashflowStatement(
   // every account filed under the chart's FINANCE COSTS parent (902-0000 on
   // this chart — found by name, not code) defaults to the Finance Cost
   // section unless the owner has dragged it somewhere himself.
-  if (salaryAccrualParent) {
-    for (const a of coa.values()) {
-      if ((a.code === salaryAccrualParent || a.parentCode === salaryAccrualParent) && !map[a.code]) map[a.code] = { section: "DIRECT_LABOUR", order: 10 };
-    }
-  }
+  for (const [code, section] of payrollAccrualSections(coa, LABOUR_ACCRUAL_ACCT)) if (!map[code]) map[code] = { section, order: 10 };
   const financeParents = new Set([...coa.values()].filter((a) => /^FINANCE COSTS?$/i.test(a.name.trim())).map((a) => a.code));
   for (const a of coa.values()) if (a.parentCode && financeParents.has(a.parentCode) && !map[a.code]) map[a.code] = { section: "FINANCE_COST", order: 10 };
   const sgOverride = await getCashflowStockGroupMap(c.var.DB);

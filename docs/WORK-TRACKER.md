@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-29**: branch `fix/cashflow-staff-contribution-accruals` added below (its entry is the newest).
 > **Last verified: 2026-09-29**: Cash Flow "Unallocated · STOCK - FABRIC M" entry added below — no code; branch `feat/cashflow-stock-accounts-raw-materials` dropped.
 > **Last verified: 2026-09-29**: #575 (AP Invoices popups) and #578 (Cash Flow cash view) closed ✅ below with their prod measurements.
 > **Last verified: 2026-09-29**: branch `feat/ap-invoices-popup` added below (its entry is the newest); the 410-0000 entry (#573) closed ✅ with its prod measurements.
@@ -34,6 +35,16 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
 ---
+
+## 2026-09-29 — 🔵 Cash Flow: EPF / SOCSO / EIS accruals are the ordinary staff's → General Expense (owner「这个是普通 staff，不是 direct 的」)(branch `fix/cashflow-staff-contribution-accruals`)
+
+1. 🔵 #573 filed the whole payroll-accrual family under Direct Labour. The owner: the EPF / SOCSO accruals are the ordinary
+   staff's, not direct labour. Checked first (prod P&L, read-only): the P&L books that EPF as STAFFS' EPF; PRODUCTION - EPF
+   is a small fixed line — the two statements now agree.
+2. 🔵 New pure rule `payrollAccrualSections` (cashflow-engine.ts): salary accrual + its parent → Direct Labour (the
+   department split is unchanged); every other accrual under that parent → General Expense. Found from the chart; the
+   owner's drags still win. Both sections are above the operating result: result and Cash Surplus do not move.
+   Guard `tests/cashflow-staff-contribution-accruals.test.mjs` (runs the rule and the statement).
 
 ## 2026-09-29 — 🔵 PR labels for the whole team (branch `ci/label-prs` → `main`)
 - 1. 🔵 `label-prs.yml` on `main`: every PR into `main`/`staging` gets `staging` (by base) and a type label (by title prefix). BUG-2026-09-29-218: the staging-only labeler never ran.
