@@ -1,57 +1,45 @@
 #!/usr/bin/env node
-// Writes public/staging-notes.json: the latest PRs merged into the current
-// branch. Run by deploy.yml on `staging` pushes only, so the /staging-notes
-// page has something to show there and nowhere else.
+// Writes public/staging-notes.json: the latest merged PRs that carry the
+// `staging` label. Run by deploy.yml on `staging` pushes only, so the
+// /staging-notes page has something to show there and nowhere else.
 //
 // STAGING ONLY: this feature lives on `staging` and must never get a PR into
 // main. (Staging is never merged into main wholesale; features reach main
 // through their own PRs, so it stays off prod as long as nobody opens one.)
 //
-// Deliberately NOT "what main is missing": features usually reach main as a
-// separate squash-merged PR, so staging's merge commits never become main's
-// ancestors and a main..staging diff lists PRs that are already live.
+// The label is the source, not git history: PRs into staging get it (the
+// auto-label workflow, #552), and older unlabelled PRs are left out on
+// purpose. Needs `gh` with GH_TOKEN set (the Actions runner has both).
 //
 //   node scripts/gen-staging-notes.mjs [limit]   (default 60)
-//
-// Reads GitHub's default merge commit shape:
-//   subject "Merge pull request #545 from hookkadev/feat/x", body = PR title.
 import { execFileSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 
 const limit = process.argv[2] || '60'
-const git = (...args) => execFileSync('git', args, { encoding: 'utf8' })
 
-// A shallow clone has no merge parents, so the log below silently finds 0 PRs
-// (BUG-2026-09-29-215). Fail loudly instead; the page then says "no notes".
-if (git('rev-parse', '--is-shallow-repository').trim() === 'true') {
-  console.error('gen-staging-notes: shallow checkout, needs full history (fetch-depth 0)')
-  process.exit(1)
-}
+const raw = JSON.parse(execFileSync('gh', ['pr', 'list',
+  '--base', 'staging', '--label', 'staging', '--state', 'merged',
+  '--limit', limit, '--json', 'number,title,headRefName,mergedAt',
+], { encoding: 'utf8' }))
 
-const log = git('log', 'HEAD', '--first-parent', '--merges', '-n', limit,
-  '--format=%H%x1f%cI%x1f%s%x1f%b%x1e')
+// gh sorts by creation date; the page wants newest merge first.
+raw.sort((a, b) => b.mergedAt.localeCompare(a.mergedAt))
 
-const prs = []
-for (const rec of log.split('\x1e')) {
-  const [sha, mergedAt, subject, body] = rec.trim().split('\x1f')
-  const m = /^Merge pull request #(\d+) from [^/]+\/(.+)$/.exec(subject || '')
-  if (!m) continue // "Merge origin/main into staging" etc.
-  const title = (body || '').trim().split('\n')[0] || m[2]
-  const c = /^(\w+)(?:\(([^)]*)\))?!?:\s*(.+)$/.exec(title)
-  prs.push({
-    number: Number(m[1]),
-    branch: m[2],
+const prs = raw.map((p) => {
+  const c = /^(\w+)(?:\(([^)]*)\))?!?:\s*(.+)$/.exec(p.title)
+  return {
+    number: p.number,
+    branch: p.headRefName,
     type: c ? c[1].toLowerCase() : 'other',
     scope: c?.[2] || null,
-    title: c ? c[3] : title,
-    mergedAt,
-    sha: sha.slice(0, 8),
-  })
-}
+    title: c ? c[3] : p.title,
+    mergedAt: p.mergedAt,
+  }
+})
 
 const out = {
   generatedAt: new Date().toISOString(),
-  commit: git('rev-parse', '--short=8', 'HEAD').trim(),
+  commit: execFileSync('git', ['rev-parse', '--short=8', 'HEAD'], { encoding: 'utf8' }).trim(),
   prs,
 }
 writeFileSync(new URL('../public/staging-notes.json', import.meta.url), JSON.stringify(out, null, 2) + '\n')
