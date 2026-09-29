@@ -31,16 +31,17 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
-## 2026-09-29 — 🔵 Cash Flow statement: 9 s → bulk reads (owner「为什么他的 load 这么慢」→「可以做，但是还是主要确保数据对」)(branch `perf/cashflow-statement-batching`)
+## 2026-09-29 — ✅ Cash Flow statement: 9 s → 0.65 s, figures identical (owner「为什么他的 load 这么慢」→「可以做，但是还是主要确保数据对」)(#565 7a8f5596 MERGED, deployed, prod-verified)
 
-1. 🔵 Measured on prod: `GET /cashflow-statement?period=2026-09` 8,634 / 9,349 ms (two runs) vs 50–120 ms for
+1. ✅ Measured on prod: `GET /cashflow-statement?period=2026-09` 8,634 / 9,349 ms (two runs) vs 50–120 ms for
    every other endpoint. Cause: one query per ticked supplier payment (115) + one per settled PI (298)
    → ~415 serial round-trips. Fix: both reads in bulk (chunked IN lists of 200); `piWeightsFor` /
    `weightsForPayment` become pure lookups with the identical arithmetic. Guard
    `tests/cashflow-statement-batching.test.mjs`.
-2. ⏳ Data-equality proof: baseline row fingerprints for 2026-06/07/08/09 captured on prod BEFORE the
-   deploy (localStorage in the owner's browser + SHA-256 in the tracker below once compared); after the
-   deploy the same rows are re-fetched and diffed — the ruling is 「主要确保数据对」.
+2. ✅ Data-equality proof (prod, before vs after the deploy, same browser): 2026-06 / 07 / 08 / 09 — 129 rows each,
+   every row IDENTICAL (SHA-256 prefixes 118a689ff6dacd5d / 69299de183df897c / 6be1ffd86ad28126 / f6eceeac6c501a87
+   before AND after, zero row differences). Load time 8.3–8.9 s → 644–670 ms per month. Baselines deleted from the
+   browser afterwards.
 
 ## 2026-09-29 — ✅ Cash Flow: Trade Finance block — owner's final ruling, grossed up and below the operating result (「raw material 加, drawdown 减, 一加一减 … 放在 after operation surplus」→「做」)(#560 3ad9dedb MERGED, deployed, prod-verified Sep'26: Raw Materials 190,448.08 · Net operation surplus 50,196.35 · Trade Finance: Drawdown MEDITEX (33,807.30) / NLY (30,000.00) / OCEAN SKY (33,352.38), Interest (1,637.08), Repaid +98,067.52 = (729.24) · INTEREST ON TRADE FINANCE 1,637.08 under General Expense › FINANCE COSTS · Cash Surplus 10,500.86 = the bank, and the lines now add up to it exactly: 50,196.35 + 729.24 − 1,747.10 − 38,677.63)
 
