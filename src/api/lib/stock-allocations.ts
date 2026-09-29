@@ -581,8 +581,25 @@ export type OpenAllocation = {
 };
 
 /**
- * What a given sales order currently holds, netted per line. The detail panel
- * reads this to decide whether there is anything to release.
+ * What a given sales order currently holds, netted per PRODUCT.
+ *
+ * THE GROUP KEY IS THE IDENTITY, AND IT IS DELIBERATELY SMALL. It was once
+ * (product, order, order_no, so_item_id, so_line_no), and a release then failed
+ * to cancel its own allocation: the ALLOCATE rows carried
+ * (soi-…, line 1, SO-2609-394) and the RELEASE counter-rows carried
+ * (null, null, null), so the two fell into different groups, the +4 stayed
+ * "open" and the −4 was hidden by the HAVING. The goods had gone home, the
+ * panel still offered to release them, and nothing anywhere disagreed.
+ *
+ * so_item_id, so_line_no and sales_order_no DESCRIBE an allocation; they do not
+ * identify one. A counter-row is the reversal of a claim on a product by an
+ * order, and that pair is the whole identity. Keeping the descriptive columns
+ * out of the key means the netting cannot be broken by a write site that
+ * forgets to populate one — which is the failure that actually happened, and
+ * which "remember to fill it in at every call site" would only postpone.
+ *
+ * MIN(so_item_id) etc. are reported for display only; they name the first line
+ * the product was claimed against, and a caller must not treat them as a key.
  */
 export async function loadOpenAllocationsForOrder(
   db: D1Database,
@@ -590,11 +607,14 @@ export async function loadOpenAllocationsForOrder(
 ): Promise<OpenAllocation[]> {
   const res = await db
     .prepare(
-      `SELECT product_code, sales_order_id, sales_order_no, so_item_id, so_line_no,
+      `SELECT product_code, sales_order_id,
+              MIN(sales_order_no) AS sales_order_no,
+              MIN(so_item_id)     AS so_item_id,
+              MIN(so_line_no)     AS so_line_no,
               SUM(direction * quantity) AS net_qty
          FROM stock_allocations
         WHERE sales_order_id = ?
-        GROUP BY product_code, sales_order_id, sales_order_no, so_item_id, so_line_no
+        GROUP BY product_code, sales_order_id
         HAVING SUM(direction * quantity) > 0`,
     )
     .bind(salesOrderId)

@@ -1289,6 +1289,43 @@ correctness bug in the key, and mixing them into one change would have made the
 ---
 
 
+
+## BUG-2026-09-29-220 — a release did not cancel its own allocation `sales` `inventory` 🟢
+
+🟢 Fixed. **Measured on staging** during the DEV-05 acceptance run: four pieces
+allocated to SO-2609-394, then released. Ownership went home correctly (all four
+production orders back to Factory Stock, `sales_order_id = stock_origin_so_id`)
+and availability returned to 4 — but the order's netted holding still read **4**,
+so the detail panel kept offering to release goods that were already back.
+
+The netting group key was
+`(product_code, sales_order_id, sales_order_no, so_item_id, so_line_no)`.
+ALLOCATE rows — written by the confirm path — carry the line
+(`soi-…`, `1`, `SO-2609-394`). RELEASE counter-rows carry `(null, null, null)`,
+because those come from the request body on the release path and nothing
+required them. **Different groups**: the `+4` stayed open and the `−4` was
+hidden by the `HAVING SUM(...) > 0`.
+
+Nothing disagreed anywhere: the goods were home, availability was right, and
+only this one view was wrong — which is why it needed a human clicking Release
+and then looking at the panel.
+
+**Fix is the KEY, not the write sites.** `so_item_id`, `so_line_no` and
+`sales_order_no` DESCRIBE an allocation; they do not identify one. A
+counter-row reverses a claim on a product by an order, and that pair is the
+whole identity, so the group is now `(product_code, sales_order_id)` with the
+descriptive columns reported via `MIN(...)` for display only. Patching the
+release endpoint to fill the fields in would have worked until the next write
+site forgot one.
+
+**Why the tests missed it**: the existing netting test fed a ready-made
+`net_qty` row, so it verified the READ and never once exercised a release
+cancelling an allocation. The new test allocates with the line fields and
+releases without them — the exact staging shape — and asserts the holding
+disappears.
+
+
+
 ## BUG-2026-09-24-202b — the note said six, the factory would have queued ten `sales` `production` 🟢
 
 

@@ -575,3 +575,79 @@ test("no row read in this module uses a bare snake_case key", () => {
     .filter((hit) => !src.includes(`?? ${hit}`));
   assert.deepEqual(bare, [], `these reads would be undefined when the adapter camelCases: ${bare.join(", ")}`);
 });
+
+// ---------------------------------------------------------------------------
+// BUG-2026-09-29-217 — a release did not cancel its own allocation.
+//
+// Measured on staging: four pieces allocated to SO-2609-394, then released.
+// Ownership went home correctly and availability returned to 4 — but the
+// order's netted holding still read 4, so the panel kept offering to release
+// goods that were already back.
+//
+// The group key was (product, order, order_no, so_item_id, so_line_no). The
+// ALLOCATE rows carried (soi-…, 1, SO-2609-394); the RELEASE counter-rows
+// carried (null, null, null), because those fields come from the request body
+// on the release path and nothing required them. Different groups, so the +4
+// stayed open and the −4 was hidden by the HAVING.
+//
+// The fix is the KEY, not the write sites: a counter-row reverses a claim on a
+// product by an order, and that pair is the identity. The rest is description.
+//
+// The old netting test could not catch it — it fed a ready-made `net_qty` row,
+// so it verified the read and never exercised a release cancelling an
+// allocation.
+// ---------------------------------------------------------------------------
+test("the netting group key is product + order ONLY", () => {
+  const src = read("src/api/lib/stock-allocations.ts");
+  const fn = src.slice(
+    src.indexOf("export async function loadOpenAllocationsForOrder"),
+    src.length,
+  );
+  const groupBy = (fn.match(/GROUP BY ([^\n]*)/) || [])[1] || "";
+  assert.equal(
+    groupBy.trim(),
+    "product_code, sales_order_id",
+    "descriptive columns in the key let a counter-row miss the claim it reverses",
+  );
+  for (const descriptive of ["so_item_id", "so_line_no", "sales_order_no"]) {
+    assert.ok(
+      !groupBy.includes(descriptive),
+      `${descriptive} describes an allocation, it does not identify one`,
+    );
+  }
+});
+
+test("a release cancels an allocation even when it omits the line fields", async () => {
+  // Exactly the staging shape: ALLOCATE carries the line, RELEASE does not.
+  const rows = [];
+  const db = fakeDb((q) => {
+    if (!/FROM stock_allocations/i.test(q)) return [];
+    // net by (product, order), the way the fixed query groups
+    const net = rows.reduce((n, r) => n + r.direction * r.quantity, 0);
+    return net > 0
+      ? [{ productCode: "A100", salesOrderId: "so-1", salesOrderNo: "SO-1", soItemId: "i1", soLineNo: 1, netQty: net }]
+      : [];
+  });
+
+  const at = "2026-09-29T00:00:00.000Z";
+  // allocate 4, WITH line fields
+  await db.batch([
+    buildAllocationStatement(db, "ALLOCATE", {
+      productCode: "A100", quantity: 4, salesOrderId: "so-1",
+      salesOrderNo: "SO-1", soItemId: "i1", soLineNo: 1, occurredAt: at,
+    }),
+  ]);
+  rows.push({ direction: 1, quantity: 4 });
+  assert.equal((await loadOpenAllocationsForOrder(db, "so-1"))[0].quantity, 4);
+
+  // release 4, WITHOUT them — the shape that broke it
+  await db.batch([
+    buildAllocationStatement(db, "RELEASE", {
+      productCode: "A100", quantity: 4, salesOrderId: "so-1", occurredAt: at,
+    }),
+  ]);
+  rows.push({ direction: -1, quantity: 4 });
+
+  const after = await loadOpenAllocationsForOrder(db, "so-1");
+  assert.equal(after.length, 0, "a fully released holding must disappear, not linger at 4");
+});
