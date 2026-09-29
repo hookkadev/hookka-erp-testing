@@ -48,7 +48,7 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
    one Amount column (money out in brackets); "All months" in month blocks, each with its total.
 2. 🔵 Salary department split: the payroll month named in the voucher text is read in any case / full name / without a year
    (`payrollMonthFrom`). Before, only "May'26"-style text was read, so most salary payments used the PAYMENT month's payslip
-   mix. Totals do not move — only how Direct Labour spreads across departments. A named month without payslips keeps the old mix.
+   mix. Totals do not move — only how Direct Labour spreads across departments. A named month without payslips uses the payment month's mix (one April-salary leg paid at opening used to stay unsplit; it now splits by May's payslips).
    Guard `tests/cashflow-drill-tidy.test.mjs`. Prod check after deploy: Direct Labour total, result and Cash Surplus identical.
 
 ## 2026-09-29 — ✅ Cash Flow inline drill: click a line's name, its payments / receipts open underneath (owner「cash flow 也要这样点开看」)(#587 81560c37 MERGED, deployed, prod-verified)
