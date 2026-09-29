@@ -3,7 +3,8 @@
 > **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-212 (branch `fix/customer-price-invoices-main`; ids 196-210 are on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-211 (branch `fix/customer-price-invoices-main`; ids 196-210 are on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-196 (branch `fix/tf-interest-account-collision`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
-> **Last verified: 2026-09-28**: newest entry BUG-2026-09-28-209 (branch `feat/rm-uom-options`, DEV-20; ids 196-208 are taken on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-09-29**: BUG-2026-09-28-209 / 210 (DEV-20, staging ids) brought to `main` on branch `feat/rm-uom-options-main`; a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-09-28**: newest entry BUG-2026-09-28-210 (branch `feat/rm-uom-options`, DEV-20, PR #536; ids 196-208 are taken on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-25**: newest entry BUG-2026-09-25-195 (branch `feat/employees-kpi-layout`, PR #530); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-25**: newest entry BUG-2026-09-25-194 (branch `feat/dashboard-kpi-no-icons`, PR #524); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-25** — newest entry BUG-2026-09-25-192 (branch `feat/ocr-dashboard-tab`, PR #522); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
@@ -95,6 +96,18 @@ real run → 900-I001 reads 0 legs / 0.00, 900-I004 carries the 20 (DR 2,458.96 
 row is "INTEREST ON TRADE FINANCE", EXPENSE, parent 902-0000. Sep'26 P&L re-read: INTEREST ON TRADE
 FINANCE RM 1,637.08 under Operating Expenses (beside LOAN INTEREST), INCORPORATION EXPENSE WRITTEN OFF
 gone. Guard `tests/tf-interest-account.test.mjs`.
+
+---
+
+## BUG-2026-09-28-210: Editing a raw material's stock qty dropped the decimals (12.5 MTR saved as 12) `inventory` 🟡
+
+🟡 **Fix in progress** (branch `feat/rm-uom-options` → `staging`, PR #536; not verified in a browser).
+
+**Symptom.** Found while scoping DEV-20, not reported. In Inventory → Raw Materials → Edit, typing a decimal Stock Qty (e.g. 12.5 for a fabric in MTR) saved a whole number (12). The half metre left the books with no adjustment record. Prod impact UNMEASURED.
+
+**Root cause.** The Stock Qty input parsed with `parseInt(e.target.value)` while every RM quantity column (`raw_materials.balance_qty`, `rm_batches`, PO / GRN lines) is DOUBLE PRECISION.
+
+**Fix.** `Number(e.target.value)` in the Edit RM dialog (`src/pages/inventory/index.tsx`). Units that genuinely must be whole (BOX / CTN / SET / PAIR by default) are now a setting in RM Settings, enforced by `raw-materials.ts` POST / PUT on a typed balance only. Regression: `tests/rm-uom-options.test.mjs`.
 
 ---
 

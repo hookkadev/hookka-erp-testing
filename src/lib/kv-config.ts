@@ -545,6 +545,9 @@ export type VariantsConfig = {
   // DEV-20: raw-material category (itemGroup) → allowed UOMs. A group with no
   // entry allows every UOM. Enforced by the raw-materials route too.
   uomOptions?: Record<string, string[]>;
+  // DEV-20: units whose RM balance cannot be typed as a fraction on the
+  // Inventory page (all categories). Absent → DEFAULT_WHOLE_UOMS.
+  wholeUoms?: string[];
   // Add FG bulk-generate per-variant defaults, keyed by size code (bedframe:
   // K/Q/…) or compartment code (sofa: 1A(LHF)/…). defaultBom = the source BOM
   // template productCode to copy from on generate (its {PRODUCT_CODE} etc.

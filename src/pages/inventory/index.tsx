@@ -37,6 +37,7 @@ import {
   materialVariantCode,
   materialVariantDescription,
   uomOptionsFor,
+  wholeUomsFrom,
   type UomOptions,
 } from "@/lib/material-variants";
 // Stock Breakdown — the per-item right-hand drawer (lots, movements with a
@@ -1320,6 +1321,13 @@ export default function InventoryPage() {
     [rmForm.itemGroup, rmUomOpts],
   );
   const rmFormUom = rmFormUomChoices.includes(rmForm.baseUOM) ? rmForm.baseUOM : rmFormUomChoices[0];
+  // Units whose balance cannot be typed as a fraction here (all categories).
+  const rmWholeUoms = useMemo(() => wholeUomsFrom(variantsCfg?.wholeUoms), [variantsCfg]);
+  function toggleWholeUom(uom: string) {
+    const next = rmWholeUoms.includes(uom) ? rmWholeUoms.filter((x) => x !== uom) : [...rmWholeUoms, uom];
+    setVariantsCfg((prev) => ({ ...(prev ?? {}), wholeUoms: next }) as VariantsConfig);
+    patchVariantsConfig({ wholeUoms: next });
+  }
   function toggleCatUom(cat: string, uom: string) {
     const cur = rmUomOpts[cat] ?? [];
     const list = cur.includes(uom) ? cur.filter((x) => x !== uom) : [...cur, uom];
@@ -2928,6 +2936,34 @@ export default function InventoryPage() {
                       <Input type="number" placeholder="Width" onFocus={(e) => e.currentTarget.select()} value={catSheetDefault(matCatSel).width ?? ""} onChange={(e) => saveSheetDefault(matCatSel, { width: e.target.value === "" ? undefined : Number(e.target.value) })} className="w-28" />
                     </div>
                   </div>
+
+                  {/* Whole-number units (DEV-20) — GLOBAL, not per category.
+                      A stock qty typed on this page (Add RM / Edit RM) in one
+                      of these units must be whole; the API enforces it. Stock
+                      Adjustments, PO, GRN and production are not checked. */}
+                  <div className="pt-3 border-t border-[#E2DDD8]">
+                    <div className="text-xs text-[#6B7280] mb-1.5">
+                      Whole-number units <span className="text-[#1F1D1B] font-medium">(all categories)</span>{" "}
+                      <span className="text-[#9CA3AF]">(stock qty typed on this page cannot be a fraction, e.g. no 2.5 BOX)</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {[...new Set([...ALL_RM_UOMS, ...Object.values(rmUomOpts).flat(), ...rmWholeUoms])].map((u) => {
+                        const on = rmWholeUoms.includes(u);
+                        return (
+                          <button
+                            key={u}
+                            type="button"
+                            aria-pressed={on}
+                            onClick={() => toggleWholeUom(u)}
+                            className={`inline-flex items-center gap-1.5 border rounded px-2.5 py-1 text-sm font-mono ${on ? "border-[#6B5C32] bg-[#F4EFE3] text-[#1F1D1B]" : "border-[#E2DDD8] bg-white text-gray-500 hover:bg-[#FAF9F7]"}`}
+                          >
+                            <span className={`w-4 h-4 flex-shrink-0 rounded-sm border flex items-center justify-center ${on ? "bg-[#6B5C32] border-[#6B5C32] text-white" : "border-gray-300"}`}>{on ? <Check className="w-3 h-3" /> : null}</span>
+                            {u}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
                 <div className="flex justify-end gap-2 px-6 py-4 border-t border-[#E2DDD8]">
                   <Button variant="primary" size="sm" onClick={() => setShowMaterialCats(false)}>Done</Button>
@@ -3298,7 +3334,7 @@ export default function InventoryPage() {
                 </div>
                 <div>
                   <label className="block text-xs text-[#6B7280] mb-1">Stock Qty</label>
-                  <Input type="number" onFocus={(e) => e.currentTarget.select()} value={editRMForm.balanceQty} onChange={(e) => setEditRMForm(f => ({ ...f, balanceQty: parseInt(e.target.value) || 0 }))} />
+                  <Input type="number" onFocus={(e) => e.currentTarget.select()} value={editRMForm.balanceQty} onChange={(e) => setEditRMForm(f => ({ ...f, balanceQty: Number(e.target.value) || 0 }))} />
                 </div>
               </div>
               <div>
