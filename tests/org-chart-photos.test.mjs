@@ -227,3 +227,17 @@ test('both render sites use PersonAvatar — neither still draws a bare initials
     'a raw initials-only circle must not still exist alongside PersonAvatar',
   );
 });
+
+test('the photo is fetched via /stream, not /download — BUG-2026-09-29-214', () => {
+  // /download 302s to a Supabase presigned URL. Reproduced against staging's
+  // Supabase project: the presigned URL Supabase itself issued came back
+  // "InvalidSignature" when fetched — measured against the real service, not
+  // assumed. /stream proxies the bytes straight through this Worker with the
+  // service_role key on every request, so there is no signature to fail.
+  assert.match(UI, /src=\{`\/api\/files\/\$\{person\.photoFileId\}\/stream`\}/);
+  assert.doesNotMatch(
+    UI,
+    /\/api\/files\/\$\{person\.photoFileId\}\/download/,
+    'a regression back to the presigned-URL path would resurrect BUG-2026-09-29-214',
+  );
+});
