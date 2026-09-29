@@ -30,9 +30,9 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
-## 2026-09-29 — 🔵 AP Invoices: kind / status chips + supplier picker instead of the two dropdowns (owner「我希望是这样选，而不是往下滑。先确定」→「做」)(branch `feat/ap-invoices-chips`)
+## 2026-09-29 — ✅ AP Invoices: kind / status chips + supplier picker instead of the two dropdowns (owner「我希望是这样选，而不是往下滑。先确定」→「做」)(#549 62f8a1d8 MERGED, deployed, prod-verified: chips with counts, AP-invoices click filters the list, Purchase invoices count 534, dropdowns gone)
 
-1. 🔵 `AP_KIND_CHIPS` (All / AP invoices / Purchase invoices) and `AP_STATUS_CHIPS` (All / Open /
+1. ✅ `AP_KIND_CHIPS` (All / AP invoices / Purchase invoices) and `AP_STATUS_CHIPS` (All / Open /
    Paid / Cancelled) as chip rows with a count on each (each count reflects the other filters);
    a `SearchableSelect` "All suppliers" picker; the list loads once and filters client-side.
    Default stays ALL; the bill editor still opens below on "New AP bill"; double-click untouched.

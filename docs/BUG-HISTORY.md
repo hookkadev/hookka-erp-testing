@@ -63,7 +63,7 @@ Entries themselves stay newest-first.
 **Not fixed here:** existing invoices/SOs keep their stored price; the affected SO must be re-saved (or invoice lines edited) before re-sending. Prod rows affected are UNMEASURED (no prod read in this session). Known ceiling, pre-existing on POST too: the server seat-height match ignores the fabric tier (PRICE_1/2/3) and bedframe `price1Sen`.
 
 ---
-## BUG-2026-09-29-196 — Trade-finance interest was booked to "INCORPORATION EXPENSE WRITTEN OFF": the interest account's code 900-I001 already belonged to another account `accounting` `trade-finance` `chart-of-accounts` 🟡
+## BUG-2026-09-29-196 — Trade-finance interest was booked to "INCORPORATION EXPENSE WRITTEN OFF": the interest account's code 900-I001 already belonged to another account `accounting` `trade-finance` `chart-of-accounts` 🟢
 
 **Symptom (owner, 2026-09-28, while checking the Cash Flow Trade Finance block):** the Sep'26 P&L showed
 "INCORPORATION EXPENSE WRITTEN OFF RM 1,637.08" — an expense the company never incurred that month.
@@ -88,9 +88,12 @@ collided with.
   off 900-I001 onto the new account (ids / dates / sources / amounts untouched — only `accountCode`),
   audited, idempotent. Guard: `tests/tf-interest-account.test.mjs`.
 
-**Verification:** UNMEASURED until the repoint runs on prod (dry-run count must be 20, DR 2,458.96 /
-CR 821.88; after the run 900-I001 must read 0.00 and the Sep'26 P&L must show INTEREST ON TRADE
-FINANCE 1,637.08 under FINANCE COSTS with INCORPORATION EXPENSE WRITTEN OFF gone).
+**Verification (prod, 2026-09-29, #547 merged as 1c693840):** owner confirmed the code (「那就
+900-I004」; his first pick 900-I002 was INTERNET CHARGES). Dry run → 20 legs, DR 2,458.96 / CR 821.88;
+real run → 900-I001 reads 0 legs / 0.00, 900-I004 carries the 20 (DR 2,458.96 / CR 821.88); the COA
+row is "INTEREST ON TRADE FINANCE", EXPENSE, parent 902-0000. Sep'26 P&L re-read: INTEREST ON TRADE
+FINANCE RM 1,637.08 under Operating Expenses (beside LOAN INTEREST), INCORPORATION EXPENSE WRITTEN OFF
+gone. Guard `tests/tf-interest-account.test.mjs`.
 
 ## BUG-2026-09-25-195: Overall Efficiency showed a dash on the People tab, and the month figure counted days with no hours `dashboard` `employees` 🟡
 
