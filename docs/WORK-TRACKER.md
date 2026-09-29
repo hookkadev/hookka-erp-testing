@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-29**: branch `feat/production-multi-select-filters` added below (open, its entry is the newest).
 > **Last verified: 2026-09-25**: branch `feat/dashboard-efficiency-employee-drill` (stacked on `fix/dashboard-tighter-padding`, PR #533) added below (committed, not pushed, its entry is the newest).
 > **Last verified: 2026-09-25**: branch `fix/dashboard-tighter-padding` added below (not committed, its entry is the newest).
 > **Last verified: 2026-09-25**: branch `feat/dashboard-kpi-no-icons` (PR #524 to `main`, open) is the newest entry below, items 1 to 17 checked against the branch. The Attendance log, time audit dates and Department Status branches are folded into it (#525, #526, #527 closed).
@@ -29,6 +30,11 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
 ---
+
+## 2026-09-29 — 🔵 Production Tracking: Category / Customer / State filters become multi-select (branch `feat/production-multi-select-filters` → `main`)
+- 1. 🔵 Category dropdown → checkbox dropdown with Select all / Clear all; label "All categories" / the one name / "N categories selected". State `cat` is now `string[]` (URL `?cat=A&cat=B`; old `?cat=SOFA` links still read). Server `?cat=` stays single-value: sent only when exactly one is ticked, 2+ fetch all and filter client-side.
+- 2. 🔵 Same for Customer (`?customer=`) and State (`?state=`), both client-side filters only. Lists over 8 options get a search box; "Select all" then ticks the matching ones. List scrolls past 60vh.
+- Not yet driven in a browser: the only local API is the prod proxy and it needs a sign-in. tsc strict clean.
 
 ## 2026-09-29 — 🔵 AP Invoices: double-click / No. link open the purchase invoice itself (owner「点开 invoice 我希望是直接点开 invoice，而不是跳去 purchase invoice list」→「pi 做」)(branch `fix/ap-invoices-open-pi-detail`)
 

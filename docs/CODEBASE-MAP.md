@@ -89,6 +89,8 @@
 
 > **Last verified: 2026-09-23 on branch `fix/so-duplicate-ref-saves-draft`** — the Sales rows for `sales-orders.ts` / `sales/create.tsx` and the `scan-po-modal.tsx` row: line counts re-measured (`wc -l`), behaviour of BUG-2026-09-23-185 noted; the `src/api/routes/sales-orders.ts:4003` `lineNo` anchor re-derived.
 
+> **Last verified: 2026-09-29 on branch `feat/production-multi-select-filters`** — the `production/index.tsx` row only: `reuseUnchanged` anchor re-measured (1072) and the multi-select Category / Customer / State filters noted.
+
 > **Last verified: 2026-09-23 on branch `fix/production-auto-load`** — the `production/index.tsx` row only: line count re-measured (`wc -l`, was 8888), the removed "Load all" gate and the Overview scroll/poll perf fix noted.
 
 > **Last verified: 2026-09-25 on branch `feat/ocr-dashboard-tab`** — the OCR rows only (new `OcrView.tsx` row, `scan-queue.ts` line refs re-anchored by `check-codebase-map.mjs --fix`, gate exits 0).
@@ -527,7 +529,7 @@ authoritative current detail.** New here? Start with [ONBOARDING-PATH.md](ONBOAR
 
 | Frontend page | API route | Primary tables | Tests |
 |---|---|---|---|
-| `src/pages/production/index.tsx` — dept-tabbed WIP board; fetches on mount, no "Load all" gate since 2026-09-23; Overview rows virtualized by `OverviewVirtualRows` (bottom of file — keep the virtualizer OUT of `ProductionPage`, it re-renders its host per scroll frame); orders poll opts into `useCachedJson` `reuseUnchanged` (9698, re-measured 2026-09-23) | `src/api/routes/production-orders.ts` — PO/job-card/WIP backend (7.6k) | `production_orders` / `production_orders_archive` / `production_orders_list_snapshot` | `tests/bom-explosion.test.mjs` |
+| `src/pages/production/index.tsx` — dept-tabbed WIP board; fetches on mount, no "Load all" gate since 2026-09-23; Overview rows virtualized by `OverviewVirtualRows` (bottom of file — keep the virtualizer OUT of `ProductionPage`, it re-renders its host per scroll frame); orders poll opts into `useCachedJson` `reuseUnchanged` (1072, re-measured 2026-09-29); Category / Customer / State filters are multi-selects (`?cat=A&cat=B`, `src/components/checkbox-multi-select.tsx`), the API narrows only a single category pick, everything else filters client-side | `src/api/routes/production-orders.ts` — PO/job-card/WIP backend (7.6k) | `production_orders` / `production_orders_archive` / `production_orders_list_snapshot` | `tests/bom-explosion.test.mjs` |
 | `src/pages/production/folders.tsx` — folder list | `src/api/routes/production-folders.ts` — group/ungroup | `job_cards` / `job_cards_archive` / `job_card_events` | `tests/job-card-id.test.mjs` |
 | `src/pages/production/folder-detail.tsx` — folder detail | `src/api/routes/job-cards.ts` — reads + event timeline | `folder_job_cards` / `production_folders` | `tests/production-fresh-po-direct-db.test.mjs` |
 | _(no page)_ `/production/tracker` — redirect only, → `/planning?tab=tracker`. The Master Tracker is a Planning TAB; the standalone `production/tracker.tsx` was deleted 2026-08-13 (unreachable since the route became a redirect, imported nowhere) | `src/api/routes/bom.ts` — bom_templates + bom_versions | `wip_items` / `wip_cascade_log` / `piece_pics` | `tests/production-order-builder.test.mjs` |
