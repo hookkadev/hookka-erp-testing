@@ -53,7 +53,8 @@ import {
   collectOperationsReport,
   type OperationsPeriodKind,
 } from "../lib/operations-report";
-import { getOrgId } from "../lib/tenant";
+import { getOrgId, DEFAULT_ORG_ID } from "../lib/tenant";
+import { productionRevenueByDay } from "../lib/production-revenue";
 import {
   REPORT_KINDS,
   invalidEmailsIn,
@@ -794,20 +795,15 @@ export async function dispatchReport(
     body = {};
   }
   // Date resolution:
-  //   - efficiency: previous working day (skip Sun + PH walking back from today).
-  //     Monday 12pm → Saturday's report (not Sunday's empty one).
-  //   - schedule / overdue: today (the cron only fires on working days, so
-  //     today is by construction a working day — see cronGate).
+  //   - every kind: today. The efficiency email used to cover the previous
+  //     working day at 12:00; BUG-36 moved it to the evening covering TODAY
+  //     (with production revenue). The cron only fires on working days, so
+  //     today is by construction a working day — see cronGate.
   //   - body.date always wins as override (manual backfill).
-  let date: string;
-  if (typeof body.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.date)) {
-    date = body.date;
-  } else if (kind === "efficiency") {
-    const holidays = await loadPublicHolidays(c);
-    date = previousWorkingDay(todayYmdSgt(), holidays);
-  } else {
-    date = todayYmdSgt();
-  }
+  const date =
+    typeof body.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.date)
+      ? body.date
+      : todayYmdSgt();
   const overrideTo = Array.isArray(body.to)
     ? body.to
     : typeof body.to === "string"
@@ -989,9 +985,26 @@ async function runAndSendReport(
     subject = `[Hookka] Production Morning Brief — ${date} (${data.overdue.totals.salesOrders} overdue)`;
   } else if (kind === "efficiency") {
     const data = await collectEfficiencyData(c.var.DB, date);
+    // Email only (the in-app /efficiency page is HR-readable; revenue is not
+    // theirs). Same query as the dashboard's Daily (Lim) tab.
+    try {
+      const orgId = (c.var as { orgId?: string }).orgId || DEFAULT_ORG_ID;
+      const [r] = await productionRevenueByDay(c.var.DB, orgId, date);
+      data.revenue = {
+        revenueSen: Number(r?.revenueSen) || 0,
+        orders: Number(r?.orders) || 0,
+        unpricedOrders: Number(r?.unpricedOrders) || 0,
+      };
+    } catch (err) {
+      console.error("[reports/efficiency] production revenue failed:", err);
+      data.revenue = null;
+    }
     html = renderEfficiencyHtml(data);
     text = renderEfficiencyEmailText(data);
-    subject = `[Hookka] Daily Efficiency Report — ${date} (${data.totals.efficiencyPct}% overall)`;
+    const rev = data.revenue
+      ? ` · RM ${(data.revenue.revenueSen / 100).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+      : "";
+    subject = `[Hookka] Production Efficiency & Revenue — ${date} (${data.totals.efficiencyPct}% overall${rev})`;
   } else if (kind === "schedule") {
     const data = await collectScheduleData(c.var.DB, date);
     html = renderScheduleHtml(data);

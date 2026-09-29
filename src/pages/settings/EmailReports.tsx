@@ -17,8 +17,8 @@ const REPORTS: { kind: Kind; title: string; description: string; when: string }[
   {
     kind: "overdue",
     title: "Overdue Orders",
-    description: "Sales orders past their delivery date, grouped by department.",
-    when: "Daily 17:00",
+    description: "Sales orders past their customer delivery date that production has not finished.",
+    when: "Daily 08:00",
   },
   {
     kind: "schedule",
@@ -28,9 +28,9 @@ const REPORTS: { kind: Kind; title: string; description: string; when: string }[
   },
   {
     kind: "efficiency",
-    title: "Production Efficiency",
-    description: "Per-worker and per-department efficiency for the previous working day.",
-    when: "Daily 12:00",
+    title: "Production Efficiency & Revenue",
+    description: "Today's per-worker and per-department efficiency, plus production revenue (same figure as the dashboard).",
+    when: "Daily 18:30",
   },
   {
     kind: "brief",
