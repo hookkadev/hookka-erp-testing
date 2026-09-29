@@ -30,15 +30,26 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
-## 2026-09-29 — 🔵 AP Invoices: double-click / No. link open the purchase invoice itself (owner「点开 invoice 我希望是直接点开 invoice，而不是跳去 purchase invoice list」→「pi 做」)(branch `fix/ap-invoices-open-pi-detail`)
+## 2026-09-29 — 🔵 Cash Flow: Trade Finance block — owner's final ruling, grossed up and below the operating result (「raw material 加, drawdown 减, 一加一减 … 放在 after operation surplus」→「做」)(branch `feat/cashflow-tf-gross-up`)
 
-1. 🔵 A PI row navigated to `/procurement/pi` (the list). It now opens `/procurement/pi/<id>` — the invoice's
+1. 🔵 Replaces the 2026-09-28 「倒反」 version (draw counted as spend inside COST / EXPENSE OUT, repayment as
+   an offset — once repaid the purchase vanished and the lines no longer added up to the bank). Now a
+   TF-paid purchase splits by material under Raw Materials in the month of the draw; the facility side
+   is its own block right after Net operation surplus, outflow-signed: Drawdown (negative), Interest
+   charged (negative), Repaid (positive); the block nets to the change in what is owed. Interest expense
+   lands on 900-I004 under General Expense › Finance Costs. Sep'26 expected: Raw Materials 190,448.08,
+   Net operation surplus 148,263.87 → 50,196.35, Trade Finance (97,159.68) (1,637.08) +98,067.52 =
+   (729.24), Cash Surplus 53,600.71 unchanged. Guard `tests/cashflow-trade-finance.test.mjs` rewritten.
+
+## 2026-09-29 — ✅ AP Invoices: double-click / No. link open the purchase invoice itself (owner「点开 invoice 我希望是直接点开 invoice，而不是跳去 purchase invoice list」→「pi 做」)(#559 36d7e1a7 MERGED, deployed, prod-verified: double-click on a PI row lands on /procurement/pi/<id>)
+
+1. ✅ A PI row navigated to `/procurement/pi` (the list). It now opens `/procurement/pi/<id>` — the invoice's
    own detail page — on double-click and from the No. link; an AP bill still opens the editor below.
    Pins updated in `tests/doc-detail-dblclick.test.mjs` / `tests/ap-invoices-chips.test.mjs`.
 
-## 2026-09-29 — 🔵 Cash Flow: a supplier can be filed under a section — Capex / Factory Overhead / General Expense / Direct Labour (owner「我无法选其他的 categories, 类似 capex 等等」→「做」)(branch `feat/cashflow-supplier-section-categories`)
+## 2026-09-29 — ✅ Cash Flow: a supplier can be filed under a section — Capex / Factory Overhead / General Expense / Direct Labour (owner「我无法选其他的 categories, 类似 capex 等等」→「做」)(#556 63c57bf5 MERGED, deployed, prod-verified: the Supplier categories dropdown lists 10 options incl. Capital Expenditure (CAPEX) / Factory Overhead / General Expense / Direct Labour)
 
-1. 🔵 Engine `SUPPLIER_SECTION_TARGETS` + `supplierSectionFor`: a supplier's "Unallocated — X" / "Opening
+1. ✅ Engine `SUPPLIER_SECTION_TARGETS` + `supplierSectionFor`: a supplier's "Unallocated — X" / "Opening
    creditors — X" money (payments with no material line) moves to the chosen section whole, as a row
    named after the supplier; a PI with material lines still splits by material. `PUT /cashflow/map`
    accepts the four section keys; the Supplier categories card lists them under the four raw-material

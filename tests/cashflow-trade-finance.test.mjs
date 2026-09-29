@@ -1,20 +1,18 @@
 // ---------------------------------------------------------------------------
-// cashflow-trade-finance.test.mjs — owner 2026-09-28:
-//   「用 trade finance 还我要当做 trade finance - Houzs Century」 then
-//   「我决定倒反吧 … repay 是 + … 我会看 total spend」→「对，做」.
+// cashflow-trade-finance.test.mjs — owner 2026-09-28/29, final ruling
+// 2026-09-29: 「raw material 加, drawdown 减, 一加一减 … trade finance - houzs
+// century 我想要放在 after operation surplus」→「做」.
 //
-// The Cash Flow statement gets a Trade Finance block inside COST / EXPENSE OUT,
-// right after Raw Materials:
-//   · a supplier paid from the facility (DR 400 · CR 310-0020, no bank leg) is
-//     SPEND in the month of the draw — one positive row per supplier "(via TF)";
-//   · the repayment to the lender (DR 310-0020 · CR bank) is the OFFSET — one
-//     negative row "Repaid to <lender>";
-//   · the block nets to what is still owed and counts in the operating surplus
-//     (the owner's "total spend"); the bank surplus stays bank-true.
-// Measured on prod that day: Jul draws 95,513.04 / Aug 31,741.29 / Sep
-// 97,775.56 (OCEAN SKY 33,466.49 · MEDITEX 33,988.19 · NLY 30,320.88), Sep
-// repayment 64,601.03 — which until now sat under Unallocated as (64,601.03)
-// while the draws appeared nowhere.
+// A supplier paid from the trade-finance facility is GROSSED UP:
+//   · the purchase splits by material under Raw Materials (spend, in the
+//     month of the draw) exactly like a bank-paid supplier payment;
+//   · the facility side sits in the Trade Finance block BELOW the operating
+//     result, outflow-signed: a drawdown reads negative (the lender lent),
+//     the lender's interest negative, a repayment positive (real cash out);
+//   · the block nets to the change in what is owed; the operating result does
+//     not include it; the bank surplus is bank legs only.
+// Measured on prod 2026-09-29: Sep draws 97,159.68 (OCEAN SKY 33,352.38 ·
+// MEDITEX 33,807.30 · NLY 30,000.00), interest 1,637.08, repaid 98,067.52.
 // ---------------------------------------------------------------------------
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -30,99 +28,99 @@ const coa = new Map([
   ["400-0000", acct("400-0000", "LIABILITY", "SCC", "TRADE CREDITORS")],
   ["310-0010", acct("310-0010", "ASSET", "SBK", "CASH AT BANK - HLBB")],
   ["310-0020", acct("310-0020", "LIABILITY", null, "TRADE FINANCE - HOUZS CENTURY SDN BHD")],
+  ["900-I004", acct("900-I004", "EXPENSE", null, "INTEREST ON TRADE FINANCE")],
   ["900-0001", acct("900-0001", "EXPENSE", null, "Transport expense")],
 ]);
 const TF = { "310-0020": { section: "TRADE_FINANCE", order: 10 } };
 const leg = (accountCode, debitSen, creditSen, lineLabel, sourceId = "s", sourceType = "supplier_payment") =>
   ({ accountCode, debitSen, creditSen, ym: "2026-09", sourceType, sourceId, lineLabel });
 
-// The September picture the owner approved, in sen. Draws arrive as debit
-// pseudo-legs (the caller turns the CR on the facility into one); the
-// repayment arrives flipped to a credit (the real leg is DR 310-0020).
+// September as the caller now hands it over: a draw is the AP leg (split by
+// material through rmSplit) + the facility leg AS POSTED (credit); interest
+// is its expense leg + the facility credit; a repayment is the facility
+// debit + the bank leg.
 const sep = () => cf.buildStatement({
   classified: [
-    leg("310-0020", 3346649, 0, "OCEAN SKY TRADING SDN. BHD. (via TF)", "PV-2609-004"),
-    leg("310-0020", 3398819, 0, "MEDITEX INDUSTRIES SDN. BHD. (via TF)", "PV-2609-007"),
-    leg("310-0020", 3032088, 0, "NLY SDN BHD (via TF)", "PV-2609-006"),
-    // The lender's interest (tf_interest legs) — one row per facility, with
-    // an adjustment netting inside it.
-    leg("310-0020", 8255, 0, "Interest charged by HOUZS CENTURY SDN BHD", "tfint-1", "tf_interest"),
-    leg("310-0020", 0, 1000, "Interest charged by HOUZS CENTURY SDN BHD", "tfint-2", "tf_interest"),
-    leg("310-0020", 0, 6460103, "Repaid to HOUZS CENTURY SDN BHD", "HPV-2609-030"),
+    leg("400-0000", 3335238, 0, undefined, "PV-2609-004"),
+    leg("310-0020", 0, 3335238, "Drawdown — OCEAN SKY TRADING SDN. BHD.", "PV-2609-004"),
+    leg("900-I004", 163708, 0, undefined, "tfint-1", "tf_interest"),
+    leg("310-0020", 0, 163708, "Interest charged by HOUZS CENTURY SDN BHD", "tfint-1", "tf_interest"),
+    leg("310-0020", 9806752, 0, "Repaid to HOUZS CENTURY SDN BHD", "HPV-2609-030"),
     leg("900-0001", 100000, 0, undefined, "pv-9", "payment_voucher"),
   ],
   bankLegs: [
-    { accountCode: "310-0010", debitSen: 0, creditSen: 6460103, ym: "2026-09" },
+    { accountCode: "310-0010", debitSen: 0, creditSen: 9806752, ym: "2026-09" },
     { accountCode: "310-0010", debitSen: 0, creditSen: 100000, ym: "2026-09" },
   ],
-  coa, map: TF, rmSplit: {}, stockGroupOverride: {}, fyeMonth: 8, period: "2026-09",
+  coa, map: TF, rmSplit: { "PV-2609-004": [{ line: "B.M-FABR", weight: 1 }] },
+  stockGroupOverride: {}, fyeMonth: 8, period: "2026-09",
 });
 
-test("the section exists, is spend-signed, operating, and sits right after Raw Materials", () => {
+test("the block is outflow-signed, NOT operating, and is the first block after the operating result", () => {
   assert.equal(cf.SECTION_LABELS.TRADE_FINANCE, "Trade Finance");
-  assert.ok(cf.OUTFLOW_SECTIONS.has("TRADE_FINANCE"), "draws display positive like every other spend");
-  assert.ok(cf.OPERATING_SECTIONS.has("TRADE_FINANCE"), "counted in the operating surplus — the owner's total spend");
-  assert.equal(cf.SECTION_ORDER.indexOf("TRADE_FINANCE"), cf.SECTION_ORDER.indexOf("RAW_MATERIALS") + 1);
-  assert.ok(cf.tfLineOrder("OCEAN SKY (via TF)") < cf.tfLineOrder("Repaid to HOUZS CENTURY SDN BHD"), "draws first, repayment last");
+  assert.ok(cf.OUTFLOW_SECTIONS.has("TRADE_FINANCE"), "+ = cash out, − = the lender lent");
+  assert.ok(!cf.OPERATING_SECTIONS.has("TRADE_FINANCE"), "sits below Net operation surplus");
+  assert.equal(cf.SECTION_ORDER.indexOf("TRADE_FINANCE"), cf.SECTION_ORDER.indexOf("TAXATION") + 1);
+  const st = sep();
+  const idx = (pred) => st.rows.findIndex(pred);
+  const head = idx((r) => r.kind === "group" && r.groupId === "TRADE_FINANCE");
+  assert.ok(idx((r) => r.kind === "result") < head, "after the operating result");
+  assert.ok(head < idx((r) => r.kind === "total"), "before the cash surplus");
+  assert.ok(!st.rows.some((r) => r.kind === "group" && ["FINANCE_COST", "CAPEX"].includes(r.groupId) && st.rows.indexOf(r) < head), "first of the lower blocks");
 });
 
-test("draws show positive per supplier, the repayment negative, under the facility account as the group", () => {
+test("raw material 加, drawdown 减: the purchase shows under Raw Materials, the facility side negative below", () => {
   const st = sep();
   const m = st.columns.findIndex((c) => c.key === "2026-09");
-  const group = st.rows.find((r) => r.kind === "group" && r.label === "TRADE FINANCE - HOUZS CENTURY SDN BHD");
-  assert.ok(group, "facility account group missing");
-  assert.equal(group.section, "TRADE_FINANCE");
-  assert.equal(group.groupId, "TRADE_FINANCE>310-0020");
-  const owed = 9777556 + (8255 - 1000) - 6460103;
-  assert.equal(group.values[m], owed, "the block nets to what is still owed this month");
+  const fabr = st.rows.find((r) => r.kind === "line" && r.label === "B.M-FABR");
+  assert.equal(fabr.section, "RAW_MATERIALS");
+  assert.equal(fabr.values[m], 3335238, "the TF-paid purchase is spend, by material, in the month of the draw");
   const lines = st.rows.filter((r) => r.kind === "line" && r.section === "TRADE_FINANCE");
   assert.deepEqual(lines.map((r) => r.label), [
-    "MEDITEX INDUSTRIES SDN. BHD. (via TF)",
-    "NLY SDN BHD (via TF)",
-    "OCEAN SKY TRADING SDN. BHD. (via TF)",
+    "Drawdown — OCEAN SKY TRADING SDN. BHD.",
     "Interest charged by HOUZS CENTURY SDN BHD",
     "Repaid to HOUZS CENTURY SDN BHD",
   ]);
   const val = (label) => lines.find((r) => r.label === label).values[m];
-  assert.equal(val("OCEAN SKY TRADING SDN. BHD. (via TF)"), 3346649);
-  assert.equal(val("Interest charged by HOUZS CENTURY SDN BHD"), 8255 - 1000, "interest and its adjustment net on one row");
-  assert.equal(val("Repaid to HOUZS CENTURY SDN BHD"), -6460103);
+  assert.equal(val("Drawdown — OCEAN SKY TRADING SDN. BHD."), -3335238, "the lender lent → negative");
+  assert.equal(val("Interest charged by HOUZS CENTURY SDN BHD"), -163708);
+  assert.equal(val("Repaid to HOUZS CENTURY SDN BHD"), 9806752, "real cash out → positive");
+  const group = st.rows.find((r) => r.kind === "group" && r.label === "TRADE FINANCE - HOUZS CENTURY SDN BHD");
+  assert.equal(group.groupId, "TRADE_FINANCE>310-0020");
+  assert.equal(group.values[m], 9806752 - 3335238 - 163708, "nets to the change in what is owed");
   for (const l of lines) assert.equal(l.groupId, "TRADE_FINANCE>310-0020");
-  // The section head carries the same net, and lives in COST / EXPENSE OUT
-  // between Raw Materials and the operating result.
-  const head = st.rows.find((r) => r.kind === "group" && r.groupId === "TRADE_FINANCE");
-  assert.equal(head.values[m], owed);
-  const idx = (pred) => st.rows.findIndex(pred);
-  assert.ok(idx((r) => r.kind === "section" && r.label === "COST / EXPENSE OUT") < idx((r) => r === head));
-  assert.ok(idx((r) => r === head) < idx((r) => r.kind === "result"));
+  // The interest expense lands on its own account line (General Expense).
+  const intExp = st.rows.find((r) => r.kind === "line" && r.label === "INTEREST ON TRADE FINANCE");
+  assert.equal(intExp.section, "GENERAL_EXPENSE");
+  assert.equal(intExp.values[m], 163708);
 });
 
-test("total spend counts the draws and not the repayment; the bank surplus stays bank-true", () => {
+test("the operating result counts the purchase and the interest, not the facility; the bank surplus is bank legs only", () => {
   const st = sep();
   const m = st.columns.findIndex((c) => c.key === "2026-09");
   const result = st.rows.find((r) => r.kind === "result");
-  // Operating: draws −9,777,556 − interest 7,255 + repayment offset +6,460,103 + transport −100,000.
-  assert.equal(result.values[m], -(9777556 + 7255 - 6460103) - 100000);
+  assert.equal(result.values[m], -(3335238 + 163708 + 100000));
   const total = st.rows.find((r) => r.kind === "total");
-  assert.equal(total.values[m], -(6460103 + 100000), "Cash Surplus is the bank movement only — a draw never touched a bank");
+  assert.equal(total.values[m], -(9806752 + 100000), "Cash Surplus is the bank movement only");
 });
 
-test("a voided draw cancels its own supplier row; a lineLabel never changes an account's section", () => {
+test("a voided draw nets both sides to nothing", () => {
   const st = cf.buildStatement({
     classified: [
-      leg("310-0020", 3032088, 0, "NLY SDN BHD (via TF)", "PV-2609-006"),
-      leg("310-0020", 0, 3032088, "NLY SDN BHD (via TF)", "PV-2609-006", "supplier_payment_void"),
-      leg("900-0001", 5000, 0, "Named by the caller", "pv-1", "payment_voucher"),
+      leg("400-0000", 3032088, 0, undefined, "PV-2609-006"),
+      leg("310-0020", 0, 3032088, "Drawdown — NLY SDN BHD", "PV-2609-006"),
+      leg("400-0000", 0, 3032088, undefined, "PV-2609-006", "supplier_payment_void"),
+      leg("310-0020", 3032088, 0, "Drawdown — NLY SDN BHD", "PV-2609-006", "supplier_payment_void"),
     ],
-    bankLegs: [{ accountCode: "310-0010", debitSen: 0, creditSen: 5000, ym: "2026-09" }],
-    coa, map: TF, rmSplit: {}, stockGroupOverride: {}, fyeMonth: 8, period: "2026-09",
+    bankLegs: [],
+    coa, map: TF, rmSplit: { "PV-2609-006": [{ line: "PLYWOOD", weight: 1 }] },
+    stockGroupOverride: {}, fyeMonth: 8, period: "2026-09",
   });
   const m = st.columns.findIndex((c) => c.key === "2026-09");
-  const nly = st.rows.find((r) => r.kind === "line" && r.label === "NLY SDN BHD (via TF)");
-  assert.equal(nly.values[m] || 0, 0); // display sign leaves a -0 behind; strict equal cares
-  const named = st.rows.find((r) => r.kind === "line" && r.label === "Named by the caller");
-  assert.equal(named.section, "GENERAL_EXPENSE");
-  assert.equal(named.accountCode, "900-0001");
+  const nly = st.rows.find((r) => r.kind === "line" && r.label === "Drawdown — NLY SDN BHD");
+  assert.equal(nly.values[m] || 0, 0);
+  const ply = st.rows.find((r) => r.kind === "line" && r.label === "PLYWOOD");
+  assert.equal(ply.values[m] || 0, 0);
 });
 
 // The caller (computeCashflowStatement) — source-scan, house style.
@@ -133,28 +131,20 @@ test("the statement learns the facility accounts from the trade-finance config, 
   assert.match(body, /const tfSources = await getTfSources\(c\.var\.DB\)\.catch\(\(\) => \[\] as TfSource\[\]\);/);
   assert.match(body, /for \(const s of tfSources\) tfAccounts\.set\(resolveAcct\(s\.accountCode\), s\);/);
   assert.doesNotMatch(body, /310-0020/);
-  // The facility account lands in the block unless the owner dragged it elsewhere.
   assert.match(body, /if \(!map\[code\]\) map\[code\] = \{ section: "TRADE_FINANCE", order: 10 \};/);
 });
 
-test("a draw (no bank leg) becomes a positive supplier row; a repayment (bank leg) is flipped to the offset", () => {
-  // From the no-bank gate to the main per-leg loop (the draw road has its own
-  // inner `for (const l of legs)`, so take the SECOND occurrence).
-  const a = body.indexOf("if (!hasBank) {");
-  const inner = body.indexOf("for (const l of legs) {", a);
-  const draw = body.slice(a, body.indexOf("for (const l of legs) {", inner + 10));
-  assert.match(draw, /const net = l\.creditSen - l\.debitSen;/, "CR on the facility = drawn; a void's DR reversal nets it out");
-  assert.match(draw, /debitSen: net > 0 \? net : 0, creditSen: net < 0 \? -net : 0,/);
-  assert.match(draw, /\(via TF\)`/);
-  assert.match(draw, /if \(tfAccounts\.size && !opening\)/, "an opening balance on the facility is not a draw");
-  // Prod 2026-09-28 showed 20+ "TF interest · PV-… (via TF)" rows: the lender's
-  // interest (tf_interest legs + adjustments) folds into ONE row per facility.
-  assert.match(draw, /lineLabel: l\.sourceType\.startsWith\("tf_interest"\)\s*\n\s*\? `Interest charged by \$\{tfAccounts\.get\(l\.code\)!\.lenderName \|\| "lender"\}`/);
-  assert.ok(cf.tfLineOrder("Interest charged by X") > cf.tfLineOrder("A (via TF)") && cf.tfLineOrder("Interest charged by X") < cf.tfLineOrder("Repaid to X"));
-  const repay = body.slice(body.indexOf("if (tfAccounts.has(l.code)) {"), body.indexOf('if (l.sourceType.startsWith("other_party_payment"))'));
-  assert.match(repay, /accountCode: l\.code, debitSen: l\.creditSen, creditSen: l\.debitSen,/, "flipped: the real leg is DR facility");
-  assert.match(repay, /lineLabel: `Repaid to \$\{tfAccounts\.get\(l\.code\)!\.lenderName \|\| "lender"\}`/);
-  assert.match(repay, /continue;\s*\n\s*\}\s*$/, "a repayment never reaches paymentNos / the raw-material split");
-  // Supplier names for the draw rows come from the payment itself.
+test("a no-bank entry that moves the facility is grossed up: contra legs classify as if a bank paid, the facility leg as posted", () => {
+  assert.match(body, /const viaTf = !hasBank && tfAccounts\.size > 0 && !opening && legs\.some\(\(l\) => tfAccounts\.has\(l\.code\)\);/);
+  assert.match(body, /if \(!hasBank && !viaTf\) continue;/);
+  const tf = body.slice(body.indexOf("if (tfAccounts.has(l.code)) {"), body.indexOf('if (l.sourceType.startsWith("other_party_payment"))'));
+  assert.match(tf, /accountCode: l\.code, debitSen: l\.debitSen, creditSen: l\.creditSen,/, "as posted — no flip, no netting");
+  assert.doesNotMatch(tf, /debitSen: l\.creditSen/, "the old flip is back");
+  assert.match(tf, /\? `Interest charged by \$\{lender\}`/);
+  assert.match(tf, /\? `Repaid to \$\{lender\}`/);
+  assert.match(tf, /: `Drawdown — \$\{tfPayee\(l\.sourceType, l\.sourceId, l\.description\) \|\| "trade finance"\}`/);
+  assert.match(tf, /continue;\s*\n\s*\}\s*$/, "a facility leg never reaches paymentNos / the raw-material split");
+  // The draw's AP leg falls through to the normal road → paymentNos → material split.
+  assert.match(body, /if \(l\.sourceType\.startsWith\("supplier_payment"\)\) paymentNos\.add\(l\.sourceId\);/);
   assert.match(body, /SELECT payment_no, MAX\(supplier_name\) AS supplier_name FROM supplier_payments WHERE org_id = \? GROUP BY payment_no/);
 });

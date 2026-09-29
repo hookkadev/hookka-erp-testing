@@ -5,13 +5,14 @@
 export type CfSection =
   | "REVENUE_COLLECTION"
   | "RAW_MATERIALS"
-  // Owner 2026-09-28 「用 trade finance 还我要当做 trade finance - Houzs Century」
-  // then 「倒反 … 我会看 total spend」: a supplier paid from the trade-finance
-  // facility is SPEND in the month of the draw (shown positive, one row per
-  // supplier "(via TF)"), and the later repayment to the lender is the offset
-  // (negative) — the section nets to what is still owed. Counted in the
-  // operating surplus like any other spend; the bank surplus below stays
-  // bank-true because a draw never touches a bank.
+  // Owner 2026-09-28/29, final ruling 「raw material 加, drawdown 减, 一加一减 …
+  // 放在 after operation surplus」: a supplier paid from the trade-finance
+  // facility is grossed up — the purchase splits by material under Raw
+  // Materials (spend, in the month of the draw) and the facility side sits in
+  // this block BELOW the operating result, outflow-signed: a drawdown reads
+  // negative (the lender lent), interest charged negative, a repayment
+  // positive (real cash out). The block nets to the change in what is owed;
+  // the bank surplus stays bank-true because the two sides of a draw cancel.
   | "TRADE_FINANCE"
   | "DIRECT_LABOUR"
   | "FACTORY_OVERHEAD"
@@ -42,14 +43,15 @@ export const OUTFLOW_SECTIONS: ReadonlySet<CfSection> = new Set<CfSection>([
 
 // Operating sections feed "Net operation surplus / (deficit)".
 export const OPERATING_SECTIONS: ReadonlySet<CfSection> = new Set<CfSection>([
-  "REVENUE_COLLECTION", "RAW_MATERIALS", "TRADE_FINANCE", "DIRECT_LABOUR", "FACTORY_OVERHEAD",
+  "REVENUE_COLLECTION", "RAW_MATERIALS", "DIRECT_LABOUR", "FACTORY_OVERHEAD",
   "GENERAL_EXPENSE", "TAXATION",
 ]);
 
-// Display order of sections in the statement.
+// Display order of sections in the statement. Trade Finance is the first
+// block after the operating result (owner 2026-09-29).
 export const SECTION_ORDER: CfSection[] = [
-  "REVENUE_COLLECTION", "RAW_MATERIALS", "TRADE_FINANCE", "DIRECT_LABOUR", "FACTORY_OVERHEAD",
-  "GENERAL_EXPENSE", "TAXATION", "FINANCE_COST", "CAPEX", "DEPOSIT", "LOAN",
+  "REVENUE_COLLECTION", "RAW_MATERIALS", "DIRECT_LABOUR", "FACTORY_OVERHEAD",
+  "GENERAL_EXPENSE", "TAXATION", "TRADE_FINANCE", "FINANCE_COST", "CAPEX", "DEPOSIT", "LOAN",
   "UNALLOCATED",
 ];
 
@@ -208,8 +210,8 @@ export type ClassifiedLeg = {
   lineLabel?: string;
 };
 
-// Inside the Trade Finance block: the draws (spend) first, the lender's
-// interest next, the repayment (offset) last.
+// Inside the Trade Finance block: the drawdowns (negative — the lender lent)
+// first, the lender's interest next, the repayments (positive — cash out) last.
 export function tfLineOrder(label: string): number {
   return label.startsWith("Repaid to ") ? 20 : label.startsWith("Interest charged by ") ? 15 : 10;
 }
@@ -476,7 +478,7 @@ export function buildStatement(opts: {
   emitSection("REVENUE_COLLECTION", false);
   push({ kind: "gap", label: "", depth: 0, values: columns.map(() => null) });
   push({ kind: "section", label: "COST / EXPENSE OUT", depth: 0, values: columns.map(() => null) });
-  for (const sec of ["RAW_MATERIALS", "TRADE_FINANCE", "DIRECT_LABOUR", "FACTORY_OVERHEAD", "GENERAL_EXPENSE", "TAXATION"] as CfSection[])
+  for (const sec of ["RAW_MATERIALS", "DIRECT_LABOUR", "FACTORY_OVERHEAD", "GENERAL_EXPENSE", "TAXATION"] as CfSection[])
     emitSection(sec, true);
 
   const opAggs = [...lines.values()].filter((a) => OPERATING_SECTIONS.has(a.section));
@@ -484,7 +486,7 @@ export function buildStatement(opts: {
   push({ kind: "result", label: "Net operation surplus / (deficit)", depth: 0, values: sumCols(opAggs) });
 
   push({ kind: "gap", label: "", depth: 0, values: columns.map(() => null) });
-  for (const sec of ["FINANCE_COST", "CAPEX", "DEPOSIT", "LOAN", "UNALLOCATED"] as CfSection[])
+  for (const sec of ["TRADE_FINANCE", "FINANCE_COST", "CAPEX", "DEPOSIT", "LOAN", "UNALLOCATED"] as CfSection[])
     emitSection(sec, true);
 
   push({ kind: "gap", label: "", depth: 0, values: columns.map(() => null) });
