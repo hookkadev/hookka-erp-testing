@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-30**: branch `feat/org-chart-to-main` (org-chart photos + Add Department, staging → main) added below (its entry is the newest).
 > **Last verified: 2026-09-30**: #614 (drill labels / empty descriptions) closed ✅ below with its prod check.
 > **Last verified: 2026-09-30**: branch `fix/drill-variant-noise` added below (its entry is the newest); #612 closed ✅ with its prod check.
 > **Last verified: 2026-09-30**: branch `fix/drill-names-tf-and-pi-edits` added below (its entry is the newest).
@@ -57,6 +58,40 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
+
+## 2026-09-29 — 🔵 Org Chart photo UX split + Users drawer photo upload (branch `feat/org-chart-photo-ux` → `staging`, continues BUG-2026-09-29-214's feature)
+
+1. ✅ Ask (owner, testing the just-shipped photo feature live): "when i click the picture it send me to change to a new picture, can i have it like when i click it just shows the picture bigger." `PersonAvatar` (`src/components/org-chart.tsx`) now splits the two actions: the circle itself opens a lightbox when a photo exists (falls back to starting an upload only when there is none yet); a small always-visible pencil badge is the one dedicated "change photo" control, distinct from the pre-existing reports-to pencil at the card's own corner.
+2. ✅ Ask: "we can make the add picture in the users list table." `UserDetailDrawer` (`src/components/user-detail-drawer.tsx`) gained an Add/Change/Remove photo control, writing through the SAME `uploadFileAsset` → `PUT /api/org-chart/photo` path the chart uses (keyed `user:<id>`); `Users.tsx` passes the live `photoFileId` through from `/api/org-chart`.
+3. ✅ Follow-up (owner): "if i want to change the picture did the old picture get deleted and replace with the new one?" Found: no — `PUT /photo` only moved the `photo_file_id` pointer; the previous `file_assets` row and its Supabase Storage object were left behind on every change. Fixed: the route now calls the shared `removeStoredFile` (`src/api/routes/files.ts`) for the previous fileId right after the pointer update succeeds, skipped when there was no previous photo or it is unchanged; a storage-side delete failure is logged, not surfaced as a request failure (the pointer write already committed).
+
+Verified: `tsc -p tsconfig.app.json` clean; `npm test` full suite green (5098 pass / 0 fail); all 4 doc gates pass. Regression: `tests/org-chart-photos.test.mjs` (extended), `tests/user-detail-drawer-photo.test.mjs` (new). Not yet verified live on staging for item 3 — pending push + deploy.
+
+## 2026-09-29 — 🔵 BUG-36 Daily email reports: per-report PIC module (Lim, High) (branch `feat/report-pics` → `staging`)
+- Ask: 3 daily emails (overdue AM, today's production orders AM, today's efficiency + revenue after 6pm), set up "as a full module, insert PIC (multiple), then it triggers and sends".
+- Found: all report kinds already exist and send on schedule (GitHub `daily-reports.yml`, measured 2026-09-29: last 4 runs `sent 3 · failed 0`). Missing: any UI for recipients (one shared list, DB/env only).
+- 1. ✅ (not pushed; tsc/lint/tests green, UI NOT driven live: only local DB is staging, read-only) PIC module: Settings → Email Reports page, per-report on/off + multiple PICs + send-test. Stored in `kv_config['daily_report_settings']`; unconfigured reports keep today's recipients.
+- 2. ⏸ Overdue to the morning, efficiency to today @ ~18:30 + revenue: waiting on Lim's revenue definition.
+
+## 2026-09-28 — 🔵 BUG-34 Customer credit control: quota + overdue-term DO block, admin override (branch `feat/customer-credit-control` → `staging`, BUG-2026-09-28-210)
+
+1. 🔵 Term-aware due date: `termMonths` / `dueDateForTerms` in `src/lib/terms.ts` (COD/NET30/NET60/NET90 = 0/1/2/3 months, due = last day of invoice month + N). Used by the DO auto-invoice and the manual invoice POST (was +30 days / fixed 1 month).
+2. 🔵 One shared gate `src/api/lib/customer-credit.ts`: PAYMENT_OVERDUE (issued unpaid invoice past its term due date, derived from invoiceDate + the customer's current term) and CREDIT_LIMIT_EXCEEDED (outstanding + undelivered DRAFT/LOADED/IN_TRANSIT DOs + this DO). Limit 0 = no quota check.
+3. 🔵 Wired into DO create (every path incl. delivery agent), packing-list-first (per customer; replaces `projectCreditFailure`) and DRAFT→LOADED (office + driver QR). Consignment-note convert left limit-only (bills goods already out).
+4. 🔵 Admin override: `creditOverride: { reason }`, allowed for `delivery-orders:credit-override` (ADMIN / SUPER_ADMIN always) unless kv_config `credit-override-enabled` = `false`. Audited as action `credit-override`. No settings UI: flip it with `PUT /api/kv-config/credit-override-enabled` body `false`.
+5. 🔵 Delivery page (`credit-override.tsx`): block dialog with the overdue invoices or the limit breakdown, reason box, re-send. Single create, packing-list-first (preview shows a warning), single + bulk dispatch. `/m` only shows the server message.
+
+Verified: `tsc -p tsconfig.app.json` exit 0; `npm test` all pass. NOT verified on staging or in a browser; staging data impact UNMEASURED.
+
+
+## 2026-09-25 — 🔵 Sync `staging` from `main` (branch `chore/sync-staging-from-main-0925` → `staging`)
+
+105 `main` commits merged into `staging` (75 staging-only). Conflicts: 2 code, 9 docs.
+1. 🔵 `delivery-orders.ts` imports: both kept (`requireReadOrDashboardTab` from main, idempotency from staging).
+2. 🔵 `purchase-invoices.ts` PUT: main's `priorPairs` read kept BEFORE staging's 23514-guarded `db.batch` (it must see the pre-edit rows).
+3. 🔵 Docs: stamps/logs unioned; module-guide + map anchors re-derived; `API.md` regenerated.
+4. 🔵 **Bug-id collisions — followed `main`:** main's numbers stand; staging's colliding entries renumbered after main's max (194) and every staging-side reference (code comments, tests, docs, short forms) moved with them: 09-23-184→196, 185→197; 09-24-182→198, 183→199, 184→200, 185→201, 186→202 (186b→202b), 187→203, 188→204, 189→205, 190→206, 191→207; rack-scan 09-25-193→195.
+tsc strict 0; `npm test` 5047 pass / 0 fail.
 ---
 
 ## 2026-09-30 — ✅ Drills: an edited document is not labelled, a description that says nothing is not shown (follow-up to #612)(#614 ba33071b MERGED, deployed, prod-verified)

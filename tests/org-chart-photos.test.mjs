@@ -63,6 +63,7 @@ function makeDb() {
   const seen = [];
   const writes = [];
   const migrations = [];
+  const deletes = [];
   function prepare(sql) {
     seen.push(sql);
     let bound = [];
@@ -74,7 +75,7 @@ function makeDb() {
       async first() {
         if (/FROM file_assets WHERE id = \? AND orgId = \?/i.test(sql)) {
           const row = FILE_ASSETS.get(bound[0]);
-          return row && row.orgId === bound[1] ? { id: bound[0] } : null;
+          return row && row.orgId === bound[1] ? { id: bound[0], r2Key: `k-${bound[0]}` } : null;
         }
         return null;
       },
@@ -88,6 +89,8 @@ function makeDb() {
         if (/^ALTER TABLE/i.test(sql)) migrations.push(sql);
         else if (/^UPDATE (users|workers) SET photoFileId/i.test(sql)) {
           writes.push({ sql, table: sql.match(/^UPDATE (\w+)/i)[1], fileId: bound[0], id: bound[1] });
+        } else if (/^DELETE FROM file_assets WHERE id = \? AND orgId = \?/i.test(sql)) {
+          deletes.push({ id: bound[0], orgId: bound[1] });
         }
         return { success: true };
       },
@@ -98,6 +101,7 @@ function makeDb() {
     seen,
     writes,
     migrations,
+    deletes,
     db: { prepare, batch: async () => [{ results: [] }] },
   };
 }
@@ -195,6 +199,62 @@ test('an empty fileId CLEARS the photo, same as clearing a reporting line', asyn
   assert.equal(res.status, 200);
   assert.equal(writes.length, 1);
   assert.equal(writes[0].fileId, null);
+});
+
+// ---------------------------------------------------------------------------
+// Old-photo cleanup — "if i want to change the picture did the old picture
+// get deleted and replace with the new one?" (owner, 2026-09-29). Before this,
+// no: the pointer moved but the previous file_assets row (and its Supabase
+// Storage object) was never touched, so every change orphaned one file.
+// ---------------------------------------------------------------------------
+test('changing an existing photo deletes the PREVIOUS file_assets row, not just the pointer', async () => {
+  const { db, writes, deletes } = makeDb();
+  const res = await call(db, 'PUT', '/photo', 'SUPER_ADMIN', { personKey: 'worker:w-1', fileId: 'file-new' });
+  assert.equal(res.status, 200);
+  assert.equal(writes.length, 1, 'the pointer still moves');
+  assert.equal(deletes.length, 1, 'the OLD file (file-existing) must be removed');
+  assert.equal(deletes[0].id, 'file-existing');
+  assert.equal(deletes[0].orgId, 'hookka', 'the delete stays scoped to the caller\'s own org');
+});
+
+test('clearing a photo also deletes the previous file, not only the pointer', async () => {
+  const { db, deletes } = makeDb();
+  const res = await call(db, 'PUT', '/photo', 'SUPER_ADMIN', { personKey: 'worker:w-1', fileId: '' });
+  assert.equal(res.status, 200);
+  assert.equal(deletes.length, 1);
+  assert.equal(deletes[0].id, 'file-existing');
+});
+
+test('setting a photo for someone who had NONE attempts no delete at all', async () => {
+  const { db, deletes } = makeDb();
+  const res = await call(db, 'PUT', '/photo', 'SUPER_ADMIN', { personKey: 'user:u-1', fileId: 'file-new' });
+  assert.equal(res.status, 200);
+  assert.equal(deletes.length, 0, 'there was no previous file to clean up');
+});
+
+test('re-saving the SAME fileId is a no-op, not a delete-then-restore of the same file', async () => {
+  const { db, deletes, writes } = makeDb();
+  const res = await call(db, 'PUT', '/photo', 'SUPER_ADMIN', { personKey: 'worker:w-1', fileId: 'file-existing' });
+  assert.equal(res.status, 200);
+  assert.equal(writes.length, 1);
+  assert.equal(deletes.length, 0, 'the old and new id are identical — nothing to clean up');
+});
+
+test('the request still SUCCEEDS even though this stub org has no storage credentials configured', async () => {
+  // removeStoredFile degrades a missing-storage-config error to "drop the DB
+  // row only" (see files.ts) rather than failing the whole request — the
+  // pointer write already committed, so a storage hiccup on the OLD file
+  // must not be reported back as a failure to change the photo.
+  const { db } = makeDb();
+  const res = await call(db, 'PUT', '/photo', 'SUPER_ADMIN', { personKey: 'worker:w-1', fileId: 'file-new' });
+  const body = await res.json();
+  assert.equal(body.success, true);
+});
+
+test('the route reuses the ONE shared delete path (files.ts removeStoredFile), not a bespoke storage call', () => {
+  const route = readFileSync(resolve(process.cwd(), 'src/api/routes/org-chart.ts'), 'utf8');
+  assert.match(route, /import \{ removeStoredFile \} from "\.\/files";/);
+  assert.match(route, /await removeStoredFile\(c, oldFileId\)/);
 });
 
 // ---------------------------------------------------------------------------
