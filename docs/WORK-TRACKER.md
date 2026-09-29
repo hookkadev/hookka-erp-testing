@@ -38,7 +38,7 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 - 3. 🔵 `sanitize-staging.mjs` STAGING_REF `zaxy...` changed to `kahx...` (it was refusing to run, so the scrub and PIN steps were skipped after each wipe).
 - 4. 🟡 UNMEASURED: merge not run against a live DB (no credentials in this session). First step after merge: dispatch `Sync prod → staging` with mode=merge and read the per-table log. The sanitiser also re-fakes contact fields and passwords on ALL staging rows, including test rows.
 
-## 2026-09-29 — 🔵 Cash Flow: one sign convention (owner「确定一下整体的符号哦，有点乱，loan from houzs … 应该是我借出去吧」→「做，统一符号」)(branch `feat/cashflow-unified-signs`)
+## 2026-09-29 — ✅ Cash Flow: one sign convention (owner「确定一下整体的符号哦，有点乱，loan from houzs … 应该是我借出去吧」→「做，统一符号」)(#569 e96e89c5 MERGED, deployed, prod-verified)
 
 1. ✅ Checked first (prod): Aug'26 "LOAN FROM RELATED PARTY - HOUZS VENTURE (71,457.13)" = OCB-2608-007's three lines
    (5,702.00 / 22,873.50 / 42,881.63) debited to 440-0030, which was 0 before → a DEBIT balance, Houzs Venture owes
