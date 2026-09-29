@@ -150,6 +150,9 @@ export type SupplierPaymentGroup = {
   totalBookedSen: number;
   lines: SupplierPaymentLine[];
   lifecycleState: string;
+  // Filled by GET /api/supplier-payments from the ledger's CR leg (the table
+  // itself keeps no bank column); null when no bank leg exists (contra).
+  bankAccount?: string | null;
 };
 
 /** Groups flat (payment × PI-line) rows into one entry per payment_no. */

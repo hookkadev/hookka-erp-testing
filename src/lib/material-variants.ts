@@ -60,6 +60,25 @@ export function isUomAllowed(group: string, uom: string, opts: UomOptions | null
   return uomOptionsFor(group, opts).some((x) => x.toUpperCase() === u);
 }
 
+/** Units whose stock balance may not be TYPED as a fraction on the Inventory
+ * page (Add RM / Edit RM). Stored on variants-config as `wholeUoms`; absent →
+ * this default. PCS is left out on purpose: foam sheets are stocked in PCS and
+ * consumed by area, so their counts go fractional. Owner scope: Inventory page
+ * only — Stock Adjustments, PO, GRN and production consumption are unchecked. */
+export const DEFAULT_WHOLE_UOMS = ["BOX", "CTN", "SET", "PAIR"];
+
+/** The configured whole-number units; an explicit empty list means "none". */
+export function wholeUomsFrom(list: unknown): string[] {
+  return Array.isArray(list) ? list.map((u) => String(u).trim().toUpperCase()) : DEFAULT_WHOLE_UOMS;
+}
+
+/** True when `qty` is a fraction in a unit that must be whole. The tolerance
+ * absorbs float noise such as 2.9999999999 from a UI sum. */
+export function isFractionOfWholeUom(uom: string, qty: number, wholeUoms: string[]): boolean {
+  if (!wholeUoms.includes((uom ?? "").trim().toUpperCase())) return false;
+  return Math.abs(qty - Math.round(qty)) > 1e-9;
+}
+
 /** Same unit, ignoring case/whitespace — "pcs" → "PCS" is not a UOM change. */
 export function sameUom(a: string | null | undefined, b: string | null | undefined): boolean {
   return (a ?? "").trim().toUpperCase() === (b ?? "").trim().toUpperCase();

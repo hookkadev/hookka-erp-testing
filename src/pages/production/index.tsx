@@ -68,6 +68,7 @@ import type { BaseRowsResponse } from "./baserows.worker";
 // — see loadFabSewStickers.
 import { buildOnePickerEntry, buildBaseRows, type PickerByDept } from "./baserows-core";
 import { CellBox } from "./components/CellBox";
+import { CheckboxMultiSelect } from "@/components/checkbox-multi-select";
 import { ProductDetailLine } from "./components/ProductDetailLine";
 import { CreateStockPODialog } from "./components/CreateStockPODialog";
 import {
@@ -163,6 +164,17 @@ const OVERVIEW_COLW_STORAGE = "prod-overview-colwidths-v1";
 // the shared grid template so they stay column-aligned. (Wei Siang 2026-06-03:
 // batch set-due-date on the Overview, mirroring the dept sheet + tracker.)
 const OVERVIEW_SELECT_COL_W = 36;
+// Category filter options. ACCESSORY is singular on the API; "Accessories" is
+// only the label. NO_VALUES is the stable empty default useUrlState needs for
+// the multi-select filters (category / customer / state).
+const CATEGORY_OPTIONS = [
+  { value: "BEDFRAME", label: "Bedframe" },
+  { value: "SOFA", label: "Sofa" },
+  { value: "ACCESSORY", label: "Accessories" },
+];
+const NO_VALUES: string[] = [];
+const asOptions = (vals: string[]) => vals.map((v) => ({ value: v, label: v }));
+const categoryLabel = (v: string) => CATEGORY_OPTIONS.find((o) => o.value === v)?.label ?? v;
 const OverviewResizeCtx = createContext<{ start: (e: React.MouseEvent, key: string) => void; reset: (key: string) => void } | null>(null);
 
 // ----- Overview header cell — sort indicator + filter popover trigger -----
@@ -903,8 +915,9 @@ export default function ProductionPage({
     const t = setTimeout(() => setFltSearch(fltSearchInput), 200);
     return () => clearTimeout(t);
   }, [fltSearchInput, setFltSearch]);
-  const [fltState, setFltState] = useUrlState<string>("state", "");
-  const [fltCustomer, setFltCustomer] = useUrlState<string>("customer", "");
+  // Multi-select since 2026-09-29 (`?state=A&state=B`); empty = all.
+  const [fltState, setFltState] = useUrlState<string[]>("state", NO_VALUES);
+  const [fltCustomer, setFltCustomer] = useUrlState<string[]>("customer", NO_VALUES);
   // Date filters: URL is source of truth. Default value here is "" so
   // useUrlState NEVER falls back to today() on the round-trip — that
   // fallback caused Clear all + native picker Clear to silently snap
@@ -999,7 +1012,14 @@ export default function ProductionPage({
   // now baked into the server-side fetch URL via `&cat=…` so the API
   // returns only the rows for the active category instead of shipping
   // everything for a client-side .filter() pass.
-  const [fltCategory, setFltCategory] = useUrlState<string>("cat", "");
+  // Multi-select since 2026-09-29: `?cat=A&cat=B` (an old `?cat=SOFA` link
+  // still reads as ["SOFA"]). Empty = all categories.
+  const [fltCategory, setFltCategory] = useUrlState<string[]>("cat", NO_VALUES);
+  // ponytail: the API's ?cat= takes one value, so only a single pick is
+  // narrowed server-side; 2+ fetch every category and the client filter
+  // below trims. Teach the API a list if that payload ever matters.
+  const serverCatFrag =
+    fltCategory.length === 1 ? `&cat=${encodeURIComponent(fltCategory[0])}` : "";
   const dueQueryFrag =
     (effectiveDueFrom ? `&dueFrom=${encodeURIComponent(effectiveDueFrom)}` : "") +
     (effectiveDueTo ? `&dueTo=${encodeURIComponent(effectiveDueTo)}` : "");
@@ -1039,8 +1059,8 @@ export default function ProductionPage({
   const dueFrag = searchActive ? "" : dueQueryFrag;
   const baseUrl =
     mode === "dept" && deptCode
-      ? `/api/production-orders?fields=minimal&dept=${encodeURIComponent(deptCode)}${excludeCompletedFrag}${dueFrag}${fltCategory ? `&cat=${encodeURIComponent(fltCategory)}` : ""}`
-      : `/api/production-orders?fields=minimal${excludeCompletedFrag}${dueFrag}${fltCategory ? `&cat=${encodeURIComponent(fltCategory)}` : ""}`;
+      ? `/api/production-orders?fields=minimal&dept=${encodeURIComponent(deptCode)}${excludeCompletedFrag}${dueFrag}${serverCatFrag}`
+      : `/api/production-orders?fields=minimal${excludeCompletedFrag}${dueFrag}${serverCatFrag}`;
   const ordersUrl: string | null = datesSeeded ? baseUrl : null;
   // Phase 5 was reverted on 2026-05-24: the worker-parse path added
   // structured-clone overhead that ate the JSON.parse savings on desktop
@@ -2921,10 +2941,10 @@ export default function ProductionPage({
         const hay = haystackByPo.get(o.id) || "";
         if (!hay.includes(q)) return false;
       }
-      if (deferredFltState && o.customerState !== deferredFltState) return false;
-      if (deferredFltCustomer && o.customerName !== deferredFltCustomer) return false;
+      if (deferredFltState.length > 0 && !deferredFltState.includes(o.customerState ?? "")) return false;
+      if (deferredFltCustomer.length > 0 && !deferredFltCustomer.includes(o.customerName ?? "")) return false;
       // Category — itemCategory column on the PO.
-      if (deferredFltCategory && o.itemCategory !== deferredFltCategory) return false;
+      if (deferredFltCategory.length > 0 && !deferredFltCategory.includes(o.itemCategory ?? "")) return false;
       // (Item type + Model filters removed 2026-05-08 — data shows all
       //  item types + models by default; operators narrow via search /
       //  category / state / date instead.)
@@ -3319,12 +3339,12 @@ export default function ProductionPage({
   // (modelOptions removed 2026-05-08 with the Model filter.)
   const customerOptions = useMemo(
     () =>
-      Array.from(new Set(orders.map((o) => o.customerName).filter(Boolean))).sort(),
+      asOptions(Array.from(new Set(orders.map((o) => o.customerName).filter(Boolean))).sort()),
     [orders],
   );
   const stateOptions = useMemo(
     () =>
-      Array.from(new Set(orders.map((o) => o.customerState).filter(Boolean))).sort(),
+      asOptions(Array.from(new Set(orders.map((o) => o.customerState).filter(Boolean))).sort()),
     [orders],
   );
 
@@ -6147,15 +6167,10 @@ export default function ProductionPage({
     // "filter status waiting的 product code啊等等 全部都要 show 出来").
     const filterBits: string[] = [];
     if (fltSearch) filterBits.push(`Search: "${fltSearch}"`);
-    if (fltCustomer) filterBits.push(`Customer: ${fltCustomer}`);
-    if (fltState) filterBits.push(`State: ${fltState}`);
-    if (fltCategory) {
-      const catLabel =
-        fltCategory === "ACCESSORY" ? "Accessories" :
-        fltCategory === "BEDFRAME" ? "Bedframe" :
-        fltCategory === "SOFA" ? "Sofa" :
-        fltCategory;
-      filterBits.push(`Category: ${catLabel}`);
+    if (fltCustomer.length > 0) filterBits.push(`Customer: ${fltCustomer.join(", ")}`);
+    if (fltState.length > 0) filterBits.push(`State: ${fltState.join(", ")}`);
+    if (fltCategory.length > 0) {
+      filterBits.push(`Category: ${fltCategory.map(categoryLabel).join(", ")}`);
     }
     if (fltDueFrom || fltDueTo) {
       filterBits.push(`Due: ${fltDueFrom || "…"} → ${fltDueTo || "…"}`);
@@ -6687,15 +6702,10 @@ export default function ProductionPage({
     // handlePrintSchedule for consistency.
     const filterBits: string[] = [];
     if (fltSearch) filterBits.push(`Search: "${fltSearch}"`);
-    if (fltCustomer) filterBits.push(`Customer: ${fltCustomer}`);
-    if (fltState) filterBits.push(`State: ${fltState}`);
-    if (fltCategory) {
-      const catLabel =
-        fltCategory === "ACCESSORY" ? "Accessories" :
-        fltCategory === "BEDFRAME" ? "Bedframe" :
-        fltCategory === "SOFA" ? "Sofa" :
-        fltCategory;
-      filterBits.push(`Category: ${catLabel}`);
+    if (fltCustomer.length > 0) filterBits.push(`Customer: ${fltCustomer.join(", ")}`);
+    if (fltState.length > 0) filterBits.push(`State: ${fltState.join(", ")}`);
+    if (fltCategory.length > 0) {
+      filterBits.push(`Category: ${fltCategory.map(categoryLabel).join(", ")}`);
     }
     if (fltDueFrom || fltDueTo) {
       filterBits.push(`Due: ${fltDueFrom || "…"} → ${fltDueTo || "…"}`);
@@ -7190,36 +7200,32 @@ export default function ProductionPage({
           onChange={(e) => setFltSearchInput(e.target.value)}
           className="flex-1 min-w-[240px] text-xs px-3 py-1.5 border border-[#E6E0D9] rounded focus:outline-none focus:border-[#6B5C32]"
         />
-        <select
-          value={fltCustomer}
-          onChange={(e) => setFltCustomer(e.target.value)}
-          className="text-xs px-2 py-1.5 border border-[#E6E0D9] rounded bg-white"
-        >
-          <option value="">All customers</option>
-          {customerOptions.map((c) => (<option key={c} value={c}>{c}</option>))}
-        </select>
-        <select
-          value={fltState}
-          onChange={(e) => setFltState(e.target.value)}
-          className="text-xs px-2 py-1.5 border border-[#E6E0D9] rounded bg-white"
-        >
-          <option value="">All states</option>
-          {stateOptions.map((s) => (<option key={s} value={s}>{s}</option>))}
-        </select>
-        {/* Category — itemCategory column. Note the canonical value is
-            ACCESSORY (singular) on the API; we surface "Accessories" as
-            the human label for the option. */}
-        <select
-          value={fltCategory}
-          onChange={(e) => setFltCategory(e.target.value)}
-          className="text-xs px-2 py-1.5 border border-[#E6E0D9] rounded bg-white"
+        <CheckboxMultiSelect
+          options={customerOptions}
+          selected={fltCustomer}
+          onChange={setFltCustomer}
+          allLabel="All customers"
+          noun="customers"
+          title="Customer"
+          className="min-w-[180px]"
+        />
+        <CheckboxMultiSelect
+          options={stateOptions}
+          selected={fltState}
+          onChange={setFltState}
+          allLabel="All states"
+          noun="states"
+          title="Customer state"
+        />
+        {/* Category — itemCategory column, tick any number (empty = all). */}
+        <CheckboxMultiSelect
+          options={CATEGORY_OPTIONS}
+          selected={fltCategory}
+          onChange={setFltCategory}
+          allLabel="All categories"
+          noun="categories"
           title="Product category"
-        >
-          <option value="">All categories</option>
-          <option value="BEDFRAME">Bedframe</option>
-          <option value="SOFA">Sofa</option>
-          <option value="ACCESSORY">Accessories</option>
-        </select>
+        />
         {/* Item-type + Model dropdowns removed 2026-05-08 per operator
             request — they didn't help narrow the view in practice and just
             added clutter beside the more useful state/category filters.

@@ -1,5 +1,8 @@
 # Sales — Module Guide
 
+> **Last verified: 2026-09-29** (branch `chore/sync-main-into-staging`, staging<-main merge): the symbol table anchors re-derived (create.tsx :2415 / :3052, detail.tsx :559, sales-orders.ts :1748 / :3206 / :2533; sales-orders.ts is 5,954 lines). Nothing else re-checked.
+
+> **Last verified: 2026-09-29** (CopyFromSourceModal / LineItemCard anchors moved to 2390 / 3016 by BUG-2026-09-29-211; the sales-orders.ts line count below is stale, it measured 5,853 on 2026-09-29. Other create.tsx anchors as re-derived 2026-09-23 after BUG-2026-09-23-183; rest as of 2026-08-19) against `src/api/routes/sales-orders.ts` (**5,733** lines),
 > **Last verified: 2026-09-25** (branch `chore/sync-staging-from-main-0925`) — every `sales-orders.ts` / `sales/*.tsx` anchor in the flows, table and gotchas re-derived against the staging←main merge; nothing else re-checked.
 
 > **Last verified: 2026-09-23** (create.tsx line anchors re-derived after BUG-2026-09-23-183; rest as of 2026-08-19) against `src/api/routes/sales-orders.ts` (**5,733** lines),
@@ -96,8 +99,8 @@ Owns the customer-facing order lifecycle: **Sales Orders** (SO) and their line i
 | `soStageLabel` | `src/pages/sales/index.tsx:166` | Maps SO status → display stage label |
 | `CreateSalesOrderPageWrapper` | `src/pages/sales/create.tsx:205` | Default export; providers shell |
 | `CreateSalesOrderPage` | `src/pages/sales/create.tsx:213` | Main create form (parties, items, totals) |
-| `CopyFromSourceModal` | `src/pages/sales/create.tsx:2411` | 2-step copy-draft picker |
-| `LineItemCard` | `src/pages/sales/create.tsx:3048` | Per-line item editor |
+| `CopyFromSourceModal` | `src/pages/sales/create.tsx:2415` | 2-step copy-draft picker |
+| `LineItemCard` | `src/pages/sales/create.tsx:3052` | Per-line item editor |
 | `SalesOrderDetailPage` | `src/pages/sales/detail.tsx:559` | SO detail; linked POs/JCs/DOs/invoices |
 | `app.post("/")` (create) | `src/api/routes/sales-orders.ts:1748` | SO create + combo pass + snapshot invalidation |
 | `app.put("/:id")` (edit) | `src/api/routes/sales-orders.ts:3206` | SO edit + re-run combo pass |

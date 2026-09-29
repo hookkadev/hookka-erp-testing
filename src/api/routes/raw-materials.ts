@@ -30,9 +30,11 @@ import {
   lockedResponse,
 } from "../lib/lock-helpers";
 import {
+  isFractionOfWholeUom,
   isUomAllowed,
   sameUom,
   uomOptionsFor,
+  wholeUomsFrom,
   type UomOptions,
 } from "../../lib/material-variants";
 import { requirePermission } from "../lib/rbac";
@@ -187,24 +189,36 @@ function pickUnit(body: RawMaterialBody, fallback = "PCS"): string {
   return fallback;
 }
 
-/** Per-group allowed UOMs from kv `variants-config.uomOptions` (DEV-20, set
- * in Inventory → RM Settings). A missing / malformed blob means "no group is
- * restricted" — it must never block a raw-material write on its own. */
-async function loadUomOptions(db: D1Database): Promise<UomOptions> {
+/** RM UOM settings from kv `variants-config` (DEV-20, set in Inventory → RM
+ * Settings): per-group allowed units, and the units whose balance cannot be
+ * typed as a fraction. A missing / malformed blob means "no group restricted"
+ * and the default whole list — it must never block a write on its own. */
+async function loadUomConfig(
+  db: D1Database,
+): Promise<{ uomOpts: UomOptions; wholeUoms: string[] }> {
+  let cfg: { uomOptions?: unknown; wholeUoms?: unknown } | null = null;
   try {
     const row = await db
       .prepare("SELECT value FROM kv_config WHERE key = ?")
       .bind("variants-config")
       .first<{ value: string | null }>();
-    const opts = JSON.parse(row?.value ?? "null")?.uomOptions;
-    return opts && typeof opts === "object" ? (opts as UomOptions) : {};
+    cfg = JSON.parse(row?.value ?? "null");
   } catch {
-    return {};
+    cfg = null;
   }
+  const opts = cfg?.uomOptions;
+  return {
+    uomOpts: opts && typeof opts === "object" ? (opts as UomOptions) : {},
+    wholeUoms: wholeUomsFrom(cfg?.wholeUoms),
+  };
 }
 
 function uomNotAllowedMsg(group: string, uom: string, opts: UomOptions): string {
   return `UOM "${uom}" is not allowed for item group ${group}. Allowed: ${uomOptionsFor(group, opts).join(", ")} (Inventory → RM Settings).`;
+}
+
+function wholeQtyMsg(itemCode: string, uom: string, qty: number): string {
+  return `${itemCode} is counted in ${uom}, which only takes whole numbers (${qty} entered). Units that must be whole are set in Inventory → RM Settings.`;
 }
 
 function statusFromBody(body: RawMaterialBody, fallback = "ACTIVE"): string {
@@ -314,13 +328,16 @@ app.post("/", async (c) => {
   const id = genId();
   const baseUOM = pickUnit(body);
   const itemGroup = (body.itemGroup ?? "OTHERS").trim() || "OTHERS";
-  const uomOpts = await loadUomOptions(c.var.DB);
+  const { uomOpts, wholeUoms } = await loadUomConfig(c.var.DB);
   if (!isUomAllowed(itemGroup, baseUOM, uomOpts)) {
     return c.json({ success: false, error: uomNotAllowedMsg(itemGroup, baseUOM, uomOpts) }, 400);
   }
   const status = statusFromBody(body);
   const isActive = status === "ACTIVE" ? 1 : 0;
   const balanceQty = Number(body.balanceQty) || 0;
+  if (isFractionOfWholeUom(baseUOM, balanceQty, wholeUoms)) {
+    return c.json({ success: false, error: wholeQtyMsg(itemCode, baseUOM, balanceQty) }, 400);
+  }
   const minStock = Number(body.minStock) || 0;
   const maxStock = Number(body.maxStock) || 0;
   const notes = typeof body.notes === "string" ? body.notes : null;
@@ -462,14 +479,23 @@ app.put("/:id", async (c) => {
         ? numOrNull(body.sheetWidthIn)
         : (existing.sheet_width_in ?? existing.sheetWidthIn ?? null),
   };
-  // DEV-20. Only a change to the unit or the group is checked, so an edit
-  // that leaves both alone never trips over a legacy off-list UOM.
+  // DEV-20. Only a change to the unit, group or typed balance is checked, so
+  // an edit that leaves them alone never trips over a legacy value — e.g. a
+  // BOX balance production left at 12.5.
   const uomChanged = !sameUom(existing.baseUOM, merged.baseUOM);
-  if (uomChanged || (existing.itemGroup ?? "") !== (merged.itemGroup ?? "")) {
-    const uomOpts = await loadUomOptions(c.var.DB);
-    if (!isUomAllowed(merged.itemGroup, merged.baseUOM, uomOpts)) {
+  const groupChanged = (existing.itemGroup ?? "") !== (merged.itemGroup ?? "");
+  const balanceChanged = Number(merged.balanceQty) !== Number(existing.balanceQty);
+  if (uomChanged || groupChanged || balanceChanged) {
+    const { uomOpts, wholeUoms } = await loadUomConfig(c.var.DB);
+    if ((uomChanged || groupChanged) && !isUomAllowed(merged.itemGroup, merged.baseUOM, uomOpts)) {
       return c.json(
         { success: false, error: uomNotAllowedMsg(merged.itemGroup, merged.baseUOM, uomOpts) },
+        400,
+      );
+    }
+    if (balanceChanged && isFractionOfWholeUom(merged.baseUOM, Number(merged.balanceQty), wholeUoms)) {
+      return c.json(
+        { success: false, error: wholeQtyMsg(merged.itemCode, merged.baseUOM, Number(merged.balanceQty)) },
         400,
       );
     }
@@ -719,7 +745,8 @@ app.post("/bulk-import", async (c) => {
     idToCode.set(r.id, r.itemCode);
     idToUnit.set(r.id, { baseUOM: r.baseUOM ?? "", balanceQty: r.balanceQty });
   }
-  const uomOpts = await loadUomOptions(c.var.DB);
+  // Bulk import never writes balanceQty on UPDATE, so only the unit rules apply.
+  const { uomOpts } = await loadUomConfig(c.var.DB);
   const regrouped: { itemCode: string; from: string; to: string }[] = [];
   const rejected: { row: number; reason: string }[] = [];
 

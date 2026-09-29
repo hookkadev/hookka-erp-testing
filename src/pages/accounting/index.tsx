@@ -72,6 +72,11 @@ import { asMutationResponse, useCompanyOptions, orgIdParam, type CompanyOption }
 // Customer Payment page; the Receipts hub hosts the same form.
 import { CustomerReceiptForm } from "../invoices/payments";
 import { buildCustomerPaymentVoucher, hasUnallocated, unallocatedSen } from "@/lib/customer-receipt";
+// The Payments hub lists this page's own vouchers PLUS the two payment
+// documents recorded on their own pages, and prints each through its own
+// builder (owner 2026-09-28 「other creditor 的 payment 没出现在 payment voucher?」).
+import { buildSupplierPaymentVoucher } from "@/lib/supplier-payment-voucher";
+import type { SupplierPaymentGroup } from "@/lib/supplier-payment-alloc";
 import type { PaymentRecord } from "@/types";
 import { AuditLogTab } from "./tabs/AuditLogTab";
 import { TradeFinanceBlock } from "./tabs/TradeFinanceBlock";
@@ -6676,6 +6681,14 @@ type ApInvRow = {
   kind: "AP" | "PI"; id: string; no: string; supplier: string; partyId?: string; supplierRef: string; date: string; dueDate: string | null;
   description: string; totalSen: number; paidSen: number; outstandingSen: number; status: "OPEN" | "PAID" | "CANCELLED"; opening: boolean;
 };
+// Owner 2026-09-29 「我希望是这样选，而不是往下滑」: kind and status are chip rows
+// (one click, a count on each) instead of two dropdowns to open and scroll.
+const AP_KIND_CHIPS: { key: "ALL" | "AP" | "PI"; label: string }[] = [
+  { key: "ALL", label: "All" }, { key: "AP", label: "AP invoices" }, { key: "PI", label: "Purchase invoices" },
+];
+const AP_STATUS_CHIPS: { key: "ALL" | "OPEN" | "PAID" | "CANCELLED"; label: string }[] = [
+  { key: "ALL", label: "All" }, { key: "OPEN", label: "Open" }, { key: "PAID", label: "Paid" }, { key: "CANCELLED", label: "Cancelled" },
+];
 function ApInvoicesTab({ accounts }: { accounts: ChartOfAccount[] }) {
   const navigate = useNavigate();
   // Raise / edit other-creditor bills right here (sidebar slim-down 2026-09-22:
@@ -6689,19 +6702,32 @@ function ApInvoicesTab({ accounts }: { accounts: ChartOfAccount[] }) {
   // Owner 2026-09-22: default ALL (the mirror is for looking things up, not only chasing).
   const [status, setStatus] = useState<"OPEN" | "PAID" | "CANCELLED" | "ALL">("ALL");
   const [q, setQ] = useState("");
+  // One load of everything, then every filter is client-side: the chips can
+  // carry counts, and a supplier picker narrows without a round-trip.
+  const [supplier, setSupplier] = useState("");
   useEffect(() => {
     let dead = false;
-    fetch(`/api/accounting/ap-invoices${status === "ALL" ? "" : `?status=${status}`}`)
+    fetch("/api/accounting/ap-invoices")
       .then((r) => r.json() as Promise<{ success?: boolean; data?: typeof data }>)
       .then((j) => { if (!dead && j?.success && j.data) setData(j.data); })
       .catch(() => {});
     return () => { dead = true; };
-  }, [status, ver]);
-  const rows = (data?.rows ?? []).filter((r) => {
-    if (kind !== "ALL" && r.kind !== kind) return false;
+  }, [ver]);
+  const all = data?.rows ?? [];
+  const passes = (r: ApInvRow, skip?: "kind" | "status") => {
+    if (skip !== "kind" && kind !== "ALL" && r.kind !== kind) return false;
+    if (skip !== "status" && status !== "ALL" && r.status !== status) return false;
+    if (supplier && r.supplier !== supplier) return false;
     if (q.trim()) { const kw = q.toLowerCase(); if (![r.no, r.supplier, r.supplierRef, r.description].some((s) => s.toLowerCase().includes(kw))) return false; }
     return true;
-  });
+  };
+  const rows = all.filter((r) => passes(r));
+  // Each chip counts what it would show given the OTHER filters.
+  const kindCount = (k: typeof kind) => all.filter((r) => passes(r, "kind") && (k === "ALL" || r.kind === k)).length;
+  const statusCount = (s: typeof status) => all.filter((r) => passes(r, "status") && (s === "ALL" || r.status === s)).length;
+  const supplierOpts = [...new Set(all.map((r) => r.supplier).filter(Boolean))].sort((a, b) => a.localeCompare(b)).map((s) => ({ value: s, label: s }));
+  const chipBtn = (on: boolean, first: boolean) =>
+    `px-3 py-1.5 font-semibold uppercase tracking-wide cursor-pointer ${on ? "bg-[#6B5C32] text-white" : "text-[#6B7280] hover:bg-[#FAF8F5]"} ${first ? "" : "border-l border-[#F0ECE9]"}`;
   const shownSen = rows.reduce((s, r) => s + r.outstandingSen, 0);
   const chip = (r: ApInvRow) =>
     r.status === "PAID" ? "bg-[#EAF3DE] text-[#27500A]" : r.status === "CANCELLED" ? "bg-[#F0ECE9] text-[#9CA3AF]" : "bg-[#FBF3E4] text-[#7A5B12]";
@@ -6725,13 +6751,30 @@ function ApInvoicesTab({ accounts }: { accounts: ChartOfAccount[] }) {
         </div>
       )}
       <div className="flex flex-wrap items-center gap-2">
-        <input type="text" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search no / supplier / ref" className="rounded-md border border-[#E2DDD8] px-3 py-1.5 text-sm w-64" />
-        <select value={kind} onChange={(e) => setKind(e.target.value as typeof kind)} className="rounded-md border border-[#E2DDD8] px-2 py-1.5 text-sm">
-          <option value="ALL">AP + PI</option><option value="AP">AP bills only</option><option value="PI">Purchase invoices only</option>
-        </select>
-        <select value={status} onChange={(e) => setStatus(e.target.value as typeof status)} className="rounded-md border border-[#E2DDD8] px-2 py-1.5 text-sm">
-          <option value="ALL">All</option><option value="OPEN">Open</option><option value="PAID">Paid</option><option value="CANCELLED">Cancelled</option>
-        </select>
+        <div className="inline-flex flex-wrap rounded-md border border-[#E2DDD8] bg-white overflow-hidden text-xs" title="Which kind of invoice">
+          {AP_KIND_CHIPS.map((ch, i) => {
+            const n = kindCount(ch.key); const on = kind === ch.key;
+            return (
+              <button key={ch.key} type="button" onClick={() => setKind(ch.key)} className={chipBtn(on, i === 0)}>
+                {ch.label}<span className={`ml-1 tabular-nums ${on ? "text-white/80" : "text-[#9CA3AF]"}`}>{n}</span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="inline-flex flex-wrap rounded-md border border-[#E2DDD8] bg-white overflow-hidden text-xs" title="Status">
+          {AP_STATUS_CHIPS.map((ch, i) => {
+            const n = statusCount(ch.key); const on = status === ch.key;
+            return (
+              <button key={ch.key} type="button" onClick={() => setStatus(ch.key)} className={chipBtn(on, i === 0)}>
+                {ch.label}<span className={`ml-1 tabular-nums ${on ? "text-white/80" : "text-[#9CA3AF]"}`}>{n}</span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="w-64">
+          <SearchableSelect value={supplier} onChange={setSupplier} options={supplierOpts} placeholder="All suppliers" allowClear />
+        </div>
+        <input type="text" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search no / supplier / ref" className="rounded-md border border-[#E2DDD8] px-3 py-1.5 text-sm w-56" />
         <span className="ml-auto text-xs text-[#6B7280]">Shown outstanding <span className="font-semibold tabular-nums text-[#1F1D1B]">{formatCurrency(shownSen)}</span></span>
       </div>
       <Card>
@@ -6757,11 +6800,13 @@ function ApInvoicesTab({ accounts }: { accounts: ChartOfAccount[] }) {
               <tbody>
                 {rows.map((r) => (
                   <tr key={`${r.kind}-${r.id}`} className={`border-b border-[#F0ECE9] hover:bg-[#FAF8F5] ${r.status === "CANCELLED" ? "opacity-50" : ""}`}
-                    onDoubleClick={() => { if (r.kind === "PI") navigate("/procurement/pi"); else setManage(true); }}
-                    title={r.kind === "PI" ? "Double-click: open on Procurement › Purchase Invoices" : "Double-click: open the bill editor below"}>
+                    // Owner 2026-09-29 「直接点开 invoice，而不是跳去 purchase invoice list」:
+                    // a PI opens ITS OWN detail page, not the list.
+                    onDoubleClick={() => { if (r.kind === "PI") navigate(`/procurement/pi/${r.id}`); else setManage(true); }}
+                    title={r.kind === "PI" ? "Double-click: open this purchase invoice" : "Double-click: open the bill editor below"}>
                     <td className="px-3 py-1.5"><span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${r.kind === "PI" ? "bg-[#EEF2FB] text-[#2C4170]" : "bg-[#F6F1E7] text-[#6B5C32]"}`}>{r.kind}</span>{r.opening && <span className="ml-1 text-[10px] text-[#9CA3AF]">opening</span>}</td>
                     <td className="px-3 py-1.5 tabular-nums text-xs whitespace-nowrap">
-                      {r.kind === "PI" ? <Link to="/procurement/pi" className="underline decoration-dotted text-[#6B5C32]" title="Open on Procurement › Purchase Invoices">{r.no}</Link> : <button type="button" onClick={() => setManage(true)} className="underline decoration-dotted text-[#6B5C32] cursor-pointer" title="Edit below (other-creditor bills)">{r.no}</button>}
+                      {r.kind === "PI" ? <Link to={`/procurement/pi/${r.id}`} className="underline decoration-dotted text-[#6B5C32]" title="Open this purchase invoice">{r.no}</Link> : <button type="button" onClick={() => setManage(true)} className="underline decoration-dotted text-[#6B5C32] cursor-pointer" title="Edit below (other-creditor bills)">{r.no}</button>}
                     </td>
                     <td className="px-3 py-1.5">{r.supplier}</td>
                     <td className="px-3 py-1.5 text-xs text-[#6B7280]">{r.supplierRef}</td>
@@ -7474,6 +7519,8 @@ type OpenBill = { id: string; billNo: string; outstandingSen: number };
 type PaymentGroup = {
   paymentNo: string; partyId: string; partyType: "DEBTOR" | "CREDITOR"; partyName: string;
   date: string; bankAccount: string; totalSen: number; lifecycleState?: string;
+  // GET /other-party-payments returns it; the Payments hub shows it as the note.
+  reference?: string;
   lines: { billId: string; billNo: string; amountSen: number }[];
 };
 
@@ -8801,6 +8848,88 @@ const PV_STATUS_CHIPS: { key: PvStatusChip; label: string }[] = [
   { key: "ALL", label: "All" }, { key: "DRAFT", label: "Draft" }, { key: "PREPARED", label: "Prepared" }, { key: "CHECKED", label: "Checked" },
   { key: "APPROVED", label: "Approved" }, { key: "ADVANCE_OPEN", label: "Advance open" }, { key: "CANCELLED", label: "Cancelled" },
 ];
+// ── The payments hub (owner 2026-09-28) ────────────────────────────────────
+// 「other creditor 的 payment 没出现在 payment voucher?」— right, it did not: this
+// list read `payment_vouchers` only, while the two payment documents entered on
+// their own pages live in their own tables (`supplier_payments`,
+// `other_party_payments`). Measured on prod that day: 96 vouchers here, 42
+// other-creditor payments (RM 338,498.00) and 113 supplier payments nowhere on
+// this page — yet ALL THREE mint their number from the same counter
+// (issueDocNumber → HPV-YYMM-nnn), so it is one numbering book that had three
+// lists. The hub merges them READ-SIDE: no engine, no write path and no
+// recorded entry is touched, and each row still prints / voids through its own
+// document's endpoint (the money-out twin of the Receipts hub).
+type PayDoor = "PV" | "AP" | "SP" | "OCP";
+type PayRow = {
+  door: PayDoor; key: string; no: string; date: string; payee: string; via: string; note: string;
+  totalSen: number;
+  // ACTIVE / VOID / DELETED. A foreign door has no approval ladder — it posts
+  // when it is saved — so it reads as Approved on the chips.
+  state: string;
+  advanceOpen: boolean;
+  pv?: PvRow; sp?: SupplierPaymentGroup; ocp?: PaymentGroup;
+};
+const PAY_DOOR_LABEL: Record<PayDoor, string> = {
+  PV: "Payment Voucher", AP: "AP Payment", SP: "Supplier Payment", OCP: "Other Creditor Payment",
+};
+const PAY_DOOR_HINT: Record<PayDoor, string> = {
+  PV: "Payment Voucher — pays an expense",
+  AP: "AP Payment — pays creditor bills through the approval ladder",
+  SP: "Supplier Payment — recorded on the Supplier Payment page (posts on save)",
+  OCP: "Other Creditor Payment — recorded on the Other Creditor Payments page (posts on save)",
+};
+const payDoorChip = (d: PayDoor) => (
+  <span
+    className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+      d === "PV" ? "bg-[#F6F1E7] text-[#6B5C32]"
+      : d === "AP" ? "bg-[#EEF2FB] text-[#2C4170]"
+      : d === "SP" ? "bg-[#EAF3DE] text-[#27500A]"
+      : "bg-[#F7E5E1] text-[#9A3A2D]"}`}
+    title={PAY_DOOR_HINT[d]}
+  >{d}</span>
+);
+// A supplier-payment line with no purchase invoice is an advance; once knocked
+// off its amount reaches 0 — both conditions, same rule as the Supplier Payment
+// page's blue rows (isUnappliedAdvanceLine there).
+const spAdvanceOpenSen = (g: SupplierPaymentGroup) =>
+  g.lines.filter((l) => !l.purchaseInvoiceId && l.amountSen > 0).reduce((s, l) => s + l.amountSen, 0);
+
+function buildPayRows(pv: PvRow[] | null, sp: SupplierPaymentGroup[] | null, ocp: PaymentGroup[] | null): PayRow[] {
+  // An AP voucher's settlement document carries the voucher's own number — it
+  // is the same payment seen from the other side, so it is listed once, as the
+  // voucher (which owns the ladder trail and the attachments).
+  const pvNos = new Set((pv ?? []).map((r) => r.pvNo).filter(Boolean));
+  const rows: PayRow[] = (pv ?? []).map((r) => ({
+    door: r.pvKind === "AP" ? "AP" : "PV",
+    key: `v:${r.id}`, no: r.pvNo, date: String(r.date ?? "").slice(0, 10),
+    payee: r.payee ?? "", via: r.payFrom ?? "", note: r.description ?? "",
+    totalSen: r.totalSen, state: r.status === "VOID" ? "VOID" : (r.lifecycleState ?? "ACTIVE"),
+    advanceOpen: (r.advanceOpenSen ?? 0) > 0, pv: r,
+  }));
+  for (const g of sp ?? []) {
+    if (pvNos.has(g.paymentNo)) continue;
+    rows.push({
+      door: "SP", key: `s:${g.paymentNo}`, no: g.paymentNo, date: String(g.date ?? "").slice(0, 10),
+      // The bank comes from the ledger's CR leg (GET /supplier-payments fills
+      // it); blank only when the payment has no bank leg at all (contra).
+      payee: g.supplierName ?? "", via: g.bankAccount ?? "", note: `${g.lines.length} invoice${g.lines.length === 1 ? "" : "s"}`,
+      totalSen: g.totalBankSen, state: g.lifecycleState ?? "ACTIVE",
+      advanceOpen: spAdvanceOpenSen(g) > 0, sp: g,
+    });
+  }
+  for (const g of ocp ?? []) {
+    if (pvNos.has(g.paymentNo)) continue;
+    rows.push({
+      door: "OCP", key: `o:${g.paymentNo}`, no: g.paymentNo, date: String(g.date ?? "").slice(0, 10),
+      payee: g.partyName, via: g.bankAccount ?? "",
+      note: [g.reference, `${g.lines.length} bill${g.lines.length === 1 ? "" : "s"}`].filter(Boolean).join(" · "),
+      totalSen: g.totalSen, state: g.lifecycleState ?? "ACTIVE",
+      advanceOpen: false, ocp: g,
+    });
+  }
+  return rows.sort((a, b) => b.date.localeCompare(a.date) || b.no.localeCompare(a.no));
+}
+
 // The settled-bills detail block for a voucher's print: an AP voucher carries
 // its ticks (draft or posted), so no round-trip is needed.
 function pvApPrintDetail(pv: PvRow): { supplierName: string; piNo: string | null; opening: boolean; method: string; bookedSen: number }[] | undefined {
@@ -8897,11 +9026,18 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
   const { toast } = useToast();
   const { confirm } = useConfirm();
   const [rows, setRows] = useState<PvRow[] | null>(null);
+  // The two payment documents recorded on their own pages — listed here too
+  // (owner 2026-09-28). Read-only on this page apart from print / void, which
+  // go to their own endpoints.
+  const [spRows, setSpRows] = useState<SupplierPaymentGroup[] | null>(null);
+  const [ocpRows, setOcpRows] = useState<PaymentGroup[] | null>(null);
   const [migrationMissing, setMigrationMissing] = useState(false);
   const [expandedPv, setExpandedPv] = useState<Record<string, boolean>>({});
   // Double-click → the voucher's detail popup (resolved from `rows` by id so
   // it re-renders after a rung / void / attachment change).
   const [detailPvId, setDetailPvId] = useState<string | null>(null);
+  // Same for a row from another door (keyed by PayRow.key).
+  const [detailPayKey, setDetailPayKey] = useState<string | null>(null);
   // A deep-link opens New AP Payment straight away (state seeded, no effect).
   const initialPay = parsePayLink(new URLSearchParams(window.location.search).get("pay"));
   const [showForm, setShowForm] = useState(!!initialPay);
@@ -8924,6 +9060,8 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [bankFilter, setBankFilter] = useState("");
+  // Which door the row came in by (all four by default).
+  const [doorFilter, setDoorFilter] = useState<"" | PayDoor>("");
   // Ladder actions in flight (single or batch) — buttons disable meanwhile.
   const [ladderBusy, setLadderBusy] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -9024,6 +9162,17 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
         }
       })
       .catch(() => {});
+    // The other two doors. Cache-busted like the Receipts hub's three: a void
+    // or a new payment on their own page must show here on the next load.
+    const bust = `x=${Date.now()}`;
+    fetch(`/api/supplier-payments?${bust}`, { cache: "no-store" })
+      .then((r) => r.json() as Promise<{ success?: boolean; data?: SupplierPaymentGroup[] } | SupplierPaymentGroup[]>)
+      .then((j) => setSpRows(Array.isArray(j) ? j : (j?.success ? j.data ?? [] : [])))
+      .catch(() => setSpRows([]));
+    fetch(`/api/accounting/other-party-payments?type=CREDITOR&${bust}`, { cache: "no-store" })
+      .then((r) => r.json() as Promise<{ success?: boolean; data?: PaymentGroup[] }>)
+      .then((j) => setOcpRows(j?.success ? j.data ?? [] : []))
+      .catch(() => setOcpRows([]));
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -9054,19 +9203,41 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
   // Cancelled. An accrued-unpaid voucher sits under Approved with its own badge.
   const chipOf = (r: PvRow): Exclude<PvStatusChip, "ALL" | "ADVANCE_OPEN"> =>
     r.status === "VOID" ? "CANCELLED" : !isPosted(r) ? apState(r) : "APPROVED";
-  const matchesChip = (r: PvRow, chip: PvStatusChip) =>
-    chip === "ALL" ? true : chip === "ADVANCE_OPEN" ? isPosted(r) && (r.advanceOpenSen ?? 0) > 0 : chipOf(r) === chip;
-  const chipCount = (chip: PvStatusChip) => (rows ?? []).filter((r) => matchesChip(r, chip)).length;
-  const visibleRows = (rows ?? []).filter((r) => {
-    if (q.trim()) { const kw = q.toLowerCase(); if (![r.pvNo, r.payee ?? "", r.description ?? "", ...(r.allocs ?? []).map((a) => a.docNo)].some((s) => s.toLowerCase().includes(kw))) return false; }
-    if (!matchesChip(r, statusFilter)) return false;
-    if (dateFrom && r.date < dateFrom) return false;
-    if (dateTo && r.date > dateTo) return false;
-    if (bankFilter && (r.payFrom ?? "") !== bankFilter) return false;
+  // Every money-out door in one list, newest first (owner 2026-09-28). A
+  // foreign door has no ladder — it posts when it is saved — so it reads as
+  // Approved on the chips, Cancelled once voided.
+  const payRows = useMemo(() => buildPayRows(rows, spRows, ocpRows), [rows, spRows, ocpRows]);
+  const payLoading = rows === null || spRows === null || ocpRows === null;
+  const matchesChip = (row: PayRow, chip: PvStatusChip) => {
+    if (chip === "ALL") return true;
+    if (chip === "ADVANCE_OPEN") return row.state === "ACTIVE" && row.advanceOpen && (!row.pv || isPosted(row.pv));
+    return (row.state !== "ACTIVE" ? "CANCELLED" : row.pv ? chipOf(row.pv) : "APPROVED") === chip;
+  };
+  const chipCount = (chip: PvStatusChip) => payRows.filter((r) => matchesChip(r, chip)).length;
+  const doorCount = (d: PayDoor) => payRows.filter((r) => r.door === d).length;
+  const visibleRows = payRows.filter((row) => {
+    if (doorFilter && row.door !== doorFilter) return false;
+    if (q.trim()) {
+      const kw = q.toLowerCase();
+      const hay = [
+        row.no, row.payee, row.note,
+        ...(row.pv?.allocs ?? []).map((a) => a.docNo),
+        ...(row.sp?.lines ?? []).map((l) => l.piNo ?? ""),
+        ...(row.ocp?.lines ?? []).map((l) => l.billNo),
+      ];
+      if (!hay.some((s) => s.toLowerCase().includes(kw))) return false;
+    }
+    if (!matchesChip(row, statusFilter)) return false;
+    if (dateFrom && row.date < dateFrom) return false;
+    if (dateTo && row.date > dateTo) return false;
+    if (bankFilter && row.via !== bankFilter) return false;
     return true;
   });
+  // A supplier payment with no bank leg on the ledger (contra) has no bank to
+  // match, so picking a bank hides it — say so instead of letting it vanish.
+  const bankHiddenSp = bankFilter ? payRows.filter((r) => r.door === "SP" && !r.via).length : 0;
 
-  const pvSel = useRowSelection(visibleRows, (r) => r.pvNo ?? r.id);
+  const pvSel = useRowSelection(visibleRows, (r) => r.key);
 
   const resetForm = () => {
     setShowForm(false);
@@ -9206,7 +9377,8 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
 
   // Batch rung over the ticked vouchers (date order on the server).
   const handleLadderBatch = async (action: "prepare" | "check" | "approve") => {
-    const ids = pvSel.selectedRows.map((r) => r.id);
+    // Only this page's own vouchers ride the ladder; a ticked foreign row is skipped.
+    const ids = pvSel.selectedRows.map((r) => r.pv?.id).filter((id): id is string => !!id);
     if (!ids.length) return;
     if (action === "approve" && !(await confirm({ title: "Approve & post all?", message: `${ids.length} voucher${ids.length === 1 ? "" : "s"} will be posted to the ledger.` }))) return;
     setLadderBusy(true);
@@ -9273,6 +9445,64 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
       toast.error(`Bundle not printed — ${(e as Error).message}`);
     } finally { setBundleBusy(null); }
   };
+  // Print one row whatever door it came in by — each document's own builder,
+  // so the paper is identical to its own page's.
+  const payVoucherOf = (row: PayRow): VoucherSpec =>
+    row.pv ? { ...buildPvVoucher(row.pv, accounts), footerText: printFooter }
+    : row.sp ? buildSupplierPaymentVoucher(row.sp)
+    : buildOtherPartyPaymentVoucher(row.ocp!, accounts);
+  // A foreign row voids / restores through its own document's endpoint — the
+  // same call its own page makes (the Receipts hub does exactly this).
+  const handleForeignLifecycle = async (row: PayRow, action: "void" | "delete" | "unvoid") => {
+    const verb = action === "unvoid" ? "Restore" : action === "delete" ? "Delete" : "Void";
+    const extra = action === "delete"
+      ? " It will be hidden from the GL (still visible in the audit log)."
+      : action === "void"
+        ? " A reversal entry will be posted (nothing is deleted)."
+        : "";
+    if (!(await confirm({ title: `${verb} ${PAY_DOOR_LABEL[row.door].toLowerCase()}?`, message: `${verb} ${row.no}?${extra}`, danger: true }))) return;
+    const url = row.sp
+      ? `/api/supplier-payments/${encodeURIComponent(row.no)}/lifecycle`
+      : `/api/accounting/other-party-payments/${encodeURIComponent(row.no)}/lifecycle`;
+    const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action }) });
+    const j = asMutationResponse(await res.json());
+    if (j?.success) {
+      toast.success(`${row.no} ${action === "unvoid" ? "restored" : action === "delete" ? "deleted" : "voided"}`);
+      invalidateCachePrefix("/api/supplier-payments");
+      load();
+    } else toast.error(j?.error || `${verb} failed`);
+  };
+  // Where a foreign row lives — its own page, for edit / knock-off / FX.
+  const foreignHref = (row: PayRow) => row.sp ? "/invoices/supplier-payments" : "/accounting?tab=ocreditorpay";
+  // What a foreign row settled — shown inline on expand and in the popup.
+  const foreignDetailTable = (row: PayRow) => (
+    <table className="w-full text-xs">
+      <thead>
+        <tr className="text-[#9CA3AF] text-left">
+          <th className="py-1 pr-4 font-medium">{row.sp ? "Purchase invoice" : "Bill"}</th>
+          <th className="py-1 pr-4 font-medium">{row.sp ? "Supplier inv no" : ""}</th>
+          <th className="py-1 font-medium text-right">Paid</th>
+        </tr>
+      </thead>
+      <tbody>
+        {row.sp?.lines.map((l) => (
+          <tr key={l.id} className="border-t border-[#F0ECE9]">
+            <td className="py-1 pr-4 whitespace-nowrap tabular-nums">{l.piNo || <span>Advance / unallocated{l.amountSen > 0 ? <span className="ml-1 text-[10px] text-[#7A5B12]">· {formatCurrency(l.amountSen)} still unapplied</span> : null}</span>}</td>
+            <td className="py-1 pr-4 text-[#6B7280]">{l.supplierInvoiceNo || ""}</td>
+            <td className="py-1 text-right tabular-nums">{formatCurrency(l.amountSen)}</td>
+          </tr>
+        ))}
+        {row.ocp?.lines.map((l) => (
+          <tr key={l.billId} className="border-t border-[#F0ECE9]">
+            <td className="py-1 pr-4 whitespace-nowrap tabular-nums">{l.billNo} <span className="text-[10px] text-[#9CA3AF]">other-creditor bill</span></td>
+            <td className="py-1 pr-4" />
+            <td className="py-1 text-right tabular-nums">{formatCurrency(l.amountSen)}</td>
+          </tr>
+        ))}
+        <tr className="border-t-2 border-[#1F1D1B] font-semibold"><td className="py-1 pr-4" colSpan={2}>Total</td><td className="py-1 text-right tabular-nums">{formatCurrency(row.totalSen)}</td></tr>
+      </tbody>
+    </table>
+  );
 
   const handleSettle = async (row: PvRow) => {
     const payFrom = window.prompt(
@@ -9377,7 +9607,7 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-lg font-semibold text-[#1F1D1B]">Payment Vouchers</h2>
-          <p className="text-[11px] text-[#9CA3AF]">Every payment out, one door. <b>AP Payment</b> pays a creditor's bills (purchase invoices / other-creditor bills); <b>Payment Voucher</b> pays an expense. Draft → Prepared → Checked → Approved (posted), or Post now. Foreign-currency PIs, advance knock-off and trade-finance repayment: <Link to="/invoices/supplier-payments" className="underline decoration-dotted text-[#6B5C32]">Supplier Payment page</Link>.</p>
+          <p className="text-[11px] text-[#9CA3AF]">Every payment out, one door. <b>AP Payment</b> pays a creditor's bills (purchase invoices / other-creditor bills); <b>Payment Voucher</b> pays an expense. Draft → Prepared → Checked → Approved (posted), or Post now. Foreign-currency PIs, advance knock-off and trade-finance repayment: <Link to="/invoices/supplier-payments" className="underline decoration-dotted text-[#6B5C32]">Supplier Payment page</Link>. Payments recorded there and on <Link to="/accounting?tab=ocreditorpay" className="underline decoration-dotted text-[#6B5C32]">Other Creditor Payments</Link> are listed below too (badges <b>SP</b> / <b>OCP</b>) — same HPV number series, one list.</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">
           <ScanBillsBatch rows={rows ?? []} bankCash={bankCash} onDone={load} />
@@ -9663,8 +9893,10 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
         </Card>
       )}
 
-      {rows !== null && (
-        <div className="text-[11px] uppercase tracking-wide text-[#9CA3AF]">{rows.length} payment voucher{rows.length === 1 ? "" : "s"}</div>
+      {!payLoading && (
+        <div className="text-[11px] uppercase tracking-wide text-[#9CA3AF]" title="Every payment out, whichever page it was recorded on — all four share one HPV number series">
+          {payRows.length} payment{payRows.length === 1 ? "" : "s"} · {doorCount("PV")} voucher · {doorCount("AP")} AP · {doorCount("SP")} supplier · {doorCount("OCP")} other creditor
+        </div>
       )}
       <div className="inline-flex flex-wrap rounded-md border border-[#E2DDD8] bg-white overflow-hidden text-xs">
         {PV_STATUS_CHIPS.map((ch) => {
@@ -9687,12 +9919,19 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
           <option value="">All banks</option>
           {bankCash.map((b) => <option key={b.code} value={b.code}>{b.code} {b.name}</option>)}
         </select>
+        <select value={doorFilter} onChange={(e) => setDoorFilter(e.target.value as "" | PayDoor)} className="rounded-md border border-[#E2DDD8] px-2 py-1.5 text-sm" title="Which page the payment was recorded on">
+          <option value="">All doors</option>
+          {(["PV", "AP", "SP", "OCP"] as PayDoor[]).map((d) => <option key={d} value={d}>{PAY_DOOR_LABEL[d]}</option>)}
+        </select>
+        {bankHiddenSp > 0 && (
+          <span className="text-[11px] text-[#9A3A2D]">{bankHiddenSp} supplier payment{bankHiddenSp === 1 ? "" : "s"} hidden — no bank leg on their ledger posting (contra settlement); pick All banks to see them</span>
+        )}
       </div>
 
       {pvSel.count > 0 && (() => {
         // Ladder batch: offer each rung only when at least one ticked voucher
         // can take it (the server still re-checks every one).
-        const sel = pvSel.selectedRows;
+        const sel = pvSel.selectedRows.map((x) => x.pv).filter((x): x is PvRow => !!x);
         const n = (s: PvApprovalState) => sel.filter((r) => r.status !== "VOID" && apState(r) === s).length;
         const drafts = n("DRAFT"), prepared = n("PREPARED"), checked = n("CHECKED");
         if (!drafts && !prepared && !checked) return null;
@@ -9709,13 +9948,25 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
       <BatchActionsBar
         count={pvSel.count}
         onClear={pvSel.clear}
-        onPrint={() => printVouchers(pvSel.selectedRows.map((r) => ({ ...buildPvVoucher(r, accounts), footerText: printFooter })))}
+        onPrint={() => printVouchers(pvSel.selectedRows.map(payVoucherOf))}
         exportName="payment-vouchers"
         exportAoa={() => [
-          ["PV No", "Date", "Pay To", "Paid From", "Status", "Remarks", "Product Line", "Voucher Total (RM)", "Account Code", "Account Name", "Line Description", "Amount (RM)"],
-          ...pvSel.selectedRows.flatMap((r) => {
+          ["Door", "PV No", "Date", "Pay To", "Paid From", "Status", "Remarks", "Product Line", "Voucher Total (RM)", "Account Code", "Account Name", "Line Description", "Amount (RM)"],
+          ...pvSel.selectedRows.flatMap((row) => {
+            // A foreign row exports one line per invoice / bill it settled —
+            // the control account it relieves, the document number as the line.
+            if (row.sp) {
+              const head = ["Supplier Payment", row.no, row.date, row.payee, "", row.state, "", "", (row.totalSen / 100).toFixed(2)];
+              return row.sp.lines.map((l) => [...head, "400-0000", accounts.find((a) => a.code === "400-0000")?.name ?? "", l.piNo || "Advance / unallocated", (l.amountSen / 100).toFixed(2)]);
+            }
+            if (row.ocp) {
+              const head = ["Other Creditor Payment", row.no, row.date, row.payee, row.via ? accountLabel(accounts, row.via) : "", row.state, row.ocp.reference ?? "", "", (row.totalSen / 100).toFixed(2)];
+              return row.ocp.lines.map((l) => [...head, "405-0000", accounts.find((a) => a.code === "405-0000")?.name ?? "", l.billNo, (l.amountSen / 100).toFixed(2)]);
+            }
+            const r = row.pv!;
             const bank = r.payFrom || r.accrualAccount || "";
             const head = [
+              r.pvKind === "AP" ? "AP Payment" : "Payment Voucher",
               r.pvNo ?? r.id,
               r.date ?? "",
               r.payee ?? "",
@@ -9746,7 +9997,7 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
 
       <Card>
         <CardContent className="p-0 overflow-x-auto">
-          {rows === null ? (
+          {payLoading ? (
             <div className="py-12 text-center text-[#6B7280] text-sm">Loading…</div>
           ) : (
             <table className="w-full text-sm">
@@ -9764,7 +10015,64 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
                 </tr>
               </thead>
               <tbody>
-                {visibleRows.map((r) => (
+                {visibleRows.map((row) => {
+                  // A row from another door: read-only here apart from print /
+                  // void (its own endpoint) — expand shows what it settled,
+                  // double-click opens the popup, "open ↗" goes to its page.
+                  if (!row.pv) {
+                    const g = row;
+                    return (
+                      <React.Fragment key={g.key}>
+                        <tr
+                          className={`border-b border-[#F0ECE9] cursor-pointer hover:bg-[#FAF8F5] ${g.state !== "ACTIVE" ? "opacity-50" : g.advanceOpen ? "text-blue-600" : ""}`}
+                          onClick={() => setExpandedPv((m) => ({ ...m, [g.key]: !m[g.key] }))}
+                          onDoubleClick={() => setDetailPayKey(g.key)}
+                          title="Click to expand · double-click to open"
+                        >
+                          <td className="px-3 py-1.5 w-8" onClick={(e) => e.stopPropagation()}>
+                            <input type="checkbox" checked={pvSel.isSelected(g.key)} onChange={() => pvSel.toggle(g.key)} className="h-3.5 w-3.5 accent-[#6B5C32]" />
+                          </td>
+                          <td className="px-3 py-1.5 tabular-nums text-xs whitespace-nowrap">
+                            <span className="inline-block w-3 text-[#9CA3AF]">{expandedPv[g.key] ? "▾" : "▸"}</span> {g.no}
+                            <span className="ml-2">{payDoorChip(g.door)}</span>
+                          </td>
+                          <td className="px-3 py-1.5 text-xs text-[#6B7280] whitespace-nowrap">{g.date}</td>
+                          <td className="px-3 py-1.5">{[g.payee, g.ocp?.reference].filter(Boolean).join(" · ")}</td>
+                          <td className="px-3 py-1.5 text-xs">{g.via || <span className="text-[#9CA3AF]" title="No bank leg on this payment's ledger posting (contra settlement)">—</span>}</td>
+                          <td className="px-3 py-1.5 text-xs text-[#6B7280]">
+                            {g.sp
+                              ? <span title={g.sp.lines.map((l) => `${l.piNo || "Advance"} ${formatCurrency(l.amountSen)}`).join("\n")}>{g.sp.lines.filter((l) => l.purchaseInvoiceId).length} invoice{g.sp.lines.filter((l) => l.purchaseInvoiceId).length === 1 ? "" : "s"}{spAdvanceOpenSen(g.sp) > 0 ? " + advance" : ""}</span>
+                              : <span title={(g.ocp?.lines ?? []).map((l) => `${l.billNo} ${formatCurrency(l.amountSen)}`).join("\n")}>{g.ocp?.lines.length ?? 0} bill{(g.ocp?.lines.length ?? 0) === 1 ? "" : "s"}</span>}
+                          </td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(g.totalSen)}</td>
+                          <td className="px-3 py-1.5 text-xs">
+                            {g.state !== "ACTIVE"
+                              ? <span className="text-[#9CA3AF]">{g.state}</span>
+                              : g.sp && spAdvanceOpenSen(g.sp) > 0
+                                ? <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold bg-[#FBF3E4] text-[#7A5B12]" title="Unapplied supplier advance — knock it off on the Supplier Payment page">Approved · advance open {formatCurrency(spAdvanceOpenSen(g.sp))}</span>
+                                : <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold bg-[#EAF3DE] text-[#27500A]" title={`Posted on save — ${PAY_DOOR_HINT[g.door]}`}>Approved · paid</span>}
+                          </td>
+                          <td className="px-3 py-1.5 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                            <button onClick={() => printVoucher(payVoucherOf(g))} title={`Print ${PAY_DOOR_LABEL[g.door].toLowerCase()} voucher`} className="inline-flex items-center gap-1 text-[#6B5C32] hover:text-[#1F1D1B] text-xs underline decoration-dotted cursor-pointer mr-3"><Printer className="h-3 w-3" />print</button>
+                            <Link to={foreignHref(g)} className="text-[#6B5C32] hover:text-[#1F1D1B] text-xs underline decoration-dotted mr-3" title={`Open on the ${PAY_DOOR_LABEL[g.door]} page (edit / knock-off there)`}>open ↗</Link>
+                            <LifecycleActions
+                              state={g.state}
+                              onVoid={() => void handleForeignLifecycle(g, "void")}
+                              onDelete={() => void handleForeignLifecycle(g, "delete")}
+                              onUnvoid={() => void handleForeignLifecycle(g, "unvoid")}
+                            />
+                          </td>
+                        </tr>
+                        {expandedPv[g.key] && (
+                          <tr className="bg-[#FAF8F5] border-b border-[#F0ECE9]">
+                            <td colSpan={9} className="px-8 py-2">{foreignDetailTable(g)}</td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  }
+                  const r = row.pv;
+                  return (
                   <React.Fragment key={r.id}>
                   <tr
                     className={`border-b border-[#F0ECE9] cursor-pointer hover:bg-[#FAF8F5] ${r.status === "VOID" ? "opacity-50" : ""}`}
@@ -9773,11 +10081,11 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
                     title="Click to expand · double-click to open"
                   >
                     <td className="px-3 py-1.5 w-8" onClick={(e) => e.stopPropagation()}>
-                      <input type="checkbox" checked={pvSel.isSelected(r.pvNo ?? r.id)} onChange={() => pvSel.toggle(r.pvNo ?? r.id)} className="h-3.5 w-3.5 accent-[#6B5C32]" />
+                      <input type="checkbox" checked={pvSel.isSelected(row.key)} onChange={() => pvSel.toggle(row.key)} className="h-3.5 w-3.5 accent-[#6B5C32]" />
                     </td>
                     <td className="px-3 py-1.5 tabular-nums text-xs whitespace-nowrap">
                       <span className="inline-block w-3 text-[#9CA3AF]">{expandedPv[r.id] ? "▾" : "▸"}</span> {r.pvNo}
-                      <span className={`ml-2 rounded px-1.5 py-0.5 text-[10px] font-semibold ${r.pvKind === "AP" ? "bg-[#EEF2FB] text-[#2C4170]" : "bg-[#F6F1E7] text-[#6B5C32]"}`} title={r.pvKind === "AP" ? "AP Payment — pays creditor bills" : "Payment Voucher — pays an expense"}>{r.pvKind === "AP" ? "AP" : "PV"}</span>
+                      <span className="ml-2">{payDoorChip(r.pvKind === "AP" ? "AP" : "PV")}</span>
                       {(r.attachmentCount ?? 0) > 0 && <span className="ml-1.5 text-[10px] text-[#6B7280]" title={`${r.attachmentCount} attachment${r.attachmentCount === 1 ? "" : "s"} — expand to see`}>📎{r.attachmentCount}</span>}
                     </td>
                     <td className="px-3 py-1.5 text-xs text-[#6B7280] whitespace-nowrap">{r.date}</td>
@@ -9909,7 +10217,8 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
                     </tr>
                   )}
                   </React.Fragment>
-                ))}
+                  );
+                })}
                 {visibleRows.length === 0 && (
                   <tr><td colSpan={9} className="px-3 py-8 text-center text-sm text-[#9CA3AF]">No payments match</td></tr>
                 )}
@@ -10006,6 +10315,43 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
               )}
             </div>
             <PvAttachmentsBlock pv={r} onChanged={load} />
+          </DocDetailModal>
+        );
+      })()}
+
+      {detailPayKey && (() => {
+        const g = payRows.find((x) => x.key === detailPayKey);
+        if (!g || g.pv) return null;
+        const close = () => setDetailPayKey(null);
+        const chip = (label: string, cls: string) => <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${cls}`}>{label}</span>;
+        const adv = g.sp ? spAdvanceOpenSen(g.sp) : 0;
+        const statusChip = g.state !== "ACTIVE" ? chip(g.state === "VOID" ? "CANCELLED" : g.state, "bg-[#F0ECE9] text-[#9CA3AF]")
+          : adv > 0 ? chip(`Approved · advance open ${formatCurrency(adv)}`, "bg-[#FBF3E4] text-[#7A5B12]")
+          : chip("Approved · paid", "bg-[#EAF3DE] text-[#27500A]");
+        return (
+          <DocDetailModal
+            title={`${PAY_DOOR_LABEL[g.door]} ${g.no}`}
+            badges={<>{payDoorChip(g.door)}{statusChip}</>}
+            onClose={close}
+            actions={<>
+              <Button variant="outline" size="sm" onClick={() => printVoucher(payVoucherOf(g))}><Printer className="h-4 w-4" /> Print</Button>
+              <Link to={foreignHref(g)}><Button variant="outline" size="sm">Open on its page ↗</Button></Link>
+              {g.state === "ACTIVE"
+                ? <Button variant="outline" size="sm" onClick={() => { close(); void handleForeignLifecycle(g, "void"); }}>Void</Button>
+                : g.state === "VOID"
+                  ? <Button variant="outline" size="sm" onClick={() => { close(); void handleForeignLifecycle(g, "unvoid"); }}>Unvoid</Button>
+                  : null}
+            </>}
+          >
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <DetailField label="Date">{g.date}</DetailField>
+              <DetailField label={g.sp ? "Supplier" : "Other creditor"} span={2}>{g.payee || "—"}</DetailField>
+              <DetailField label="Paid from">{g.via ? accountLabel(accounts, g.via) : <span title="No bank leg on this payment's ledger posting (contra settlement)">—</span>}</DetailField>
+              <DetailField label="Reference" span={3}>{g.ocp?.reference || "—"}</DetailField>
+              <DetailField label="Total"><span className="tabular-nums">{formatCurrency(g.totalSen)}</span></DetailField>
+            </div>
+            <div className="text-[11px] text-[#9CA3AF]">Recorded on the {PAY_DOOR_LABEL[g.door]} page — it posted when it was saved (no approval ladder). Edit, knock-off and FX live on that page.</div>
+            <div className="border border-[#E2DDD8] rounded-md px-3 py-2">{foreignDetailTable(g)}</div>
           </DocDetailModal>
         );
       })()}
@@ -14507,6 +14853,14 @@ type CfApiData = { period: string; columns: { key: string; label: string; accum?
 // The four raw-material template categories a supplier can be assigned to
 // (mirrors RM_LINES in cashflow-engine.ts).
 const RM_CATEGORIES = ["Purchase of Fabric", "Purchase of Wooden", "Purchase of Filler", "Purchase of Other & Packaging"];
+// …or a section to file the supplier under instead (owner 2026-09-29 「我无法选
+// 其他的 categories, 类似 capex 等等」; mirrors SUPPLIER_SECTION_TARGETS).
+const SECTION_CATEGORIES: { value: string; label: string }[] = [
+  { value: "CAPEX", label: "Capital Expenditure (CAPEX)" },
+  { value: "FACTORY_OVERHEAD", label: "Factory Overhead" },
+  { value: "GENERAL_EXPENSE", label: "General Expense" },
+  { value: "DIRECT_LABOUR", label: "Direct Labour" },
+];
 
 function CashFlowTab() {
   const { toast } = useToast();
@@ -14643,7 +14997,9 @@ function CashFlowTab() {
         if (!a) { a = zeroCols(); m.set(k, a); }
         return a;
       };
-      const OUTFLOW = new Set(["RAW_MATERIALS", "DIRECT_LABOUR", "FACTORY_OVERHEAD", "GENERAL_EXPENSE", "TAXATION", "FINANCE_COST", "CAPEX", "DEPOSIT"]);
+      // Mirrors OUTFLOW_SECTIONS in cashflow-engine.ts (every block but the
+      // collection block reads money out positive — owner 2026-09-29).
+      const OUTFLOW = new Set(["RAW_MATERIALS", "DIRECT_LABOUR", "FACTORY_OVERHEAD", "GENERAL_EXPENSE", "TAXATION", "FINANCE_COST", "CAPEX", "DEPOSIT", "LOAN", "UNALLOCATED"]);
       const OPERATING = new Set(["REVENUE_COLLECTION", "RAW_MATERIALS", "DIRECT_LABOUR", "FACTORY_OVERHEAD", "GENERAL_EXPENSE", "TAXATION"]);
       const sp = await g("/api/supplier-payments");
       const piCache = new Map<string, Map<string, number>>();
@@ -14932,7 +15288,7 @@ function CashFlowTab() {
       const SEC_LABELS: Record<string, string> = {
         DIRECT_LABOUR: "Direct Labour", FACTORY_OVERHEAD: "Factory Overhead", GENERAL_EXPENSE: "General Expense",
         TAXATION: "Taxation", FINANCE_COST: "Finance Cost", CAPEX: "Capital Expenditure (CAPEX)",
-        DEPOSIT: "Deposit Incurred / (Repay)", LOAN: "Loan / (Repayment)", UNALLOCATED: "Unallocated",
+        DEPOSIT: "Deposit Incurred / (Repay)", LOAN: "Loan repaid / lent · (received)", UNALLOCATED: "Unallocated",
       };
       const SEC_ORDER = ["FINANCE_COST", "CAPEX", "DEPOSIT", "LOAN", "UNALLOCATED"];
       const addInto = (section: string, label: string, values: number[], belowResult: boolean) => {
@@ -15020,12 +15376,13 @@ function CashFlowTab() {
     } catch { toast.error("Save failed"); }
   };
 
+  // L1–L4 only set the collapse BASELINE: every group whose children sit
+  // deeper than the level starts collapsed. Nothing is filtered by depth, so
+  // any group can still be opened by a click at any level (owner 2026-09-29
+  // 「按了 L2 我还是能自己点开」— the old depth gate swallowed the click).
   const cfCollapseForLevel = (rs: CfApiRow[], L: number): Set<string> => {
     const s = new Set<string>();
-    if (L >= 3) return s;
-    for (const r of rs) if (r.kind === "group" && r.groupId) {
-      if (L <= 1) s.add(r.groupId);
-    }
+    for (const r of rs) if (r.kind === "group" && r.groupId && r.depth >= L) s.add(r.groupId);
     return s;
   };
   const applyLevel = (L: number) => { setCollapsed(cfCollapseForLevel(rows, L)); setLevel(L); };
@@ -15095,9 +15452,7 @@ function CashFlowTab() {
     }
     return false;
   };
-  const visibleRows = (edit ? rows : cleanRows).filter((r) =>
-    r.depth <= (level >= 3 ? 9 : level) && !hiddenByCollapse(r),
-  );
+  const visibleRows = (edit ? rows : cleanRows).filter((r) => !hiddenByCollapse(r));
 
   const buildExport = (): Aoa => {
     const head: (string | number)[] = ["ITEM", ...cols.map((c) => c.label)];
@@ -15153,6 +15508,7 @@ function CashFlowTab() {
             <p className="text-[11px] text-[#6B7280] mb-2">
               Opening-creditor and uncoded rows file under the purchase parent of their supplier's category.
               Auto = guessed from that supplier's own recorded purchases; pick a category to override, or "Keep flat".
+              Pick a section instead (Capex, Factory Overhead, General Expense, Direct Labour) and that supplier's uncoded / opening money moves there whole, as a row of its own.
             </p>
             <div className="grid gap-1.5" style={{ gridTemplateColumns: "minmax(220px, 1fr) auto" }}>
               {supRows.map((sup) => {
@@ -15169,6 +15525,7 @@ function CashFlowTab() {
                     >
                       <option value="__auto__">Auto{guess ? ` — ${guess.replace("Purchase of ", "")}` : " — no purchase history"}</option>
                       {RM_CATEGORIES.map((c2) => <option key={c2} value={c2}>{c2.replace("Purchase of ", "")}</option>)}
+                      {SECTION_CATEGORIES.map((c2) => <option key={c2.value} value={c2.value}>{c2.label}</option>)}
                       <option value="__flat__">Keep flat (unclassified)</option>
                     </select>
                   </Fragment>
@@ -15253,6 +15610,7 @@ function CashFlowTab() {
             </>
           )}
           <p className="text-[11px] text-[#9CA3AF] mt-3">Cash basis · classified from bank/cash ledger movements · Raw Materials traced to PI stock groups · Bank c/f = b/f + Cash Surplus.</p>
+          <p className="text-[11px] text-[#9CA3AF]">Signs: Revenue Collection = money in. Every other block, above and below Net operation surplus: amount = money out, (amount) = money in.</p>
         </CardContent>
       </Card>
     </div>

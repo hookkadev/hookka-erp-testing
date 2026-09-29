@@ -2665,8 +2665,19 @@ export function DataGrid<T extends Record<string, any>>({
   // Mirror the grid's internal filter + sort result back to the parent.
   // Scoped to the stable identity of `onFilteredDataChange` so a caller
   // that passes a non-memoised callback doesn't trigger an infinite loop.
+  // Emit only when the rows actually changed (BUG-12, BUG-CLASSES C24 #2):
+  // `sortedData` is a fresh array whenever `columns` changes identity, so a
+  // parent that stores the emission in state AND passes un-memoised columns
+  // (Department Labor, `setPrintRows`) looped forever — the tab rendered but
+  // every later click stuck.
+  const lastEmittedFiltered = useRef<T[] | null>(null);
   useEffect(() => {
     if (!onFilteredDataChange) return;
+    const prev = lastEmittedFiltered.current;
+    if (prev && prev.length === sortedData.length && prev.every((row, i) => row === sortedData[i])) {
+      return;
+    }
+    lastEmittedFiltered.current = sortedData;
     onFilteredDataChange(sortedData);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sortedData]);

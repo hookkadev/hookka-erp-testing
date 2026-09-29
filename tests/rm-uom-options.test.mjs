@@ -40,6 +40,40 @@ test("sameUom: case / whitespace is not a unit change", () => {
   assert.equal(mv.sameUom(null, ""), true);
 });
 
+test("wholeUomsFrom: absent → default (no PCS, foam sheets go fractional); [] → none", () => {
+  assert.deepEqual(mv.wholeUomsFrom(undefined), mv.DEFAULT_WHOLE_UOMS);
+  assert.ok(!mv.DEFAULT_WHOLE_UOMS.includes("PCS"));
+  assert.ok(mv.DEFAULT_WHOLE_UOMS.includes("BOX"));
+  assert.deepEqual(mv.wholeUomsFrom([]), []);
+  assert.deepEqual(mv.wholeUomsFrom([" pcs "]), ["PCS"]);
+});
+
+test("isFractionOfWholeUom: only a fraction in a whole unit fails", () => {
+  const whole = ["BOX", "CTN"];
+  assert.equal(mv.isFractionOfWholeUom("BOX", 2.5, whole), true);
+  assert.equal(mv.isFractionOfWholeUom("box", 2.5, whole), true);
+  assert.equal(mv.isFractionOfWholeUom("BOX", 3, whole), false);
+  assert.equal(mv.isFractionOfWholeUom("BOX", 0, whole), false);
+  assert.equal(mv.isFractionOfWholeUom("BOX", 2.9999999999999996, whole), false, "float noise is not a fraction");
+  assert.equal(mv.isFractionOfWholeUom("MTR", 12.5, whole), false);
+});
+
+test("whole-number rule is Inventory-page only (RM create / edit), never stock adjustments", () => {
+  const src = read("src/api/routes/raw-materials.ts");
+  const post = src.slice(src.indexOf('app.post("/", '), src.indexOf('app.put("/:id"'));
+  const put = src.slice(src.indexOf('app.put("/:id"'), src.indexOf('app.delete("/:id"'));
+  assert.match(post, /isFractionOfWholeUom\(baseUOM, balanceQty, wholeUoms\)/);
+  // PUT checks only a CHANGED balance, so a BOX left at 12.5 by production
+  // does not block renaming the material.
+  assert.match(put, /balanceChanged && isFractionOfWholeUom\(/);
+  // Owner scope: Stock Adjustments / PO / GRN stay unchecked.
+  for (const f of ["src/api/routes/stock-adjustments.ts", "src/api/routes/purchase-orders.ts", "src/api/routes/grn.ts"]) {
+    assert.doesNotMatch(read(f), /isFractionOfWholeUom|wholeUoms/, f);
+  }
+  // Edit RM Stock Qty keeps decimals (it used parseInt: 12.5 MTR saved as 12).
+  assert.doesNotMatch(read("src/pages/inventory/index.tsx"), /balanceQty: parseInt\(/);
+});
+
 function fakeDb(counts) {
   return {
     prepare() {

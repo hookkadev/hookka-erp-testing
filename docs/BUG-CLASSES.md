@@ -1711,7 +1711,7 @@ know the selection, read it through a ref or the row itself.
 | # | grid callback | parent state fed back | state |
 |---|---|---|---|
 | 1 | `onSelectionChange` on `/delivery` Pending Delivery | `selectedReadyPOs` in `pendingDeliveryColumns` deps | ✅ 2026-09-22 (BUG-2026-09-22-005) — both halves fixed |
-| 2 | `onFilteredDataChange` | — | ✅ pre-emptively scoped "to the stable identity of the callback so a non-memoised callback doesn't loop" (comment in `data-grid.tsx`) — the same class, caught earlier |
+| 2 | `onFilteredDataChange` on `/employees` Department Labor | `printRows` state + un-memoised `columns` | ✅ 2026-09-29 (BUG-12) — the old callback-identity scoping did NOT cover it: fresh `columns` → fresh `sortedData` → emit → `setPrintRows` → re-render → fresh `columns`. Grid now identity-guards this emit too; tab memoises its columns |
 | 3 | the other 16 `onSelectionChange=` pages | none rebuilds `columns` from selection (checked 2026-09-22) | ⬜ no test forbids the next one; the grid-side guard now makes it inert |
 
 Test: `tests/datagrid-selection-emit.test.mjs`.

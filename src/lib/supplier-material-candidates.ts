@@ -110,6 +110,8 @@ function containsRun(long: string[], short: string[]): boolean {
 /** Fewest parts / characters the shared run must have — `6` or `FOG` alone never identifies. */
 export const MIN_CODE_FAMILY_PARTS = 2;
 export const MIN_CODE_FAMILY_CHARS = 5;
+/** Floor when our code merely starts with the supplier's (`KS08` = `KS8` = 3 chars). */
+export const MIN_CODE_PREFIX_CHARS = 3;
 
 /**
  * Our material whose code is the supplier's code in another form — one sits,
@@ -131,6 +133,14 @@ export function codeFamilyMatch<T extends MaterialLike>(
 ): T | null {
   const theirs = codeParts(supplierCodeOf(supplierCode));
   if (theirs.length === 0) return null;
+  // The SAME code, punctuation and zero-padding aside (`KS08` ↔ `KS-08`), needs
+  // no length floor: there is nothing to infer, and it must beat `KS-08 SEA
+  // PINK`, which contains it and would otherwise tie it (INFAB, BUG-37). One
+  // exact hit answers; two identical codes are ambiguous, so refuse.
+  const exact = items.filter((it) => sameSupplierCode(it.itemCode, supplierCode));
+  if (exact.length > 0) {
+    return new Set(exact.map((it) => normKey(it.itemCode))).size === 1 ? exact[0] : null;
+  }
   let best: T | null = null;
   let bestLen = 0;
   let tie = false;
@@ -142,7 +152,12 @@ export function codeFamilyMatch<T extends MaterialLike>(
     const ours = codeParts(it.itemCode);
     const short = ours.length <= theirs.length ? ours : theirs;
     const long = short === ours ? theirs : ours;
-    if (short.length < MIN_CODE_FAMILY_PARTS || short.join("").length < MIN_CODE_FAMILY_CHARS) continue;
+    // Our code STARTING with theirs (`KS08` → `KS-08 SEA PINK`) is a far safer
+    // reading than theirs turning up mid-way through ours, so it gets a lower
+    // length floor. A tie is still refused below.
+    const startsWithTheirs = ours.length > theirs.length && theirs.every((p, j) => ours[j] === p);
+    const minChars = startsWithTheirs ? MIN_CODE_PREFIX_CHARS : MIN_CODE_FAMILY_CHARS;
+    if (short.length < MIN_CODE_FAMILY_PARTS || short.join("").length < minChars) continue;
     if (!containsRun(long, short)) continue;
     if (short.length > bestLen) {
       best = it;
