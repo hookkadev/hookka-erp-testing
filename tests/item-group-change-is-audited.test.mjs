@@ -147,7 +147,8 @@ test('every path that can change itemGroup emits an audit event', () => {
   // The bulk path cannot compare groups it never read.
   assert.match(
     src,
-    /SELECT id, itemCode, itemGroup FROM raw_materials/,
+    // Extra columns may ride along (DEV-20 adds baseUOM / balanceQty).
+    /SELECT id, itemCode, itemGroup[\w ,]* FROM raw_materials/,
     'the bulk pre-fetch must include itemGroup',
   );
 });
