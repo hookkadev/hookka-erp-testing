@@ -16,7 +16,7 @@ import { MoneyInput } from "@/components/ui/money-input";
 import { useVirtualRows } from "@/components/ui/virtual-rows";
 import { DeferredBlock } from "@/components/ui/deferred-block";
 import { formatCurrency, formatDateDMY, formatRM, roundSen, todayYmdMY } from "@/lib/utils";
-import { monthLabel as drillMonthLabel } from "@/lib/ledger-drill";
+import { monthLabel as drillMonthLabel, shortBankName } from "@/lib/ledger-drill";
 // Every money field on this page is `type="text" inputMode="decimal"` — the
 // browser lets a comma through, and `parseFloat("12,000")` is 12. One parser,
 // and a null the caller must refuse. See src/lib/parse-money.ts.
@@ -15075,10 +15075,34 @@ function CfDrillPanel({ period, lineKey }: { period: string; lineKey: string }) 
     return () => { dead = true; };
   }, [period, lineKey]);
   const shown = data ? data.items.filter((it) => month === "ALL" || it.ym === month) : [];
-  const moneyIn = shown.reduce((s, it) => s + (it.sen > 0 ? it.sen : 0), 0);
-  const moneyOut = shown.reduce((s, it) => s + (it.sen < 0 ? -it.sen : 0), 0);
+  const sum = (items: CfDrillItem[]) => items.reduce((s, it) => s + it.sen, 0);
+  const total = sum(shown);
   const chips = data ? data.months.filter((m) => m.sen !== 0 || m.ym === period) : [];
+  // Owner 2026-09-29 「有一点点乱」: the whole payment + this line's share get
+  // their own columns (only when something here is split); one Amount column,
+  // money out in brackets like the statement; "All months" in month blocks,
+  // each with its total (= that month's figure on the statement).
+  const anySplit = shown.some((it) => it.ofSen);
+  const colCount = anySplit ? 8 : 6;
+  const amt = (sen: number) => (sen < 0 ? `(${plDrillAmt(-sen)})` : plDrillAmt(sen));
+  const amtCls = (sen: number) => `py-1 pl-3 text-right tabular-nums whitespace-nowrap ${sen < 0 ? "text-[#9A3A2D]" : ""}`;
+  const blocks: { ym: string; label: string; items: CfDrillItem[] }[] = month === "ALL"
+    ? [...new Set(shown.map((it) => it.ym))].sort().map((ym) => ({ ym, label: data?.months.find((m) => m.ym === ym)?.label ?? ym, items: shown.filter((it) => it.ym === ym) }))
+    : [{ ym: month, label: "", items: shown }];
+  const itemRow = (it: CfDrillItem) => (
+    <tr key={it.key} className="border-t border-[#F0ECE9] align-top text-[#374151]">
+      <td className="py-1 pr-3 whitespace-nowrap">{it.date.replace(/-/g, "/")}</td>
+      <td className="py-1 pr-3">{it.description || "—"}</td>
+      <td className="py-1 pr-3 whitespace-nowrap" title={it.otherSide.map((o) => `${o.code} ${o.name}`).join(", ")}>{it.otherSide.length ? it.otherSide.map((o) => shortBankName(o.name) || o.code).join(", ") : "—"}</td>
+      <td className="py-1 pr-3 whitespace-nowrap">{it.ref1}</td>
+      <td className="py-1 pr-3">{it.ref2 ?? ""}</td>
+      {anySplit && <td className="py-1 pl-3 text-right tabular-nums whitespace-nowrap text-[#6B7280]">{it.ofSen ? plDrillAmt(it.ofSen) : ""}</td>}
+      {anySplit && <td className="py-1 pl-3 text-right tabular-nums whitespace-nowrap text-[#6B7280]">{it.ofSen ? `${((Math.abs(it.sen) / it.ofSen) * 100).toFixed(1)}%` : ""}</td>}
+      <td className={amtCls(it.sen)}>{amt(it.sen)}</td>
+    </tr>
+  );
   const th = "py-1 pr-3 font-medium text-left";
+  const thR = "py-1 pl-3 font-medium text-right";
   const chip = (on: boolean) => `px-2 py-0.5 rounded-full border text-[11px] ${on ? "bg-[#6B5C32] border-[#6B5C32] text-white" : "border-[#E2DDD8] text-[#6B7280] hover:bg-white"}`;
   return (
     <div className="bg-[#FAF8F5] border-y border-dashed border-[#E2DDD8] px-4 py-2 whitespace-normal">
@@ -15100,28 +15124,29 @@ function CfDrillPanel({ period, lineKey }: { period: string; lineKey: string }) 
                 <tr className="text-[11px] uppercase tracking-wide text-[#6B7280]">
                   <th className={th}>Date</th><th className={th}>Description</th><th className={th}>Bank</th>
                   <th className={th}>Ref. 1</th><th className={th}>Ref. 2</th>
-                  <th className="py-1 pl-3 font-medium text-right">Money in</th><th className="py-1 pl-3 font-medium text-right">Money out</th>
+                  {anySplit && <th className={thR} title="The whole payment — this line got a share of it">Whole payment</th>}
+                  {anySplit && <th className={thR} title="This line's share of the whole payment">Share</th>}
+                  <th className={thR}>Amount</th>
                 </tr>
               </thead>
               <tbody>
-                {shown.map((it) => (
-                  <tr key={it.key} className="border-t border-[#F0ECE9] align-top text-[#374151]">
-                    <td className="py-1 pr-3 whitespace-nowrap">{it.date.replace(/-/g, "/")}</td>
-                    <td className="py-1 pr-3">{it.description || "—"}{it.ofSen ? <span className="text-[#9CA3AF]"> · part of {plDrillAmt(it.ofSen)}</span> : null}</td>
-                    <td className="py-1 pr-3">{it.otherSide.length ? it.otherSide.map((o) => `${o.code} ${o.name}`).join(", ") : "—"}</td>
-                    <td className="py-1 pr-3 whitespace-nowrap">{it.ref1}</td>
-                    <td className="py-1 pr-3">{it.ref2 ?? ""}</td>
-                    <td className="py-1 pl-3 text-right tabular-nums">{it.sen > 0 ? plDrillAmt(it.sen) : ""}</td>
-                    <td className="py-1 pl-3 text-right tabular-nums">{it.sen < 0 ? plDrillAmt(-it.sen) : ""}</td>
-                  </tr>
+                {blocks.map((b) => (
+                  <Fragment key={b.ym}>
+                    {b.items.map(itemRow)}
+                    {month === "ALL" && (
+                      <tr className="border-t border-[#E2DDD8] font-semibold text-[#4B5563] bg-[#F7F4EF]">
+                        <td className="py-1" colSpan={colCount - 1}>{b.label} total</td>
+                        <td className={amtCls(sum(b.items))}>{amt(sum(b.items))}</td>
+                      </tr>
+                    )}
+                  </Fragment>
                 ))}
                 {shown.length === 0 && (
-                  <tr><td colSpan={7} className="py-1 text-[#9CA3AF]">No money moved on this line {month === "ALL" ? "this financial year" : "in this month"}.</td></tr>
+                  <tr><td colSpan={colCount} className="py-1 text-[#9CA3AF]">No money moved on this line {month === "ALL" ? "this financial year" : "in this month"}.</td></tr>
                 )}
                 <tr className="border-t border-[#9CA3AF] font-semibold text-[#1F1D1B]">
-                  <td className="py-1" colSpan={5}>Total</td>
-                  <td className="py-1 pl-3 text-right tabular-nums">{plDrillAmt(moneyIn)}</td>
-                  <td className="py-1 pl-3 text-right tabular-nums">{plDrillAmt(moneyOut)}</td>
+                  <td className="py-1" colSpan={colCount - 1}>Total</td>
+                  <td className={amtCls(total)}>{amt(total)}</td>
                 </tr>
               </tbody>
             </table>

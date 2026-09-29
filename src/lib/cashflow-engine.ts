@@ -189,6 +189,33 @@ export function payrollAccrualSections(
   return out;
 }
 
+// The payroll month a salary voucher's description names — whose payslip
+// department mix splits the cash. Owner 2026-09-29 「月份一起修」: the old
+// pattern only knew "May'26", so "PAYMENT FOR SALARIES - MAY'26" and
+// "… - JULY'26" fell back to the PAYMENT month's mix. Now any case, short or
+// full names ("Sept" too), and a month with no year ("LATE SALARY JUNE") is
+// the latest such month not after the payment month. Nothing named → fallback.
+const MONTH_WORD = /\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b(?:\s*'\s*(\d{2})\b)?/gi;
+const MONTH_NO: Record<string, number> = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+export function payrollMonthFrom(description: string | null | undefined, fallbackYm: string): string {
+  const text = description ?? "";
+  let noYear: number | null = null;
+  for (const m of text.matchAll(MONTH_WORD)) {
+    const mon = MONTH_NO[m[1].slice(0, 3).toLowerCase()];
+    if (!mon) continue;
+    if (m[2]) return `20${m[2]}-${String(mon).padStart(2, "0")}`;
+    noYear ??= mon;
+  }
+  if (noYear !== null) {
+    const fm = /^(\d{4})-(\d{2})$/.exec(fallbackYm);
+    if (fm) {
+      const y = Number(fm[1]), pm = Number(fm[2]);
+      return `${noYear <= pm ? y : y - 1}-${String(noYear).padStart(2, "0")}`;
+    }
+  }
+  return fallbackYm;
+}
+
 // Distribute an integer total (sen) across weighted buckets so the parts sum
 // EXACTLY to total (largest-remainder method). Used to split one supplier
 // payment across the material lines of the PI it settled.

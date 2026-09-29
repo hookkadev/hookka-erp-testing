@@ -30,7 +30,7 @@ import { parseDebtorCode } from "../../lib/debtor";
 import { defaultPnlBucket, pnlBucketFor } from "../../lib/pnl-bucket";
 import { bsSectionFor, bsSectionClass } from "../../lib/bs-section";
 import type { BsSection } from "../../lib/bs-section";
-import { buildStatement, splitByLargestRemainder, rawMaterialLineFor, RM_LINES, SUPPLIER_SECTION_TARGETS, payrollAccrualSections, displaySign } from "../../lib/cashflow-engine";
+import { buildStatement, splitByLargestRemainder, rawMaterialLineFor, RM_LINES, SUPPLIER_SECTION_TARGETS, payrollAccrualSections, displaySign, payrollMonthFrom } from "../../lib/cashflow-engine";
 import type { CfMap, ClassifiedLeg, BankLeg, RmSplit, CoaLite, CfSection } from "../../lib/cashflow-engine";
 import { getDocNumberPrefixes, issueDocNumber, issueDocNumberWithPrefix } from "../lib/doc-number-service";
 import { computeDiscountAlloc, type PiOpen } from "../../lib/discount-alloc";
@@ -38,7 +38,7 @@ import { ensurePartialPaymentColumns } from "../lib/ensure-partial-payment";
 import { ensureFinanceOrgColumns } from "../lib/ensure-finance-org";
 import { apRowBeforeOpening, legBeforeOpening, rowBeforeOpening } from "../../lib/opening-floor";
 import { applyOpeningSlice, windowCoversMonth } from "../../lib/opening-slice";
-import { docNoFromDescription, otherSideCodes } from "../../lib/ledger-drill";
+import { docNoFromDescription, otherSideCodes, withoutDocNo } from "../../lib/ledger-drill";
 import { labourInjectMonths } from "../../lib/labour-inject";
 import { projectedLabourByDept } from "../lib/labour-projection";
 import { groupPayslipsByMonthDept, forecastEntryKind, monthHasDeptForecast, labourMappedAccounts } from "../../lib/salary-dept";
@@ -9101,20 +9101,17 @@ async function computeCashflowStatement(
   }
 
   // Salary → department rows. Weights come from aggregateLabour of the payroll
-  // month the voucher description names ("… - May'26"); a leg with no parseable
-  // month uses its own document month; a month with no payslips gets no split
-  // and the leg stays on the account line.
+  // month the voucher description names (payrollMonthFrom: "… - May'26",
+  // "… - MAY'26", "… - JULY'26", "LATE SALARY JUNE" — owner 2026-09-29
+  // 「月份一起修」); a leg naming no month uses its own document month; a named
+  // month with no payslips falls back to the document month's mix (what it
+  // got before); no payslips there either → no split, the leg stays on the
+  // account line.
   const deptSplit: RmSplit = {};
   if (salaryLegs.length) {
     if (!map[LABOUR_ACCRUAL_ACCT]) map[LABOUR_ACCRUAL_ACCT] = { section: "DIRECT_LABOUR", order: 10 };
-    const MONTHS3 = { Jan: "01", Feb: "02", Mar: "03", Apr: "04", May: "05", Jun: "06", Jul: "07", Aug: "08", Sep: "09", Oct: "10", Nov: "11", Dec: "12" } as const;
-    const payrollYm = (desc: string, fallback: string): string => {
-      const m = /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)'(\d{2})\b/.exec(desc);
-      return m ? `20${m[2]}-${MONTHS3[m[1] as keyof typeof MONTHS3]}` : fallback;
-    };
     const mixCache = new Map<string, { line: string; weight: number }[]>();
-    for (const leg of salaryLegs) {
-      const ym = payrollYm(leg.description, leg.ym);
+    const mixFor = async (ym: string) => {
       let mix = mixCache.get(ym);
       if (!mix) {
         try {
@@ -9123,6 +9120,12 @@ async function computeCashflowStatement(
         } catch { mix = []; }
         mixCache.set(ym, mix);
       }
+      return mix;
+    };
+    for (const leg of salaryLegs) {
+      const ym = payrollMonthFrom(leg.description, leg.ym);
+      let mix = await mixFor(ym);
+      if (!mix.length && ym !== leg.ym) mix = await mixFor(leg.ym);
       if (mix.length && !deptSplit[leg.sourceId]) deptSplit[leg.sourceId] = mix;
     }
   }
@@ -9168,6 +9171,9 @@ async function computeCashflowStatement(
       return out;
     };
     const ref2 = new Map<string, string>();
+    // A voucher's own purpose ("PAYMENT FOR SALARIES - JULY'26") — the
+    // Description column; its number and payee already have their columns.
+    const pvPurpose = new Map<string, string>();
     try {
       const spNos = [...new Set(ents.filter((e) => e.sourceType.startsWith("supplier_payment")).map((e) => e.sourceId))];
       const piByPay = new Map<string, Set<string>>();
@@ -9196,9 +9202,11 @@ async function computeCashflowStatement(
     } catch { /* Ref. 2 stays empty */ }
     try {
       const pvIds = [...new Set(ents.filter((e) => e.sourceType.startsWith("payment_voucher")).map((e) => e.sourceId))];
-      for (const r of await chunkIds(pvIds, (ph) => `SELECT id, payee FROM payment_vouchers WHERE id IN (${ph})`)) {
+      for (const r of await chunkIds(pvIds, (ph) => `SELECT id, payee, description FROM payment_vouchers WHERE id IN (${ph})`)) {
         const payee = String(r.payee ?? "").trim();
         if (payee) ref2.set(`pv::${String(r.id)}`, payee);
+        const purpose = String(r.description ?? "").trim();
+        if (purpose) pvPurpose.set(String(r.id), purpose);
       }
     } catch { /* Ref. 2 stays empty */ }
     const ref2For = (sourceType: string, sourceId: string): string | null =>
@@ -9216,7 +9224,10 @@ async function computeCashflowStatement(
         money = legs.filter((l) => tfAccounts.has(l.code));
         entryCash = money.reduce((s, l) => s + l.creditSen - l.debitSen, 0);
       }
-      const description = (money[0]?.description || legs[0]?.description || "").trim();
+      const legText = (money[0]?.description || legs[0]?.description || "").trim();
+      const ref1 = docNoFromDescription(legText) ?? e.sourceId;
+      const purpose = e.sourceType.startsWith("payment_voucher") ? pvPurpose.get(e.sourceId) : undefined;
+      const description = purpose ?? withoutDocNo(legText, ref1);
       const codes = [...new Set(money.map((l) => l.code))];
       return {
         key: `${e.sourceType}::${e.sourceId}`,
@@ -9224,7 +9235,7 @@ async function computeCashflowStatement(
         date: legs[0]?.date ?? e.ym,
         description,
         otherSide: codes.map((code) => ({ code, name: coa.get(code)?.name ?? "" })),
-        ref1: docNoFromDescription(description) ?? e.sourceId,
+        ref1,
         ref2: ref2For(e.sourceType, e.sourceId),
         sen: e.sen,
         ofSen: Math.abs(entryCash) !== Math.abs(e.sen) ? Math.abs(entryCash) : null,

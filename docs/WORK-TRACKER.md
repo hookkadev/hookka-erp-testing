@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-29**: branch `feat/cashflow-drill-tidy` added below (its entry is the newest).
 > **Last verified: 2026-09-29**: #587 (Cash Flow inline drill) closed ✅ below with its prod check.
 > **Last verified: 2026-09-29**: branch `feat/cashflow-inline-drill` added below (its entry is the newest).
 > **Last verified: 2026-09-29**: #586 (P&L inline drill) closed ✅ below with its prod check.
@@ -40,6 +41,15 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
 ---
+
+## 2026-09-29 — 🔵 Cash Flow drill tidy + payroll month read right (owner「有一点点乱，有没有优化的建议」→「好像可以，月份一起修」)(branch `feat/cashflow-drill-tidy`)
+
+1. 🔵 Panel: Description = the voucher's own purpose; bank by short name; "Whole payment" + "Share" columns when split;
+   one Amount column (money out in brackets); "All months" in month blocks, each with its total.
+2. 🔵 Salary department split: the payroll month named in the voucher text is read in any case / full name / without a year
+   (`payrollMonthFrom`). Before, only "May'26"-style text was read, so most salary payments used the PAYMENT month's payslip
+   mix. Totals do not move — only how Direct Labour spreads across departments. A named month without payslips keeps the old mix.
+   Guard `tests/cashflow-drill-tidy.test.mjs`. Prod check after deploy: Direct Labour total, result and Cash Surplus identical.
 
 ## 2026-09-29 — ✅ Cash Flow inline drill: click a line's name, its payments / receipts open underneath (owner「cash flow 也要这样点开看」)(#587 81560c37 MERGED, deployed, prod-verified)
 
