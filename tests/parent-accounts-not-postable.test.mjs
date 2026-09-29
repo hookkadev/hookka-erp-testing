@@ -10,8 +10,10 @@
 //      its stored flag: every line validation reads the effective flag, the
 //      JE post refuses it, pickers no longer offer it, and the COA editor
 //      cannot flag a parent postable.
-//   d. Cash Flow: the salary-accrual family (410-0010's parent ACCRUALS and
-//      its ACCRUAL - EPF / SOCSO / EIS children) defaults to Direct Labour;
+//   d. Cash Flow: the payroll accruals under 410-0010's parent get default
+//      sections — salary (and the parent) Direct Labour, EPF / SOCSO / EIS
+//      General Expense since the owner's 「这个是普通 staff，不是 direct 的」
+//      (behaviour in tests/cashflow-staff-contribution-accruals.test.mjs);
 //      the parent's salary payments split by department like 410-0010's.
 // ---------------------------------------------------------------------------
 import { readFileSync } from "node:fs";
@@ -40,10 +42,10 @@ test("the journal post, the account list and the COA editor all honour it", () =
   assert.match(put, /merged\.isPostable = 0;/);
 });
 
-test("Cash Flow files the salary-accrual family under Direct Labour, found from the chart", () => {
+test("Cash Flow takes the payroll-accrual defaults from the chart", () => {
   const body = api.slice(api.indexOf("async function computeCashflowStatement("), api.indexOf('app.get("/cashflow-statement"'));
   assert.match(body, /const salaryAccrualParent = coa\.get\(LABOUR_ACCRUAL_ACCT\)\?\.parentCode \?\? null;/);
-  assert.match(body, /if \(\(a\.code === salaryAccrualParent \|\| a\.parentCode === salaryAccrualParent\) && !map\[a\.code\]\) map\[a\.code\] = \{ section: "DIRECT_LABOUR", order: 10 \};/);
+  assert.match(body, /for \(const \[code, section\] of payrollAccrualSections\(coa, LABOUR_ACCRUAL_ACCT\)\) if \(!map\[code\]\) map\[code\] = \{ section, order: 10 \};/, "the owner's drags win");
   assert.match(body, /else if \(l\.code === LABOUR_ACCRUAL_ACCT \|\| \(salaryAccrualParent && l\.code === salaryAccrualParent\)\)/, "the parent's salary payments split by department too");
   assert.doesNotMatch(body, /"410-0000"/, "no hard-coded parent code");
 });
