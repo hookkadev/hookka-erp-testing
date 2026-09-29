@@ -1,5 +1,8 @@
 # GitHub Workflow Governance
 
+> **Last verified: 2026-09-29** (branch `feat/staging-patch-notes`, STAGING ONLY) — the `deploy.yml` row only:
+> added the staging-only full-history checkout and "Staging patch notes" step, read from `deploy.yml`.
+
 > **Last verified: 2026-09-23** (branch `ci/github-deployments-status`) — the `deploy.yml` row only:
 > added its Deployments-environment behaviour, read from the `environment:` block in `deploy.yml`.
 
@@ -43,7 +46,7 @@ The next improvement is not to move files around for neatness. The next improvem
 | `.github/PULL_REQUEST_TEMPLATE.md` | Standard PR checklist for development mode, impact check, staging/rollout, and tests. |
 | `docs/BUG-HISTORY.md` | Existing living bug report/history log. Use this as the source of truth for identified, in-progress, and fixed bugs. |
 | `.github/ISSUE_TEMPLATE/*.md` | Optional later only if GitHub Issues becomes the main intake channel; not needed while `docs/BUG-HISTORY.md` is the working system. |
-| `.github/workflows/deploy.yml` | CI/build/deploy/canary pipeline. Runs on `main` / `staging` are recorded in the repo's Deployments sidebar as the `production` / `staging` environment (no URL shown); PR canary and other branch runs are not recorded (2026-09-23). |
+| `.github/workflows/deploy.yml` | CI/build/deploy/canary pipeline. Runs on `main` / `staging` are recorded in the repo's Deployments sidebar as the `production` / `staging` environment (no URL shown); PR canary and other branch runs are not recorded (2026-09-23). On `staging` only: checkout with full history and a non-blocking "Staging patch notes" step that writes `public/staging-notes.json` for the `/staging-notes` page (2026-09-29; this change lives on `staging` only and is never PR'd into main). |
 | `.github/workflows/sync-staging.yml` | Controlled prod-to-staging refresh. |
 | `.github/workflows/merge-main-into-staging.yml` | On every push to `main`, merges `main` into the `staging` branch and dispatches the staging deploy; on conflict opens a PR from `chore/sync-staging-from-main` into `staging` and fails (added 2026-09-22). |
 | `.github/workflows/*.yml` | One workflow per scheduled/ops job, with header comments explaining purpose, secrets, timing, and safety. |

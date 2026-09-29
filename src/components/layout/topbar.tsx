@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { ChevronDown, LogOut, User, Building2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { GlobalSearch } from "./global-search";
@@ -94,6 +95,16 @@ export function Topbar({ user }: TopbarProps) {
           </div>
         )}
       </div>
+
+      {/* Staging-only marker + link to the latest PRs merged into staging. */}
+      {window.location.hostname.startsWith("staging.") && (
+        <Link
+          to="/staging-notes"
+          className="rounded-md bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-800 hover:bg-amber-200"
+        >
+          Staging · patch notes
+        </Link>
+      )}
 
       {/* Notifications — real feed + real unread count (see notification-bell.tsx) */}
       <NotificationBell />
