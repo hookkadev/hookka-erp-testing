@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-215 (branch `fix/staging-notes-history`, staging only); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-214 (branch `fix/org-chart-photo-stream`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-211 (branch `fix/so-customer-price-on-edit`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-28**: newest entry BUG-2026-09-28-210 (branch `feat/customer-credit-control`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
@@ -41,6 +42,20 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-09-29-215 — Staging patch notes page listed 0 PRs `infrastructure` 🟢
+
+🟢 **Fixed** · The new `/staging-notes` page (staging only, PR #551) went live and read "Latest 0 PRs merged into staging".
+
+**Root cause, measured in the deploy log** (run for `36b60552`): the checkout step ran with `fetch-depth: 1`, and the notes step printed `staging-notes.json: 0 PRs`. `deploy.yml` asked for `fetch-depth: ${{ github.ref == 'refs/heads/staging' && 0 || 1 }}`. In Actions expressions a bare `0` is falsy, so `true && 0` is `0` and `0 || 1` is `1`: every staging build got a depth-1 clone. In a shallow clone HEAD has no parents, so `git log --merges` finds nothing, and the script wrote an empty list that the page rendered as fact (class [C15](BUG-CLASSES.md#c15--a-request-that-died-rendered-as-an-answer)).
+
+**Fix.** `'0'` / `'1'` quoted (a non-empty string is truthy). `scripts/gen-staging-notes.mjs` now checks `git rev-parse --is-shallow-repository` and exits 1, so a future shallow build shows "No patch notes in this build" instead of a false "0 PRs"; the step is `continue-on-error`, so the deploy itself is unaffected.
+
+**Regression.** `tests/staging-notes.test.mjs`: the fetch-depth line must use the quoted `'0'`, and the script must carry the shallow guard. Proved by hand: a `git clone --depth 1` of staging makes the script exit 1; the full worktree gives 30 PRs.
+
+**Verify.** Live check on staging after the deploy of this fix: pending at time of writing.
 
 ---
 

@@ -1,5 +1,7 @@
 # Recurring bug classes — the index that makes P5 executable
 
+> **Last verified: 2026-09-29**: restamped on branch `fix/staging-notes-history` (staging only): C15 gains row 6, the staging patch notes that read a depth-1 clone and printed "0 PRs" (BUG-2026-09-29-215). Nothing else re-checked.
+
 > **Last verified: 2026-09-25**: restamped on branch `feat/dashboard-kpi-no-icons` (PR #524): C15 gains row 5, the Worker Efficiency card that printed worker ids after a refused `/api/workers` read (BUG-2026-09-25-194). Nothing else re-checked.
 > **Last verified: 2026-09-25** — restamped on branch `feat/ocr-dashboard-tab`: C23 gains the OCR-tab row (BUG-2026-09-25-192, `readQueueRow` dual-key fix); no other class re-checked.
 > **Last verified: 2026-09-23** — branch `fix/invoice-line-so-ref` adds **C16 row 8** (invoice PDF read the DO field names for per-line SO/REF/CO SO). Nothing else re-checked.
@@ -876,6 +878,7 @@ class must not use it.
 | 3 | **list pages** — ~25 grids whose empty caption (*"No draft orders."*, `DataGrid`'s default *"No data found."*) renders over a failed fetch | ⬜ **open, enumerated.** Each page owns its own caption and its own fetch shape, so this is a separate PR with its own before/after — not a blind sweep. Start from the files that import `useCachedJson` and pass an `emptyMessage`, and give `DataGrid` a `loadFailure` prop rather than editing 25 captions by hand |
 | 4 | **`cachedFetchJson` callers outside this class** | ⬜ unswept. The function returns `null` on every failure; any caller that renders that null as a factual empty state is row 1/2/3 wearing a different hat. `products/bom.tsx` and `products/documents.tsx` were two, found by this pass |
 | 5 | **Worker Efficiency card** (/m Home and /dashboard): `/api/workers` refused with 403 for PRODUCTION, and every row printed the raw worker id as if it were the name | ✅ 2026-09-25 (BUG-2026-09-25-194): the name now travels with the hours in `/api/working-hour-entries/summary`, so there is no second request left to fail. Test `tests/working-hours-summary-names.test.mjs` |
+| 6 | **Staging patch notes** (`/staging-notes`, staging only): `deploy.yml` asked for `fetch-depth` with `&& 0 \|\| 1`, a bare 0 is falsy in Actions, so the clone was depth 1, the git log had no merge parents, and the page printed *"Latest 0 PRs"* as fact | ✅ 2026-09-29 (BUG-2026-09-29-215): quoted `'0'`, and `scripts/gen-staging-notes.mjs` now exits 1 on a shallow repo so the page says "no notes in this build" instead of a false zero. Test `tests/staging-notes.test.mjs` |
 
 Rows 3 and 4 are why this section exists rather than a note in the bug entry.
 Row 2's pass fixed **19 files across 11 modules**; every one would have been
