@@ -21,6 +21,13 @@ import { writeFileSync } from 'node:fs'
 const limit = process.argv[2] || '60'
 const git = (...args) => execFileSync('git', args, { encoding: 'utf8' })
 
+// A shallow clone has no merge parents, so the log below silently finds 0 PRs
+// (BUG-2026-09-29-215). Fail loudly instead; the page then says "no notes".
+if (git('rev-parse', '--is-shallow-repository').trim() === 'true') {
+  console.error('gen-staging-notes: shallow checkout, needs full history (fetch-depth 0)')
+  process.exit(1)
+}
+
 const log = git('log', 'HEAD', '--first-parent', '--merges', '-n', limit,
   '--format=%H%x1f%cI%x1f%s%x1f%b%x1e')
 
