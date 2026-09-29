@@ -1,5 +1,7 @@
 # Architecture
 
+> **Last verified: 2026-09-29** (branch `feat/staging-mailslurp-sender`): `src/api/lib/` table only, new `email.ts` row read from the file. Rest not re-checked.
+
 > **Last verified: 2026-08-14** (branch `docs/docs-vs-code-audit`) — corrected against the
 > source by the prose audit; the row(s) touched here are itemised in
 > [`docs/DOCS-VS-CODE-AUDIT.md`](DOCS-VS-CODE-AUDIT.md). Only the claims listed there were
@@ -358,6 +360,7 @@ The non-UI heart of the app. A selected tour:
 | `idempotency.ts`              | `withIdempotency` for money mutations                      |
 | `audit.ts`                    | `emitAudit` + `buildAuditStatement` for txn batching       |
 | `journal-hash.ts`             | Append-only SHA-256 ledger, `verifyJournalChain` helper    |
+| `email.ts`                    | `sendMail` (Brevo, Resend, MailSlurp on staging) + templates |
 | `email-outbox.ts`             | `enqueueEmail` + `processOutbox` (retry-with-backoff)      |
 | `supabase-compat.ts`          | D1-shaped facade over `postgres.js`; batch = transaction   |
 | `monitoring.ts`               | Optional toucan-js error capture in worker                 |

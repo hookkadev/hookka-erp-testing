@@ -1,5 +1,7 @@
 # Hookka ERP — Codebase Map (the single authoritative map)
 
+> **Last verified: 2026-09-29 on branch `feat/staging-mailslurp-sender` (STAGING ONLY)** — Mail Center notes: new outbound-sender bullet (provider order Brevo, Resend, MailSlurp; `hasMailProvider`), read from `src/api/lib/email.ts`. Nothing else re-checked.
+
 > **Last verified: 2026-09-29 on branch `fix/staging-notes-history` (STAGING ONLY)** — the `staging-notes.tsx` / `gen-staging-notes.mjs` row only: shallow-checkout guard, line count (`wc -l`, 58) and the new test `tests/staging-notes.test.mjs` (BUG-2026-09-29-215).
 
 > **Last verified: 2026-09-29 on branch `feat/staging-patch-notes` (STAGING ONLY)** — Quality, Warehouse, Scanning & Platform: new `staging-notes.tsx` / `gen-staging-notes.mjs` row (incl. the staging-only sidebar "PATCH NOTES" group), anchors read from `src/dashboard-routes.tsx`, `sidebar.tsx` and `topbar.tsx`, line counts by `wc -l`; the Organisations-note `sidebar.tsx` anchors (`switchOrg` :457, switcher label/tick :908/:963) re-measured and their claims re-read. The branch shifts later `dashboard-routes.tsx` lines by 3-4; the older anchors in this file were already off on `main` (e.g. `/leads` cited `:414`, is `:431` on main) and are not re-anchored here.
@@ -878,6 +880,7 @@ that proves those locks can actually go red.
   Inbound mail has been LIVE since the MX cutover (prod received on 2026-08-19); any copy
   claiming otherwise is stale.
 - Mail Center is GMAIL-STYLE with 3 localStorage view toggles (mail-prefs.ts, surfaced via the header "View" gear): density (compact single-line default ↔ comfortable old multi-line cards), reading-pane (split 3-pane default ↔ full-width list that opens /mail-center/:id), category-tabs (All/Primary/Notifications strip, default on). These ARE the owner's "可以开关" — we did NOT fork two full layouts. The category split is a CLIENT-SIDE heuristic (`classifyCategory` over counterpartyEmail: no-reply/system/alert/eservices/statement local-parts + known bank/payment domains → Notifications, else Primary) — NO backend columns, the threads API is unchanged (still GET /threads, 300-row cap). Both row densities share RowLead+RowActions so star/select/hover-actions can't drift. Don't re-add the old single-layout ThreadList; don't move the category heuristic server-side.
+- OUTBOUND MAIL (every sender: Mail Center compose, Email Reports "Send test now", invites, outbox drain, supplier PO) goes through `sendMail` in `src/api/lib/email.ts`: Brevo if `BREVO_API_KEY`, else Resend if `RESEND_API_KEY`, else MailSlurp if BOTH `MAILSLURP_API_KEY` + `MAILSLURP_INBOX_ID` (staging only; sends AS the inbox address, attachments uploaded first). Gates that skip or enqueue when nothing is configured call `hasMailProvider(env)`; add a new provider there and in `sendMail`, not as another inline `RESEND || BREVO` check. None set = "No email provider configured". `tests/mail-mailslurp-provider.test.mjs`.
 
 **Start here:** For a customer-facing task open `src/pages/customers.tsx`; for users/RBAC/org/mailbox-scope open `src/pages/settings/Users.tsx`; for internal email open `src/pages/mail-center/index.tsx`.
 

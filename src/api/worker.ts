@@ -40,6 +40,8 @@ export type Env = {
     API_CORS_ORIGIN: string;
     APP_URL: string;              // e.g. "http://localhost:8788" or "https://hookka-erp-testing.pages.dev"
     RESEND_API_KEY?: string;      // Optional — set via wrangler secret for prod, .dev.vars for local
+    MAILSLURP_API_KEY?: string;   // Staging only — MailSlurp sender fallback (lib/email.ts sendMail)
+    MAILSLURP_INBOX_ID?: string;  // Staging only — the MailSlurp inbox mail is sent from
     RESEND_FROM_EMAIL: string;    // e.g. "Hookka Manufacturing ERP <onboarding@resend.dev>"
     ANTHROPIC_API_KEY?: string;   // Claude API key — set via `wrangler secret put ANTHROPIC_API_KEY`. Used by routes/scan-po.ts.
     // Per-user daily cap on AI Assistant questions (routes/assistant.ts).

@@ -46,9 +46,7 @@ export interface SendEmailResult {
 // ---------------------------------------------------------------------------
 
 export async function notifySupplierPoSubmitted(
-  env: {
-    RESEND_API_KEY?: string;
-    BREVO_API_KEY?: string;
+  env: MailEnv & {
     RESEND_FROM_EMAIL?: string;
     APP_URL?: string;
   },
@@ -65,7 +63,7 @@ export async function notifySupplierPoSubmitted(
     );
     return { ok: false, error: "supplier has no email on file" };
   }
-  if (!env.RESEND_API_KEY && !env.BREVO_API_KEY) {
+  if (!hasMailProvider(env)) {
     console.log(
       `[email] PO ${args.poNo}: skipped — no email provider configured`,
     );
@@ -240,16 +238,100 @@ export async function sendEmailViaBrevo(
   }
 }
 
+// ---------------------------------------------------------------------------
+// MailSlurp backend — staging only (2026-09-29). Staging has no Brevo/Resend
+// key, so outbound mail sends from a MailSlurp inbox instead. MailSlurp sends
+// AS the inbox address, so the `from` string is ignored here.
+//
+// API doc: https://docs.mailslurp.com/api/
+// Send:    POST https://api.mailslurp.com/inboxes/{inboxId}  (x-api-key header)
+//          { to: [..], subject, body, isHTML, attachments?: [attachmentId] }
+// Attach:  POST https://api.mailslurp.com/attachments
+//          { base64Contents, contentType, filename } -> [attachmentId]
+// ---------------------------------------------------------------------------
+export async function sendEmailViaMailSlurp(
+  apiKey: string,
+  inboxId: string,
+  args: SendEmailArgs,
+): Promise<SendEmailResult> {
+  const api = "https://api.mailslurp.com";
+  const headers = {
+    "x-api-key": apiKey,
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  };
+  try {
+    // Attachments must be uploaded first; the send references them by id.
+    const attachmentIds: string[] = [];
+    for (const a of args.attachments ?? []) {
+      const up = await fetch(`${api}/attachments`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          base64Contents: a.contentBase64,
+          contentType: /\.pdf$/i.test(a.filename)
+            ? "application/pdf"
+            : "application/octet-stream",
+          filename: a.filename,
+        }),
+      });
+      const upText = await up.text();
+      if (!up.ok) {
+        return { ok: false, error: `MailSlurp attachment ${up.status}: ${upText}` };
+      }
+      attachmentIds.push(...(JSON.parse(upText) as string[]));
+    }
+    const res = await fetch(`${api}/inboxes/${encodeURIComponent(inboxId)}`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        to: [args.to],
+        subject: args.subject,
+        body: args.html,
+        isHTML: true,
+        ...(attachmentIds.length > 0 ? { attachments: attachmentIds } : {}),
+      }),
+    });
+    if (!res.ok) {
+      return { ok: false, error: `MailSlurp ${res.status}: ${await res.text()}` };
+    }
+    return { ok: true };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Unknown MailSlurp error",
+    };
+  }
+}
+
+export interface MailEnv {
+  RESEND_API_KEY?: string;
+  BREVO_API_KEY?: string;
+  MAILSLURP_API_KEY?: string;
+  MAILSLURP_INBOX_ID?: string;
+}
+
+// True when sendMail has at least one provider to send through. Callers
+// that skip/enqueue when nothing is configured gate on this, so a new
+// provider only has to be added here and in sendMail.
+export function hasMailProvider(env: MailEnv): boolean {
+  return Boolean(
+    env.BREVO_API_KEY ||
+      env.RESEND_API_KEY ||
+      (env.MAILSLURP_API_KEY && env.MAILSLURP_INBOX_ID),
+  );
+}
+
 // Pluggable sender. Prefers Brevo when BREVO_API_KEY is configured (the
-// 2026-05-27 cutover target), falls back to Resend otherwise so existing
-// deployments keep working until the secret is rotated. Returns the same
-// SendEmailResult shape regardless of provider so callers stay agnostic.
+// 2026-05-27 cutover target), falls back to Resend, then MailSlurp (staging
+// only). Returns the same SendEmailResult shape regardless of provider so
+// callers stay agnostic.
 //
 // Migration plan: once BREVO_API_KEY is set on every environment and
 // hookka.com is verified at Brevo, RESEND_API_KEY can be removed (this
 // helper degrades gracefully — final fallback is `{ ok: false }`).
 export async function sendMail(
-  env: { RESEND_API_KEY?: string; BREVO_API_KEY?: string },
+  env: MailEnv,
   from: string,
   args: SendEmailArgs,
 ): Promise<SendEmailResult> {
@@ -259,9 +341,13 @@ export async function sendMail(
   if (env.RESEND_API_KEY) {
     return sendEmail(env.RESEND_API_KEY, from, args);
   }
+  if (env.MAILSLURP_API_KEY && env.MAILSLURP_INBOX_ID) {
+    return sendEmailViaMailSlurp(env.MAILSLURP_API_KEY, env.MAILSLURP_INBOX_ID, args);
+  }
   return {
     ok: false,
-    error: "No email provider configured (BREVO_API_KEY or RESEND_API_KEY)",
+    error:
+      "No email provider configured (BREVO_API_KEY, RESEND_API_KEY, or MAILSLURP_API_KEY + MAILSLURP_INBOX_ID)",
   };
 }
 

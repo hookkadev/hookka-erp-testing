@@ -1,5 +1,7 @@
 # Reports & Analytics — Module Guide
 
+> **Last verified: 2026-09-29** (branch `feat/staging-mailslurp-sender`): the `/send` gotcha only, provider note read from `src/api/lib/email.ts`.
+
 > **Last verified: 2026-09-29** (branch `feat/report-evening-revenue`): `reports.ts` anchors re-derived; efficiency email now covers today at 18:30 with production revenue, overdue moved to 08:00 (BUG-36).
 
 > **Last verified: 2026-09-29** (branch `feat/report-pics`): every `reports.ts` line anchor re-derived after the Email Reports settings (BUG-36) shifted the file; recipient flow updated. Other files not re-checked.
@@ -79,7 +81,7 @@ Two unrelated report worlds share the name **Reports**:
 ## Gotchas
 - **The Reports hub and `/api/reports/*` do NOT share data.** `reports.tsx` tabs fetch source-module list APIs and aggregate client-side; only `daily-report.tsx` consumes `/api/reports/compliance.json`. Don't expect matching shapes.
 - **Logic lives in `src/api/lib/*`, not the route.** `reports.ts` (1044) is a thin shim over `compliance-report.ts` (1519), `efficiency-report.ts` (676), `schedule-overdue-report.ts` (713), `operations-report.ts` (1248), `production-brief.ts` (738). Edit the lib, not the handler.
-- **`/send` endpoints touch the email/cron path** — they resolve recipients from `kv_config` + `users` and call `sendMail`; not a pure read. The cron `-trigger` variants add `authCron` (`x-cron-secret`) + `cronGate` (skip Sunday / public holidays).
+- **`/send` endpoints touch the email/cron path** — they resolve recipients from `kv_config` + `users` and call `sendMail`; not a pure read. "Send test now" (Settings → Email Reports) hits the same `/send`; a toast of "No email provider configured" means the environment has no Brevo / Resend / MailSlurp secret (staging uses MailSlurp: `MAILSLURP_API_KEY` + `MAILSLURP_INBOX_ID`). The cron `-trigger` variants add `authCron` (`x-cron-secret`) + `cronGate` (skip Sunday / public holidays).
 - **Daily Report is expensive → snapshot-cached.** `collectComplianceData` cold-computes ~6s across the whole order/delivery/invoice/procurement chain; `buildComplianceCached` (`reports.ts:669`) serves last-good instantly and refreshes in the background. Numbers are byte-identical.
 - **Production Brief is Agent-Console-gated.** A paused `PRODUCTION` agent (or global kill switch) silences the automatic brief; manual `/brief/send` still works. It also runs under `recordAgentRun` for token accounting.
 - **`forecasts.ts` reads only `forecast_entries`.** The forecast *page* additionally pulls `/api/historical-sales` and `/api/promise-date`; the route itself is a plain CRUD over one table (camelCase cols).
