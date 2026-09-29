@@ -43,3 +43,12 @@ test("zero/negative customer prices are ignored, not treated as free", () => {
 test("all-empty line is 0, never NaN", () => {
   assert.equal(r(Z), 0);
 });
+
+// BUG-35 (Conts invoice) — the precedence above existed but only the POST used
+// it; the PUT still kept the edit screen's (master-seeded) price for non-sofa
+// lines, and the invoice copied it. Both write paths must route through it.
+test("SO POST and PUT both price lines through resolveSoBasePriceSen", async () => {
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(resolve(process.cwd(), "src/api/routes/sales-orders.ts"), "utf8");
+  assert.ok((src.match(/resolveSoBasePriceSen\(\{/g) ?? []).length >= 2);
+});

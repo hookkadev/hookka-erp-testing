@@ -979,11 +979,14 @@ function CreateSalesOrderPage() {
       const prod = products.find(p => p.id === pid);
       if (!prod) return null;
       const isSofa = prod.category === "SOFA";
-      let priceSen = prod.costPriceSen || 0;
+      // Customer price list first (BUG-35), master product only as fallback.
+      const cp = customerProductsMap.get(prod.id);
+      const seats = (cp?.seatHeightPrices?.length ? cp.seatHeightPrices : prod.seatHeightPrices) ?? [];
+      let priceSen = cp?.basePriceSen || prod.costPriceSen || 0;
       // If seat height already chosen, look up height-specific price
-      if (template.seatHeight && prod.seatHeightPrices) {
-        const tier = prod.seatHeightPrices.find(t => t.height === template.seatHeight);
-        if (tier) priceSen = tier.priceSen;
+      if (template.seatHeight) {
+        const tier = resolveSofaTierPrice(seats, template.seatHeight, template.fabricCode);
+        if (tier !== null) priceSen = tier;
       }
       return {
         ...EMPTY_LINE,
@@ -999,6 +1002,8 @@ function CreateSalesOrderPage() {
         // Template.legPriceSen is already 0 in this mode (selectLeg zeroes
         // it), but belt-and-braces guard the basePrice here too.
         basePriceSen: isServiceOrderMode ? 0 : priceSen,
+        price1Sen: cp?.price1Sen ?? prod.price1Sen ?? null,
+        seatHeightPrices: seats,
         seatHeight: template.seatHeight,
         fabricCode: template.fabricCode,
         quantity: 1,
@@ -1330,12 +1335,11 @@ function CreateSalesOrderPage() {
       const prod = products.find(p => p.id === item.productId);
       let newPrice = item.basePriceSen;
       if (prod) {
-        // Prefer customer-resolved price1Sen cached on the line; fall back
-        // to global product price1Sen, then global basePriceSen.
+        // Prefer customer-resolved prices; fall back to the master product.
         const p1 = item.price1Sen ?? prod.price1Sen ?? null;
         newPrice = priceTier === "PRICE_1" && p1
           ? p1
-          : (prod.basePriceSen || 0);
+          : (customerProductsMap.get(prod.id)?.basePriceSen || prod.basePriceSen || 0);
       }
       updateItem(idx, { fabricCode: fab.code, basePriceSen: newPrice });
     } else {
