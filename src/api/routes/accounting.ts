@@ -8673,16 +8673,50 @@ async function computeCashflowStatement(
       const grp = String((r.item_group ?? r.itemGroup) ?? "");
       if (code) grpByCode.set(code, grp);
     }
+    // Owner 2026-09-29 「load 这么慢」: measured 8.6–9.3 s on prod, and the
+    // cause was one query per ticked payment (115) plus one per settled PI
+    // (298) — ~415 serial round-trips. The same two reads now come in bulk,
+    // chunked IN lists, and the arithmetic below is byte-for-byte what it
+    // was (the owner's condition: 「主要确保数据对」).
+    const chunk = <T,>(arr: T[], n: number): T[][] => { const out: T[][] = []; for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n)); return out; };
+    // 1. Every allocation row of every ticked payment.
+    const payRowsByNo = new Map<string, Record<string, unknown>[]>();
+    for (const part of chunk([...paymentNos], 200)) {
+      const res = await c.var.DB.prepare(
+        `SELECT sp.payment_no AS payment_no, sp.purchase_invoice_id AS purchase_invoice_id, sp.booked_sen AS booked_sen, sp.amount_sen AS amount_sen,
+                sp.supplier_name AS supplier_name, COALESCE(sp.method,'') AS method
+           FROM supplier_payments sp
+          WHERE sp.payment_no IN (${part.map(() => "?").join(",")}) AND COALESCE(sp.method,'') <> 'CREDIT_NOTE'`,
+      ).bind(...part).all<Record<string, unknown>>();
+      for (const r of res.results ?? []) {
+        const no = String(r.paymentNo ?? r.payment_no ?? "");
+        const arr = payRowsByNo.get(no) ?? [];
+        arr.push(r);
+        payRowsByNo.set(no, arr);
+      }
+    }
+    // 2. The item lines of every PI those rows settled.
+    const piIds = new Set<string>();
+    for (const rows of payRowsByNo.values()) for (const r of rows) { const id = String(r.purchaseInvoiceId ?? r.purchase_invoice_id ?? ""); if (id) piIds.add(id); }
+    const piItemsById = new Map<string, Record<string, unknown>[]>();
+    for (const part of chunk([...piIds], 200)) {
+      const res = await c.var.DB.prepare(`SELECT * FROM purchase_invoice_items WHERE pi_id IN (${part.map(() => "?").join(",")})`).bind(...part).all<Record<string, unknown>>();
+      for (const it of res.results ?? []) {
+        const id = String(it.piId ?? it.pi_id ?? "");
+        const arr = piItemsById.get(id) ?? [];
+        arr.push(it);
+        piItemsById.set(id, arr);
+      }
+    }
     // Per-PI material-line weights, computed once per PI and reused across
     // every payment that touched it. A PI belongs to exactly one supplier, so
     // the supplier-tagged fallback label is stable under the piId cache key.
     const piWeightCache = new Map<string, Map<string, number>>();
-    const piWeightsFor = async (piId: string, supplier: string): Promise<Map<string, number>> => {
+    const piWeightsFor = (piId: string, supplier: string): Map<string, number> => {
       const hit = piWeightCache.get(piId);
       if (hit) return hit;
       const w = new Map<string, number>();
-      const itRes = await c.var.DB.prepare("SELECT * FROM purchase_invoice_items WHERE pi_id = ?").bind(piId).all<Record<string, unknown>>();
-      for (const it of itRes.results ?? []) {
+      for (const it of piItemsById.get(piId) ?? []) {
         const lt = String((it.line_type ?? it.lineType) ?? "STOCKED");
         const amt = Number((it.line_total_sen ?? it.lineTotalSen) ?? 0);
         const mc = String((it.material_code ?? it.materialCode) ?? "");
@@ -8704,23 +8738,17 @@ async function computeCashflowStatement(
     // 什么」): advances (no PI yet), opening-balance PIs (pi-ob-*, item
     // lines predate the system), trade-finance repayments. Discount
     // markers (CREDIT_NOTE) are not cash and stay out.
-    const weightsForPayment = async (payNo: string): Promise<Map<string, number>> => {
-      const rowsRes = await c.var.DB.prepare(
-        `SELECT sp.purchase_invoice_id AS purchase_invoice_id, sp.booked_sen AS booked_sen, sp.amount_sen AS amount_sen,
-                sp.supplier_name AS supplier_name, COALESCE(sp.method,'') AS method
-           FROM supplier_payments sp
-          WHERE sp.payment_no = ? AND COALESCE(sp.method,'') <> 'CREDIT_NOTE'`,
-      ).bind(payNo).all<Record<string, unknown>>();
+    const weightsForPayment = (payNo: string): Map<string, number> => {
       const weights = new Map<string, number>();
       const bump = (line: string, sen: number) => weights.set(line, (weights.get(line) ?? 0) + sen);
-      for (const row of rowsRes.results ?? []) {
+      for (const row of payRowsByNo.get(payNo) ?? []) {
         const piId = String(row.purchaseInvoiceId ?? row.purchase_invoice_id ?? "");
         const booked = Math.max(0, Number(row.bookedSen ?? row.booked_sen ?? row.amountSen ?? row.amount_sen) || 0);
         if (!booked) continue;
         const supplier = String(row.supplierName ?? row.supplier_name ?? "").trim() || "unknown supplier";
         if (String(row.method ?? "") === "TF_REPAYMENT") { bump("Trade finance repayment", booked); continue; }
         if (!piId) { bump("Supplier advance / deposit", booked); continue; }
-        const w = await piWeightsFor(piId, supplier);
+        const w = piWeightsFor(piId, supplier);
         let totalW = 0;
         for (const v of w.values()) totalW += v;
         // Owner 2026-08-31 「我想要分」: pre-system opening invoices carry no
@@ -8732,7 +8760,7 @@ async function computeCashflowStatement(
       return weights;
     };
     for (const payNo of paymentNos) {
-      const weights = await weightsForPayment(payNo);
+      const weights = weightsForPayment(payNo);
       if (weights.size) {
         rmSplit[payNo] = [...weights.entries()].map(([line, weight]) => ({ line, weight: Math.round(weight) }));
       }
