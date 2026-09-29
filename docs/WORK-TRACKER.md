@@ -35,6 +35,11 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
+## 2026-09-29 — 🔵 PR labels for the whole team (branch `ci/label-prs` → `main`)
+- 1. 🔵 `label-prs.yml` on `main`: every PR into `main`/`staging` gets `staging` (by base) and a type label (by title prefix). BUG-2026-09-29-218: the staging-only labeler never ran.
+- 2. 🔵 Labels `security`, `performance`, `ci`, `chore` created in the repo.
+- 3. 🟡 Live check after merge: open or retitle a PR and confirm the run and labels.
+
 ## 2026-09-29 — 🟡 Cash Flow Unallocated "STOCK - FABRIC M": booking fix is the owner's, no code (owner「2. 不明白」→ answers → 「就放着」)
 
 1. Measured (prod): the stock account 330-0001 holds exactly three other-creditor bill lines (Jun / Aug / Sep); the P&L
@@ -47,6 +52,7 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 3. 🟡 Parked by the owner (「就放着」): the related-party loan itself was never booked (no 440-0030 line in the 22/05
    opening, no inflow in the bank), while the June and August bills repay it, so 440-0030 reads as a debit until an
    opening credit is added. Opening fix = the owner's / accountant's.
+
 
 ## 2026-09-29 — ✅ Cash Flow: cash-view signs — money in positive, money out negative everywhere (owner「这个 cash flow 我想要更改，全部进钱 positive，出钱 negative」)(#578 0a24bdea MERGED, deployed, prod-verified)
 
