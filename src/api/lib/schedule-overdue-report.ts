@@ -558,7 +558,33 @@ function formatRM(sen: number): string {
   });
 }
 
-export function renderOverdueHtml(data: OverdueReport): string {
+// Phone layout for the Overdue email (BUG-36): below 900px (phones, and the narrow reading pane of Gmail or Outlook) each SO row
+// becomes a card and the 4 summary boxes go two per row. `screen` only, so
+// the A4 print is unchanged. The small labels are hidden on desktop, where
+// the table header names the columns.
+const OVERDUE_PHONE_CSS = `
+  .m-lbl { display: none; }
+  @media screen and (max-width: 900px) {
+    body { font-size: 11pt; }
+    .page { padding: 10px 12px; }
+    h1 { font-size: 16pt; }
+    .summary { display: block; overflow: hidden; }
+    .summary .cell { display: block; float: left; width: 50%; padding: 6px 8px; }
+    .summary .val { font-size: 14pt; }
+    table.data, table.data tbody, table.data tr, table.data td { display: block; width: auto !important; }
+    table.data colgroup, table.data thead { display: none; }
+    table.data tbody tr { border: 1px solid #E5E1DC; border-radius: 6px; margin-bottom: 8px; padding: 8px 10px; }
+    table.data tbody tr:last-child td, table.data tbody td { border: 0; padding: 1px 0; overflow: visible; text-align: left !important; font-size: 10.5pt; }
+    table.data tbody td.m-inline { display: inline-block; margin-right: 14px; }
+    .m-lbl { display: inline; color: #6B7280; font-weight: 400; font-size: 9pt; }
+    .secondary { font-size: 9pt; }
+  }
+`;
+
+export function renderOverdueHtml(
+  data: OverdueReport,
+  opts: { email?: boolean } = {},
+): string {
   const { date, totals, rows } = data;
   const longDate = formatDateLong(date);
 
@@ -599,18 +625,18 @@ export function renderOverdueHtml(data: OverdueReport): string {
           : r.daysOverdue >= 14
             ? "#FFF7ED"
             : "transparent";
-      const status = `<span style="color:${statusColor(r.status)};font-weight:600;">${escapeHtml(r.status)}</span>`;
+      const status = `<span style="color:${statusColor(r.status)};font-weight:600;">${escapeHtml(r.status.replace(/_/g, " "))}</span>`;
       return `<tr style="background:${rowBg};">
         <td><strong>${escapeHtml(r.companySOId || r.salesOrderId)}</strong></td>
         <td>${escapeHtml(r.customerName)}${r.customerState ? ` <span class="secondary">· ${escapeHtml(r.customerState)}</span>` : ""}</td>
         <td>${escapeHtml(r.productSummary || "—")}</td>
-        <td class="num" style="text-align:right;">${r.itemCount}</td>
-        <td class="num" style="text-align:right;">${r.totalQty}</td>
-        <td class="num">${escapeHtml(r.customerDeliveryDate)}</td>
-        <td class="num"><span class="secondary">${escapeHtml(r.hookkaExpectedDD ?? "—")}</span></td>
-        <td class="num" style="text-align:right;font-weight:700;color:${daysColor};">${r.daysOverdue}d</td>
-        <td class="num" style="text-align:right;">${escapeHtml(formatRM(r.totalSen))}</td>
-        <td>${status}</td>
+        <td class="num m-inline" style="text-align:right;"><span class="m-lbl">Items </span>${r.itemCount}</td>
+        <td class="num m-inline" style="text-align:right;"><span class="m-lbl">Units </span>${r.totalQty}</td>
+        <td class="num m-inline"><span class="m-lbl">Customer DD </span>${escapeHtml(r.customerDeliveryDate)}</td>
+        <td class="num m-inline"><span class="m-lbl">Our target </span><span class="secondary">${escapeHtml(r.hookkaExpectedDD ?? "—")}</span></td>
+        <td class="num m-inline" style="text-align:right;font-weight:700;color:${daysColor};"><span class="m-lbl">Overdue </span>${r.daysOverdue}d</td>
+        <td class="num m-inline" style="text-align:right;">${escapeHtml(formatRM(r.totalSen))}</td>
+        <td class="m-inline">${status}</td>
       </tr>`;
     })
     .join("");
@@ -630,11 +656,12 @@ export function renderOverdueHtml(data: OverdueReport): string {
 <html lang="en">
 <head>
 <meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Overdue Report — ${escapeHtml(longDate)}</title>
-<style>${PAGE_CSS}</style>
+<style>${PAGE_CSS}${OVERDUE_PHONE_CSS}</style>
 </head>
 <body>
-<div class="print-bar no-print"><button onclick="window.print()">Print / Save as PDF</button></div>
+${opts.email ? "" : `<div class="print-bar no-print"><button onclick="window.print()">Print / Save as PDF</button></div>`}
 <div class="page">
   <h1>Overdue Report</h1>
   <div class="meta">${escapeHtml(longDate)} &nbsp;·&nbsp; Hookka Manufacturing ERP &nbsp;·&nbsp; sales orders past customer delivery date</div>

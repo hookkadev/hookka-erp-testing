@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-221 (branch `fix/overdue-email-mobile`, to staging; -220 is taken on staging); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-29** (branch `chore/sync-main-into-staging`, staging<-main merge): both logs merged; staging's customer-credit entry renumbered BUG-2026-09-28-210 to -218 (main's -210 is the RM stock-qty bug) and staging's DEV-05 dual-key BUG-2026-09-29-216 (PR #572) to -219 (main's -216 is the staging nightly wipe). Newest entry is -219.
 
 > **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-217 (branch `fix/scan-short-supplier-code`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
@@ -54,6 +55,32 @@ Entries themselves stay newest-first.
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
 
 ---
+
+## BUG-2026-09-29-221 — the Overdue email was unreadable on a phone `reports` `ui-frontend` 🟢
+
+🟢 Fixed on `staging` (branch `fix/overdue-email-mobile`, BUG-36 follow-up).
+
+The emailed Overdue Report is the same HTML as the A4-landscape print page:
+a 10-column table, no viewport tag, no small-screen rules. A phone shrank the
+whole ~1000px page to fit, so the table text was a third of its size, and
+`IN_PRODUCTION` (one word, no break point) was cut off in its column even on
+a desktop. The email also carried a "Print / Save as PDF" button that does
+nothing inside a mail client.
+
+Fix (`src/api/lib/schedule-overdue-report.ts`): a viewport tag plus
+`OVERDUE_PHONE_CSS`, a `screen`-only media query below 900px that turns each
+SO row into a card with small labels, and the summary boxes two per row. The
+print output is unchanged because the rules never apply to `print`. Status
+now renders with spaces (`IN PRODUCTION`) so it wraps. `renderOverdueHtml`
+takes `{ email: true }`, passed by `runAndSendReport`, which drops the Print
+button from the email only.
+
+Not covered: Outlook's phone app partly ignores embedded media queries, so it
+may still show the shrunk table. The Schedule, Efficiency and Morning Brief
+emails have the same problem and are not changed here.
+
+Regression test: `tests/overdue-email-mobile.test.mjs` (fails on the old
+template, passes on the new one).
 
 ## BUG-2026-09-29-219 — every availability figure was silently zero `production` `inventory` 🟢
 

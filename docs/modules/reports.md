@@ -1,5 +1,7 @@
 # Reports & Analytics — Module Guide
 
+> **Last verified: 2026-09-29** (branch `fix/overdue-email-mobile`): `schedule-overdue-report.ts` line count and the Overdue email phone-layout gotcha only.
+
 > **Last verified: 2026-09-29** (branch `feat/staging-mailslurp-sender`): the `/send` gotcha only, provider note read from `src/api/lib/email.ts`.
 
 > **Last verified: 2026-09-29** (branch `feat/report-evening-revenue`): `reports.ts` anchors re-derived; efficiency email now covers today at 18:30 with production revenue, overdue moved to 08:00 (BUG-36).
@@ -33,7 +35,7 @@ Two unrelated report worlds share the name **Reports**:
   - `/api/forecasts` → `src/api/routes/forecasts.ts` (155) — mount `worker.ts:1346`
   - `/api/dashboard/overview` → `src/api/routes/dashboard-overview.ts` (2316) — mount `worker.ts:1304`
 - Report engines (logic lives here, not in the route)
-  - `src/api/lib/compliance-report.ts` (1519) · `efficiency-report.ts` (676) · `schedule-overdue-report.ts` (713) · `operations-report.ts` (1248) · `production-brief.ts` (738)
+  - `src/api/lib/compliance-report.ts` (1519) · `efficiency-report.ts` (676) · `schedule-overdue-report.ts` (740) · `operations-report.ts` (1248) · `production-brief.ts` (738)
 - Shared client engines: `src/lib/print-report.ts` (351, WYSIWYG print) · `src/lib/export-report.ts` (146, CSV/XLSX/PDF export)
 
 ## Data model
@@ -80,13 +82,15 @@ Two unrelated report worlds share the name **Reports**:
 
 ## Gotchas
 - **The Reports hub and `/api/reports/*` do NOT share data.** `reports.tsx` tabs fetch source-module list APIs and aggregate client-side; only `daily-report.tsx` consumes `/api/reports/compliance.json`. Don't expect matching shapes.
-- **Logic lives in `src/api/lib/*`, not the route.** `reports.ts` (1044) is a thin shim over `compliance-report.ts` (1519), `efficiency-report.ts` (676), `schedule-overdue-report.ts` (713), `operations-report.ts` (1248), `production-brief.ts` (738). Edit the lib, not the handler.
+- **Logic lives in `src/api/lib/*`, not the route.** `reports.ts` (1044) is a thin shim over `compliance-report.ts` (1519), `efficiency-report.ts` (676), `schedule-overdue-report.ts` (740), `operations-report.ts` (1248), `production-brief.ts` (738). Edit the lib, not the handler.
 - **`/send` endpoints touch the email/cron path** — they resolve recipients from `kv_config` + `users` and call `sendMail`; not a pure read. "Send test now" (Settings → Email Reports) hits the same `/send`; a toast of "No email provider configured" means the environment has no Brevo / Resend / MailSlurp secret (staging uses MailSlurp: `MAILSLURP_API_KEY` + `MAILSLURP_INBOX_ID`). The cron `-trigger` variants add `authCron` (`x-cron-secret`) + `cronGate` (skip Sunday / public holidays).
 - **Daily Report is expensive → snapshot-cached.** `collectComplianceData` cold-computes ~6s across the whole order/delivery/invoice/procurement chain; `buildComplianceCached` (`reports.ts:669`) serves last-good instantly and refreshes in the background. Numbers are byte-identical.
 - **Production Brief is Agent-Console-gated.** A paused `PRODUCTION` agent (or global kill switch) silences the automatic brief; manual `/brief/send` still works. It also runs under `recordAgentRun` for token accounting.
 - **`forecasts.ts` reads only `forecast_entries`.** The forecast *page* additionally pulls `/api/historical-sales` and `/api/promise-date`; the route itself is a plain CRUD over one table (camelCase cols).
 - **`dashboard-b/` IS the production dashboard** (it is not experimental — the legacy `/dashboard` page was retired 2026-05-21); `/dashboard-b` redirects to `/dashboard`. `charts.tsx` is lazy-loaded to defer the ~357KB recharts/d3 bundle — don't import recharts eagerly into `index.tsx`. See [[dashboard]].
 - **Reuse the shared print/export engines** (`print-report.ts`, `export-report.ts`) — don't hand-roll print or CSV/XLSX/PDF.
+
+- **The Overdue email has a phone layout; the other report emails do not.** `renderOverdueHtml(data, { email: true })` adds `OVERDUE_PHONE_CSS` (`@media screen and (max-width: 900px)`, rows become cards) and drops the Print button. The same template serves the in-app page and the A4 print, so keep phone rules inside a `screen` media query (BUG-2026-09-29-221, `tests/overdue-email-mobile.test.mjs`).
 
 ## Common tasks (mini-playbook)
 - **Add a Reports-hub tab** → new entry in `TABS` (`reports.tsx:406`) + a `<XReportTab/>` component following the existing tab pattern (fetch source API, aggregate client-side, `printReport`/`exportReport*`). No `/api/reports/*` route needed.
