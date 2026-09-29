@@ -31,6 +31,22 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
+## 2026-09-29 — 🟡 System RM stock stopped at end of March; material-code gap `MED-PSF15.064HCS(A1)` (owner: monthly stock-take is enough, stock parked until management decides)
+
+Measured on prod 2026-09-29, read-only:
+1. 🟡 Polyester fibre `MED-PSF15.064HCS(14)(L)` (rm-154): 48 batches (1 OPENING + 47 GRN imports), the last on
+   30/03/2026. The `(A1)` code sits on 12 GRN-IMPORT-PI-2604/2605 lines (12/04–28/05, all POSTED) that produced
+   **no batch on any material**; the 8 June–Aug MEDITEX PIs with `(A1)` were keyed directly with no GRN.
+2. 🟡 System-wide: 1,344 RM batches, only 1 received after 01/04/2026; none of the 35 April–May import GRNs
+   produced a batch (any material); since June purchases are keyed as PIs without GRNs. System RM stock
+   quantities are frozen at end-March (the P&L "50 materials with negative stock" banner). The P&L itself is
+   unaffected (`rm_valuation_mode = stock_take_only`).
+3. 🟡 Owner 2026-09-29: 「每月盘点就够，库存先不管。我和 management 讨论后决定」 — nothing to do until then.
+4. 🟡 Still open: `MED-PSF15.064HCS(A1)` (29 PI lines, RM 27,588.00) and the typo `COMFY LIFGHT GREY` are not in
+   the RM master, so Cash Flow shows them as "Unallocated — MEDITEX" under FABRIC (really FILLER). A code-family
+   auto-rule was measured (it would guess right; 5 of 477 master families are multi-group and would be refused)
+   but NOT built — the owner worried it hides mistakes; the recommendation is a master-data fix, owner to decide.
+
 ## 2026-09-29 — ✅ Cash Flow statement: 9 s → 0.65 s, figures identical (owner「为什么他的 load 这么慢」→「可以做，但是还是主要确保数据对」)(#565 7a8f5596 MERGED, deployed, prod-verified)
 
 1. ✅ Measured on prod: `GET /cashflow-statement?period=2026-09` 8,634 / 9,349 ms (two runs) vs 50–120 ms for
