@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-29**: #575 (AP Invoices popups) and #578 (Cash Flow cash view) closed ✅ below with their prod measurements.
 > **Last verified: 2026-09-29**: branch `feat/ap-invoices-popup` added below (its entry is the newest); the 410-0000 entry (#573) closed ✅ with its prod measurements.
 > **Last verified: 2026-09-29**: branch `fix/staging-no-nightly-wipe` added below (PR #570 open, its entry is the newest).
 > **Last verified: 2026-09-29**: branch `feat/production-multi-select-filters` added below (open, its entry is the newest).
@@ -33,26 +34,35 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
-## 2026-09-29 — 🔵 Cash Flow: cash-view signs — money in positive, money out negative everywhere (owner「这个 cash flow 我想要更改，全部进钱 positive，出钱 negative」)(branch `feat/cashflow-cash-view-signs`)
+## 2026-09-29 — ✅ Cash Flow: cash-view signs — money in positive, money out negative everywhere (owner「这个 cash flow 我想要更改，全部进钱 positive，出钱 negative」)(#578 0a24bdea MERGED, deployed, prod-verified)
 
-1. 🔵 Supersedes the morning`s #569 rule (money out positive below the collection). `OUTFLOW_SECTIONS` is now empty:
+1. ✅ Supersedes the morning`s #569 rule (money out positive below the collection). `OUTFLOW_SECTIONS` is now empty:
    costs, Trade Finance repayments, finance costs, capex spend, loans repaid / lent, unallocated payments read
    negative; collections, drawdowns, loans received, asset sales read positive. Labels: Loan received / (repaid ·
    lent), Deposit refunded / (paid); footer states the rule. Figures, the operating result and Cash Surplus unchanged.
    Tests re-pointed (engine, trade finance, supplier section, finance cost, unified signs).
+2. ✅ Prod (measured): statement snapshots taken before deploy for 2026-06 / -07 / -08 / -09 (the -08 one carries every
+   month Sep'25–Aug'26), compared row by row after: 0 unexpected rows. Unchanged: Revenue Collection rows, Net operation
+   surplus, Cash Surplus, Bank b/f, Bank c/f. Every other non-zero row exactly sign-flipped. Sep'26: result 13,597.20,
+   Trade Finance 729.24, Finance Cost (1,636.48), CAPEX (1,747.10), Unallocated (442.00), Cash Surplus 10,500.86 —
+   now a plain sum; Bank c/f 132,703.25. Snapshot deleted from the browser afterwards.
 
-## 2026-09-29 — 🔵 AP Invoices: bill form + bill detail in popups; Other Creditors back in the sidebar (owner「ap invoice 就 pop out 出来给我填相关之类不可以吗？」+「other creditor maintenance 放 sidebar 旁边」→「3. 做」)(branch `feat/ap-invoices-popup`)
+## 2026-09-29 — ✅ AP Invoices: bill form + bill detail in popups; Other Creditors back in the sidebar (owner「ap invoice 就 pop out 出来给我填相关之类不可以吗？」+「other creditor maintenance 放 sidebar 旁边」→「3. 做」)(#575 33378a85 MERGED, deployed, prod-verified)
 
-1. 🔵 New AP bill opens the other-creditor bill form in a popup (`OtherPartyBillsManager` in `formOnly` mode: form open at once,
+1. ✅ New AP bill opens the other-creditor bill form in a popup (`OtherPartyBillsManager` in `formOnly` mode: form open at once,
    no list, closes on save or Cancel; ✕ closes, a stray click outside does not — a half-filled bill never vanishes).
-2. 🔵 Double-click an AP bill (or click its No.) → detail popup: creditor / date / reference / lines / tax / total / paid /
+2. ✅ Double-click an AP bill (or click its No.) → detail popup: creditor / date / reference / lines / tax / total / paid /
    outstanding, actions Print / Edit / Copy / Void (Unvoid when voided). Edit and Copy open the same popup form
    (Edit re-posts the same bill number; Copy = today, no reference, never an opening — one builder `billFormFrom`).
    Void goes through the Bills page's own lifecycle endpoint, behind a confirm. PI rows still open their own page.
-3. 🔵 The duplicate bills list + names list under the mirror are gone; Creditors › **Other Creditors** is a menu entry again
+3. ✅ The duplicate bills list + names list under the mirror are gone; Creditors › **Other Creditors** is a menu entry again
    (`?tab=ocreditor`, the same names/contacts page). FINANCE menu 32 → 33 entries.
 4. UI only — no endpoint, no write path, no ledger change. Guards `tests/ap-invoices-popup.test.mjs` (new),
    `tests/finance-sidebar.test.mjs`, `tests/ap-invoices-chips.test.mjs`, `tests/doc-detail-dblclick.test.mjs`.
+5. ✅ Prod (checked in the owner's browser, nothing saved): New AP bill popup opens with Scan Bill + the form, the account
+   picker drops down inside it, Cancel closes it; double-click OCB-2609-004 → detail popup (PAID, 330-0001 STOCK -
+   FABRIC M 442.00, Print / Edit / Copy / Void); Edit → "Edit OCB-2609-004" prefilled, creditor locked, no Scan; Cancel
+   closes; the page no longer carries the editor / names list below; Creditors › Other Creditors opens `?tab=ocreditor`.
 
 ## 2026-09-29 — ✅ 410-0000 ACCRUALS: parent accounts never postable + Cash Flow accrual family → Direct Labour (owner「by right 410-0000 不能选吧？我有注意到 410-0000 pv 开过去」→「做 a b d，c 的不做，要 park 回去对的 accrual」)(#573 e6bd8e93 MERGED, deployed, prod-verified)
 
