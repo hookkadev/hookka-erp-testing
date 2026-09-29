@@ -1,0 +1,26 @@
+# Adds the `staging` label to every PR whose base is `staging`, so staging PRs
+# are easy to tell apart from main PRs in the list.
+#
+# pull_request_target runs the copy of this file on the base branch and never
+# checks out the PR's code, so it is safe to give it a write token. `edited`
+# covers a PR that is retargeted to staging after it was opened.
+name: Label staging PRs
+
+on:
+  pull_request_target:
+    types: [opened, reopened, edited]
+    branches: [staging]
+
+permissions:
+  pull-requests: write
+  issues: write
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - run: gh pr edit "$PR" --repo "$REPO" --add-label staging
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
