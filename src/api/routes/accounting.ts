@@ -38,6 +38,7 @@ import { ensurePartialPaymentColumns } from "../lib/ensure-partial-payment";
 import { ensureFinanceOrgColumns } from "../lib/ensure-finance-org";
 import { apRowBeforeOpening, legBeforeOpening, rowBeforeOpening } from "../../lib/opening-floor";
 import { applyOpeningSlice, windowCoversMonth } from "../../lib/opening-slice";
+import { docNoFromDescription, otherSideCodes } from "../../lib/ledger-drill";
 import { labourInjectMonths } from "../../lib/labour-inject";
 import { projectedLabourByDept } from "../lib/labour-projection";
 import { groupPayslipsByMonthDept, forecastEntryKind, monthHasDeptForecast, labourMappedAccounts } from "../../lib/salary-dept";
@@ -6719,19 +6720,35 @@ async function getPnlOpeningPriorCum(
 
 const PNL_TYPES: ReadonlySet<CoaRow["type"]> = new Set(["REVENUE", "COST", "EXPENSE"]);
 
+// The P&L inline drill (owner 2026-09-29 「我要点开看 detail，就是这样」) asks
+// glWindowSigned to TRACE one account: every ledger leg it adds to that
+// account's figure, every leg of those legs' entries (for the "other side"),
+// and the report-layer additions (payroll from payslips, the opening-month
+// slice). Same pass as the statement, so the drill sums to the line to the sen.
+type PnlTraceLeg = { id: string; accountCode: string; sourceType: string; sourceId: string; date: string; debitSen: number; creditSen: number; description: string };
+type PnlTrace = {
+  account: string; // resolved code
+  legs: PnlTraceLeg[];
+  entryLegs: Map<string, { accountCode: string; debitSen: number; creditSen: number }[]>; // sourceType::sourceId → legs
+  extra: { kind: "payroll" | "opening_slice"; ym: string; sen: number }[];
+};
+
 async function glWindowSigned(
   db: Env["Variables"]["DB"],
   orgId: string,
   startYm: string | null,
   endYm: string | null,
   dc: DocDateCtx,
+  trace?: PnlTrace,
 ): Promise<{ net: GlWindow; coa: Map<string, { name: string; type: CoaRow["type"] }> }> {
   const memoKey = `${startYm ?? ""}|${endYm ?? ""}`;
-  const cached = dc.glMemo?.get(memoKey);
+  const cached = trace ? undefined : dc.glMemo?.get(memoKey);
   if (cached) return cached;
   const [legRes, coaRes] = await Promise.all([
-    db.prepare("SELECT accountCode, sourceId, debitSen, creditSen, postedAt, sourceType FROM ledger_journal_entries WHERE hidden = 0")
-      .all<{ accountCode: string; sourceId: string; debitSen: number; creditSen: number; postedAt: string; sourceType: string }>(),
+    db.prepare(trace
+      ? "SELECT id, accountCode, sourceId, debitSen, creditSen, postedAt, sourceType, description FROM ledger_journal_entries WHERE hidden = 0"
+      : "SELECT accountCode, sourceId, debitSen, creditSen, postedAt, sourceType FROM ledger_journal_entries WHERE hidden = 0")
+      .all<{ id?: string; accountCode: string; sourceId: string; debitSen: number; creditSen: number; postedAt: string; sourceType: string; description?: string }>(),
     db.prepare("SELECT code, name, type FROM chart_of_accounts").all<{ code: string; name: string; type: CoaRow["type"] }>(),
   ]);
   const resolve = await loadAccountResolver(db);
@@ -6781,6 +6798,23 @@ async function glWindowSigned(
     if (endYm && ym > endYm) continue;
     const code = resolve(l.accountCode);
     net.set(code, (net.get(code) ?? 0) + (Number(l.debitSen) || 0) - (Number(l.creditSen) || 0));
+    if (trace && code === trace.account) {
+      trace.legs.push({
+        id: String(l.id ?? ""), accountCode: l.accountCode, sourceType: l.sourceType, sourceId: l.sourceId, date: dd.slice(0, 10),
+        debitSen: Number(l.debitSen) || 0, creditSen: Number(l.creditSen) || 0, description: String(l.description ?? ""),
+      });
+    }
+  }
+  if (trace && trace.legs.length) {
+    // Every leg of the traced legs' entries — the drill's "other side".
+    const keys = new Set(trace.legs.map((t) => `${t.sourceType}::${t.sourceId}`));
+    for (const l of legRes.results ?? []) {
+      const key = `${l.sourceType}::${l.sourceId}`;
+      if (!keys.has(key)) continue;
+      let arr = trace.entryLegs.get(key);
+      if (!arr) { arr = []; trace.entryLegs.set(key, arr); }
+      arr.push({ accountCode: l.accountCode, debitSen: Number(l.debitSen) || 0, creditSen: Number(l.creditSen) || 0 });
+    }
   }
   // Report-layer labour (owner 2026-08-31 「任何时候我看P&L 时你都自动提取」):
   // the payroll figures show up without waiting for a post — stored payslips
@@ -6800,6 +6834,7 @@ async function glWindowSigned(
     for (const { account, sen } of await labourInjectionLines(db, orgId, ym, dc.labourMemo)) {
       if (recorded?.has(account)) continue;
       net.set(account, (net.get(account) ?? 0) + sen);
+      if (trace && account === trace.account && sen !== 0) trace.extra.push({ kind: "payroll", ym, sen });
     }
   }
   const coa = new Map((coaRes.results ?? []).map((a) => [a.code, { name: a.name, type: a.type }] as const));
@@ -6808,13 +6843,16 @@ async function glWindowSigned(
   // come from the owner-keyed historical P&L, so nothing double-counts.
   if (openingNet.size && windowCoversMonth(startYm, endYm, obDate ? obDate.slice(0, 7) : null)) {
     const priorCum = await getPnlOpeningPriorCum(db);
+    const before = trace ? (net.get(trace.account) ?? 0) : 0;
     applyOpeningSlice(net, openingNet, priorCum, (code) => {
       const t = coa.get(code)?.type;
       return t !== undefined && PNL_TYPES.has(t);
     });
+    const slice = trace ? (net.get(trace.account) ?? 0) - before : 0;
+    if (trace && slice !== 0 && obDate) trace.extra.push({ kind: "opening_slice", ym: obDate.slice(0, 7), sen: slice });
   }
   const out = { net, coa };
-  dc.glMemo?.set(memoKey, out);
+  if (!trace) dc.glMemo?.set(memoKey, out);
   return out;
 }
 
@@ -7972,11 +8010,14 @@ async function costByLineWindow(
 
 // Assemble the statement row tree from a period window + the FY-YTD window.
 function buildPnlRows(p: PnlWindow, y: PnlWindow, editable = false) {
-  type Row = { kind: "group" | "line" | "total" | "grandtotal" | "gap"; depth: number; label: string; periodSen?: number; ytdSen?: number; groupId?: string; totalLabel?: string; badge?: string; accountCode?: string; bucket?: string };
+  // drillCode: the account a line can be opened on (the P&L inline drill) when
+  // the line is one account's ledger figure but carries no accountCode (that
+  // field also drives the edit-mode drag, which these rows must not get).
+  type Row = { kind: "group" | "line" | "total" | "grandtotal" | "gap"; depth: number; label: string; periodSen?: number; ytdSen?: number; groupId?: string; totalLabel?: string; badge?: string; accountCode?: string; bucket?: string; drillCode?: string };
   const rows: Row[] = [];
   let gid = 0;
   const g = (label: string, depth: number, periodSen: number, ytdSen: number, totalLabel: string, bucket?: string) => { const id = `g${gid++}`; rows.push({ kind: "group", depth, label, periodSen, ytdSen, groupId: id, totalLabel, bucket }); return id; };
-  const line = (label: string, depth: number, ps: number, ys: number, accountCode?: string, bucket?: string) => rows.push({ kind: "line", depth, label, periodSen: ps, ytdSen: ys, accountCode, bucket });
+  const line = (label: string, depth: number, ps: number, ys: number, accountCode?: string, bucket?: string, drillCode?: string) => rows.push({ kind: "line", depth, label, periodSen: ps, ytdSen: ys, accountCode, bucket, drillCode });
   const tot = (label: string, depth: number, ps: number, ys: number) => rows.push({ kind: "total", depth, label, periodSen: ps, ytdSen: ys });
 
   // SALES
@@ -7994,11 +8035,11 @@ function buildPnlRows(p: PnlWindow, y: PnlWindow, editable = false) {
     const yg = y.rmGroups.find((x) => x.group === pg.group);
     g(pg.description, 2, pg.openingSen + pg.purchasesSen - pg.closingSen, yg ? yg.openingSen + yg.purchasesSen - yg.closingSen : 0, `TOTAL ${pg.description}`);
     line("OPENING STOCK", 3, pg.openingSen, yg?.openingSen ?? 0);
-    line("PURCHASE", 3, pg.purchasesSen, yg?.purchasesSen ?? 0);
+    line("PURCHASE", 3, pg.purchasesSen, yg?.purchasesSen ?? 0, undefined, undefined, pg.group);
     line("CLOSING STOCK", 3, -pg.closingSen, yg ? -yg.closingSen : 0);
   }
-  line("CARRIAGE INWARDS", 1, p.carriageSen, y.carriageSen);
-  line("SST CHARGES", 1, p.sstSen, y.sstSen);
+  line("CARRIAGE INWARDS", 1, p.carriageSen, y.carriageSen, undefined, undefined, "700-1015");
+  line("SST CHARGES", 1, p.sstSen, y.sstSen, undefined, undefined, "706-0000");
   // Direct labour
   g("DIRECT LABOUR", 1, p.labourSen, y.labourSen, "TOTAL DIRECT LABOUR", "DIRECT_LABOUR");
   for (let i = 0; i < p.labourLines.length; i++) line(p.labourLines[i].name, 2, p.labourLines[i].amountSen, y.labourLines.find((x) => x.code === p.labourLines[i].code)?.amountSen ?? 0, p.labourLines[i].code, "DIRECT_LABOUR");
@@ -8350,6 +8391,128 @@ app.get("/pl-statement", async (c) => {
       netSalesSen: p.netSalesSen,
       rows: buildPnlRows(p, y, editable),
       materialWarnings,
+    },
+  });
+});
+
+// P&L inline drill (owner 2026-09-29 「我要点开看 detail，就是这样」— the Houzs
+// P&L's click-a-line view): the ledger lines behind ONE account line for the
+// statement's period, picked by the same pass the statement uses (a traced
+// glWindowSigned), so lines + report-layer additions (payroll from payslips,
+// the opening-month slice) sum to the line to the sen. Each line carries its
+// document (Ref. 1), the related document (Ref. 2: an invoice's SO, a PI's
+// supplier invoice no., a bill's reference, a voucher's payee) and the
+// accounts on the other side of its entry. Read-only; lines at full value
+// (the Sofa / Bedframe views carry a share of them).
+app.get("/pl-drill", async (c) => {
+  const denied = await requirePermission(c, "accounting", "read");
+  if (denied) return denied;
+  await ensurePnlHistorical(c.var.DB);
+  const db = c.var.DB;
+  const period = c.req.query("period") || new Date().toISOString().slice(0, 7);
+  const accountParam = (c.req.query("account") || "").trim();
+  if (!accountParam) return c.json({ success: false, error: "account is required" }, 400);
+  const orgId = getOrgId(c);
+  const resolve = await loadAccountResolver(db);
+  const account = resolve(accountParam);
+  const startYm = periodStartYm(period);
+  const endYm = periodEndYm(period);
+  // A single month keyed from the old books has no ledger lines behind it.
+  const [historical, openingDateRaw] = await Promise.all([loadHistoricalPnl(db, orgId), getOpeningDate(db)]);
+  const openingMonth = openingDateRaw ? openingDateRaw.slice(0, 7) : null;
+  if (startYm && startYm === endYm && selectHistoricalWindow(historical, openingMonth, startYm, "all")) {
+    const a = await db.prepare("SELECT name FROM chart_of_accounts WHERE code = ?").bind(account).first<{ name: string }>();
+    return c.json({ success: true, data: { period, account: { code: account, name: a?.name ?? "" }, historical: true, lines: [], extra: [], debitSen: 0, creditSen: 0, netSen: 0, tied: true } });
+  }
+  const dc = await loadDocDateResolver(db);
+  const trace: PnlTrace = { account, legs: [], entryLegs: new Map(), extra: [] };
+  const { net, coa } = await glWindowSigned(db, orgId, startYm, endYm, dc, trace);
+
+  // Ref. 1 / Ref. 2 from the source documents, one batched read per kind; a
+  // read that fails only leaves the refs to the line description.
+  const refs = new Map<string, { ref1?: string | null; ref2?: string | null }>();
+  const idsOf = (pred: (t: string) => boolean) => [...new Set(trace.legs.filter((l) => pred(l.sourceType)).map((l) => l.sourceId))];
+  const chunked = async <T,>(ids: string[], sql: (ph: string) => string, extra: unknown[] = []): Promise<T[]> => {
+    const out: T[] = [];
+    for (let i = 0; i < ids.length; i += 200) {
+      const part = ids.slice(i, i + 200);
+      const res = await db.prepare(sql(part.map(() => "?").join(","))).bind(...part, ...extra).all<T>();
+      out.push(...(res.results ?? []));
+    }
+    return out;
+  };
+  const setRef = (pred: (t: string) => boolean, id: string, v: { ref1?: string | null; ref2?: string | null }) => {
+    for (const l of trace.legs) if (l.sourceId === id && pred(l.sourceType)) refs.set(`${l.sourceType}::${l.sourceId}`, v);
+  };
+  const isInvoice = (t: string) => t === "invoice" || t.startsWith("invoice_");
+  const isPi = (t: string) => t === "purchase_invoice" || t.startsWith("purchase_invoice_");
+  const isPv = (t: string) => t === "payment_voucher" || t.startsWith("payment_voucher_");
+  const isBill = (t: string) => t.startsWith("other_party_bill");
+  try {
+    const inv = await chunked<Record<string, unknown>>(idsOf(isInvoice), (ph) => `SELECT id, invoiceNo, salesOrderId, doNo FROM invoices WHERE id IN (${ph})`);
+    const soIds = [...new Set(inv.map((r) => String(r.salesOrderId ?? r.sales_order_id ?? "")).filter(Boolean))];
+    const soNo = new Map<string, string>();
+    for (const r of await chunked<Record<string, unknown>>(soIds, (ph) => `SELECT id, companySOId FROM sales_orders WHERE id IN (${ph})`)) {
+      const no = String(r.companySOId ?? r.company_so_id ?? "");
+      if (no) soNo.set(String(r.id), no);
+    }
+    for (const r of inv) {
+      const so = soNo.get(String(r.salesOrderId ?? r.sales_order_id ?? ""));
+      setRef(isInvoice, String(r.id), { ref1: String(r.invoiceNo ?? r.invoice_no ?? "") || null, ref2: so ?? (String(r.doNo ?? r.do_no ?? "") || null) });
+    }
+  } catch { /* refs stay on the description */ }
+  try {
+    for (const r of await chunked<Record<string, unknown>>(idsOf(isPi), (ph) => `SELECT id, piNo, poRef, supplier_invoice_no FROM purchase_invoices WHERE id IN (${ph})`)) {
+      const supInv = String(r.supplierInvoiceNo ?? r.supplier_invoice_no ?? "");
+      setRef(isPi, String(r.id), { ref1: String(r.piNo ?? r.pi_no ?? "") || null, ref2: supInv || (String(r.poRef ?? r.po_ref ?? "") || null) });
+    }
+  } catch { /* refs stay on the description */ }
+  try {
+    for (const r of await chunked<Record<string, unknown>>(idsOf(isPv), (ph) => `SELECT id, pvNo, payee FROM payment_vouchers WHERE id IN (${ph})`)) {
+      setRef(isPv, String(r.id), { ref1: String(r.pvNo ?? r.pv_no ?? "") || null, ref2: String(r.payee ?? "") || null });
+    }
+  } catch { /* refs stay on the description */ }
+  try {
+    for (const r of await chunked<Record<string, unknown>>(idsOf(isBill), (ph) => `SELECT billNo, referenceNo FROM other_party_bills WHERE billNo IN (${ph}) AND orgId = ?`, [orgId])) {
+      setRef(isBill, String(r.billNo ?? r.bill_no ?? ""), { ref1: String(r.billNo ?? r.bill_no ?? "") || null, ref2: String(r.referenceNo ?? r.reference_no ?? "") || null });
+    }
+  } catch { /* refs stay on the description */ }
+
+  const lines = trace.legs
+    .map((l) => {
+      const key = `${l.sourceType}::${l.sourceId}`;
+      const r = refs.get(key);
+      return {
+        id: l.id,
+        date: l.date,
+        description: l.description,
+        otherSide: otherSideCodes(l, trace.entryLegs.get(key) ?? [], resolve).map((code) => ({ code, name: coa.get(code)?.name ?? "" })),
+        ref1: docNoFromDescription(l.description) ?? r?.ref1 ?? l.sourceId,
+        ref2: r?.ref2 ?? null,
+        debitSen: l.debitSen,
+        creditSen: l.creditSen,
+        sourceType: l.sourceType,
+        sourceId: l.sourceId,
+      };
+    })
+    .sort((a, b) => a.date.localeCompare(b.date) || String(a.ref1).localeCompare(String(b.ref1)));
+  const extraDebit = trace.extra.reduce((s, e) => s + (e.sen > 0 ? e.sen : 0), 0);
+  const extraCredit = trace.extra.reduce((s, e) => s + (e.sen < 0 ? -e.sen : 0), 0);
+  const debitSen = lines.reduce((s, l) => s + l.debitSen, 0) + extraDebit;
+  const creditSen = lines.reduce((s, l) => s + l.creditSen, 0) + extraCredit;
+  const netSen = net.get(account) ?? 0;
+  return c.json({
+    success: true,
+    data: {
+      period,
+      account: { code: account, name: coa.get(account)?.name ?? "", type: coa.get(account)?.type ?? null },
+      historical: false,
+      lines,
+      extra: trace.extra,
+      debitSen,
+      creditSen,
+      netSen,
+      tied: debitSen - creditSen === netSen,
     },
   });
 });
