@@ -21,7 +21,7 @@ import { requirePermission, requireSuperAdmin } from "../lib/rbac";
 import { ensureOrgRoles } from "../lib/ensure-org-roles";
 import { ensureDerivedPermissions } from "../lib/ensure-derived-permissions";
 import { hashPassword } from "../lib/password";
-import { inviteEmailTemplate, sendMail } from "../lib/email";
+import { hasMailProvider, inviteEmailTemplate, sendMail, type MailEnv } from "../lib/email";
 import { enqueueEmail } from "../lib/email-outbox";
 import { emitAudit } from "../lib/audit";
 
@@ -724,15 +724,11 @@ async function sendInviteEmail(
   // "afternoon broken" symptom. Send directly so the recipient gets it in
   // seconds; the outbox stays as a durable fallback below if the direct send
   // fails. (2026-06-05 — afternoon-invite-delay fix.)
-  const env = c.env as {
-    RESEND_API_KEY?: string;
-    BREVO_API_KEY?: string;
-    RESEND_FROM_EMAIL?: string;
-  };
+  const env = c.env as MailEnv & { RESEND_FROM_EMAIL?: string };
   const from =
     env.RESEND_FROM_EMAIL ||
     "Hookka Manufacturing ERP <noreply@hookka.com>";
-  if (env.RESEND_API_KEY || env.BREVO_API_KEY) {
+  if (hasMailProvider(env)) {
     const direct = await sendMail(env, from, {
       to: invite.email,
       subject: tpl.subject,
