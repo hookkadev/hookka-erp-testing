@@ -398,7 +398,13 @@ export default function UsersPage() {
   // was set through the chart — the edges live in org_reporting, keyed
   // (source, id) so they can cross `users` and `workers`.
   const { data: orgPeopleResp, refresh: refreshOrgPeople } = useCachedJson<{
-    data?: { key: string; name: string; position: string; managerKey: string | null }[];
+    data?: {
+      key: string;
+      name: string;
+      position: string;
+      managerKey: string | null;
+      photoFileId: string | null;
+    }[];
   }>("/api/org-chart");
   const orgPeople = useMemo(() => orgPeopleResp?.data ?? [], [orgPeopleResp]);
 
@@ -2615,6 +2621,9 @@ export default function UsersPage() {
           }
           currentManagerKey={
             orgPeople.find((p) => p.key === `user:${drawerUser.id}`)?.managerKey ?? null
+          }
+          photoFileId={
+            orgPeople.find((p) => p.key === `user:${drawerUser.id}`)?.photoFileId ?? null
           }
           // Everyone on the chart, factory floor included — a reporting line is
           // allowed to cross the two tables, and offering office accounts only

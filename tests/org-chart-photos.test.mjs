@@ -241,3 +241,37 @@ test('the photo is fetched via /stream, not /download — BUG-2026-09-29-214', (
     'a regression back to the presigned-URL path would resurrect BUG-2026-09-29-214',
   );
 });
+
+test('clicking an EXISTING photo views it, and only a missing photo starts an upload — owner feedback 2026-09-29', () => {
+  // Owner, testing it live: "when i click the picture it send me to change to
+  // a new picture, can i have it like when i click it just shows the picture
+  // bigger." Before this, the circle's onClick always opened the file picker.
+  assert.match(UI, /const hasPhoto = !!person\.photoFileId;/);
+  assert.match(
+    UI,
+    /const primaryAction = hasPhoto \? onView : \(\) => inputRef\.current\?\.click\(\);/,
+  );
+  assert.match(UI, /onClick=\{primaryAction\}/);
+});
+
+test('a dedicated pencil badge starts the upload regardless of whether a photo already exists', () => {
+  // The one remaining always-on way to CHANGE a photo, now that the circle
+  // itself is view-only once a photo is set.
+  assert.match(UI, /title=\{`Change \$\{person\.name\}'s photo`\}/);
+  const badgeIdx = UI.indexOf("title={`Change ${person.name}'s photo`}");
+  assert.match(
+    UI.slice(Math.max(0, badgeIdx - 200), badgeIdx),
+    /onClick=\{\(\) => inputRef\.current\?\.click\(\)\}/,
+  );
+});
+
+test('the lightbox renders the SAME /stream URL, keyed off viewingPhoto rather than person', () => {
+  assert.match(UI, /const \[viewingPhoto, setViewingPhoto\] = useState<Pick<\s*\n\s*OrgPerson,\s*\n\s*"name" \| "photoFileId"\s*\n\s*> \| null>\(null\);/);
+  assert.match(UI, /\{viewingPhoto\?\.photoFileId && \(/);
+  assert.match(UI, /src=\{`\/api\/files\/\$\{viewingPhoto\.photoFileId\}\/stream`\}/);
+});
+
+test('both render sites open the SAME lightbox via onView, not a second modal each', () => {
+  const uses = (UI.match(/onView=\{\(\) => setViewingPhoto\(/g) ?? []).length;
+  assert.equal(uses, 2, 'the tree card and the board card must both wire onView to the one lightbox state');
+});

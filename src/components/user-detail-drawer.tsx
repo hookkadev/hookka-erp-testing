@@ -26,8 +26,9 @@
 //   * Save sends only what changed, so a department edit can never silently
 //     rewrite a role
 // ---------------------------------------------------------------------------
-import { useState } from "react";
-import { X, Trash2, Ban, CheckCircle2, Save } from "lucide-react";
+import { useRef, useState } from "react";
+import { X, Trash2, Ban, CheckCircle2, Save, Camera, Loader2 } from "lucide-react";
+import { uploadFileAsset } from "@/lib/upload-file";
 
 export type DrawerUser = {
   id: string;
@@ -40,6 +41,11 @@ export type DrawerUser = {
   reportsTo: string;
 };
 
+// Mirrors org-chart.tsx's PHOTO_ACCEPT — the image subset of ALLOWED_MIME in
+// src/api/routes/files.ts (that list also allows PDF/video, neither of which
+// a headshot ever is).
+const PHOTO_ACCEPT = "image/png,image/jpeg,image/webp,image/gif,image/heic,image/heif";
+
 type Props = {
   user: DrawerUser;
   /**
@@ -50,6 +56,12 @@ type Props = {
    * the chart draws a line for.
    */
   currentManagerKey?: string | null;
+  /**
+   * /api/files id of their current photo, or null. Comes from /api/org-chart
+   * (photoFileId), the same source org-chart.tsx's avatars read — added
+   * 2026-09-29 so a photo can be set here, not only from the Org Chart card.
+   */
+  photoFileId?: string | null;
   /** Everyone who could be an upline — excludes the person themselves. */
   uplineOptions: { id: string; label: string }[];
   departments: readonly string[];
@@ -65,6 +77,7 @@ type Props = {
 export function UserDetailDrawer({
   user,
   currentManagerKey,
+  photoFileId: initialPhotoFileId,
   uplineOptions,
   departments,
   roleOptions,
@@ -79,6 +92,9 @@ export function UserDetailDrawer({
   const [role, setRole] = useState(user.role);
   // Seeded from the org_reporting edge, not the legacy column.
   const [reportsTo, setReportsTo] = useState(currentManagerKey ?? "");
+  const [photoFileId, setPhotoFileId] = useState(initialPhotoFileId ?? null);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const photoInputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
@@ -119,6 +135,59 @@ export function UserDetailDrawer({
       return false;
     } finally {
       setBusy(false);
+    }
+  }
+
+  // Same two-step upload as the Org Chart avatar: the file goes to the
+  // existing /api/files store first (uploadFileAsset — size cap, timeout,
+  // read-back verification), then only the resulting id is handed to
+  // /api/org-chart/photo, which stamps it onto the SAME users.photo_file_id
+  // column the chart reads. fileId="" clears the photo.
+  async function setPhoto(fileId: string) {
+    setUploadingPhoto(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/org-chart/photo", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ personKey: `user:${user.id}`, fileId }),
+      });
+      const j = (await res.json().catch(() => ({}))) as {
+        success?: boolean;
+        error?: string;
+      };
+      if (!res.ok || j.success === false) {
+        setError(j.error || `Could not save the photo (HTTP ${res.status})`);
+        return;
+      }
+      setPhotoFileId(fileId || null);
+      setOk(fileId ? "Photo saved" : "Photo removed");
+      onSaved();
+    } catch {
+      setError("Could not reach the server.");
+    } finally {
+      setUploadingPhoto(false);
+    }
+  }
+
+  async function uploadPhoto(file: File) {
+    setUploadingPhoto(true);
+    setError(null);
+    try {
+      const uploaded = await uploadFileAsset({
+        file,
+        resourceType: "org-photo",
+        resourceId: `user:${user.id}`,
+      });
+      if (!uploaded.ok) {
+        setError(uploaded.error);
+        setUploadingPhoto(false);
+        return;
+      }
+      await setPhoto(uploaded.id);
+    } catch {
+      setError("Could not reach the server.");
+      setUploadingPhoto(false);
     }
   }
 
@@ -232,6 +301,59 @@ export function UserDetailDrawer({
               {ok}
             </div>
           )}
+
+          <div>
+            <span className={label}>Photo</span>
+            <div className="flex items-center gap-3">
+              <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#E2DDD8] bg-[#F5F3EF] text-sm font-semibold text-[#6B5C32]">
+                {uploadingPhoto ? (
+                  <Loader2 className="h-5 w-5 animate-spin text-[#8A8577]" />
+                ) : photoFileId ? (
+                  <img
+                    src={`/api/files/${photoFileId}/stream`}
+                    alt={user.displayName || user.email}
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  (user.displayName || user.email).slice(0, 1).toUpperCase()
+                )}
+              </div>
+              {canManage && (
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    disabled={uploadingPhoto || busy}
+                    onClick={() => photoInputRef.current?.click()}
+                    className="flex h-8 items-center gap-1.5 rounded-md border border-[#E2DDD8] px-2.5 text-[12px] text-[#6B7280] hover:text-[#1F1D1B] disabled:opacity-50"
+                  >
+                    <Camera className="h-3.5 w-3.5" />
+                    {photoFileId ? "Change" : "Add photo"}
+                  </button>
+                  {photoFileId && (
+                    <button
+                      type="button"
+                      disabled={uploadingPhoto || busy}
+                      onClick={() => setPhoto("")}
+                      className="h-8 rounded-md border border-[#E2DDD8] px-2.5 text-[12px] text-[#6B7280] hover:text-[#1F1D1B] disabled:opacity-50"
+                    >
+                      Remove
+                    </button>
+                  )}
+                  <input
+                    ref={photoInputRef}
+                    type="file"
+                    accept={PHOTO_ACCEPT}
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      e.target.value = "";
+                      if (file) void uploadPhoto(file);
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+          </div>
 
           <div>
             <label className={label} htmlFor="ud-name">
