@@ -30,6 +30,12 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
+## 2026-09-29 — 🔵 AP Invoices: double-click / No. link open the purchase invoice itself (owner「点开 invoice 我希望是直接点开 invoice，而不是跳去 purchase invoice list」→「pi 做」)(branch `fix/ap-invoices-open-pi-detail`)
+
+1. 🔵 A PI row navigated to `/procurement/pi` (the list). It now opens `/procurement/pi/<id>` — the invoice's
+   own detail page — on double-click and from the No. link; an AP bill still opens the editor below.
+   Pins updated in `tests/doc-detail-dblclick.test.mjs` / `tests/ap-invoices-chips.test.mjs`.
+
 ## 2026-09-29 — 🔵 Cash Flow: a supplier can be filed under a section — Capex / Factory Overhead / General Expense / Direct Labour (owner「我无法选其他的 categories, 类似 capex 等等」→「做」)(branch `feat/cashflow-supplier-section-categories`)
 
 1. 🔵 Engine `SUPPLIER_SECTION_TARGETS` + `supplierSectionFor`: a supplier's "Unallocated — X" / "Opening
@@ -38,9 +44,9 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
    accepts the four section keys; the Supplier categories card lists them under the four raw-material
    lines. Guard `tests/cashflow-supplier-section.test.mjs`.
 
-## 2026-09-29 — 🔵 Cash Flow: L2 collapsed groups can be opened by click (owner「这些我希望我按了 L2 我还是能自己点开」)(branch `fix/cashflow-level-expand`)
+## 2026-09-29 — ✅ Cash Flow: L2 collapsed groups can be opened by click (owner「这些我希望我按了 L2 我还是能自己点开」)(#555 d5f78e5c MERGED, deployed, prod-verified: L2 collapses PURCHASE - FABRIC / WOODEN / FILLER, a click on PURCHASE - FABRIC opens it while the others stay closed)
 
-1. 🔵 `visibleRows` gated rows by `depth <= level`, so at L2 a click on a group flipped the caret but its
+1. ✅ `visibleRows` gated rows by `depth <= level`, so at L2 a click on a group flipped the caret but its
    children stayed hidden. Now L1–L4 only set the collapse baseline (`cfCollapseForLevel` collapses
    every group at depth ≥ L) and visibility follows the collapse set alone — any group opens on click
    at any level. Guard `tests/cashflow-level-expand.test.mjs`.
