@@ -170,7 +170,8 @@ export function TradeFinanceBlock() {
                       <td className="py-1.5 px-3 text-right tabular-nums">{rm(d.amountSen - d.interestSen)}</td>
                       <td className="py-1.5 px-3 text-right">
                         {/* The bank's charged interest — keyed here (OCR prefill
-                            later); posts to 900-I001 and joins the balance. */}
+                            later); posts to the dedicated INTEREST ON TRADE
+                            FINANCE account and joins the balance. */}
                         <input
                           key={`${d.drawSourceId}:${d.interestSen}`}
                           type="number"

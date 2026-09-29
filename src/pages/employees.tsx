@@ -4941,7 +4941,9 @@ function DepartmentLaborTab({
   // The fully-loaded total only splits into Labor / Under-recorded for a full
   // single month with no category filter (same guard as the loading itself).
   const splitVisible = deptFullMonth && !categoryFilter && deptMonthFinished;
-  const columns: Column<DepartmentLaborRow>[] = [
+  // Memoised: the grid echoes its rows back via onFilteredDataChange into
+  // printRows state, so fresh columns every render re-emitted forever (BUG-12).
+  const columns: Column<DepartmentLaborRow>[] = useMemo(() => [
     {
       key: "deptName",
       label: "Department",
@@ -5082,7 +5084,7 @@ function DepartmentLaborTab({
           <span className="text-[#D1D5DB] tabular-nums">—</span>
         ),
     },
-  ];
+  ], [splitVisible]);
 
   // The DataGrid sorts/filters/searches its own copy; mirror that result back
   // here (via <DataGrid onFilteredDataChange>) so "Print Report" prints EXACTLY

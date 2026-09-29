@@ -1,9 +1,19 @@
 # Bug History
 
+> **Last verified: 2026-09-29** (branch `chore/sync-main-into-staging`, staging<-main merge): both logs merged; staging's customer-credit entry renumbered BUG-2026-09-28-210 to -218 (main's -210 is the RM stock-qty bug). Newest entry is still -217.
+
+> **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-217 (branch `fix/scan-short-supplier-code`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
+> **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-216 (branch `fix/staging-no-nightly-wipe`; ids 213-215 are on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+
+> **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-212 (branch `fix/customer-price-invoices-main`; ids 196-210 are on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-211 (branch `fix/customer-price-invoices-main`; ids 196-210 are on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-196 (branch `fix/tf-interest-account-collision`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-09-29**: BUG-2026-09-28-209 / 210 (DEV-20, staging ids) brought to `main` on branch `feat/rm-uom-options-main`; a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-09-28**: newest entry BUG-2026-09-28-210 (branch `feat/rm-uom-options`, DEV-20, PR #536; ids 196-208 are taken on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-215 (branch `fix/staging-notes-history`, staging only); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-214 (branch `fix/org-chart-photo-stream`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-211 (branch `fix/so-customer-price-on-edit`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
-> **Last verified: 2026-09-28**: newest entry BUG-2026-09-28-210 (branch `feat/customer-credit-control`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-09-28**: newest entry BUG-2026-09-28-210 (branch `feat/customer-credit-control`; renumbered to -218 in the 09-29 staging<-main sync, the id collided with main's); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-28**: newest entry BUG-2026-09-28-209 (branch `feat/rm-uom-options`, DEV-20; ids 196-208 are taken on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-25**: newest entry BUG-2026-09-25-195 (branch `feat/employees-kpi-layout`, PR #530); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-25**: newest entry BUG-2026-09-25-194 (branch `feat/dashboard-kpi-no-icons`, PR #524); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
@@ -45,6 +55,42 @@ Entries themselves stay newest-first.
 
 ---
 
+## BUG-2026-09-28-218 — customer credit control let DOs through: no overdue-term block, undelivered DOs not counted `delivery-orders` `accounting` 🟡
+
+🟡 **Fix in progress** (branch `feat/customer-credit-control` → `staging`). Client tracker BUG-34.
+
+**Symptom.** A customer over their credit limit, or with last month's invoice unpaid past their term, could still get goods out on a DO.
+
+**Root cause.** (1) The only gate was the credit limit at DO create (`createDeliveryOrderForPOs`). It compared `outstandingSen + this DO`, but `outstandingSen` only rises when a DO is DELIVERED, so DOs created but not yet delivered were invisible: several DOs in a row each passed on their own. (2) Nothing read the customer's credit term (COD / NET30 / NET60 / NET90) at all, so there was no overdue block. The DO auto-invoice stamped `dueDate` as invoice date + 30 days, while manual invoices used end of next month. (3) The gate ran only at create, not at dispatch.
+
+**Fix.** One shared gate, `src/api/lib/customer-credit.ts` (`checkCustomerCredit` + `gateCredit`): PAYMENT_OVERDUE when an issued, unpaid invoice is past `dueDateForTerms(invoiceDate, creditTerms)` (`src/lib/terms.ts`, last day of invoice month + term months), and CREDIT_LIMIT_EXCEEDED on outstanding + undelivered DOs (DRAFT / LOADED / IN_TRANSIT, priced by `do-value.ts`) + this DO. Run at DO create (all paths, incl. the delivery agent), packing-list-first (summed per customer, replaces `projectCreditFailure`) and DRAFT→LOADED (office button and driver QR). Admin override: `creditOverride: { reason }`, allowed for `delivery-orders:credit-override` (ADMIN / SUPER_ADMIN always) while kv_config `credit-override-enabled` is not `false`; each override is an audit event (`credit-override`). Invoice due dates now follow the customer's term on the DO auto-invoice and the manual invoice. Consignment-note convert keeps its limit-only check (it bills goods already out).
+
+**Verified.** `tsc -p tsconfig.app.json` exit 0; `tests/customer-credit-gate.test.mjs` + `tests/terms.test.mjs` + full `npm test` pass. NOT verified on staging yet; staging data impact UNMEASURED.
+
+---
+
+## BUG-2026-09-29-217 — Scan PI left Internal Code blank when the supplier code was ours minus the hyphen (KS08 vs KS-08) `purchase-invoices` `scan-ocr` 🟡
+
+**Symptom:** INFAB invoice CS-KL2609232, lines `KS08` and `KS01` showed "Pick from catalog" with Internal Code empty although the Supplier SKU was read correctly. `KS-16 ICE STEEL` on the same invoice filled.
+
+**Root cause:** `codeFamilyMatch` needs >= 5 characters, and `KS08` is 3 (`KS`, `8`). Even without the floor it would tie, because the catalogue holds both `KS-08` and `KS-08 SEA PINK`, and both contain the code. Text scoring cannot help: the invoice says "KISA VELVET 08 SEA PINK", the catalogue says `KS-08 SEA PINK`.
+
+**Fix** (`src/lib/supplier-material-candidates.ts`): `codeFamilyMatch` first looks for an item whose code equals the supplier's code part for part (`sameSupplierCode`), with no length floor. One hit wins, two different codes with identical parts are refused. A second rung covers a catalogue that only has a variant (`KS08` with just `KS-08 SEA PINK`): our code starting with theirs, on whole parts (`KS-1` never matches `KS-10`), needs only 3 characters (`MIN_CODE_PREFIX_CHARS`), and a tie is still refused. Mid-code containment keeps the 5-character floor.
+
+**Regression:** `tests/scan-code-family-match.test.mjs` (BUG-37 case). **Prod UNMEASURED:** re-scan CS-KL2609232 after deploy.
+
+---
+
+## BUG-2026-09-29-216 — Staging lost all test data every night `ci-cd` `staging` 🟡
+
+**Symptom:** everything created on staging was gone the next morning; the app looked freshly cloned from prod.
+
+**Root cause:** `.github/workflows/sync-staging.yml` carried `schedule: cron '0 18 * * *'` (02:00 SGT). Schedules fire from the default branch, so the copy on `main` ran nightly: `DROP SCHEMA public CASCADE`, then `pg_restore` of a prod dump. Nothing distinguished a test record from prod data. Separately `scripts/sanitize-staging.mjs` still carried the old staging ref (`zaxy...`), so after the wipe it refused to run and the payroll/PII scrub and PIN steps were skipped.
+
+**Fix:** cron removed (manual `workflow_dispatch` only). New default `mode=merge` runs `scripts/merge-prod-into-staging.mjs`: per table, COPY prod rows into a temp table and `INSERT ... ON CONFLICT DO NOTHING`, so nothing in staging is deleted or overwritten. `mode=reset` keeps the old full clone behind `confirm=SYNC`. Sanitiser `STAGING_REF` is now `kahxgvbfanbraazetefr`. Pinned by `tests/sync-staging-no-nightly-wipe.test.mjs`. NOT run against a live database yet (no credentials in the dev session): the first `mode=merge` run on GitHub is the live check.
+
+---
+
 ## BUG-2026-09-29-215 — Staging patch notes page listed 0 PRs `infrastructure` 🟢
 
 🟢 **Fixed** · The new `/staging-notes` page (staging only, PR #551) went live and read "Latest 0 PRs merged into staging".
@@ -81,7 +127,6 @@ Confirmed live: opening that exact signed URL directly in a browser tab reproduc
 
 ---
 
-
 ## BUG-2026-09-29-213 — Settings sub-pages showed the breadcrumb "Settings > Settings" `settings` 🟢
 
 **Symptom:** on the new Settings > Email Reports page (BUG-36) the breadcrumb read "Settings > Settings". User Management (`/settings/users`) had the same trail, and System Health read "Admin > Admin".
@@ -114,17 +159,15 @@ Confirmed live: opening that exact signed URL directly in a browser tab reproduc
 
 ---
 
-## BUG-2026-09-28-210 — customer credit control let DOs through: no overdue-term block, undelivered DOs not counted `delivery-orders` `accounting` 🟡
+## BUG-2026-09-28-210: Editing a raw material's stock qty dropped the decimals (12.5 MTR saved as 12) `inventory` 🟡
 
-🟡 **Fix in progress** (branch `feat/customer-credit-control` → `staging`). Client tracker BUG-34.
+🟡 **Fix in progress** (branch `feat/rm-uom-options` → `staging`, PR #536; not verified in a browser).
 
-**Symptom.** A customer over their credit limit, or with last month's invoice unpaid past their term, could still get goods out on a DO.
+**Symptom.** Found while scoping DEV-20, not reported. In Inventory → Raw Materials → Edit, typing a decimal Stock Qty (e.g. 12.5 for a fabric in MTR) saved a whole number (12). The half metre left the books with no adjustment record. Prod impact UNMEASURED.
 
-**Root cause.** (1) The only gate was the credit limit at DO create (`createDeliveryOrderForPOs`). It compared `outstandingSen + this DO`, but `outstandingSen` only rises when a DO is DELIVERED, so DOs created but not yet delivered were invisible: several DOs in a row each passed on their own. (2) Nothing read the customer's credit term (COD / NET30 / NET60 / NET90) at all, so there was no overdue block. The DO auto-invoice stamped `dueDate` as invoice date + 30 days, while manual invoices used end of next month. (3) The gate ran only at create, not at dispatch.
+**Root cause.** The Stock Qty input parsed with `parseInt(e.target.value)` while every RM quantity column (`raw_materials.balance_qty`, `rm_batches`, PO / GRN lines) is DOUBLE PRECISION.
 
-**Fix.** One shared gate, `src/api/lib/customer-credit.ts` (`checkCustomerCredit` + `gateCredit`): PAYMENT_OVERDUE when an issued, unpaid invoice is past `dueDateForTerms(invoiceDate, creditTerms)` (`src/lib/terms.ts`, last day of invoice month + term months), and CREDIT_LIMIT_EXCEEDED on outstanding + undelivered DOs (DRAFT / LOADED / IN_TRANSIT, priced by `do-value.ts`) + this DO. Run at DO create (all paths, incl. the delivery agent), packing-list-first (summed per customer, replaces `projectCreditFailure`) and DRAFT→LOADED (office button and driver QR). Admin override: `creditOverride: { reason }`, allowed for `delivery-orders:credit-override` (ADMIN / SUPER_ADMIN always) while kv_config `credit-override-enabled` is not `false`; each override is an audit event (`credit-override`). Invoice due dates now follow the customer's term on the DO auto-invoice and the manual invoice. Consignment-note convert keeps its limit-only check (it bills goods already out).
-
-**Verified.** `tsc -p tsconfig.app.json` exit 0; `tests/customer-credit-gate.test.mjs` + `tests/terms.test.mjs` + full `npm test` pass. NOT verified on staging yet; staging data impact UNMEASURED.
+**Fix.** `Number(e.target.value)` in the Edit RM dialog (`src/pages/inventory/index.tsx`). Units that genuinely must be whole (BOX / CTN / SET / PAIR by default) are now a setting in RM Settings, enforced by `raw-materials.ts` POST / PUT on a typed balance only. Regression: `tests/rm-uom-options.test.mjs`.
 
 ---
 
@@ -137,6 +180,40 @@ Confirmed live: opening that exact signed URL directly in a browser tab reproduc
 **Root cause.** `baseUOM` was a plain editable field with no guard on any of the three write paths (`src/api/routes/raw-materials.ts` PUT and bulk-import), and bulk-import's UPDATE did not fall back to the stored value.
 
 **Fix.** `checkRawMaterialUomLocked` (`src/api/lib/lock-helpers.ts`) refuses a unit change while the material has a non-zero balance, a batch with remaining qty, or an open PO line (matched on `material_code`, else the "CODE - name" prefix, same key as `mrp.ts`). PUT returns 409; bulk-import rejects the row; the Edit dialog disables the Unit select when the balance is non-zero. Bulk-import now falls back to the stored unit when the cell is blank. A unit change is audited. Regression: `tests/rm-uom-options.test.mjs`.
+
+---
+
+## BUG-2026-09-29-196 — Trade-finance interest was booked to "INCORPORATION EXPENSE WRITTEN OFF": the interest account's code 900-I001 already belonged to another account `accounting` `trade-finance` `chart-of-accounts` 🟢
+
+**Symptom (owner, 2026-09-28, while checking the Cash Flow Trade Finance block):** the Sep'26 P&L showed
+"INCORPORATION EXPENSE WRITTEN OFF RM 1,637.08" — an expense the company never incurred that month.
+Measured on prod: it is exactly the Houzs Century trade-finance interest for September
+(Σ of the `tf_interest` legs, 20 legs on 900-I001 in total: DR 2,458.96 / CR 821.88, net 1,637.08;
+**no** genuine incorporation-expense leg on the account).
+
+**Root cause:** `TF_INTEREST_ACCT` (accounting.ts, `PUT /trade-finance/draw-interest`, 2026-08-11) was
+`{ code: "900-I001", name: "INTEREST ON TRADE FINANCE" }` and the account was created with
+`INSERT … ON CONFLICT (code) DO NOTHING`. The owner's AutoCount-style chart already had 900-I001 =
+INCORPORATION EXPENSE WRITTEN OFF (900-I002 = INTERNET CHARGES, 900-I003 = INSURANCE EXPENSES), so the
+insert silently did nothing and every interest posting debited the owner's account. Same class as the
+`ON CONFLICT DO NOTHING` self-apply traps in HOOKKA-GOTCHAS: a create that never checks what it
+collided with.
+
+**Fix (branch `fix/tf-interest-account-collision`):**
+- `TF_INTEREST_ACCT` → a free code, `900-I004 INTEREST ON TRADE FINANCE`, created under
+  `902-0000 FINANCE COSTS` (beside `900-L002 LOAN INTEREST`, so the P&L files it under Finance Costs).
+- `ensureTfInterestAccount` creates it once and **name-checks** the row: a foreign account under our
+  code makes the interest post refuse with 409 instead of absorbing the leg.
+- `POST /api/accounting/trade-finance/interest-account-repoint?dry=1` moves every `tf_interest%` leg
+  off 900-I001 onto the new account (ids / dates / sources / amounts untouched — only `accountCode`),
+  audited, idempotent. Guard: `tests/tf-interest-account.test.mjs`.
+
+**Verification (prod, 2026-09-29, #547 merged as 1c693840):** owner confirmed the code (「那就
+900-I004」; his first pick 900-I002 was INTERNET CHARGES). Dry run → 20 legs, DR 2,458.96 / CR 821.88;
+real run → 900-I001 reads 0 legs / 0.00, 900-I004 carries the 20 (DR 2,458.96 / CR 821.88); the COA
+row is "INTEREST ON TRADE FINANCE", EXPENSE, parent 902-0000. Sep'26 P&L re-read: INTEREST ON TRADE
+FINANCE RM 1,637.08 under Operating Expenses (beside LOAN INTEREST), INCORPORATION EXPENSE WRITTEN OFF
+gone. Guard `tests/tf-interest-account.test.mjs`.
 
 ---
 

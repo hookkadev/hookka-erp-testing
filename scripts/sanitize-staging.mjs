@@ -64,7 +64,7 @@ const ROTATE_QR = process.argv.includes("--rotate-qr");
 // The staging Supabase project ref. Both the direct host
 // (db.<ref>.supabase.co) and the session pooler (user postgres.<ref>@...)
 // carry the ref, so one check covers both URL shapes.
-const STAGING_REF = "zaxygxwadidiqcphibma";
+const STAGING_REF = "kahxgvbfanbraazetefr";
 const PROD_REF = "vpwdqtsxexpiqxzweivd";
 
 // The shared staging password. Staging is a test system; every user gets the

@@ -1,5 +1,9 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-29**: branch `chore/sync-main-into-staging` (staging<-main sync): DEV-20 conflicts take main's superset (`loadUomConfig` + `wholeUoms`), staging's R17 "On draft DO" label kept; staging's BUG-2026-09-28-210 (credit control) renumbered to -218.
+
+> **Last verified: 2026-09-29**: branch `fix/staging-no-nightly-wipe` added below (PR #570 open, its entry is the newest).
+> **Last verified: 2026-09-29**: branch `feat/production-multi-select-filters` added below (open, its entry is the newest).
 > **Last verified: 2026-09-29**: branch `feat/email-report-schedule` (to `staging`) added below as BUG-36 item 4.
 > **Last verified: 2026-09-29** — branch `feat/email-report-schedule` (→ `staging`) added below (BUG-36 item 4, its entry is under BUG-36).
 > **Last verified: 2026-09-29** — branch `feat/org-chart-photo-ux` (→ `staging`) added below (open, its entry is the newest).
@@ -54,7 +58,7 @@ Verified: `tsc -p tsconfig.app.json` clean; `npm test` full suite green (5098 pa
 - 4. ✅ (branch `feat/email-report-schedule` to `staging`) Per-report schedule on Settings > Email Reports: daily / weekly (Mon to Sat) / monthly (day 1 to 28) at an SGT time. `daily-reports.yml` now fires every 15 min at `POST /api/internal/reports/due-trigger`, which sends whatever `isDue` says is due and records the day in `kv_config['daily_report_last_sent']` (marked before sending, so never twice; a failed send is not retried). Unconfigured reports keep their old times. Report CONTENT is unchanged: a weekly/monthly email still covers the day it is sent. Like item 2, the cron change only runs once it reaches `main`. Verified: `tests/report-settings.test.mjs`, tsc strict, page rendered standalone with stubbed API (controls + PUT body); not driven against a live DB.
 - 3. ❓ Open for Lim: overdue scope (production-late only vs any order late to the customer); carry slipped job cards into today's production list.
 
-## 2026-09-28 — 🔵 BUG-34 Customer credit control: quota + overdue-term DO block, admin override (branch `feat/customer-credit-control` → `staging`, BUG-2026-09-28-210)
+## 2026-09-28 — 🔵 BUG-34 Customer credit control: quota + overdue-term DO block, admin override (branch `feat/customer-credit-control` → `staging`, BUG-2026-09-28-218)
 
 1. 🔵 Term-aware due date: `termMonths` / `dueDateForTerms` in `src/lib/terms.ts` (COD/NET30/NET60/NET90 = 0/1/2/3 months, due = last day of invoice month + N). Used by the DO auto-invoice and the manual invoice POST (was +30 days / fixed 1 month).
 2. 🔵 One shared gate `src/api/lib/customer-credit.ts`: PAYMENT_OVERDUE (issued unpaid invoice past its term due date, derived from invoiceDate + the customer's current term) and CREDIT_LIMIT_EXCEEDED (outstanding + undelivered DRAFT/LOADED/IN_TRANSIT DOs + this DO). Limit 0 = no quota check.
@@ -83,6 +87,238 @@ Ask (DEV-20, requester VIOLET): the RM UOM should be selectable from options tha
 2. 🔵 Add RM (single + bulk), Edit, Batch Edit UOM dropdowns read the group's allowed list (falls back to the full list when the group has none set). One shared list replaces four hardcoded ones.
 3. 🔵 Server: POST / PUT / bulk-import reject a UOM not allowed for the group; PUT refuses a UOM change while the material has stock, open batches or open PO lines.
 4. 🟡 Owner questions, NOT built: (a) buy in ROLL / use in MTR conversion; (b) creating brand-new categories. Prod item-group / UOM spread is UNMEASURED (no prod access this session).
+
+---
+
+## 2026-09-29 — 🔵 Staging wiped every night; refresh must keep test data (branch `fix/staging-no-nightly-wipe` → `main`)
+- 1. 🔵 Cause: `sync-staging.yml` cron (18:00 UTC) on `main` dropped staging's public schema. Cron removed, manual dispatch only. BUG-2026-09-29-216.
+- 2. 🔵 New `mode=merge` (default): `scripts/merge-prod-into-staging.mjs` inserts prod rows staging lacks, never deletes or overwrites. `mode=reset` = old full clone, needs `confirm=SYNC`.
+- 3. 🔵 `sanitize-staging.mjs` STAGING_REF `zaxy...` changed to `kahx...` (it was refusing to run, so the scrub and PIN steps were skipped after each wipe).
+- 4. 🟡 UNMEASURED: merge not run against a live DB (no credentials in this session). First step after merge: dispatch `Sync prod → staging` with mode=merge and read the per-table log. The sanitiser also re-fakes contact fields and passwords on ALL staging rows, including test rows.
+
+## 2026-09-29 — ✅ Cash Flow: one sign convention (owner「确定一下整体的符号哦，有点乱，loan from houzs … 应该是我借出去吧」→「做，统一符号」)(#569 e96e89c5 MERGED, deployed, prod-verified)
+
+1. ✅ Checked first (prod): Aug'26 "LOAN FROM RELATED PARTY - HOUZS VENTURE (71,457.13)" = OCB-2608-007's three lines
+   (5,702.00 / 22,873.50 / 42,881.63) debited to 440-0030, which was 0 before → a DEBIT balance, Houzs Venture owes
+   Hookka 71,457.13 — money lent out, as the owner said (the account's name says FROM; a booking choice left to the
+   owner / accountant). CAPEX "PLANT & MACHINERY (61,400.00)" = ODB-2608-001, a machine sold to Houzs → money in.
+2. ✅ LOAN and UNALLOCATED were inflow-signed while every other block below the result was outflow-signed. Now all
+   blocks except Revenue Collection read amount = money out, (amount) = money in; LOAN renamed "Loan repaid / lent ·
+   (received)"; the page footer states the rule. Figures and the cash surplus unchanged. Guard
+   `tests/cashflow-unified-signs.test.mjs`.
+3. ✅ Prod row diff (before vs after, every row of 2026-06/07/08/09): 129 rows each — 123 identical, 6 (the Loan /
+   Unallocated rows) exactly sign-flipped, zero other differences; operating surplus and Cash Surplus unchanged in all four
+   months. Aug now reads Loan repaid / lent 71,457.13 and Unallocated 145,676.25 (both money out); the footer states the rule.
+
+## 2026-09-29 — ✅ Cash Flow: interest to Finance Cost; MEDITEX `(A1)` no longer Unallocated (owner「这个应该是 finance cost 那边吧 … 不应该出现 unallocated，就是 meditex 那个」→「做，两样都做」)(#568 abccf9ab MERGED, deployed, prod-verified by a before/after row diff of 2026-06..09)
+
+1. ✅ Accounts under the chart's FINANCE COSTS parent (INTEREST ON TRADE FINANCE 900-I004, LOAN INTEREST 900-L002,
+   HIRE PURCHASE INTEREST 900-H001) default to the Finance Cost block below Net operation surplus (the owner's
+   drag still wins). Sep'26 expected: operating surplus 50,196.35 → 51,832.83; Finance Cost 1,636.48.
+2. ✅ A PI line whose code is not in the RM master now resolves like GRN receiving does: price-list SKU, then
+   the exact product name of one master item. MEDITEX `MED-PSF15.064HCS(A1)` (44 lines; same name and price
+   as `MED-PSF15.064HCS(14)(L)`) → B.FILLER; Sep'26 "Unallocated — MEDITEX" 10,450.00 moves from under
+   PURCHASE - FABRIC to PURCHASE - FILLER. Lines matching nothing still show as Unallocated.
+3. 🟡 Deviation from what the owner approved, stated: the owner said 做 to ADDING a price-list row `(A1)` →
+   `(14)(L)`. Not done — MEDITEX's price list already carries `(14)(L)` at 836, and PO SKU recovery
+   (`fillBlankSupplierSku`, purchase-orders.ts) would find two same-price candidates and blank the SKU on
+   MEDITEX fibre PO lines. The name-match rule gives the same result with no data entry.
+4. ✅ Prod row diff (before vs after, every row of 2026-06/07/08/09): Cash Surplus unchanged in all four months
+   (−70,201.45 / 128,430.03 / 52,178.41 / 10,500.86). Only these moved — Sep: "Unallocated — MEDITEX" 10,450.00 gone,
+   PURCHASE - FABRIC 56,568.62 → 46,118.62, PURCHASE - FILLER / B.FILLER +10,450.00; FINANCE COSTS 1,636.48 moved from
+   General Expense to Finance Cost; operating surplus 50,196.35 → 51,832.83. Aug: finance costs 36,717.99 (loan interest
+   32,797.99 + HP interest 3,920.00) moved; operating surplus 176,501.58 → 213,219.57. Jul: "Unallocated — MEDITEX"
+   9,488.80 gone → B.FILLER; and PI-2606-058 (NLY) "GREEN SPONGE" 367.20 — keyed with NO code — resolved by exact name
+   to `NLY-22GH - 1″` (S.FILLER), the code the other two NLY green-sponge PIs carry ("Unallocated — NLY" 4,762.56 →
+   4,395.36). Jun: loan interest 150.00 moved; operating surplus 7,528.77 → 7,678.77.
+
+## 2026-09-29 — 🟡 System RM stock stopped at end of March; material-code gap `MED-PSF15.064HCS(A1)` (owner: monthly stock-take is enough, stock parked until management decides)
+
+Measured on prod 2026-09-29, read-only:
+1. 🟡 Polyester fibre `MED-PSF15.064HCS(14)(L)` (rm-154): 48 batches (1 OPENING + 47 GRN imports), the last on
+   30/03/2026. The `(A1)` code sits on 12 GRN-IMPORT-PI-2604/2605 lines (12/04–28/05, all POSTED) that produced
+   **no batch on any material**; the 8 June–Aug MEDITEX PIs with `(A1)` were keyed directly with no GRN.
+2. 🟡 System-wide: 1,344 RM batches, only 1 received after 01/04/2026; none of the 35 April–May import GRNs
+   produced a batch (any material); since June purchases are keyed as PIs without GRNs. System RM stock
+   quantities are frozen at end-March (the P&L "50 materials with negative stock" banner). The P&L itself is
+   unaffected (`rm_valuation_mode = stock_take_only`).
+3. 🟡 Owner 2026-09-29: 「每月盘点就够，库存先不管。我和 management 讨论后决定」 — nothing to do until then.
+4. 🟡 Still open: `MED-PSF15.064HCS(A1)` (29 PI lines, RM 27,588.00) and the typo `COMFY LIFGHT GREY` are not in
+   the RM master, so Cash Flow shows them as "Unallocated — MEDITEX" under FABRIC (really FILLER). A code-family
+   auto-rule was measured (it would guess right; 5 of 477 master families are multi-group and would be refused)
+   but NOT built — the owner worried it hides mistakes; the recommendation is a master-data fix, owner to decide.
+
+## 2026-09-29 — ✅ Cash Flow statement: 9 s → 0.65 s, figures identical (owner「为什么他的 load 这么慢」→「可以做，但是还是主要确保数据对」)(#565 7a8f5596 MERGED, deployed, prod-verified)
+
+1. ✅ Measured on prod: `GET /cashflow-statement?period=2026-09` 8,634 / 9,349 ms (two runs) vs 50–120 ms for
+   every other endpoint. Cause: one query per ticked supplier payment (115) + one per settled PI (298)
+   → ~415 serial round-trips. Fix: both reads in bulk (chunked IN lists of 200); `piWeightsFor` /
+   `weightsForPayment` become pure lookups with the identical arithmetic. Guard
+   `tests/cashflow-statement-batching.test.mjs`.
+2. ✅ Data-equality proof (prod, before vs after the deploy, same browser): 2026-06 / 07 / 08 / 09 — 129 rows each,
+   every row IDENTICAL (SHA-256 prefixes 118a689ff6dacd5d / 69299de183df897c / 6be1ffd86ad28126 / f6eceeac6c501a87
+   before AND after, zero row differences). Load time 8.3–8.9 s → 644–670 ms per month. Baselines deleted from the
+   browser afterwards.
+
+## 2026-09-29 — ✅ Cash Flow: Trade Finance block — owner's final ruling, grossed up and below the operating result (「raw material 加, drawdown 减, 一加一减 … 放在 after operation surplus」→「做」)(#560 3ad9dedb MERGED, deployed, prod-verified Sep'26: Raw Materials 190,448.08 · Net operation surplus 50,196.35 · Trade Finance: Drawdown MEDITEX (33,807.30) / NLY (30,000.00) / OCEAN SKY (33,352.38), Interest (1,637.08), Repaid +98,067.52 = (729.24) · INTEREST ON TRADE FINANCE 1,637.08 under General Expense › FINANCE COSTS · Cash Surplus 10,500.86 = the bank, and the lines now add up to it exactly: 50,196.35 + 729.24 − 1,747.10 − 38,677.63)
+
+## 2026-09-29 — 🔵 Production Tracking: Category / Customer / State filters become multi-select (branch `feat/production-multi-select-filters` → `main`)
+- 1. 🔵 Category dropdown → checkbox dropdown with Select all / Clear all; label "All categories" / the one name / "N categories selected". State `cat` is now `string[]` (URL `?cat=A&cat=B`; old `?cat=SOFA` links still read). Server `?cat=` stays single-value: sent only when exactly one is ticked, 2+ fetch all and filter client-side.
+- 2. 🔵 Same for Customer (`?customer=`) and State (`?state=`), both client-side filters only. Lists over 8 options get a search box; "Select all" then ticks the matching ones. List scrolls past 60vh.
+- Not yet driven in a browser: the only local API is the prod proxy and it needs a sign-in. tsc strict clean.
+
+## 2026-09-29 — 🔵 AP Invoices: double-click / No. link open the purchase invoice itself (owner「点开 invoice 我希望是直接点开 invoice，而不是跳去 purchase invoice list」→「pi 做」)(branch `fix/ap-invoices-open-pi-detail`)
+
+1. ✅ Replaces the 2026-09-28 「倒反」 version (draw counted as spend inside COST / EXPENSE OUT, repayment as
+   an offset — once repaid the purchase vanished and the lines no longer added up to the bank). Now a
+   TF-paid purchase splits by material under Raw Materials in the month of the draw; the facility side
+   is its own block right after Net operation surplus, outflow-signed: Drawdown (negative), Interest
+   charged (negative), Repaid (positive); the block nets to the change in what is owed. Interest expense
+   lands on 900-I004 under General Expense › Finance Costs. Sep'26 expected: Raw Materials 190,448.08,
+   Net operation surplus 148,263.87 → 50,196.35, Trade Finance (97,159.68) (1,637.08) +98,067.52 =
+   (729.24), Cash Surplus 53,600.71 unchanged. Guard `tests/cashflow-trade-finance.test.mjs` rewritten.
+
+## 2026-09-29 — ✅ AP Invoices: double-click / No. link open the purchase invoice itself (owner「点开 invoice 我希望是直接点开 invoice，而不是跳去 purchase invoice list」→「pi 做」)(#559 36d7e1a7 MERGED, deployed, prod-verified: double-click on a PI row lands on /procurement/pi/<id>)
+
+1. ✅ A PI row navigated to `/procurement/pi` (the list). It now opens `/procurement/pi/<id>` — the invoice's
+   own detail page — on double-click and from the No. link; an AP bill still opens the editor below.
+   Pins updated in `tests/doc-detail-dblclick.test.mjs` / `tests/ap-invoices-chips.test.mjs`.
+
+## 2026-09-29 — ✅ Cash Flow: a supplier can be filed under a section — Capex / Factory Overhead / General Expense / Direct Labour (owner「我无法选其他的 categories, 类似 capex 等等」→「做」)(#556 63c57bf5 MERGED, deployed, prod-verified: the Supplier categories dropdown lists 10 options incl. Capital Expenditure (CAPEX) / Factory Overhead / General Expense / Direct Labour)
+
+1. ✅ Engine `SUPPLIER_SECTION_TARGETS` + `supplierSectionFor`: a supplier's "Unallocated — X" / "Opening
+   creditors — X" money (payments with no material line) moves to the chosen section whole, as a row
+   named after the supplier; a PI with material lines still splits by material. `PUT /cashflow/map`
+   accepts the four section keys; the Supplier categories card lists them under the four raw-material
+   lines. Guard `tests/cashflow-supplier-section.test.mjs`.
+
+## 2026-09-29 — ✅ Cash Flow: L2 collapsed groups can be opened by click (owner「这些我希望我按了 L2 我还是能自己点开」)(#555 d5f78e5c MERGED, deployed, prod-verified: L2 collapses PURCHASE - FABRIC / WOODEN / FILLER, a click on PURCHASE - FABRIC opens it while the others stay closed)
+
+1. ✅ `visibleRows` gated rows by `depth <= level`, so at L2 a click on a group flipped the caret but its
+   children stayed hidden. Now L1–L4 only set the collapse baseline (`cfCollapseForLevel` collapses
+   every group at depth ≥ L) and visibility follows the collapse set alone — any group opens on click
+   at any level. Guard `tests/cashflow-level-expand.test.mjs`.
+
+## 2026-09-29 — ✅ AP Invoices: kind / status chips + supplier picker instead of the two dropdowns (owner「我希望是这样选，而不是往下滑。先确定」→「做」)(#549 62f8a1d8 MERGED, deployed, prod-verified: chips with counts, AP-invoices click filters the list, Purchase invoices count 534, dropdowns gone)
+
+1. ✅ `AP_KIND_CHIPS` (All / AP invoices / Purchase invoices) and `AP_STATUS_CHIPS` (All / Open /
+   Paid / Cancelled) as chip rows with a count on each (each count reflects the other filters);
+   a `SearchableSelect` "All suppliers" picker; the list loads once and filters client-side.
+   Default stays ALL; the bill editor still opens below on "New AP bill"; double-click untouched.
+   Guard `tests/ap-invoices-chips.test.mjs`.
+
+## 2026-09-29 — ✅ BUG-2026-09-29-196 TF interest booked to 900-I001 "INCORPORATION EXPENSE WRITTEN OFF" (owner「做,用 900-I002」→ 900-I002 is INTERNET CHARGES, so 900-I004 proposed) (#547 1c693840 MERGED, deployed; repoint run on prod, P&L verified)
+
+1. ✅ `TF_INTEREST_ACCT` → `900-I004 INTEREST ON TRADE FINANCE` under `902-0000 FINANCE COSTS`;
+   `ensureTfInterestAccount` name-checks the code (foreign account → 409, never absorbed).
+2. ✅ `POST /trade-finance/interest-account-repoint?dry=1` moves the 20 `tf_interest` legs
+   (DR 2,458.96 / CR 821.88, net 1,637.08 — measured on prod 2026-09-29, nothing else on 900-I001)
+   off the old code; audited, idempotent. Guard `tests/tf-interest-account.test.mjs`;
+   BUG-HISTORY entry written 🟡.
+3. ✅ Owner: 「那就 900-I004」. Prod run 2026-09-29: dry → 20 legs, DR 2,458.96 / CR 821.88; real →
+   900-I001 now 0 legs, 900-I004 carries the 20; Sep'26 P&L shows INTEREST ON TRADE FINANCE
+   1,637.08 and the INCORPORATION line is gone. BUG-HISTORY → 🟢 (follow-up [no-docs] commit).
+
+## 2026-09-28 — ✅ Cash Flow: Trade Finance block (owner「用 trade finance 还我要当做 trade finance - Houzs Century」→「倒反 … 我会看 total spend」→「对，做」)(#541 764ebe82 + #542 b187526b MERGED, deployed, prod-verified; item 5 stays 🟡)
+
+Checked first (code + prod): the statement only counts SBK/SCH bank legs, so a
+supplier paid from 310-0020 TRADE FINANCE - HOUZS CENTURY (DR 400 · CR 310-0020)
+appeared nowhere, while the repayment (DR 310-0020 · CR bank) sat under
+Unallocated as (64,601.03). Prod 2026-09-28: 8 draws — Jul 95,513.04 / Aug
+31,741.29 / Sep 97,775.56 — repaid 64,601.03 (Sep), owing 160,428.86.
+
+1. 🔵 New section `TRADE_FINANCE` in `src/lib/cashflow-engine.ts`: inside COST /
+   EXPENSE OUT right after Raw Materials, spend-signed and operating (= the
+   owner's total spend). Rows nest under the facility account as the group
+   ("TRADE FINANCE - HOUZS CENTURY SDN BHD"): one positive row per supplier
+   "(via TF)" in the month of the draw, one negative "Repaid to <lender>" row
+   when repaid; the block nets to what is still owed. `ClassifiedLeg.lineLabel`
+   + `tfLineOrder`.
+2. 🔵 `computeCashflowStatement`: facility accounts from `getTfSources` (no
+   hard-coded code); an entry with no bank leg but a CR on the facility becomes
+   a debit pseudo-leg (a void's DR reversal nets it out); a bank-touching entry's
+   facility leg (repayment) is flipped to a credit and skips the raw-material
+   split; the facility account defaults to the block unless the owner dragged
+   it elsewhere. Cash Surplus / bank b/f–c/f unchanged (bank legs only).
+3. 🔵 Guard `tests/cashflow-trade-finance.test.mjs` (engine rows + caller scan).
+4. 🔵 First prod read after #541 (764ebe82): block live (MEDITEX 33,807.30 /
+   NLY 30,000.00 / OCEAN SKY 33,352.38 / Repaid (64,601.03)), Unallocated clean,
+   Cash Surplus 53,600.71 bank-true — but the lender's interest arrived as 20
+   per-draw rows ("TF interest · PV-… (via TF)", net 1,637.08). Follow-up:
+   `tf_interest` entries fold into one "Interest charged by <lender>" row
+   (order: draws → interest → repaid).
+5. 🟡 **Found while measuring (not fixed — owner's call): `TF_INTEREST_ACCT`
+   posts to code `900-I001`, but that code already exists in the COA as
+   "INCORPORATION EXPENSE WRITTEN OFF" (EXPENSE, parent 900-0000), so every
+   trade-finance interest leg lands there — the Sep'26 P&L line
+   "INCORPORATION EXPENSE WRITTEN OFF RM 1,637.08" IS the TF interest.** Fix
+   needs a free code for "INTEREST ON TRADE FINANCE" + a re-point of the
+   existing `tf_interest` DR legs (ledger edit → owner presses).
+
+## 2026-09-28 — ✅ Payments hub: Supplier Payment rows show Paid From (owner「supplier payment 也没记银行户口?那怎么对账」→「做」)(#538 MERGED 3ecc42c1, deployed, prod-verified)
+
+Prod verification (erp.hookka.com, right after the deploy): `GET /api/supplier-payments`
+returns 113 rows; **every ACTIVE one (83/83) carries `bankAccount`** — 75 × 310-0010
+(HLBB) + 8 × 310-0020 (trade-finance repayments); the 30 without a bank are all VOID
+(shown as "—"). Page header still 250 = 95 + 1 + 112 + 42; the 112 SP rows' Paid From
+cells read 310-0010 × 74, 310-0020 × 8, — × 30. Nothing written on prod.
+
+1. 🔵 Answer first: nothing was ever missing for reconciliation — `supplier_payments`
+   keeps no bank column, but every payment's CR leg on `ledger_journal_entries`
+   carries the bank (`buildSupplierPaymentCreate` leg 2 = `payFrom`), and Cash
+   Book reads exactly that leg (`loadBankRecoState`). Only the merged list's
+   "Paid From" cell was blank for SP rows.
+2. 🔵 `GET /api/supplier-payments` now fills `bankAccount` per payment from the
+   newest CR leg with `sourceType LIKE 'supplier_payment%'` that is not the AP
+   control / FX account (a restate re-posts under its own source; a void
+   reverses with a DR leg). The hub's `buildPayRows` uses it as `via`, so the
+   Paid From column, the popup and the bank filter all work for SP rows; only a
+   payment with no bank leg (contra) is hidden by a bank pick, with the hint.
+   Read-side only.
+
+## 2026-09-28 — ✅ Payment Vouchers 清单合并三门（owner「other creditor 的 payment 没出现在 payment voucher?」→「做」）(#537 MERGED ed38a8b2, deployed, prod-verified)
+
+Prod verification (erp.hookka.com, right after the deploy): header reads
+**250 payments · 95 voucher · 1 AP · 112 supplier · 42 other creditor**
+(= 96 + 113 − 1: HPV-2609-050 is an AP voucher whose settlement doc carries
+the same number, listed once as the voucher); door filter counts OCP 42 / SP
+112 / AP 1 / All 250; HPV-2609-040 (GVP, RM 2,850.00, OCB-2609-003) shows with
+its OCP badge, double-click opens "Other Creditor Payment HPV-2609-040" with
+Paid from 310-0010 · CASH AT BANK - HLBB, the bill line and Print / Open on
+its page / Void; Escape closes it. Nothing written on prod.
+
+Owner's ask, measured on prod first (erp.hookka.com, 2026-09-28): the Payment
+Vouchers list carried **96** rows (95 expense vouchers + 1 AP payment) while
+**42** other-creditor payments (RM 338,498.00, May–Sep, all ACTIVE) and **113**
+supplier payments were invisible on it — they live in `other_party_payments` /
+`supplier_payments` with no `payment_vouchers` row, yet they are minted from the
+SAME counter and carry the same `HPV-…` series (e.g. HPV-2609-050, 24/09,
+INFAB). One numbering book, three lists.
+
+1. 🔵 The list now merges all three money-out doors (the money-out twin of the
+   Receipts hub): Payment Voucher / AP Payment (`payment_vouchers`), Supplier
+   Payment (`/api/supplier-payments`), Other Creditor Payment
+   (`/api/accounting/other-party-payments?type=CREDITOR`). Read-side only —
+   no engine, no write path and no recorded entry is touched.
+2. 🔵 Each row carries its door badge; a foreign row shows its bills / invoices
+   on expand, opens the same `DocDetailModal` on double-click, prints its own
+   voucher and voids / unvoids through its own endpoint (exactly what the
+   Receipts hub does). A door filter sits beside the bank filter.
+3. 🔵 `buildSupplierPaymentVoucher` moved to `src/lib/supplier-payment-voucher.ts`
+   so both the Supplier Payment page and the hub print the identical voucher
+   (react-refresh forbids a plain-function export from a component module —
+   the #471 lesson).
+## 2026-09-28 — 🔵 DEV-20 Raw Material UOM options per category (branch `feat/rm-uom-options` → `staging`, #536 merged; follow-up `feat/rm-whole-uoms`; both brought to `main` on `feat/rm-uom-options-main`)
+
+Ask (DEV-20, requester VIOLET): the RM UOM should be selectable from options that fit the material (Fabric: MTR / ROLL; other groups their own), and used for purchasing, stock, production and inventory.
+
+1. 🔵 "Categories" button on Inventory → Raw Materials renamed **RM Settings**; new "Allowed UOMs" section per item group, stored in `kv_config['variants-config'].uomOptions`.
+2. 🔵 Add RM (single + bulk), Edit, Batch Edit UOM dropdowns read the group's allowed list (falls back to the full list when the group has none set). One shared list replaces four hardcoded ones.
+3. 🔵 Server: POST / PUT / bulk-import reject a UOM not allowed for the group; PUT refuses a UOM change while the material has stock, open batches or open PO lines.
+4. ✅ Owner answered 2026-09-29: (a) ROLL / MTR conversion is OUT of DEV-20 scope (DEV-20 is RM input only; PO / GRN carry no unit today, a conversion would be its own ticket); (b) creating brand-new categories not built. Prod item-group / UOM spread is UNMEASURED (no prod access this session).
+5. 🔵 Items 1-4 MERGED to `staging` as PR #536 (labelled `staging`; the conflict was CODEBASE-MAP restamp lines only). Items 6-7 follow on branch `feat/rm-whole-uoms` → `staging`.
+6. 🔵 Edit RM dialog Stock Qty used `parseInt`, so 12.5 MTR saved as 12. Now `Number`.
+7. 🔵 Whole-number units: RM Settings gets a global list of units that cannot be fractional (default BOX / CTN / SET / PAIR; PCS left out because foam sheets in PCS consume fractionally). Enforced on the Inventory page ONLY (owner correction: not PO, GRN or Stock Adjustments): the RM balance typed on Add RM / Edit RM, checked by `raw-materials.ts` POST and PUT (PUT only when the number changes). NOT on production consumption. Owner answered 2026-09-29: no per-category rule, users pick the unit per material.
 
 ---
 

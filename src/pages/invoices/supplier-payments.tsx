@@ -8,9 +8,8 @@ import { SearchableSelect } from "@/components/ui/searchable-select";
 import { defaultBankCode } from "@/lib/default-bank";
 import { formatCurrency, formatDateDMY, formatRM } from "@/lib/utils";
 import { useCachedJson, invalidateCachePrefix } from "@/lib/cached-fetch";
-import { COMPANY } from "@/lib/constants";
-import { amountInWords } from "@/lib/amount-in-words";
-import { printVouchers, type VoucherSpec, type VoucherLine } from "@/lib/print-voucher";
+import { printVouchers } from "@/lib/print-voucher";
+import { buildSupplierPaymentVoucher } from "@/lib/supplier-payment-voucher";
 import { useRowSelection } from "@/lib/use-row-selection";
 import { BatchActionsBar } from "@/components/accounting/batch-actions-bar";
 import { CreditCard, Printer } from "lucide-react";
@@ -111,40 +110,10 @@ type TfSourceRow = {
   draws: TfDrawRow[];
 };
 
-// COMPANY.HOOKKA → the VoucherSpec.company shape (single source of truth);
-// mirrors VOUCHER_COMPANY in accounting/index.tsx.
-const VOUCHER_COMPANY: VoucherSpec["company"] = {
-  name: COMPANY.HOOKKA.name,
-  addressLines: COMPANY.HOOKKA.addressLines,
-  regNo: COMPANY.HOOKKA.regNo,
-  tin: COMPANY.HOOKKA.tin,
-  phone: COMPANY.HOOKKA.phone,
-  email: COMPANY.HOOKKA.email,
-};
-
-// One supplier payment → a SUPPLIER PAYMENT VOUCHER: one line per purchase
-// invoice paid (PI No · bank amount), total = totalBankSen. Money stays integer
-// sen, formatted with formatCurrency. Mirrors buildPvVoucher in accounting/index.
-function buildSupplierPaymentVoucher(p: PaymentGroup): VoucherSpec {
-  const active = (p.lifecycleState ?? "ACTIVE") === "ACTIVE";
-  const lines: VoucherLine[] = p.lines.map((l) => ({
-    cells: [l.piNo, l.supplierInvoiceNo || "—", formatCurrency(l.amountSen)],
-  }));
-  return {
-    title: active ? "SUPPLIER PAYMENT VOUCHER" : "SUPPLIER PAYMENT VOUCHER — VOID",
-    company: VOUCHER_COMPANY,
-    docNo: p.paymentNo,
-    date: formatDateDMY(p.date),
-    partyLabel: "Paid To",
-    partyName: p.supplierName ?? "",
-    columns: [{ label: "Purchase Invoice" }, { label: "Supplier Inv No" }, { label: "Amount", align: "right" }],
-    lines,
-    totalCells: ["Total", "", formatCurrency(p.totalBankSen)],
-    amountWords: amountInWords(p.totalBankSen),
-    signatures: [{ label: "Prepared by" }, { label: "Approved by" }, { label: "Received by" }],
-    printedOn: formatDateDMY(new Date()),
-  };
-}
+// The printed SUPPLIER PAYMENT VOUCHER is built by
+// src/lib/supplier-payment-voucher.ts — the Payments hub prints the identical
+// voucher from the same builder (owner 2026-09-28: the hub lists this page's
+// payments too).
 
 export default function SupplierPaymentsPage() {
   const { toast } = useToast();
