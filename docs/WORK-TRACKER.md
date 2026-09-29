@@ -34,6 +34,12 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
 
+## 2026-09-29 — 🔵 BUG-36 Daily email reports: per-report PIC module (Lim, High) (branch `feat/report-pics` → `staging`)
+- Ask: 3 daily emails (overdue AM, today's production orders AM, today's efficiency + revenue after 6pm), set up "as a full module, insert PIC (multiple), then it triggers and sends".
+- Found: all report kinds already exist and send on schedule (GitHub `daily-reports.yml`, measured 2026-09-29: last 4 runs `sent 3 · failed 0`). Missing: any UI for recipients (one shared list, DB/env only).
+- 1. ✅ (not pushed; tsc/lint/tests green, UI NOT driven live: only local DB is staging, read-only) PIC module: Settings → Email Reports page, per-report on/off + multiple PICs + send-test. Stored in `kv_config['daily_report_settings']`; unconfigured reports keep today's recipients.
+- 2. ⏸ Overdue to the morning, efficiency to today @ ~18:30 + revenue: waiting on Lim's revenue definition.
+
 ## 2026-09-28 — 🔵 BUG-34 Customer credit control: quota + overdue-term DO block, admin override (branch `feat/customer-credit-control` → `staging`, BUG-2026-09-28-210)
 
 1. 🔵 Term-aware due date: `termMonths` / `dueDateForTerms` in `src/lib/terms.ts` (COD/NET30/NET60/NET90 = 0/1/2/3 months, due = last day of invoice month + N). Used by the DO auto-invoice and the manual invoice POST (was +30 days / fixed 1 month).

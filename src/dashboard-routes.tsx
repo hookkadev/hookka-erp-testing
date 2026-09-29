@@ -163,6 +163,7 @@ const ComponentKits = lazy(() => import('./pages/component-kits'))
 const Settings = lazy(() => import('./pages/settings'))
 const Organisations = lazy(() => import('./pages/settings/organisations'))
 const SettingsUsers = lazy(() => import('./pages/settings/Users'))
+const SettingsEmailReports = lazy(() => import('./pages/settings/EmailReports'))
 
 // Admin (SUPER_ADMIN-only screens — system health, etc.)
 const AdminHealth = lazy(() => import('./pages/admin/health'))
@@ -511,6 +512,16 @@ export const DASHBOARD_ROUTES: RouteObject[] = [
     ),
   },
 
+  // Email Reports (BUG-36) — daily report PICs. SUPER_ADMIN: the lists are staff emails.
+  {
+    path: '/settings/email-reports',
+    element: (
+      <RequireRole role="SUPER_ADMIN">
+        <S><SettingsEmailReports /></S>
+      </RequireRole>
+    ),
+  },
+
   // Admin — SUPER_ADMIN-only system health dashboard (P6.4). Same gate
   // pattern as /settings/users; both server-side and client-side checks
   // enforce the role (defense-in-depth).
@@ -679,6 +690,7 @@ const ROUTE_CHUNK_LOADERS: Record<string, () => Promise<unknown>> = {
   '/settings': () => import('./pages/settings'),
   '/settings/organisations': () => import('./pages/settings/organisations'),
   '/settings/users': () => import('./pages/settings/Users'),
+  '/settings/email-reports': () => import('./pages/settings/EmailReports'),
   '/admin/health': () => import('./pages/admin/health'),
   '/agents': () => import('./pages/agents'),
 }

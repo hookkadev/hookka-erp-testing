@@ -309,6 +309,11 @@ const SUPER_ADMIN_LINK: NavItem = {
   href: "/settings/users",
   icon: Users,
 };
+const SUPER_ADMIN_REPORTS_LINK: NavItem = {
+  name: "Email Reports",
+  href: "/settings/email-reports",
+  icon: Mail,
+};
 const SUPER_ADMIN_HEALTH_LINK: NavItem = {
   name: "System Health",
   href: "/admin/health",
@@ -539,6 +544,7 @@ export function Sidebar({
       items = [
         ...items.slice(0, insertAt),
         SUPER_ADMIN_LINK,
+        SUPER_ADMIN_REPORTS_LINK,
         SUPER_ADMIN_HEALTH_LINK,
         ...items.slice(insertAt),
       ];
