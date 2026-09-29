@@ -118,8 +118,20 @@ function PersonAvatar({
       }
     >
       {person.photoFileId ? (
+        // /stream, not /download — BUG-2026-09-29-214: /download 302s to a
+        // Supabase presigned URL, and presigned-URL verification threw
+        // "InvalidSignature" on the staging Supabase project (measured, not
+        // guessed — reproduced against the live signed URL, which is what
+        // Supabase's own storage API returned). /stream instead proxies the
+        // bytes straight through this Worker with the service_role key on
+        // every request — no signing step, so nothing to fail. Also skips a
+        // redirect hop, which is exactly the tradeoff you want for a ~40 KB
+        // avatar (a big PDF/video is the case /download's caching is worth
+        // it for). Content-Disposition: attachment on /stream does not stop
+        // an <img> from rendering inline — that header only affects a direct
+        // navigation, never an embedded resource fetch.
         <img
-          src={`/api/files/${person.photoFileId}/download`}
+          src={`/api/files/${person.photoFileId}/stream`}
           alt=""
           className="h-full w-full object-cover"
         />

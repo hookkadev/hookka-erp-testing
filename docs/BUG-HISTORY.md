@@ -1,6 +1,6 @@
 # Bug History
 
-> **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-212 (branch `fix/invoice-price-save-check`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-214 (branch `fix/org-chart-photo-stream`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-211 (branch `fix/so-customer-price-on-edit`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-28**: newest entry BUG-2026-09-28-210 (branch `feat/customer-credit-control`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-28**: newest entry BUG-2026-09-28-209 (branch `feat/rm-uom-options`, DEV-20; ids 196-208 are taken on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
@@ -43,6 +43,29 @@ Entries themselves stay newest-first.
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
 
 ---
+
+## BUG-2026-09-29-214 — Org Chart photo uploaded fine, but never displayed — Supabase itself refused its own signed URL `platform` `ui-frontend` 🟢
+
+🟢 **Fixed** · Owner uploaded a photo on the staging Org Chart right after the feature shipped (feat/org-chart-photos). The file appeared correctly in Supabase Storage, but the card kept showing initials.
+
+**Root cause — measured, not guessed.** `PersonAvatar` fetched the photo via `GET /api/files/:id/download`, which 302s to a Supabase presigned URL (`signedDownloadUrl` → `POST /storage/v1/object/sign/...`). That POST succeeded and returned a token. The browser then followed the redirect to fetch the actual bytes, and Supabase's own Storage API refused its own token:
+
+```json
+{"statusCode":"400","error":"InvalidSignature","message":"Invalid signature","code":"InvalidSignature"}
+```
+
+Confirmed live: opening that exact signed URL directly in a browser tab reproduced the same `InvalidSignature` response straight from `zaxygxwadidiqcphibma.supabase.co` — the right project, a correctly-shaped token, refused by Supabase's own verification. Not a bug in this app's code: the request to create the token and the request to redeem it both reached the correct project and the correct object; something inside Supabase's own sign/verify pair disagreed. Most likely tied to `staging` being a brand-new Supabase project (created earlier this week for BUG-2026-09-28-210 / the file-storage secrets gap) whose signing keys had not fully settled.
+
+**Fix.** `PersonAvatar` now fetches via `GET /api/files/:id/stream` instead of `/download`. `/stream` proxies the object bytes straight through this Worker using the service_role key on every request (`getFile()`) — no presigned URL, no external signature to fail. `Content-Disposition: attachment` on that route does not stop an `<img>` from rendering inline; that header only affects a direct navigation, never an embedded resource fetch. The tradeoff (a full round-trip through the Worker instead of a cached redirect) is the right one for a ~40 KB avatar; `/download`'s presign-and-cache path stays the default for the large PDFs and videos it was built for.
+
+**Regression.** `tests/org-chart-photos.test.mjs` — asserts the avatar's `<img src>` points at `/stream`, and asserts a regression back to `/download` would fail the test.
+
+**Verify.** `npm test` 5,080 pass / 0 fail; `tsc -p tsconfig.app.json` clean. Verified live on staging after this fix: the same uploaded photo now renders on the card. **Prod is unaffected** — this only touches the Org Chart photo feature, which has not been promoted past `staging` yet.
+
+**Still open.** If Supabase's signing keys on the staging project settle on their own, `/download` may start working there too — no action needed either way, since `/stream` works regardless and this fix does not depend on that happening.
+
+---
+
 
 ## BUG-2026-09-29-213 — Settings sub-pages showed the breadcrumb "Settings > Settings" `settings` 🟢
 
