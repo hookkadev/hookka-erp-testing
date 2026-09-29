@@ -31,7 +31,7 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
-## 2026-09-29 — 🔵 Cash Flow: Trade Finance block — owner's final ruling, grossed up and below the operating result (「raw material 加, drawdown 减, 一加一减 … 放在 after operation surplus」→「做」)(branch `feat/cashflow-tf-gross-up`)
+## 2026-09-29 — ✅ Cash Flow: Trade Finance block — owner's final ruling, grossed up and below the operating result (「raw material 加, drawdown 减, 一加一减 … 放在 after operation surplus」→「做」)(#560 3ad9dedb MERGED, deployed, prod-verified Sep'26: Raw Materials 190,448.08 · Net operation surplus 50,196.35 · Trade Finance: Drawdown MEDITEX (33,807.30) / NLY (30,000.00) / OCEAN SKY (33,352.38), Interest (1,637.08), Repaid +98,067.52 = (729.24) · INTEREST ON TRADE FINANCE 1,637.08 under General Expense › FINANCE COSTS · Cash Surplus 10,500.86 = the bank, and the lines now add up to it exactly: 50,196.35 + 729.24 − 1,747.10 − 38,677.63)
 
 ## 2026-09-29 — 🔵 Production Tracking: Category / Customer / State filters become multi-select (branch `feat/production-multi-select-filters` → `main`)
 - 1. 🔵 Category dropdown → checkbox dropdown with Select all / Clear all; label "All categories" / the one name / "N categories selected". State `cat` is now `string[]` (URL `?cat=A&cat=B`; old `?cat=SOFA` links still read). Server `?cat=` stays single-value: sent only when exactly one is ticked, 2+ fetch all and filter client-side.
@@ -40,7 +40,7 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ## 2026-09-29 — 🔵 AP Invoices: double-click / No. link open the purchase invoice itself (owner「点开 invoice 我希望是直接点开 invoice，而不是跳去 purchase invoice list」→「pi 做」)(branch `fix/ap-invoices-open-pi-detail`)
 
-1. 🔵 Replaces the 2026-09-28 「倒反」 version (draw counted as spend inside COST / EXPENSE OUT, repayment as
+1. ✅ Replaces the 2026-09-28 「倒反」 version (draw counted as spend inside COST / EXPENSE OUT, repayment as
    an offset — once repaid the purchase vanished and the lines no longer added up to the bank). Now a
    TF-paid purchase splits by material under Raw Materials in the month of the draw; the facility side
    is its own block right after Net operation surplus, outflow-signed: Drawdown (negative), Interest
