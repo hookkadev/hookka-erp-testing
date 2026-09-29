@@ -50,3 +50,31 @@ export function monthLabel(ym: string): string {
   const idx = Number(m[2]) - 1;
   return idx >= 0 && idx < 12 ? `${MONTHS[idx]}'${m[1].slice(2)}` : ym;
 }
+
+// A ledger description with its own document number taken out — the number
+// already has its own column (Ref. 1). "HPV-2608-030 · to ECMS" → "to ECMS";
+// "Receipt HOR-2606-008 · Houzs Century" → "Receipt · Houzs Century".
+export function withoutDocNo(description: string | null | undefined, docNo: string | null | undefined): string {
+  const raw = (description ?? "").trim();
+  if (!docNo) return raw;
+  const s = raw.split(docNo).join(" ")
+    .replace(/\s*·\s*(?:·\s*)+/g, " · ")
+    .replace(/^[\s·:\-–]+/, "")
+    .replace(/[\s·:\-–]+$/, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  return s || raw;
+}
+
+// The short name of a money account for a narrow column: "CASH AT BANK -
+// HLBB" → "HLBB", "CASH IN HAND" → "Cash", "TRADE FINANCE - HOUZS CENTURY SDN
+// BHD" → "TF · HOUZS CENTURY". Anything else keeps its name.
+export function shortBankName(name: string | null | undefined): string {
+  const n = (name ?? "").trim();
+  const bank = /^CASH AT BANK\s*[-–]\s*(.+)$/i.exec(n);
+  if (bank) return bank[1].trim();
+  if (/^(CASH IN HAND|PETTY CASH)\b/i.test(n)) return "Cash";
+  const tf = /^TRADE FINANCE\s*[-–]\s*(.+)$/i.exec(n);
+  if (tf) return `TF · ${tf[1].replace(/\s+SDN\.?\s*BHD\.?$/i, "").trim()}`;
+  return n;
+}

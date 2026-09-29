@@ -89,7 +89,7 @@ test("the caller builds the drill from the engine's sources: one row per entry, 
   assert.match(fn, /money = legs\.filter\(\(l\) => tfAccounts\.has\(l\.code\)\);/, "a facility draw shows the facility");
   assert.match(fn, /SELECT payment_no, purchase_invoice_id FROM supplier_payments WHERE payment_no IN \(\$\{ph\}\) AND org_id = \?/);
   assert.match(fn, /SELECT payment_no, bill_id FROM other_party_payments WHERE payment_no IN/);
-  assert.match(fn, /ref1: docNoFromDescription\(description\) \?\? e\.sourceId,/);
+  assert.match(fn, /const ref1 = docNoFromDescription\(legText\) \?\? e\.sourceId;/);
   assert.match(fn, /ofSen: Math\.abs\(entryCash\) !== Math\.abs\(e\.sen\) \? Math\.abs\(entryCash\) : null,/);
   assert.match(fn, /const tied = !!row && statement\.columns\.every\(\(col, i\) => \(row\.values\[i\] \?\? 0\) === sign \* \(col\.accum \? total : \(perMonth\.get\(col\.key\) \?\? 0\)\)\);/);
   assert.match(fn, /date: docDate\(l\.sourceType, l\.sourceId, l\.postedAt\)\.slice\(0, 10\),/);
@@ -112,7 +112,6 @@ test("the tab: a line's name opens the payments under the row (not in Edit); mon
   const panel = slice(ui, "function CfDrillPanel(", "\nfunction ");
   assert.match(panel, /fetch\(`\/api\/accounting\/cashflow-drill\?period=\$\{encodeURIComponent\(period\)\}&key=\$\{encodeURIComponent\(lineKey\)\}`\)/);
   assert.match(panel, /const \[month, setMonth\] = useState<string>\(period\);/);
-  for (const h of ["Date", "Description", "Bank", "Ref. 1", "Ref. 2", "Money in", "Money out"]) assert.ok(panel.includes(`>${h}</th>`), `column ${h}`);
-  assert.match(panel, /part of \{plDrillAmt\(it\.ofSen\)\}/);
+  for (const h of ["Date", "Description", "Bank", "Ref. 1", "Ref. 2", "Amount"]) assert.ok(panel.includes(`>${h}</th>`), `column ${h}`);
   assert.match(panel, />All months<\/button>/);
 });
