@@ -3578,7 +3578,8 @@ app.put("/:id", async (c) => {
         // CURRENT composition — add a piece and the combo pass below discounts
         // the new set; remove a piece and the survivors return to full
         // per-piece price (a combo-split base must not stick once the set is
-        // broken). Non-sofa lines keep the operator-typed price (Tier 1).
+        // broken). Non-sofa lines: the customer price wins; the operator-typed
+        // price only stands when the customer has none (see below).
         const isSofaLine = String(item.itemCategory ?? "") === "SOFA";
         // Seat height for per-seat pricing: the create page sends seatHeight,
         // but edit/stored payloads carry the bare seat size in sizeCode/sizeLabel.
@@ -3594,56 +3595,43 @@ app.put("/:id", async (c) => {
         // Service orders: the operator's typed price IS the price — no sofa
         // re-derive, no customer/catalog resolution (0 = free repair; see
         // the POST-side comment, SV-2606-001 RM 730 incident).
-        let basePriceSen =
-          isSofaLine && !mergedIsServiceOrder ? 0 : incomingBase;
-        // Customer-specific price: when the request didn't supply a usable
-        // price (or the line is a sofa being re-derived).
+        let basePriceSen = incomingBase;
+        // Customer price list is AUTHORITATIVE on edit too — the SAME
+        // resolveSoBasePriceSen precedence as POST (customer > incoming >
+        // product). PUT used to consult the customer price only when the line
+        // arrived at 0, so every non-sofa line saved from the edit screen (which
+        // seeds from the master product) kept the MASTER price, and the invoice
+        // copied it (BUG-35, Conts invoice). SOFA lines pass incoming=0 so they
+        // still always re-derive (owner 2026-06-11, combo pass below).
         const productIdForLookup = (item.productId as string) || "";
-        if (!mergedIsServiceOrder && basePriceSen === 0 && productIdForLookup && customerId) {
-          try {
-            const cp = customerPriceMap.get(productIdForLookup) ?? null;
-            if (cp) {
-              if (cp.seatHeightPrices && cp.seatHeightPrices.length > 0 && seatHeightForPrice) {
-                const shp = cp.seatHeightPrices.find(
-                  (p) => p.height === seatHeightForPrice || p.height === `${seatHeightForPrice}"`,
-                );
-                basePriceSen = shp?.priceSen ?? cp.basePriceSen ?? 0;
-              } else {
-                basePriceSen = cp.basePriceSen ?? 0;
-              }
+        if (!mergedIsServiceOrder && productIdForLookup) {
+          const cp = customerPriceMap.get(productIdForLookup) ?? null;
+          const prod = productMap.get(productIdForLookup) ?? null;
+          let prodSeats: Array<{ height: string; priceSen: number }> = [];
+          if (Array.isArray(prod?.seatHeightPrices)) {
+            prodSeats = prod.seatHeightPrices as typeof prodSeats;
+          } else if (typeof prod?.seatHeightPrices === "string") {
+            try {
+              prodSeats = JSON.parse(prod.seatHeightPrices || "[]");
+            } catch {
+              prodSeats = [];
             }
-          } catch {
-            // Non-fatal — keep basePriceSen at 0 if lookup fails.
           }
-        }
-        // Catalog fallback — parity with POST. Without this, editing a line
-        // whose customer price didn't resolve silently zeroed basePriceSen.
-        if (!mergedIsServiceOrder && basePriceSen === 0 && productIdForLookup) {
-          try {
-            const prod = productMap.get(productIdForLookup) ?? null;
-            if (prod) {
-              let shp: Array<{ height: string; priceSen: number }> = [];
-              if (Array.isArray(prod.seatHeightPrices)) {
-                shp = prod.seatHeightPrices as typeof shp;
-              } else if (typeof prod.seatHeightPrices === "string") {
-                try {
-                  shp = JSON.parse(prod.seatHeightPrices || "[]");
-                } catch {
-                  shp = [];
-                }
-              }
-              if (seatHeightForPrice && shp.length > 0) {
-                const cell = shp.find(
+          const matchSeat = (
+            list: Array<{ height: string; priceSen: number }> | null | undefined,
+          ): number | null =>
+            list && seatHeightForPrice
+              ? list.find(
                   (p) => p.height === seatHeightForPrice || p.height === `${seatHeightForPrice}"`,
-                );
-                basePriceSen = cell?.priceSen ?? (Number(prod.basePriceSen) || 0);
-              } else {
-                basePriceSen = Number(prod.basePriceSen) || 0;
-              }
-            }
-          } catch {
-            // Non-fatal — leave at 0; the unpriced gate below surfaces it.
-          }
+                )?.priceSen ?? null
+              : null;
+          basePriceSen = resolveSoBasePriceSen({
+            incomingSen: isSofaLine ? 0 : incomingBase,
+            customerSeatSen: matchSeat(cp?.seatHeightPrices),
+            customerBaseSen: cp?.basePriceSen ?? null,
+            productSeatSen: matchSeat(prodSeats),
+            productBaseSen: Number(prod?.basePriceSen) || 0,
+          });
         }
         // 2026-07-22 BUG FIX (under-billing, RM 12,455 across divan + leg):
         // these were `Number(item.divanPriceSen) || 0` — the same trust-the-

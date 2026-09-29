@@ -1,5 +1,7 @@
 # Bug History
 
+> **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-212 (branch `fix/customer-price-invoices-main`; ids 196-210 are on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-211 (branch `fix/customer-price-invoices-main`; ids 196-210 are on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-196 (branch `fix/tf-interest-account-collision`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-25**: newest entry BUG-2026-09-25-195 (branch `feat/employees-kpi-layout`, PR #530); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-25**: newest entry BUG-2026-09-25-194 (branch `feat/dashboard-kpi-no-icons`, PR #524); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
@@ -40,6 +42,27 @@ Entries themselves stay newest-first.
 
 ---
 
+## BUG-2026-09-29-212 — Invoice "Save Prices" always said the save did NOT take effect `invoices` `ui-frontend` 🟡
+
+**Symptom:** editing a line price on an invoice and pressing Save Prices showed "Save did NOT take effect, totalAmount: tried 44000, system has (empty)", even though the edit had been written.
+
+**Root cause:** the verifiedSave read-back in `src/pages/invoices/detail.tsx` expected `totalAmount`, a field `GET /api/invoices/:id` never returns (it returns `subtotalSen` / `totalSen`). `VerifiedSaveArgs.expect` was typed `Record<string, unknown>`, so the wrong key compiled.
+
+**Fix:** expect `subtotalSen` (the pre-tax sum the PUT recomputes and the page's `expectedTotal` already is). `expect` is now typed `{ [K in keyof T]?: unknown }` in `src/lib/verified-save.ts`, so a key that is not on the readback type fails `tsc` (checked: the old `totalAmount` key now errors; the other 25 callers compile unchanged).
+
+---
+
+## BUG-2026-09-29-211 — Conts invoice billed the master price, not the customer price list `sales-orders` `pricing-products` 🟡
+
+**Symptom (BUG-35):** an invoice for customer Conts carried prices different from Conts' own price list (Customers → Conts → Products); they matched the master product price.
+
+**Root cause:** the invoice copies the SO line price, so the wrong number was stored on the SO. The 2026-08 owner ruling (customer price authoritative, `src/lib/so-base-price.ts`) was wired into SO **POST** only. SO **PUT** still used the customer price only when a line arrived at 0, and the edit screen seeds non-sofa lines from the master product, so any SO saved through Edit kept the master price. The create screen also showed master prices on two paths (sofa module add, bedframe Price 2 fallback), corrected on save by POST.
+
+**Fix:** SO PUT now prices every line through `resolveSoBasePriceSen` exactly like POST (sofa lines still pass incoming=0 so they always re-derive), in `src/api/routes/sales-orders.ts` PUT line pricing. `src/pages/sales/edit.tsx` and `src/pages/sales/create.tsx` seed from `/api/customer-products` first. Regression pin in `tests/so-base-price.test.mjs`.
+
+**Not fixed here:** existing invoices/SOs keep their stored price; the affected SO must be re-saved (or invoice lines edited) before re-sending. Prod rows affected are UNMEASURED (no prod read in this session). Known ceiling, pre-existing on POST too: the server seat-height match ignores the fabric tier (PRICE_1/2/3) and bedframe `price1Sen`.
+
+---
 ## BUG-2026-09-29-196 — Trade-finance interest was booked to "INCORPORATION EXPENSE WRITTEN OFF": the interest account's code 900-I001 already belonged to another account `accounting` `trade-finance` `chart-of-accounts` 🟡
 
 **Symptom (owner, 2026-09-28, while checking the Cash Flow Trade Finance block):** the Sep'26 P&L showed

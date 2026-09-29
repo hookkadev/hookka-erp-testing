@@ -380,6 +380,17 @@ export default function EditSalesOrderPage() {
     return () => { cancelled = true; };
   }, [customerId, variantsTick]);
 
+  // Customer price list (Customers → company → Products). The PUT stores the
+  // customer price whenever one exists (BUG-35), so the screen seeds from it
+  // too; the master product is only the fallback for unassigned SKUs.
+  const { data: customerProductsResp } = useCachedJson<{
+    data?: { productId: string; basePriceSen: number | null; seatHeightPrices: { height: string; priceSen: number }[] | null }[];
+  }>(customerId ? `/api/customer-products?customerId=${encodeURIComponent(customerId)}` : null);
+  const customerPriceByProduct = useMemo(
+    () => new Map((customerProductsResp?.data ?? []).map((cp) => [cp.productId, cp])),
+    [customerProductsResp],
+  );
+
   // Surcharge lookup from maintenance config
   const getConfigSurcharge = (key: string, value: string, fallback: number): number => {
     if (!maintenanceConfig) return fallback;
@@ -743,7 +754,9 @@ export default function EditSalesOrderPage() {
       // would already be 0 in SO mode (set by the write paths), but reset
       // them here too in case the line is being re-pointed at a different
       // product after a price was carried in via clone / draft restore.
-      basePriceSen: isServiceOrderMode ? 0 : (prod.costPriceSen || 0),
+      basePriceSen: isServiceOrderMode
+        ? 0
+        : (customerPriceByProduct.get(prod.id)?.basePriceSen || prod.costPriceSen || 0),
       seatHeight: "",
       gapInches: isSofa ? null : items[idx].gapInches,
       divanHeightInches: isSofa ? null : items[idx].divanHeightInches,
@@ -775,18 +788,20 @@ export default function EditSalesOrderPage() {
   const selectSeatHeight = (idx: number, value: string) => {
     const item = items[idx];
     const prod = products.find(p => p.id === item.productId);
+    const cpSeats = customerPriceByProduct.get(item.productId)?.seatHeightPrices;
+    const seats = cpSeats && cpSeats.length > 0 ? cpSeats : prod?.seatHeightPrices;
     if (!value) {
       updateItem(idx, { seatHeight: "", basePriceSen: 0 });
       return;
     }
-    if (!prod?.seatHeightPrices) {
+    if (!seats) {
       // No seat-price matrix on this product — keep the operator's pick and
       // leave Base Price manual (RM0 allowed; BUG-2026-07-27-001).
       const sizeCode = value.replace(/"/g, "").trim();
       updateItem(idx, { seatHeight: value, sizeLabel: value, sizeCode });
       return;
     }
-    const tier = prod.seatHeightPrices.find(t => t.height === value);
+    const tier = seats.find(t => t.height === value);
     const sizeCode = value.replace(/"/g, "").trim();
     updateItem(idx, {
       seatHeight: value,

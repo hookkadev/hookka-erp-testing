@@ -1,6 +1,6 @@
 # Sales — Module Guide
 
-> **Last verified: 2026-09-23** (create.tsx line anchors re-derived after BUG-2026-09-23-183; rest as of 2026-08-19) against `src/api/routes/sales-orders.ts` (**5,733** lines),
+> **Last verified: 2026-09-29** (CopyFromSourceModal / LineItemCard anchors moved to 2390 / 3016 by BUG-2026-09-29-211; the sales-orders.ts line count below is stale, it measured 5,853 on 2026-09-29. Other create.tsx anchors as re-derived 2026-09-23 after BUG-2026-09-23-183; rest as of 2026-08-19) against `src/api/routes/sales-orders.ts` (**5,733** lines),
 > `src/api/routes/sales-orders/_helpers.ts` (1,462), `src/api/routes/{consignment-orders,consignment-notes}.ts`,
 > `src/api/lib/{sofa-combo,sofa-combo-pass}.ts`, `src/pages/sales/{index,create,detail}.tsx`,
 > `src/pages/consignment/note.tsx`, `src/pages/maintenance/sofa-combos.tsx`, `tests/db-schema.json`.
@@ -71,8 +71,8 @@ Owns the customer-facing order lifecycle: **Sales Orders** (SO) and their line i
 | `soStageLabel` | `src/pages/sales/index.tsx:142` | Maps SO status → display stage label |
 | `CreateSalesOrderPageWrapper` | `src/pages/sales/create.tsx:205` | Default export; providers shell |
 | `CreateSalesOrderPage` | `src/pages/sales/create.tsx:213` | Main create form (parties, items, totals) |
-| `CopyFromSourceModal` | `src/pages/sales/create.tsx:2382` | 2-step copy-draft picker |
-| `LineItemCard` | `src/pages/sales/create.tsx:3008` | Per-line item editor |
+| `CopyFromSourceModal` | `src/pages/sales/create.tsx:2390` | 2-step copy-draft picker |
+| `LineItemCard` | `src/pages/sales/create.tsx:3016` | Per-line item editor |
 | `SalesOrderDetailPage` | `src/pages/sales/detail.tsx:338` | SO detail; linked POs/JCs/DOs/invoices |
 | `app.post("/")` (create) | `src/api/routes/sales-orders.ts:1718` | SO create + combo pass + snapshot invalidation |
 | `app.put("/:id")` (edit) | `src/api/routes/sales-orders.ts:3104` | SO edit + re-run combo pass |
