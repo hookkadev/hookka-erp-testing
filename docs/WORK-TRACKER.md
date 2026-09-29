@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-29**: branch `feat/ap-invoices-popup` added below (its entry is the newest); the 410-0000 entry (#573) closed ✅ with its prod measurements.
 > **Last verified: 2026-09-29**: branch `fix/staging-no-nightly-wipe` added below (PR #570 open, its entry is the newest).
 > **Last verified: 2026-09-29**: branch `feat/production-multi-select-filters` added below (open, its entry is the newest).
 > **Last verified: 2026-09-25**: branch `feat/dashboard-efficiency-employee-drill` (stacked on `fix/dashboard-tighter-padding`, PR #533) added below (committed, not pushed, its entry is the newest).
@@ -40,17 +41,35 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
    lent), Deposit refunded / (paid); footer states the rule. Figures, the operating result and Cash Surplus unchanged.
    Tests re-pointed (engine, trade finance, supplier section, finance cost, unified signs).
 
-## 2026-09-29 — 🔵 410-0000 ACCRUALS: parent accounts never postable + Cash Flow accrual family → Direct Labour (owner「by right 410-0000 不能选吧？我有注意到 410-0000 pv 开过去」→「做 a b d，c 的不做，要 park 回去对的 accrual」)(branch `fix/parent-accounts-not-postable`)
+## 2026-09-29 — 🔵 AP Invoices: bill form + bill detail in popups; Other Creditors back in the sidebar (owner「ap invoice 就 pop out 出来给我填相关之类不可以吗？」+「other creditor maintenance 放 sidebar 旁边」→「3. 做」)(branch `feat/ap-invoices-popup`)
+
+1. 🔵 New AP bill opens the other-creditor bill form in a popup (`OtherPartyBillsManager` in `formOnly` mode: form open at once,
+   no list, closes on save or Cancel; ✕ closes, a stray click outside does not — a half-filled bill never vanishes).
+2. 🔵 Double-click an AP bill (or click its No.) → detail popup: creditor / date / reference / lines / tax / total / paid /
+   outstanding, actions Print / Edit / Copy / Void (Unvoid when voided). Edit and Copy open the same popup form
+   (Edit re-posts the same bill number; Copy = today, no reference, never an opening — one builder `billFormFrom`).
+   Void goes through the Bills page's own lifecycle endpoint, behind a confirm. PI rows still open their own page.
+3. 🔵 The duplicate bills list + names list under the mirror are gone; Creditors › **Other Creditors** is a menu entry again
+   (`?tab=ocreditor`, the same names/contacts page). FINANCE menu 32 → 33 entries.
+4. UI only — no endpoint, no write path, no ledger change. Guards `tests/ap-invoices-popup.test.mjs` (new),
+   `tests/finance-sidebar.test.mjs`, `tests/ap-invoices-chips.test.mjs`, `tests/doc-detail-dblclick.test.mjs`.
+
+## 2026-09-29 — ✅ 410-0000 ACCRUALS: parent accounts never postable + Cash Flow accrual family → Direct Labour (owner「by right 410-0000 不能选吧？我有注意到 410-0000 pv 开过去」→「做 a b d，c 的不做，要 park 回去对的 accrual」)(#573 e6bd8e93 MERGED, deployed, prod-verified)
 
 1. Measured (prod): 410-0000 ACCRUALS was the ONLY account with children still flagged postable; PVs had been paid
    against it. The owner re-parked the September ones himself at 15:04–15:26 (HPV-2609-026 / -027 → 410-0010,
    HPV-2609-029 → 410-0020 EPF, HPV-2609-030 → 410-0030 SOCSO); 6 older legs (11,192.45) remain on 410-0000 for him.
    c (restating them) is the owner`s, not ours — the restate path validates only the NEW lines, so locking 410-0000
    does not block his re-parking.
-2. 🔵 a — flip 410-0000 to non-postable on prod (PUT /coa, owner-ordered).
-3. 🔵 b — parents never postable: validation / JE post / pickers / COA editor. Guard `tests/parent-accounts-not-postable.test.mjs`.
-4. 🔵 d — Cash Flow: ACCRUALS parent + ACCRUAL - EPF / SOCSO / EIS → Direct Labour (Sep: ACCRUAL - EPF 7,801.00,
-   ACCRUAL - SOCSO 1,035.50, ACCRUALS 255.05 leave Unallocated).
+2. ✅ a — flip 410-0000 to non-postable on prod (PUT /coa, owner-ordered).
+3. ✅ b — parents never postable: validation / JE post / pickers / COA editor. Guard `tests/parent-accounts-not-postable.test.mjs`.
+   Prod (measured after deploy): GET /coa returns all 18 parent accounts non-postable (410-0000 ACCRUALS, 4 children);
+   the Payment Voucher account picker, typed "410", offers only 410-0010 / -0020 / -0030 / -0040. The server-side
+   refusal of a parent code is covered by the test only — not exercised on prod (it would need a write).
+4. ✅ d — Cash Flow: ACCRUALS parent + ACCRUAL - EPF / SOCSO / EIS → Direct Labour (Sep: ACCRUAL - EPF 7,801.00,
+   ACCRUAL - SOCSO 1,035.50, ACCRUALS 255.05 leave Unallocated). Prod Sep'26 (measured): Direct Labour › ACCRUALS
+   8,836.50 (EPF 7,801.00 + SOCSO 1,035.50; the 255.05 leg on the parent follows the salary department split);
+   Unallocated 442.00 (only STOCK - FABRIC M left); Cash Surplus 10,500.86 unchanged.
 
 ## 2026-09-29 — 🔵 Staging wiped every night; refresh must keep test data (branch `fix/staging-no-nightly-wipe` → `main`)
 - 1. 🔵 Cause: `sync-staging.yml` cron (18:00 UTC) on `main` dropped staging's public schema. Cron removed, manual dispatch only. BUG-2026-09-29-216.
