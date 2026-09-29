@@ -179,6 +179,17 @@ INFAB). One numbering book, three lists.
    so both the Supplier Payment page and the hub print the identical voucher
    (react-refresh forbids a plain-function export from a component module —
    the #471 lesson).
+## 2026-09-28 — 🔵 DEV-20 Raw Material UOM options per category (branch `feat/rm-uom-options` → `staging`, #536 merged; follow-up `feat/rm-whole-uoms`; both brought to `main` on `feat/rm-uom-options-main`)
+
+Ask (DEV-20, requester VIOLET): the RM UOM should be selectable from options that fit the material (Fabric: MTR / ROLL; other groups their own), and used for purchasing, stock, production and inventory.
+
+1. 🔵 "Categories" button on Inventory → Raw Materials renamed **RM Settings**; new "Allowed UOMs" section per item group, stored in `kv_config['variants-config'].uomOptions`.
+2. 🔵 Add RM (single + bulk), Edit, Batch Edit UOM dropdowns read the group's allowed list (falls back to the full list when the group has none set). One shared list replaces four hardcoded ones.
+3. 🔵 Server: POST / PUT / bulk-import reject a UOM not allowed for the group; PUT refuses a UOM change while the material has stock, open batches or open PO lines.
+4. ✅ Owner answered 2026-09-29: (a) ROLL / MTR conversion is OUT of DEV-20 scope (DEV-20 is RM input only; PO / GRN carry no unit today, a conversion would be its own ticket); (b) creating brand-new categories not built. Prod item-group / UOM spread is UNMEASURED (no prod access this session).
+5. 🔵 Items 1-4 MERGED to `staging` as PR #536 (labelled `staging`; the conflict was CODEBASE-MAP restamp lines only). Items 6-7 follow on branch `feat/rm-whole-uoms` → `staging`.
+6. 🔵 Edit RM dialog Stock Qty used `parseInt`, so 12.5 MTR saved as 12. Now `Number`.
+7. 🔵 Whole-number units: RM Settings gets a global list of units that cannot be fractional (default BOX / CTN / SET / PAIR; PCS left out because foam sheets in PCS consume fractionally). Enforced on the Inventory page ONLY (owner correction: not PO, GRN or Stock Adjustments): the RM balance typed on Add RM / Edit RM, checked by `raw-materials.ts` POST and PUT (PUT only when the number changes). NOT on production consumption. Owner answered 2026-09-29: no per-category rule, users pick the unit per material.
 
 ---
 
