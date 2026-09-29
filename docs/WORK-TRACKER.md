@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-29**: branch `feat/cashflow-inline-drill` added below (its entry is the newest).
 > **Last verified: 2026-09-29**: #586 (P&L inline drill) closed ✅ below with its prod check.
 > **Last verified: 2026-09-29**: branch `feat/pl-inline-drill` added below (its entry is the newest).
 > **Last verified: 2026-09-29**: #581 (Cash Flow staff-contribution accruals → General Expense) closed ✅ below with its prod check.
@@ -38,6 +39,16 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
 ---
+
+## 2026-09-29 — 🔵 Cash Flow inline drill: click a line's name, its payments / receipts open underneath (owner「cash flow 也要这样点开看」)(branch `feat/cashflow-inline-drill`)
+
+1. 🔵 Cash Flow: a line's name toggles a panel under the row — Date · Description · Bank · Ref. 1 · Ref. 2 · Money in ·
+   Money out + totals; month chips (the statement's month first, "All months"). Not in Edit (the drag owns the row).
+2. 🔵 Engine: `buildStatement({ trace })` records every leg that fed each line (`CfSource`), including the share when a payment
+   is split across materials / departments ("part of" its whole amount in the panel). Rows carry `lineKey`.
+3. 🔵 `GET /api/accounting/cashflow-drill?period&key` (read): the statement's own computation with a trace, rolled up one row per
+   entry; Ref. 2 = the PIs / bills a payment settled or a voucher's payee; `tied` = every column of the line equals its rows.
+   Guard `tests/cashflow-inline-drill.test.mjs`. Prod check after deploy: every line of a month, `tied` true.
 
 ## 2026-09-29 — ✅ P&L inline drill: click a line's name, its ledger lines open underneath (owner「我要点开看 detail，就是这样」+ Houzs P&L screenshot)(#586 5489aa74 MERGED, deployed, prod-verified)
 

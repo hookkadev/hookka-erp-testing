@@ -30,8 +30,8 @@ import { parseDebtorCode } from "../../lib/debtor";
 import { defaultPnlBucket, pnlBucketFor } from "../../lib/pnl-bucket";
 import { bsSectionFor, bsSectionClass } from "../../lib/bs-section";
 import type { BsSection } from "../../lib/bs-section";
-import { buildStatement, splitByLargestRemainder, rawMaterialLineFor, RM_LINES, SUPPLIER_SECTION_TARGETS, payrollAccrualSections } from "../../lib/cashflow-engine";
-import type { CfMap, ClassifiedLeg, BankLeg, RmSplit, CoaLite } from "../../lib/cashflow-engine";
+import { buildStatement, splitByLargestRemainder, rawMaterialLineFor, RM_LINES, SUPPLIER_SECTION_TARGETS, payrollAccrualSections, displaySign } from "../../lib/cashflow-engine";
+import type { CfMap, ClassifiedLeg, BankLeg, RmSplit, CoaLite, CfSection } from "../../lib/cashflow-engine";
 import { getDocNumberPrefixes, issueDocNumber, issueDocNumberWithPrefix } from "../lib/doc-number-service";
 import { computeDiscountAlloc, type PiOpen } from "../../lib/discount-alloc";
 import { ensurePartialPaymentColumns } from "../lib/ensure-partial-payment";
@@ -8702,11 +8702,29 @@ export async function loadFinanceSeries(
 
 // The cash-flow statement computation, shared by GET /cashflow-statement and
 // the dashboard card — one engine, so the two can never disagree.
+// The Cash Flow inline drill (owner 2026-09-29 「cash flow 也要这样点开看」):
+// one row per payment / receipt that fed a statement line, with the share it
+// put there. Built from the engine's own sources, so the rows sum to the line.
+type CfDrillItem = {
+  key: string; ym: string; date: string; description: string;
+  otherSide: { code: string; name: string }[]; ref1: string; ref2: string | null;
+  sen: number; ofSen: number | null;
+};
+const SECTION_ORDER_SET: ReadonlySet<string> = new Set<string>([
+  "REVENUE_COLLECTION", "RAW_MATERIALS", "TRADE_FINANCE", "DIRECT_LABOUR", "FACTORY_OVERHEAD", "GENERAL_EXPENSE",
+  "TAXATION", "FINANCE_COST", "CAPEX", "DEPOSIT", "LOAN", "UNALLOCATED",
+]);
+type CfDrill = {
+  key: string; label: string; section: string; found: boolean; tied: boolean;
+  items: CfDrillItem[]; months: { ym: string; label: string; sen: number }[];
+};
+
 async function computeCashflowStatement(
   db: Env["Variables"]["DB"],
   period: string,
   editable: boolean,
   orgId: string,
+  opts?: { traceKey?: string },
 ) {
   // Local alias so the extracted body reads exactly as it did in the route.
   const c: { var: { DB: Env["Variables"]["DB"] } } = { var: { DB: db } };
@@ -8738,6 +8756,7 @@ async function computeCashflowStatement(
       debitSen: l.debitSen,
       creditSen: l.creditSen,
       ym: docDate(l.sourceType, l.sourceId, l.postedAt).slice(0, 7), // by document date
+      date: docDate(l.sourceType, l.sourceId, l.postedAt).slice(0, 10),
       description: l.description ?? "",
     }));
 
@@ -9116,8 +9135,111 @@ async function computeCashflowStatement(
   }
   const statement = buildStatement({
     classified, bankLegs, coa, map, rmSplit, deptSplit, stockGroupOverride: sgOverride,
-    supplierCategory, fyeMonth, period, editable,
+    supplierCategory, fyeMonth, period, editable, trace: !!opts?.traceKey,
   });
+  let drill: CfDrill | undefined;
+  if (opts?.traceKey) {
+    const key = opts.traceKey;
+    const section = key.split("|")[0] ?? "";
+    const row = statement.rows.find((r) => r.kind === "line" && r.lineKey === key);
+    const monthCols = statement.columns.filter((col) => !col.accum);
+    const fyStart = monthCols.length ? monthCols[monthCols.length - 1].key : period;
+    const inFy = (ym: string) => ym >= fyStart && ym <= period;
+    // One row per entry: a payment that fed this line through two legs shows once.
+    const perEntry = new Map<string, { sourceType: string; sourceId: string; ym: string; sen: number }>();
+    for (const s of statement.sources?.[key] ?? []) {
+      if (!inFy(s.ym)) continue; // outside every column the statement shows
+      const k = `${s.sourceType}::${s.sourceId}`;
+      const cur = perEntry.get(k);
+      if (cur) cur.sen += s.sen;
+      else perEntry.set(k, { sourceType: s.sourceType, sourceId: s.sourceId, ym: s.ym, sen: s.sen });
+    }
+    // Ref. 2 — what the money settled: the PIs a supplier payment paid, the
+    // bills an other-creditor payment paid, a voucher's payee. Read only for
+    // the entries on this line; a failed read just leaves the column empty.
+    const ents = [...perEntry.values()];
+    const chunkIds = async (ids: string[], sql: (ph: string) => string, extra: unknown[] = []) => {
+      const out: Record<string, unknown>[] = [];
+      for (let i = 0; i < ids.length; i += 200) {
+        const part = ids.slice(i, i + 200);
+        const res = await c.var.DB.prepare(sql(part.map(() => "?").join(","))).bind(...part, ...extra).all<Record<string, unknown>>();
+        out.push(...(res.results ?? []));
+      }
+      return out;
+    };
+    const ref2 = new Map<string, string>();
+    try {
+      const spNos = [...new Set(ents.filter((e) => e.sourceType.startsWith("supplier_payment")).map((e) => e.sourceId))];
+      const piByPay = new Map<string, Set<string>>();
+      for (const r of await chunkIds(spNos, (ph) => `SELECT payment_no, purchase_invoice_id FROM supplier_payments WHERE payment_no IN (${ph}) AND org_id = ?`, [orgId])) {
+        const no = String(r.paymentNo ?? r.payment_no ?? ""), pid = String(r.purchaseInvoiceId ?? r.purchase_invoice_id ?? "");
+        if (no && pid) (piByPay.get(no) ?? piByPay.set(no, new Set()).get(no)!).add(pid);
+      }
+      const piNo = new Map<string, string>();
+      for (const r of await chunkIds([...new Set([...piByPay.values()].flatMap((s) => [...s]))], (ph) => `SELECT id, piNo FROM purchase_invoices WHERE id IN (${ph})`)) {
+        piNo.set(String(r.id), String(r.piNo ?? r.pi_no ?? ""));
+      }
+      for (const [no, ids] of piByPay) ref2.set(`sp::${no}`, [...ids].map((id) => piNo.get(id) || (id.startsWith("pi-ob-") ? "Opening" : id)).join(", "));
+    } catch { /* Ref. 2 stays empty */ }
+    try {
+      const opNos = [...new Set(ents.filter((e) => e.sourceType.startsWith("other_party_payment")).map((e) => e.sourceId))];
+      const billsByPay = new Map<string, Set<string>>();
+      for (const r of await chunkIds(opNos, (ph) => `SELECT payment_no, bill_id FROM other_party_payments WHERE payment_no IN (${ph})`)) {
+        const no = String(r.paymentNo ?? r.payment_no ?? ""), bid = String(r.billId ?? r.bill_id ?? "");
+        if (no && bid) (billsByPay.get(no) ?? billsByPay.set(no, new Set()).get(no)!).add(bid);
+      }
+      const billNo = new Map<string, string>();
+      for (const r of await chunkIds([...new Set([...billsByPay.values()].flatMap((s) => [...s]))], (ph) => `SELECT id, billNo FROM other_party_bills WHERE id IN (${ph})`)) {
+        billNo.set(String(r.id), String(r.billNo ?? r.bill_no ?? ""));
+      }
+      for (const [no, ids] of billsByPay) ref2.set(`op::${no}`, [...ids].map((id) => billNo.get(id) || id).join(", "));
+    } catch { /* Ref. 2 stays empty */ }
+    try {
+      const pvIds = [...new Set(ents.filter((e) => e.sourceType.startsWith("payment_voucher")).map((e) => e.sourceId))];
+      for (const r of await chunkIds(pvIds, (ph) => `SELECT id, payee FROM payment_vouchers WHERE id IN (${ph})`)) {
+        const payee = String(r.payee ?? "").trim();
+        if (payee) ref2.set(`pv::${String(r.id)}`, payee);
+      }
+    } catch { /* Ref. 2 stays empty */ }
+    const ref2For = (sourceType: string, sourceId: string): string | null =>
+      (sourceType.startsWith("supplier_payment") ? ref2.get(`sp::${sourceId}`)
+        : sourceType.startsWith("other_party_payment") ? ref2.get(`op::${sourceId}`)
+          : sourceType.startsWith("payment_voucher") ? ref2.get(`pv::${sourceId}`) : undefined) ?? null;
+
+    const items: CfDrillItem[] = ents.map((e) => {
+      const legs = byEntry.get(`${e.sourceType}::${e.sourceId}`) ?? [];
+      // The money side: the bank / cash legs — or, for a facility draw that
+      // never touched a bank, the trade-finance leg.
+      let money = legs.filter((l) => bankCodes.has(l.code));
+      let entryCash = money.reduce((s, l) => s + l.debitSen - l.creditSen, 0);
+      if (!money.length) {
+        money = legs.filter((l) => tfAccounts.has(l.code));
+        entryCash = money.reduce((s, l) => s + l.creditSen - l.debitSen, 0);
+      }
+      const description = (money[0]?.description || legs[0]?.description || "").trim();
+      const codes = [...new Set(money.map((l) => l.code))];
+      return {
+        key: `${e.sourceType}::${e.sourceId}`,
+        ym: e.ym,
+        date: legs[0]?.date ?? e.ym,
+        description,
+        otherSide: codes.map((code) => ({ code, name: coa.get(code)?.name ?? "" })),
+        ref1: docNoFromDescription(description) ?? e.sourceId,
+        ref2: ref2For(e.sourceType, e.sourceId),
+        sen: e.sen,
+        ofSen: Math.abs(entryCash) !== Math.abs(e.sen) ? Math.abs(entryCash) : null,
+      };
+    }).sort((a, b) => a.date.localeCompare(b.date) || a.ref1.localeCompare(b.ref1));
+    const sign = SECTION_ORDER_SET.has(section) ? displaySign(section as CfSection) : 1;
+    const perMonth = new Map<string, number>();
+    for (const it of items) perMonth.set(it.ym, (perMonth.get(it.ym) ?? 0) + it.sen);
+    const total = items.reduce((s, it) => s + it.sen, 0);
+    const tied = !!row && statement.columns.every((col, i) => (row.values[i] ?? 0) === sign * (col.accum ? total : (perMonth.get(col.key) ?? 0)));
+    drill = {
+      key, label: row?.label ?? key.slice(section.length + 1), section, found: !!row, tied,
+      items, months: monthCols.map((col) => ({ ym: col.key, label: col.label, sen: sign * (perMonth.get(col.key) ?? 0) })),
+    };
+  }
   // Money IN / OUT straight off the bank legs (DR = in, CR = out). Derived
   // here rather than by summing statement lines: the statement's line values
   // carry a per-SECTION display sign, so a salary payment reads positive under
@@ -9130,7 +9252,7 @@ async function computeCashflowStatement(
     cur.outflow -= Number(l.creditSen) || 0;
     bankByMonth.set(l.ym, cur);
   }
-  return { ...statement, bankByMonth };
+  return { ...statement, bankByMonth, drill };
 }
 
 app.get("/cashflow-statement", async (c) => {
@@ -9138,8 +9260,26 @@ app.get("/cashflow-statement", async (c) => {
   if (denied) return denied;
   const period = c.req.query("period") || new Date().toISOString().slice(0, 7);
   const editable = c.req.query("editable") === "1";
-  const { bankByMonth: _bank, ...statement } = await computeCashflowStatement(c.var.DB, period, editable, getOrgId(c));
+  const { bankByMonth: _bank, drill: _drill, sources: _sources, ...statement } = await computeCashflowStatement(c.var.DB, period, editable, getOrgId(c));
   return c.json({ success: true, data: { period, ...statement } });
+});
+
+// Cash Flow inline drill (owner 2026-09-29 「cash flow 也要这样点开看」): the
+// payments / receipts behind one statement line — date, description, the
+// bank (or facility) the money moved through, Ref. 1 (the document), Ref. 2
+// (the PIs / bills it settled, a voucher's payee) and the share it put on this
+// line (a split payment says "part of" its whole amount). Every FY month the
+// statement shows; the UI filters by month. Same computation as the
+// statement, so per column the rows sum to the line (`tied`). Read-only.
+app.get("/cashflow-drill", async (c) => {
+  const denied = await requirePermission(c, "accounting", "read");
+  if (denied) return denied;
+  const period = c.req.query("period") || new Date().toISOString().slice(0, 7);
+  const key = (c.req.query("key") || "").trim();
+  if (!key || !key.includes("|")) return c.json({ success: false, error: "key is required (SECTION|label)" }, 400);
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(period)) return c.json({ success: false, error: "period must be YYYY-MM" }, 400);
+  const { drill } = await computeCashflowStatement(c.var.DB, period, false, getOrgId(c), { traceKey: key });
+  return c.json({ success: true, data: { period, ...drill } });
 });
 
 // GL-truth P&L + Balance Sheet, computed from the immutable

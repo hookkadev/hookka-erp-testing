@@ -15045,7 +15045,92 @@ type CfApiRow = {
   groupId?: string;
   values: (number | null)[];
   accountCode?: string;
+  lineKey?: string;
 };
+
+// Cash Flow inline drill (owner 2026-09-29 「cash flow 也要这样点开看」): the
+// payments / receipts behind one line, opened under the row. GET
+// /cashflow-drill builds them from the statement's own computation, so a
+// month's rows sum to that month's figure; a payment split across lines says
+// "part of" its whole amount. Month chips filter; the statement's month first.
+type CfDrillItem = {
+  key: string; ym: string; date: string; description: string;
+  otherSide: { code: string; name: string }[]; ref1: string; ref2: string | null;
+  sen: number; ofSen: number | null;
+};
+type CfDrillData = {
+  key: string; label: string; section: string; found: boolean; tied: boolean;
+  items: CfDrillItem[]; months: { ym: string; label: string; sen: number }[];
+};
+function CfDrillPanel({ period, lineKey }: { period: string; lineKey: string }) {
+  const [data, setData] = useState<CfDrillData | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [month, setMonth] = useState<string>(period); // a month key, or "ALL"
+  useEffect(() => {
+    let dead = false;
+    fetch(`/api/accounting/cashflow-drill?period=${encodeURIComponent(period)}&key=${encodeURIComponent(lineKey)}`)
+      .then((r) => r.json() as Promise<{ success?: boolean; data?: CfDrillData; error?: string }>)
+      .then((j) => { if (dead) return; if (j?.success && j.data) setData(j.data); else setErr(j?.error || "Could not load the payments"); })
+      .catch(() => { if (!dead) setErr("Could not load the payments"); });
+    return () => { dead = true; };
+  }, [period, lineKey]);
+  const shown = data ? data.items.filter((it) => month === "ALL" || it.ym === month) : [];
+  const moneyIn = shown.reduce((s, it) => s + (it.sen > 0 ? it.sen : 0), 0);
+  const moneyOut = shown.reduce((s, it) => s + (it.sen < 0 ? -it.sen : 0), 0);
+  const chips = data ? data.months.filter((m) => m.sen !== 0 || m.ym === period) : [];
+  const th = "py-1 pr-3 font-medium text-left";
+  const chip = (on: boolean) => `px-2 py-0.5 rounded-full border text-[11px] ${on ? "bg-[#6B5C32] border-[#6B5C32] text-white" : "border-[#E2DDD8] text-[#6B7280] hover:bg-white"}`;
+  return (
+    <div className="bg-[#FAF8F5] border-y border-dashed border-[#E2DDD8] px-4 py-2 whitespace-normal">
+      {!data && !err && <div className="text-xs text-[#9CA3AF] py-1">Loading the payments…</div>}
+      {err && <div className="text-xs text-[#9A3412] py-1">{err}</div>}
+      {data && !data.found && <div className="text-xs text-[#6B7280] py-1">This line is not on the statement any more — reload the page.</div>}
+      {data && data.found && (
+        <>
+          <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
+            {chips.map((m) => (
+              <button key={m.ym} type="button" className={chip(month === m.ym)} onClick={() => setMonth(m.ym)}>{m.label}</button>
+            ))}
+            <button type="button" className={chip(month === "ALL")} onClick={() => setMonth("ALL")}>All months</button>
+            {!data.tied && <span className="text-[11px] text-[#9A3412] ml-2">These rows do not add up to the line — please report it.</span>}
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-[12px]">
+              <thead>
+                <tr className="text-[11px] uppercase tracking-wide text-[#6B7280]">
+                  <th className={th}>Date</th><th className={th}>Description</th><th className={th}>Bank</th>
+                  <th className={th}>Ref. 1</th><th className={th}>Ref. 2</th>
+                  <th className="py-1 pl-3 font-medium text-right">Money in</th><th className="py-1 pl-3 font-medium text-right">Money out</th>
+                </tr>
+              </thead>
+              <tbody>
+                {shown.map((it) => (
+                  <tr key={it.key} className="border-t border-[#F0ECE9] align-top text-[#374151]">
+                    <td className="py-1 pr-3 whitespace-nowrap">{it.date.replace(/-/g, "/")}</td>
+                    <td className="py-1 pr-3">{it.description || "—"}{it.ofSen ? <span className="text-[#9CA3AF]"> · part of {plDrillAmt(it.ofSen)}</span> : null}</td>
+                    <td className="py-1 pr-3">{it.otherSide.length ? it.otherSide.map((o) => `${o.code} ${o.name}`).join(", ") : "—"}</td>
+                    <td className="py-1 pr-3 whitespace-nowrap">{it.ref1}</td>
+                    <td className="py-1 pr-3">{it.ref2 ?? ""}</td>
+                    <td className="py-1 pl-3 text-right tabular-nums">{it.sen > 0 ? plDrillAmt(it.sen) : ""}</td>
+                    <td className="py-1 pl-3 text-right tabular-nums">{it.sen < 0 ? plDrillAmt(-it.sen) : ""}</td>
+                  </tr>
+                ))}
+                {shown.length === 0 && (
+                  <tr><td colSpan={7} className="py-1 text-[#9CA3AF]">No money moved on this line {month === "ALL" ? "this financial year" : "in this month"}.</td></tr>
+                )}
+                <tr className="border-t border-[#9CA3AF] font-semibold text-[#1F1D1B]">
+                  <td className="py-1" colSpan={5}>Total</td>
+                  <td className="py-1 pl-3 text-right tabular-nums">{plDrillAmt(moneyIn)}</td>
+                  <td className="py-1 pl-3 text-right tabular-nums">{plDrillAmt(moneyOut)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 type CfApiData = { period: string; columns: { key: string; label: string; accum?: boolean }[]; rows: CfApiRow[] };
 // The four raw-material template categories a supplier can be assigned to
 // (mirrors RM_LINES in cashflow-engine.ts).
@@ -15072,6 +15157,9 @@ function CashFlowTab() {
   const [supCatGuess, setSupCatGuess] = useState<Record<string, string>>({});
   const [dragCode, setDragCode] = useState<string | null>(null);
   const [dragOverSec, setDragOverSec] = useState<string | null>(null);
+  // Lines opened in the inline drill, keyed by period + line so a new period
+  // starts with everything closed.
+  const [cfDrillOpen, setCfDrillOpen] = useState<Set<string>>(new Set());
   const { data: resp, refresh } = useCachedJson<{ success?: boolean; data?: CfApiData }>(
     `/api/accounting/cashflow-statement?period=${period}${edit ? "&editable=1" : ""}`,
   );
@@ -15780,9 +15868,13 @@ function CashFlowTab() {
                     r.kind === "bf" ? "text-[#6B7280] italic" :
                     r.kind === "subtotal" ? "font-semibold border-t border-[#E2DDD8]" :
                     r.kind === "section" ? "font-extrabold tracking-wide text-[#6B5C32] text-[12px]" : "";
+                  const canDrill = !edit && r.kind === "line" && !!r.lineKey;
+                  const drillKey = canDrill ? `${period}|${r.lineKey}` : "";
+                  const drilled = canDrill && cfDrillOpen.has(drillKey);
                   return (
-                    <tr key={i}
-                      className={`${rowCls} ${isGroup ? "cursor-pointer hover:bg-[#F7F4EF] bg-[#F0ECE9]/30 font-semibold" : ""} ${draggable ? "cursor-move" : ""} ${dragCode === r.accountCode ? "opacity-40" : ""} ${dropHere && dragOverSec === r.section ? "ring-2 ring-inset ring-[#6B5C32]" : ""}`}
+                    <Fragment key={i}>
+                    <tr
+                      className={`${rowCls} ${isGroup ? "cursor-pointer hover:bg-[#F7F4EF] bg-[#F0ECE9]/30 font-semibold" : ""} ${draggable ? "cursor-move" : ""} ${dragCode === r.accountCode ? "opacity-40" : ""} ${dropHere && dragOverSec === r.section ? "ring-2 ring-inset ring-[#6B5C32]" : ""} ${drilled ? "bg-[#F7F4EF]" : ""}`}
                       draggable={draggable}
                       onDragStart={draggable ? (e) => { setDragCode(r.accountCode!); e.dataTransfer.setData("text/plain", r.accountCode!); e.dataTransfer.effectAllowed = "move"; } : undefined}
                       onDragEnd={draggable ? () => { setDragCode(null); setDragOverSec(null); } : undefined}
@@ -15797,11 +15889,22 @@ function CashFlowTab() {
                         else void moveTo(src, r.section);
                       } : undefined}
                       onClick={isGroup && !edit ? () => { const n = new Set(collapsed); if (n.has(r.groupId!)) n.delete(r.groupId!); else n.add(r.groupId!); setCollapsed(n); } : undefined}>
-                      <td className="py-1 whitespace-nowrap" style={pad}>{isGroup ? (isOpen ? "▾ " : "▸ ") : ""}{draggable ? "⠿ " : ""}{r.label}</td>
+                      <td className="py-1 whitespace-nowrap" style={pad}>
+                        {canDrill ? (
+                          <button type="button" className="text-left hover:underline decoration-dotted cursor-pointer" title="Show the payments behind this line"
+                            onClick={() => setCfDrillOpen((prev) => { const n = new Set(prev); if (n.has(drillKey)) n.delete(drillKey); else n.add(drillKey); return n; })}>
+                            <span className="text-[10px] text-[#9CA3AF] mr-1">{drilled ? "▾" : "▸"}</span>{r.label}
+                          </button>
+                        ) : <>{isGroup ? (isOpen ? "▾ " : "▸ ") : ""}{draggable ? "⠿ " : ""}{r.label}</>}
+                      </td>
                       {r.values.map((v, j) => (
                         <td key={j} className={`text-right px-2 tabular-nums whitespace-nowrap ${typeof v === "number" && v < 0 ? "text-[#9A3A2D]" : ""} ${v === 0 ? "text-[#C7C1BA]" : ""} ${strong ? "font-semibold" : ""} ${cols[j]?.accum ? "bg-[#F6F1E7]" : ""}`}>{fmt(v)}</td>
                       ))}
                     </tr>
+                    {drilled && r.lineKey && (
+                      <tr><td colSpan={cols.length + 1} className="p-0"><CfDrillPanel period={period} lineKey={r.lineKey} /></td></tr>
+                    )}
+                    </Fragment>
                   );
                 })}
               </tbody>

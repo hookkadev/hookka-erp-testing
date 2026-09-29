@@ -261,8 +261,16 @@ export type CfRow = {
   groupId?: string;
   values: (number | null)[];
   accountCode?: string;
+  // A line's own key ("<SECTION>|<label>") — what the inline drill asks for.
+  lineKey?: string;
 };
-export type CfStatement = { columns: CfColumn[]; rows: CfRow[] };
+// Where a line's money came from (the inline drill, owner 2026-09-29 「cash
+// flow 也要这样点开看」): one entry per ledger leg that fed the line — its
+// entry, month and the cash it put on THIS line (+ in, − out). `of` is the
+// leg's whole cash when the line only got a share of it (a payment split
+// across the materials of the PIs it settled, a salary split by department).
+export type CfSource = { sourceType: string; sourceId: string; ym: string; sen: number; legAccount: string; of?: number };
+export type CfStatement = { columns: CfColumn[]; rows: CfRow[]; sources?: Record<string, CfSource[]> };
 
 // Months of the current FY from period back to FY start (inclusive),
 // newest first, e.g. fye=8, period=2026-03 → [2026-03,...,2025-09,2025-08].
@@ -315,8 +323,10 @@ export function buildStatement(opts: {
   fyeMonth: number;
   period: string;
   editable?: boolean;
+  // Record every line's sources (CfSource) for the inline drill.
+  trace?: boolean;
 }): CfStatement {
-  const { classified, bankLegs, coa, map, rmSplit, deptSplit = {}, stockGroupOverride, supplierCategory = {}, fyeMonth, period, editable } = opts;
+  const { classified, bankLegs, coa, map, rmSplit, deptSplit = {}, stockGroupOverride, supplierCategory = {}, fyeMonth, period, editable, trace } = opts;
   const months = fyMonths(period, fyeMonth);        // newest first
   const fyStart = months[months.length - 1];        // FY start ym
   const columns: CfColumn[] = [
@@ -334,11 +344,14 @@ export function buildStatement(opts: {
     if (!a) { a = { section, label, order, vals: columns.map(() => 0), accountCode }; lines.set(k, a); }
     return a;
   };
-  const addToLine = (section: CfSection, label: string, order: number, ym: string, deltaSen: number, accountCode?: string) => {
+  const sources: Record<string, CfSource[]> = {};
+  type Src = { sourceType: string; sourceId: string; legAccount: string; of?: number };
+  const addToLine = (section: CfSection, label: string, order: number, ym: string, deltaSen: number, accountCode?: string, src?: Src) => {
     const a = ensure(section, label, order, accountCode);
     if (inFy(ym)) { a.vals[colIndex.get("__accum__")!] += deltaSen; }
     const ci = colIndex.get(ym);
     if (ci !== undefined) a.vals[ci] += deltaSen;
+    if (trace && src) (sources[`${section}|${label}`] ??= []).push({ ...src, ym, sen: deltaSen });
   };
 
   const placement = (code: string, fallback: CoaLite | undefined): { section: CfSection; order: number; name: string } => {
@@ -352,6 +365,8 @@ export function buildStatement(opts: {
     const a = coa.get(leg.accountCode);
     const place = placement(leg.accountCode, a);
     const delta = cashDelta(leg); // signed; + = cash in
+    const src: Src = { sourceType: leg.sourceType, sourceId: leg.sourceId, legAccount: leg.accountCode };
+    const share: Src = { ...src, of: delta };
     if (place.section === "RAW_MATERIALS") {
       // A split registered for this leg's exact account wins over the
       // payment-wide one (an other-party payment can put SOME of its money on
@@ -367,15 +382,15 @@ export function buildStatement(opts: {
           // A supplier the owner filed under a section (Capex, overhead …)
           // takes its uncoded / opening money there, as a row of its own.
           const via = supplierSectionFor(line, supplierCategory);
-          if (via) addToLine(via.section, via.supplier, 50, leg.ym, sign * sen);
-          else addToLine("RAW_MATERIALS", line, rmLineOrder(line), leg.ym, sign * sen);
+          if (via) addToLine(via.section, via.supplier, 50, leg.ym, sign * sen, undefined, share);
+          else addToLine("RAW_MATERIALS", line, rmLineOrder(line), leg.ym, sign * sen, undefined, share);
         }
       } else if (a && !(a.sat === "SCC" || band(leg.accountCode) === 400 || band(leg.accountCode) === 405)) {
         // A non-control account routed here (a PURCHASE - … account, or one
         // the owner dragged in) keeps its own name as the line.
-        addToLine("RAW_MATERIALS", place.name, rmLineOrder(place.name), leg.ym, delta, leg.accountCode);
+        addToLine("RAW_MATERIALS", place.name, rmLineOrder(place.name), leg.ym, delta, leg.accountCode, src);
       } else {
-        addToLine("RAW_MATERIALS", "Unallocated raw material", 99, leg.ym, delta);
+        addToLine("RAW_MATERIALS", "Unallocated raw material", 99, leg.ym, delta, undefined, src);
       }
     } else if (place.section === "DIRECT_LABOUR" && deptSplit[leg.sourceId]?.length) {
       // Salary settlement split across departments (weights = that payroll
@@ -388,12 +403,12 @@ export function buildStatement(opts: {
       );
       const sign = delta < 0 ? -1 : 1;
       for (const [line, sen] of Object.entries(parts))
-        addToLine("DIRECT_LABOUR", line, 10, leg.ym, sign * sen);
+        addToLine("DIRECT_LABOUR", line, 10, leg.ym, sign * sen, undefined, share);
     } else if (place.section === "TRADE_FINANCE") {
       const label = leg.lineLabel ?? place.name;
-      addToLine("TRADE_FINANCE", label, tfLineOrder(label), leg.ym, delta, leg.accountCode);
+      addToLine("TRADE_FINANCE", label, tfLineOrder(label), leg.ym, delta, leg.accountCode, src);
     } else {
-      addToLine(place.section, leg.lineLabel ?? place.name, place.order, leg.ym, delta, leg.accountCode);
+      addToLine(place.section, leg.lineLabel ?? place.name, place.order, leg.ym, delta, leg.accountCode, src);
     }
   }
 
@@ -479,7 +494,7 @@ export function buildStatement(opts: {
     }
     flat.sort((x, y) => x.order - y.order || x.label.localeCompare(y.label));
     const line = (a: Agg, depth: number, gid?: string) =>
-      push({ kind: "line", label: a.label, section: sec, depth, groupId: gid, values: a.vals.map((v) => sign * v), accountCode: a.accountCode });
+      push({ kind: "line", label: a.label, section: sec, depth, groupId: gid, values: a.vals.map((v) => sign * v), accountCode: a.accountCode, lineKey: `${sec}|${a.label}` });
     const body = () => {
       for (const cl of [...clusters.values()].sort((x, y) => x.code.localeCompare(y.code))) {
         const gid = `${sec}>${cl.code}`;
@@ -519,5 +534,5 @@ export function buildStatement(opts: {
   push({ kind: "bf", label: "Bank balance b/f", depth: 0, values: bfVals });
   push({ kind: "cf", label: "Bank balance c/f", depth: 0, values: cfVals });
 
-  return { columns, rows };
+  return trace ? { columns, rows, sources } : { columns, rows };
 }
