@@ -12003,7 +12003,7 @@ app.get("/trade-finance", async (c) => {
 // Interest on a draw (owner 2026-08-11 「要包括 interest」): the owner keys
 // the bank's charged interest per draw (manual now; OCR-prefill later). The
 // figure is stored NOWHERE — it is posted as `tf_interest` legs under the
-// DRAW's sourceId (DR 900-I001 INTEREST ON TRADE FINANCE / CR the TF
+// DRAW's sourceId (DR TF_INTEREST_ACCT INTEREST ON TRADE FINANCE / CR the TF
 // account), so the draw's ledger-derived amount, outstanding, repayment
 // clamps and the identity line all include it by construction. The endpoint
 // takes the draw's TOTAL interest and delta-posts the difference — send the
@@ -12011,7 +12011,71 @@ app.get("/trade-finance", async (c) => {
 // sourceType `tf_interest` is deliberately NOT in DOC_DATE_FAMILIES: its
 // legs date to the day they are keyed (postedAt fallback), which is when the
 // charge becomes known.
-const TF_INTEREST_ACCT = { code: "900-I001", name: "INTEREST ON TRADE FINANCE" };
+// The account the bank's trade-finance interest is booked to. Created on
+// first use, under FINANCE COSTS (902-0000) beside LOAN INTEREST (900-L002).
+//
+// BUG-2026-09-29-196: this used to be 900-I001 — a code that ALREADY existed
+// in the owner's AutoCount-style chart as "INCORPORATION EXPENSE WRITTEN
+// OFF" (and 900-I002 / I003 are INTERNET CHARGES / INSURANCE EXPENSES). The
+// `ON CONFLICT DO NOTHING` create never looked at the name, so every interest
+// leg landed on the wrong expense: the Sep'26 P&L line "INCORPORATION
+// EXPENSE WRITTEN OFF RM 1,637.08" was the trade-finance interest. Now: a
+// free code, a name-checked create (a foreign account under our code refuses
+// the post instead of absorbing it), and POST /trade-finance/
+// interest-account-repoint to move the legs already posted to the old code.
+const TF_INTEREST_ACCT = { code: "900-I004", name: "INTEREST ON TRADE FINANCE", parentCode: "902-0000" };
+const TF_INTEREST_LEGACY_ACCT = "900-I001";
+
+// Creates the dedicated account once (quietly) and proves the code is ours:
+// returns an error text when the code belongs to some other account.
+async function ensureTfInterestAccount(db: Env["Variables"]["DB"]): Promise<string | null> {
+  await db.prepare(
+    `INSERT INTO chart_of_accounts (code, name, type, parentCode, balanceSen, isActive, cashFlowCategory, specialAccountType, pnlCategory, isPostable)
+     VALUES (?, ?, 'EXPENSE', ?, 0, 1, NULL, NULL, NULL, 1)
+     ON CONFLICT (code) DO NOTHING`,
+  ).bind(TF_INTEREST_ACCT.code, TF_INTEREST_ACCT.name, TF_INTEREST_ACCT.parentCode).run();
+  const row = await db.prepare("SELECT name FROM chart_of_accounts WHERE code = ?")
+    .bind(TF_INTEREST_ACCT.code).first<{ name: string | null }>();
+  const name = String(row?.name ?? "").trim().toUpperCase();
+  if (name && name !== TF_INTEREST_ACCT.name) {
+    return `${TF_INTEREST_ACCT.code} is "${row?.name}" in the chart of accounts, not ${TF_INTEREST_ACCT.name} — the interest cannot be posted there`;
+  }
+  return null;
+}
+
+// POST /trade-finance/interest-account-repoint?dry=1 — one-shot repair for
+// BUG-2026-09-29-196: every tf_interest leg still sitting on the legacy code
+// moves to the dedicated account (the legs keep their ids, dates, sources and
+// amounts — only the account changes, so every draw's derived figures are
+// untouched). Idempotent: a second run moves nothing. dry=1 only counts.
+app.post("/trade-finance/interest-account-repoint", async (c) => {
+  const denied = requireFinance(c);
+  if (denied) return denied;
+  const dry = c.req.query("dry") === "1" || c.req.query("dry") === "true";
+  const orgId = getOrgId(c);
+  const acctErr = await ensureTfInterestAccount(c.var.DB);
+  if (acctErr) return c.json({ success: false, error: acctErr }, 409);
+  const legs = (await c.var.DB.prepare(
+    `SELECT id, debitSen, creditSen FROM ledger_journal_entries
+      WHERE orgId = ? AND accountCode = ? AND sourceType LIKE 'tf_interest%'`,
+  ).bind(orgId, TF_INTEREST_LEGACY_ACCT).all<Record<string, unknown>>()).results ?? [];
+  const debitSen = legs.reduce((s, l) => s + (Number(l.debitSen ?? l.debit_sen) || 0), 0);
+  const creditSen = legs.reduce((s, l) => s + (Number(l.creditSen ?? l.credit_sen) || 0), 0);
+  if (!dry && legs.length) {
+    await c.var.DB.prepare(
+      `UPDATE ledger_journal_entries SET accountCode = ?
+        WHERE orgId = ? AND accountCode = ? AND sourceType LIKE 'tf_interest%'`,
+    ).bind(TF_INTEREST_ACCT.code, orgId, TF_INTEREST_LEGACY_ACCT).run();
+    await emitAudit(c, {
+      resource: "trade-finance",
+      resourceId: TF_INTEREST_ACCT.code,
+      action: "interest-account-repoint",
+      before: { account: TF_INTEREST_LEGACY_ACCT, legs: legs.length, debitSen, creditSen },
+      after: { account: TF_INTEREST_ACCT.code },
+    });
+  }
+  return c.json({ success: true, data: { dry, from: TF_INTEREST_LEGACY_ACCT, to: TF_INTEREST_ACCT.code, legs: legs.length, debitSen, creditSen, netSen: debitSen - creditSen } });
+});
 
 app.put("/trade-finance/draw-interest", async (c) => {
   const denied = requireFinance(c);
@@ -12044,12 +12108,11 @@ app.put("/trade-finance/draw-interest", async (c) => {
     if (draw.amountSen + deltaSen < draw.repaidSen) {
       return c.json({ success: false, error: "Lowering interest below what is already repaid would overdraw the draw — void the repayment first" }, 400);
     }
-    // Make sure the dedicated expense account exists (created once, quietly).
-    await c.var.DB.prepare(
-      `INSERT INTO chart_of_accounts (code, name, type, parentCode, balanceSen, isActive, cashFlowCategory, specialAccountType, pnlCategory, isPostable)
-       VALUES (?, ?, 'EXPENSE', NULL, 0, 1, NULL, NULL, NULL, 1)
-       ON CONFLICT (code) DO NOTHING`,
-    ).bind(TF_INTEREST_ACCT.code, TF_INTEREST_ACCT.name).run();
+    // Make sure the dedicated expense account exists (created once, quietly)
+    // and is OURS — a foreign account under the code refuses the post
+    // (BUG-2026-09-29-196: 900-I001 was somebody else's account).
+    const acctErr = await ensureTfInterestAccount(c.var.DB);
+    if (acctErr) return c.json({ success: false, error: acctErr }, 409);
     const orgId = getOrgId(c);
     const actorUserId = (c as unknown as { get: (k: string) => string | undefined }).get("userId") ?? null;
     // sourceId carries the charge date (self-dated leg, see doc-date.ts);

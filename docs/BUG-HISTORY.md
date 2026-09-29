@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-196 (branch `fix/tf-interest-account-collision`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-25**: newest entry BUG-2026-09-25-195 (branch `feat/employees-kpi-layout`, PR #530); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-25**: newest entry BUG-2026-09-25-194 (branch `feat/dashboard-kpi-no-icons`, PR #524); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-25** — newest entry BUG-2026-09-25-192 (branch `feat/ocr-dashboard-tab`, PR #522); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
@@ -38,6 +39,35 @@ Entries themselves stay newest-first.
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
 
 ---
+
+## BUG-2026-09-29-196 — Trade-finance interest was booked to "INCORPORATION EXPENSE WRITTEN OFF": the interest account's code 900-I001 already belonged to another account `accounting` `trade-finance` `chart-of-accounts` 🟡
+
+**Symptom (owner, 2026-09-28, while checking the Cash Flow Trade Finance block):** the Sep'26 P&L showed
+"INCORPORATION EXPENSE WRITTEN OFF RM 1,637.08" — an expense the company never incurred that month.
+Measured on prod: it is exactly the Houzs Century trade-finance interest for September
+(Σ of the `tf_interest` legs, 20 legs on 900-I001 in total: DR 2,458.96 / CR 821.88, net 1,637.08;
+**no** genuine incorporation-expense leg on the account).
+
+**Root cause:** `TF_INTEREST_ACCT` (accounting.ts, `PUT /trade-finance/draw-interest`, 2026-08-11) was
+`{ code: "900-I001", name: "INTEREST ON TRADE FINANCE" }` and the account was created with
+`INSERT … ON CONFLICT (code) DO NOTHING`. The owner's AutoCount-style chart already had 900-I001 =
+INCORPORATION EXPENSE WRITTEN OFF (900-I002 = INTERNET CHARGES, 900-I003 = INSURANCE EXPENSES), so the
+insert silently did nothing and every interest posting debited the owner's account. Same class as the
+`ON CONFLICT DO NOTHING` self-apply traps in HOOKKA-GOTCHAS: a create that never checks what it
+collided with.
+
+**Fix (branch `fix/tf-interest-account-collision`):**
+- `TF_INTEREST_ACCT` → a free code, `900-I004 INTEREST ON TRADE FINANCE`, created under
+  `902-0000 FINANCE COSTS` (beside `900-L002 LOAN INTEREST`, so the P&L files it under Finance Costs).
+- `ensureTfInterestAccount` creates it once and **name-checks** the row: a foreign account under our
+  code makes the interest post refuse with 409 instead of absorbing the leg.
+- `POST /api/accounting/trade-finance/interest-account-repoint?dry=1` moves every `tf_interest%` leg
+  off 900-I001 onto the new account (ids / dates / sources / amounts untouched — only `accountCode`),
+  audited, idempotent. Guard: `tests/tf-interest-account.test.mjs`.
+
+**Verification:** UNMEASURED until the repoint runs on prod (dry-run count must be 20, DR 2,458.96 /
+CR 821.88; after the run 900-I001 must read 0.00 and the Sep'26 P&L must show INTEREST ON TRADE
+FINANCE 1,637.08 under FINANCE COSTS with INCORPORATION EXPENSE WRITTEN OFF gone).
 
 ## BUG-2026-09-25-195: Overall Efficiency showed a dash on the People tab, and the month figure counted days with no hours `dashboard` `employees` 🟡
 
