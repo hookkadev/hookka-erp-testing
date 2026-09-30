@@ -40,7 +40,7 @@ test("Ref. 2 is the counterparty; the documents ride along for the hover; AP vou
   assert.match(fn, /SELECT pvNo, description FROM payment_vouchers WHERE pvNo IN/, "a payment made through a voucher takes its purpose");
   assert.match(fn, /ref2: who,/);
   assert.match(fn, /docs: kind \? docs\.get\(`\$\{kind\}::\$\{e\.sourceId\}`\) \?\? null : null,/);
-  assert.match(fn, /const description = purpose \?\? tidyDescription\(legText, ref1, who\);/);
+  assert.match(fn, /const description = purpose \? \(variant \? `\$\{purpose\} · \$\{variant\}` : purpose\) : tidyDescription\(legText, ref1, who\);/);
   assert.doesNotMatch(fn, /ref2\.set\(`sp::/, "the invoice list is not Ref. 2 any more");
 });
 
