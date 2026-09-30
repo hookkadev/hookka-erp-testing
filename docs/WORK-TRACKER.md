@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-30**: #617 entry item 4 — owner re-posted the opening; creditor Self-check card green (measured).
 > **Last verified: 2026-09-30**: #617 (BUG-2026-09-30-229/-230, Self-check reconciliations + cancelled opening seeds) closed ✅ below with its prod check.
 > **Last verified: 2026-09-30**: branch `fix/pillow-fab-sew-sticker` (DEV-26) added below (its entry is the newest).
 > **Last verified: 2026-09-30**: branch `fix/selfcheck-recon-and-opening-seeds` added below (its entry is the newest).
@@ -125,8 +126,10 @@ tsc strict 0; `npm test` 5047 pass / 0 fail.
    each — the opening leg (creditor) and the receipt knocked off against invoices outside the books (debtor); the control
    cards, trial balance and the other opening totals unchanged; the Opening Balance page lists no cancelled seed and its
    difference grew by exactly the cancelled seeds. Self-check page read back the same.
-4. 🟡 Owner: re-post the opening (place the difference — his choice of account); the customer opening for the debtor item
-   waits for that customer's statement.
+4. ✅ Owner re-posted the opening himself (difference placed on the account he chose). Measured after: opening balanced,
+   creditor control = subledger to the sen (Self-check card green), trial balance unchanged, the finalised bank
+   reconciliations' live figures still equal their sealed snapshots. 🟡 The debtor item waits for that customer's opening
+   (needs their statement at the opening date).
 
 ## 2026-09-30 — ✅ Drills: an official receipt reads its own text, never a lone "from" (BUG-2026-09-30-228)(#616 d68542b0 MERGED, deployed, prod-verified)
 
