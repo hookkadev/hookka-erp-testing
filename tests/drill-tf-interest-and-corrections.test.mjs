@@ -27,7 +27,10 @@ const slice = (src, from, to) => { const a = src.indexOf(from); assert.notEqual(
 test("a correction entry says what it is; an ordinary posting says nothing", () => {
   const v = drill.drillVariant;
   assert.equal(v("supplier_payment_restate_rev:1727000000000", "HPV-2609-001"), "reversed on edit");
-  assert.equal(v("invoice_restate_post:1727000000000", "inv-1"), "re-posted on edit");
+  // An edit's re-post hides the older legs, so it IS the document (345 lines
+  // on prod carried a needless label before this).
+  assert.equal(v("invoice_restate_post:1727000000000", "inv-1"), "");
+  assert.equal(v("supplier_payment_restate_post:1727000000000", "HPV-2609-001"), "");
   assert.equal(v("purchase_invoice_restate_post", "pi-1"), "GL re-sync", "a PI's re-sync carries no stamp");
   assert.equal(v("purchase_invoice_unvoid", "pi-1"), "unvoid");
   assert.equal(v("payment_voucher_void", "pv-1"), "void");
@@ -68,4 +71,20 @@ test("Cash Flow lines: official receipts, JVs and interest have their counterpar
   assert.match(fn, /const lender = \(byEntry\.get\(`\$\{e\.sourceType\}::\$\{e\.sourceId\}`\) \?\? \[\]\)\.map\(\(l\) => tfAccounts\.get\(l\.code\)\?\.lenderName \?\? ""\)\.find\(Boolean\) \?\? "";/);
   assert.match(fn, /if \(paid\) docs\.set\(`tf::\$\{e\.sourceId\}`, `Drawn to pay \$\{paid\}`\);/);
   assert.match(fn, /const variant = drillVariant\(e\.sourceType, e\.sourceId\);/);
+});
+
+test("a description that says nothing does not replace the ledger text", () => {
+  const own = drill.ownDescription;
+  assert.equal(own("Rental - Sep'26"), "Rental - Sep'26");
+  assert.equal(own("  from "), null, "an official receipt keyed as 'from'");
+  assert.equal(own("To"), null);
+  assert.equal(own(""), null);
+  assert.equal(own(null), null);
+  assert.equal(own("from HONG LEONG"), "from HONG LEONG", "a real sentence stays");
+  const fn = slice(api, "async function buildDrillLines(", "\n}\n");
+  assert.match(fn, /header: ownDescription\(str\(r\.description\)\) \?\? "Official receipt" \}\);/, "an official receipt falls back to its kind");
+  assert.match(fn, /header: ownDescription\(str\(r\.description\)\) \}\);/, "a voucher / JV falls back to the ledger text");
+  const cf = slice(api, "async function computeCashflowStatement(", 'app.get("/cashflow-statement"');
+  assert.match(cf, /ownDescription\(String\(r\.description \?\? ""\)\) \?\? "Official receipt"\);/);
+  assert.doesNotMatch(cf, /const purpose = String\(r\.description \?\? ""\)\.trim\(\);/, "every voucher purpose goes through ownDescription");
 });
