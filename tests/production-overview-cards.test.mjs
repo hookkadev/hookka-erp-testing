@@ -10,7 +10,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { DEPARTMENTS, overviewStages, stageTint } from "../src/pages/production/utils.ts";
+import { CARD_HEIGHT, DEPARTMENTS, overviewStages, stageKind, stageTint } from "../src/pages/production/utils.ts";
 
 const read = (p) => readFileSync(resolve(process.cwd(), p), "utf8");
 const PAGE = read("src/pages/production/index.tsx");
@@ -82,4 +82,26 @@ test("cards and stage cells are memoized, fed stable handlers", () => {
 
 test("the page opens on Cards and does not persist the choice", () => {
   assert.match(PAGE, /useState<"cards" \| "grid">\("cards"\)/);
+});
+
+test("stageKind: pill state per cell; in progress is display-only", () => {
+  const cell = (state, doneCards, totalCards) => ({ state, doneCards, totalCards, earliestDue: "", latestCompleted: "", isOffLeadtime: false });
+  assert.equal(stageKind(cell("empty", 0, 0)), "skipped");
+  assert.equal(stageKind(cell("done", 2, 2)), "done");
+  assert.equal(stageKind(cell("overdue", 1, 2)), "overdue", "overdue wins over partly done");
+  assert.equal(stageKind(cell("pending", 1, 2)), "inProgress");
+  assert.equal(stageKind(cell("pending", 0, 2)), "pending");
+  // The saved status filter still only knows pending / overdue / done.
+  assert.doesNotMatch(read("src/pages/production/types.ts"), /inProgress/);
+});
+
+test("cards have a fixed height equal to the virtualizer estimate", () => {
+  assert.match(CARDS, /style=\{\{ height: CARD_HEIGHT,/);
+  assert.match(PAGE, /estimateSize=\{CARD_HEIGHT\}/);
+  assert.equal(CARD_HEIGHT, 128);
+});
+
+test("Grid keeps the original CellBox look; the Cards pills are separate", () => {
+  assert.match(PAGE, /<CellBox cell=\{c\} \/>/);
+  assert.ok(!CARDS.includes('from "./CellBox"'), "Cards must not render CellBox");
 });

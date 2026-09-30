@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-30**: branch `feat/production-overview-card-pills` added below as item 6 of the Production Overview Cards entry (stacked on #592).
 > **Last verified: 2026-09-30**: branch `feat/production-overview-cards` added below (open, its entry is the newest).
 > **Last verified: 2026-09-30**: branch `test/bug06-do-guard-behavioural` (to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-09-30**: branch `feat/m-warehouse-movement-time` (to `staging`) added below (its entry is the newest).
@@ -101,7 +102,8 @@ tsc strict 0; `npm test` 5047 pass / 0 fail.
 - 2. 🔵 Card = one-line header bar (checkbox, SO ID + hold pill, Customer PO, product + specs, hold reason, customer | Special, Qty, Cust DD, Our DD) over a stage pipeline (existing `CellBox`, same colours). No sideways scroll at 1280px+.
 - 3. 🔵 Stages from `overviewStages()` (`production/utils.ts`): today's 9 in today's order and labels, plus any other `isProduction` dept from `/api/departments` appended by sequence. Overview only; dept tabs / print keep `DEPARTMENTS`.
 - 4. 🔵 Sort / filter / select-all move into a sticky 2-line header inside the cards' scroll box (same popovers, same saved `hookka-production-overview-table-state`). Click bar = select, double-click = open SO/CO, click stage = date picker.
-- 5. 🔵 Perf: each card is one virtual row (82px, `OverviewVirtualRows`); `WorkOrderCard` / `StageCell` are `React.memo` with stable handlers.
+- 5. 🔵 Perf: each card is one virtual row (fixed height, `OverviewVirtualRows`); `WorkOrderCard` / `StageCell` are `React.memo` with stable handlers.
+- 6. 🔵 (branch `feat/production-overview-card-pills` → `staging`, stacked on #592) Cards restyled: white rounded card with shadow; header badges (Qty / Cust DD / Our DD, customer with a building icon); each stage = label, status pill (Completed #2D5A54, In progress #2563EB = some JCs done, Pending #B0892A, Overdue #991B1B + alert icon, N/A dashed) and the date under it (overdue bold red "! date"); off-plan dates get a cyan dot. Card row 128px. Legend follows the view. Grid unchanged.
 - Guard: `tests/production-overview-cards.test.mjs`.
 
 ## 2026-09-28 — 🔵 DEV-20 Raw Material UOM options per category (branch `feat/rm-uom-options` → `staging`)
