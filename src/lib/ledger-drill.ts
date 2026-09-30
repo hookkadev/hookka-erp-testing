@@ -78,3 +78,31 @@ export function shortBankName(name: string | null | undefined): string {
   if (tf) return `TF · ${tf[1].replace(/\s+SDN\.?\s*BHD\.?$/i, "").trim()}`;
   return n;
 }
+
+// The overall description of a cash-flow row: the ledger text without its own
+// number (Ref. 1), without the counterparty's name (Ref. 2) and without the
+// "(edited)" marker of a re-posted document. "Supplier payment (edited)" →
+// "Supplier payment"; "Receipt HOR-2606-008 · Houzs Century" → "Receipt";
+// "Other creditor payment · HPV-2606-070 · Houzs Venture" → "Other creditor
+// payment". Nothing left → the text without its number.
+export function tidyDescription(
+  description: string | null | undefined,
+  docNo: string | null | undefined,
+  party: string | null | undefined,
+): string {
+  const base = withoutDocNo(description, docNo);
+  let s = base;
+  const p = (party ?? "").trim();
+  if (p) {
+    const at = s.toUpperCase().indexOf(p.toUpperCase());
+    if (at >= 0) s = s.slice(0, at) + " " + s.slice(at + p.length);
+  }
+  s = s.replace(/\(edited\)/gi, " ")
+    .replace(/\s*·\s*(?:·\s*)+/g, " · ")
+    .replace(/^[\s·:\-–]+/, "")
+    .replace(/[\s·:\-–]+$/, "")
+    .replace(/(?:^|\s+)to$/i, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  return s || base;
+}

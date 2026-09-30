@@ -38,7 +38,7 @@ import { ensurePartialPaymentColumns } from "../lib/ensure-partial-payment";
 import { ensureFinanceOrgColumns } from "../lib/ensure-finance-org";
 import { apRowBeforeOpening, legBeforeOpening, rowBeforeOpening } from "../../lib/opening-floor";
 import { applyOpeningSlice, windowCoversMonth } from "../../lib/opening-slice";
-import { docNoFromDescription, otherSideCodes, withoutDocNo } from "../../lib/ledger-drill";
+import { docNoFromDescription, otherSideCodes, tidyDescription } from "../../lib/ledger-drill";
 import { labourInjectMonths } from "../../lib/labour-inject";
 import { projectedLabourByDept } from "../lib/labour-projection";
 import { groupPayslipsByMonthDept, forecastEntryKind, monthHasDeptForecast, labourMappedAccounts } from "../../lib/salary-dept";
@@ -8708,6 +8708,9 @@ export async function loadFinanceSeries(
 type CfDrillItem = {
   key: string; ym: string; date: string; description: string;
   otherSide: { code: string; name: string }[]; ref1: string; ref2: string | null;
+  // The documents the money settled (PI / bill numbers) — shown on hover, not
+  // in the column (owner 2026-09-30 「不需要看每一张 invoice 的 number」).
+  docs: string | null;
   sen: number; ofSen: number | null;
 };
 const SECTION_ORDER_SET: ReadonlySet<string> = new Set<string>([
@@ -9175,49 +9178,70 @@ async function computeCashflowStatement(
       }
       return out;
     };
-    const ref2 = new Map<string, string>();
-    // A voucher's own purpose ("PAYMENT FOR SALARIES - JULY'26") — the
-    // Description column; its number and payee already have their columns.
-    const pvPurpose = new Map<string, string>();
+    // Ref. 2 = who the money went to / came from (owner 2026-09-30 「refer 2 是
+    // 看 supplier 名字和 overall description 就好，不需要看每一张 invoice 的
+    // number」): the supplier, the other creditor, the voucher's payee, the
+    // customer. The PIs / bills a payment settled ride along for the hover.
+    // A payment made through a payment voucher (an AP voucher: its number is
+    // the payment number) takes that voucher's purpose as its description.
+    const party = new Map<string, string>();
+    const docs = new Map<string, string>();
+    const pvPurpose = new Map<string, string>(); // voucher id → purpose
+    const pvPurposeByNo = new Map<string, string>(); // voucher number → purpose
+    const setOnce = (m: Map<string, string>, k: string, v: string) => { if (v && !m.has(k)) m.set(k, v); };
     try {
       const spNos = [...new Set(ents.filter((e) => e.sourceType.startsWith("supplier_payment")).map((e) => e.sourceId))];
       const piByPay = new Map<string, Set<string>>();
-      for (const r of await chunkIds(spNos, (ph) => `SELECT payment_no, purchase_invoice_id FROM supplier_payments WHERE payment_no IN (${ph}) AND org_id = ?`, [orgId])) {
+      for (const r of await chunkIds(spNos, (ph) => `SELECT payment_no, purchase_invoice_id, supplier_name FROM supplier_payments WHERE payment_no IN (${ph}) AND org_id = ?`, [orgId])) {
         const no = String(r.paymentNo ?? r.payment_no ?? ""), pid = String(r.purchaseInvoiceId ?? r.purchase_invoice_id ?? "");
+        setOnce(party, `sp::${no}`, String(r.supplierName ?? r.supplier_name ?? "").trim());
         if (no && pid) (piByPay.get(no) ?? piByPay.set(no, new Set()).get(no)!).add(pid);
       }
       const piNo = new Map<string, string>();
       for (const r of await chunkIds([...new Set([...piByPay.values()].flatMap((s) => [...s]))], (ph) => `SELECT id, piNo FROM purchase_invoices WHERE id IN (${ph})`)) {
         piNo.set(String(r.id), String(r.piNo ?? r.pi_no ?? ""));
       }
-      for (const [no, ids] of piByPay) ref2.set(`sp::${no}`, [...ids].map((id) => piNo.get(id) || (id.startsWith("pi-ob-") ? "Opening" : id)).join(", "));
+      for (const [no, ids] of piByPay) docs.set(`sp::${no}`, [...ids].map((id) => piNo.get(id) || (id.startsWith("pi-ob-") ? "Opening" : id)).join(", "));
     } catch { /* Ref. 2 stays empty */ }
     try {
       const opNos = [...new Set(ents.filter((e) => e.sourceType.startsWith("other_party_payment")).map((e) => e.sourceId))];
       const billsByPay = new Map<string, Set<string>>();
-      for (const r of await chunkIds(opNos, (ph) => `SELECT payment_no, bill_id FROM other_party_payments WHERE payment_no IN (${ph})`)) {
+      for (const r of await chunkIds(opNos, (ph) => `SELECT payment_no, bill_id, party_name FROM other_party_payments WHERE payment_no IN (${ph})`)) {
         const no = String(r.paymentNo ?? r.payment_no ?? ""), bid = String(r.billId ?? r.bill_id ?? "");
+        setOnce(party, `op::${no}`, String(r.partyName ?? r.party_name ?? "").trim());
         if (no && bid) (billsByPay.get(no) ?? billsByPay.set(no, new Set()).get(no)!).add(bid);
       }
       const billNo = new Map<string, string>();
       for (const r of await chunkIds([...new Set([...billsByPay.values()].flatMap((s) => [...s]))], (ph) => `SELECT id, billNo FROM other_party_bills WHERE id IN (${ph})`)) {
         billNo.set(String(r.id), String(r.billNo ?? r.bill_no ?? ""));
       }
-      for (const [no, ids] of billsByPay) ref2.set(`op::${no}`, [...ids].map((id) => billNo.get(id) || id).join(", "));
+      for (const [no, ids] of billsByPay) docs.set(`op::${no}`, [...ids].map((id) => billNo.get(id) || id).join(", "));
     } catch { /* Ref. 2 stays empty */ }
     try {
       const pvIds = [...new Set(ents.filter((e) => e.sourceType.startsWith("payment_voucher")).map((e) => e.sourceId))];
       for (const r of await chunkIds(pvIds, (ph) => `SELECT id, payee, description FROM payment_vouchers WHERE id IN (${ph})`)) {
-        const payee = String(r.payee ?? "").trim();
-        if (payee) ref2.set(`pv::${String(r.id)}`, payee);
+        setOnce(party, `pv::${String(r.id)}`, String(r.payee ?? "").trim());
         const purpose = String(r.description ?? "").trim();
         if (purpose) pvPurpose.set(String(r.id), purpose);
       }
+      // AP vouchers: the settlement carries the voucher's number.
+      const payNos = [...new Set(ents.filter((e) => e.sourceType.startsWith("supplier_payment") || e.sourceType.startsWith("other_party_payment")).map((e) => e.sourceId))];
+      for (const r of await chunkIds(payNos, (ph) => `SELECT pvNo, description FROM payment_vouchers WHERE pvNo IN (${ph})`)) {
+        const purpose = String(r.description ?? "").trim();
+        if (purpose) pvPurposeByNo.set(String(r.pvNo ?? r.pv_no ?? ""), purpose);
+      }
+    } catch { /* description stays the ledger text */ }
+    try {
+      const recIds = [...new Set(ents.filter((e) => e.sourceType === "payment" || e.sourceType.startsWith("payment_") && !e.sourceType.startsWith("payment_voucher")).map((e) => e.sourceId))];
+      for (const r of await chunkIds(recIds, (ph) => `SELECT id, customerName FROM payment_records WHERE id IN (${ph})`)) {
+        setOnce(party, `rc::${String(r.id)}`, String(r.customerName ?? r.customer_name ?? "").trim());
+      }
     } catch { /* Ref. 2 stays empty */ }
-    const ref2For = (sourceType: string, sourceId: string): string | null =>
-      (sourceType.startsWith("supplier_payment") ? ref2.get(`sp::${sourceId}`)
-        : sourceType.startsWith("other_party_payment") ? ref2.get(`op::${sourceId}`)
-          : sourceType.startsWith("payment_voucher") ? ref2.get(`pv::${sourceId}`) : undefined) ?? null;
+    const kindOf = (sourceType: string): string =>
+      sourceType.startsWith("supplier_payment") ? "sp"
+        : sourceType.startsWith("other_party_payment") ? "op"
+          : sourceType.startsWith("payment_voucher") ? "pv"
+            : sourceType === "payment" || sourceType.startsWith("payment_") ? "rc" : "";
 
     const items: CfDrillItem[] = ents.map((e) => {
       const legs = byEntry.get(`${e.sourceType}::${e.sourceId}`) ?? [];
@@ -9231,8 +9255,11 @@ async function computeCashflowStatement(
       }
       const legText = (money[0]?.description || legs[0]?.description || "").trim();
       const ref1 = docNoFromDescription(legText) ?? e.sourceId;
-      const purpose = e.sourceType.startsWith("payment_voucher") ? pvPurpose.get(e.sourceId) : undefined;
-      const description = purpose ?? withoutDocNo(legText, ref1);
+      const kind = kindOf(e.sourceType);
+      const who = kind ? party.get(`${kind}::${e.sourceId}`) ?? null : null;
+      const purpose = kind === "pv" ? pvPurpose.get(e.sourceId)
+        : kind === "sp" || kind === "op" ? pvPurposeByNo.get(e.sourceId) : undefined;
+      const description = purpose ?? tidyDescription(legText, ref1, who);
       const codes = [...new Set(money.map((l) => l.code))];
       return {
         key: `${e.sourceType}::${e.sourceId}`,
@@ -9241,7 +9268,8 @@ async function computeCashflowStatement(
         description,
         otherSide: codes.map((code) => ({ code, name: coa.get(code)?.name ?? "" })),
         ref1,
-        ref2: ref2For(e.sourceType, e.sourceId),
+        ref2: who,
+        docs: kind ? docs.get(`${kind}::${e.sourceId}`) ?? null : null,
         sen: e.sen,
         ofSen: Math.abs(entryCash) !== Math.abs(e.sen) ? Math.abs(entryCash) : null,
       };

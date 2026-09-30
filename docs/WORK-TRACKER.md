@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-30**: branch `feat/cashflow-drill-party-ref` added below (its entry is the newest).
 > **Last verified: 2026-09-30**: branch `feat/production-overview-cards-narrow-main` added below as item 5 of the Production Overview Cards to `main` entry (#597 merged).
 > **Last verified: 2026-09-30**: branch `feat/production-overview-cards-main` added below (its entry is the newest).
 > **Last verified: 2026-09-30**: #598 (Cash Flow stock accounts → Raw Materials) closed ✅ below with its prod check.
@@ -48,6 +49,14 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
 ---
+
+## 2026-09-30 — 🔵 Cash Flow drill: Ref. 2 = the counterparty's name, the overall description, invoice numbers on hover (owner「refer 2 是看 supplier 名字和 overall description 就好」→「可以，做」)(branch `feat/cashflow-drill-party-ref`)
+
+1. Measured first (prod, read-only): supplier-payment rows read "Supplier payment" / "Supplier payment (edited)" with a
+   list of PI numbers as Ref. 2 and no supplier name anywhere.
+2. 🔵 Ref. 2 = supplier / other creditor / voucher payee / customer; the PIs / bills a payment settled on hover; Description =
+   the voucher's purpose (also for payments made through an AP voucher) else the ledger text without number, name and
+   "(edited)" (`tidyDescription`). Display only. Guard `tests/cashflow-drill-party.test.mjs`.
 
 ## 2026-09-30 — 🔵 Production Overview Cards view to `main` (branch `feat/production-overview-cards-main` → `main`; staging #592 / #595 / #596 merged)
 - 1. 🔵 Cards / Grid toggle on the Overview (opens on Cards, not saved); Grid is the old matrix, unchanged.

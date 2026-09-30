@@ -87,8 +87,8 @@ test("the caller builds the drill from the engine's sources: one row per entry, 
   assert.match(fn, /for \(const s of statement\.sources\?\.\[key\] \?\? \[\]\) \{\n      if \(!inFy\(s\.ym\)\) continue;/, "only the months the statement shows");
   assert.match(fn, /let money = legs\.filter\(\(l\) => bankCodes\.has\(l\.code\)\);/);
   assert.match(fn, /money = legs\.filter\(\(l\) => tfAccounts\.has\(l\.code\)\);/, "a facility draw shows the facility");
-  assert.match(fn, /SELECT payment_no, purchase_invoice_id FROM supplier_payments WHERE payment_no IN \(\$\{ph\}\) AND org_id = \?/);
-  assert.match(fn, /SELECT payment_no, bill_id FROM other_party_payments WHERE payment_no IN/);
+  assert.match(fn, /SELECT payment_no, purchase_invoice_id, supplier_name FROM supplier_payments WHERE payment_no IN \(\$\{ph\}\) AND org_id = \?/);
+  assert.match(fn, /SELECT payment_no, bill_id, party_name FROM other_party_payments WHERE payment_no IN/);
   assert.match(fn, /const ref1 = docNoFromDescription\(legText\) \?\? e\.sourceId;/);
   assert.match(fn, /ofSen: Math\.abs\(entryCash\) !== Math\.abs\(e\.sen\) \? Math\.abs\(entryCash\) : null,/);
   assert.match(fn, /const tied = !!row && statement\.columns\.every\(\(col, i\) => \(row\.values\[i\] \?\? 0\) === sign \* \(col\.accum \? total : \(perMonth\.get\(col\.key\) \?\? 0\)\)\);/);
