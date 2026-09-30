@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-30**: branch `feat/production-overview-cards-main` added below (its entry is the newest).
 > **Last verified: 2026-09-30**: #594 (General Ledger source links) closed ✅ below.
 > **Last verified: 2026-09-30**: branch `fix/gl-source-link-opens-pi` added below (its entry is the newest).
 > **Last verified: 2026-09-29**: #588 (Cash Flow drill tidy + payroll month) closed ✅ below with its prod check; #589 corrected its fallback note.
@@ -44,6 +45,13 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
 ---
+
+## 2026-09-30 — 🔵 Production Overview Cards view to `main` (branch `feat/production-overview-cards-main` → `main`; staging #592 / #595 / #596 merged)
+- 1. 🔵 Cards / Grid toggle on the Overview (opens on Cards, not saved); Grid is the old matrix, unchanged.
+- 2. 🔵 Card per work order: header (SO ID, hold pill, product + specs, Customer PO, customer | Special, Qty, Cust DD, Our DD) over stage tiles (label, status pill, date). Pills: Completed teal, In progress blue (some JCs done), Pending gold, Overdue dark red + "! date", N/A dashed. Off-plan dates: cyan dot. Fixed 128px rows, virtualized, memoized.
+- 3. 🔵 Stage columns from `overviewStages()`: the 9 `DEPARTMENTS` in today's order/labels plus extra `isProduction` depts from `/api/departments`.
+- 4. 🔵 Cards has no column headers: stage pills (status + date popover, count badge), More filters (8 order-level filters), Sort, Select all and Clear sit on a second line of the page filter bar; the toggle sits at its right end. Same filters/sort as Grid.
+- Applied to `main` as one commit (the three staging commits, cherry-picked; code identical to staging apart from the pre-existing main/staging drift). Guard: `tests/production-overview-cards.test.mjs`.
 
 ## 2026-09-30 — ✅ A finance user's click on a purchase invoice still lands on the PI list (owner: colleague on finance@hookka.com「点 ap invoice 还是跳去 purchase invoice list」)(#594 a435e752 MERGED, deployed, live-checked)
 
