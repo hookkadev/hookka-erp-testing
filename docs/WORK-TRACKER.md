@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-30**: branch `feat/bs-inline-drill` added below (its entry is the newest).
 > **Last verified: 2026-09-30**: #606 (P&L drill like the Cash Flow drill) closed ✅ below with its prod check.
 > **Last verified: 2026-09-30**: branch `feat/pl-drill-like-cashflow` added below (its entry is the newest).
 > **Last verified: 2026-09-30**: #605 (Cash Flow drill Ref. 2 = counterparty) closed ✅ below with its prod check.
@@ -52,6 +53,15 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
 ---
+
+## 2026-09-30 — 🔵 Balance Sheet inline drill (owner「Balance sheet 也要这样点开看」)(branch `feat/bs-inline-drill`)
+
+1. Checked first (code): every balance-sheet line except the unclosed-earnings one is an account's ledger balance up to the
+   month end — no computed adjustments — so a drill can tie exactly.
+2. 🔵 Name → panel: Balance b/f (end of the previous month), the month's lines in the P&L / Cash Flow drill columns, Balance
+   c/f = the figure. `GET /api/accounting/bs-drill` uses the sheet's own leg rules; the line builder is shared with the P&L
+   drill (`buildDrillLines`). Not in Edit, not the unclosed-earnings line. Guard `tests/bs-inline-drill.test.mjs`.
+   Prod check after deploy: every account of a month, tied and c/f = the sheet.
 
 ## 2026-09-30 — ✅ P&L drill reads like the Cash Flow drill (owner「P&L 同理，我想看 supplier 名字，p&L 点开要看的东西和 cash flow 一样」)(#606 235cb95c MERGED, deployed, prod-verified)
 

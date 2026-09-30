@@ -73,15 +73,18 @@ test("GET /pl-drill: read permission, same period window, refs, other side, tie 
   assert.match(ep, /const startYm = periodStartYm\(period\);\n  const endYm = periodEndYm\(period\);/, "the statement's own window");
   assert.match(ep, /selectHistoricalWindow\(historical, openingMonth, startYm, "all"\)/, "a month from the old books says so");
   assert.match(ep, /await glWindowSigned\(db, orgId, startYm, endYm, dc, trace\);/);
+  // The lines come from the builder shared with the balance-sheet drill (2026-09-30).
+  assert.match(ep, /const lines = await buildDrillLines\(db, orgId, trace\.legs, trace\.entryLegs, resolve, coa\);/);
+  assert.match(ep, /tied: debitSen - creditSen === netSen,/);
   // Since 2026-09-30 (owner 「p&L 点开要看的东西和 cash flow 一样」): Ref. 2 = the
   // counterparty; the SO / supplier invoice no. moved to the hover (docs).
-  assert.match(ep, /SELECT id, invoiceNo, salesOrderId, doNo, customerName FROM invoices WHERE id IN/);
-  assert.match(ep, /SELECT id, companySOId FROM sales_orders WHERE id IN/, "an invoice's SO rides along for the hover");
-  assert.match(ep, /SELECT id, piNo, poRef, supplier_invoice_no, supplierName FROM purchase_invoices WHERE id IN/);
-  assert.match(ep, /r\.supplierInvoiceNo \?\? r\.supplier_invoice_no/, "dual-key read of the snake_case column");
-  assert.match(ep, /const ref1 = docNoFromDescription\(l\.description\) \?\? r\?\.ref1 \?\? l\.sourceId;/);
-  assert.match(ep, /otherSide: otherSideCodes\(l, trace\.entryLegs\.get\(key\) \?\? \[\], resolve\)/);
-  assert.match(ep, /tied: debitSen - creditSen === netSen,/);
+  const lines = slice(api, "async function buildDrillLines(", "\n}\n");
+  assert.match(lines, /SELECT id, invoiceNo, salesOrderId, doNo, customerName FROM invoices WHERE id IN/);
+  assert.match(lines, /SELECT id, companySOId FROM sales_orders WHERE id IN/, "an invoice's SO rides along for the hover");
+  assert.match(lines, /SELECT id, piNo, poRef, supplier_invoice_no, supplierName FROM purchase_invoices WHERE id IN/);
+  assert.match(lines, /r\.supplierInvoiceNo \?\? r\.supplier_invoice_no/, "dual-key read of the snake_case column");
+  assert.match(lines, /const ref1 = docNoFromDescription\(l\.description\) \?\? r\?\.ref1 \?\? l\.sourceId;/);
+  assert.match(lines, /otherSide: otherSideCodes\(l, entryLegs\.get\(key\) \?\? \[\], resolve\)/);
 });
 
 test("computed lines that ARE one account's ledger figure open too, without joining the edit-mode drag", () => {

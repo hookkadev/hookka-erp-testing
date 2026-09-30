@@ -8395,39 +8395,20 @@ app.get("/pl-statement", async (c) => {
   });
 });
 
-// P&L inline drill (owner 2026-09-29 「我要点开看 detail，就是这样」— the Houzs
-// P&L's click-a-line view): the ledger lines behind ONE account line for the
-// statement's period, picked by the same pass the statement uses (a traced
-// glWindowSigned), so lines + report-layer additions (payroll from payslips,
-// the opening-month slice) sum to the line to the sen. Each line carries its
-// document (Ref. 1), the related document (Ref. 2: an invoice's SO, a PI's
-// supplier invoice no., a bill's reference, a voucher's payee) and the
-// accounts on the other side of its entry. Read-only; lines at full value
-// (the Sofa / Bedframe views carry a share of them).
-app.get("/pl-drill", async (c) => {
-  const denied = await requirePermission(c, "accounting", "read");
-  if (denied) return denied;
-  await ensurePnlHistorical(c.var.DB);
-  const db = c.var.DB;
-  const period = c.req.query("period") || new Date().toISOString().slice(0, 7);
-  const accountParam = (c.req.query("account") || "").trim();
-  if (!accountParam) return c.json({ success: false, error: "account is required" }, 400);
-  const orgId = getOrgId(c);
-  const resolve = await loadAccountResolver(db);
-  const account = resolve(accountParam);
-  const startYm = periodStartYm(period);
-  const endYm = periodEndYm(period);
-  // A single month keyed from the old books has no ledger lines behind it.
-  const [historical, openingDateRaw] = await Promise.all([loadHistoricalPnl(db, orgId), getOpeningDate(db)]);
-  const openingMonth = openingDateRaw ? openingDateRaw.slice(0, 7) : null;
-  if (startYm && startYm === endYm && selectHistoricalWindow(historical, openingMonth, startYm, "all")) {
-    const a = await db.prepare("SELECT name FROM chart_of_accounts WHERE code = ?").bind(account).first<{ name: string }>();
-    return c.json({ success: true, data: { period, account: { code: account, name: a?.name ?? "" }, historical: true, lines: [], extra: [], debitSen: 0, creditSen: 0, netSen: 0, tied: true } });
-  }
-  const dc = await loadDocDateResolver(db);
-  const trace: PnlTrace = { account, legs: [], entryLegs: new Map(), extra: [] };
-  const { net, coa } = await glWindowSigned(db, orgId, startYm, endYm, dc, trace);
-
+// One drill line per ledger leg, shared by the P&L and balance-sheet drills
+// (owner 2026-09-30: the P&L drill shows what the Cash Flow drill shows, and
+// 「Balance sheet 也要这样点开看」). Ref. 1 = the document, Ref. 2 = who it is
+// with, Description = the document's overall description, docs = the related
+// documents (hover), other side = the opposite accounts of the same entry.
+type DrillSourceLeg = { id: string; accountCode: string; sourceType: string; sourceId: string; date: string; debitSen: number; creditSen: number; description: string };
+async function buildDrillLines(
+  db: Env["Variables"]["DB"],
+  orgId: string,
+  legs: DrillSourceLeg[],
+  entryLegs: Map<string, { accountCode: string; debitSen: number; creditSen: number }[]>,
+  resolve: (code: string) => string,
+  coa: ReadonlyMap<string, { name: string }>,
+) {
   // Like the Cash Flow drill (owner 2026-09-30 「P&L 同理，我想看 supplier 名字，
   // p&L 点开要看的东西和 cash flow 一样」): Ref. 1 = the document; Ref. 2 =
   // who it is with (customer / supplier / payee / other creditor / payer);
@@ -8437,7 +8418,7 @@ app.get("/pl-drill", async (c) => {
   // the line's own text.
   type DocInfo = { ref1?: string | null; party?: string | null; docs?: string | null; header?: string | null };
   const info = new Map<string, DocInfo>();
-  const idsOf = (pred: (t: string) => boolean) => [...new Set(trace.legs.filter((l) => pred(l.sourceType)).map((l) => l.sourceId))];
+  const idsOf = (pred: (t: string) => boolean) => [...new Set(legs.filter((l) => pred(l.sourceType)).map((l) => l.sourceId))];
   const chunked = async <T,>(ids: string[], sql: (ph: string) => string, extra: unknown[] = []): Promise<T[]> => {
     const out: T[] = [];
     for (let i = 0; i < ids.length; i += 200) {
@@ -8448,7 +8429,7 @@ app.get("/pl-drill", async (c) => {
     return out;
   };
   const setInfo = (pred: (t: string) => boolean, id: string, v: DocInfo) => {
-    for (const l of trace.legs) if (l.sourceId === id && pred(l.sourceType)) info.set(`${l.sourceType}::${l.sourceId}`, v);
+    for (const l of legs) if (l.sourceId === id && pred(l.sourceType)) info.set(`${l.sourceType}::${l.sourceId}`, v);
   };
   const str = (v: unknown) => (v === null || v === undefined ? "" : String(v)).trim();
   const isInvoice = (t: string) => t === "invoice" || t.startsWith("invoice_");
@@ -8522,7 +8503,7 @@ app.get("/pl-drill", async (c) => {
     }
   } catch { /* the line keeps its own text */ }
 
-  const lines = trace.legs
+  return legs
     .map((l) => {
       const key = `${l.sourceType}::${l.sourceId}`;
       const r = info.get(key);
@@ -8532,7 +8513,7 @@ app.get("/pl-drill", async (c) => {
         id: l.id,
         date: l.date,
         description: r?.header ?? tidyDescription(l.description, ref1, party),
-        otherSide: otherSideCodes(l, trace.entryLegs.get(key) ?? [], resolve).map((code) => ({ code, name: coa.get(code)?.name ?? "" })),
+        otherSide: otherSideCodes(l, entryLegs.get(key) ?? [], resolve).map((code) => ({ code, name: coa.get(code)?.name ?? "" })),
         ref1,
         ref2: party,
         docs: r?.docs ?? null,
@@ -8543,6 +8524,42 @@ app.get("/pl-drill", async (c) => {
       };
     })
     .sort((a, b) => a.date.localeCompare(b.date) || String(a.ref1).localeCompare(String(b.ref1)));
+}
+
+// P&L inline drill (owner 2026-09-29 「我要点开看 detail，就是这样」— the Houzs
+// P&L's click-a-line view): the ledger lines behind ONE account line for the
+// statement's period, picked by the same pass the statement uses (a traced
+// glWindowSigned), so lines + report-layer additions (payroll from payslips,
+// the opening-month slice) sum to the line to the sen. Each line carries its
+// document (Ref. 1), the related document (Ref. 2: an invoice's SO, a PI's
+// supplier invoice no., a bill's reference, a voucher's payee) and the
+// accounts on the other side of its entry. Read-only; lines at full value
+// (the Sofa / Bedframe views carry a share of them).
+app.get("/pl-drill", async (c) => {
+  const denied = await requirePermission(c, "accounting", "read");
+  if (denied) return denied;
+  await ensurePnlHistorical(c.var.DB);
+  const db = c.var.DB;
+  const period = c.req.query("period") || new Date().toISOString().slice(0, 7);
+  const accountParam = (c.req.query("account") || "").trim();
+  if (!accountParam) return c.json({ success: false, error: "account is required" }, 400);
+  const orgId = getOrgId(c);
+  const resolve = await loadAccountResolver(db);
+  const account = resolve(accountParam);
+  const startYm = periodStartYm(period);
+  const endYm = periodEndYm(period);
+  // A single month keyed from the old books has no ledger lines behind it.
+  const [historical, openingDateRaw] = await Promise.all([loadHistoricalPnl(db, orgId), getOpeningDate(db)]);
+  const openingMonth = openingDateRaw ? openingDateRaw.slice(0, 7) : null;
+  if (startYm && startYm === endYm && selectHistoricalWindow(historical, openingMonth, startYm, "all")) {
+    const a = await db.prepare("SELECT name FROM chart_of_accounts WHERE code = ?").bind(account).first<{ name: string }>();
+    return c.json({ success: true, data: { period, account: { code: account, name: a?.name ?? "" }, historical: true, lines: [], extra: [], debitSen: 0, creditSen: 0, netSen: 0, tied: true } });
+  }
+  const dc = await loadDocDateResolver(db);
+  const trace: PnlTrace = { account, legs: [], entryLegs: new Map(), extra: [] };
+  const { net, coa } = await glWindowSigned(db, orgId, startYm, endYm, dc, trace);
+
+  const lines = await buildDrillLines(db, orgId, trace.legs, trace.entryLegs, resolve, coa);
   const extraDebit = trace.extra.reduce((s, e) => s + (e.sen > 0 ? e.sen : 0), 0);
   const extraCredit = trace.extra.reduce((s, e) => s + (e.sen < 0 ? -e.sen : 0), 0);
   const debitSen = lines.reduce((s, l) => s + l.debitSen, 0) + extraDebit;
@@ -8560,6 +8577,83 @@ app.get("/pl-drill", async (c) => {
       creditSen,
       netSen,
       tied: debitSen - creditSen === netSen,
+    },
+  });
+});
+
+// Balance-sheet inline drill (owner 2026-09-30 「Balance sheet 也要这样点开看」):
+// one balance-sheet account's balance brought forward, the month's ledger
+// lines (the same columns as the P&L / Cash Flow drills) and the balance
+// carried forward. Picked by the same pass as the /pl balance sheet — hidden
+// legs out, pre-opening legs out, by document date, old codes resolved, the
+// same optional company filter — so b/f + lines = c/f = the sheet's figure.
+// Read-only.
+app.get("/bs-drill", async (c) => {
+  const denied = await requirePermission(c, "accounting", "read");
+  if (denied) return denied;
+  const db = c.var.DB;
+  const period = c.req.query("period") || new Date().toISOString().slice(0, 7);
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(period)) return c.json({ success: false, error: "period must be YYYY-MM" }, 400);
+  const accountParam = (c.req.query("account") || "").trim();
+  if (!accountParam) return c.json({ success: false, error: "account is required" }, 400);
+  const orgId = getOrgId(c);
+  const resolve = await loadAccountResolver(db);
+  const account = resolve(accountParam);
+  const coaRes = await db.prepare("SELECT code, name, type FROM chart_of_accounts").all<{ code: string; name: string; type: CoaRow["type"] }>();
+  const coa = new Map((coaRes.results ?? []).map((a) => [a.code, { name: a.name, type: a.type }] as const));
+  const acct = coa.get(account);
+  if (!acct) return c.json({ success: false, error: `Account ${account} not found` }, 404);
+  const section = bsSectionFor(account, acct.type, await getBsSectionMap(db));
+  if (!section) return c.json({ success: false, error: `${account} is not a balance-sheet account` }, 400);
+  const assetSide = bsSectionClass(section) === "asset";
+  const coFilter = companyFilter(c, "orgId");
+  const legWhere = coFilter.active ? ` AND ${coFilter.sql}` : "";
+  const legRes = await db.prepare(
+    `SELECT id, accountCode, sourceId, sourceType, debitSen, creditSen, postedAt, description FROM ledger_journal_entries WHERE hidden = 0${legWhere}`,
+  )
+    .bind(...(coFilter.active ? [coFilter.param] : []))
+    .all<{ id: string; accountCode: string; sourceId: string; sourceType: string; debitSen: number; creditSen: number; postedAt: string; description: string | null }>();
+  const { docDate, openingDate } = await loadDocDateResolver(db);
+  let bf = 0;
+  let cf = 0;
+  const monthLegs: DrillSourceLeg[] = [];
+  for (const l of legRes.results ?? []) {
+    const dd = docDate(l.sourceType, l.sourceId, l.postedAt); // by document date
+    if (legBeforeOpening(l.sourceType, dd, openingDate)) continue; // pre-opening: not extracted
+    if (resolve(l.accountCode) !== account) continue;
+    const ym = dd.slice(0, 7);
+    if (ym > period) continue;
+    const v = (Number(l.debitSen) || 0) - (Number(l.creditSen) || 0);
+    cf += v;
+    if (ym < period) { bf += v; continue; }
+    monthLegs.push({
+      id: String(l.id ?? ""), accountCode: l.accountCode, sourceType: l.sourceType, sourceId: l.sourceId, date: dd.slice(0, 10),
+      debitSen: Number(l.debitSen) || 0, creditSen: Number(l.creditSen) || 0, description: String(l.description ?? ""),
+    });
+  }
+  const keys = new Set(monthLegs.map((l) => `${l.sourceType}::${l.sourceId}`));
+  const entryLegs = new Map<string, { accountCode: string; debitSen: number; creditSen: number }[]>();
+  for (const l of legRes.results ?? []) {
+    const k = `${l.sourceType}::${l.sourceId}`;
+    if (!keys.has(k)) continue;
+    let arr = entryLegs.get(k);
+    if (!arr) { arr = []; entryLegs.set(k, arr); }
+    arr.push({ accountCode: l.accountCode, debitSen: Number(l.debitSen) || 0, creditSen: Number(l.creditSen) || 0 });
+  }
+  const lines = await buildDrillLines(db, orgId, monthLegs, entryLegs, resolve, coa);
+  const moved = lines.reduce((s, l) => s + l.debitSen - l.creditSen, 0);
+  // Amounts on the sheet's own side: assets debit-positive, the rest credit.
+  const toSide = (v: number) => (assetSide ? v : -v);
+  return c.json({
+    success: true,
+    data: {
+      period,
+      account: { code: account, name: acct.name, type: acct.type, section },
+      assetSide,
+      bfSen: toSide(bf),
+      cfSen: toSide(cf),
+      lines,
+      tied: bf + moved === cf,
     },
   });
 });

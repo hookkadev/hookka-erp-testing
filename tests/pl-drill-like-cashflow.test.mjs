@@ -17,7 +17,8 @@ const ui = readFileSync("src/pages/accounting/index.tsx", "utf8").replace(/\r\n/
 const slice = (src, from, to) => { const a = src.indexOf(from); assert.notEqual(a, -1, from); const b = src.indexOf(to, a + 1); return src.slice(a, b === -1 ? undefined : b); };
 
 test("Ref. 2 is the counterparty for every kind of document; the related documents ride along", () => {
-  const ep = slice(api, 'app.get("/pl-drill"', 'app.get("/pl-monthly"');
+  // The document lookups live in the builder shared with the balance-sheet drill.
+  const ep = slice(api, "async function buildDrillLines(", "\n}\n");
   assert.match(ep, /party: str\(r\.customerName \?\? r\.customer_name\) \|\| null,\n\s+docs: so \?\? /, "invoice → customer; its SO on hover");
   assert.match(ep, /party: str\(r\.supplierName \?\? r\.supplier_name\) \|\| null,/, "PI → supplier");
   assert.match(ep, /SELECT id, pvNo, payee, description FROM payment_vouchers WHERE id IN/, "voucher → payee + its purpose");
