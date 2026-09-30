@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-30**: branch `feat/account-permissions-tab` (to `staging`) added below (in progress, its entry is the newest).
 > **Last verified: 2026-09-30**: branch `fix/t006-r2-grn-receipt-race` (to `staging`) added below (committed locally, not pushed, its entry is the newest).
 > **Last verified: 2026-09-30**: branch `fix/t006-r7-return-qty` (to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-09-30**: branch `feat/production-overview-cards-narrow` added below as item 8 of the Production Overview Cards entry.
@@ -49,6 +50,13 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-09-30 — 🔵 Per-account permissions tab (branch `feat/account-permissions-tab` → `staging`)
+
+Ask (owner): "a new tab beside org chart … the admin can see all of the user permission and role and the admin can edit every acc access weather it was edit, view, delete etc". Owner's answers: **per account only**; the 5 code roles (Sales/Office/QA/R&D/HR) may become editable (replaces the 2026-08-04 code-only rule for any account that is edited); **Super Admin only** may edit.
+1. ✅ Backend: per-account override consulted by BOTH the gate (`rbac.ts`) and the menu (`/me/permissions`); an account never edited keeps its role's set, so day one changes nothing. `tests/user-permissions.test.mjs` (14; 4 fail on the old code).
+2. ✅ API: `/api/user-permissions` — catalog, list, get, save, reset-to-role; Super Admin only; audited.
+3. 🔵 UI: "Permissions" tab beside Org Chart — built, typecheck/lint clean. NOT driven in a browser locally (local dev needs the owner's sandbox DB string); owner chose to verify on staging.
 
 ## 2026-09-30 — 🔵 T-006 R2: GRN over-receipt race (branch `fix/t006-r2-grn-receipt-race` to `staging`, STAGING ONLY, never PR to main)
 

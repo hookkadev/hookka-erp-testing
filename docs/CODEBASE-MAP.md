@@ -58,6 +58,8 @@
 
 > **Last verified: 2026-09-28 on branch `feat/customer-credit-control`** — Delivery & Consignment gotcha for the shared customer credit gate (BUG-2026-09-28-218).
 
+> **Last verified: 2026-09-30** on branch `feat/account-permissions-tab` — the Permissions-tab bullet in the Customers & Platform notes (new `user-permissions` route / lib / panel). Nothing else re-checked.
+
 > **Last verified: 2026-09-28** on branch `feat/org-chart-photos`, against `src/api/routes/org-chart.ts`,
 > `src/lib/org-people.ts`, `src/components/org-chart.tsx` — the new Org Chart photo columns/endpoint
 > documented in the Customers & Platform row below. This is the file's genuine freshness stamp
@@ -915,6 +917,7 @@ that proves those locks can actually go red.
 - Customer hubs feed the DO/Service hub chain (delivery_hubs, customer_hubs); hub-cascade-completeness + service-hub-chain tests guard the cascade — editing hub routes can break downstream delivery/consignment integrity.
 - Hub deletions are EXPLICIT-ONLY (BUG-2026-07-27-002, `tests/hub-wipe-guard.test.mjs`): customers.ts PUT deletes only ids named in `body.deletedHubIds` and UPSERTs the rest — never reintroduce the replace-diff (it let stale-tab saves wipe hubs). Hub INSERT inherits the customer's org; hub state pickers include SGR (canonical Selangor, `malaysia-states.ts`); scan-PO create shows a confirm gate before creating hub-less SOs.
 - /api/files (files.ts) serves customer, product-doc and modular uploads with attachment disposition but `<img src=.../download>` still renders — shared endpoint, don't special-case per resourceType.
+- **Permissions tab (2026-09-30)** — Settings → User Management → Permissions, Super Admin only: `src/components/user-permissions-panel.tsx` (account list + module × View/Create/Edit/Delete grid) → `src/api/routes/user-permissions.ts` (`/api/user-permissions`: catalog, list, get, save, reset) → table `user_permissions` (one row per EDITED account; self-applied on first save). `src/api/lib/user-permissions.ts` is read by BOTH `rbac.ts` (`getEffectivePermissions`) and `auth.ts` `/me/permissions`, before the role — keep it that way or the menu and the gate will disagree. `tests/user-permissions.test.mjs` also fails if a gate checks a right the catalog (`ALL_RESOURCES` + `SPECIAL_ACTIONS`) cannot grant.
 - **Org Chart photos (2026-09-28)** live on `users.photo_file_id` / `workers.photo_file_id` — one column per table, NOT a join, because `users` and `workers` already have no link between them by design (org-chart.ts header comment) and `org_reporting` exists only because an EDGE needs a place that can point at either table; a photo is a fact about one row, so it goes directly on that row. The upload itself goes through the existing `/api/files` store (resourceType `"org-photo"`, resourceId the person's composite key `user:<id>` / `worker:<id>`) — `PUT /api/org-chart/photo` only ever receives the resulting file id, never image bytes. Both columns need `ensureOrgPhotoColumns` awaited before any query that names `photoFileId`, mirroring how `ensureOrgReporting` guards `org_reporting`.
 - kv_config is a shared generic store (e.g. public_holidays consumed by payroll) — changing its shape can affect unrelated modules.
 - **Mail Center permissions are TWO independent layers, and confusing them is the mistake.**

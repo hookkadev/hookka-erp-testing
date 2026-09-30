@@ -1,5 +1,7 @@
 # RBAC Remediation — current state and the way through
 
+> **Last verified: 2026-09-30** (branch `feat/account-permissions-tab`) — added the per-account layer above the role lookup ("Where a role's permissions actually come from"). Nothing else re-checked.
+
 > **Last verified: 2026-09-24** — rebased onto `main` (215 commits of drift, cherry-picked clean) and
 > re-measured: scanner against this branch, plus the PRODUCTION grant counts quoted below. Previously against `src/api/lib/rbac.ts` (fail-opens closed) and `src/api/routes/{attendance,leaves,files,working-hour-entries,cash-flow,stock-value,forecasts,sessions}.ts`,
 > `src/api/lib/{rbac,nav-permissions}.ts`, `src/dashboard-routes.tsx`. Every claim below was
@@ -163,6 +165,16 @@ DDL on a request path. Gate it with the rest of `files.ts` and move the ALTER in
 migration.
 
 ## Where a role's permissions actually come from — check this before editing any grant
+
+**First, per account (2026-09-30, branch `feat/account-permissions-tab`).** Before any of the
+role logic below, the gate (`rbac.ts` `getEffectivePermissions`) and the menu
+(`/me/permissions`) both ask `lib/user-permissions.ts` whether *this account* has its own list
+in `user_permissions`. If it does, that list is the whole answer and the role is not consulted.
+The list is written only by a Super Admin from Settings → User Management → **Permissions**
+(`/api/user-permissions`). An account never edited has no row and falls through to the role
+exactly as described below. SUPER_ADMIN / ADMIN short-circuit before either and cannot be edited.
+So "what can this person do" = their row if one exists, otherwise their role — check the row
+first (`SELECT permissions FROM user_permissions WHERE user_id = ?`).
 
 `rbac.ts:86` short-circuits **before** the `role_permissions` query:
 
