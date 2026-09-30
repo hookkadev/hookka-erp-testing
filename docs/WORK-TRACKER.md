@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-30**: #598 (Cash Flow stock accounts → Raw Materials) closed ✅ below with its prod check.
 > **Last verified: 2026-09-30**: branch `feat/cashflow-stock-accounts-rm` added below (its entry is the newest).
 > **Last verified: 2026-09-30**: #594 (General Ledger source links) closed ✅ below.
 > **Last verified: 2026-09-30**: branch `fix/gl-source-link-opens-pi` added below (its entry is the newest).
@@ -46,14 +47,18 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
-## 2026-09-30 — 🔵 Cash Flow: payments booked to a raw-material stock account read as Raw Materials (owner「不要动到 P&L」+ re-booked the loan line himself)(branch `feat/cashflow-stock-accounts-rm`)
+## 2026-09-30 — ✅ Cash Flow: payments booked to a raw-material stock account read as Raw Materials (owner「不要动到 P&L」+ re-booked the loan line himself)(#598 c284ab0a MERGED, deployed, prod-verified)
 
 1. Owner: the pre-opening fabric repaid to a related company stays on its stock account (no P&L change). He first re-booked
    the one loan-repayment line that shared that account (measured on prod: the stock account now holds only fabric lines,
    the loan line shows under Loan in the cash flow).
-2. 🔵 `rawStockAccountSections` + nesting by name: SBS stock accounts (not WIP / finished goods) default to Raw Materials,
+2. ✅ `rawStockAccountSections` + nesting by name: SBS stock accounts (not WIP / finished goods) default to Raw Materials,
    under the purchase parent their name maps to. Replaces the dropped branch `feat/cashflow-stock-accounts-raw-materials`.
    Guard `tests/cashflow-stock-accounts.test.mjs`. Prod check after deploy: only those lines move, Cash Surplus identical.
+3. ✅ Prod (measured, snapshot before vs after): the stock-account line moved from Unallocated to Raw Materials under PURCHASE -
+   FABRIC in Aug'26 and Sep'26; Unallocated is empty in both months. Between snapshot and check the owner's team posted two new
+   salary vouchers (one dated in Aug, one in Sep); the operating result differs by exactly the moved line plus those vouchers,
+   and Cash Surplus by exactly those vouchers — i.e. the release itself moved no cash.
 
 ## 2026-09-30 — ✅ A finance user's click on a purchase invoice still lands on the PI list (owner: colleague on finance@hookka.com「点 ap invoice 还是跳去 purchase invoice list」)(#594 a435e752 MERGED, deployed, live-checked)
 
