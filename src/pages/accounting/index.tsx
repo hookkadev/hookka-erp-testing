@@ -14867,6 +14867,83 @@ function GroupByCompanyCard({ period, options }: { period: string; options: Comp
   );
 }
 
+// Balance-sheet inline drill (owner 2026-09-30 「Balance sheet 也要这样点开看」):
+// the account's balance at the end of the previous month, the month's ledger
+// lines (the same columns as the P&L / Cash Flow drills) and the balance at
+// the end of the month — which is the figure on the sheet. GET /bs-drill
+// picks them the way the sheet does, so b/f + lines = c/f.
+type BsDrillData = {
+  account?: { code: string; name: string; type: string | null; section: string };
+  assetSide: boolean; bfSen: number; cfSen: number; lines: PlDrillLine[]; tied?: boolean;
+};
+const prevYmOf = (ym: string) => { const [y, m] = ym.split("-").map(Number); return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, "0")}`; };
+function BsDrillPanel({ period, account, company }: { period: string; account: string; company: string }) {
+  const [data, setData] = useState<BsDrillData | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    let dead = false;
+    fetch(`/api/accounting/bs-drill?period=${encodeURIComponent(period)}&account=${encodeURIComponent(account)}${orgIdParam(company)}`)
+      .then((r) => r.json() as Promise<{ success?: boolean; data?: BsDrillData; error?: string }>)
+      .then((j) => { if (dead) return; if (j?.success && j.data) setData(j.data); else setErr(j?.error || "Could not load the ledger lines"); })
+      .catch(() => { if (!dead) setErr("Could not load the ledger lines"); });
+    return () => { dead = true; };
+  }, [period, account, company]);
+  const signed = (l: PlDrillLine) => (data?.assetSide ? l.debitSen - l.creditSen : l.creditSen - l.debitSen);
+  const amt = (sen: number) => (sen < 0 ? `(${plDrillAmt(-sen)})` : plDrillAmt(sen));
+  const amtCls = (sen: number) => `py-1 pl-3 text-right tabular-nums whitespace-nowrap ${sen < 0 ? "text-[#9A3A2D]" : ""}`;
+  const th = "py-1 pr-3 font-medium text-left";
+  return (
+    <div className="bg-[#FAF8F5] border-y border-dashed border-[#E2DDD8] px-4 py-2">
+      {!data && !err && <div className="text-xs text-[#9CA3AF] py-1">Loading the ledger lines…</div>}
+      {err && <div className="text-xs text-[#9A3412] py-1">{err}</div>}
+      {data && (
+        <div className="overflow-x-auto">
+          {data.tied === false && <div className="text-[11px] text-[#9A3412] mb-1">These lines do not add up to the balance — please report it.</div>}
+          <table className="w-full text-[12px]">
+            <thead>
+              <tr className="text-[11px] uppercase tracking-wide text-[#6B7280]">
+                <th className={th}>Date</th><th className={th}>Description</th><th className={th}>Other side</th>
+                <th className={th}>Ref. 1</th><th className={th}>Ref. 2</th>
+                <th className="py-1 pl-3 font-medium text-right">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr className="border-t border-[#E2DDD8] font-semibold text-[#4B5563] bg-[#F7F4EF]">
+                <td className="py-1" colSpan={5}>Balance b/f · end of {drillMonthLabel(prevYmOf(period))}</td>
+                <td className={amtCls(data.bfSen)}>{amt(data.bfSen)}</td>
+              </tr>
+              {data.lines.map((l) => {
+                const sen = signed(l);
+                return (
+                  <tr key={l.id || `${l.sourceType}:${l.sourceId}:${l.debitSen}:${l.creditSen}`} className="border-t border-[#F0ECE9] align-top text-[#374151]">
+                    <td className="py-1 pr-3 whitespace-nowrap">{l.date.replace(/-/g, "/")}</td>
+                    <td className="py-1 pr-3">{l.description || "—"}</td>
+                    <td className="py-1 pr-3 whitespace-nowrap" title={l.otherSide.map((o) => `${o.code} ${o.name}`).join(", ")}>{l.otherSide.length ? l.otherSide.map((o) => shortBankName(o.name) || o.code).join(", ") : "—"}</td>
+                    <td className="py-1 pr-3 whitespace-nowrap">{l.ref1}</td>
+                    <td className="py-1 pr-3">
+                      {l.docs
+                        ? <span className="underline decoration-dotted cursor-help" title={l.docs}>{l.ref2 || "—"}</span>
+                        : (l.ref2 ?? "")}
+                    </td>
+                    <td className={amtCls(sen)}>{amt(sen)}</td>
+                  </tr>
+                );
+              })}
+              {data.lines.length === 0 && (
+                <tr><td colSpan={6} className="py-1 text-[#9CA3AF]">Nothing moved on this account in {drillMonthLabel(period)}.</td></tr>
+              )}
+              <tr className="border-t border-[#9CA3AF] font-semibold text-[#1F1D1B]">
+                <td className="py-1" colSpan={5}>Balance c/f · end of {drillMonthLabel(period)}</td>
+                <td className={amtCls(data.cfSen)}>{amt(data.cfSen)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function BalanceSheetTab() {
   const [period, setPeriod] = useState(new Date().toISOString().slice(0, 7));
   // Multi-company (Phase 2): "" = All companies (group) → URL unchanged =
@@ -14892,6 +14969,9 @@ function BalanceSheetTab() {
   const [bmap, setBmap] = useState<Record<string, string>>({});
   const [dragCode, setDragCode] = useState<string | null>(null);
   const [dragOverSec, setDragOverSec] = useState<string | null>(null);
+  // Accounts opened in the inline drill, keyed by period + company + account
+  // so a new month starts with everything closed.
+  const [bsDrillOpen, setBsDrillOpen] = useState<Set<string>>(new Set());
   useEffect(() => {
     if (!edit) return;
     fetch("/api/accounting/bs/section-map")
@@ -14950,17 +15030,33 @@ function BalanceSheetTab() {
       </tr>
       {entries.map((e) => {
         const draggable = edit && e.accountCode !== "NP-CURRENT";
+        // The unclosed-earnings line is the P&L's result, not an account.
+        const canDrill = !edit && e.accountCode !== "NP-CURRENT";
+        const drillKey = `${period}|${company}|${e.accountCode}`;
+        const drilled = canDrill && bsDrillOpen.has(drillKey);
         return (
-          <tr key={e.id} className={`border-t border-[#E2DDD8]/50 ${draggable ? "cursor-move" : ""} ${dragCode === e.accountCode ? "opacity-40" : ""}`}
+          <Fragment key={e.id}>
+          <tr className={`border-t border-[#E2DDD8]/50 ${draggable ? "cursor-move" : ""} ${dragCode === e.accountCode ? "opacity-40" : ""} ${drilled ? "bg-[#F7F4EF]" : ""}`}
             draggable={draggable}
             onDragStart={draggable ? (ev) => { setDragCode(e.accountCode); ev.dataTransfer.setData("text/plain", e.accountCode); ev.dataTransfer.effectAllowed = "move"; } : undefined}
             onDragEnd={draggable ? () => { setDragCode(null); setDragOverSec(null); } : undefined}>
             <td className="px-4 py-1.5 pl-8 text-[#6B7280] text-xs">{draggable ? "⠿ " : ""}{e.accountCode}</td>
-            <td className="px-4 py-1.5 text-[#4B5563]">{e.accountName}</td>
+            <td className="px-4 py-1.5 text-[#4B5563]">
+              {canDrill ? (
+                <button type="button" className="text-left hover:underline decoration-dotted cursor-pointer" title="Show the ledger lines behind this balance"
+                  onClick={() => setBsDrillOpen((prev) => { const n = new Set(prev); if (n.has(drillKey)) n.delete(drillKey); else n.add(drillKey); return n; })}>
+                  <span className="text-[10px] text-[#9CA3AF] mr-1">{drilled ? "▾" : "▸"}</span>{e.accountName}
+                </button>
+              ) : e.accountName}
+            </td>
             <td className={`px-4 py-1.5 text-right font-medium ${e.balance < 0 ? "text-[#9A3A2D]" : "text-[#1F1D1B]"}`}>
               {e.balance < 0 ? `(${formatCurrency(Math.abs(e.balance))})` : formatCurrency(e.balance)}
             </td>
           </tr>
+          {drilled && (
+            <tr><td colSpan={3} className="p-0"><BsDrillPanel period={period} account={e.accountCode} company={company} /></td></tr>
+          )}
+          </Fragment>
         );
       })}
       <tr className={`border-t border-[#E2DDD8] ${bgClass} font-semibold`}>
