@@ -16,7 +16,7 @@ import { jcMinutesTotal } from "../../lib/job-card-minutes";
 // Cushion / Armrest / Headrest is sewn with the base, so the BASE sticker
 // travels with the whole assembly. An ACCESSORY is its own item even when its
 // BOM borrows one of those types (pillows are typed SOFA_CUSHION, the closest
-// of the six BOM types), so it keeps its sticker (BUG-2026-09-30-229).
+// of the six BOM types), so it keeps its sticker (BUG-2026-09-30-231).
 export const travelsWithBaseSticker = (row: {
   wipType?: string;
   category?: string;

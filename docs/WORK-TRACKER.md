@@ -1,6 +1,7 @@
 # Hookka ERP — Work Tracker
 
 > **Last verified: 2026-09-30**: branch `fix/pillow-fab-sew-sticker` (DEV-26) added below (its entry is the newest).
+> **Last verified: 2026-09-30**: branch `fix/selfcheck-recon-and-opening-seeds` added below (its entry is the newest).
 > **Last verified: 2026-09-30**: #616 (BUG-2026-09-30-228, receipt drill text) closed ✅ below with its prod check.
 > **Last verified: 2026-09-30**: branch `fix/drill-receipt-description` added below (its entry is the newest); the #614 entry corrected (its receipt premise was wrong).
 > **Last verified: 2026-09-30**: branch `feat/org-chart-to-main` (org-chart photos + Add Department, staging → main) added below (its entry is the newest).
@@ -62,7 +63,7 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
 
-## 2026-09-30 — 🔵 DEV-26 Pillow sticker for Fab Sew (Siti, High) (branch `fix/pillow-fab-sew-sticker` → `main`, BUG-2026-09-30-229)
+## 2026-09-30 — 🔵 DEV-26 Pillow sticker for Fab Sew (Siti, High) (branch `fix/pillow-fab-sew-sticker` → `main`, BUG-2026-09-30-231)
 
 Ask (DEV-26): a pillow sticker for the sewing department to scan. Fab Cut already has a pillow QR, Fab Sew does not.
 
@@ -107,6 +108,19 @@ Verified: `tsc -p tsconfig.app.json` exit 0; `npm test` all pass. NOT verified o
 4. 🔵 **Bug-id collisions — followed `main`:** main's numbers stand; staging's colliding entries renumbered after main's max (194) and every staging-side reference (code comments, tests, docs, short forms) moved with them: 09-23-184→196, 185→197; 09-24-182→198, 183→199, 184→200, 185→201, 186→202 (186b→202b), 187→203, 188→204, 189→205, 190→206, 191→207; rack-scan 09-25-193→195.
 tsc strict 0; `npm test` 5047 pass / 0 fail.
 ---
+
+## 2026-09-30 — 🔵 Self-check reds: the reconciliations copy the control cards; cancelled opening seeds out (owner「先查 8 和 9」→「确定没有问题才做」)(BUG-2026-09-30-229/-230)(branch `fix/selfcheck-recon-and-opening-seeds`)
+
+1. Investigated first (prod, read-only): the Self-check headline is the reconciliation's drift, not the card's. Creditor:
+   the card's gap is the opening leg only; the reconciliation added three trade-finance repayments as supplier advances.
+   Debtor: the card's gap is one receipt knocked off against invoices outside the books (waits for that customer's
+   opening); the reconciliation added every receipt held on account, labelled "void payment GL leak" though all were live.
+   The opening gap: bills changed after the last opening post (the owner's cleanup of one supplier's pre-opening bills),
+   plus four CANCELLED supplier seeds the opening sum still counted.
+2. 🔵 `ap-recon.ts`: a `TF_REPAYMENT` payment is never an advance. `/ar-reconciliation`: on-account remainders as advance
+   rows (the card's rule). `openingControlSums` + the Opening Balance supplier list: CANCELLED seeds out. Guard
+   `tests/selfcheck-recon-mirrors-controls.test.mjs`; class C18 rows 6–8.
+3. After deploy (owner): re-post the opening — the page then shows the difference to place; the owner chooses the account.
 
 ## 2026-09-30 — ✅ Drills: an official receipt reads its own text, never a lone "from" (BUG-2026-09-30-228)(#616 d68542b0 MERGED, deployed, prod-verified)
 

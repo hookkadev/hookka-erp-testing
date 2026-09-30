@@ -1,4 +1,4 @@
-// DEV-26 / BUG-2026-09-30-229: pillows had a Fab Cut QR and no Fab Sew QR.
+// DEV-26 / BUG-2026-09-30-231: pillows had a Fab Cut QR and no Fab Sew QR.
 //
 // The Fab Sew sticker builder skips a sofa's Back Cushion / Armrest / Headrest
 // rows (the BASE sticker travels with the assembly). Pillow BOMs are typed
