@@ -1,5 +1,6 @@
 # Recurring bug classes — the index that makes P5 executable
 
+> **Last verified: 2026-09-30**: restamped on branch `fix/staging-so-detail-live-do` (staging): C21 gains row 18, the SO detail page that showed a cancelled DO as a production order's delivery (BUG-2026-09-30-225). Nothing else re-checked.
 > **Last verified: 2026-09-30**: restamped on branch `fix/t006-r7-return-qty` (staging only): adds C26, a guard and the write it guards reading one input two ways (BUG-2026-09-30-224). Nothing else re-checked.
 
 > **Last verified: 2026-09-29**: restamped on branch `fix/staging-notes-history` (staging only): C15 gains row 6, the staging patch notes that read a depth-1 clone and printed "0 PRs" (BUG-2026-09-29-215). Nothing else re-checked.
@@ -1482,6 +1483,7 @@ IDENTITY or MONEY.
 | 15 | grep false positives — `web-push.ts:107` (`pub[0] !== 0x04`, a byte), `do-component-breakdown.ts:102` (`a[0]`/`b[0]`, Map-entry tuples in a comparator), `sales/index.tsx:250-251` (`_flStatus[0]`, "any filter active?") | nothing | ✅ not this class |
 | 16 | `grn.ts` `resolveRmForGRNItem` — `raw_materials WHERE description = ? LIMIT 1` for a blank-code (PO-sourced) GRN line; 37 descriptions are shared on staging, e.g. five "WHITE SPONGE" | receiving NLY-D12-6MM posted stock onto D12-0.5 | ✅ 2026-09-24 (BUG-2026-09-24-202) — PO line's code first; a shared name resolves to nothing and is reported unresolved. Staging: 0 posted lines hit it (measured). Prod UNMEASURED |
 | 17 | `po-cost-cascade.ts` `resolveRmFromBom` — same `description = ? LIMIT 1` for a BOM line with no code | FIFO consumption could draw the wrong raw material | ⬜ open — refusing an ambiguous name there silently stops consumption for that line, so it needs its own decision |
+| 18 | `sales-orders.ts` `GET /:id` `poDeliveryMap` — first DO seen per production order over unordered `delivery_order_items` | which DO (and status) the SO detail page **shows** for a linked PO; a cancelled DO could hide its live replacement | ✅ 2026-09-30 (BUG-2026-09-30-225) — `buildPoDeliveryMap`: live DO beats cancelled. Two live DOs (split delivery) still keep the first seen, display only |
 
 **Enforced by** `tests/first-one-wins-refusal.test.mjs` — 8 behavioural assertions driving
 the pure resolver with adversarial fixtures (two orders with the SAME line count, so a

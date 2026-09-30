@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-09-30**: newest entry BUG-2026-09-30-225 (branch `fix/staging-so-detail-live-do`, to staging); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-30**: newest entry BUG-2026-09-30-224 (branch `fix/t006-r7-return-qty`, to staging); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-30**: newest entry BUG-2026-09-30-223 (branch `test/bug06-do-guard-behavioural`, to staging); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-222 (branch `fix/report-emails-mobile`, to staging); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
@@ -56,6 +57,18 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-09-30-225 — SO detail showed a cancelled DO as a production order's delivery `sales` `delivery-orders` 🟢
+
+**Symptom:** the Delivery column in the SO detail page's "Linked Production Orders" table could name a CANCELLED DO for a production order that was already on a new live DO. Seen on staging with SO-2609-397: DO-2609-090 was cancelled and DO-2609-091 created, and the page still showed DO-2609-090 CANCELLED.
+
+**Root cause:** class C21 (first-one-wins). `GET /api/sales-orders/:id` built `linkedPOs[].deliveryDoNo` / `deliveryStatus` by looping `delivery_order_items` and keeping the first DO seen per production order. Cancelling a DO keeps its item rows, so the production order links to both DOs, and the query has no `ORDER BY`, so which one came first was luck.
+
+**Fix:** the loop moved into `buildPoDeliveryMap` (`sales-orders/_helpers.ts`). A live DO replaces a cancelled one; a cancelled DO shows only when no live DO exists. Display only, no data changes.
+
+**Test:** `tests/so-detail-live-do.test.mjs` drives the helper with the cancelled row first and last, the cancelled-only case, and an unlinked DO, and checks the route calls it. The cancelled-first case fails on the old first-wins rule.
 
 ---
 
