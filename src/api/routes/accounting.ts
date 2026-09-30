@@ -8428,9 +8428,15 @@ app.get("/pl-drill", async (c) => {
   const trace: PnlTrace = { account, legs: [], entryLegs: new Map(), extra: [] };
   const { net, coa } = await glWindowSigned(db, orgId, startYm, endYm, dc, trace);
 
-  // Ref. 1 / Ref. 2 from the source documents, one batched read per kind; a
-  // read that fails only leaves the refs to the line description.
-  const refs = new Map<string, { ref1?: string | null; ref2?: string | null }>();
+  // Like the Cash Flow drill (owner 2026-09-30 「P&L 同理，我想看 supplier 名字，
+  // p&L 点开要看的东西和 cash flow 一样」): Ref. 1 = the document; Ref. 2 =
+  // who it is with (customer / supplier / payee / other creditor / payer);
+  // Description = the document's overall description; the related documents
+  // (an invoice's SO, a PI's supplier invoice no., a bill's reference) ride
+  // along for the hover. One batched read per kind; a failed read only leaves
+  // the line's own text.
+  type DocInfo = { ref1?: string | null; party?: string | null; docs?: string | null; header?: string | null };
+  const info = new Map<string, DocInfo>();
   const idsOf = (pred: (t: string) => boolean) => [...new Set(trace.legs.filter((l) => pred(l.sourceType)).map((l) => l.sourceId))];
   const chunked = async <T,>(ids: string[], sql: (ph: string) => string, extra: unknown[] = []): Promise<T[]> => {
     const out: T[] = [];
@@ -8441,54 +8447,95 @@ app.get("/pl-drill", async (c) => {
     }
     return out;
   };
-  const setRef = (pred: (t: string) => boolean, id: string, v: { ref1?: string | null; ref2?: string | null }) => {
-    for (const l of trace.legs) if (l.sourceId === id && pred(l.sourceType)) refs.set(`${l.sourceType}::${l.sourceId}`, v);
+  const setInfo = (pred: (t: string) => boolean, id: string, v: DocInfo) => {
+    for (const l of trace.legs) if (l.sourceId === id && pred(l.sourceType)) info.set(`${l.sourceType}::${l.sourceId}`, v);
   };
+  const str = (v: unknown) => (v === null || v === undefined ? "" : String(v)).trim();
   const isInvoice = (t: string) => t === "invoice" || t.startsWith("invoice_");
   const isPi = (t: string) => t === "purchase_invoice" || t.startsWith("purchase_invoice_");
   const isPv = (t: string) => t === "payment_voucher" || t.startsWith("payment_voucher_");
   const isBill = (t: string) => t.startsWith("other_party_bill");
+  const isJv = (t: string) => t === "manual" || t.startsWith("manual_");
+  const isCn = (t: string) => t === "credit_note" || t.startsWith("credit_note_");
+  const isDn = (t: string) => t === "debit_note" || t.startsWith("debit_note_");
+  const isOr = (t: string) => t === "official_receipt" || t.startsWith("official_receipt_");
   try {
-    const inv = await chunked<Record<string, unknown>>(idsOf(isInvoice), (ph) => `SELECT id, invoiceNo, salesOrderId, doNo FROM invoices WHERE id IN (${ph})`);
-    const soIds = [...new Set(inv.map((r) => String(r.salesOrderId ?? r.sales_order_id ?? "")).filter(Boolean))];
+    const inv = await chunked<Record<string, unknown>>(idsOf(isInvoice), (ph) => `SELECT id, invoiceNo, salesOrderId, doNo, customerName FROM invoices WHERE id IN (${ph})`);
+    const soIds = [...new Set(inv.map((r) => str(r.salesOrderId ?? r.sales_order_id)).filter(Boolean))];
     const soNo = new Map<string, string>();
     for (const r of await chunked<Record<string, unknown>>(soIds, (ph) => `SELECT id, companySOId FROM sales_orders WHERE id IN (${ph})`)) {
-      const no = String(r.companySOId ?? r.company_so_id ?? "");
+      const no = str(r.companySOId ?? r.company_so_id);
       if (no) soNo.set(String(r.id), no);
     }
     for (const r of inv) {
-      const so = soNo.get(String(r.salesOrderId ?? r.sales_order_id ?? ""));
-      setRef(isInvoice, String(r.id), { ref1: String(r.invoiceNo ?? r.invoice_no ?? "") || null, ref2: so ?? (String(r.doNo ?? r.do_no ?? "") || null) });
+      const so = soNo.get(str(r.salesOrderId ?? r.sales_order_id));
+      setInfo(isInvoice, String(r.id), {
+        ref1: str(r.invoiceNo ?? r.invoice_no) || null,
+        party: str(r.customerName ?? r.customer_name) || null,
+        docs: so ?? (str(r.doNo ?? r.do_no) || null),
+        header: "Sales invoice",
+      });
     }
-  } catch { /* refs stay on the description */ }
+  } catch { /* the line keeps its own text */ }
   try {
-    for (const r of await chunked<Record<string, unknown>>(idsOf(isPi), (ph) => `SELECT id, piNo, poRef, supplier_invoice_no FROM purchase_invoices WHERE id IN (${ph})`)) {
-      const supInv = String(r.supplierInvoiceNo ?? r.supplier_invoice_no ?? "");
-      setRef(isPi, String(r.id), { ref1: String(r.piNo ?? r.pi_no ?? "") || null, ref2: supInv || (String(r.poRef ?? r.po_ref ?? "") || null) });
+    for (const r of await chunked<Record<string, unknown>>(idsOf(isPi), (ph) => `SELECT id, piNo, poRef, supplier_invoice_no, supplierName FROM purchase_invoices WHERE id IN (${ph})`)) {
+      const supInv = str(r.supplierInvoiceNo ?? r.supplier_invoice_no), po = str(r.poRef ?? r.po_ref);
+      setInfo(isPi, String(r.id), {
+        ref1: str(r.piNo ?? r.pi_no) || null,
+        party: str(r.supplierName ?? r.supplier_name) || null,
+        docs: [supInv && `Supplier invoice ${supInv}`, po && `PO ${po}`].filter(Boolean).join(" · ") || null,
+        header: "Purchase invoice",
+      });
     }
-  } catch { /* refs stay on the description */ }
+  } catch { /* the line keeps its own text */ }
   try {
-    for (const r of await chunked<Record<string, unknown>>(idsOf(isPv), (ph) => `SELECT id, pvNo, payee FROM payment_vouchers WHERE id IN (${ph})`)) {
-      setRef(isPv, String(r.id), { ref1: String(r.pvNo ?? r.pv_no ?? "") || null, ref2: String(r.payee ?? "") || null });
+    for (const r of await chunked<Record<string, unknown>>(idsOf(isPv), (ph) => `SELECT id, pvNo, payee, description FROM payment_vouchers WHERE id IN (${ph})`)) {
+      setInfo(isPv, String(r.id), { ref1: str(r.pvNo ?? r.pv_no) || null, party: str(r.payee) || null, header: str(r.description) || null });
     }
-  } catch { /* refs stay on the description */ }
+  } catch { /* the line keeps its own text */ }
   try {
-    for (const r of await chunked<Record<string, unknown>>(idsOf(isBill), (ph) => `SELECT billNo, referenceNo FROM other_party_bills WHERE billNo IN (${ph}) AND orgId = ?`, [orgId])) {
-      setRef(isBill, String(r.billNo ?? r.bill_no ?? ""), { ref1: String(r.billNo ?? r.bill_no ?? "") || null, ref2: String(r.referenceNo ?? r.reference_no ?? "") || null });
+    for (const r of await chunked<Record<string, unknown>>(idsOf(isBill), (ph) => `SELECT billNo, partyName, referenceNo, description FROM other_party_bills WHERE billNo IN (${ph}) AND orgId = ?`, [orgId])) {
+      const ref = str(r.referenceNo ?? r.reference_no);
+      setInfo(isBill, str(r.billNo ?? r.bill_no), {
+        ref1: str(r.billNo ?? r.bill_no) || null,
+        party: str(r.partyName ?? r.party_name) || null,
+        docs: ref ? `Reference ${ref}` : null,
+        header: str(r.description) || null,
+      });
     }
-  } catch { /* refs stay on the description */ }
+  } catch { /* the line keeps its own text */ }
+  try {
+    for (const r of await chunked<Record<string, unknown>>(idsOf(isJv), (ph) => `SELECT id, description FROM journal_entries WHERE id IN (${ph})`)) {
+      setInfo(isJv, String(r.id), { header: str(r.description) || null });
+    }
+  } catch { /* the line keeps its own text */ }
+  for (const [pred, table, label] of [[isCn, "credit_notes", "Credit note"], [isDn, "debit_notes", "Debit note"]] as const) {
+    try {
+      for (const r of await chunked<Record<string, unknown>>(idsOf(pred), (ph) => `SELECT id, customerName FROM ${table} WHERE id IN (${ph})`)) {
+        setInfo(pred, String(r.id), { party: str(r.customerName ?? r.customer_name) || null, header: label });
+      }
+    } catch { /* the line keeps its own text */ }
+  }
+  try {
+    for (const r of await chunked<Record<string, unknown>>(idsOf(isOr), (ph) => `SELECT id, receivedFrom, description FROM official_receipts WHERE id IN (${ph})`)) {
+      setInfo(isOr, String(r.id), { party: str(r.receivedFrom ?? r.received_from) || null, header: str(r.description) || null });
+    }
+  } catch { /* the line keeps its own text */ }
 
   const lines = trace.legs
     .map((l) => {
       const key = `${l.sourceType}::${l.sourceId}`;
-      const r = refs.get(key);
+      const r = info.get(key);
+      const ref1 = docNoFromDescription(l.description) ?? r?.ref1 ?? l.sourceId;
+      const party = r?.party ?? null;
       return {
         id: l.id,
         date: l.date,
-        description: l.description,
+        description: r?.header ?? tidyDescription(l.description, ref1, party),
         otherSide: otherSideCodes(l, trace.entryLegs.get(key) ?? [], resolve).map((code) => ({ code, name: coa.get(code)?.name ?? "" })),
-        ref1: docNoFromDescription(l.description) ?? r?.ref1 ?? l.sourceId,
-        ref2: r?.ref2 ?? null,
+        ref1,
+        ref2: party,
+        docs: r?.docs ?? null,
         debitSen: l.debitSen,
         creditSen: l.creditSen,
         sourceType: l.sourceType,
