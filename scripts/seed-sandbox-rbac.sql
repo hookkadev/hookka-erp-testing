@@ -8,10 +8,10 @@
 --   empty result. See docs/RBAC-REMEDIATION.md.
 --
 -- WHERE IT MAY RUN
---   SANDBOX ONLY — Supabase project cjnewpxxmiucwirlcqpj (hookka-sandbox).
+--   SANDBOX ONLY — Supabase project hookka-sandbox (SUPABASE_SANDBOX_REF in your .env).
 --   It refuses to run against a populated database (see the guard below), but
 --   do not rely on that: check which project you are connected to first.
---   NEVER staging (zaxygxwadidiqcphibma). NEVER production (vpwdqtsxexpiqxzweivd).
+--   NEVER staging. NEVER production.
 --
 -- WHAT IT WRITES
 --   8 workers, ~320 attendance records over the last ~10 weeks, ~200 working

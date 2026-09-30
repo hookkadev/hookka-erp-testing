@@ -31,6 +31,12 @@ export function addDays(iso: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+// Interest charged on a draw posts `tf_interest` legs whose sourceId is
+// `tfint-YYYY-MM-DD-<draw payment no>`; this gives back the draw's payment no.
+export function tfInterestDrawId(sourceId: string): string {
+  return sourceId.replace(/^tfint-\d{4}-\d{2}-\d{2}-/, "");
+}
+
 export function deriveDraws(
   legs: TfLegRow[],
   metas: TfDrawMeta[],
@@ -52,7 +58,7 @@ export function deriveDraws(
     const net = (Number(l.creditSen) || 0) - (Number(l.debitSen) || 0);
     accountNetSen += net;
     const isInterest = String(l.sourceType ?? "").split(":")[0].startsWith("tf_interest");
-    const key = isInterest ? l.sourceId.replace(/^tfint-\d{4}-\d{2}-\d{2}-/, "") : l.sourceId;
+    const key = isInterest ? tfInterestDrawId(l.sourceId) : l.sourceId;
     netBy.set(key, (netBy.get(key) ?? 0) + net);
     if (isInterest) interestBy.set(key, (interestBy.get(key) ?? 0) + net);
   }

@@ -30,20 +30,21 @@ import { parseDebtorCode } from "../../lib/debtor";
 import { defaultPnlBucket, pnlBucketFor } from "../../lib/pnl-bucket";
 import { bsSectionFor, bsSectionClass } from "../../lib/bs-section";
 import type { BsSection } from "../../lib/bs-section";
-import { buildStatement, splitByLargestRemainder, rawMaterialLineFor, RM_LINES, SUPPLIER_SECTION_TARGETS } from "../../lib/cashflow-engine";
-import type { CfMap, ClassifiedLeg, BankLeg, RmSplit, CoaLite } from "../../lib/cashflow-engine";
+import { buildStatement, splitByLargestRemainder, rawMaterialLineFor, RM_LINES, SUPPLIER_SECTION_TARGETS, payrollAccrualSections, displaySign, payrollMonthFrom, rawStockAccountSections } from "../../lib/cashflow-engine";
+import type { CfMap, ClassifiedLeg, BankLeg, RmSplit, CoaLite, CfSection } from "../../lib/cashflow-engine";
 import { getDocNumberPrefixes, issueDocNumber, issueDocNumberWithPrefix } from "../lib/doc-number-service";
 import { computeDiscountAlloc, type PiOpen } from "../../lib/discount-alloc";
 import { ensurePartialPaymentColumns } from "../lib/ensure-partial-payment";
 import { ensureFinanceOrgColumns } from "../lib/ensure-finance-org";
 import { apRowBeforeOpening, legBeforeOpening, rowBeforeOpening } from "../../lib/opening-floor";
 import { applyOpeningSlice, windowCoversMonth } from "../../lib/opening-slice";
+import { docNoFromDescription, drillVariant, otherSideCodes, ownDescription, tidyDescription } from "../../lib/ledger-drill";
 import { labourInjectMonths } from "../../lib/labour-inject";
 import { projectedLabourByDept } from "../lib/labour-projection";
 import { groupPayslipsByMonthDept, forecastEntryKind, monthHasDeptForecast, labourMappedAccounts } from "../../lib/salary-dept";
 import { ensureTfTables, getTfSources, saveTfSources, loadTfDraws } from "../lib/trade-finance";
 import type { TfSource } from "../lib/trade-finance";
-import { tfTotals } from "../../lib/trade-finance";
+import { tfInterestDrawId, tfTotals } from "../../lib/trade-finance";
 import { buildDeliveredAsOf, fgClosingSen } from "../../lib/fg-closing";
 import { costAsOfByPo } from "../../lib/cost-attribution";
 import { STOCK_TAKE_ITEM_ALIAS_SEED_2026_05 } from "../lib/stock-take-item-alias-seed-2026-05";
@@ -284,6 +285,21 @@ const PROTECTED_ACCOUNTS = new Set([
   "330-0001", "330-0002", "330-0003", "330-1001", "330-1002", "330-2001",
   "330-3005", "330-4000", "330-8000", "330-9000",
 ]);
+
+// An account with child accounts is a header (AutoCount convention) and is
+// NEVER postable, whatever its stored flag says. Owner 2026-09-29 「by right
+// 410-0000 不能选吧」: 410-0000 ACCRUALS was the one parent in the chart still
+// flagged postable, so salary vouchers were paid against it instead of
+// 410-0010 ACCRUAL - SALARY. The fragment below replaces the stored flag in the
+// SELECTs that feed line validation; accountHasChildren serves single lookups.
+// (snake_case alias: the PG adapter camelCases it back to isPostable.)
+const EFFECTIVE_POSTABLE_SQL =
+  "CASE WHEN EXISTS (SELECT 1 FROM chart_of_accounts k WHERE k.parentCode = chart_of_accounts.code) THEN 0 ELSE isPostable END AS is_postable";
+async function accountHasChildren(db: Env["Variables"]["DB"], code: string): Promise<boolean> {
+  const r = await db.prepare("SELECT COUNT(*) AS n_children FROM chart_of_accounts WHERE parentCode = ?")
+    .bind(code).first<Record<string, unknown>>();
+  return Number(r?.nChildren ?? r?.n_children ?? 0) > 0;
+}
 
 // "Does this account carry any amount?" — gate before promoting a leaf
 // account into a parent (drag & drop). Checks the immutable ledger plus
@@ -842,7 +858,13 @@ app.get("/coa", async (c) => {
   const res = await c.var.DB.prepare(
     "SELECT * FROM chart_of_accounts WHERE isActive = 1 ORDER BY code",
   ).all<CoaRow>();
-  const data = (res.results ?? []).map(rowToCoa);
+  // A parent is never postable (see EFFECTIVE_POSTABLE_SQL) — every account
+  // picker filters on isPostable, so a header can no longer be chosen.
+  const parents = new Set((res.results ?? []).map((r) => r.parentCode).filter((x): x is string => !!x));
+  const data = (res.results ?? []).map((r) => {
+    const row = rowToCoa(r);
+    return parents.has(row.code) ? { ...row, isPostable: false } : row;
+  });
   return c.json({ success: true, data, total: data.length });
 });
 
@@ -978,6 +1000,15 @@ app.put("/coa", async (c) => {
             ? 1
             : 0,
     };
+    if (await accountHasChildren(c.var.DB, String(code))) {
+      if (body.isPostable === true) {
+        return c.json(
+          { success: false, error: `${code} has child accounts — a parent (header) account can't be postable; post to one of its children` },
+          400,
+        );
+      }
+      merged.isPostable = 0;
+    }
     if (
       merged.cashFlowCategory &&
       !["O", "I", "F"].includes(merged.cashFlowCategory)
@@ -1376,7 +1407,7 @@ app.put("/journals/:id", async (c) => {
             400,
           );
         }
-        if ((acct.isPostable ?? 1) === 0) {
+        if ((acct.isPostable ?? 1) === 0 || (await accountHasChildren(c.var.DB, l.accountCode))) {
           return c.json(
             {
               success: false,
@@ -3207,7 +3238,7 @@ app.get("/ar-reconciliation", async (c) => {
         isOpening?: number | null; is_opening?: number | null;
       }>(),
     c.var.DB.prepare(
-      `SELECT pr.id AS id, pr.receiptNumber AS receiptNumber, pr.customerName AS customerName,
+      `SELECT pr.id AS id, pr.receiptNumber AS receiptNumber, pr.customerId AS customerId, pr.customerName AS customerName,
               pr.date AS date, pr.amount AS amount, pr.method AS method, pr.allocations AS allocations,
               dl.state AS lifecycleState
          FROM payment_records pr
@@ -3215,7 +3246,8 @@ app.get("/ar-reconciliation", async (c) => {
                 ON dl.sourceType = 'payment' AND dl.sourceId = pr.id
         WHERE 1=1`,
     ).all<{
-      id: string; receiptNumber?: string; receipt_number?: string; customerName?: string; customer_name?: string;
+      id: string; receiptNumber?: string; receipt_number?: string; customerId?: string; customer_id?: string;
+      customerName?: string; customer_name?: string;
       date?: string; amount?: number; method?: string; allocations?: string | unknown[];
       lifecycleState?: string | null; lifecyclestate?: string | null;
     }>().catch(() => ({ results: [] as never[] })),
@@ -3283,9 +3315,25 @@ app.get("/ar-reconciliation", async (c) => {
         date,
       });
     }
-    // NOTE: deliberately NO synthetic "unapplied remainder" row — /ar-control
-    // subtracts no advances, so the mirror must not either; a receipt whose GL
-    // exceeds its allocations surfaces as a payment_gl_mismatch item instead.
+    // What the receipt holds on account — the part its allocations don't cover.
+    // /ar-control nets it off as an unapplied customer advance
+    // (loadUnappliedCustomerAdvances: live receipts with a customer, amount −
+    // Σ allocations, positive only), so the mirror carries it as an advance row
+    // too. Before, every receipt held on account read as a "void payment GL
+    // leak" (BUG-2026-09-30-229).
+    const onAccountSen = Math.round(Number(r.amount) || 0) - allocs.reduce((s, a) => s + Math.round(Number(a.amount) || 0), 0);
+    if (onAccountSen > 0 && String(r.customerId ?? r.customer_id ?? "")) {
+      receiptRows.push({
+        paymentNo: recId,
+        purchaseInvoiceId: null,
+        bookedSen: 0,
+        amountSen: onAccountSen,
+        method: String(r.method ?? ""),
+        active,
+        supplierName: name,
+        date,
+      });
+    }
   }
 
   const report = buildApReconciliation(
@@ -3978,7 +4026,7 @@ app.post("/other-party-bills", async (c) => {
 
     for (const code of [...new Set(items.map((i) => i.counterAccount))]) {
       const acct = await c.var.DB.prepare(
-        "SELECT code, isPostable FROM chart_of_accounts WHERE code = ?",
+        `SELECT code, ${EFFECTIVE_POSTABLE_SQL} FROM chart_of_accounts WHERE code = ?`,
       )
         .bind(code)
         .first<{ code: string; isPostable: number }>();
@@ -4121,7 +4169,7 @@ app.put("/other-party-bills/:billNo", async (c) => {
     if (shapeErr) return c.json({ success: false, error: shapeErr }, 400);
     for (const code of [...new Set(items.map((i) => i.counterAccount))]) {
       const acct = await c.var.DB.prepare(
-        "SELECT code, isPostable FROM chart_of_accounts WHERE code = ?",
+        `SELECT code, ${EFFECTIVE_POSTABLE_SQL} FROM chart_of_accounts WHERE code = ?`,
       ).bind(code).first<{ code: string; isPostable: number }>();
       if (!acct) return c.json({ success: false, error: `Account ${code} not found` }, 400);
       if (acct.isPostable !== 1)
@@ -6689,19 +6737,35 @@ async function getPnlOpeningPriorCum(
 
 const PNL_TYPES: ReadonlySet<CoaRow["type"]> = new Set(["REVENUE", "COST", "EXPENSE"]);
 
+// The P&L inline drill (owner 2026-09-29 「我要点开看 detail，就是这样」) asks
+// glWindowSigned to TRACE one account: every ledger leg it adds to that
+// account's figure, every leg of those legs' entries (for the "other side"),
+// and the report-layer additions (payroll from payslips, the opening-month
+// slice). Same pass as the statement, so the drill sums to the line to the sen.
+type PnlTraceLeg = { id: string; accountCode: string; sourceType: string; sourceId: string; date: string; debitSen: number; creditSen: number; description: string };
+type PnlTrace = {
+  account: string; // resolved code
+  legs: PnlTraceLeg[];
+  entryLegs: Map<string, { accountCode: string; debitSen: number; creditSen: number }[]>; // sourceType::sourceId → legs
+  extra: { kind: "payroll" | "opening_slice"; ym: string; sen: number }[];
+};
+
 async function glWindowSigned(
   db: Env["Variables"]["DB"],
   orgId: string,
   startYm: string | null,
   endYm: string | null,
   dc: DocDateCtx,
+  trace?: PnlTrace,
 ): Promise<{ net: GlWindow; coa: Map<string, { name: string; type: CoaRow["type"] }> }> {
   const memoKey = `${startYm ?? ""}|${endYm ?? ""}`;
-  const cached = dc.glMemo?.get(memoKey);
+  const cached = trace ? undefined : dc.glMemo?.get(memoKey);
   if (cached) return cached;
   const [legRes, coaRes] = await Promise.all([
-    db.prepare("SELECT accountCode, sourceId, debitSen, creditSen, postedAt, sourceType FROM ledger_journal_entries WHERE hidden = 0")
-      .all<{ accountCode: string; sourceId: string; debitSen: number; creditSen: number; postedAt: string; sourceType: string }>(),
+    db.prepare(trace
+      ? "SELECT id, accountCode, sourceId, debitSen, creditSen, postedAt, sourceType, description FROM ledger_journal_entries WHERE hidden = 0"
+      : "SELECT accountCode, sourceId, debitSen, creditSen, postedAt, sourceType FROM ledger_journal_entries WHERE hidden = 0")
+      .all<{ id?: string; accountCode: string; sourceId: string; debitSen: number; creditSen: number; postedAt: string; sourceType: string; description?: string }>(),
     db.prepare("SELECT code, name, type FROM chart_of_accounts").all<{ code: string; name: string; type: CoaRow["type"] }>(),
   ]);
   const resolve = await loadAccountResolver(db);
@@ -6751,6 +6815,23 @@ async function glWindowSigned(
     if (endYm && ym > endYm) continue;
     const code = resolve(l.accountCode);
     net.set(code, (net.get(code) ?? 0) + (Number(l.debitSen) || 0) - (Number(l.creditSen) || 0));
+    if (trace && code === trace.account) {
+      trace.legs.push({
+        id: String(l.id ?? ""), accountCode: l.accountCode, sourceType: l.sourceType, sourceId: l.sourceId, date: dd.slice(0, 10),
+        debitSen: Number(l.debitSen) || 0, creditSen: Number(l.creditSen) || 0, description: String(l.description ?? ""),
+      });
+    }
+  }
+  if (trace && trace.legs.length) {
+    // Every leg of the traced legs' entries — the drill's "other side".
+    const keys = new Set(trace.legs.map((t) => `${t.sourceType}::${t.sourceId}`));
+    for (const l of legRes.results ?? []) {
+      const key = `${l.sourceType}::${l.sourceId}`;
+      if (!keys.has(key)) continue;
+      let arr = trace.entryLegs.get(key);
+      if (!arr) { arr = []; trace.entryLegs.set(key, arr); }
+      arr.push({ accountCode: l.accountCode, debitSen: Number(l.debitSen) || 0, creditSen: Number(l.creditSen) || 0 });
+    }
   }
   // Report-layer labour (owner 2026-08-31 「任何时候我看P&L 时你都自动提取」):
   // the payroll figures show up without waiting for a post — stored payslips
@@ -6770,6 +6851,7 @@ async function glWindowSigned(
     for (const { account, sen } of await labourInjectionLines(db, orgId, ym, dc.labourMemo)) {
       if (recorded?.has(account)) continue;
       net.set(account, (net.get(account) ?? 0) + sen);
+      if (trace && account === trace.account && sen !== 0) trace.extra.push({ kind: "payroll", ym, sen });
     }
   }
   const coa = new Map((coaRes.results ?? []).map((a) => [a.code, { name: a.name, type: a.type }] as const));
@@ -6778,13 +6860,16 @@ async function glWindowSigned(
   // come from the owner-keyed historical P&L, so nothing double-counts.
   if (openingNet.size && windowCoversMonth(startYm, endYm, obDate ? obDate.slice(0, 7) : null)) {
     const priorCum = await getPnlOpeningPriorCum(db);
+    const before = trace ? (net.get(trace.account) ?? 0) : 0;
     applyOpeningSlice(net, openingNet, priorCum, (code) => {
       const t = coa.get(code)?.type;
       return t !== undefined && PNL_TYPES.has(t);
     });
+    const slice = trace ? (net.get(trace.account) ?? 0) - before : 0;
+    if (trace && slice !== 0 && obDate) trace.extra.push({ kind: "opening_slice", ym: obDate.slice(0, 7), sen: slice });
   }
   const out = { net, coa };
-  dc.glMemo?.set(memoKey, out);
+  if (!trace) dc.glMemo?.set(memoKey, out);
   return out;
 }
 
@@ -7942,11 +8027,14 @@ async function costByLineWindow(
 
 // Assemble the statement row tree from a period window + the FY-YTD window.
 function buildPnlRows(p: PnlWindow, y: PnlWindow, editable = false) {
-  type Row = { kind: "group" | "line" | "total" | "grandtotal" | "gap"; depth: number; label: string; periodSen?: number; ytdSen?: number; groupId?: string; totalLabel?: string; badge?: string; accountCode?: string; bucket?: string };
+  // drillCode: the account a line can be opened on (the P&L inline drill) when
+  // the line is one account's ledger figure but carries no accountCode (that
+  // field also drives the edit-mode drag, which these rows must not get).
+  type Row = { kind: "group" | "line" | "total" | "grandtotal" | "gap"; depth: number; label: string; periodSen?: number; ytdSen?: number; groupId?: string; totalLabel?: string; badge?: string; accountCode?: string; bucket?: string; drillCode?: string };
   const rows: Row[] = [];
   let gid = 0;
   const g = (label: string, depth: number, periodSen: number, ytdSen: number, totalLabel: string, bucket?: string) => { const id = `g${gid++}`; rows.push({ kind: "group", depth, label, periodSen, ytdSen, groupId: id, totalLabel, bucket }); return id; };
-  const line = (label: string, depth: number, ps: number, ys: number, accountCode?: string, bucket?: string) => rows.push({ kind: "line", depth, label, periodSen: ps, ytdSen: ys, accountCode, bucket });
+  const line = (label: string, depth: number, ps: number, ys: number, accountCode?: string, bucket?: string, drillCode?: string) => rows.push({ kind: "line", depth, label, periodSen: ps, ytdSen: ys, accountCode, bucket, drillCode });
   const tot = (label: string, depth: number, ps: number, ys: number) => rows.push({ kind: "total", depth, label, periodSen: ps, ytdSen: ys });
 
   // SALES
@@ -7964,11 +8052,11 @@ function buildPnlRows(p: PnlWindow, y: PnlWindow, editable = false) {
     const yg = y.rmGroups.find((x) => x.group === pg.group);
     g(pg.description, 2, pg.openingSen + pg.purchasesSen - pg.closingSen, yg ? yg.openingSen + yg.purchasesSen - yg.closingSen : 0, `TOTAL ${pg.description}`);
     line("OPENING STOCK", 3, pg.openingSen, yg?.openingSen ?? 0);
-    line("PURCHASE", 3, pg.purchasesSen, yg?.purchasesSen ?? 0);
+    line("PURCHASE", 3, pg.purchasesSen, yg?.purchasesSen ?? 0, undefined, undefined, pg.group);
     line("CLOSING STOCK", 3, -pg.closingSen, yg ? -yg.closingSen : 0);
   }
-  line("CARRIAGE INWARDS", 1, p.carriageSen, y.carriageSen);
-  line("SST CHARGES", 1, p.sstSen, y.sstSen);
+  line("CARRIAGE INWARDS", 1, p.carriageSen, y.carriageSen, undefined, undefined, "700-1015");
+  line("SST CHARGES", 1, p.sstSen, y.sstSen, undefined, undefined, "706-0000");
   // Direct labour
   g("DIRECT LABOUR", 1, p.labourSen, y.labourSen, "TOTAL DIRECT LABOUR", "DIRECT_LABOUR");
   for (let i = 0; i < p.labourLines.length; i++) line(p.labourLines[i].name, 2, p.labourLines[i].amountSen, y.labourLines.find((x) => x.code === p.labourLines[i].code)?.amountSen ?? 0, p.labourLines[i].code, "DIRECT_LABOUR");
@@ -8324,6 +8412,418 @@ app.get("/pl-statement", async (c) => {
   });
 });
 
+// An official receipt's payer and description, for the drills: its header
+// note when it has one, else its lines' text (the receipt popup shows both;
+// the note is often empty), else the document's kind (BUG-2026-09-30-228).
+async function officialReceiptTexts(
+  db: Env["Variables"]["DB"],
+  ids: string[],
+): Promise<Map<string, { payer: string; text: string }>> {
+  const out = new Map<string, { payer: string; text: string }>();
+  for (let i = 0; i < ids.length; i += 200) {
+    const part = ids.slice(i, i + 200);
+    const ph = part.map(() => "?").join(",");
+    const lineText = new Map<string, string[]>();
+    try {
+      const lines = await db.prepare(`SELECT receiptId, description FROM official_receipt_lines WHERE receiptId IN (${ph}) ORDER BY lineOrder`)
+        .bind(...part).all<Record<string, unknown>>();
+      for (const r of lines.results ?? []) {
+        const id = String(r.receiptId ?? r.receipt_id ?? ""), text = String(r.description ?? "").trim();
+        const seen = lineText.get(id) ?? [];
+        if (id && text && !seen.includes(text)) lineText.set(id, [...seen, text]);
+      }
+    } catch { /* the header note, or the kind */ }
+    const heads = await db.prepare(`SELECT id, receivedFrom, description FROM official_receipts WHERE id IN (${ph})`)
+      .bind(...part).all<Record<string, unknown>>();
+    for (const r of heads.results ?? []) {
+      const id = String(r.id);
+      out.set(id, {
+        payer: String(r.receivedFrom ?? r.received_from ?? "").trim(),
+        text: ownDescription(String(r.description ?? "")) ?? (lineText.get(id)?.join(" · ") || "Official receipt"),
+      });
+    }
+  }
+  return out;
+}
+
+// One drill line per ledger leg, shared by the P&L and balance-sheet drills
+// (owner 2026-09-30: the P&L drill shows what the Cash Flow drill shows, and
+// 「Balance sheet 也要这样点开看」). Ref. 1 = the document, Ref. 2 = who it is
+// with, Description = the document's overall description, docs = the related
+// documents (hover), other side = the opposite accounts of the same entry.
+type DrillSourceLeg = { id: string; accountCode: string; sourceType: string; sourceId: string; date: string; debitSen: number; creditSen: number; description: string };
+async function buildDrillLines(
+  db: Env["Variables"]["DB"],
+  orgId: string,
+  legs: DrillSourceLeg[],
+  entryLegs: Map<string, { accountCode: string; debitSen: number; creditSen: number }[]>,
+  resolve: (code: string) => string,
+  coa: ReadonlyMap<string, { name: string }>,
+) {
+  // Like the Cash Flow drill (owner 2026-09-30 「P&L 同理，我想看 supplier 名字，
+  // p&L 点开要看的东西和 cash flow 一样」): Ref. 1 = the document; Ref. 2 =
+  // who it is with (customer / supplier / payee / other creditor / payer);
+  // Description = the document's overall description; the related documents
+  // (an invoice's SO, a PI's supplier invoice no., a bill's reference) ride
+  // along for the hover. One batched read per kind; a failed read only leaves
+  // the line's own text.
+  type DocInfo = { ref1?: string | null; party?: string | null; docs?: string | null; header?: string | null };
+  const info = new Map<string, DocInfo>();
+  const idsOf = (pred: (t: string) => boolean) => [...new Set(legs.filter((l) => pred(l.sourceType)).map((l) => l.sourceId))];
+  const chunked = async <T,>(ids: string[], sql: (ph: string) => string, extra: unknown[] = []): Promise<T[]> => {
+    const out: T[] = [];
+    for (let i = 0; i < ids.length; i += 200) {
+      const part = ids.slice(i, i + 200);
+      const res = await db.prepare(sql(part.map(() => "?").join(","))).bind(...part, ...extra).all<T>();
+      out.push(...(res.results ?? []));
+    }
+    return out;
+  };
+  const setInfo = (pred: (t: string) => boolean, id: string, v: DocInfo) => {
+    for (const l of legs) if (l.sourceId === id && pred(l.sourceType)) info.set(`${l.sourceType}::${l.sourceId}`, v);
+  };
+  const str = (v: unknown) => (v === null || v === undefined ? "" : String(v)).trim();
+  const isInvoice = (t: string) => t === "invoice" || t.startsWith("invoice_");
+  const isPi = (t: string) => t === "purchase_invoice" || t.startsWith("purchase_invoice_");
+  const isPv = (t: string) => t === "payment_voucher" || t.startsWith("payment_voucher_");
+  const isBill = (t: string) => t.startsWith("other_party_bill");
+  const isJv = (t: string) => t === "manual" || t.startsWith("manual_");
+  const isCn = (t: string) => t === "credit_note" || t.startsWith("credit_note_");
+  const isDn = (t: string) => t === "debit_note" || t.startsWith("debit_note_");
+  const isOr = (t: string) => t === "official_receipt" || t.startsWith("official_receipt_");
+  const isSp = (t: string) => t.startsWith("supplier_payment");
+  const isOp = (t: string) => t.startsWith("other_party_payment");
+  const isRc = (t: string) => t === "payment" || (t.startsWith("payment_") && !t.startsWith("payment_voucher"));
+  const isPcn = (t: string) => t.startsWith("purchase_credit_note");
+  try {
+    const inv = await chunked<Record<string, unknown>>(idsOf(isInvoice), (ph) => `SELECT id, invoiceNo, salesOrderId, doNo, customerName FROM invoices WHERE id IN (${ph})`);
+    const soIds = [...new Set(inv.map((r) => str(r.salesOrderId ?? r.sales_order_id)).filter(Boolean))];
+    const soNo = new Map<string, string>();
+    for (const r of await chunked<Record<string, unknown>>(soIds, (ph) => `SELECT id, companySOId FROM sales_orders WHERE id IN (${ph})`)) {
+      const no = str(r.companySOId ?? r.company_so_id);
+      if (no) soNo.set(String(r.id), no);
+    }
+    for (const r of inv) {
+      const so = soNo.get(str(r.salesOrderId ?? r.sales_order_id));
+      setInfo(isInvoice, String(r.id), {
+        ref1: str(r.invoiceNo ?? r.invoice_no) || null,
+        party: str(r.customerName ?? r.customer_name) || null,
+        docs: so ?? (str(r.doNo ?? r.do_no) || null),
+        header: "Sales invoice",
+      });
+    }
+  } catch { /* the line keeps its own text */ }
+  try {
+    // An edit to a posted PI posts its correction under `<PI id>:edit-<time>`
+    // (purchase-invoices.ts): the same PI, so the same supplier.
+    const piSourceIds = new Map<string, Set<string>>(); // PI id → the sourceIds carrying it
+    for (const l of legs) {
+      if (!isPi(l.sourceType)) continue;
+      const id = l.sourceId.replace(/:edit-\d+$/, "");
+      (piSourceIds.get(id) ?? piSourceIds.set(id, new Set()).get(id)!).add(l.sourceId);
+    }
+    for (const r of await chunked<Record<string, unknown>>([...piSourceIds.keys()], (ph) => `SELECT id, piNo, poRef, supplier_invoice_no, supplierName FROM purchase_invoices WHERE id IN (${ph})`)) {
+      const supInv = str(r.supplierInvoiceNo ?? r.supplier_invoice_no), po = str(r.poRef ?? r.po_ref);
+      for (const sourceId of piSourceIds.get(String(r.id)) ?? []) {
+        setInfo(isPi, sourceId, {
+          ref1: str(r.piNo ?? r.pi_no) || null,
+          party: str(r.supplierName ?? r.supplier_name) || null,
+          docs: [supInv && `Supplier invoice ${supInv}`, po && `PO ${po}`].filter(Boolean).join(" · ") || null,
+          header: "Purchase invoice",
+        });
+      }
+    }
+  } catch { /* the line keeps its own text */ }
+  try {
+    for (const r of await chunked<Record<string, unknown>>(idsOf(isPv), (ph) => `SELECT id, pvNo, payee, description FROM payment_vouchers WHERE id IN (${ph})`)) {
+      setInfo(isPv, String(r.id), { ref1: str(r.pvNo ?? r.pv_no) || null, party: str(r.payee) || null, header: ownDescription(str(r.description)) });
+    }
+  } catch { /* the line keeps its own text */ }
+  try {
+    for (const r of await chunked<Record<string, unknown>>(idsOf(isBill), (ph) => `SELECT billNo, partyName, referenceNo, description FROM other_party_bills WHERE billNo IN (${ph}) AND orgId = ?`, [orgId])) {
+      const ref = str(r.referenceNo ?? r.reference_no);
+      setInfo(isBill, str(r.billNo ?? r.bill_no), {
+        ref1: str(r.billNo ?? r.bill_no) || null,
+        party: str(r.partyName ?? r.party_name) || null,
+        docs: ref ? `Reference ${ref}` : null,
+        header: ownDescription(str(r.description)),
+      });
+    }
+  } catch { /* the line keeps its own text */ }
+  try {
+    for (const r of await chunked<Record<string, unknown>>(idsOf(isJv), (ph) => `SELECT id, description FROM journal_entries WHERE id IN (${ph})`)) {
+      setInfo(isJv, String(r.id), { header: ownDescription(str(r.description)) });
+    }
+  } catch { /* the line keeps its own text */ }
+  for (const [pred, table, label] of [[isCn, "credit_notes", "Credit note"], [isDn, "debit_notes", "Debit note"]] as const) {
+    try {
+      for (const r of await chunked<Record<string, unknown>>(idsOf(pred), (ph) => `SELECT id, customerName FROM ${table} WHERE id IN (${ph})`)) {
+        setInfo(pred, String(r.id), { party: str(r.customerName ?? r.customer_name) || null, header: label });
+      }
+    } catch { /* the line keeps its own text */ }
+  }
+  try {
+    for (const [id, r] of await officialReceiptTexts(db, idsOf(isOr))) {
+      setInfo(isOr, id, { party: r.payer || null, header: r.text });
+    }
+  } catch { /* the line keeps its own text */ }
+  // The documents that mostly sit on balance-sheet accounts (the balance-sheet
+  // drill, owner 2026-09-30): a supplier payment names the supplier and lists
+  // the PIs it settled; an other-creditor payment names the creditor and its
+  // bills; a customer receipt names the customer; a purchase credit note the
+  // supplier. A payment made through a payment voucher takes the voucher's
+  // purpose as its description.
+  const pvPurposeByNo = new Map<string, string>();
+  try {
+    const payNos = [...new Set([...idsOf(isSp), ...idsOf(isOp)])];
+    for (const r of await chunked<Record<string, unknown>>(payNos, (ph) => `SELECT pvNo, description FROM payment_vouchers WHERE pvNo IN (${ph})`)) {
+      const purpose = ownDescription(str(r.description));
+      if (purpose) pvPurposeByNo.set(str(r.pvNo ?? r.pv_no), purpose);
+    }
+  } catch { /* description stays the ledger text */ }
+  try {
+    const partyByPay = new Map<string, string>();
+    const piByPay = new Map<string, Set<string>>();
+    for (const r of await chunked<Record<string, unknown>>(idsOf(isSp), (ph) => `SELECT payment_no, purchase_invoice_id, supplier_name FROM supplier_payments WHERE payment_no IN (${ph}) AND org_id = ?`, [orgId])) {
+      const no = str(r.paymentNo ?? r.payment_no), pid = str(r.purchaseInvoiceId ?? r.purchase_invoice_id), nm = str(r.supplierName ?? r.supplier_name);
+      if (no && nm && !partyByPay.has(no)) partyByPay.set(no, nm);
+      if (no && pid) (piByPay.get(no) ?? piByPay.set(no, new Set()).get(no)!).add(pid);
+    }
+    const piNo = new Map<string, string>();
+    for (const r of await chunked<Record<string, unknown>>([...new Set([...piByPay.values()].flatMap((s) => [...s]))], (ph) => `SELECT id, piNo FROM purchase_invoices WHERE id IN (${ph})`)) {
+      piNo.set(String(r.id), str(r.piNo ?? r.pi_no));
+    }
+    for (const no of new Set([...partyByPay.keys(), ...piByPay.keys()])) {
+      const ids = [...(piByPay.get(no) ?? [])];
+      setInfo(isSp, no, {
+        party: partyByPay.get(no) ?? null,
+        docs: ids.length ? ids.map((id) => piNo.get(id) || (id.startsWith("pi-ob-") ? "Opening" : id)).join(", ") : null,
+        header: pvPurposeByNo.get(no) ?? "Supplier payment",
+      });
+    }
+  } catch { /* the line keeps its own text */ }
+  try {
+    const partyByPay = new Map<string, string>();
+    const billsByPay = new Map<string, Set<string>>();
+    for (const r of await chunked<Record<string, unknown>>(idsOf(isOp), (ph) => `SELECT payment_no, bill_id, party_name FROM other_party_payments WHERE payment_no IN (${ph})`)) {
+      const no = str(r.paymentNo ?? r.payment_no), bid = str(r.billId ?? r.bill_id), nm = str(r.partyName ?? r.party_name);
+      if (no && nm && !partyByPay.has(no)) partyByPay.set(no, nm);
+      if (no && bid) (billsByPay.get(no) ?? billsByPay.set(no, new Set()).get(no)!).add(bid);
+    }
+    const billNo = new Map<string, string>();
+    for (const r of await chunked<Record<string, unknown>>([...new Set([...billsByPay.values()].flatMap((s) => [...s]))], (ph) => `SELECT id, billNo FROM other_party_bills WHERE id IN (${ph})`)) {
+      billNo.set(String(r.id), str(r.billNo ?? r.bill_no));
+    }
+    for (const no of new Set([...partyByPay.keys(), ...billsByPay.keys()])) {
+      const ids = [...(billsByPay.get(no) ?? [])];
+      setInfo(isOp, no, {
+        party: partyByPay.get(no) ?? null,
+        docs: ids.length ? ids.map((id) => billNo.get(id) || id).join(", ") : null,
+        header: pvPurposeByNo.get(no) ?? "Other creditor payment",
+      });
+    }
+  } catch { /* the line keeps its own text */ }
+  try {
+    for (const r of await chunked<Record<string, unknown>>(idsOf(isRc), (ph) => `SELECT id, customerName FROM payment_records WHERE id IN (${ph})`)) {
+      setInfo(isRc, String(r.id), { party: str(r.customerName ?? r.customer_name) || null, header: "Receipt" });
+    }
+  } catch { /* the line keeps its own text */ }
+  try {
+    for (const r of await chunked<Record<string, unknown>>(idsOf(isPcn), (ph) => `SELECT id, noteNumber, supplierName, piNo FROM purchase_credit_notes WHERE id IN (${ph})`)) {
+      const pi = str(r.piNo ?? r.pi_no);
+      setInfo(isPcn, String(r.id), {
+        ref1: str(r.noteNumber ?? r.note_number) || null,
+        party: str(r.supplierName ?? r.supplier_name) || null,
+        docs: pi ? `PI ${pi}` : null,
+      });
+    }
+  } catch { /* the line keeps its own text */ }
+  // Trade-finance interest: charged by the lender whose facility account is
+  // the entry's other leg; the hover says whom the draw paid.
+  try {
+    const tfLegs = legs.filter((l) => l.sourceType.startsWith("tf_interest"));
+    if (tfLegs.length) {
+      const lenderByAcct = new Map((await getTfSources(db)).map((s) => [resolve(s.accountCode), s.lenderName] as const));
+      const draws = [...new Set(tfLegs.map((l) => tfInterestDrawId(l.sourceId)))];
+      const paidTo = new Map<string, string>();
+      for (const r of await chunked<Record<string, unknown>>(draws, (ph) => `SELECT payment_no, supplier_name FROM supplier_payments WHERE payment_no IN (${ph}) AND org_id = ?`, [orgId])) {
+        const no = str(r.paymentNo ?? r.payment_no), nm = str(r.supplierName ?? r.supplier_name);
+        if (no && nm && !paidTo.has(no)) paidTo.set(no, nm);
+      }
+      for (const r of await chunked<Record<string, unknown>>(draws.filter((d) => !paidTo.has(d)), (ph) => `SELECT payment_no, party_name FROM other_party_payments WHERE payment_no IN (${ph})`)) {
+        const no = str(r.paymentNo ?? r.payment_no), nm = str(r.partyName ?? r.party_name);
+        if (no && nm && !paidTo.has(no)) paidTo.set(no, nm);
+      }
+      for (const l of tfLegs) {
+        const key = `${l.sourceType}::${l.sourceId}`;
+        const paid = paidTo.get(tfInterestDrawId(l.sourceId));
+        info.set(key, {
+          ref1: tfInterestDrawId(l.sourceId),
+          party: (entryLegs.get(key) ?? []).map((x) => lenderByAcct.get(resolve(x.accountCode)) ?? "").find(Boolean) || null,
+          docs: paid ? `Drawn to pay ${paid}` : null,
+        });
+      }
+    }
+  } catch { /* the line keeps its own text */ }
+
+  return legs
+    .map((l) => {
+      const key = `${l.sourceType}::${l.sourceId}`;
+      const r = info.get(key);
+      const ref1 = docNoFromDescription(l.description) ?? r?.ref1 ?? l.sourceId;
+      const party = r?.party ?? null;
+      // The document's description replaces the ledger text, so a correction
+      // says what it is after it ("Purchase invoice · void").
+      const variant = drillVariant(l.sourceType, l.sourceId);
+      return {
+        id: l.id,
+        date: l.date,
+        description: r?.header ? (variant ? `${r.header} · ${variant}` : r.header) : tidyDescription(l.description, ref1, party),
+        otherSide: otherSideCodes(l, entryLegs.get(key) ?? [], resolve).map((code) => ({ code, name: coa.get(code)?.name ?? "" })),
+        ref1,
+        ref2: party,
+        docs: r?.docs ?? null,
+        debitSen: l.debitSen,
+        creditSen: l.creditSen,
+        sourceType: l.sourceType,
+        sourceId: l.sourceId,
+      };
+    })
+    .sort((a, b) => a.date.localeCompare(b.date) || String(a.ref1).localeCompare(String(b.ref1)));
+}
+
+// P&L inline drill (owner 2026-09-29 「我要点开看 detail，就是这样」— the Houzs
+// P&L's click-a-line view): the ledger lines behind ONE account line for the
+// statement's period, picked by the same pass the statement uses (a traced
+// glWindowSigned), so lines + report-layer additions (payroll from payslips,
+// the opening-month slice) sum to the line to the sen. Each line carries its
+// document (Ref. 1), the related document (Ref. 2: an invoice's SO, a PI's
+// supplier invoice no., a bill's reference, a voucher's payee) and the
+// accounts on the other side of its entry. Read-only; lines at full value
+// (the Sofa / Bedframe views carry a share of them).
+app.get("/pl-drill", async (c) => {
+  const denied = await requirePermission(c, "accounting", "read");
+  if (denied) return denied;
+  await ensurePnlHistorical(c.var.DB);
+  const db = c.var.DB;
+  const period = c.req.query("period") || new Date().toISOString().slice(0, 7);
+  const accountParam = (c.req.query("account") || "").trim();
+  if (!accountParam) return c.json({ success: false, error: "account is required" }, 400);
+  const orgId = getOrgId(c);
+  const resolve = await loadAccountResolver(db);
+  const account = resolve(accountParam);
+  const startYm = periodStartYm(period);
+  const endYm = periodEndYm(period);
+  // A single month keyed from the old books has no ledger lines behind it.
+  const [historical, openingDateRaw] = await Promise.all([loadHistoricalPnl(db, orgId), getOpeningDate(db)]);
+  const openingMonth = openingDateRaw ? openingDateRaw.slice(0, 7) : null;
+  if (startYm && startYm === endYm && selectHistoricalWindow(historical, openingMonth, startYm, "all")) {
+    const a = await db.prepare("SELECT name FROM chart_of_accounts WHERE code = ?").bind(account).first<{ name: string }>();
+    return c.json({ success: true, data: { period, account: { code: account, name: a?.name ?? "" }, historical: true, lines: [], extra: [], debitSen: 0, creditSen: 0, netSen: 0, tied: true } });
+  }
+  const dc = await loadDocDateResolver(db);
+  const trace: PnlTrace = { account, legs: [], entryLegs: new Map(), extra: [] };
+  const { net, coa } = await glWindowSigned(db, orgId, startYm, endYm, dc, trace);
+
+  const lines = await buildDrillLines(db, orgId, trace.legs, trace.entryLegs, resolve, coa);
+  const extraDebit = trace.extra.reduce((s, e) => s + (e.sen > 0 ? e.sen : 0), 0);
+  const extraCredit = trace.extra.reduce((s, e) => s + (e.sen < 0 ? -e.sen : 0), 0);
+  const debitSen = lines.reduce((s, l) => s + l.debitSen, 0) + extraDebit;
+  const creditSen = lines.reduce((s, l) => s + l.creditSen, 0) + extraCredit;
+  const netSen = net.get(account) ?? 0;
+  return c.json({
+    success: true,
+    data: {
+      period,
+      account: { code: account, name: coa.get(account)?.name ?? "", type: coa.get(account)?.type ?? null },
+      historical: false,
+      lines,
+      extra: trace.extra,
+      debitSen,
+      creditSen,
+      netSen,
+      tied: debitSen - creditSen === netSen,
+    },
+  });
+});
+
+// Balance-sheet inline drill (owner 2026-09-30 「Balance sheet 也要这样点开看」):
+// one balance-sheet account's balance brought forward, the month's ledger
+// lines (the same columns as the P&L / Cash Flow drills) and the balance
+// carried forward. Picked by the same pass as the /pl balance sheet — hidden
+// legs out, pre-opening legs out, by document date, old codes resolved, the
+// same optional company filter — so b/f + lines = c/f = the sheet's figure.
+// Read-only.
+app.get("/bs-drill", async (c) => {
+  const denied = await requirePermission(c, "accounting", "read");
+  if (denied) return denied;
+  const db = c.var.DB;
+  const period = c.req.query("period") || new Date().toISOString().slice(0, 7);
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(period)) return c.json({ success: false, error: "period must be YYYY-MM" }, 400);
+  const accountParam = (c.req.query("account") || "").trim();
+  if (!accountParam) return c.json({ success: false, error: "account is required" }, 400);
+  const orgId = getOrgId(c);
+  const resolve = await loadAccountResolver(db);
+  const account = resolve(accountParam);
+  const coaRes = await db.prepare("SELECT code, name, type FROM chart_of_accounts").all<{ code: string; name: string; type: CoaRow["type"] }>();
+  const coa = new Map((coaRes.results ?? []).map((a) => [a.code, { name: a.name, type: a.type }] as const));
+  const acct = coa.get(account);
+  if (!acct) return c.json({ success: false, error: `Account ${account} not found` }, 404);
+  const section = bsSectionFor(account, acct.type, await getBsSectionMap(db));
+  if (!section) return c.json({ success: false, error: `${account} is not a balance-sheet account` }, 400);
+  const assetSide = bsSectionClass(section) === "asset";
+  const coFilter = companyFilter(c, "orgId");
+  const legWhere = coFilter.active ? ` AND ${coFilter.sql}` : "";
+  const legRes = await db.prepare(
+    `SELECT id, accountCode, sourceId, sourceType, debitSen, creditSen, postedAt, description FROM ledger_journal_entries WHERE hidden = 0${legWhere}`,
+  )
+    .bind(...(coFilter.active ? [coFilter.param] : []))
+    .all<{ id: string; accountCode: string; sourceId: string; sourceType: string; debitSen: number; creditSen: number; postedAt: string; description: string | null }>();
+  const { docDate, openingDate } = await loadDocDateResolver(db);
+  let bf = 0;
+  let cf = 0;
+  const monthLegs: DrillSourceLeg[] = [];
+  for (const l of legRes.results ?? []) {
+    const dd = docDate(l.sourceType, l.sourceId, l.postedAt); // by document date
+    if (legBeforeOpening(l.sourceType, dd, openingDate)) continue; // pre-opening: not extracted
+    if (resolve(l.accountCode) !== account) continue;
+    const ym = dd.slice(0, 7);
+    if (ym > period) continue;
+    const v = (Number(l.debitSen) || 0) - (Number(l.creditSen) || 0);
+    cf += v;
+    if (ym < period) { bf += v; continue; }
+    monthLegs.push({
+      id: String(l.id ?? ""), accountCode: l.accountCode, sourceType: l.sourceType, sourceId: l.sourceId, date: dd.slice(0, 10),
+      debitSen: Number(l.debitSen) || 0, creditSen: Number(l.creditSen) || 0, description: String(l.description ?? ""),
+    });
+  }
+  const keys = new Set(monthLegs.map((l) => `${l.sourceType}::${l.sourceId}`));
+  const entryLegs = new Map<string, { accountCode: string; debitSen: number; creditSen: number }[]>();
+  for (const l of legRes.results ?? []) {
+    const k = `${l.sourceType}::${l.sourceId}`;
+    if (!keys.has(k)) continue;
+    let arr = entryLegs.get(k);
+    if (!arr) { arr = []; entryLegs.set(k, arr); }
+    arr.push({ accountCode: l.accountCode, debitSen: Number(l.debitSen) || 0, creditSen: Number(l.creditSen) || 0 });
+  }
+  const lines = await buildDrillLines(db, orgId, monthLegs, entryLegs, resolve, coa);
+  const moved = lines.reduce((s, l) => s + l.debitSen - l.creditSen, 0);
+  // Amounts on the sheet's own side: assets debit-positive, the rest credit.
+  const toSide = (v: number) => (assetSide ? v : -v);
+  return c.json({
+    success: true,
+    data: {
+      period,
+      account: { code: account, name: acct.name, type: acct.type, section },
+      assetSide,
+      bfSen: toSide(bf),
+      cfSen: toSide(cf),
+      lines,
+      tied: bf + moved === cf,
+    },
+  });
+});
+
 app.get("/pl-monthly", async (c) => {
   const denied = await requirePermission(c, "accounting", "read");
   if (denied) return denied;
@@ -8509,11 +9009,32 @@ export async function loadFinanceSeries(
 
 // The cash-flow statement computation, shared by GET /cashflow-statement and
 // the dashboard card — one engine, so the two can never disagree.
+// The Cash Flow inline drill (owner 2026-09-29 「cash flow 也要这样点开看」):
+// one row per payment / receipt that fed a statement line, with the share it
+// put there. Built from the engine's own sources, so the rows sum to the line.
+type CfDrillItem = {
+  key: string; ym: string; date: string; description: string;
+  otherSide: { code: string; name: string }[]; ref1: string; ref2: string | null;
+  // The documents the money settled (PI / bill numbers) — shown on hover, not
+  // in the column (owner 2026-09-30 「不需要看每一张 invoice 的 number」).
+  docs: string | null;
+  sen: number; ofSen: number | null;
+};
+const SECTION_ORDER_SET: ReadonlySet<string> = new Set<string>([
+  "REVENUE_COLLECTION", "RAW_MATERIALS", "TRADE_FINANCE", "DIRECT_LABOUR", "FACTORY_OVERHEAD", "GENERAL_EXPENSE",
+  "TAXATION", "FINANCE_COST", "CAPEX", "DEPOSIT", "LOAN", "UNALLOCATED",
+]);
+type CfDrill = {
+  key: string; label: string; section: string; found: boolean; tied: boolean;
+  items: CfDrillItem[]; months: { ym: string; label: string; sen: number }[];
+};
+
 async function computeCashflowStatement(
   db: Env["Variables"]["DB"],
   period: string,
   editable: boolean,
   orgId: string,
+  opts?: { traceKey?: string },
 ) {
   // Local alias so the extracted body reads exactly as it did in the route.
   const c: { var: { DB: Env["Variables"]["DB"] } } = { var: { DB: db } };
@@ -8545,6 +9066,7 @@ async function computeCashflowStatement(
       debitSen: l.debitSen,
       creditSen: l.creditSen,
       ym: docDate(l.sourceType, l.sourceId, l.postedAt).slice(0, 7), // by document date
+      date: docDate(l.sourceType, l.sourceId, l.postedAt).slice(0, 10),
       description: l.description ?? "",
     }));
 
@@ -8608,6 +9130,12 @@ async function computeCashflowStatement(
   }
   const tfPayee = (sourceType: string, sourceId: string, description: string): string =>
     (sourceType.startsWith("supplier_payment") ? tfSupplierByNo.get(sourceId) : undefined) ?? description.trim();
+  // The payroll accruals under 410-0010's parent (ACCRUALS) are payroll money,
+  // not "Unallocated" (owner 2026-09-29). The parent's own legs are salary and
+  // split by department like 410-0010's; the section defaults (salary → Direct
+  // Labour, EPF / SOCSO / EIS → General Expense) come from
+  // payrollAccrualSections below. Found from the chart, not coded.
+  const salaryAccrualParent = coa.get(LABOUR_ACCRUAL_ACCT)?.parentCode ?? null;
   for (const legs of byEntry.values()) {
     const hasBank = legs.some((l) => bankCodes.has(l.code));
     const opening = legs.some((l) => isOpeningSource(l.sourceType));
@@ -8653,7 +9181,7 @@ async function computeCashflowStatement(
           ym: l.ym, sourceType: l.sourceType, sourceId: l.sourceId,
         });
         if (l.sourceType.startsWith("supplier_payment")) paymentNos.add(l.sourceId);
-        else if (l.code === LABOUR_ACCRUAL_ACCT)
+        else if (l.code === LABOUR_ACCRUAL_ACCT || (salaryAccrualParent && l.code === salaryAccrualParent))
           salaryLegs.push({ sourceId: l.sourceId, description: l.description, ym: l.ym });
       }
     }
@@ -8668,8 +9196,11 @@ async function computeCashflowStatement(
   // every account filed under the chart's FINANCE COSTS parent (902-0000 on
   // this chart — found by name, not code) defaults to the Finance Cost
   // section unless the owner has dragged it somewhere himself.
+  for (const [code, section] of payrollAccrualSections(coa, LABOUR_ACCRUAL_ACCT)) if (!map[code]) map[code] = { section, order: 10 };
   const financeParents = new Set([...coa.values()].filter((a) => /^FINANCE COSTS?$/i.test(a.name.trim())).map((a) => a.code));
   for (const a of coa.values()) if (a.parentCode && financeParents.has(a.parentCode) && !map[a.code]) map[a.code] = { section: "FINANCE_COST", order: 10 };
+  // Raw-material stock accounts → Raw Materials (owner 2026-09-30); see rawStockAccountSections.
+  for (const [code, section] of rawStockAccountSections(coa)) if (!map[code]) map[code] = { section, order: 10 };
   const sgOverride = await getCashflowStockGroupMap(c.var.DB);
   const rmSplit: RmSplit = {};
   if (paymentNos.size || opLegs.length) {
@@ -8882,20 +9413,20 @@ async function computeCashflowStatement(
   }
 
   // Salary → department rows. Weights come from aggregateLabour of the payroll
-  // month the voucher description names ("… - May'26"); a leg with no parseable
-  // month uses its own document month; a month with no payslips gets no split
-  // and the leg stays on the account line.
+  // month the voucher description names (payrollMonthFrom: "… - May'26",
+  // "… - MAY'26", "… - JULY'26", "LATE SALARY JUNE" — owner 2026-09-29
+  // 「月份一起修」); a leg naming no month uses its own document month; a named
+  // month with no payslips falls back to the document month's mix (before,
+  // an unreadable name got that mix and a readable one — "Salaries - Apr'26",
+  // paid 22/05 — stayed unsplit on the account line; now both split); no
+  // payslips there either → no split, the leg stays on the account line.
+  // The month comes from the LEG's text (the voucher line), which can differ
+  // from the voucher header the drill shows.
   const deptSplit: RmSplit = {};
   if (salaryLegs.length) {
     if (!map[LABOUR_ACCRUAL_ACCT]) map[LABOUR_ACCRUAL_ACCT] = { section: "DIRECT_LABOUR", order: 10 };
-    const MONTHS3 = { Jan: "01", Feb: "02", Mar: "03", Apr: "04", May: "05", Jun: "06", Jul: "07", Aug: "08", Sep: "09", Oct: "10", Nov: "11", Dec: "12" } as const;
-    const payrollYm = (desc: string, fallback: string): string => {
-      const m = /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)'(\d{2})\b/.exec(desc);
-      return m ? `20${m[2]}-${MONTHS3[m[1] as keyof typeof MONTHS3]}` : fallback;
-    };
     const mixCache = new Map<string, { line: string; weight: number }[]>();
-    for (const leg of salaryLegs) {
-      const ym = payrollYm(leg.description, leg.ym);
+    const mixFor = async (ym: string) => {
       let mix = mixCache.get(ym);
       if (!mix) {
         try {
@@ -8904,6 +9435,12 @@ async function computeCashflowStatement(
         } catch { mix = []; }
         mixCache.set(ym, mix);
       }
+      return mix;
+    };
+    for (const leg of salaryLegs) {
+      const ym = payrollMonthFrom(leg.description, leg.ym);
+      let mix = await mixFor(ym);
+      if (!mix.length && ym !== leg.ym) mix = await mixFor(leg.ym);
       if (mix.length && !deptSplit[leg.sourceId]) deptSplit[leg.sourceId] = mix;
     }
   }
@@ -8916,8 +9453,184 @@ async function computeCashflowStatement(
   }
   const statement = buildStatement({
     classified, bankLegs, coa, map, rmSplit, deptSplit, stockGroupOverride: sgOverride,
-    supplierCategory, fyeMonth, period, editable,
+    supplierCategory, fyeMonth, period, editable, trace: !!opts?.traceKey,
   });
+  let drill: CfDrill | undefined;
+  if (opts?.traceKey) {
+    const key = opts.traceKey;
+    const section = key.split("|")[0] ?? "";
+    const row = statement.rows.find((r) => r.kind === "line" && r.lineKey === key);
+    const monthCols = statement.columns.filter((col) => !col.accum);
+    const fyStart = monthCols.length ? monthCols[monthCols.length - 1].key : period;
+    const inFy = (ym: string) => ym >= fyStart && ym <= period;
+    // One row per entry: a payment that fed this line through two legs shows once.
+    const perEntry = new Map<string, { sourceType: string; sourceId: string; ym: string; sen: number }>();
+    for (const s of statement.sources?.[key] ?? []) {
+      if (!inFy(s.ym)) continue; // outside every column the statement shows
+      const k = `${s.sourceType}::${s.sourceId}`;
+      const cur = perEntry.get(k);
+      if (cur) cur.sen += s.sen;
+      else perEntry.set(k, { sourceType: s.sourceType, sourceId: s.sourceId, ym: s.ym, sen: s.sen });
+    }
+    // Ref. 2 — what the money settled: the PIs a supplier payment paid, the
+    // bills an other-creditor payment paid, a voucher's payee. Read only for
+    // the entries on this line; a failed read just leaves the column empty.
+    const ents = [...perEntry.values()];
+    const chunkIds = async (ids: string[], sql: (ph: string) => string, extra: unknown[] = []) => {
+      const out: Record<string, unknown>[] = [];
+      for (let i = 0; i < ids.length; i += 200) {
+        const part = ids.slice(i, i + 200);
+        const res = await c.var.DB.prepare(sql(part.map(() => "?").join(","))).bind(...part, ...extra).all<Record<string, unknown>>();
+        out.push(...(res.results ?? []));
+      }
+      return out;
+    };
+    // Ref. 2 = who the money went to / came from (owner 2026-09-30 「refer 2 是
+    // 看 supplier 名字和 overall description 就好，不需要看每一张 invoice 的
+    // number」): the supplier, the other creditor, the voucher's payee, the
+    // customer. The PIs / bills a payment settled ride along for the hover.
+    // A payment made through a payment voucher (an AP voucher: its number is
+    // the payment number) takes that voucher's purpose as its description.
+    const party = new Map<string, string>();
+    const docs = new Map<string, string>();
+    const pvPurpose = new Map<string, string>(); // voucher id → purpose
+    const pvPurposeByNo = new Map<string, string>(); // voucher number → purpose
+    const setOnce = (m: Map<string, string>, k: string, v: string) => { if (v && !m.has(k)) m.set(k, v); };
+    try {
+      const spNos = [...new Set(ents.filter((e) => e.sourceType.startsWith("supplier_payment")).map((e) => e.sourceId))];
+      const piByPay = new Map<string, Set<string>>();
+      for (const r of await chunkIds(spNos, (ph) => `SELECT payment_no, purchase_invoice_id, supplier_name FROM supplier_payments WHERE payment_no IN (${ph}) AND org_id = ?`, [orgId])) {
+        const no = String(r.paymentNo ?? r.payment_no ?? ""), pid = String(r.purchaseInvoiceId ?? r.purchase_invoice_id ?? "");
+        setOnce(party, `sp::${no}`, String(r.supplierName ?? r.supplier_name ?? "").trim());
+        if (no && pid) (piByPay.get(no) ?? piByPay.set(no, new Set()).get(no)!).add(pid);
+      }
+      const piNo = new Map<string, string>();
+      for (const r of await chunkIds([...new Set([...piByPay.values()].flatMap((s) => [...s]))], (ph) => `SELECT id, piNo FROM purchase_invoices WHERE id IN (${ph})`)) {
+        piNo.set(String(r.id), String(r.piNo ?? r.pi_no ?? ""));
+      }
+      for (const [no, ids] of piByPay) docs.set(`sp::${no}`, [...ids].map((id) => piNo.get(id) || (id.startsWith("pi-ob-") ? "Opening" : id)).join(", "));
+    } catch { /* Ref. 2 stays empty */ }
+    try {
+      const opNos = [...new Set(ents.filter((e) => e.sourceType.startsWith("other_party_payment")).map((e) => e.sourceId))];
+      const billsByPay = new Map<string, Set<string>>();
+      for (const r of await chunkIds(opNos, (ph) => `SELECT payment_no, bill_id, party_name FROM other_party_payments WHERE payment_no IN (${ph})`)) {
+        const no = String(r.paymentNo ?? r.payment_no ?? ""), bid = String(r.billId ?? r.bill_id ?? "");
+        setOnce(party, `op::${no}`, String(r.partyName ?? r.party_name ?? "").trim());
+        if (no && bid) (billsByPay.get(no) ?? billsByPay.set(no, new Set()).get(no)!).add(bid);
+      }
+      const billNo = new Map<string, string>();
+      for (const r of await chunkIds([...new Set([...billsByPay.values()].flatMap((s) => [...s]))], (ph) => `SELECT id, billNo FROM other_party_bills WHERE id IN (${ph})`)) {
+        billNo.set(String(r.id), String(r.billNo ?? r.bill_no ?? ""));
+      }
+      for (const [no, ids] of billsByPay) docs.set(`op::${no}`, [...ids].map((id) => billNo.get(id) || id).join(", "));
+    } catch { /* Ref. 2 stays empty */ }
+    try {
+      const pvIds = [...new Set(ents.filter((e) => e.sourceType.startsWith("payment_voucher")).map((e) => e.sourceId))];
+      for (const r of await chunkIds(pvIds, (ph) => `SELECT id, payee, description FROM payment_vouchers WHERE id IN (${ph})`)) {
+        setOnce(party, `pv::${String(r.id)}`, String(r.payee ?? "").trim());
+        const purpose = ownDescription(String(r.description ?? ""));
+        if (purpose) pvPurpose.set(String(r.id), purpose);
+      }
+      // AP vouchers: the settlement carries the voucher's number.
+      const payNos = [...new Set(ents.filter((e) => e.sourceType.startsWith("supplier_payment") || e.sourceType.startsWith("other_party_payment")).map((e) => e.sourceId))];
+      for (const r of await chunkIds(payNos, (ph) => `SELECT pvNo, description FROM payment_vouchers WHERE pvNo IN (${ph})`)) {
+        const purpose = ownDescription(String(r.description ?? ""));
+        if (purpose) pvPurposeByNo.set(String(r.pvNo ?? r.pv_no ?? ""), purpose);
+      }
+    } catch { /* description stays the ledger text */ }
+    try {
+      const recIds = [...new Set(ents.filter((e) => e.sourceType === "payment" || e.sourceType.startsWith("payment_") && !e.sourceType.startsWith("payment_voucher")).map((e) => e.sourceId))];
+      for (const r of await chunkIds(recIds, (ph) => `SELECT id, customerName FROM payment_records WHERE id IN (${ph})`)) {
+        setOnce(party, `rc::${String(r.id)}`, String(r.customerName ?? r.customer_name ?? "").trim());
+      }
+    } catch { /* Ref. 2 stays empty */ }
+    // An official receipt names its payer and carries its description (its
+    // note, else its lines' text); a JV its description; trade-finance interest the lender (the facility
+    // account on the entry), with whom the draw paid on hover.
+    const ownPurpose = new Map<string, string>(); // "or::id" / "jv::id" → the document's description
+    try {
+      const orIds = [...new Set(ents.filter((e) => e.sourceType.startsWith("official_receipt")).map((e) => e.sourceId))];
+      for (const [id, r] of await officialReceiptTexts(c.var.DB, orIds)) {
+        setOnce(party, `or::${id}`, r.payer);
+        setOnce(ownPurpose, `or::${id}`, r.text);
+      }
+    } catch { /* Ref. 2 stays empty */ }
+    try {
+      const jvIds = [...new Set(ents.filter((e) => e.sourceType === "manual" || e.sourceType.startsWith("manual_")).map((e) => e.sourceId))];
+      for (const r of await chunkIds(jvIds, (ph) => `SELECT id, description FROM journal_entries WHERE id IN (${ph})`)) {
+        setOnce(ownPurpose, `jv::${String(r.id)}`, ownDescription(String(r.description ?? "")) ?? "");
+      }
+    } catch { /* description stays the ledger text */ }
+    try {
+      const tfEnts = ents.filter((e) => e.sourceType.startsWith("tf_interest"));
+      const draws = [...new Set(tfEnts.map((e) => tfInterestDrawId(e.sourceId)))];
+      const paidTo = new Map<string, string>();
+      for (const r of await chunkIds(draws, (ph) => `SELECT payment_no, supplier_name FROM supplier_payments WHERE payment_no IN (${ph}) AND org_id = ?`, [orgId])) {
+        setOnce(paidTo, String(r.paymentNo ?? r.payment_no ?? ""), String(r.supplierName ?? r.supplier_name ?? "").trim());
+      }
+      for (const r of await chunkIds(draws.filter((d) => !paidTo.has(d)), (ph) => `SELECT payment_no, party_name FROM other_party_payments WHERE payment_no IN (${ph})`)) {
+        setOnce(paidTo, String(r.paymentNo ?? r.payment_no ?? ""), String(r.partyName ?? r.party_name ?? "").trim());
+      }
+      for (const e of tfEnts) {
+        const lender = (byEntry.get(`${e.sourceType}::${e.sourceId}`) ?? []).map((l) => tfAccounts.get(l.code)?.lenderName ?? "").find(Boolean) ?? "";
+        setOnce(party, `tf::${e.sourceId}`, lender);
+        const paid = paidTo.get(tfInterestDrawId(e.sourceId));
+        if (paid) docs.set(`tf::${e.sourceId}`, `Drawn to pay ${paid}`);
+      }
+    } catch { /* Ref. 2 stays empty */ }
+    const kindOf = (sourceType: string): string =>
+      sourceType.startsWith("supplier_payment") ? "sp"
+        : sourceType.startsWith("other_party_payment") ? "op"
+          : sourceType.startsWith("payment_voucher") ? "pv"
+            : sourceType === "payment" || sourceType.startsWith("payment_") ? "rc"
+              : sourceType.startsWith("official_receipt") ? "or"
+                : sourceType.startsWith("tf_interest") ? "tf"
+                  : sourceType === "manual" || sourceType.startsWith("manual_") ? "jv" : "";
+
+    const items: CfDrillItem[] = ents.map((e) => {
+      const legs = byEntry.get(`${e.sourceType}::${e.sourceId}`) ?? [];
+      // The money side: the bank / cash legs — or, for a facility draw that
+      // never touched a bank, the trade-finance leg.
+      let money = legs.filter((l) => bankCodes.has(l.code));
+      let entryCash = money.reduce((s, l) => s + l.debitSen - l.creditSen, 0);
+      if (!money.length) {
+        money = legs.filter((l) => tfAccounts.has(l.code));
+        entryCash = money.reduce((s, l) => s + l.creditSen - l.debitSen, 0);
+      }
+      const legText = (money[0]?.description || legs[0]?.description || "").trim();
+      const ref1 = docNoFromDescription(legText) ?? e.sourceId;
+      const kind = kindOf(e.sourceType);
+      const who = kind ? party.get(`${kind}::${e.sourceId}`) ?? null : null;
+      const purpose = kind === "pv" ? pvPurpose.get(e.sourceId)
+        : kind === "sp" || kind === "op" ? pvPurposeByNo.get(e.sourceId)
+          : kind === "or" || kind === "jv" ? ownPurpose.get(`${kind}::${e.sourceId}`) : undefined;
+      // A correction says what it is after the document's description.
+      const variant = drillVariant(e.sourceType, e.sourceId);
+      const description = purpose ? (variant ? `${purpose} · ${variant}` : purpose) : tidyDescription(legText, ref1, who);
+      const codes = [...new Set(money.map((l) => l.code))];
+      return {
+        key: `${e.sourceType}::${e.sourceId}`,
+        ym: e.ym,
+        date: legs[0]?.date ?? e.ym,
+        description,
+        otherSide: codes.map((code) => ({ code, name: coa.get(code)?.name ?? "" })),
+        ref1,
+        ref2: who,
+        docs: kind ? docs.get(`${kind}::${e.sourceId}`) ?? null : null,
+        sen: e.sen,
+        ofSen: Math.abs(entryCash) !== Math.abs(e.sen) ? Math.abs(entryCash) : null,
+      };
+    }).sort((a, b) => a.date.localeCompare(b.date) || a.ref1.localeCompare(b.ref1));
+    const sign = SECTION_ORDER_SET.has(section) ? displaySign(section as CfSection) : 1;
+    const perMonth = new Map<string, number>();
+    for (const it of items) perMonth.set(it.ym, (perMonth.get(it.ym) ?? 0) + it.sen);
+    const total = items.reduce((s, it) => s + it.sen, 0);
+    const tied = !!row && statement.columns.every((col, i) => (row.values[i] ?? 0) === sign * (col.accum ? total : (perMonth.get(col.key) ?? 0)));
+    drill = {
+      key, label: row?.label ?? key.slice(section.length + 1), section, found: !!row, tied,
+      items, months: monthCols.map((col) => ({ ym: col.key, label: col.label, sen: sign * (perMonth.get(col.key) ?? 0) })),
+    };
+  }
   // Money IN / OUT straight off the bank legs (DR = in, CR = out). Derived
   // here rather than by summing statement lines: the statement's line values
   // carry a per-SECTION display sign, so a salary payment reads positive under
@@ -8930,7 +9643,7 @@ async function computeCashflowStatement(
     cur.outflow -= Number(l.creditSen) || 0;
     bankByMonth.set(l.ym, cur);
   }
-  return { ...statement, bankByMonth };
+  return { ...statement, bankByMonth, drill };
 }
 
 app.get("/cashflow-statement", async (c) => {
@@ -8938,8 +9651,26 @@ app.get("/cashflow-statement", async (c) => {
   if (denied) return denied;
   const period = c.req.query("period") || new Date().toISOString().slice(0, 7);
   const editable = c.req.query("editable") === "1";
-  const { bankByMonth: _bank, ...statement } = await computeCashflowStatement(c.var.DB, period, editable, getOrgId(c));
+  const { bankByMonth: _bank, drill: _drill, sources: _sources, ...statement } = await computeCashflowStatement(c.var.DB, period, editable, getOrgId(c));
   return c.json({ success: true, data: { period, ...statement } });
+});
+
+// Cash Flow inline drill (owner 2026-09-29 「cash flow 也要这样点开看」): the
+// payments / receipts behind one statement line — date, description, the
+// bank (or facility) the money moved through, Ref. 1 (the document), Ref. 2
+// (the PIs / bills it settled, a voucher's payee) and the share it put on this
+// line (a split payment says "part of" its whole amount). Every FY month the
+// statement shows; the UI filters by month. Same computation as the
+// statement, so per column the rows sum to the line (`tied`). Read-only.
+app.get("/cashflow-drill", async (c) => {
+  const denied = await requirePermission(c, "accounting", "read");
+  if (denied) return denied;
+  const period = c.req.query("period") || new Date().toISOString().slice(0, 7);
+  const key = (c.req.query("key") || "").trim();
+  if (!key || !key.includes("|")) return c.json({ success: false, error: "key is required (SECTION|label)" }, 400);
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(period)) return c.json({ success: false, error: "period must be YYYY-MM" }, 400);
+  const { drill } = await computeCashflowStatement(c.var.DB, period, false, getOrgId(c), { traceKey: key });
+  return c.json({ success: true, data: { period, ...drill } });
 });
 
 // GL-truth P&L + Balance Sheet, computed from the immutable
@@ -9986,7 +10717,7 @@ app.post("/payment-vouchers", async (c) => {
         ? body.productLine
         : null;
     const coaRes = await c.var.DB.prepare(
-      "SELECT code, type, specialAccountType, isPostable FROM chart_of_accounts",
+      `SELECT code, type, specialAccountType, ${EFFECTIVE_POSTABLE_SQL} FROM chart_of_accounts`,
     ).all<{ code: string; type: CoaRow["type"]; specialAccountType: string | null; isPostable: number | null }>();
     const coa = new Map((coaRes.results ?? []).map((a) => [a.code, a] as const));
     await ensurePvApprovalCols(c.var.DB);
@@ -10120,7 +10851,7 @@ app.put("/payment-vouchers/:id", async (c) => {
     const date = String(body.date || "");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return c.json({ success: false, error: "date must be YYYY-MM-DD" }, 400);
     const coaRes = await c.var.DB.prepare(
-      "SELECT code, type, specialAccountType, isPostable FROM chart_of_accounts",
+      `SELECT code, type, specialAccountType, ${EFFECTIVE_POSTABLE_SQL} FROM chart_of_accounts`,
     ).all<{ code: string; type: CoaRow["type"]; specialAccountType: string | null; isPostable: number | null }>();
     const coa = new Map((coaRes.results ?? []).map((a) => [a.code, a] as const));
     const now = new Date().toISOString();
@@ -10544,7 +11275,7 @@ app.post("/payment-vouchers/:id/restate", async (c) => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return c.json({ success: false, error: "date must be YYYY-MM-DD" }, 400);
     const accrued = body.accrued === true || body.accrued === 1;
     const productLine = body.productLine === "SOFA" || body.productLine === "BEDFRAME" ? body.productLine : null;
-    const coaRes = await c.var.DB.prepare("SELECT code, type, specialAccountType, isPostable FROM chart_of_accounts").all<{ code: string; type: CoaRow["type"]; specialAccountType: string | null; isPostable: number | null }>();
+    const coaRes = await c.var.DB.prepare(`SELECT code, type, specialAccountType, ${EFFECTIVE_POSTABLE_SQL} FROM chart_of_accounts`).all<{ code: string; type: CoaRow["type"]; specialAccountType: string | null; isPostable: number | null }>();
     const coa = new Map((coaRes.results ?? []).map((a) => [a.code, a] as const));
     const v = validateDocLines(coa, body.lines);
     if (!v.ok) return c.json({ success: false, error: v.error }, 400);
@@ -10629,7 +11360,7 @@ app.post("/official-receipts", async (c) => {
       return c.json({ success: false, error: "date must be YYYY-MM-DD" }, 400);
     }
     const coaRes = await c.var.DB.prepare(
-      "SELECT code, type, specialAccountType, isPostable FROM chart_of_accounts",
+      `SELECT code, type, specialAccountType, ${EFFECTIVE_POSTABLE_SQL} FROM chart_of_accounts`,
     ).all<{ code: string; type: CoaRow["type"]; specialAccountType: string | null; isPostable: number | null }>();
     const coa = new Map((coaRes.results ?? []).map((a) => [a.code, a] as const));
     const v = validateDocLines(coa, body.lines);
@@ -10774,7 +11505,7 @@ app.post("/fund-transfers", async (c) => {
   }
 
   const coaRes = await c.var.DB.prepare(
-    "SELECT code, type, specialAccountType, isPostable FROM chart_of_accounts",
+    `SELECT code, type, specialAccountType, ${EFFECTIVE_POSTABLE_SQL} FROM chart_of_accounts`,
   ).all<{ code: string; type: CoaRow["type"]; specialAccountType: string | null; isPostable: number | null }>();
   const coa = new Map((coaRes.results ?? []).map((a) => [a.code, a] as const));
 
@@ -14451,7 +15182,7 @@ app.post("/bank-reco/book-line", async (c) => {
     const amountSen = Math.round(Number(line.amountSen) || 0);
     if (amountSen === 0) return c.json({ success: false, error: "Zero-amount line" }, 400);
     const coaRes = await c.var.DB.prepare(
-      "SELECT code, type, specialAccountType, isPostable FROM chart_of_accounts",
+      `SELECT code, type, specialAccountType, ${EFFECTIVE_POSTABLE_SQL} FROM chart_of_accounts`,
     ).all<{ code: string; type: CoaRow["type"]; specialAccountType: string | null; isPostable: number | null }>();
     const coa = new Map((coaRes.results ?? []).map((a) => [a.code, a] as const));
     const bank = coa.get(line.accountCode);
@@ -15532,10 +16263,12 @@ async function openingControlSums(db: Env["Variables"]["DB"]): Promise<{
       arByControl.set(ctl, (arByControl.get(ctl) ?? 0) + amt);
       arTotalSen += amt;
     }
+    // A cancelled seed is not an opening bill — the customer seeds above and
+    // the pre-opening PIs below leave it out too (BUG-2026-09-30-230).
     const pi = await db
       .prepare(
         `SELECT COALESCE(SUM(amountSen),0) AS s FROM purchase_invoices
-          WHERE isOpening = 1 AND status != 'DRAFT'`,
+          WHERE isOpening = 1 AND status NOT IN ('DRAFT','CANCELLED')`,
       )
       .first<{ s: number }>();
     apTotalSen = Number(pi?.s) || 0;
@@ -15658,7 +16391,7 @@ app.get("/opening-balance", async (c) => {
         `SELECT id, piNo, supplierId, supplierName, invoiceDate, dueDate,
                 amountSen, status
            FROM purchase_invoices
-          WHERE isOpening = 1 AND status != 'DRAFT'
+          WHERE isOpening = 1 AND status NOT IN ('DRAFT','CANCELLED')
           ORDER BY supplierName, invoiceDate, piNo`,
       )
       .all();

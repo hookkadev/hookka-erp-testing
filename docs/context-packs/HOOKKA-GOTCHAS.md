@@ -1,5 +1,7 @@
 # Hookka — Hard-Won Gotchas
 
+> **Last verified: 2026-09-30** (branch `chore/sync-staging-from-main-0930`, staging<-main merge): the "Staging vs prod share bindings" gotcha only, its two project refs replaced by their `.env` names (`SUPABASE_*_REF`). Nothing else re-checked.
+
 > **Last verified: 2026-08-13** against every file it cites — all 17 exist and carry the
 > named symbols: `roundUpToRinggitSen` (`src/lib/utils.ts:270`), `distributeComboUnitPrices`
 > (`src/api/lib/sofa-combo.ts`), `bedframeSizeDefault` (`src/api/routes/fg-units.ts:235`),
@@ -242,8 +244,8 @@ costing model. See `docs/BUG-CLASSES.md`.
   dynamic-import chunk) — not a code bug; a hard refresh fixes it.
 - **Staging vs prod share bindings; only the hostname splits them** (measured 2026-09-21).
   `*.hookka-erp-testing.pages.dev` → `HYPERDRIVE_STAGING` = Hyperdrive `hookka-erp-staging`
-  → Supabase `kahxgvbfanbraazetefr`; anything else → `HYPERDRIVE` = `hookka-erp-supabase` →
-  `vpwdqtsxexpiqxzweivd` (prod). `SESSION_CACHE` KV is ONE namespace for both: preview hosts
+  → the staging project (`SUPABASE_STAGING_REF`); anything else → `HYPERDRIVE` = `hookka-erp-supabase` →
+  the production project (`SUPABASE_PROJECT_REF`). `SESSION_CACHE` KV is ONE namespace for both: preview hosts
   get every key prefixed `stg:` (`src/api/lib/kv-prefix.ts`). Before that, staging and prod
   read/wrote each other's cached dashboard/permissions. Preview has NO Supabase Storage
   secrets (uploads 503). `.dev.vars` `*_STAGING` vars point at a stale project (`zaxy…`) —
