@@ -49,6 +49,18 @@ Entries themselves stay newest-first.
 
 ---
 
+## BUG-2026-09-30-227 — Org-chart photo route could delete ANY file in the org `org-chart` `auth-rbac` 🟢
+
+🟢 **Fixed** (branch `fix/org-photo-file-scope` → `staging`, not yet deployed) · Found by code review while verifying the org-chart photo feature live on staging. No incident: nothing measured says it was ever exploited, and the normal UI cannot trigger it.
+
+**The hole.** `PUT /api/org-chart/photo` accepted a `fileId` if it was *any* `file_assets` row in the caller's org. Since #563 (delete the previous photo on change), the old pointer's file is deleted when a photo changes. Together: a `users:update` holder could set someone's photo to a sales-order PDF's file id, change the photo, and the PDF was removed from storage and `file_assets` — a delete of a document they had no `files:delete` right to.
+
+**Fix.** One `isOwnPhoto()` check (`resourceType = 'org-photo' AND resourceId = <personKey>`, org-scoped), used twice: a new `fileId` must be a photo uploaded for that person, and the old pointer is only deleted if it passes the same check, so a pointer written before this fix can never take an unrelated file with it.
+
+**Regression.** `tests/org-chart-photos.test.mjs`: a non-photo file and another person's photo are refused; an old pointer to a non-photo file survives a photo change. The 3 new tests fail on the pre-fix route; all 26 pass after.
+
+---
+
 ## BUG-2026-09-29-222 — A file already gone from storage could never be deleted, and streamed as a 500 `platform` 🟢
 
 🟢 **Fixed** (branch `fix/storage-delete-not-found`, not yet deployed) · Found while verifying the org-chart "delete the old photo on change" feature on staging.
