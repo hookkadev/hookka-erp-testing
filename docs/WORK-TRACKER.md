@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-30**: #614 (drill labels / empty descriptions) closed ✅ below with its prod check.
 > **Last verified: 2026-09-30**: branch `fix/drill-variant-noise` added below (its entry is the newest); #612 closed ✅ with its prod check.
 > **Last verified: 2026-09-30**: branch `fix/drill-names-tf-and-pi-edits` added below (its entry is the newest).
 > **Last verified: 2026-09-30**: #607 (Balance Sheet inline drill) and #609 (its counterparty names) closed ✅ below with their prod checks.
@@ -58,15 +59,19 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
-## 2026-09-30 — 🔵 Drills: an edited document is not labelled, a description that says nothing is not shown (follow-up to #612)(branch `fix/drill-variant-noise`)
+## 2026-09-30 — ✅ Drills: an edited document is not labelled, a description that says nothing is not shown (follow-up to #612)(#614 ba33071b MERGED, deployed, prod-verified)
 
 1. Found by #612's prod check: every edit re-posts the document and hides its older legs (each restate family does), so the
    re-post IS the document — labelling it `re-posted on edit` marked hundreds of ordinary lines. And one official receipt's own
    description is just "from" (its payer is in its own field), which replaced a readable ledger text.
-2. 🔵 `drillVariant`: an edit's re-post says nothing (void / unvoid / reversal / edit adjustment / GL re-sync stay).
+2. ✅ `drillVariant`: an edit's re-post says nothing (void / unvoid / reversal / edit adjustment / GL re-sync stay).
    `ownDescription`: a description that is empty or a lone "from" / "to" / "for" does not replace the ledger text — an
    official receipt then shows "Official receipt". Applied to every typed description the drills use (vouchers, bills, JVs,
    official receipts; P&L / balance-sheet and Cash Flow). Guard `tests/drill-tf-interest-and-corrections.test.mjs`.
+3. ✅ Prod (measured, the same sweep as #612): every balance-sheet account May–Sep and every Cash Flow line of the year to
+   September tied, c/f equal to the sheet; no `re-posted on edit` left; void / unvoid / edit adjustment / GL re-sync lines
+   still labelled; the official receipt reads "Official receipt" with its payer as Ref. 2. UI: the trade-finance account
+   opened on the September sheet — b/f, interest lines naming the lender, c/f equal to the sheet.
 
 ## 2026-09-30 — ✅ Drills: the last lines without a counterparty, and corrections say what they are (follow-up to #609)(#612 84be12ba MERGED, deployed, prod-verified)
 
