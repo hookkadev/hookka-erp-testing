@@ -44,9 +44,26 @@ test("the three Meditex lines resolve on the supplier's code alone", () => {
 test("the longest shared run wins; an equal tie is refused, not guessed", () => {
   const withColour = [...CATALOG, { itemCode: "NICCA-06-FOG", description: "FABRIC FOG" }];
   assert.equal(codeFamilyMatch("NICCA-6-FOG", withColour)?.itemCode, "NICCA-06-FOG");
-  const twins = [{ itemCode: "AB-12" }, { itemCode: "CD-AB-12-X" }];
-  // "AB-12" sits inside both, with the same 2-part run → ambiguous.
-  assert.equal(codeFamilyMatch("AB-12", twins), null);
+  const twins = [{ itemCode: "XY-ABC-12" }, { itemCode: "ABC-12-X" }];
+  // "ABC-12" sits inside both, with the same 2-part run → ambiguous.
+  assert.equal(codeFamilyMatch("ABC-12", twins), null);
+});
+
+test("BUG-37: KS08 is KS-08 even though KS-08 SEA PINK also contains it", () => {
+  const ks = [
+    { itemCode: "KS-08 SEA PINK", description: "FABRIC" },
+    { itemCode: "KS-08", description: "SEA PINK" },
+    { itemCode: "KS-01", description: "BABY WHITE" },
+  ];
+  assert.equal(codeFamilyMatch("KS08", ks)?.itemCode, "KS-08", "identical, under the length floor");
+  assert.equal(codeFamilyMatch("KS01", ks)?.itemCode, "KS-01");
+  assert.equal(codeFamilyMatch("KS09", ks), null, "a different number is a different item");
+  assert.equal(codeFamilyMatch("KS08", [{ itemCode: "KS-08" }, { itemCode: "KS-008" }]), null, "two identical codes are ambiguous");
+  // Only the coloured variant exists: still ours-starts-with-theirs, unique.
+  const only = [{ itemCode: "KS-08 SEA PINK" }, { itemCode: "KS-01 BABY WHITE" }];
+  assert.equal(codeFamilyMatch("KS08", only)?.itemCode, "KS-08 SEA PINK");
+  assert.equal(codeFamilyMatch("KS08", [...only, { itemCode: "KS-08 SEA PINK 2" }]), null, "two variants: refuse");
+  assert.equal(codeFamilyMatch("KS1", [{ itemCode: "KS-10 RED" }]), null, "KS-1 is not KS-10");
 });
 
 test("too little to identify: short runs, row numbers and blanks never match", () => {

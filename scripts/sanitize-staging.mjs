@@ -55,6 +55,7 @@
 // ============================================================================
 
 import postgres from "postgres";
+import { projectRef } from "./_db.mjs";
 import { createHash, randomBytes } from "node:crypto";
 
 const APPLY = process.argv.includes("--apply");
@@ -63,9 +64,10 @@ const ROTATE_QR = process.argv.includes("--rotate-qr");
 
 // The staging Supabase project ref. Both the direct host
 // (db.<ref>.supabase.co) and the session pooler (user postgres.<ref>@...)
-// carry the ref, so one check covers both URL shapes.
-const STAGING_REF = "kahxgvbfanbraazetefr";
-const PROD_REF = "vpwdqtsxexpiqxzweivd";
+// carry the ref, so one check covers both URL shapes. The refs come from
+// the environment (GitHub secrets), never from this public source file.
+const STAGING_REF = projectRef("staging");
+const PROD_REF = projectRef("prod");
 
 // The shared staging password. Staging is a test system; every user gets the
 // same known password so the team can log in as anyone to reproduce a report.
@@ -86,14 +88,14 @@ if (!url) {
 // ---------------------------------------------------------------------------
 if (url.includes(PROD_REF)) {
   console.error(
-    `REFUSING: STAGING_DATABASE_URL contains the PRODUCTION project ref (${PROD_REF}).`,
+    "REFUSING: STAGING_DATABASE_URL contains the PRODUCTION project ref.",
   );
   process.exit(1);
 }
 if (!url.includes(STAGING_REF)) {
   console.error(
-    `REFUSING: STAGING_DATABASE_URL does not contain the known staging project ref (${STAGING_REF}).\n` +
-      `If the staging project was recreated, update STAGING_REF in this file — do NOT relax the check.`,
+    "REFUSING: STAGING_DATABASE_URL does not contain the staging project ref (SUPABASE_STAGING_REF).\n" +
+      "If the staging project was recreated, update that secret — do NOT relax the check.",
   );
   process.exit(1);
 }

@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-217 (branch `fix/scan-short-supplier-code`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-216 (branch `fix/staging-no-nightly-wipe`; ids 213-215 are on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 
 > **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-212 (branch `fix/customer-price-invoices-main`; ids 196-210 are on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
@@ -46,13 +47,37 @@ Entries themselves stay newest-first.
 
 ---
 
+## BUG-2026-09-29-218 — Staging PR label workflow never ran; every `staging` label was added by hand `ci-cd` 🟡
+
+**Symptom:** PRs into `staging` (#572, #577 and others) had no `staging` label unless someone added it manually.
+
+**Root cause:** `label-staging-prs.yml` (#552) was merged to `staging` only. `pull_request_target` always runs the workflow file from the default branch (`main`), whatever the PR's base, so the workflow was never triggered. Zero `pull_request_target` runs on 2026-09-29; every `staging` label that day was added by a person.
+
+**Fix:** `.github/workflows/label-prs.yml` on `main`, covering PRs into `main` and `staging`: base `staging` gets `staging`, and the title type prefix gets a type label (`fix` gets `bug`, `feat` gets `enhancement`, and so on). The title is passed through env, never spliced into the script. Checked locally against real PR titles with a stub `gh`, including a title with shell syntax.
+
+---
+
+## BUG-2026-09-29-217 — Scan PI left Internal Code blank when the supplier code was ours minus the hyphen (KS08 vs KS-08) `purchase-invoices` `scan-ocr` 🟡
+
+**Symptom:** INFAB invoice CS-KL2609232, lines `KS08` and `KS01` showed "Pick from catalog" with Internal Code empty although the Supplier SKU was read correctly. `KS-16 ICE STEEL` on the same invoice filled.
+
+**Root cause:** `codeFamilyMatch` needs >= 5 characters, and `KS08` is 3 (`KS`, `8`). Even without the floor it would tie, because the catalogue holds both `KS-08` and `KS-08 SEA PINK`, and both contain the code. Text scoring cannot help: the invoice says "KISA VELVET 08 SEA PINK", the catalogue says `KS-08 SEA PINK`.
+
+**Fix** (`src/lib/supplier-material-candidates.ts`): `codeFamilyMatch` first looks for an item whose code equals the supplier's code part for part (`sameSupplierCode`), with no length floor. One hit wins, two different codes with identical parts are refused. A second rung covers a catalogue that only has a variant (`KS08` with just `KS-08 SEA PINK`): our code starting with theirs, on whole parts (`KS-1` never matches `KS-10`), needs only 3 characters (`MIN_CODE_PREFIX_CHARS`), and a tie is still refused. Mid-code containment keeps the 5-character floor.
+
+**Regression:** `tests/scan-code-family-match.test.mjs` (BUG-37 case). **Prod UNMEASURED:** re-scan CS-KL2609232 after deploy.
+
+---
+
 ## BUG-2026-09-29-216 — Staging lost all test data every night `ci-cd` `staging` 🟡
 
 **Symptom:** everything created on staging was gone the next morning; the app looked freshly cloned from prod.
 
-**Root cause:** `.github/workflows/sync-staging.yml` carried `schedule: cron '0 18 * * *'` (02:00 SGT). Schedules fire from the default branch, so the copy on `main` ran nightly: `DROP SCHEMA public CASCADE`, then `pg_restore` of a prod dump. Nothing distinguished a test record from prod data. Separately `scripts/sanitize-staging.mjs` still carried the old staging ref (`zaxy...`), so after the wipe it refused to run and the payroll/PII scrub and PIN steps were skipped.
+**Root cause:** `.github/workflows/sync-staging.yml` carried `schedule: cron '0 18 * * *'` (02:00 SGT). Schedules fire from the default branch, so the copy on `main` ran nightly: `DROP SCHEMA public CASCADE`, then `pg_restore` of a prod dump. Nothing distinguished a test record from prod data. Separately `scripts/sanitize-staging.mjs` still carried the old staging ref, so after the wipe it refused to run and the payroll/PII scrub and PIN steps were skipped.
 
-**Fix:** cron removed (manual `workflow_dispatch` only). New default `mode=merge` runs `scripts/merge-prod-into-staging.mjs`: per table, COPY prod rows into a temp table and `INSERT ... ON CONFLICT DO NOTHING`, so nothing in staging is deleted or overwritten. `mode=reset` keeps the old full clone behind `confirm=SYNC`. Sanitiser `STAGING_REF` is now `kahxgvbfanbraazetefr`. Pinned by `tests/sync-staging-no-nightly-wipe.test.mjs`. NOT run against a live database yet (no credentials in the dev session): the first `mode=merge` run on GitHub is the live check.
+**Fix:** cron removed (manual `workflow_dispatch` only). New default `mode=merge` runs `scripts/merge-prod-into-staging.mjs`: per table, COPY prod rows into a temp table and `INSERT ... ON CONFLICT DO NOTHING`, so nothing in staging is deleted or overwritten. `mode=reset` keeps the old full clone behind `confirm=SYNC`. Sanitiser `STAGING_REF` now matches the current staging project. Pinned by `tests/sync-staging-no-nightly-wipe.test.mjs`. NOT run against a live database yet (no credentials in the dev session): the first `mode=merge` run on GitHub is the live check.
+
+**Follow-up (same day):** the same stale ref was still in `.mcp.json` (the Supabase MCP connector), the `CLAUDE.md` environment table, `docs/PRE-DEPLOY-CHECKLIST.md`, `docs/RBAC-REMEDIATION.md`, the write allowlists of `scripts/clone-prod-to-staging.mjs` and `scripts/repair-uncosted-deliveries.mjs`, and `scripts/seed-sandbox-rbac.sql`. All now name the current staging project, and every project ref now comes from `.env` / GitHub secrets (`SUPABASE_PROJECT_REF`, `SUPABASE_STAGING_REF`) instead of source. Measured: Hyperdrive `hookka-erp-staging` targets this project, and it was written at 18:22 UTC on 2026-09-28 by the last nightly sync. Nothing deployed uses the old staging project. The test now fails if any tracked file names a known project ref.
 
 ---
 ## BUG-2026-09-29-212 — Invoice "Save Prices" always said the save did NOT take effect `invoices` `ui-frontend` 🟡
@@ -5691,7 +5716,7 @@ Independently, the isolated joins were replayed against the same prod rows asser
 
 **Verified.** Replayed both pipelines against live prod rows: **957 POs and 13,418 attached job cards, output byte-identical** (`JSON.stringify` equal), join **6,865 ms → 8 ms**, fetch **30.77 MB → 10.76 MB**, ~**7.3 s** of server work removed. The `/delivery` variant benefits more — join **18,132 ms → 33 ms** — with its row count unchanged. The exact new SQL was run through the real `translateSql` compat layer and executed on prod: correct snake_case rewriting inside the nested sub-select, 13,418 rows, matching expectation; the `includeArchive` UNION form parses in both the existing and the new position. `tests/production-orders-jobcard-grouping.test.mjs` (6 tests) pins order-equivalence including the equal-`sequence` stable-sort tie, empty-bucket and orphan-card cases, non-mutation of the shared array, and the SQL shape. Full suite 3,690 pass / 0 fail; `npx tsc -p tsconfig.app.json --noEmit` exit 0. **Not yet observed on a running prod deploy** — Actions is billing-blocked, so the end-to-end cold-call timing is a projection from the measured server-side saving, not a measurement.
 
-**Prod DB note (corrects the entry below).** The local `.dev.vars` `DATABASE_URL` is indeed dead (`28P01`), but a **working** read-only DSN for live prod exists in the repo's own scripts (`db.vpwdqtsxexpiqxzweivd.supabase.co`, used by ~65 `scripts/*.mjs`) — that is how the live figures above were read. The second DSN in `scripts/` (`db.zaxygxwadidiqcphibma…`) is a **stale copy**, last written 2026-08-10. Both are hardcoded credentials sitting in tracked files and belong on the rotation list.
+**Prod DB note (corrects the entry below).** The local `.dev.vars` `DATABASE_URL` is indeed dead (`28P01`), but a **working** read-only DSN for live prod exists in the repo's own scripts (the prod host, used by ~65 `scripts/*.mjs`) — that is how the live figures above were read. The second DSN in `scripts/` (the old staging project) is a **stale copy**, last written 2026-08-10. Both are hardcoded credentials sitting in tracked files and belong on the rotation list.
 ## BUG-2026-08-13-004 — Department Efficiency let unmeasured job cards divide their own estimate by itself, burying the 4,289 real recordings at ~100% `ui-frontend` `production-orders` `data-integrity` 🟢
 
 **Symptom.** Reports › Production › **Department Efficiency** parked every department near **100%** whatever the date range, and the **Export CSV** button shipped that as a KPI. The dead Master Tracker page (`src/pages/production/tracker.tsx`, deleted in the same branch) carried the same expression in an "Actual Hours / Efficiency %" table.

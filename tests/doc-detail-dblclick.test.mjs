@@ -47,7 +47,7 @@ test("Fund Transfer, Other Party Bills / Payments, AP Invoices open on double-cl
   assert.match(pays, /onDoubleClick=\{\(\) => setDetail\(g\)\}/);
   const ap = block("function ApInvoicesTab(", "function DocDetailModal(");
   // Owner 2026-09-29: a PI opens its own detail page, not the list.
-  assert.match(ap, /onDoubleClick=\{\(\) => \{ if \(r\.kind === "PI"\) navigate\(`\/procurement\/pi\/\$\{r\.id\}`\); else setManage\(true\); \}\}/);
+  assert.match(ap, /onDoubleClick=\{\(\) => \{ if \(r\.kind === "PI"\) navigate\(`\/procurement\/pi\/\$\{r\.id\}`\); else setDetailBillNo\(r\.no\); \}\}/);
   // The checkbox cell never lets a double-click on it open the record.
   assert.match(ft, /<td className="px-3 py-1\.5 w-8" onDoubleClick=\{\(e\) => e\.stopPropagation\(\)\}>/);
   assert.match(bills, /<td className="px-3 py-1\.5 w-8" onDoubleClick=\{\(e\) => e\.stopPropagation\(\)\}>/);

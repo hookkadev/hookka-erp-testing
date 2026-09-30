@@ -59,7 +59,7 @@ then **re-send the corrected invoices to the customer** (a person's decision, no
 
 See `docs/SECURITY-ROTATION-TODO.md`. ~109 scripts carry the live prod Supabase connection
 string in plaintext, and it is in git history, so editing files cannot remediate it. Rotate the
-DB password in Supabase (project `vpwdqtsxexpiqxzweivd`), update the Cloudflare `HYPERDRIVE` /
+DB password in Supabase (the prod project), update the Cloudflare `HYPERDRIVE` /
 `DATABASE_URL` binding and local `.dev.vars`, then delete that TODO file. The dead login
 password is already inert; this DB string is the remaining live exposure.
 

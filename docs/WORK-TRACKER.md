@@ -1,5 +1,17 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-30**: branch `fix/gl-source-link-opens-pi` added below (its entry is the newest).
+> **Last verified: 2026-09-29**: #588 (Cash Flow drill tidy + payroll month) closed ✅ below with its prod check; #589 corrected its fallback note.
+> **Last verified: 2026-09-29**: branch `feat/cashflow-drill-tidy` added below (its entry is the newest).
+> **Last verified: 2026-09-29**: #587 (Cash Flow inline drill) closed ✅ below with its prod check.
+> **Last verified: 2026-09-29**: branch `feat/cashflow-inline-drill` added below (its entry is the newest).
+> **Last verified: 2026-09-29**: #586 (P&L inline drill) closed ✅ below with its prod check.
+> **Last verified: 2026-09-29**: branch `feat/pl-inline-drill` added below (its entry is the newest).
+> **Last verified: 2026-09-29**: #581 (Cash Flow staff-contribution accruals → General Expense) closed ✅ below with its prod check.
+> **Last verified: 2026-09-29**: branch `fix/cashflow-staff-contribution-accruals` added below (its entry is the newest).
+> **Last verified: 2026-09-29**: Cash Flow "Unallocated · STOCK - FABRIC M" entry added below — no code; branch `feat/cashflow-stock-accounts-raw-materials` dropped.
+> **Last verified: 2026-09-29**: #575 (AP Invoices popups) and #578 (Cash Flow cash view) closed ✅ below with their prod measurements.
+> **Last verified: 2026-09-29**: branch `feat/ap-invoices-popup` added below (its entry is the newest); the 410-0000 entry (#573) closed ✅ with its prod measurements.
 > **Last verified: 2026-09-29**: branch `fix/staging-no-nightly-wipe` added below (PR #570 open, its entry is the newest).
 > **Last verified: 2026-09-29**: branch `feat/production-multi-select-filters` added below (open, its entry is the newest).
 > **Last verified: 2026-09-25**: branch `feat/dashboard-efficiency-employee-drill` (stacked on `fix/dashboard-tighter-padding`, PR #533) added below (committed, not pushed, its entry is the newest).
@@ -32,11 +44,141 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
+## 2026-09-30 — 🔵 A finance user's click on a purchase invoice still lands on the PI list (owner: colleague on finance@hookka.com「点 ap invoice 还是跳去 purchase invoice list」)(branch `fix/gl-source-link-opens-pi`)
+
+1. Checked (code): AP Invoices has opened the PI itself since #559, for every role — the endpoint is accounting:read, the PI
+   detail route has no permission guard and GET /purchase-invoices/:id only needs a login. The list jump is the pre-#559
+   code, i.e. a browser still running the old bundle → reload. Not measured as that user (no credentials in this session).
+2. 🔵 The General Ledger's source link still sent a purchase-invoice leg to the PI list (and a supplier payment to the PI
+   list too): now `/procurement/pi/:id` and `/invoices/supplier-payments`. Guard `tests/ledger-source-links.test.mjs`.
+
+## 2026-09-29 — ✅ Cash Flow drill tidy + payroll month read right (owner「有一点点乱，有没有优化的建议」→「好像可以，月份一起修」)(#588 12295837 + #589 MERGED, deployed, prod-verified)
+
+1. ✅ Panel: Description = the voucher's own purpose; bank by short name; "Whole payment" + "Share" columns when split;
+   one Amount column (money out in brackets); "All months" in month blocks, each with its total.
+2. ✅ Salary department split: the payroll month named in the voucher text is read in any case / full name / without a year
+   (`payrollMonthFrom`). Before, only "May'26"-style text was read, so most salary payments used the PAYMENT month's payslip
+   mix. Totals do not move — only how Direct Labour spreads across departments. A named month without payslips uses the payment month's mix (one April-salary leg paid at opening used to stay unsplit; it now splits by May's payslips).
+   Guard `tests/cashflow-drill-tidy.test.mjs`. Prod check after deploy: Direct Labour total, result and Cash Surplus identical.
+3. ✅ Prod (measured, statement snapshot before vs after, FY to Aug'26 and Sep'26): Direct Labour per column, the operating
+   result, Cash Surplus, Bank b/f and c/f identical; only department lines moved. Payments for the same payroll month now carry
+   the same department share. UI: the new columns, month blocks and totals on a department line, tied.
+4. 🟡 For the owner: one voucher's header names a different payroll month than its line; the split follows the line, the panel
+   shows the header. Either the voucher text is corrected or the panel shows the line text — owner to decide.
+
+## 2026-09-29 — ✅ Cash Flow inline drill: click a line's name, its payments / receipts open underneath (owner「cash flow 也要这样点开看」)(#587 81560c37 MERGED, deployed, prod-verified)
+
+1. ✅ Cash Flow: a line's name toggles a panel under the row — Date · Description · Bank · Ref. 1 · Ref. 2 · Money in ·
+   Money out + totals; month chips (the statement's month first, "All months"). Not in Edit (the drag owns the row).
+2. ✅ Engine: `buildStatement({ trace })` records every leg that fed each line (`CfSource`), including the share when a payment
+   is split across materials / departments ("part of" its whole amount in the panel). Rows carry `lineKey`.
+3. ✅ `GET /api/accounting/cashflow-drill?period&key` (read): the statement's own computation with a trace, rolled up one row per
+   entry; Ref. 2 = the PIs / bills a payment settled or a voucher's payee; `tied` = every column of the line equals its rows.
+   Guard `tests/cashflow-inline-drill.test.mjs`. Prod check after deploy: every line of a month, `tied` true.
+4. ✅ Prod (measured): every line of the Sep'26 statement and of the FY statement ending Aug'26 opened through the endpoint —
+   all found and `tied` (every column equals its rows), including the split shares; under a second per line. UI: a
+   General Expense line opened under its row with its two vouchers, bank, payee as Ref. 2 and the total equal to the line.
+
+## 2026-09-29 — ✅ P&L inline drill: click a line's name, its ledger lines open underneath (owner「我要点开看 detail，就是这样」+ Houzs P&L screenshot)(#586 5489aa74 MERGED, deployed, prod-verified)
+
+1. ✅ P&L statement: an account line's name toggles a panel under the row — Date · Description · Other side · Ref. 1 · Ref. 2 ·
+   Debit · Credit (the screenshot's columns) + a total. Not in edit mode (the drag owns the row there). A new period starts closed.
+2. ✅ `GET /api/accounting/pl-drill?period&account` (read): the statement's own pass with a trace, so the lines sum to the line;
+   payroll taken from payslips (not posted yet) and the opening month's share show as their own rows; a month keyed from
+   the old books says so. Ref. 1 = the document; Ref. 2 = invoice → SO, PI → supplier invoice no., bill → its reference,
+   voucher → payee. Other side = the opposite accounts of the same entry.
+3. ✅ Computed lines that are one account's ledger figure open too (a group's PURCHASE, carriage, SST); stock / WIP / FG don't.
+   Guard `tests/pl-inline-drill.test.mjs`. Prod check after deploy: every openable line of a month, drill total = line.
+4. ✅ Prod (measured): every openable line of Sep'26 and Aug'26 opened through the endpoint — each drill total equals its
+   P&L line and `tied` is true (none off); roughly half a second per line. UI: the sales line opened under its row with the
+   seven columns, Ref. 1 = invoice, Ref. 2 = its SO, other side = trade debtors, total = the line.
+
+## 2026-09-29 — ✅ Cash Flow: EPF / SOCSO / EIS accruals are the ordinary staff's → General Expense (owner「这个是普通 staff，不是 direct 的」)(#581 302e67c7 MERGED, deployed, prod-verified)
+
+1. ✅ #573 filed the whole payroll-accrual family under Direct Labour. The owner: the EPF / SOCSO accruals are the ordinary
+   staff's, not direct labour. Checked first (prod P&L, read-only): the P&L books that EPF as STAFFS' EPF; PRODUCTION - EPF
+   is a small fixed line — the two statements now agree.
+2. ✅ New pure rule `payrollAccrualSections` (cashflow-engine.ts): salary accrual + its parent → Direct Labour (the
+   department split is unchanged); every other accrual under that parent → General Expense. Found from the chart; the
+   owner's drags still win. Both sections are above the operating result: result and Cash Surplus do not move.
+   Guard `tests/cashflow-staff-contribution-accruals.test.mjs` (runs the rule and the statement).
+3. ✅ Prod (measured, statement snapshot before deploy vs after): in every month Jun–Sep only the ACCRUAL - EPF / SOCSO rows
+   moved from Direct Labour to General Expense (nested under ACCRUALS); Net operation surplus, Cash Surplus, Bank b/f and
+   c/f identical. The lone ACCRUAL - SALARY row (May) stays in Direct Labour, now shown flat (single child, not nested).
+   Snapshot deleted from the browser afterwards.
+
+## 2026-09-29 — 🔵 PR labels for the whole team (branch `ci/label-prs` → `main`)
+- 1. 🔵 `label-prs.yml` on `main`: every PR into `main`/`staging` gets `staging` (by base) and a type label (by title prefix). BUG-2026-09-29-218: the staging-only labeler never ran.
+- 2. 🔵 Labels `security`, `performance`, `ci`, `chore` created in the repo.
+- 3. 🟡 Live check after merge: open or retitle a PR and confirm the run and labels.
+
+## 2026-09-29 — 🟡 Cash Flow Unallocated "STOCK - FABRIC M": booking fix is the owner's, no code (owner「2. 不明白」→ answers → 「就放着」)
+
+1. Measured (prod): the stock account 330-0001 holds exactly three other-creditor bill lines (Jun / Aug / Sep); the P&L
+   reads purchases from the 701~705 GL accounts, so none of them reaches the P&L today. Figures and parties are in the
+   owner's handoff notes, not here (this repo is public).
+2. Owner: two lines are fabric purchases, one is a related-party loan repayment. Fix = the owner re-books the three
+   lines himself (AP Invoices › double-click › Edit): two to 701-0010, one to 440-0030.
+   Branch `feat/cashflow-stock-accounts-raw-materials` ("every stock-account payment is raw material") DROPPED — it
+   would have filed the loan repayment as a purchase. Not merged.
+3. 🟡 Parked by the owner (「就放着」): the related-party loan itself was never booked (no 440-0030 line in the 22/05
+   opening, no inflow in the bank), while the June and August bills repay it, so 440-0030 reads as a debit until an
+   opening credit is added. Opening fix = the owner's / accountant's.
+
+
+## 2026-09-29 — ✅ Cash Flow: cash-view signs — money in positive, money out negative everywhere (owner「这个 cash flow 我想要更改，全部进钱 positive，出钱 negative」)(#578 0a24bdea MERGED, deployed, prod-verified)
+
+1. ✅ Supersedes the morning`s #569 rule (money out positive below the collection). `OUTFLOW_SECTIONS` is now empty:
+   costs, Trade Finance repayments, finance costs, capex spend, loans repaid / lent, unallocated payments read
+   negative; collections, drawdowns, loans received, asset sales read positive. Labels: Loan received / (repaid ·
+   lent), Deposit refunded / (paid); footer states the rule. Figures, the operating result and Cash Surplus unchanged.
+   Tests re-pointed (engine, trade finance, supplier section, finance cost, unified signs).
+2. ✅ Prod (measured): statement snapshots taken before deploy for 2026-06 / -07 / -08 / -09 (the -08 one carries every
+   month Sep'25–Aug'26), compared row by row after: 0 unexpected rows. Unchanged: Revenue Collection rows, Net operation
+   surplus, Cash Surplus, Bank b/f, Bank c/f. Every other non-zero row exactly sign-flipped. Sep'26: result 13,597.20,
+   Trade Finance 729.24, Finance Cost (1,636.48), CAPEX (1,747.10), Unallocated (442.00), Cash Surplus 10,500.86 —
+   now a plain sum; Bank c/f 132,703.25. Snapshot deleted from the browser afterwards.
+
+## 2026-09-29 — ✅ AP Invoices: bill form + bill detail in popups; Other Creditors back in the sidebar (owner「ap invoice 就 pop out 出来给我填相关之类不可以吗？」+「other creditor maintenance 放 sidebar 旁边」→「3. 做」)(#575 33378a85 MERGED, deployed, prod-verified)
+
+1. ✅ New AP bill opens the other-creditor bill form in a popup (`OtherPartyBillsManager` in `formOnly` mode: form open at once,
+   no list, closes on save or Cancel; ✕ closes, a stray click outside does not — a half-filled bill never vanishes).
+2. ✅ Double-click an AP bill (or click its No.) → detail popup: creditor / date / reference / lines / tax / total / paid /
+   outstanding, actions Print / Edit / Copy / Void (Unvoid when voided). Edit and Copy open the same popup form
+   (Edit re-posts the same bill number; Copy = today, no reference, never an opening — one builder `billFormFrom`).
+   Void goes through the Bills page's own lifecycle endpoint, behind a confirm. PI rows still open their own page.
+3. ✅ The duplicate bills list + names list under the mirror are gone; Creditors › **Other Creditors** is a menu entry again
+   (`?tab=ocreditor`, the same names/contacts page). FINANCE menu 32 → 33 entries.
+4. UI only — no endpoint, no write path, no ledger change. Guards `tests/ap-invoices-popup.test.mjs` (new),
+   `tests/finance-sidebar.test.mjs`, `tests/ap-invoices-chips.test.mjs`, `tests/doc-detail-dblclick.test.mjs`.
+5. ✅ Prod (checked in the owner's browser, nothing saved): New AP bill popup opens with Scan Bill + the form, the account
+   picker drops down inside it, Cancel closes it; double-click OCB-2609-004 → detail popup (PAID, 330-0001 STOCK -
+   FABRIC M 442.00, Print / Edit / Copy / Void); Edit → "Edit OCB-2609-004" prefilled, creditor locked, no Scan; Cancel
+   closes; the page no longer carries the editor / names list below; Creditors › Other Creditors opens `?tab=ocreditor`.
+
+## 2026-09-29 — ✅ 410-0000 ACCRUALS: parent accounts never postable + Cash Flow accrual family → Direct Labour (owner「by right 410-0000 不能选吧？我有注意到 410-0000 pv 开过去」→「做 a b d，c 的不做，要 park 回去对的 accrual」)(#573 e6bd8e93 MERGED, deployed, prod-verified)
+
+1. Measured (prod): 410-0000 ACCRUALS was the ONLY account with children still flagged postable; PVs had been paid
+   against it. The owner re-parked the September ones himself at 15:04–15:26 (HPV-2609-026 / -027 → 410-0010,
+   HPV-2609-029 → 410-0020 EPF, HPV-2609-030 → 410-0030 SOCSO); 6 older legs (11,192.45) remain on 410-0000 for him.
+   c (restating them) is the owner`s, not ours — the restate path validates only the NEW lines, so locking 410-0000
+   does not block his re-parking.
+2. ✅ a — flip 410-0000 to non-postable on prod (PUT /coa, owner-ordered).
+3. ✅ b — parents never postable: validation / JE post / pickers / COA editor. Guard `tests/parent-accounts-not-postable.test.mjs`.
+   Prod (measured after deploy): GET /coa returns all 18 parent accounts non-postable (410-0000 ACCRUALS, 4 children);
+   the Payment Voucher account picker, typed "410", offers only 410-0010 / -0020 / -0030 / -0040. The server-side
+   refusal of a parent code is covered by the test only — not exercised on prod (it would need a write).
+4. ✅ d — Cash Flow: ACCRUALS parent + ACCRUAL - EPF / SOCSO / EIS → Direct Labour (Sep: ACCRUAL - EPF 7,801.00,
+   ACCRUAL - SOCSO 1,035.50, ACCRUALS 255.05 leave Unallocated). Prod Sep'26 (measured): Direct Labour › ACCRUALS
+   8,836.50 (EPF 7,801.00 + SOCSO 1,035.50; the 255.05 leg on the parent follows the salary department split);
+   Unallocated 442.00 (only STOCK - FABRIC M left); Cash Surplus 10,500.86 unchanged.
+
 ## 2026-09-29 — 🔵 Staging wiped every night; refresh must keep test data (branch `fix/staging-no-nightly-wipe` → `main`)
 - 1. 🔵 Cause: `sync-staging.yml` cron (18:00 UTC) on `main` dropped staging's public schema. Cron removed, manual dispatch only. BUG-2026-09-29-216.
 - 2. 🔵 New `mode=merge` (default): `scripts/merge-prod-into-staging.mjs` inserts prod rows staging lacks, never deletes or overwrites. `mode=reset` = old full clone, needs `confirm=SYNC`.
-- 3. 🔵 `sanitize-staging.mjs` STAGING_REF `zaxy...` changed to `kahx...` (it was refusing to run, so the scrub and PIN steps were skipped after each wipe).
+- 3. 🔵 `sanitize-staging.mjs` STAGING_REF changed from the old staging project to the current one (it was refusing to run, so the scrub and PIN steps were skipped after each wipe).
 - 4. 🟡 UNMEASURED: merge not run against a live DB (no credentials in this session). First step after merge: dispatch `Sync prod → staging` with mode=merge and read the per-table log. The sanitiser also re-fakes contact fields and passwords on ALL staging rows, including test rows.
+- 5. 🔵 Project refs out of the repo: scripts read `SUPABASE_PROJECT_REF` / `SUPABASE_STAGING_REF` from env (`scripts/_db.mjs` `projectRef`), `.mcp.json` uses `${SUPABASE_STAGING_REF}`, docs name the variable. Needs GitHub secret `SUPABASE_STAGING_REF` before the next staging sync (branch `fix/staging-ref-cleanup`).
 
 ## 2026-09-29 — ✅ Cash Flow: one sign convention (owner「确定一下整体的符号哦，有点乱，loan from houzs … 应该是我借出去吧」→「做，统一符号」)(#569 e96e89c5 MERGED, deployed, prod-verified)
 
@@ -2020,7 +2162,7 @@ Owner 早前的指示：**「假的acc就不要放了 放空都好过放假的�
 
 **没做的：已经生成并存起来的 payslip 列。** 那些是真正会印出来交给 HR 的东西。
 
-实测 prod（`vpwdqtsxexpiqxzweivd`）：
+实测 prod：
 
 | period | rows | fake | status |
 |---|---|---|---|
@@ -3639,7 +3781,7 @@ mobile (`/worker`, `/m`) must not lag (currently laggy). Plus OCR + research.
 **Asks logged (so none drop):**
 1. ✅ Pool size 50 (owner set in Supabase). ⏳ Compute → Small blocked by a
    Supabase platform incident (project resizing failing globally). Re-do once
-   status.supabase.com clears; verify it lands on prod `vpwdqtsxexpiqxzweivd`.
+   status.supabase.com clears; verify it lands on prod (`SUPABASE_PROJECT_REF`).
 2. 🔵 **B — DB connection retry + graceful 503 login** (`supabase-compat.ts`,
    `auth.ts`) — written, shipping now.
 3. ⬜ **Keep-warm heartbeat** — ping `/api/pg-ping` every 1–5 min (GitHub Action
