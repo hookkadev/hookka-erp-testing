@@ -59,3 +59,40 @@ export function planReset(pos: SkipPO[]): SkipPatch[][] {
   );
   return chunk(patches);
 }
+
+type PatchResult = { success: boolean; error?: string };
+
+/**
+ * Send one wave through bulk-patch. bulk-patch runs the wave in parallel, and
+ * a card can fail there only because of the crowd (20 orders of one SO all
+ * writing at once). So a failed card is sent again on its own, straight to
+ * PATCH /:id, which also returns the server's error ref that bulk-patch drops.
+ * The write is idempotent: same status and date as the first attempt.
+ */
+export async function sendWave(
+  patches: SkipPatch[],
+  f: typeof fetch = fetch,
+): Promise<{ done: number; errors: string[] }> {
+  const post = (url: string, method: string, body: unknown) =>
+    f(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const res = await post("/api/production-orders/bulk-patch", "POST", { patches });
+  const j = (await res.json().catch(() => ({}))) as { results?: PatchResult[]; error?: string };
+  if (!res.ok) throw new Error(j.error ?? `bulk-patch returned ${res.status}`);
+  let done = 0;
+  const errors: string[] = [];
+  for (const [i, p] of patches.entries()) {
+    if (j.results?.[i]?.success) {
+      done++;
+      continue;
+    }
+    const { poId, ...body } = p;
+    const r = await post(`/api/production-orders/${encodeURIComponent(poId)}`, "PATCH", body);
+    if (r.ok) {
+      done++;
+      continue;
+    }
+    const e = (await r.json().catch(() => ({}))) as { error?: string; ref?: string };
+    errors.push(`${e.error ?? `HTTP ${r.status}`}${e.ref ? ` (ref ${e.ref})` : ""}`);
+  }
+  return { done, errors };
+}

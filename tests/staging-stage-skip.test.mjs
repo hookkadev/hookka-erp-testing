@@ -48,12 +48,28 @@ test("reset clears only completed cards back to WAITING", () => {
 test("card renders only on the staging host and writes through bulk-patch", () => {
   const src = readFileSync(new URL("../src/components/staging-stage-skip.tsx", import.meta.url), "utf8");
   assert.match(src, /if \(!window\.location\.hostname\.startsWith\("staging\."\)\) return null;/);
-  assert.match(src, /\/api\/production-orders\/bulk-patch/);
+  assert.match(src, /sendWave\(patches\)/);
+  assert.match(readFileSync(new URL("../src/lib/staging-stage-skip.ts", import.meta.url), "utf8"), /\/api\/production-orders\/bulk-patch/);
 });
 
 test("a PO whose only DO was cancelled can still be moved", () => {
   const src = readFileSync(new URL("../src/components/staging-stage-skip.tsx", import.meta.url), "utf8");
   assert.match(src, /!po\.deliveryDoNo \|\| po\.deliveryStatus === "CANCELLED"/);
   // ...but the server decides what a live DO holds, before any write.
-  assert.ok(src.indexOf("/api/delivery-orders/linked-po-ids") < src.indexOf("/api/production-orders/bulk-patch"));
+  assert.ok(src.indexOf("/api/delivery-orders/linked-po-ids") < src.indexOf("sendWave(patches)"));
+});
+
+test("a card that fails in the parallel wave is retried on its own", async () => {
+  const { sendWave } = await import("../src/lib/staging-stage-skip.ts");
+  const patches = ["a", "b", "c"].map((id) => ({ poId: `po-${id}`, jobCardId: id, completedDate: "d", status: "COMPLETED" }));
+  const calls = [];
+  const json = (status, body) => ({ ok: status < 400, status, json: async () => body });
+  const f = async (url, init) => {
+    calls.push(`${init.method} ${url}`);
+    if (url.endsWith("/bulk-patch")) return json(200, { results: [{ success: true }, { success: false, error: "x" }, { success: false, error: "x" }] });
+    // b goes through on its own; c is a real failure and carries a ref.
+    return url.endsWith("po-b") ? json(200, { success: true }) : json(500, { error: "Something went wrong", ref: "abc12345" });
+  };
+  assert.deepEqual(await sendWave(patches, f), { done: 2, errors: ["Something went wrong (ref abc12345)"] });
+  assert.deepEqual(calls, ["POST /api/production-orders/bulk-patch", "PATCH /api/production-orders/po-b", "PATCH /api/production-orders/po-c"]);
 });
