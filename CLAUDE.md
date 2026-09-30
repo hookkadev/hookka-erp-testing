@@ -1,7 +1,8 @@
 # Hookka ERP — Start Here (read before any task)
 
 > **Last verified: 2026-09-29** — Environment table: project refs moved out of the repo (it is
-> public) into `.env` / GitHub secrets; staging measured from the `hookka-erp-staging` Hyperdrive.
+> public) into `.env` / GitHub secrets; staging measured from the `hookka-erp-staging` Hyperdrive
+> (database) and the SG project's Storage logs (file storage). The old Tokyo staging project is retired.
 
 > **Last verified: 2026-09-22** (branch `fix/scan-queue-client-driven`) — re-measured the tracked-file
 > count and the API.md mount/handler counts quoted below; nothing else re-checked.
@@ -90,8 +91,20 @@ Doc map: [`docs/DOCS-INDEX.md`](docs/DOCS-INDEX.md). The big picture: [`docs/DEV
 | | Supabase project ref (in `.env` / GitHub secrets, never in the repo) | Use |
 |---|---|---|
 | Sandbox | `SUPABASE_SANDBOX_REF` | Where development happens. Seed it; never mind that it is fake. |
-| Staging | `SUPABASE_STAGING_REF` | A **production clone**. Read-only confirmation of a finished fix. Never the surface a fix is developed against. |
+| Staging | `SUPABASE_STAGING_REF` (`hookka-erp-staging-sg`, Singapore) | A **production clone**. Read-only confirmation of a finished fix. Never the surface a fix is developed against. Database **and** file storage (`hookka-files` bucket). |
 | Production | `SUPABASE_PROJECT_REF` | Never written to from development work. |
+
+**The old Tokyo staging project (`hookka-erp-staging`) is RETIRED** — owner 2026-09-29. Its
+database is stale (`file_assets` stops at 2026-09-12) and staging stopped using its storage the
+same day. Never query it to answer a question about staging, and never put its ref in a secret.
+It used to be listed here as staging, which sent an afternoon of debugging to the wrong database.
+
+Where each half of staging is wired, so this can be re-checked instead of trusted: the
+database is the Cloudflare Hyperdrive config `hookka-erp-staging` (bound as
+`HYPERDRIVE_STAGING`; its user carries the SG project ref). File storage is the
+`SUPABASE_PROJECT_REF` secret on the Pages **Preview** environment — encrypted, so confirm it
+from the SG project's Storage logs (an upload from staging shows `ObjectCreated` there; measured
+2026-09-29 17:47).
 
 - **Fixes are finished and verified locally first.** Pushing is never a way to get something
   testable — if the only way to try a change is to deploy it, the change is not ready.

@@ -1,6 +1,6 @@
 # RBAC Remediation — current state and the way through
 
-> **Last verified: 2026-09-29** — project refs replaced by their `.env` names (`SUPABASE_*_REF`); nothing else re-checked.
+> **Last verified: 2026-09-29** — project refs replaced by their `.env` names (`SUPABASE_*_REF`); the old Tokyo staging project is retired. Nothing else re-checked.
 >
 > **Last verified: 2026-09-24** — rebased onto `main` (215 commits of drift, cherry-picked clean) and
 > re-measured: scanner against this branch, plus the PRODUCTION grant counts quoted below. Previously against `src/api/lib/rbac.ts` (fail-opens closed) and `src/api/routes/{attendance,leaves,files,working-hour-entries,cash-flow,stock-value,forecasts,sessions}.ts`,
@@ -268,7 +268,8 @@ the queue above. Also unread: session and token handling, `public-do-qr.ts`, and
 ## Environment rules — these are not negotiable
 
 - **Sandbox for development.** Supabase `SUPABASE_SANDBOX_REF`. Staging
-  (`SUPABASE_STAGING_REF`) is a production clone and is for read-only confirmation only,
+  (`SUPABASE_STAGING_REF`; the old Tokyo project is retired — see CLAUDE.md) is a
+  production clone and is for read-only confirmation only,
   never the surface a fix is developed against. Production (`SUPABASE_PROJECT_REF`) is never
   written to from this work.
 - **Say which environment** any command or query touches, every time, before running it.
