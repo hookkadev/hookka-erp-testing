@@ -49,9 +49,10 @@ export type StageClick = (
   anchor: HTMLElement,
 ) => void;
 
-// Header bar + pipeline heights are fixed so every card is the same height
-// and the virtualizer's estimate is exact (no jump while fast-scrolling).
-export const CARD_HEIGHT = 82;
+// Every card row is a fixed height (8px gap + 120px card: header, divider,
+// stage label / pill / date) so the virtualizer's estimate is exact and fast
+// scrolling never jumps. The row sets this height explicitly.
+export const CARD_HEIGHT = 128;
 export const pipelineCols = (n: number) => `repeat(${n}, minmax(0, 1fr))`;
 
 // Lifecycle look shared by the Grid rows and the Card header bar: amber for
@@ -96,6 +97,18 @@ export function stageTint(order: ProductionOrder, deptCode: string, cellFlash: C
     if (k === "ok") tint = "ok";
   }
   return tint;
+}
+
+// Cards view stage pill. Splits the Cell "pending" state in two for display
+// only: some job cards done = in progress, none done = pending. The Cell state
+// (and so the saved status filters) is unchanged; "skipped" is an empty cell
+// (no job card in that department).
+export type StageKind = "done" | "inProgress" | "pending" | "overdue" | "skipped";
+export function stageKind(cell: Cell): StageKind {
+  if (cell.state === "empty") return "skipped";
+  if (cell.state === "done") return "done";
+  if (cell.state === "overdue") return "overdue";
+  return cell.doneCards > 0 ? "inProgress" : "pending";
 }
 
 // Today as YYYY-MM-DD. Used for the page's default fltDueFrom/fltDueTo so
