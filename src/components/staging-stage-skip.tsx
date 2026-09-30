@@ -10,7 +10,7 @@ import { useConfirm } from "@/components/ui/confirm-dialog";
 import { invalidateCachePrefix } from "@/lib/cached-fetch";
 import { todayYmdMY } from "@/lib/utils";
 import { REPAIR_DEPT_CODES, REPAIR_DEPT_LABELS } from "@/lib/repair-scope";
-import { planCompleteUpTo, planReset, type SkipPO, type SkipPatch } from "@/lib/staging-stage-skip";
+import { planCompleteUpTo, planReset, sendWave, type SkipPO, type SkipPatch } from "@/lib/staging-stage-skip";
 
 type LinkedPORef = { id: string; poNo: string; status: string; deliveryDoNo?: string; deliveryStatus?: string };
 
@@ -65,21 +65,11 @@ export function StagingStageSkipCard({ linkedPOs, onChanged }: { linkedPOs: Link
       let done = 0;
       let failed = 0;
       for (const patches of batches) {
-        const res = await fetch("/api/production-orders/bulk-patch", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ patches }),
-        });
-        const j = (await res.json().catch(() => ({}))) as { results?: Array<{ success: boolean; error?: string }>; error?: string };
-        if (!res.ok) throw new Error(j.error ?? `bulk-patch returned ${res.status}`);
-        for (const r of j.results ?? []) {
-          if (r.success) done++;
-          else {
-            failed++;
-            lines.push(r.error ?? "unknown error");
-          }
-        }
-        // Stop at the first failing wave: later waves would only hit the
+        const w = await sendWave(patches);
+        done += w.done;
+        failed += w.errors.length;
+        lines.push(...w.errors);
+        // Stop at the first wave with a card that failed twice: later waves would only hit the
         // sequence lock behind it.
         if (failed > 0) break;
       }

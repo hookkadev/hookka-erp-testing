@@ -73,6 +73,7 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 - Test: `tests/staging-stage-skip.test.mjs`. Not usable on local dev: local proxies to prod, and the host check hides the card there.
 - #599 merged and deployed. Used live on staging 2026-09-30: test order SO-2609-397 pushed to Packing, 14 job cards in 8 waves, 0 failed; reset put all 14 back to WAITING.
 - Fix (branch `fix/staging-stage-skip-cancelled-do`): after a DO was cancelled the card said "0 of 1 can be moved", because the SO reports a cancelled DO as the PO's delivery. The card now ignores a CANCELLED delivery, and before writing asks `GET /api/delivery-orders/linked-po-ids` which POs a live DO holds, since the SO's per-PO delivery field is first-DO-wins and can name a cancelled DO while a live one exists.
+- Fix (branch `fix/staging-stage-skip-retry`): on a 20-order SO the tool reported "160 job card(s) updated, 1 failed. Something went wrong on our side" and stopped. That text is the API's generic 500, not a timeout. Cause of the 500 is UNMEASURED: bulk-patch drops the error `ref`, so the Worker log line could not be matched. `sendWave` (`src/lib/staging-stage-skip.ts`) now sends a card that failed in the parallel wave again on its own through `PATCH /api/production-orders/:id`, and a card that fails twice is shown with its `ref`. Not yet tried on staging.
 
 ## 2026-09-30 — 🔵 BUG-06: finish the Transfer / Convert duplicate guard on staging (branch `test/bug06-do-guard-behavioural` → `staging`)
 
