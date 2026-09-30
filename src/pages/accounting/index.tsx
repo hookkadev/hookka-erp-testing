@@ -8111,9 +8111,14 @@ function sourceHref(sourceType: string, sourceId: string): string | null {
       return "/invoices/credit-notes";
     case "debit_note":
       return "/invoices/debit-notes";
+    // A purchase invoice opens ITSELF, not the list (owner 2026-09-29 「直接点开
+    // invoice，而不是跳去 purchase invoice list」 — same rule as AP Invoices);
+    // the leg's sourceId is the PI's id. A supplier payment goes to the page
+    // that lists supplier payments.
     case "purchase_invoice":
+      return `/procurement/pi/${encodeURIComponent(sourceId)}`;
     case "supplier_payment":
-      return "/procurement/pi";
+      return "/invoices/supplier-payments";
     default:
       return null; // manual / manual_reversal / year_close — no doc page
   }
