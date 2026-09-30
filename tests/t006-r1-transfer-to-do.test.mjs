@@ -37,18 +37,5 @@ test('the create button is disabled when there is nothing ready to transfer', ()
   );
 });
 
-test('the server refuses an SO-linked DO create with no productionOrderIds', () => {
-  const src = readFileSync('src/api/routes/delivery-orders/_helpers.ts', 'utf8');
-  assert.match(
-    src,
-    /if \(salesOrderId && productionOrderIds\.length === 0\) \{/,
-    'this is the authoritative backstop — even a future caller repeating the old mistake must be refused',
-  );
-  const idx = src.indexOf('if (salesOrderId && productionOrderIds.length === 0)');
-  const guardIdx = src.indexOf('const composition = await validateDoComposition');
-  assert.ok(idx > 0 && guardIdx > 0, 'both markers must be present');
-  assert.ok(
-    guardIdx < idx,
-    'the refusal must sit AFTER the point where productionOrderIds is resolved from the request, not before',
-  );
-});
+// The server-side refusal is covered by behaviour, not source text, in
+// tests/do-create-requires-production-orders.test.mjs.

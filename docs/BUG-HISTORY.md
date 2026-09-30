@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-09-30**: newest entry BUG-2026-09-30-223 (branch `test/bug06-do-guard-behavioural`, to staging); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-222 (branch `fix/report-emails-mobile`, to staging); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-221 (branch `fix/overdue-email-mobile`, to staging; -220 is taken on staging); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-29** (branch `chore/sync-main-into-staging`, staging<-main merge): both logs merged; staging's customer-credit entry renumbered BUG-2026-09-28-210 to -218 (main's -210 is the RM stock-qty bug) and staging's DEV-05 dual-key BUG-2026-09-29-216 (PR #572) to -219 (main's -216 is the staging nightly wipe). Newest entry is -219.
@@ -54,6 +55,18 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-09-30-223 — DO create let `items` name an already-delivered production order past the duplicate guard `delivery-orders` 🟡
+
+**Symptom:** BUG-06 (T-006 R1) closed the Sales page entry point, but a create request that carried `items` could still deliver a production order twice. Two shapes got through: `productionOrderIds: [po-2]` with an item for already-delivered `po-1`, and `customerId` plus items with no sales order and no `productionOrderIds`. No UI sends either today; a direct API call could.
+
+**Root cause:** `createDeliveryOrderForPOs` writes `body.items` as sent, but ran `validateDoComposition` only over `body.productionOrderIds`. R1's refusal only fires when a sales order is named. The edit path already derived its guard ids from the items; create did not.
+
+**Fix:** create guards the union of `body.productionOrderIds` and every `productionOrderId` in `body.items`. Those POs are also loaded, so the consignment-PO refusal, customer/hub inference and rack snapshot cover them too.
+
+**Test:** `tests/do-create-requires-production-orders.test.mjs` drives the real create function on a fake DB that logs every statement, including batched writes. The two new cases wrote a second DO for `po-1` on the old code. It also replaces the source-text check for R1's server refusal in `t006-r1-transfer-to-do.test.mjs`.
 
 ---
 
