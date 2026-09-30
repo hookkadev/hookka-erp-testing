@@ -1469,3 +1469,30 @@ export async function pushNewlyCreatedJobCardsToSheet(
   }
 }
 
+/**
+ * Which DO each production order shows in the SO detail page's "Linked
+ * Production Orders" Delivery column (BUG-2026-09-30-224, class C21).
+ *
+ * A production order can sit on a CANCELLED DO and on the live DO that
+ * replaced it, and the item rows come back in no chosen order. A live DO
+ * always beats a cancelled one; a cancelled DO shows only when nothing live
+ * does. Two live DOs (a split delivery) keep the first seen: display only,
+ * it decides no identity or money.
+ */
+export function buildPoDeliveryMap(
+  items: ReadonlyArray<{ productionOrderId: string; deliveryOrderId: string }>,
+  dos: ReadonlyArray<{ id: string; doNo: string; status: string }>,
+): Map<string, { doNo: string; status: string }> {
+  const doById = new Map(dos.map((d) => [d.id, d]));
+  const out = new Map<string, { doNo: string; status: string }>();
+  for (const di of items) {
+    const d = doById.get(di.deliveryOrderId);
+    if (!d) continue;
+    const prev = out.get(di.productionOrderId);
+    if (!prev || (prev.status === "CANCELLED" && d.status !== "CANCELLED")) {
+      out.set(di.productionOrderId, { doNo: d.doNo, status: d.status });
+    }
+  }
+  return out;
+}
+

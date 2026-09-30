@@ -1,5 +1,7 @@
 # Sales — Module Guide
 
+> **Last verified: 2026-09-30** (branch `fix/staging-so-detail-live-do`, BUG-2026-09-30-224): SO detail's per-PO delivery column now comes from `buildPoDeliveryMap` (`sales-orders/_helpers.ts:1482`), which prefers a live DO over a cancelled one; `app.put("/:id")` anchor moved to :3202. Nothing else re-checked.
+
 > **Last verified: 2026-09-30** (branch `feat/staging-stage-skip`, STAGING ONLY): `SalesOrderDetailPage` anchor re-measured (:560) and the staging-only "skip production stages" card noted. Nothing else re-checked.
 
 > **Last verified: 2026-09-29** (branch `chore/sync-main-into-staging`, staging<-main merge): the symbol table anchors re-derived (create.tsx :2415 / :3052, detail.tsx :559, sales-orders.ts :1748 / :3206 / :2533; sales-orders.ts is 5,954 lines). Nothing else re-checked.
@@ -90,7 +92,7 @@ Owns the customer-facing order lifecycle: **Sales Orders** (SO) and their line i
 1. **Create SO** — `app.post("/")` `sales-orders.ts:1748`. Validates/normalizes items → item-catalog-snap enrich (import at `:42`) → sofa-combo repricing via `runSofaComboPass` at `:2292` (guarded by `if (!isServiceOrder)` at `:2252`) → insert SO + items (`:2343`) → invalidate list snapshot.
 2. **Confirm / status cascade (DRAFT/PENDING → IN_PRODUCTION)** — `app.post("/:id/confirm")` `sales-orders.ts:2533`. Idempotent; flips status, writes `so_status_changes` (autoActions JSON), and calls `createProductionOrdersForSO` (`_helpers.ts:576`, called at `sales-orders.ts:2701`; a second call site for the PUT path sits at `:4114`) to insert one PO per item. Further transitions cascade via `cascadeSOStatusToPOs` (`_helpers.ts:773`).
 3. **Sofa-combo pricing** — `runSofaComboPass` `sofa-combo-pass.ts:132` (resolves base prices via `resolveLineBasePriceSen` `:76`, `seatHeightOf` `:64`) → calls `applySofaCombos` `sofa-combo.ts:209` which subset-matches lines (`findComboSubset` `:98`, module-private) and returns `newBaseByKey` + total discount; per-unit split via `distributeComboUnitPrices` (`:165`). Called from SO POST (`sales-orders.ts:2253`) and PUT (`:3799`) — those are the ONLY two call sites.
-4. **Edit SO** — `app.put("/:id")` `sales-orders.ts:3206`. Re-resolves items, re-runs `runSofaComboPass` at `:3912` (old full-price combo SOs re-price down here), re-cascades status/locks.
+4. **Edit SO** — `app.put("/:id")` `sales-orders.ts:3202`. Re-resolves items, re-runs `runSofaComboPass` at `:3912` (old full-price combo SOs re-price down here), re-cascades status/locks.
 5. **Copy-from-source (draft picker)** — `CopyFromSourceModal` `create.tsx:2411` (2-step) + backend `app.post("/copy-for-service-order")` `sales-orders.ts:5434`.
 
 ## Key functions / sections (locate-to-function)
@@ -105,11 +107,12 @@ Owns the customer-facing order lifecycle: **Sales Orders** (SO) and their line i
 | `LineItemCard` | `src/pages/sales/create.tsx:3052` | Per-line item editor |
 | `SalesOrderDetailPage` | `src/pages/sales/detail.tsx:560` | SO detail; linked POs/JCs/DOs/invoices |
 | `app.post("/")` (create) | `src/api/routes/sales-orders.ts:1748` | SO create + combo pass + snapshot invalidation |
-| `app.put("/:id")` (edit) | `src/api/routes/sales-orders.ts:3206` | SO edit + re-run combo pass |
+| `app.put("/:id")` (edit) | `src/api/routes/sales-orders.ts:3202` | SO edit + re-run combo pass |
 | `app.post("/:id/confirm")` | `src/api/routes/sales-orders.ts:2533` | DRAFT/PENDING → IN_PRODUCTION, cascade to POs |
 | `createProductionOrdersForSO` | `sales-orders/_helpers.ts:576` | One production_orders row per SO item |
 | `cascadeSOStatusToPOs` | `sales-orders/_helpers.ts:773` | Propagate SO status change to POs/JCs |
 | `rowToSO` / `rowToSOList` | `sales-orders/_helpers.ts:243 / 307` | Row → API shape (dual-keyed) |
+| `buildPoDeliveryMap` | `sales-orders/_helpers.ts:1482` | SO detail: which DO each linked PO shows (live DO beats cancelled) |
 | `ensurePendingMigrations` | `sales-orders/_helpers.ts:1283` | Runtime column self-apply |
 | `runSofaComboPass` | `src/api/lib/sofa-combo-pass.ts:132` | Wrapper: resolve prices → applySofaCombos → write back |
 | `resolveLineBasePriceSen` | `src/api/lib/sofa-combo-pass.ts:76` | Resolve a line's base price (sen) |
@@ -126,6 +129,7 @@ Owns the customer-facing order lifecycle: **Sales Orders** (SO) and their line i
 - **Snapshot is cache-aside.** `sales_orders_list_snapshot` is only used for unfiltered list fetches; any filtered fetch bypasses the cache. Five `withSnapshot(...)` configs name it — `sales-orders.ts:374 / 452 / 522 / 574 / 601` — each keyed on a different `cache_key` over the same table; the invalidation rationale comment is at `:5827`.
 - **Service orders price 0.** `sales_orders.caseId` marks a service-repair SO; auto-pricing is skipped by design — do not reintroduce it for service orders.
 - **Consignment Notes never carry invoices.** Owner ruling: CN = DO-equivalent; 3PL stays DO-side; amount on CN/CO lists is derived from CO value, not stored. Dispatch/delivered emails are idempotent via folded-lowercase `dispatchemailat` / `deliveredemailat`.
+- **A PO can be on more than one DO.** Cancelling a DO keeps its `delivery_order_items` rows, so a PO moved to a new DO links to both. Anything that shows "the" DO for a PO must prefer the live one; SO detail does this through `buildPoDeliveryMap` (BUG-2026-09-30-224).
 - **Production locks are inviolate.** COMPLETED job_cards / non-PENDING fg_units / cost_ledger references must not be overridden for cosmetic edits.
 - **camelCase columns need a rename-map entry** (`column-rename-map.json`) or they 400 "Invalid request body"; read folded-lowercase cols dual-keyed (`r.camelCase ?? r.snake_case`). Prefer snake_case for new columns.
 

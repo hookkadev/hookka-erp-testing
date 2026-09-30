@@ -115,6 +115,7 @@ import {
   canonicalizeRepairScopesAgainstBom,
   ensurePendingMigrations,
   pushNewlyCreatedJobCardsToSheet,
+  buildPoDeliveryMap,
 } from "./sales-orders/_helpers";
 import type {
   SalesOrderRow,
@@ -3076,7 +3077,8 @@ app.get("/:id", async (c) => {
   // status. Lets the Linked Production Orders table show a real per-line
   // delivery state (DO no. + Delivered/Dispatched/…) instead of the operator
   // cross-checking the Delivery page. Reuses the DOs already fetched above.
-  const poDeliveryMap = new Map<string, { doNo: string; status: string }>();
+  // A live DO beats a cancelled one (BUG-2026-09-30-224).
+  let poDeliveryMap = new Map<string, { doNo: string; status: string }>();
   if (doIds.length > 0) {
     const diRes = await c.var.DB.prepare(
       `SELECT productionOrderId, deliveryOrderId
@@ -3086,13 +3088,7 @@ app.get("/:id", async (c) => {
     )
       .bind(...doIds)
       .all<{ productionOrderId: string; deliveryOrderId: string }>();
-    const doById = new Map(linkedDOs.map((d) => [d.id, d]));
-    for (const di of diRes.results ?? []) {
-      const d = doById.get(di.deliveryOrderId);
-      if (d && !poDeliveryMap.has(di.productionOrderId)) {
-        poDeliveryMap.set(di.productionOrderId, { doNo: d.doNo, status: d.status });
-      }
-    }
+    poDeliveryMap = buildPoDeliveryMap(diRes.results ?? [], linkedDOs);
   }
 
   // Invoices: by SO link OR by any of this SO's DOs. A consolidated invoice
