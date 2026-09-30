@@ -216,6 +216,22 @@ export function payrollMonthFrom(description: string | null | undefined, fallbac
   return fallbackYm;
 }
 
+// Raw-material stock accounts (special type SBS: "STOCK - FABRIC M",
+// "STOCK - WOODEN", "STOCK - B.FILLER" …) default to Raw Materials. A payment
+// booked straight to one is buying material (owner 2026-09-30: the
+// pre-opening fabric repaid to Houzs, 「不要动到 P&L」 — so the bill stays on
+// the stock account and only the cash flow files it). Work-in-progress and
+// finished-goods stock are not raw material. The owner's drags still win.
+export function rawStockAccountSections(coa: ReadonlyMap<string, CoaLite>): Map<string, CfSection> {
+  const out = new Map<string, CfSection>();
+  for (const a of coa.values()) {
+    if (a.sat !== "SBS") continue;
+    if (/WORK[\s-]*IN[\s-]*PROGRESS|FINISHED\s+GOODS|\bWIP\b/i.test(a.name)) continue;
+    out.set(a.code, "RAW_MATERIALS");
+  }
+  return out;
+}
+
 // Distribute an integer total (sen) across weighted buckets so the parts sum
 // EXACTLY to total (largest-remainder method). Used to split one supplier
 // payment across the material lines of the PI it settled.
@@ -491,6 +507,12 @@ export function buildStatement(opts: {
         // The facility account itself is the group ("TRADE FINANCE - HOUZS
         // CENTURY SDN BHD"), its supplier / repayment rows sit under it.
         pCode = a.accountCode;
+      } else if (sec === "RAW_MATERIALS" && a.accountCode && coa.get(a.accountCode)?.sat === "SBS") {
+        // A raw-material stock account files under the purchase parent its
+        // name belongs to ("STOCK - FABRIC M" → PURCHASE - FABRIC), not under
+        // the balance-sheet STOCK parent.
+        const p = RM_LINE_PARENT[rawMaterialLineFor(a.label, stockGroupOverride)];
+        if (p && coa.has(p)) pCode = p;
       } else if (a.accountCode) {
         const p = coa.get(a.accountCode)?.parentCode ?? undefined;
         if (p && p !== a.accountCode && coa.has(p)) pCode = p;
