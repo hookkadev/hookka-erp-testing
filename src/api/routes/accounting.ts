@@ -8440,6 +8440,10 @@ async function buildDrillLines(
   const isCn = (t: string) => t === "credit_note" || t.startsWith("credit_note_");
   const isDn = (t: string) => t === "debit_note" || t.startsWith("debit_note_");
   const isOr = (t: string) => t === "official_receipt" || t.startsWith("official_receipt_");
+  const isSp = (t: string) => t.startsWith("supplier_payment");
+  const isOp = (t: string) => t.startsWith("other_party_payment");
+  const isRc = (t: string) => t === "payment" || (t.startsWith("payment_") && !t.startsWith("payment_voucher"));
+  const isPcn = (t: string) => t.startsWith("purchase_credit_note");
   try {
     const inv = await chunked<Record<string, unknown>>(idsOf(isInvoice), (ph) => `SELECT id, invoiceNo, salesOrderId, doNo, customerName FROM invoices WHERE id IN (${ph})`);
     const soIds = [...new Set(inv.map((r) => str(r.salesOrderId ?? r.sales_order_id)).filter(Boolean))];
@@ -8500,6 +8504,77 @@ async function buildDrillLines(
   try {
     for (const r of await chunked<Record<string, unknown>>(idsOf(isOr), (ph) => `SELECT id, receivedFrom, description FROM official_receipts WHERE id IN (${ph})`)) {
       setInfo(isOr, String(r.id), { party: str(r.receivedFrom ?? r.received_from) || null, header: str(r.description) || null });
+    }
+  } catch { /* the line keeps its own text */ }
+  // The documents that mostly sit on balance-sheet accounts (the balance-sheet
+  // drill, owner 2026-09-30): a supplier payment names the supplier and lists
+  // the PIs it settled; an other-creditor payment names the creditor and its
+  // bills; a customer receipt names the customer; a purchase credit note the
+  // supplier. A payment made through a payment voucher takes the voucher's
+  // purpose as its description.
+  const pvPurposeByNo = new Map<string, string>();
+  try {
+    const payNos = [...new Set([...idsOf(isSp), ...idsOf(isOp)])];
+    for (const r of await chunked<Record<string, unknown>>(payNos, (ph) => `SELECT pvNo, description FROM payment_vouchers WHERE pvNo IN (${ph})`)) {
+      const purpose = str(r.description);
+      if (purpose) pvPurposeByNo.set(str(r.pvNo ?? r.pv_no), purpose);
+    }
+  } catch { /* description stays the ledger text */ }
+  try {
+    const partyByPay = new Map<string, string>();
+    const piByPay = new Map<string, Set<string>>();
+    for (const r of await chunked<Record<string, unknown>>(idsOf(isSp), (ph) => `SELECT payment_no, purchase_invoice_id, supplier_name FROM supplier_payments WHERE payment_no IN (${ph}) AND org_id = ?`, [orgId])) {
+      const no = str(r.paymentNo ?? r.payment_no), pid = str(r.purchaseInvoiceId ?? r.purchase_invoice_id), nm = str(r.supplierName ?? r.supplier_name);
+      if (no && nm && !partyByPay.has(no)) partyByPay.set(no, nm);
+      if (no && pid) (piByPay.get(no) ?? piByPay.set(no, new Set()).get(no)!).add(pid);
+    }
+    const piNo = new Map<string, string>();
+    for (const r of await chunked<Record<string, unknown>>([...new Set([...piByPay.values()].flatMap((s) => [...s]))], (ph) => `SELECT id, piNo FROM purchase_invoices WHERE id IN (${ph})`)) {
+      piNo.set(String(r.id), str(r.piNo ?? r.pi_no));
+    }
+    for (const no of new Set([...partyByPay.keys(), ...piByPay.keys()])) {
+      const ids = [...(piByPay.get(no) ?? [])];
+      setInfo(isSp, no, {
+        party: partyByPay.get(no) ?? null,
+        docs: ids.length ? ids.map((id) => piNo.get(id) || (id.startsWith("pi-ob-") ? "Opening" : id)).join(", ") : null,
+        header: pvPurposeByNo.get(no) ?? "Supplier payment",
+      });
+    }
+  } catch { /* the line keeps its own text */ }
+  try {
+    const partyByPay = new Map<string, string>();
+    const billsByPay = new Map<string, Set<string>>();
+    for (const r of await chunked<Record<string, unknown>>(idsOf(isOp), (ph) => `SELECT payment_no, bill_id, party_name FROM other_party_payments WHERE payment_no IN (${ph})`)) {
+      const no = str(r.paymentNo ?? r.payment_no), bid = str(r.billId ?? r.bill_id), nm = str(r.partyName ?? r.party_name);
+      if (no && nm && !partyByPay.has(no)) partyByPay.set(no, nm);
+      if (no && bid) (billsByPay.get(no) ?? billsByPay.set(no, new Set()).get(no)!).add(bid);
+    }
+    const billNo = new Map<string, string>();
+    for (const r of await chunked<Record<string, unknown>>([...new Set([...billsByPay.values()].flatMap((s) => [...s]))], (ph) => `SELECT id, billNo FROM other_party_bills WHERE id IN (${ph})`)) {
+      billNo.set(String(r.id), str(r.billNo ?? r.bill_no));
+    }
+    for (const no of new Set([...partyByPay.keys(), ...billsByPay.keys()])) {
+      const ids = [...(billsByPay.get(no) ?? [])];
+      setInfo(isOp, no, {
+        party: partyByPay.get(no) ?? null,
+        docs: ids.length ? ids.map((id) => billNo.get(id) || id).join(", ") : null,
+        header: pvPurposeByNo.get(no) ?? "Other creditor payment",
+      });
+    }
+  } catch { /* the line keeps its own text */ }
+  try {
+    for (const r of await chunked<Record<string, unknown>>(idsOf(isRc), (ph) => `SELECT id, customerName FROM payment_records WHERE id IN (${ph})`)) {
+      setInfo(isRc, String(r.id), { party: str(r.customerName ?? r.customer_name) || null, header: "Receipt" });
+    }
+  } catch { /* the line keeps its own text */ }
+  try {
+    for (const r of await chunked<Record<string, unknown>>(idsOf(isPcn), (ph) => `SELECT id, noteNumber, supplierName, piNo FROM purchase_credit_notes WHERE id IN (${ph})`)) {
+      const pi = str(r.piNo ?? r.pi_no);
+      setInfo(isPcn, String(r.id), {
+        ref1: str(r.noteNumber ?? r.note_number) || null,
+        party: str(r.supplierName ?? r.supplier_name) || null,
+        docs: pi ? `PI ${pi}` : null,
+      });
     }
   } catch { /* the line keeps its own text */ }
 

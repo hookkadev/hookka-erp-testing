@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-30**: branch `fix/drill-names-on-bs-documents` added below (its entry is the newest).
 > **Last verified: 2026-09-30**: branch `feat/bs-inline-drill` added below (its entry is the newest).
 > **Last verified: 2026-09-30**: #606 (P&L drill like the Cash Flow drill) closed ✅ below with its prod check.
 > **Last verified: 2026-09-30**: branch `feat/pl-drill-like-cashflow` added below (its entry is the newest).
@@ -53,6 +54,14 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
 ---
+
+## 2026-09-30 — 🔵 Balance-sheet drill: name the counterparty of payments, receipts and purchase credit notes (follow-up to #607)(branch `fix/drill-names-on-bs-documents`)
+
+1. Measured on prod after #607 (read-only, every account May–Sep): supplier payments, other-creditor payments, customer
+   receipts and purchase credit notes carried no Ref. 2 — the shared line builder only knew the documents that hit the P&L.
+2. 🔵 `buildDrillLines` names them (supplier / creditor / customer / supplier), lists the PIs / bills a payment settled on
+   hover, and a voucher-made payment takes the voucher's purpose. JVs, transfers and payroll entries have no counterparty.
+   Guard `tests/drill-bs-document-names.test.mjs`.
 
 ## 2026-09-30 — 🔵 Balance Sheet inline drill (owner「Balance sheet 也要这样点开看」)(branch `feat/bs-inline-drill`)
 
