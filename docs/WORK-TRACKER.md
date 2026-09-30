@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-30**: branch `feat/production-overview-cards` added below (open, its entry is the newest).
 > **Last verified: 2026-09-30**: branch `test/bug06-do-guard-behavioural` (to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-09-30**: branch `feat/m-warehouse-movement-time` (to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-09-29**: branch `fix/report-emails-mobile` (to `staging`) added below as BUG-36 item 6; item 5 marked merged (#582).
@@ -94,6 +95,14 @@ Verified: `tsc -p tsconfig.app.json` exit 0; `npm test` all pass. NOT verified o
 4. 🔵 **Bug-id collisions — followed `main`:** main's numbers stand; staging's colliding entries renumbered after main's max (194) and every staging-side reference (code comments, tests, docs, short forms) moved with them: 09-23-184→196, 185→197; 09-24-182→198, 183→199, 184→200, 185→201, 186→202 (186b→202b), 187→203, 188→204, 189→205, 190→206, 191→207; rack-scan 09-25-193→195.
 tsc strict 0; `npm test` 5047 pass / 0 fail.
 ---
+
+## 2026-09-30 — 🔵 Production Overview: Cards view, one card per work order (branch `feat/production-overview-cards` → `staging`)
+- 1. 🔵 Cards / Grid toggle on the Overview; opens on Cards every time, choice not saved. Grid is the old matrix, unchanged (resize, saved widths).
+- 2. 🔵 Card = one-line header bar (checkbox, SO ID + hold pill, Customer PO, product + specs, hold reason, customer | Special, Qty, Cust DD, Our DD) over a stage pipeline (existing `CellBox`, same colours). No sideways scroll at 1280px+.
+- 3. 🔵 Stages from `overviewStages()` (`production/utils.ts`): today's 9 in today's order and labels, plus any other `isProduction` dept from `/api/departments` appended by sequence. Overview only; dept tabs / print keep `DEPARTMENTS`.
+- 4. 🔵 Sort / filter / select-all move into a sticky 2-line header inside the cards' scroll box (same popovers, same saved `hookka-production-overview-table-state`). Click bar = select, double-click = open SO/CO, click stage = date picker.
+- 5. 🔵 Perf: each card is one virtual row (82px, `OverviewVirtualRows`); `WorkOrderCard` / `StageCell` are `React.memo` with stable handlers.
+- Guard: `tests/production-overview-cards.test.mjs`.
 
 ## 2026-09-28 — 🔵 DEV-20 Raw Material UOM options per category (branch `feat/rm-uom-options` → `staging`)
 
