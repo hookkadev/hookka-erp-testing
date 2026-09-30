@@ -53,7 +53,10 @@ export type StageClick = (
 // stage label / pill / date) so the virtualizer's estimate is exact and fast
 // scrolling never jumps. The row sets this height explicitly.
 export const CARD_HEIGHT = 128;
-export const pipelineCols = (n: number) => `repeat(${n}, minmax(0, 1fr))`;
+// Narrow list (< 56rem, the cards' @container, e.g. a tablet or a half-width
+// window): two-line header + stages in two rows, so labels and pills keep
+// their size instead of squeezing nine columns. 8px gap + 202px card.
+export const CARD_HEIGHT_NARROW = 210;
 
 // Lifecycle look shared by the Grid rows and the Card header bar: amber for
 // ON_HOLD, grey + strikethrough for CANCELLED, warm highlight when ticked

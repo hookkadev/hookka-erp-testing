@@ -3,10 +3,10 @@ import { AlertTriangle, Building2 } from "lucide-react";
 import type { Cell, ProductionOrder } from "../types";
 import {
   CARD_HEIGHT,
+  CARD_HEIGHT_NARROW,
   cellFor,
   fmtShortDate,
   overviewRowLook,
-  pipelineCols,
   stageKind,
   stageTint,
   type CellFlash,
@@ -24,6 +24,10 @@ import { ProductDetailLine } from "./ProductDetailLine";
 // needs no layout change and nothing scrolls sideways. Shared helpers
 // (overviewRowLook, stageTint, stageKind, CARD_HEIGHT) live in ../utils.
 // The Grid view keeps the original CellBox colours; this look is Cards only.
+//
+// Width: the cards' scroll box is an @container. Below 56rem (@max-4xl) a
+// card switches to a two-line header and puts its stages in two rows
+// (ceil(n / 2) columns), with its own fixed height (CARD_HEIGHT_NARROW).
 
 const PILL: Record<StageKind, string> = {
   done: "bg-[#2D5A54] text-white",
@@ -62,7 +66,7 @@ const StageCell = memo(function StageCell({
         {stage.name}
       </span>
       <span
-        className={`mt-0.5 h-6 w-14 flex items-center justify-center gap-0.5 rounded-md text-xs font-semibold tabular-nums ${PILL[kind]}`}
+        className={`mt-0.5 h-6 w-full max-w-14 flex items-center justify-center gap-0.5 rounded-md text-xs font-semibold tabular-nums ${PILL[kind]}`}
       >
         {kind === "overdue" && <AlertTriangle className="h-3 w-3" strokeWidth={2.5} />}
         {kind === "skipped" ? "N/A" : `${cell.doneCards}/${cell.totalCards}`}
@@ -101,7 +105,10 @@ export function StagePipeline({
   // another card doesn't rebuild these cells.
   const cells = useMemo(() => stages.map((s) => cellFor(order, s.code, orders)), [order, orders, stages]);
   return (
-    <div className="grid gap-1" style={{ gridTemplateColumns: pipelineCols(stages.length) }}>
+    <div
+      className="grid gap-1 grid-cols-[repeat(var(--cols),minmax(0,1fr))] @max-4xl:grid-cols-[repeat(var(--cols-narrow),minmax(0,1fr))]"
+      style={{ "--cols": stages.length, "--cols-narrow": Math.ceil(stages.length / 2) } as React.CSSProperties}
+    >
       {stages.map((s, i) => (
         <StageCell
           key={s.code}
@@ -132,32 +139,34 @@ export function WorkOrderHeader({
   const look = overviewRowLook(order, selected, "hover:bg-[#FAF8F4]");
   return (
     <div
-      className={`h-7 -mx-1 px-1 rounded flex items-center justify-between gap-4 cursor-pointer text-xs ${look.rowCls}`}
+      className={`min-h-7 -mx-1 px-1 rounded flex flex-wrap items-center gap-x-2.5 gap-y-0.5 cursor-pointer text-xs ${look.rowCls}`}
       // Single click toggles selection, double click opens the order — same
       // as a Grid row.
       onClick={() => onToggle(order.id)}
       onDoubleClick={() => onOpen(order)}
     >
-      <div className="flex items-center gap-2.5 min-w-0">
-        <input
-          type="checkbox"
-          aria-label={`Select order ${order.poNo}`}
-          checked={selected}
-          onChange={() => onToggle(order.id)}
-          onClick={(e) => e.stopPropagation()}
-          onDoubleClick={(e) => e.stopPropagation()}
-          className="cursor-pointer flex-shrink-0"
-        />
-        <span className="text-[13px] font-bold text-[#1F1D1B] tabular-nums flex-shrink-0">{order.poNo}</span>
-        {look.pillLabel && (
-          <span
-            className={`text-[9px] font-semibold px-1.5 py-[1px] rounded uppercase tracking-wide no-underline cursor-default flex-shrink-0 ${look.pillCls}`}
-            title={look.holdTooltip || undefined}
-          >
-            {look.pillLabel}
-          </span>
-        )}
-        <div className="flex items-center gap-1.5 min-w-0 overflow-hidden whitespace-nowrap text-[#6B7280]">
+      <input
+        type="checkbox"
+        aria-label={`Select order ${order.poNo}`}
+        checked={selected}
+        onChange={() => onToggle(order.id)}
+        onClick={(e) => e.stopPropagation()}
+        onDoubleClick={(e) => e.stopPropagation()}
+        className="cursor-pointer flex-shrink-0"
+      />
+      <span className="h-7 flex items-center text-[13px] font-bold text-[#1F1D1B] tabular-nums flex-shrink-0">{order.poNo}</span>
+      {look.pillLabel && (
+        <span
+          className={`text-[9px] font-semibold px-1.5 py-[1px] rounded uppercase tracking-wide no-underline cursor-default flex-shrink-0 ${look.pillCls}`}
+          title={look.holdTooltip || undefined}
+        >
+          {look.pillLabel}
+        </span>
+      )}
+      {/* Product / specs / PO / hold reason / customer. Wide: fills the space
+          between the SO ID and the badges. Narrow: drops to its own line. */}
+      <div className="flex-1 min-w-0 h-7 flex items-center gap-2 text-[#6B7280] @max-4xl:order-last @max-4xl:basis-full @max-4xl:h-[18px] @max-4xl:pl-6">
+        <div className="min-w-0 flex items-center gap-1.5 overflow-hidden whitespace-nowrap">
           <span className="font-semibold text-[#3A2E22]">{order.productCode}</span>
           <span>·</span>
           <ProductDetailLine order={order} />
@@ -168,15 +177,15 @@ export function WorkOrderHeader({
             </span>
           )}
         </div>
-        <span className="flex items-center gap-1 text-[#6B7280] min-w-[60px] truncate" title={order.customerName}>
+        <span className="flex items-center gap-1 flex-shrink-0 max-w-[40%] truncate" title={order.customerName}>
           <Building2 className="h-3 w-3 flex-shrink-0 text-[#9CA3AF]" />
           <span className="truncate">{order.customerName}</span>
         </span>
       </div>
-      <div className="flex items-center gap-1.5 flex-shrink-0 tabular-nums">
+      <div className="ml-auto flex items-center gap-1.5 flex-shrink-0 tabular-nums">
         {order.specialOrder && (
           <span
-            className="rounded-md bg-[#FBEAE7] px-2 py-0.5 text-[11px] font-semibold text-[#991B1B] truncate max-w-[160px]"
+            className="rounded-md bg-[#FBEAE7] px-2 py-0.5 text-[11px] font-semibold text-[#991B1B] truncate max-w-[160px] @max-4xl:max-w-[90px]"
             title={order.specialOrder}
           >
             {order.specialOrder}
@@ -192,10 +201,9 @@ export function WorkOrderHeader({
 
 // One virtual row. Memoized: with stable handlers from ProductionPage, a
 // checkbox tick re-renders only the ticked card, and a scroll frame re-renders
-// none of the already-mounted ones. The row's height is set explicitly so it
-// always equals CARD_HEIGHT (the virtualizer estimate). The stage grid sits
-// 19px in from the row edge (8px row padding + 1px border + 10px card
-// padding); the sticky stage header in ProductionPage uses the same inset.
+// none of the already-mounted ones. The row's height is fixed (CARD_HEIGHT,
+// or CARD_HEIGHT_NARROW in a narrow list) so every card is the same height;
+// the virtualizer measures each row, so the narrow height needs no estimate.
 export const WorkOrderCard = memo(function WorkOrderCard({
   index,
   start,
@@ -225,8 +233,14 @@ export const WorkOrderCard = memo(function WorkOrderCard({
     <div
       ref={measureRef}
       data-index={index}
-      className="absolute top-0 left-0 right-0 px-2 pt-2"
-      style={{ height: CARD_HEIGHT, transform: `translateY(${start}px)` }}
+      className="absolute top-0 left-0 right-0 px-2 pt-2 h-(--card-h) @max-4xl:h-(--card-h-narrow)"
+      style={
+        {
+          "--card-h": `${CARD_HEIGHT}px`,
+          "--card-h-narrow": `${CARD_HEIGHT_NARROW}px`,
+          transform: `translateY(${start}px)`,
+        } as React.CSSProperties
+      }
     >
       <div
         className={`h-full overflow-hidden rounded-lg border bg-white p-2.5 shadow-sm ${
