@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-30**: branch `feat/m-warehouse-movement-time` (to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-09-29**: branch `fix/report-emails-mobile` (to `staging`) added below as BUG-36 item 6; item 5 marked merged (#582).
 > **Last verified: 2026-09-29**: branch `fix/overdue-email-mobile` (to `staging`) added below as BUG-36 item 5; the duplicated item 4 line removed.
 > **Last verified: 2026-09-29**: branch `chore/sync-main-into-staging` (staging<-main sync): DEV-20 conflicts take main's superset (`loadUomConfig` + `wholeUoms`), staging's R17 "On draft DO" label kept; staging's BUG-2026-09-28-210 (credit control) renumbered to -218.
@@ -41,6 +42,9 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-09-30 — 🔵 /m Warehouse: movements show the time, not just the date (branch `feat/m-warehouse-movement-time` → `staging`)
+- DEV-09 asks for "Date / Time" on movements. `WarehouseScreen.tsx` `MovementRow` and `MovementCard` now format `createdAt` with `dateTimeShort` ("28 Sep, 14:05") instead of `dateShort`. Display only, no API or schema change.
 
 
 ## 2026-09-29 — 🔵 Org Chart photo UX split + Users drawer photo upload (branch `feat/org-chart-photo-ux` → `staging`, continues BUG-2026-09-29-214's feature)
