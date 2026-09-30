@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-30**: branch `fix/pillow-fab-sew-sticker` (DEV-26) added below (its entry is the newest).
 > **Last verified: 2026-09-30**: #616 (BUG-2026-09-30-228, receipt drill text) closed ✅ below with its prod check.
 > **Last verified: 2026-09-30**: branch `fix/drill-receipt-description` added below (its entry is the newest); the #614 entry corrected (its receipt premise was wrong).
 > **Last verified: 2026-09-30**: branch `feat/org-chart-to-main` (org-chart photos + Add Department, staging → main) added below (its entry is the newest).
@@ -59,6 +60,17 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+
+## 2026-09-30 — 🔵 DEV-26 Pillow sticker for Fab Sew (Siti, High) (branch `fix/pillow-fab-sew-sticker` → `main`, BUG-2026-09-30-229)
+
+Ask (DEV-26): a pillow sticker for the sewing department to scan. Fab Cut already has a pillow QR, Fab Sew does not.
+
+1. 🔵 Pillows print a Fab Sew sticker, from both the Fab Sew page and "Print Fab Sew Stickers" on the Fab Cut page. One QR per SO ID row; the normal Fab Sew layout.
+2. ⚪ Not in scope, decided with the requester's side: a non-sewing worker who scans a pillow sticker still gets "Upholstery already complete" (a pillow has no Upholstery card; nothing is written). Left as is.
+3. ⚪ Noticed, not fixed: A02 armrest lines print two Fab Sew stickers per SO ID ("A02 (main)" and "A02") because those orders carry two sets of Fab Sew cards. Needs its own ticket.
+
+Measured on staging 2026-09-30 (read-only): 392 open accessory orders on Fab Sew, 320 with no sticker, all pillows (Square Pillow 280, Long Pillow 38, 5543-Long Pillow 2). Prod data is UNMEASURED.
 
 
 ## 2026-09-29 — 🔵 Org Chart photo UX split + Users drawer photo upload (branch `feat/org-chart-photo-ux` → `staging`, continues BUG-2026-09-29-214's feature)

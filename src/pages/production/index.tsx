@@ -68,7 +68,7 @@ import type { BaseRowsResponse } from "./baserows.worker";
 // loader (Fab Cut tab) runs this synchronously on a freshly-fetched,
 // all-dept order set so its DeptRow output is byte-identical to the grid's
 // — see loadFabSewStickers.
-import { buildOnePickerEntry, buildBaseRows, type PickerByDept } from "./baserows-core";
+import { buildOnePickerEntry, buildBaseRows, travelsWithBaseSticker, type PickerByDept } from "./baserows-core";
 import { CellBox } from "./components/CellBox";
 import { WorkOrderCard } from "./components/OverviewCards";
 import { CheckboxMultiSelect } from "@/components/checkbox-multi-select";
@@ -4466,9 +4466,7 @@ export default function ProductionPage({
       // The BASE sticker is the one that travels with the assembly.
       if (
         (activeTab === "FAB_SEW" || activeTab === "FAB_CUT") &&
-        (row.wipType === "CUSHION" ||
-          row.wipType === "ARMREST" ||
-          row.wipType === "HEADREST")
+        travelsWithBaseSticker(row)
       ) {
         continue;
       }
@@ -4759,13 +4757,7 @@ export default function ProductionPage({
         // upholstery assembly in one pass — skip the Back Cushion / Armrest /
         // Headrest sub-component JCs; the BASE sticker travels with the
         // assembly.
-        if (
-          row.wipType === "CUSHION" ||
-          row.wipType === "ARMREST" ||
-          row.wipType === "HEADREST"
-        ) {
-          continue;
-        }
+        if (travelsWithBaseSticker(row)) continue;
         // FAB_SEW shared sticker — sentinel opId (one sticker serves both
         // Sewing and Upholstery; completing dept decided by who scans). Fans
         // out PER PIECE (Wei Siang 2026-06-06), mirroring the FAB_SEW branch of

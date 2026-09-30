@@ -12,6 +12,20 @@
 import type { JobCard, ProductionOrder, DeptRow, DeptSched, PrevState } from "./types";
 import { jcMinutesTotal } from "../../lib/job-card-minutes";
 
+// A Fab Cut / Fab Sew row that gets NO sticker of its own: a sofa's Back
+// Cushion / Armrest / Headrest is sewn with the base, so the BASE sticker
+// travels with the whole assembly. An ACCESSORY is its own item even when its
+// BOM borrows one of those types (pillows are typed SOFA_CUSHION, the closest
+// of the six BOM types), so it keeps its sticker (BUG-2026-09-30-229).
+export const travelsWithBaseSticker = (row: {
+  wipType?: string;
+  category?: string;
+}): boolean =>
+  (row.wipType === "CUSHION" ||
+    row.wipType === "ARMREST" ||
+    row.wipType === "HEADREST") &&
+  (row.category || "").toUpperCase() !== "ACCESSORY";
+
 // Per (poId, deptCode, wipKey) -> JobCard index. The outer Map keys on
 // deptCode; the inner Map keys on wipKey ("" when none) plus a "*" entry
 // for the latest-due fallback across all wipKeys in that (PO, dept).
