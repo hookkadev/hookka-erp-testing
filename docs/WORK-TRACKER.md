@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-30**: #616 (BUG-2026-09-30-228, receipt drill text) closed ✅ below with its prod check.
 > **Last verified: 2026-09-30**: branch `fix/drill-receipt-description` added below (its entry is the newest); the #614 entry corrected (its receipt premise was wrong).
 > **Last verified: 2026-09-30**: branch `feat/org-chart-to-main` (org-chart photos + Add Department, staging → main) added below (its entry is the newest).
 > **Last verified: 2026-09-30**: #614 (drill labels / empty descriptions) closed ✅ below with its prod check.
@@ -95,14 +96,17 @@ Verified: `tsc -p tsconfig.app.json` exit 0; `npm test` all pass. NOT verified o
 tsc strict 0; `npm test` 5047 pass / 0 fail.
 ---
 
-## 2026-09-30 — 🔵 Drills: an official receipt reads its own text, never a lone "from" (BUG-2026-09-30-228)(branch `fix/drill-receipt-description`)
+## 2026-09-30 — ✅ Drills: an official receipt reads its own text, never a lone "from" (BUG-2026-09-30-228)(#616 d68542b0 MERGED, deployed, prod-verified)
 
 1. Owner opened the receipt the drill showed as "from": its header note is empty and its text is on its line. The "from" was
    the drill's own doing — the bank leg's text "<no> · from <payer>" with the payer taken out (it is Ref. 2). #614 below had
    read it as typed data; it was not.
-2. 🔵 `officialReceiptTexts` (one lookup for the P&L / balance-sheet and Cash Flow drills): the note, else the receipt lines'
+2. ✅ `officialReceiptTexts` (one lookup for the P&L / balance-sheet and Cash Flow drills): the note, else the receipt lines'
    text, else "Official receipt". `tidyDescription` never leaves a lone "to" / "from". `ownDescription` back to
    "empty → none". Guard `tests/drill-tf-interest-and-corrections.test.mjs`.
+3. ✅ Prod (measured): the owner's receipt now reads its line text in the balance-sheet (bank account), P&L (income account)
+   and Cash Flow drills, payer as Ref. 2; every balance-sheet account May–Sep and every Cash Flow line of the year to
+   September tied (c/f equal to the sheet), and no drill line anywhere reads a lone "from" / "to".
 
 ## 2026-09-30 — ✅ Drills: an edited document is not labelled, a description that says nothing is not shown (follow-up to #612)(#614 ba33071b MERGED, deployed, prod-verified)
 
