@@ -26,7 +26,7 @@ test("Ref. 2 is the counterparty for every kind of document; the related documen
   assert.match(ep, /SELECT id, description FROM journal_entries WHERE id IN/, "JV → its own description");
   assert.match(ep, /\[\[isCn, "credit_notes", "Credit note"\], \[isDn, "debit_notes", "Debit note"\]\]/);
   assert.match(ep, /SELECT id, receivedFrom, description FROM official_receipts WHERE id IN/, "official receipt → payer");
-  assert.match(ep, /description: r\?\.header \?\? tidyDescription\(l\.description, ref1, party\),/);
+  assert.match(ep, /description: r\?\.header \? \(variant \? `\$\{r\.header\} · \$\{variant\}` : r\.header\) : tidyDescription\(l\.description, ref1, party\),/);
   assert.match(ep, /ref2: party,\n\s+docs: r\?\.docs \?\? null,/);
   assert.match(ep, /header: "Sales invoice",/);
   assert.match(ep, /header: "Purchase invoice",/);

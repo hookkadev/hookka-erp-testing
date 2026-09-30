@@ -106,3 +106,19 @@ export function tidyDescription(
     .trim();
   return s || base;
 }
+
+// What a correction entry is, said after the document's own description (the
+// drills show the document's description instead of the ledger text, which
+// used to say "Void · PI …"): an edited document's old posting reversed and
+// its new one posted, a void, an unvoid, a reversal, a PI edit's adjustment,
+// a PI's GL re-sync. An ordinary posting → "".
+export function drillVariant(sourceType: string, sourceId = ""): string {
+  const t = sourceType.split(":")[0];
+  if (/_restate_rev$/.test(t)) return "reversed on edit";
+  if (/_restate_post$/.test(t)) return sourceType.includes(":") ? "re-posted on edit" : "GL re-sync";
+  if (/_unvoid$/.test(t)) return "unvoid";
+  if (/_void$/.test(t)) return "void";
+  if (/_reversal$/.test(t)) return "reversal";
+  if (/:edit-\d+$/.test(sourceId)) return "edit adjustment";
+  return "";
+}

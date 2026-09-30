@@ -38,13 +38,13 @@ import { ensurePartialPaymentColumns } from "../lib/ensure-partial-payment";
 import { ensureFinanceOrgColumns } from "../lib/ensure-finance-org";
 import { apRowBeforeOpening, legBeforeOpening, rowBeforeOpening } from "../../lib/opening-floor";
 import { applyOpeningSlice, windowCoversMonth } from "../../lib/opening-slice";
-import { docNoFromDescription, otherSideCodes, tidyDescription } from "../../lib/ledger-drill";
+import { docNoFromDescription, drillVariant, otherSideCodes, tidyDescription } from "../../lib/ledger-drill";
 import { labourInjectMonths } from "../../lib/labour-inject";
 import { projectedLabourByDept } from "../lib/labour-projection";
 import { groupPayslipsByMonthDept, forecastEntryKind, monthHasDeptForecast, labourMappedAccounts } from "../../lib/salary-dept";
 import { ensureTfTables, getTfSources, saveTfSources, loadTfDraws } from "../lib/trade-finance";
 import type { TfSource } from "../lib/trade-finance";
-import { tfTotals } from "../../lib/trade-finance";
+import { tfInterestDrawId, tfTotals } from "../../lib/trade-finance";
 import { buildDeliveredAsOf, fgClosingSen } from "../../lib/fg-closing";
 import { costAsOfByPo } from "../../lib/cost-attribution";
 import { STOCK_TAKE_ITEM_ALIAS_SEED_2026_05 } from "../lib/stock-take-item-alias-seed-2026-05";
@@ -8463,14 +8463,24 @@ async function buildDrillLines(
     }
   } catch { /* the line keeps its own text */ }
   try {
-    for (const r of await chunked<Record<string, unknown>>(idsOf(isPi), (ph) => `SELECT id, piNo, poRef, supplier_invoice_no, supplierName FROM purchase_invoices WHERE id IN (${ph})`)) {
+    // An edit to a posted PI posts its correction under `<PI id>:edit-<time>`
+    // (purchase-invoices.ts): the same PI, so the same supplier.
+    const piSourceIds = new Map<string, Set<string>>(); // PI id → the sourceIds carrying it
+    for (const l of legs) {
+      if (!isPi(l.sourceType)) continue;
+      const id = l.sourceId.replace(/:edit-\d+$/, "");
+      (piSourceIds.get(id) ?? piSourceIds.set(id, new Set()).get(id)!).add(l.sourceId);
+    }
+    for (const r of await chunked<Record<string, unknown>>([...piSourceIds.keys()], (ph) => `SELECT id, piNo, poRef, supplier_invoice_no, supplierName FROM purchase_invoices WHERE id IN (${ph})`)) {
       const supInv = str(r.supplierInvoiceNo ?? r.supplier_invoice_no), po = str(r.poRef ?? r.po_ref);
-      setInfo(isPi, String(r.id), {
-        ref1: str(r.piNo ?? r.pi_no) || null,
-        party: str(r.supplierName ?? r.supplier_name) || null,
-        docs: [supInv && `Supplier invoice ${supInv}`, po && `PO ${po}`].filter(Boolean).join(" · ") || null,
-        header: "Purchase invoice",
-      });
+      for (const sourceId of piSourceIds.get(String(r.id)) ?? []) {
+        setInfo(isPi, sourceId, {
+          ref1: str(r.piNo ?? r.pi_no) || null,
+          party: str(r.supplierName ?? r.supplier_name) || null,
+          docs: [supInv && `Supplier invoice ${supInv}`, po && `PO ${po}`].filter(Boolean).join(" · ") || null,
+          header: "Purchase invoice",
+        });
+      }
     }
   } catch { /* the line keeps its own text */ }
   try {
@@ -8577,6 +8587,33 @@ async function buildDrillLines(
       });
     }
   } catch { /* the line keeps its own text */ }
+  // Trade-finance interest: charged by the lender whose facility account is
+  // the entry's other leg; the hover says whom the draw paid.
+  try {
+    const tfLegs = legs.filter((l) => l.sourceType.startsWith("tf_interest"));
+    if (tfLegs.length) {
+      const lenderByAcct = new Map((await getTfSources(db)).map((s) => [resolve(s.accountCode), s.lenderName] as const));
+      const draws = [...new Set(tfLegs.map((l) => tfInterestDrawId(l.sourceId)))];
+      const paidTo = new Map<string, string>();
+      for (const r of await chunked<Record<string, unknown>>(draws, (ph) => `SELECT payment_no, supplier_name FROM supplier_payments WHERE payment_no IN (${ph}) AND org_id = ?`, [orgId])) {
+        const no = str(r.paymentNo ?? r.payment_no), nm = str(r.supplierName ?? r.supplier_name);
+        if (no && nm && !paidTo.has(no)) paidTo.set(no, nm);
+      }
+      for (const r of await chunked<Record<string, unknown>>(draws.filter((d) => !paidTo.has(d)), (ph) => `SELECT payment_no, party_name FROM other_party_payments WHERE payment_no IN (${ph})`)) {
+        const no = str(r.paymentNo ?? r.payment_no), nm = str(r.partyName ?? r.party_name);
+        if (no && nm && !paidTo.has(no)) paidTo.set(no, nm);
+      }
+      for (const l of tfLegs) {
+        const key = `${l.sourceType}::${l.sourceId}`;
+        const paid = paidTo.get(tfInterestDrawId(l.sourceId));
+        info.set(key, {
+          ref1: tfInterestDrawId(l.sourceId),
+          party: (entryLegs.get(key) ?? []).map((x) => lenderByAcct.get(resolve(x.accountCode)) ?? "").find(Boolean) || null,
+          docs: paid ? `Drawn to pay ${paid}` : null,
+        });
+      }
+    }
+  } catch { /* the line keeps its own text */ }
 
   return legs
     .map((l) => {
@@ -8584,10 +8621,13 @@ async function buildDrillLines(
       const r = info.get(key);
       const ref1 = docNoFromDescription(l.description) ?? r?.ref1 ?? l.sourceId;
       const party = r?.party ?? null;
+      // The document's description replaces the ledger text, so a correction
+      // says what it is after it ("Purchase invoice · void").
+      const variant = drillVariant(l.sourceType, l.sourceId);
       return {
         id: l.id,
         date: l.date,
-        description: r?.header ?? tidyDescription(l.description, ref1, party),
+        description: r?.header ? (variant ? `${r.header} · ${variant}` : r.header) : tidyDescription(l.description, ref1, party),
         otherSide: otherSideCodes(l, entryLegs.get(key) ?? [], resolve).map((code) => ({ code, name: coa.get(code)?.name ?? "" })),
         ref1,
         ref2: party,
@@ -9453,11 +9493,48 @@ async function computeCashflowStatement(
         setOnce(party, `rc::${String(r.id)}`, String(r.customerName ?? r.customer_name ?? "").trim());
       }
     } catch { /* Ref. 2 stays empty */ }
+    // An official receipt names its payer and carries its own description; a
+    // JV its description; trade-finance interest the lender (the facility
+    // account on the entry), with whom the draw paid on hover.
+    const ownPurpose = new Map<string, string>(); // "or::id" / "jv::id" → the document's description
+    try {
+      const orIds = [...new Set(ents.filter((e) => e.sourceType.startsWith("official_receipt")).map((e) => e.sourceId))];
+      for (const r of await chunkIds(orIds, (ph) => `SELECT id, receivedFrom, description FROM official_receipts WHERE id IN (${ph})`)) {
+        setOnce(party, `or::${String(r.id)}`, String(r.receivedFrom ?? r.received_from ?? "").trim());
+        setOnce(ownPurpose, `or::${String(r.id)}`, String(r.description ?? "").trim());
+      }
+    } catch { /* Ref. 2 stays empty */ }
+    try {
+      const jvIds = [...new Set(ents.filter((e) => e.sourceType === "manual" || e.sourceType.startsWith("manual_")).map((e) => e.sourceId))];
+      for (const r of await chunkIds(jvIds, (ph) => `SELECT id, description FROM journal_entries WHERE id IN (${ph})`)) {
+        setOnce(ownPurpose, `jv::${String(r.id)}`, String(r.description ?? "").trim());
+      }
+    } catch { /* description stays the ledger text */ }
+    try {
+      const tfEnts = ents.filter((e) => e.sourceType.startsWith("tf_interest"));
+      const draws = [...new Set(tfEnts.map((e) => tfInterestDrawId(e.sourceId)))];
+      const paidTo = new Map<string, string>();
+      for (const r of await chunkIds(draws, (ph) => `SELECT payment_no, supplier_name FROM supplier_payments WHERE payment_no IN (${ph}) AND org_id = ?`, [orgId])) {
+        setOnce(paidTo, String(r.paymentNo ?? r.payment_no ?? ""), String(r.supplierName ?? r.supplier_name ?? "").trim());
+      }
+      for (const r of await chunkIds(draws.filter((d) => !paidTo.has(d)), (ph) => `SELECT payment_no, party_name FROM other_party_payments WHERE payment_no IN (${ph})`)) {
+        setOnce(paidTo, String(r.paymentNo ?? r.payment_no ?? ""), String(r.partyName ?? r.party_name ?? "").trim());
+      }
+      for (const e of tfEnts) {
+        const lender = (byEntry.get(`${e.sourceType}::${e.sourceId}`) ?? []).map((l) => tfAccounts.get(l.code)?.lenderName ?? "").find(Boolean) ?? "";
+        setOnce(party, `tf::${e.sourceId}`, lender);
+        const paid = paidTo.get(tfInterestDrawId(e.sourceId));
+        if (paid) docs.set(`tf::${e.sourceId}`, `Drawn to pay ${paid}`);
+      }
+    } catch { /* Ref. 2 stays empty */ }
     const kindOf = (sourceType: string): string =>
       sourceType.startsWith("supplier_payment") ? "sp"
         : sourceType.startsWith("other_party_payment") ? "op"
           : sourceType.startsWith("payment_voucher") ? "pv"
-            : sourceType === "payment" || sourceType.startsWith("payment_") ? "rc" : "";
+            : sourceType === "payment" || sourceType.startsWith("payment_") ? "rc"
+              : sourceType.startsWith("official_receipt") ? "or"
+                : sourceType.startsWith("tf_interest") ? "tf"
+                  : sourceType === "manual" || sourceType.startsWith("manual_") ? "jv" : "";
 
     const items: CfDrillItem[] = ents.map((e) => {
       const legs = byEntry.get(`${e.sourceType}::${e.sourceId}`) ?? [];
@@ -9474,8 +9551,11 @@ async function computeCashflowStatement(
       const kind = kindOf(e.sourceType);
       const who = kind ? party.get(`${kind}::${e.sourceId}`) ?? null : null;
       const purpose = kind === "pv" ? pvPurpose.get(e.sourceId)
-        : kind === "sp" || kind === "op" ? pvPurposeByNo.get(e.sourceId) : undefined;
-      const description = purpose ?? tidyDescription(legText, ref1, who);
+        : kind === "sp" || kind === "op" ? pvPurposeByNo.get(e.sourceId)
+          : kind === "or" || kind === "jv" ? ownPurpose.get(`${kind}::${e.sourceId}`) : undefined;
+      // A correction says what it is after the document's description.
+      const variant = drillVariant(e.sourceType, e.sourceId);
+      const description = purpose ? (variant ? `${purpose} · ${variant}` : purpose) : tidyDescription(legText, ref1, who);
       const codes = [...new Set(money.map((l) => l.code))];
       return {
         key: `${e.sourceType}::${e.sourceId}`,

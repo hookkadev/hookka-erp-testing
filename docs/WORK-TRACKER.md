@@ -1,5 +1,7 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-30**: branch `fix/drill-names-tf-and-pi-edits` added below (its entry is the newest).
+> **Last verified: 2026-09-30**: #607 (Balance Sheet inline drill) and #609 (its counterparty names) closed ✅ below with their prod checks.
 > **Last verified: 2026-09-30**: branch `fix/drill-names-on-bs-documents` added below (its entry is the newest).
 > **Last verified: 2026-09-30**: branch `feat/bs-inline-drill` added below (its entry is the newest).
 > **Last verified: 2026-09-30**: #606 (P&L drill like the Cash Flow drill) closed ✅ below with its prod check.
@@ -55,22 +57,41 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
-## 2026-09-30 — 🔵 Balance-sheet drill: name the counterparty of payments, receipts and purchase credit notes (follow-up to #607)(branch `fix/drill-names-on-bs-documents`)
+## 2026-09-30 — 🔵 Drills: the last lines without a counterparty, and corrections say what they are (follow-up to #609)(branch `fix/drill-names-tf-and-pi-edits`)
+
+1. Measured on prod after #609 (read-only): in the P&L / balance-sheet drills the lines still without a Ref. 2 were trade-finance
+   interest, a PI edit's correction (posted under `<PI id>:edit-<time>`, so the PI lookup missed it), JVs, bank transfers and
+   payroll postings; in the Cash Flow drill (every line of the year to September) trade-finance interest, one official receipt
+   and one JV. JVs, transfers and payroll postings have no counterparty.
+2. 🔵 Trade-finance interest names the lender (the facility account on the entry) with the supplier the draw paid on hover; a PI
+   edit's correction finds its PI (supplier, supplier invoice no.); in the Cash Flow drill an official receipt names its payer
+   and shows its description, a JV its description. The interest sourceId format has one definition (`tfInterestDrawId`,
+   also used by the draw maths).
+3. 🔵 The drills show the document's description instead of the ledger text, which hid what a correction is ("Void · PI …").
+   A correction now says it after the description: `reversed on edit` / `re-posted on edit` / `void` / `unvoid` / `reversal`
+   / `edit adjustment` / `GL re-sync` (`drillVariant`). Guard `tests/drill-tf-interest-and-corrections.test.mjs`.
+
+## 2026-09-30 — ✅ Balance-sheet drill: name the counterparty of payments, receipts and purchase credit notes (follow-up to #607)(#609 659ce9bb MERGED, deployed, prod-verified)
 
 1. Measured on prod after #607 (read-only, every account May–Sep): supplier payments, other-creditor payments, customer
    receipts and purchase credit notes carried no Ref. 2 — the shared line builder only knew the documents that hit the P&L.
-2. 🔵 `buildDrillLines` names them (supplier / creditor / customer / supplier), lists the PIs / bills a payment settled on
+2. ✅ `buildDrillLines` names them (supplier / creditor / customer / supplier), lists the PIs / bills a payment settled on
    hover, and a voucher-made payment takes the voucher's purpose. JVs, transfers and payroll entries have no counterparty.
    Guard `tests/drill-bs-document-names.test.mjs`.
+3. ✅ Prod (measured, every balance-sheet account May–Sep): every drill tied and its c/f equal to the sheet; supplier
+   payments (edits included), other-creditor payments, customer receipts and purchase credit notes all carry a name. Left
+   without one: PI edit corrections and trade-finance interest (next entry), JVs, transfers, payroll postings.
 
-## 2026-09-30 — 🔵 Balance Sheet inline drill (owner「Balance sheet 也要这样点开看」)(branch `feat/bs-inline-drill`)
+## 2026-09-30 — ✅ Balance Sheet inline drill (owner「Balance sheet 也要这样点开看」)(#607 e82d244b MERGED, deployed, prod-verified)
 
 1. Checked first (code): every balance-sheet line except the unclosed-earnings one is an account's ledger balance up to the
    month end — no computed adjustments — so a drill can tie exactly.
-2. 🔵 Name → panel: Balance b/f (end of the previous month), the month's lines in the P&L / Cash Flow drill columns, Balance
+2. ✅ Name → panel: Balance b/f (end of the previous month), the month's lines in the P&L / Cash Flow drill columns, Balance
    c/f = the figure. `GET /api/accounting/bs-drill` uses the sheet's own leg rules; the line builder is shared with the P&L
    drill (`buildDrillLines`). Not in Edit, not the unclosed-earnings line. Guard `tests/bs-inline-drill.test.mjs`.
    Prod check after deploy: every account of a month, tied and c/f = the sheet.
+3. ✅ Prod (measured): every balance-sheet account of September and of August opened, each tied (b/f + lines = c/f) and c/f
+   equal to the sheet's figure; UI: an account opened under its row with b/f, the month's lines and c/f.
 
 ## 2026-09-30 — ✅ P&L drill reads like the Cash Flow drill (owner「P&L 同理，我想看 supplier 名字，p&L 点开要看的东西和 cash flow 一样」)(#606 235cb95c MERGED, deployed, prod-verified)
 
