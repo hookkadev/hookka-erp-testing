@@ -1,5 +1,6 @@
 # T-006 — Transfer / Convert foundation: fix plan
 
+> **Last verified: 2026-09-30** (branch `fix/t006-r2-grn-receipt-race`): R2's concurrency window re-read in `grn.ts` and closed in code as BUG-2026-09-30-226, see "R2's concurrency window" below. Proven against a fake DB only. The real Postgres row-lock behaviour is UNVERIFIED until two receipts are fired at once on staging. Nothing else re-checked.
 > **Last verified: 2026-09-30** (branch `fix/t006-r7-return-qty`): R7 cap re-read in source. A negative or missing quantity got past it, fixed as BUG-2026-09-30-224, see the R7 follow-up below. Nothing else re-checked.
 > **Last verified: 2026-09-30** (branch `test/bug06-do-guard-behavioural`): R1 re-checked by behaviour against staging. The Sales page path is closed; a second gap on the same guard (`items` naming POs the guard never saw) is fixed as BUG-2026-09-30-223, see the R1 follow-up below. PR #448 to `main` was closed unmerged on 2026-09-30; T-006 lives on staging.
 > **Last verified: 2026-09-24** against the live staging DB (branch `fix/t006-live-findings`):
@@ -344,26 +345,90 @@ the handler logic — wrapping first would mean re-touching every one of these f
 
 ## What is NOT fixed (2026-09-21) — read before assuming the ticket is closed
 
-Three things in this plan are knowingly incomplete. They are listed here rather than left for
+Three things in this plan were knowingly incomplete on 2026-09-21 (the first, R2's
+concurrency window, was closed in code on 2026-09-30 and awaits a live check). They are listed here rather than left for
 the next person to rediscover.
 
-### R2's concurrency window is still open
+### R2's concurrency window: closed in code 2026-09-30, not yet proven on a real database
 
-The over-receipt check is now cumulative (it reads `purchase_order_items.receivedQty` and adds
-this document's quantity before comparing against the 110% ceiling), which is what A2 asks for
-and what `tests/purchasing-convert-flow.test.mjs` now proves by driving two real receipts
-through the route. But the read still happens BEFORE `db.batch()`, not inside it, and there is
-no DB constraint on `receivedQty` the way R5 gives `grn_items.invoiced_qty` one. Two receipts
-that interleave between the read and the batch can still both post.
+**What was open.** The over-receipt check is cumulative (it reads
+`purchase_order_items.receivedQty` and adds this document's quantity before comparing against
+the 110% ceiling), but the read happens BEFORE `db.batch()`. Two receipts that interleaved
+between the read and the batch both passed and both posted. Measured on staging 2026-09-30:
+the sequential case is refused correctly (400); the simultaneous case was the gap.
 
 A CHECK constraint is NOT the answer here: over-receipt is a legitimate business path in this
 system ("Requires ADMIN approval"), and the ceiling is 110% of ordered, not ordered — a hard
-constraint would refuse work the business does on purpose. Closing this properly needs either a
-conditional UPDATE that fails loudly when the ceiling is already consumed, or a row lock on the
-PO line. Neither was attempted without a live DB to test against.
+constraint would refuse work the business does on purpose.
 
-The realistic trigger — a double-click or a retry, not two operators — is now covered by R10's
-client half (below) plus the submit buttons' in-flight `disabled`.
+**What changed (BUG-2026-09-30-226, branch `fix/t006-r2-grn-receipt-race`).** The ceiling now also sits inside the
+statement that raises the counter (`poCounterIncrement`, `grn.ts:952`):
+
+```sql
+UPDATE purchase_order_items
+   SET receivedQty = CASE
+         WHEN receivedQty + ? <= quantity * 1.1 THEN receivedQty + ?
+         ELSE CAST('po_line_over_receipt:' || id AS DOUBLE PRECISION)
+       END
+ WHERE id = ?
+```
+
+- It raises instead of matching zero rows. `db.batch()` is one transaction
+  (`supabase-compat.ts` `sql.begin`), so the failed cast (Postgres `22P02`) rolls back every
+  statement in the batch. A 0-row update would have let the GRN, its lines and its stock commit
+  with no PO draw-down.
+- The cast concatenates the row's `id` so the planner cannot fold it to a constant and raise on
+  every call. It sits in `SET`, not `WHERE`, so it only runs for the row `id = ?` matched.
+- The route maps the raised error to **409** "This purchase order line was just received by
+  another GRN..." (same style as R5's `23514` mapping in `purchase-invoices.ts`). The
+  pre-batch check stays and still gives the friendly 400 in the sequential case.
+- Same quantities as the pre-batch check: it TESTS the line's received qty and RAISES the
+  counter by its accepted qty. That mismatch is older than this fix and was kept on purpose
+  (see "Known oddities" below).
+
+**Every site that raises the counter now goes through it:**
+
+| site | before | now |
+|---|---|---|
+| GRN create, born POSTED (`POST /api/grn`) | unguarded statement in the create batch | guarded statement, same batch |
+| DRAFT → POSTED (`PUT /api/grn/:id`) | own batch, AFTER the status flip and the stock post had committed | guarded statement in the batch that flips the status, so a refusal leaves the GRN DRAFT with no stock |
+| Qty edit on a POSTED GRN, increase (`PUT /api/grn/:id` with `items`) | own batch, after the stock adjustment had committed; no ceiling at all | guarded statement in the same batch as the line rewrite and the stock adjustment, plus a pre-batch 400 |
+
+Decreases (edit down, cancel, delete) are unchanged.
+
+**Two behaviour changes that come with it, beyond the race.** Both are the same check-then-write
+gap with a longer wait between the check and the write:
+
+1. Two DRAFT receipts for the same PO line each pass the create check (a DRAFT draws nothing
+   down). Posting the second one used to succeed. It is now refused with the 409.
+2. Raising a POSTED line's accepted qty past 110% of the PO line used to succeed silently. It is
+   now refused with a 400. **Needs an owner look**: if editing a receipt upward was the way
+   over-receipt got "ADMIN approval" in practice, this closes it, and there is no override.
+
+**Known oddities, left alone.**
+
+- The check compares the incoming **received** qty; the counter moves by the **accepted** qty.
+  A line received 10 / accepted 8 is tested as 10 and counted as 8.
+- Two lines of ONE document drawing on the same PO line are each tested alone against the value
+  read, not summed, so one document can still exceed the ceiling. The guard keeps that (one
+  statement per PO line: summed increase, largest line tested) so it cannot refuse a document
+  the pre-check just accepted.
+- `postGRNToStock` on the DRAFT → POSTED path still runs in its own batch after the status flip.
+  A failure there leaves a POSTED GRN with its PO draw-down but no stock (before: neither).
+  R3 made only the create path one batch.
+
+**UNVERIFIED against a real database.** The tests drive the real route against a fake DB that
+evaluates the guard on the row's current value and rolls a failed batch back. They prove the
+route ends with nothing written and a 409 when its read was stale. They cannot prove that
+Postgres makes the second transaction wait on the row lock and re-evaluate the `CASE` against
+the committed value, that the cast is not folded at plan time, or that the driver's error
+message carries the marker the route matches on. Verify on staging after deploy: fire two
+receipts for the same PO line at once; exactly one must post and the other must get the 409.
+Also confirm one ordinary receipt still posts (a guard that raised on every call would show
+here first).
+
+The realistic trigger — a double-click or a retry, not two operators — was already covered by
+R10's client half (below) plus the submit buttons' in-flight `disabled`.
 
 ### R7's cancel-after-restock is a dead end, on purpose
 

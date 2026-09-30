@@ -1,5 +1,6 @@
 # Recurring bug classes — the index that makes P5 executable
 
+> **Last verified: 2026-09-30**: restamped on branch `fix/t006-r2-grn-receipt-race` (staging only): adds C27, a ceiling checked before the write with nothing in the write to back it (BUG-2026-09-30-226); C10 row 4 renamed to the functions that now exist. Nothing else re-checked.
 > **Last verified: 2026-09-30**: restamped on branch `fix/staging-so-detail-live-do` (staging): C21 gains row 18, the SO detail page that showed a cancelled DO as a production order's delivery (BUG-2026-09-30-225). Nothing else re-checked.
 > **Last verified: 2026-09-30**: restamped on branch `fix/t006-r7-return-qty` (staging only): adds C26, a guard and the write it guards reading one input two ways (BUG-2026-09-30-224). Nothing else re-checked.
 
@@ -586,7 +587,7 @@ happens to read is caught, so the pair looks guarded under half the test orders 
 | 1 | PO line, invoiced | PI create off a PO / PI create off a GRN | ✅ fixed 2026-08-07 (BUG-2026-08-07-003 — 100 billed off the PO then 100 more off its GRN = 200 payable on a 100 PO. GRN→PO order was already caught, because the PO ceiling reads GRN-sourced lines through `COALESCE(pii.po_id, pi.purchaseOrderId)`) |
 | 2 | PO line, invoiced | PI **re-line** (PUT items) | ✅ fixed 2026-08-07 — same hole with one more step: raise the invoice for 1, edit it to 100. Now shares the helper, with the edited PI excluded from its own already-invoiced total |
 | 3 | GRN line, invoiced (`grn_items.invoiced_qty`) | PI create / PI re-line / PI delete / PI cancel / GRN un-post | ✅ one counter, incremented and restored through the shared `convert-chain.ts` helpers |
-| 4 | PO line, received (`purchase_order_items.receivedQty`) | GRN post-on-create / GRN post-on-PUT | ✅ both go through `cascadePOStatusAfterGRNPost`; reversal through `restorePOReceivedQtyForGRN` |
+| 4 | PO line, received (`purchase_order_items.receivedQty`) | GRN post-on-create / GRN post-on-PUT | ✅ both go through `buildPOCounterStatements` (guarded increase, C27 row 2); reversal through `restorePOReceivedQtyForGRN` |
 
 **The rule.** One quantity gets ONE ceiling function, called by every route that spends it —
 not one guard per route. When you add a second way to draw something down, the question is not
@@ -1766,3 +1767,31 @@ lands in the gap (missing, negative) passes the check as one value and is stored
 
 Test: `tests/t006-r7-delivery-return.test.mjs` (real create function, fake DB).
 
+## C27 — a ceiling checked before the write, with nothing in the write to back it
+
+**Shape.** A handler SELECTs a counter, compares it with a limit in JavaScript, and later runs
+an unconditional `counter = counter + ?`. The check is right for the value it read. Anything
+that commits between the read and the write is invisible to it, so two requests at the same
+moment both pass. Sequential tests never see it. A longer wait is the same bug: a DRAFT checked
+at create and posted days later.
+
+**The rule.** Keep the friendly pre-check, and put the limit in the write as well, so the
+database decides on the value that is actually there:
+
+- a CHECK constraint when the limit is a fixed fact about the row (R5,
+  `chk_grn_items_invoiced_qty`), or
+- a guarded UPDATE that RAISES when the limit is a business tolerance (R2's 110%).
+
+It must raise, not match zero rows: a 0-row update lets the rest of the batch commit. The
+counter statement must ride in the same `db.batch()` as the document it belongs to, or the
+raise has nothing to roll back. Map the error to a 409.
+
+| # | site | state |
+|---|---|---|
+| 1 | `purchase-invoices.ts` PI create vs `grn_items.invoiced_qty` | ✅ CHECK constraint + 23514 mapped to 409 (T-006 R5) |
+| 2 | `grn.ts` GRN create / DRAFT → POSTED / qty edit vs `purchase_order_items.receivedQty` | ✅ fixed in code 2026-09-30 (BUG-2026-09-30-226), guarded UPDATE. Real row-lock behaviour UNVERIFIED until run on staging |
+| 3 | `purchase-invoices.ts` `checkPoRemaining` (PO invoiced ceiling) | ⬜ unswept: read-then-write, no backstop known |
+| 4 | delivery return cap (T-006 R7), DO invoiceable qty, stock allocation | ⬜ unswept |
+
+Test: `tests/purchasing-convert-flow.test.mjs` ("R2 race"), `tests/purchase-edit-cascade.test.mjs`.
+A fake DB cannot show locking. It can show that a stale read ends with nothing written.

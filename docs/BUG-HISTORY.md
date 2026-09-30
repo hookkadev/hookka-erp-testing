@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-09-30**: newest entry BUG-2026-09-30-226 (branch `fix/t006-r2-grn-receipt-race`, to staging); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-30**: newest entry BUG-2026-09-30-225 (branch `fix/staging-so-detail-live-do`, to staging); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-30**: newest entry BUG-2026-09-30-224 (branch `fix/t006-r7-return-qty`, to staging); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-30**: newest entry BUG-2026-09-30-223 (branch `test/bug06-do-guard-behavioural`, to staging); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
@@ -57,6 +58,22 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-09-30-226 — two simultaneous GRNs could both pass the over-receipt check `procurement` `grn` 🟡
+
+**Symptom:** not observed in data. Known gap from T-006 R2. Measured on staging 2026-09-30: a second receipt sent after the first is refused (400 "Over-receipt ... already received 10 + this receipt 2 = 12"). Two receipts sent at the same moment were not covered: both could post and take a PO line past 110% of ordered.
+
+**Root cause:** class C27 (check-then-write with no backstop in the write). `POST /api/grn` read `purchase_order_items.receivedQty`, compared, and only later ran `db.batch()` with an unconditional `receivedQty = receivedQty + ?`. Anything committed between the read and the batch was invisible to the check. The same unconditional statement was used when a DRAFT was posted (no check at all at post time) and when a POSTED line's qty was edited upward (no check at all), and on those two paths it ran in its own batch after the GRN status or the stock adjustment had already committed.
+
+**Fix:** `poCounterIncrement` (`grn.ts:952`) puts the ceiling in the counter statement: `SET receivedQty = CASE WHEN receivedQty + ? <= quantity * 1.1 THEN receivedQty + ? ELSE CAST('po_line_over_receipt:' || id AS DOUBLE PRECISION) END`. When the ceiling is already used the cast raises, and because `db.batch()` is one transaction the whole batch rolls back. The route maps it to 409 (`grn.ts:1973`, `:2406`). The DRAFT to POSTED path and the qty-edit path now carry the counter statements in their main batch instead of a later one, so a refusal leaves nothing half written. The pre-batch check is kept for the friendly 400. Not a CHECK constraint: the ceiling is 110% and over-receipt is a path the business uses.
+
+**Behaviour that changes besides the race:** posting a second DRAFT that would take the PO line past 110% is now refused (409). Raising a POSTED line's accepted qty past 110% of the PO line is now refused (400). See the T-006 plan, "R2's concurrency window".
+
+**Test:** `tests/purchasing-convert-flow.test.mjs` (three "R2 race" tests: stale read on create ends with nothing written and a 409; the guard is in the create batch and survives the column rewriter; posting a second DRAFT is refused and stays DRAFT) and `tests/purchase-edit-cascade.test.mjs` (edit past the ceiling refused; raced edit rolls the stock adjustment back). These five fail on the old code. Source pins in `tests/t006-r2-grn-cumulative-overreceipt.test.mjs`.
+
+**UNVERIFIED:** real Postgres locking. The fake DB has no locks. After deploy to staging, fire two receipts at one PO line at once and confirm exactly one posts.
 
 ---
 

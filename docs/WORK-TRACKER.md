@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-30**: branch `fix/t006-r2-grn-receipt-race` (to `staging`) added below (committed locally, not pushed, its entry is the newest).
 > **Last verified: 2026-09-30**: branch `fix/t006-r7-return-qty` (to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-09-30**: branch `feat/production-overview-cards-narrow` added below as item 8 of the Production Overview Cards entry.
 > **Last verified: 2026-09-30**: branch `feat/production-overview-card-filters` added below as item 7 of the Production Overview Cards entry (stacked on #595).
@@ -48,6 +49,15 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-09-30 — 🔵 T-006 R2: GRN over-receipt race (branch `fix/t006-r2-grn-receipt-race` to `staging`, STAGING ONLY, never PR to main)
+
+- Asked: close the window where two simultaneous receipts both pass the 110% check, inside the database statement, failing loudly (no 0-row update), mapped to 409. Keep the pre-batch 400. Guard every place a GRN raises the PO counter. Tests, docs, commit locally, no push, no PR.
+- Done: `poCounterIncrement` in `grn.ts` carries the ceiling in the counter UPDATE and raises when it is used up. Guarded at all three sites: create (born POSTED), DRAFT to POSTED, and a qty edit that increases. The last two now run the counter in their main batch. BUG-2026-09-30-226, BUG-CLASSES C27.
+- Tests: `purchasing-convert-flow` (3 new), `purchase-edit-cascade` (2 new), source pins in `t006-r2-grn-cumulative-overreceipt` and `grn-multi-po`. The five behavioural ones fail on the old code.
+- NOT verified: real Postgres row locking (no database access from this branch). After deploy to staging, fire two receipts at one PO line at once; exactly one must post.
+- Needs an owner look: a POSTED line can no longer be edited up past 110% of its PO line, and a second DRAFT that would pass 110% can no longer be posted. No override exists.
+- Left alone: the check tests received qty while the counter moves by accepted qty; two lines of one document on the same PO line are not summed.
 
 ## 2026-09-30 — 🔵 T-006 R7: delivery return quantity must be positive (branch `fix/t006-r7-return-qty` to `staging`)
 
