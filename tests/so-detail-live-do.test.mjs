@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// so-detail-live-do.test.mjs — BUG-2026-09-30-224 (class C21, first-one-wins).
+// so-detail-live-do.test.mjs — BUG-2026-09-30-225 (class C21, first-one-wins).
 //
 // GET /api/sales-orders/:id builds linkedPOs[].deliveryDoNo / deliveryStatus
 // from delivery_order_items, which come back in no chosen order. It kept the

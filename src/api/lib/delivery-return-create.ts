@@ -249,7 +249,7 @@ export async function enrichItemsWithRefs(db: D1Database, items: DRCreateItem[])
 
 export type CreateDeliveryReturnResult =
   | { ok: true; id: string; returnNo: string }
-  | { ok: false; error: string };
+  | { ok: false; error: string; status?: 400 };
 
 // Create a Delivery Return document from a DO + a set of returned lines.
 // Header (SO / customer) is snapshotted from the source DO. BOTH lookups are
@@ -268,7 +268,26 @@ export async function createDeliveryReturnRecord(
 ): Promise<CreateDeliveryReturnResult> {
   await ensureDeliveryReturnTables(db);
   const doId = String(input.doId ?? "").trim();
-  const items = Array.isArray(input.items) ? input.items : [];
+  const rawItems = Array.isArray(input.items) ? input.items : [];
+  // Read each line's quantity ONCE; the cap and the insert both use this value.
+  // They used to read it apart: the cap counted a missing quantity as 0 while
+  // the insert wrote 1, and a negative quantity lowered the "already returned"
+  // sum and made room for an over-return (BUG-2026-09-30-224).
+  const badQty = rawItems.find((it) => {
+    const q = Number(it.quantity);
+    return !(Number.isFinite(q) && q > 0);
+  });
+  if (badQty) {
+    return {
+      ok: false,
+      status: 400,
+      error: `Each returned line needs a quantity greater than 0 (${badQty.productCode || badQty.productionOrderId || "a line"} has ${badQty.quantity ?? "none"}).`,
+    };
+  }
+  const items: (DRCreateItem & { quantity: number })[] = rawItems.map((it) => ({
+    ...it,
+    quantity: Number(it.quantity),
+  }));
   // The refs are resolved HERE, not taken from the caller: the office modal
   // posts what the DO API gave it (which carries neither the line's customer PO
   // nor its Reference), and a client should not be able to assert them anyway.
@@ -276,7 +295,27 @@ export async function createDeliveryReturnRecord(
   // both records come out identical (owner 2026-07-16).
   await enrichItemsWithRefs(db, items);
   if (!doId || items.length === 0) {
-    return { ok: false, error: "A delivery order id and at least one item are required" };
+    return { ok: false, status: 400, error: "A delivery order id and at least one item are required" };
+  }
+
+  // The cap below is keyed by production order, so a line without one would
+  // skip it. Refuse such a line when the DO's own lines carry production
+  // orders; a legacy DO with none has nothing to key a cap on.
+  if (items.some((it) => !it.productionOrderId)) {
+    const poLines = await db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM delivery_order_items
+          WHERE deliveryOrderId = ? AND productionOrderId IS NOT NULL AND productionOrderId <> ''`,
+      )
+      .bind(doId)
+      .first<{ n: number }>();
+    if (Number(poLines?.n) > 0) {
+      return {
+        ok: false,
+        status: 400,
+        error: "Each returned line must name the production order it came from on this delivery order.",
+      };
+    }
   }
 
   // T-006 R7 — cap each line at the DO's own delivered quantity, cumulative
@@ -320,7 +359,7 @@ export async function createDeliveryReturnRecord(
       const priorReturned = priorReturnedByPoId.get(poId) ?? 0;
       const thisReturn = items
         .filter((it) => it.productionOrderId === poId)
-        .reduce((s, it) => s + (Number(it.quantity) || 0), 0);
+        .reduce((s, it) => s + it.quantity, 0);
       if (priorReturned + thisReturn > doLineQty) {
         return {
           ok: false,
@@ -436,7 +475,7 @@ export async function createDeliveryReturnRecord(
             String(it.productCode ?? ""),
             String(it.productName ?? ""),
             String(it.wipLabel ?? ""),
-            Number(it.quantity ?? 1),
+            it.quantity,
             String(it.problem ?? ""),
             String(it.fgUnitId ?? ""),
             it.wasInvoiced ? 1 : 0,

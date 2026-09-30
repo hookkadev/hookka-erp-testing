@@ -1471,7 +1471,7 @@ export async function pushNewlyCreatedJobCardsToSheet(
 
 /**
  * Which DO each production order shows in the SO detail page's "Linked
- * Production Orders" Delivery column (BUG-2026-09-30-224, class C21).
+ * Production Orders" Delivery column (BUG-2026-09-30-225, class C21).
  *
  * A production order can sit on a CANCELLED DO and on the live DO that
  * replaced it, and the item rows come back in no chosen order. A live DO

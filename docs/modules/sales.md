@@ -1,6 +1,6 @@
 # Sales — Module Guide
 
-> **Last verified: 2026-09-30** (branch `fix/staging-so-detail-live-do`, BUG-2026-09-30-224): SO detail's per-PO delivery column now comes from `buildPoDeliveryMap` (`sales-orders/_helpers.ts:1482`), which prefers a live DO over a cancelled one; symbol-table anchors for `app.post("/")`, `/:id/confirm` and `app.put("/:id")` moved to :1749 / :2534 / :3202. Other line anchors in the flows were not re-checked.
+> **Last verified: 2026-09-30** (branch `fix/staging-so-detail-live-do`, BUG-2026-09-30-225): SO detail's per-PO delivery column now comes from `buildPoDeliveryMap` (`sales-orders/_helpers.ts:1482`), which prefers a live DO over a cancelled one; symbol-table anchors for `app.post("/")`, `/:id/confirm` and `app.put("/:id")` moved to :1749 / :2534 / :3202. Other line anchors in the flows were not re-checked.
 
 > **Last verified: 2026-09-30** (branch `feat/staging-stage-skip`, STAGING ONLY): `SalesOrderDetailPage` anchor re-measured (:560) and the staging-only "skip production stages" card noted. Nothing else re-checked.
 
@@ -129,7 +129,7 @@ Owns the customer-facing order lifecycle: **Sales Orders** (SO) and their line i
 - **Snapshot is cache-aside.** `sales_orders_list_snapshot` is only used for unfiltered list fetches; any filtered fetch bypasses the cache. Five `withSnapshot(...)` configs name it — `sales-orders.ts:374 / 452 / 522 / 574 / 601` — each keyed on a different `cache_key` over the same table; the invalidation rationale comment is at `:5827`.
 - **Service orders price 0.** `sales_orders.caseId` marks a service-repair SO; auto-pricing is skipped by design — do not reintroduce it for service orders.
 - **Consignment Notes never carry invoices.** Owner ruling: CN = DO-equivalent; 3PL stays DO-side; amount on CN/CO lists is derived from CO value, not stored. Dispatch/delivered emails are idempotent via folded-lowercase `dispatchemailat` / `deliveredemailat`.
-- **A PO can be on more than one DO.** Cancelling a DO keeps its `delivery_order_items` rows, so a PO moved to a new DO links to both. Anything that shows "the" DO for a PO must prefer the live one; SO detail does this through `buildPoDeliveryMap` (BUG-2026-09-30-224).
+- **A PO can be on more than one DO.** Cancelling a DO keeps its `delivery_order_items` rows, so a PO moved to a new DO links to both. Anything that shows "the" DO for a PO must prefer the live one; SO detail does this through `buildPoDeliveryMap` (BUG-2026-09-30-225).
 - **Production locks are inviolate.** COMPLETED job_cards / non-PENDING fg_units / cost_ledger references must not be overridden for cosmetic edits.
 - **camelCase columns need a rename-map entry** (`column-rename-map.json`) or they 400 "Invalid request body"; read folded-lowercase cols dual-keyed (`r.camelCase ?? r.snake_case`). Prefer snake_case for new columns.
 

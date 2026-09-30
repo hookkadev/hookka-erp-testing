@@ -1,6 +1,7 @@
 # Recurring bug classes — the index that makes P5 executable
 
-> **Last verified: 2026-09-30**: restamped on branch `fix/staging-so-detail-live-do` (staging): C21 gains row 18, the SO detail page that showed a cancelled DO as a production order's delivery (BUG-2026-09-30-224). Nothing else re-checked.
+> **Last verified: 2026-09-30**: restamped on branch `fix/staging-so-detail-live-do` (staging): C21 gains row 18, the SO detail page that showed a cancelled DO as a production order's delivery (BUG-2026-09-30-225). Nothing else re-checked.
+> **Last verified: 2026-09-30**: restamped on branch `fix/t006-r7-return-qty` (staging only): adds C26, a guard and the write it guards reading one input two ways (BUG-2026-09-30-224). Nothing else re-checked.
 
 > **Last verified: 2026-09-29**: restamped on branch `fix/staging-notes-history` (staging only): C15 gains row 6, the staging patch notes that read a depth-1 clone and printed "0 PRs" (BUG-2026-09-29-215). Nothing else re-checked.
 
@@ -1482,7 +1483,7 @@ IDENTITY or MONEY.
 | 15 | grep false positives — `web-push.ts:107` (`pub[0] !== 0x04`, a byte), `do-component-breakdown.ts:102` (`a[0]`/`b[0]`, Map-entry tuples in a comparator), `sales/index.tsx:250-251` (`_flStatus[0]`, "any filter active?") | nothing | ✅ not this class |
 | 16 | `grn.ts` `resolveRmForGRNItem` — `raw_materials WHERE description = ? LIMIT 1` for a blank-code (PO-sourced) GRN line; 37 descriptions are shared on staging, e.g. five "WHITE SPONGE" | receiving NLY-D12-6MM posted stock onto D12-0.5 | ✅ 2026-09-24 (BUG-2026-09-24-202) — PO line's code first; a shared name resolves to nothing and is reported unresolved. Staging: 0 posted lines hit it (measured). Prod UNMEASURED |
 | 17 | `po-cost-cascade.ts` `resolveRmFromBom` — same `description = ? LIMIT 1` for a BOM line with no code | FIFO consumption could draw the wrong raw material | ⬜ open — refusing an ambiguous name there silently stops consumption for that line, so it needs its own decision |
-| 18 | `sales-orders.ts` `GET /:id` `poDeliveryMap` — first DO seen per production order over unordered `delivery_order_items` | which DO (and status) the SO detail page **shows** for a linked PO; a cancelled DO could hide its live replacement | ✅ 2026-09-30 (BUG-2026-09-30-224) — `buildPoDeliveryMap`: live DO beats cancelled. Two live DOs (split delivery) still keep the first seen, display only |
+| 18 | `sales-orders.ts` `GET /:id` `poDeliveryMap` — first DO seen per production order over unordered `delivery_order_items` | which DO (and status) the SO detail page **shows** for a linked PO; a cancelled DO could hide its live replacement | ✅ 2026-09-30 (BUG-2026-09-30-225) — `buildPoDeliveryMap`: live DO beats cancelled. Two live DOs (split delivery) still keep the first seen, display only |
 
 **Enforced by** `tests/first-one-wins-refusal.test.mjs` — 8 behavioural assertions driving
 the pure resolver with adversarial fixtures (two orders with the SAME line count, so a
@@ -1747,4 +1748,21 @@ re-queues; it never re-kicks under waitUntil.
 | 3 | every other `waitUntil(` in `src/api` | ⬜ not audited for duration; grep and check the slowest |
 
 Test: `tests/scan-queue-client-driven.test.mjs` (no `waitUntil(` in scan-queue.ts).
+
+## C26 — a guard and the write it guards read the same input two ways
+
+**Shape.** A check parses a request field one way (`Number(x) || 0`) and the INSERT a few lines
+later parses it another (`Number(x ?? 1)`). Each looks reasonable alone. The request that
+lands in the gap (missing, negative) passes the check as one value and is stored as another.
+
+**The rule.** Parse and validate the field ONCE at the top, reject what is not valid with a
+400, and hand the one parsed value to both the guard and the write.
+
+| # | site | state |
+|---|---|---|
+| 1 | `delivery-return-create.ts` T-006 R7 cap vs item insert (quantity: missing counted 0, stored 1; negative accepted) | ✅ fixed 2026-09-30 (BUG-2026-09-30-224) |
+| 2 | same function: a line with no `productionOrderId` skipped the cap | ✅ fixed 2026-09-30, refused when the DO has production-order lines |
+| 3 | other capped create paths (purchase return, GRN, PI) | ⬜ unswept |
+
+Test: `tests/t006-r7-delivery-return.test.mjs` (real create function, fake DB).
 

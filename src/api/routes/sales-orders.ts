@@ -3077,7 +3077,7 @@ app.get("/:id", async (c) => {
   // status. Lets the Linked Production Orders table show a real per-line
   // delivery state (DO no. + Delivered/Dispatched/…) instead of the operator
   // cross-checking the Delivery page. Reuses the DOs already fetched above.
-  // A live DO beats a cancelled one (BUG-2026-09-30-224).
+  // A live DO beats a cancelled one (BUG-2026-09-30-225).
   let poDeliveryMap = new Map<string, { doNo: string; status: string }>();
   if (doIds.length > 0) {
     const diRes = await c.var.DB.prepare(
