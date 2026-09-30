@@ -13,6 +13,104 @@ export const DEPARTMENTS = [
   { name: "Packing",    code: "PACKING" },
 ] as const;
 
+export type StageConfig = { code: string; name: string };
+export type LiveDepartment = {
+  code: string;
+  name: string;
+  shortName?: string;
+  sequence: number;
+  isProduction: boolean;
+};
+
+// Overview stage columns. The 9 DEPARTMENTS keep their current order and
+// labels no matter what /api/departments says (the DB `sequence` puts
+// WOOD_CUT 3rd; the floor reads it 5th, so we don't reorder). Any other
+// isProduction department added in the admin UI is appended by sequence,
+// so a new stage shows up with no code change. `live` null/empty (loading
+// or a failed read) = the constant alone.
+export function overviewStages(live?: LiveDepartment[] | null): StageConfig[] {
+  const base: StageConfig[] = DEPARTMENTS.map((d) => ({ code: d.code, name: d.name }));
+  if (!live || live.length === 0) return base;
+  const known = new Set(base.map((d) => d.code));
+  const extra = live
+    .filter((d) => d.isProduction && !known.has(d.code))
+    .sort((a, b) => a.sequence - b.sequence)
+    .map((d) => ({ code: d.code, name: d.shortName || d.name }));
+  return extra.length > 0 ? [...base, ...extra] : base;
+}
+
+// ----- Overview Cards view helpers (components/OverviewCards.tsx + the Grid) -----
+
+export type CellFlash = Record<string, "ok" | "err">;
+export type StageClick = (
+  order: ProductionOrder,
+  deptCode: string,
+  cell: Cell,
+  anchor: HTMLElement,
+) => void;
+
+// Every card row is a fixed height (8px gap + 120px card: header, divider,
+// stage label / pill / date) so the virtualizer's estimate is exact and fast
+// scrolling never jumps. The row sets this height explicitly.
+export const CARD_HEIGHT = 128;
+export const pipelineCols = (n: number) => `repeat(${n}, minmax(0, 1fr))`;
+
+// Lifecycle look shared by the Grid rows and the Card header bar: amber for
+// ON_HOLD, grey + strikethrough for CANCELLED, warm highlight when ticked
+// (overrides the lifecycle tint so the selection reads clearly).
+export function overviewRowLook(
+  order: ProductionOrder,
+  isSelected: boolean,
+  plainCls = "hover:bg-[#FDFBF7]",
+) {
+  const rowCls = isSelected
+    ? "bg-[#FFF8E6] hover:bg-[#FBEFC9]"
+    : order.status === "ON_HOLD"
+      ? "bg-[#FEF6D8] hover:bg-[#FBEBAE]"
+      : order.status === "CANCELLED"
+        ? "bg-[#F3F4F6] text-[#9CA3AF] line-through hover:bg-[#E5E7EB]"
+        : plainCls;
+  const pillLabel =
+    order.status === "ON_HOLD" ? "ON HOLD" : order.status === "CANCELLED" ? "CANCELLED" : "";
+  const pillCls =
+    order.status === "ON_HOLD"
+      ? "bg-[#FAEFCB] text-[#9C6F1E]"
+      : order.status === "CANCELLED"
+        ? "bg-[#E5E7EB] text-[#4B5563]"
+        : "";
+  // ON HOLD reason (0185) — full reason + who + when in the chip tooltip.
+  const holdReason = order.status === "ON_HOLD" ? (order.holdReason || "").trim() : "";
+  const holdTooltip = holdReason
+    ? `On hold: ${holdReason}${order.heldBy ? ` — ${order.heldBy}` : ""}${order.heldAt ? ` (${order.heldAt})` : ""}`
+    : "";
+  return { rowCls, pillLabel, pillCls, holdReason, holdTooltip };
+}
+
+// A dept cell may hold several JCs (a sofa with several WIPs in one dept);
+// flash keys are per JC, so OR them: any "err" wins, then any "ok".
+export function stageTint(order: ProductionOrder, deptCode: string, cellFlash: CellFlash): "ok" | "err" | "" {
+  let tint: "ok" | "err" | "" = "";
+  for (const jc of order.jobCards) {
+    if (jc.departmentCode !== deptCode) continue;
+    const k = cellFlash[`${jc.id}|${deptCode}`];
+    if (k === "err") return "err";
+    if (k === "ok") tint = "ok";
+  }
+  return tint;
+}
+
+// Cards view stage pill. Splits the Cell "pending" state in two for display
+// only: some job cards done = in progress, none done = pending. The Cell state
+// (and so the saved status filters) is unchanged; "skipped" is an empty cell
+// (no job card in that department).
+export type StageKind = "done" | "inProgress" | "pending" | "overdue" | "skipped";
+export function stageKind(cell: Cell): StageKind {
+  if (cell.state === "empty") return "skipped";
+  if (cell.state === "done") return "done";
+  if (cell.state === "overdue") return "overdue";
+  return cell.doneCards > 0 ? "inProgress" : "pending";
+}
+
 // Today as YYYY-MM-DD. Used for the page's default fltDueFrom/fltDueTo so
 // the production grid (and the API call that backs it) only loads POs
 // whose targetEndDate falls on today by default.
