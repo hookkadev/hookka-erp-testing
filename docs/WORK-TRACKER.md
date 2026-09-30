@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-30**: branch `test/bug06-do-guard-behavioural` (to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-09-30**: branch `feat/m-warehouse-movement-time` (to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-09-29**: branch `fix/report-emails-mobile` (to `staging`) added below as BUG-36 item 6; item 5 marked merged (#582).
 > **Last verified: 2026-09-29**: branch `fix/overdue-email-mobile` (to `staging`) added below as BUG-36 item 5; the duplicated item 4 line removed.
@@ -42,6 +43,14 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-09-30 — 🔵 BUG-06: finish the Transfer / Convert duplicate guard on staging (branch `test/bug06-do-guard-behavioural` → `staging`)
+
+- Asked: go back to BUG-06 ("Transfer / convert: one entry point bypasses the duplicate guard"), test case it, finish it; work goes to staging, PR #448 to main closed.
+- Sales page path (T-006 R1): already fixed on staging. Proved by a new behavioural test that runs the real `createDeliveryOrderForPOs`.
+- Second gap found by the same test: `items` naming an already-delivered PO went past the guard. Fixed, BUG-2026-09-30-223.
+- tsc strict 0; `npm test` 5168 pass / 0 fail / 3 skip.
+- Staging state: UNMEASURED against the staging DB.
 
 ## 2026-09-30 — 🔵 /m Warehouse: movements show the time, not just the date (branch `feat/m-warehouse-movement-time` → `staging`)
 - DEV-09 asks for "Date / Time" on movements. `WarehouseScreen.tsx` `MovementRow` and `MovementCard` now format `createdAt` with `dateTimeShort` ("28 Sep, 14:05") instead of `dateShort`. Display only, no API or schema change.

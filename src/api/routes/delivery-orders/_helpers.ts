@@ -2272,11 +2272,20 @@ export async function createDeliveryOrderForPOs(
       itemCategory: string | null;
       specialOrder: string | null;
     };
-    const productionOrderIds: string[] = Array.isArray(body.productionOrderIds)
-      ? (body.productionOrderIds as unknown[]).filter(
-          (x): x is string => typeof x === "string" && x.length > 0,
-        )
-      : [];
+    // BUG-06: body.items is written as sent, so the guard below must see
+    // every production order those items name too, not only
+    // body.productionOrderIds (the edit path already derives its ids from
+    // the items). Otherwise items for an already-delivered PO pass the guard.
+    const productionOrderIds: string[] = [
+      ...new Set(
+        [
+          ...(Array.isArray(body.productionOrderIds) ? body.productionOrderIds : []),
+          ...(Array.isArray(body.items)
+            ? (body.items as Array<Record<string, unknown>>).map((it) => it?.productionOrderId)
+            : []),
+        ].filter((x): x is string => typeof x === "string" && x.length > 0),
+      ),
+    ];
     let poRowsForItems: PoRow[] = [];
     let resolvedSalesOrderId: string | undefined = body.salesOrderId ?? undefined;
     if (productionOrderIds.length > 0) {

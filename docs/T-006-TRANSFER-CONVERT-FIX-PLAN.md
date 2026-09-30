@@ -1,5 +1,6 @@
 # T-006 — Transfer / Convert foundation: fix plan
 
+> **Last verified: 2026-09-30** (branch `test/bug06-do-guard-behavioural`): R1 re-checked by behaviour against staging. The Sales page path is closed; a second gap on the same guard (`items` naming POs the guard never saw) is fixed as BUG-2026-09-30-223, see the R1 follow-up below. PR #448 to `main` was closed unmerged on 2026-09-30; T-006 lives on staging.
 > **Last verified: 2026-09-24** against the live staging DB (branch `fix/t006-live-findings`):
 > the real route code run in a rolled-back transaction. R1, R2, R3, R5, R7, R10 held as written.
 > R8/R9/PI-side R10 500'd (`bigint = text` join), R6 refused every return and re-opened
@@ -49,6 +50,8 @@ the one that hurt someone.
 ---
 
 ## R1 — SO→DO transfer bypasses the duplicate-delivery guard
+
+**Follow-up 2026-09-30 (BUG-06 / BUG-2026-09-30-223):** the R1 refusal below only fires when a sales order is named, and the guard only saw `productionOrderIds`, while create writes `body.items` as sent. Create now guards every production order named in either. Proven by `tests/do-create-requires-production-orders.test.mjs`, which runs the real function; the R1 source-text test for the server refusal was replaced by it.
 
 **Confirmed at:** `src/pages/sales/index.tsx:1881-1900`, `src/api/routes/delivery-orders/_helpers.ts:2256-2337`.
 
