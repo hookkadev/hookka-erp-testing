@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-222 (branch `fix/storage-delete-not-found`; ids 219-221 are on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-217 (branch `fix/scan-short-supplier-code`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-216 (branch `fix/staging-no-nightly-wipe`; ids 213-215 are on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 
@@ -44,6 +45,22 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-09-29-222 — A file already gone from storage could never be deleted, and streamed as a 500 `platform` 🟢
+
+🟢 **Fixed** (branch `fix/storage-delete-not-found`, not yet deployed) · Found while verifying the org-chart "delete the old photo on change" feature on staging.
+
+**Symptom, measured.** Staging's storage log (SG project, 2026-09-29 17:47:58) shows the old-photo delete answered **HTTP 400**. The photo change itself succeeded, but `removeStoredFile` gave up and the old `file_assets` row stayed. Earlier the same day, `/api/files/:id/stream` for a photo whose object had been removed answered a generic **500 "stream failed"**, not a 404.
+
+**Root cause.** `deleteFile` and `getFile` in `src/api/lib/supabase-storage.ts` treated only HTTP **404** as "object not found". Supabase Storage reports a missing object as HTTP **400** with a JSON body whose `statusCode` is `"404"` / `error` `"not_found"`. The 400 status is measured; the body shape is Supabase's documented not-found envelope (the same `{statusCode,error,message}` envelope measured for `InvalidSignature` in BUG-2026-09-29-214), UNMEASURED for this exact response. So "already gone" was treated as a hard failure: the delete threw before the row delete, and the stream threw instead of returning null → 404.
+
+**Fix.** One exported `isObjectNotFound(status, body)`, used by both: 404, or 400 whose body says not-found / `NoSuchKey`. Any other 400 (e.g. `InvalidSignature`) still fails.
+
+**Regression.** `tests/supabase-storage-not-found.test.mjs` calls the real `deleteFile` / `getFile` against stubbed responses; 3 of its 7 tests fail on the pre-fix code.
+
+**Not repaired by this fix.** Rows already stuck before the fix (staging's pre-move org photos) stay until deleted again, now that a retry would succeed.
 
 ---
 
