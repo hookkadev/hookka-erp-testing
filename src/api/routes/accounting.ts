@@ -38,7 +38,7 @@ import { ensurePartialPaymentColumns } from "../lib/ensure-partial-payment";
 import { ensureFinanceOrgColumns } from "../lib/ensure-finance-org";
 import { apRowBeforeOpening, legBeforeOpening, rowBeforeOpening } from "../../lib/opening-floor";
 import { applyOpeningSlice, windowCoversMonth } from "../../lib/opening-slice";
-import { docNoFromDescription, drillVariant, otherSideCodes, tidyDescription } from "../../lib/ledger-drill";
+import { docNoFromDescription, drillVariant, otherSideCodes, ownDescription, tidyDescription } from "../../lib/ledger-drill";
 import { labourInjectMonths } from "../../lib/labour-inject";
 import { projectedLabourByDept } from "../lib/labour-projection";
 import { groupPayslipsByMonthDept, forecastEntryKind, monthHasDeptForecast, labourMappedAccounts } from "../../lib/salary-dept";
@@ -8485,7 +8485,7 @@ async function buildDrillLines(
   } catch { /* the line keeps its own text */ }
   try {
     for (const r of await chunked<Record<string, unknown>>(idsOf(isPv), (ph) => `SELECT id, pvNo, payee, description FROM payment_vouchers WHERE id IN (${ph})`)) {
-      setInfo(isPv, String(r.id), { ref1: str(r.pvNo ?? r.pv_no) || null, party: str(r.payee) || null, header: str(r.description) || null });
+      setInfo(isPv, String(r.id), { ref1: str(r.pvNo ?? r.pv_no) || null, party: str(r.payee) || null, header: ownDescription(str(r.description)) });
     }
   } catch { /* the line keeps its own text */ }
   try {
@@ -8495,13 +8495,13 @@ async function buildDrillLines(
         ref1: str(r.billNo ?? r.bill_no) || null,
         party: str(r.partyName ?? r.party_name) || null,
         docs: ref ? `Reference ${ref}` : null,
-        header: str(r.description) || null,
+        header: ownDescription(str(r.description)),
       });
     }
   } catch { /* the line keeps its own text */ }
   try {
     for (const r of await chunked<Record<string, unknown>>(idsOf(isJv), (ph) => `SELECT id, description FROM journal_entries WHERE id IN (${ph})`)) {
-      setInfo(isJv, String(r.id), { header: str(r.description) || null });
+      setInfo(isJv, String(r.id), { header: ownDescription(str(r.description)) });
     }
   } catch { /* the line keeps its own text */ }
   for (const [pred, table, label] of [[isCn, "credit_notes", "Credit note"], [isDn, "debit_notes", "Debit note"]] as const) {
@@ -8513,7 +8513,7 @@ async function buildDrillLines(
   }
   try {
     for (const r of await chunked<Record<string, unknown>>(idsOf(isOr), (ph) => `SELECT id, receivedFrom, description FROM official_receipts WHERE id IN (${ph})`)) {
-      setInfo(isOr, String(r.id), { party: str(r.receivedFrom ?? r.received_from) || null, header: str(r.description) || null });
+      setInfo(isOr, String(r.id), { party: str(r.receivedFrom ?? r.received_from) || null, header: ownDescription(str(r.description)) ?? "Official receipt" });
     }
   } catch { /* the line keeps its own text */ }
   // The documents that mostly sit on balance-sheet accounts (the balance-sheet
@@ -8526,7 +8526,7 @@ async function buildDrillLines(
   try {
     const payNos = [...new Set([...idsOf(isSp), ...idsOf(isOp)])];
     for (const r of await chunked<Record<string, unknown>>(payNos, (ph) => `SELECT pvNo, description FROM payment_vouchers WHERE pvNo IN (${ph})`)) {
-      const purpose = str(r.description);
+      const purpose = ownDescription(str(r.description));
       if (purpose) pvPurposeByNo.set(str(r.pvNo ?? r.pv_no), purpose);
     }
   } catch { /* description stays the ledger text */ }
@@ -9477,13 +9477,13 @@ async function computeCashflowStatement(
       const pvIds = [...new Set(ents.filter((e) => e.sourceType.startsWith("payment_voucher")).map((e) => e.sourceId))];
       for (const r of await chunkIds(pvIds, (ph) => `SELECT id, payee, description FROM payment_vouchers WHERE id IN (${ph})`)) {
         setOnce(party, `pv::${String(r.id)}`, String(r.payee ?? "").trim());
-        const purpose = String(r.description ?? "").trim();
+        const purpose = ownDescription(String(r.description ?? ""));
         if (purpose) pvPurpose.set(String(r.id), purpose);
       }
       // AP vouchers: the settlement carries the voucher's number.
       const payNos = [...new Set(ents.filter((e) => e.sourceType.startsWith("supplier_payment") || e.sourceType.startsWith("other_party_payment")).map((e) => e.sourceId))];
       for (const r of await chunkIds(payNos, (ph) => `SELECT pvNo, description FROM payment_vouchers WHERE pvNo IN (${ph})`)) {
-        const purpose = String(r.description ?? "").trim();
+        const purpose = ownDescription(String(r.description ?? ""));
         if (purpose) pvPurposeByNo.set(String(r.pvNo ?? r.pv_no ?? ""), purpose);
       }
     } catch { /* description stays the ledger text */ }
@@ -9501,13 +9501,13 @@ async function computeCashflowStatement(
       const orIds = [...new Set(ents.filter((e) => e.sourceType.startsWith("official_receipt")).map((e) => e.sourceId))];
       for (const r of await chunkIds(orIds, (ph) => `SELECT id, receivedFrom, description FROM official_receipts WHERE id IN (${ph})`)) {
         setOnce(party, `or::${String(r.id)}`, String(r.receivedFrom ?? r.received_from ?? "").trim());
-        setOnce(ownPurpose, `or::${String(r.id)}`, String(r.description ?? "").trim());
+        setOnce(ownPurpose, `or::${String(r.id)}`, ownDescription(String(r.description ?? "")) ?? "Official receipt");
       }
     } catch { /* Ref. 2 stays empty */ }
     try {
       const jvIds = [...new Set(ents.filter((e) => e.sourceType === "manual" || e.sourceType.startsWith("manual_")).map((e) => e.sourceId))];
       for (const r of await chunkIds(jvIds, (ph) => `SELECT id, description FROM journal_entries WHERE id IN (${ph})`)) {
-        setOnce(ownPurpose, `jv::${String(r.id)}`, String(r.description ?? "").trim());
+        setOnce(ownPurpose, `jv::${String(r.id)}`, ownDescription(String(r.description ?? "")) ?? "");
       }
     } catch { /* description stays the ledger text */ }
     try {

@@ -109,16 +109,27 @@ export function tidyDescription(
 
 // What a correction entry is, said after the document's own description (the
 // drills show the document's description instead of the ledger text, which
-// used to say "Void · PI …"): an edited document's old posting reversed and
-// its new one posted, a void, an unvoid, a reversal, a PI edit's adjustment,
-// a PI's GL re-sync. An ordinary posting → "".
+// used to say "Void · PI …"): a void, an unvoid, a reversal, a PI edit's
+// adjustment, a PI's GL re-sync, an edited document's old posting reversed.
+// An edited document's re-post says nothing: every edit hides the document's
+// older legs (supplier-payments.ts, payments.ts, …), so the re-post IS the
+// document (measured on prod 2026-09-30: labelling it marked 345 ordinary
+// lines). An ordinary posting → "".
 export function drillVariant(sourceType: string, sourceId = ""): string {
   const t = sourceType.split(":")[0];
   if (/_restate_rev$/.test(t)) return "reversed on edit";
-  if (/_restate_post$/.test(t)) return sourceType.includes(":") ? "re-posted on edit" : "GL re-sync";
+  if (/_restate_post$/.test(t)) return sourceType.includes(":") ? "" : "GL re-sync";
   if (/_unvoid$/.test(t)) return "unvoid";
   if (/_void$/.test(t)) return "void";
   if (/_reversal$/.test(t)) return "reversal";
   if (/:edit-\d+$/.test(sourceId)) return "edit adjustment";
   return "";
+}
+
+// A document's own description, or null when it says nothing: empty, or a lone
+// "from" / "to" / "for" (an official receipt keyed as "from", its payer in its
+// own field). Then the drill keeps the ledger text, or the document's kind.
+export function ownDescription(description: string | null | undefined): string | null {
+  const s = (description ?? "").trim();
+  return s && !/^(?:from|to|for)$/i.test(s) ? s : null;
 }
