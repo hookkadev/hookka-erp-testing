@@ -8,7 +8,7 @@ import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm-dialog";
-import { Plus, Lock, ExternalLink, Filter } from "lucide-react";
+import { Plus, Lock, ExternalLink, Filter, ChevronDown } from "lucide-react";
 import { DataGrid } from "@/components/ui/data-grid";
 import type { Column, ContextMenuItem } from "@/components/ui/data-grid";
 import { getQRCodeDataURL, generateStickerData, generateCompartmentStickerData } from "@/lib/qr-utils";
@@ -63,7 +63,6 @@ import {
   todayISO,
   CARD_HEIGHT,
   overviewRowLook,
-  pipelineCols,
   stageTint,
   type LiveDepartment,
   type StageClick,
@@ -182,6 +181,105 @@ const asOptions = (vals: string[]) => vals.map((v) => ({ value: v, label: v }));
 const categoryLabel = (v: string) => CATEGORY_OPTIONS.find((o) => o.value === v)?.label ?? v;
 const OverviewResizeCtx = createContext<{ start: (e: React.MouseEvent, key: string) => void; reset: (key: string) => void } | null>(null);
 
+// ----- Filter popover anchored under a trigger button -----
+// Portaled to <body> with fixed positioning so no scroll/overflow container
+// (the Grid's horizontal scroll box) can clip it; re-anchors on scroll/resize.
+// Mount it only while open. `panelWidth` keeps a wide panel on screen.
+function AnchoredPopover({
+  anchorRef,
+  onClose,
+  panelWidth = 200,
+  children,
+}: {
+  anchorRef: React.RefObject<HTMLElement | null>;
+  onClose: () => void;
+  panelWidth?: number;
+  children: React.ReactNode;
+}) {
+  const [popPos, setPopPos] = useState<{ top: number; left: number } | null>(null);
+  // Measure-then-position before paint, so the panel never flashes at 0,0.
+  useLayoutEffect(() => {
+    const place = () => {
+      const r = anchorRef.current?.getBoundingClientRect();
+      if (!r) return;
+      const left = Math.max(8, Math.min(r.right - panelWidth, window.innerWidth - panelWidth - 8));
+      setPopPos({ top: r.bottom + 4, left });
+    };
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
+  }, [anchorRef, panelWidth]);
+  if (!popPos) return null;
+  return createPortal(
+    <>
+      {/* Outside-click capture overlay so the popover dismisses cleanly. */}
+      <div className="fixed inset-0 z-[60]" onClick={onClose} />
+      <div
+        className="fixed z-[61] bg-white border border-[#E6E0D9] rounded-md shadow-lg p-3 min-w-[180px] normal-case tracking-normal text-[12px] font-normal text-[#1F1D1B]"
+        style={{ top: popPos.top, left: popPos.left }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {children}
+      </div>
+    </>,
+    document.body,
+  );
+}
+
+// ----- Cards view filter pill — label + chevron, opens a filter popover -----
+// Highlighted with a count badge while any of its filters is active.
+function FilterPill({
+  label,
+  count,
+  open,
+  onToggle,
+  onClose,
+  panelWidth,
+  children,
+}: {
+  label: string;
+  count: number;
+  open: boolean;
+  onToggle: () => void;
+  onClose: () => void;
+  panelWidth?: number;
+  children: React.ReactNode;
+}) {
+  const ref = useRef<HTMLButtonElement>(null);
+  return (
+    <>
+      <button
+        ref={ref}
+        type="button"
+        aria-expanded={open}
+        onClick={onToggle}
+        className={`h-7 inline-flex items-center gap-1 rounded-full border px-2.5 text-[11px] font-semibold uppercase tracking-wide transition-colors ${
+          count > 0
+            ? "border-[#6B5C32] bg-[#F5EFE0] text-[#6B5C32]"
+            : "border-[#E6E0D9] bg-white text-[#6B7280] hover:bg-[#FAF8F4]"
+        }`}
+      >
+        {label}
+        {count > 0 && (
+          <span className="h-4 min-w-4 rounded-full bg-[#6B5C32] px-1 text-[10px] leading-4 text-white text-center normal-case tracking-normal">
+            {count}
+          </span>
+        )}
+        <ChevronDown className={`h-3 w-3 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <AnchoredPopover anchorRef={ref} onClose={onClose} panelWidth={panelWidth}>
+          {children}
+        </AnchoredPopover>
+      )}
+    </>
+  );
+}
+
 // ----- Overview header cell — sort indicator + filter popover trigger -----
 //
 // Memoized internally via the shallow comparison of the props the cell
@@ -222,28 +320,6 @@ function OverviewHeader({
   // scroll container — an in-flow absolute popover would be clipped by that
   // overflow box. Re-anchors on scroll/resize so it tracks the button.
   const filterBtnRef = useRef<HTMLButtonElement>(null);
-  const [popPos, setPopPos] = useState<{ top: number; left: number } | null>(null);
-  /* eslint-disable react-hooks/set-state-in-effect -- measure-then-position a
-     portaled popover before paint; synchronous setState inside useLayoutEffect
-     is the intended pattern for anchoring an element to a measured DOM rect. */
-  useLayoutEffect(() => {
-    if (!open) { setPopPos(null); return; }
-    const place = () => {
-      const r = filterBtnRef.current?.getBoundingClientRect();
-      if (!r) return;
-      const PANEL_W = 200;
-      const left = Math.max(8, Math.min(r.right - PANEL_W, window.innerWidth - PANEL_W - 8));
-      setPopPos({ top: r.bottom + 4, left });
-    };
-    place();
-    window.addEventListener("resize", place);
-    window.addEventListener("scroll", place, true);
-    return () => {
-      window.removeEventListener("resize", place);
-      window.removeEventListener("scroll", place, true);
-    };
-  }, [open]);
-  /* eslint-enable react-hooks/set-state-in-effect */
   return (
     <div
       data-ovh
@@ -280,24 +356,10 @@ function OverviewHeader({
           )}
         </button>
       </div>
-      {open && popPos && createPortal(
-        <>
-          {/* Outside-click capture overlay so the popover dismisses cleanly.
-              Portaled to <body> (with the panel) so the horizontal-scroll
-              container around the matrix can't clip it. */}
-          <div
-            className="fixed inset-0 z-[60]"
-            onClick={() => setOpenFilterCol(null)}
-          />
-          <div
-            className="fixed z-[61] bg-white border border-[#E6E0D9] rounded-md shadow-lg p-3 min-w-[180px] normal-case tracking-normal text-[12px] font-normal text-[#1F1D1B]"
-            style={{ top: popPos.top, left: popPos.left }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {renderFilter()}
-          </div>
-        </>,
-        document.body,
+      {open && (
+        <AnchoredPopover anchorRef={filterBtnRef} onClose={() => setOpenFilterCol(null)}>
+          {renderFilter()}
+        </AnchoredPopover>
       )}
       {overviewResize && (
         <span
@@ -7149,9 +7211,10 @@ export default function ProductionPage({
   // forced the user to start over. Instead the spinner renders as a small
   // fixed badge so the filter UI remains live during refetch.
 
-  // Overview header controls, shared by the Grid header row and the Cards
-  // sticky header. Only one view renders at a time, so reusing the elements
-  // is safe; the filter popovers are portaled, so neither layout clips them.
+  // Overview filter controls. Grid shows them as column headers (sort +
+  // filter popover per column); Cards shows the SAME filters as a strip of
+  // pills under the page filter bar. Both read/write overviewFilters +
+  // overviewSort, so switching views keeps every filter.
   const overviewSelectAll = (
     <input
       type="checkbox"
@@ -7165,212 +7228,264 @@ export default function ProductionPage({
       className="cursor-pointer align-middle"
     />
   );
-  const overviewFieldHeaders = (
-    <>
-      <OverviewHeader
-        key="soId"
-        label="SO ID"
-        sortKey="soId"
-        sort={overviewSort}
-        cycle={cycleOverviewSort}
-        filterCol="soId"
-        filterActive={isFilterActive("soId")}
-        openFilterCol={openFilterCol}
-        setOpenFilterCol={setOpenFilterCol}
-        renderFilter={() => (
-          <TextContainsFilter
-            value={overviewFilters.soId}
-            onChange={(v) => setOverviewFilters((p) => ({ ...p, soId: v }))}
-            placeholder="Contains…"
-          />
-        )}
-      />
-      <OverviewHeader
-        key="product"
-        label="Product"
-        sortKey="product"
-        sort={overviewSort}
-        cycle={cycleOverviewSort}
-        filterCol="product"
-        filterActive={isFilterActive("product")}
-        openFilterCol={openFilterCol}
-        setOpenFilterCol={setOpenFilterCol}
-        renderFilter={() => (
-          <TextContainsFilter
-            value={overviewFilters.product}
-            onChange={(v) => setOverviewFilters((p) => ({ ...p, product: v }))}
-            placeholder="Contains…"
-          />
-        )}
-      />
-      <OverviewHeader
-        key="customer"
-        label="Customer"
-        sortKey="customer"
-        sort={overviewSort}
-        cycle={cycleOverviewSort}
-        filterCol="customer"
-        filterActive={isFilterActive("customer")}
-        openFilterCol={openFilterCol}
-        setOpenFilterCol={setOpenFilterCol}
-        renderFilter={() => (
-          <MultiSelectFilter
-            options={Array.from(new Set(visibleOrders.concat(orders).map((o) => o.customerName).filter(Boolean))).sort()}
-            selected={overviewFilters.customers}
-            onChange={(next) => setOverviewFilters((p) => ({ ...p, customers: next }))}
-          />
-        )}
-      />
-      <OverviewHeader
-        key="customerPO"
-        label="Customer PO"
-        sortKey="customerPO"
-        sort={overviewSort}
-        cycle={cycleOverviewSort}
-        filterCol="customerPO"
-        filterActive={isFilterActive("customerPO")}
-        openFilterCol={openFilterCol}
-        setOpenFilterCol={setOpenFilterCol}
-        renderFilter={() => (
-          <TextContainsFilter
-            value={overviewFilters.customerPO}
-            onChange={(v) => setOverviewFilters((p) => ({ ...p, customerPO: v }))}
-            placeholder="Contains…"
-          />
-        )}
-      />
-      <OverviewHeader
-        key="specialOrder"
-        label="Special Order"
-        sortKey="specialOrder"
-        sort={overviewSort}
-        cycle={cycleOverviewSort}
-        filterCol="specialOrder"
-        filterActive={isFilterActive("specialOrder")}
-        openFilterCol={openFilterCol}
-        setOpenFilterCol={setOpenFilterCol}
-        renderFilter={() => (
-          <TextContainsFilter
-            value={overviewFilters.specialOrder}
-            onChange={(v) => setOverviewFilters((p) => ({ ...p, specialOrder: v }))}
-            placeholder="Contains…"
-          />
-        )}
-      />
-      <OverviewHeader
-        key="qty"
-        label="Qty"
-        align="center"
-        sortKey="qty"
-        sort={overviewSort}
-        cycle={cycleOverviewSort}
-        filterCol="qty"
-        filterActive={isFilterActive("qty")}
-        openFilterCol={openFilterCol}
-        setOpenFilterCol={setOpenFilterCol}
-        renderFilter={() => (
-          <NumericRangeFilter
-            min={overviewFilters.qtyMin}
-            max={overviewFilters.qtyMax}
-            onChange={(min, max) => setOverviewFilters((p) => ({ ...p, qtyMin: min, qtyMax: max }))}
-          />
-        )}
-      />
-      <OverviewHeader
-        key="customerDD"
-        label="Customer DD"
-        align="center"
-        sortKey="customerDD"
-        sort={overviewSort}
-        cycle={cycleOverviewSort}
-        filterCol="customerDD"
-        filterActive={isFilterActive("customerDD")}
-        openFilterCol={openFilterCol}
-        setOpenFilterCol={setOpenFilterCol}
-        renderFilter={() => (
-          <DateRangeFilter
-            from={overviewFilters.customerDDFrom}
-            to={overviewFilters.customerDDTo}
-            onChange={(from, to) => setOverviewFilters((p) => ({ ...p, customerDDFrom: from, customerDDTo: to }))}
-          />
-        )}
-      />
-      <OverviewHeader
-        key="ourExpectedDD"
-        label="Our Expected DD"
-        align="center"
-        sortKey="ourExpectedDD"
-        sort={overviewSort}
-        cycle={cycleOverviewSort}
-        filterCol="ourExpectedDD"
-        filterActive={isFilterActive("ourExpectedDD")}
-        openFilterCol={openFilterCol}
-        setOpenFilterCol={setOpenFilterCol}
-        renderFilter={() => (
-          <DateRangeFilter
-            from={overviewFilters.ourExpectedDDFrom}
-            to={overviewFilters.ourExpectedDDTo}
-            onChange={(from, to) => setOverviewFilters((p) => ({ ...p, ourExpectedDDFrom: from, ourExpectedDDTo: to }))}
-          />
-        )}
-      />
-    </>
+  const overviewFieldFilters: {
+    key: (typeof OVERVIEW_FIXED_COLS)[number];
+    label: string;
+    align?: "center";
+    render: () => React.ReactNode;
+  }[] = [
+    {
+      key: "soId",
+      label: "SO ID",
+      render: () => (
+        <TextContainsFilter
+          value={overviewFilters.soId}
+          onChange={(v) => setOverviewFilters((p) => ({ ...p, soId: v }))}
+          placeholder="Contains…"
+        />
+      ),
+    },
+    {
+      key: "product",
+      label: "Product",
+      render: () => (
+        <TextContainsFilter
+          value={overviewFilters.product}
+          onChange={(v) => setOverviewFilters((p) => ({ ...p, product: v }))}
+          placeholder="Contains…"
+        />
+      ),
+    },
+    {
+      key: "customer",
+      label: "Customer",
+      render: () => (
+        <MultiSelectFilter
+          options={Array.from(new Set(visibleOrders.concat(orders).map((o) => o.customerName).filter(Boolean))).sort()}
+          selected={overviewFilters.customers}
+          onChange={(next) => setOverviewFilters((p) => ({ ...p, customers: next }))}
+        />
+      ),
+    },
+    {
+      key: "customerPO",
+      label: "Customer PO",
+      render: () => (
+        <TextContainsFilter
+          value={overviewFilters.customerPO}
+          onChange={(v) => setOverviewFilters((p) => ({ ...p, customerPO: v }))}
+          placeholder="Contains…"
+        />
+      ),
+    },
+    {
+      key: "specialOrder",
+      label: "Special Order",
+      render: () => (
+        <TextContainsFilter
+          value={overviewFilters.specialOrder}
+          onChange={(v) => setOverviewFilters((p) => ({ ...p, specialOrder: v }))}
+          placeholder="Contains…"
+        />
+      ),
+    },
+    {
+      key: "qty",
+      label: "Qty",
+      align: "center",
+      render: () => (
+        <NumericRangeFilter
+          min={overviewFilters.qtyMin}
+          max={overviewFilters.qtyMax}
+          onChange={(min, max) => setOverviewFilters((p) => ({ ...p, qtyMin: min, qtyMax: max }))}
+        />
+      ),
+    },
+    {
+      key: "customerDD",
+      label: "Customer DD",
+      align: "center",
+      render: () => (
+        <DateRangeFilter
+          from={overviewFilters.customerDDFrom}
+          to={overviewFilters.customerDDTo}
+          onChange={(from, to) => setOverviewFilters((p) => ({ ...p, customerDDFrom: from, customerDDTo: to }))}
+        />
+      ),
+    },
+    {
+      key: "ourExpectedDD",
+      label: "Our Expected DD",
+      align: "center",
+      render: () => (
+        <DateRangeFilter
+          from={overviewFilters.ourExpectedDDFrom}
+          to={overviewFilters.ourExpectedDDTo}
+          onChange={(from, to) => setOverviewFilters((p) => ({ ...p, ourExpectedDDFrom: from, ourExpectedDDTo: to }))}
+        />
+      ),
+    },
+  ];
+  const renderStageFilter = (code: string) => (
+    <DeptStatusFilter
+      selected={overviewFilters.deptStatuses[code] || []}
+      onChange={(next) =>
+        setOverviewFilters((p) => ({
+          ...p,
+          deptStatuses: { ...p.deptStatuses, [code]: next },
+        }))
+      }
+      dateRange={overviewFilters.deptDates[code] || { from: "", to: "" }}
+      onDateRangeChange={(next) =>
+        setOverviewFilters((p) => ({
+          ...p,
+          deptDates: { ...p.deptDates, [code]: next },
+        }))
+      }
+    />
   );
-  const overviewStageHeaders = (
-    <>
+  // Active-filter count for a stage pill: one per ticked status, +1 for a
+  // date range.
+  const stageFilterCount = (code: string) => {
+    const range = overviewFilters.deptDates[code];
+    return (overviewFilters.deptStatuses[code] || []).length + (range && (range.from || range.to) ? 1 : 0);
+  };
+  const overviewFieldHeaders = overviewFieldFilters.map((f) => (
+    <OverviewHeader
+      key={f.key}
+      label={f.label}
+      align={f.align}
+      sortKey={f.key}
+      sort={overviewSort}
+      cycle={cycleOverviewSort}
+      filterCol={f.key}
+      filterActive={isFilterActive(f.key)}
+      openFilterCol={openFilterCol}
+      setOpenFilterCol={setOpenFilterCol}
+      renderFilter={f.render}
+    />
+  ));
+  const overviewStageHeaders = overviewStages.map((d) => (
+    <OverviewHeader
+      key={d.code}
+      label={d.name}
+      align="center"
+      border
+      sortKey={d.code}
+      sort={overviewSort}
+      cycle={cycleOverviewSort}
+      filterCol={d.code}
+      filterActive={isFilterActive(d.code)}
+      openFilterCol={openFilterCol}
+      setOpenFilterCol={setOpenFilterCol}
+      renderFilter={() => renderStageFilter(d.code)}
+    />
+  ));
+  const togglePill = (col: string) => setOpenFilterCol(openFilterCol === col ? null : col);
+  const closePill = () => setOpenFilterCol(null);
+  const moreFiltersCount = overviewFieldFilters.filter((f) => isFilterActive(f.key)).length;
+  // Cards view control strip (second line of the page filter bar): one pill
+  // per stage (status + date popover), "More filters" for the order-level
+  // column filters, then sort, select-all and a clear for these filters.
+  const overviewStageStrip = (
+    <div className="basis-full flex flex-wrap items-center gap-1.5 border-t border-[#EFEAE2] pt-2">
       {overviewStages.map((d) => (
-        <OverviewHeader
+        <FilterPill
           key={d.code}
           label={d.name}
-          align="center"
-          border
-          sortKey={d.code}
-          sort={overviewSort}
-          cycle={cycleOverviewSort}
-          filterCol={d.code}
-          filterActive={isFilterActive(d.code)}
-          openFilterCol={openFilterCol}
-          setOpenFilterCol={setOpenFilterCol}
-          renderFilter={() => (
-            <DeptStatusFilter
-              selected={overviewFilters.deptStatuses[d.code] || []}
-              onChange={(next) =>
-                setOverviewFilters((p) => ({
-                  ...p,
-                  deptStatuses: { ...p.deptStatuses, [d.code]: next },
-                }))
-              }
-              dateRange={overviewFilters.deptDates[d.code] || { from: "", to: "" }}
-              onDateRangeChange={(next) =>
-                setOverviewFilters((p) => ({
-                  ...p,
-                  deptDates: { ...p.deptDates, [d.code]: next },
-                }))
-              }
-            />
-          )}
-        />
+          count={stageFilterCount(d.code)}
+          open={openFilterCol === d.code}
+          onToggle={() => togglePill(d.code)}
+          onClose={closePill}
+        >
+          {renderStageFilter(d.code)}
+        </FilterPill>
       ))}
-    </>
-  );
-  // Cards view header: metadata sort/filter controls on line 1, stage
-  // sort/filter on line 2 in the SAME grid template as each card's stage row
-  // so they line up. Rendered inside the cards' scroll box (sticky top-0) so the vertical
-  // scrollbar narrows header and cards equally.
-  const overviewCardsHeader = (
-    <div className="bg-[#FAF8F4] border-b border-[#E6E0D9]">
-      <div className="flex flex-wrap items-center gap-x-2 px-2 border-b border-[#EFEAE2]">
-        <div className="flex items-center pr-1">{overviewSelectAll}</div>
-        {overviewFieldHeaders}
-      </div>
-      {/* Thin sort/filter row for the stages (each card shows its own stage
-          labels). Same grid, gap and 19px inset as a card's stage row. */}
-      <div
-        className="grid gap-1 px-[19px] [&_[data-ovh]]:py-1 [&_[data-ovh]]:border-l-0"
-        style={{ gridTemplateColumns: pipelineCols(overviewStages.length) }}
+      <FilterPill
+        label="More filters"
+        count={moreFiltersCount}
+        open={openFilterCol === "more"}
+        onToggle={() => togglePill("more")}
+        onClose={closePill}
+        panelWidth={280}
       >
-        {overviewStageHeaders}
+        <div className="flex flex-col gap-3 w-[256px] max-h-[60vh] overflow-y-auto pr-1">
+          {overviewFieldFilters.map((f) => (
+            <div key={f.key}>
+              <div className={`text-[10px] font-semibold uppercase tracking-wider mb-1 ${isFilterActive(f.key) ? "text-[#6B5C32]" : "text-[#6B7280]"}`}>
+                {f.label}
+              </div>
+              {f.render()}
+            </div>
+          ))}
+        </div>
+      </FilterPill>
+      <div className="ml-auto flex items-center gap-2 text-[11px] text-[#6B7280]">
+        <label className="flex items-center gap-1">
+          Sort
+          <select
+            value={overviewSort?.key ?? ""}
+            onChange={(e) =>
+              setOverviewSort(e.target.value ? { key: e.target.value, dir: overviewSort?.dir ?? "asc" } : null)
+            }
+            className="h-7 rounded border border-[#E6E0D9] bg-white px-1.5 text-[11px] text-[#3A2E22] focus:outline-none focus:ring-1 focus:ring-[#6B5C32]/30"
+          >
+            <option value="">None</option>
+            <optgroup label="Order">
+              {overviewFieldFilters.map((f) => (
+                <option key={f.key} value={f.key}>{f.label}</option>
+              ))}
+            </optgroup>
+            <optgroup label="Stage due date">
+              {overviewStages.map((d) => (
+                <option key={d.code} value={d.code}>{d.name}</option>
+              ))}
+            </optgroup>
+          </select>
+        </label>
+        <button
+          type="button"
+          disabled={!overviewSort}
+          onClick={() => setOverviewSort((s) => (s ? { ...s, dir: s.dir === "asc" ? "desc" : "asc" } : s))}
+          className="h-7 w-7 rounded border border-[#E6E0D9] bg-white text-[#6B5C32] disabled:text-[#D1CCC4] hover:bg-[#FAF8F4]"
+          title={overviewSort?.dir === "desc" ? "Descending: click for ascending" : "Ascending: click for descending"}
+          aria-label="Sort direction"
+        >
+          {overviewSort?.dir === "desc" ? "▼" : "▲"}
+        </button>
+        <label className="flex items-center gap-1.5 border-l border-[#E6E0D9] pl-2 cursor-pointer">
+          {overviewSelectAll}
+          Select all ({visibleOrders.length})
+        </label>
+        {(anyOverviewFilterActive || overviewSort) && (
+          <button
+            type="button"
+            onClick={clearAllOverviewFilters}
+            className="font-semibold text-[#6B5C32] hover:underline"
+            title="Clear the stage / order filters and the sort"
+          >
+            Clear
+          </button>
+        )}
       </div>
+    </div>
+  );
+  // Cards / Grid switch — sits at the right end of the page filter bar.
+  const overviewViewToggle = (
+    <div className="inline-flex rounded border border-[#D4CFC7] overflow-hidden" role="group" aria-label="Overview layout">
+      {(["cards", "grid"] as const).map((v) => (
+        <button
+          key={v}
+          type="button"
+          aria-pressed={overviewView === v}
+          onClick={() => setOverviewView(v)}
+          className={`px-2.5 py-1 text-[11px] font-semibold ${
+            overviewView === v ? "bg-[#6B5C32] text-white" : "bg-white text-[#5A5550] hover:bg-[#F5F2ED]"
+          }`}
+        >
+          {v === "cards" ? "Cards" : "Grid"}
+        </button>
+      ))}
     </div>
   );
   // Same BUG-2026-08-13-146 gate as the footer: "No production orders
@@ -7708,6 +7823,8 @@ export default function ProductionPage({
             </span>
           )}
         </span>
+        {activeTab === "ALL" && overviewViewToggle}
+        {activeTab === "ALL" && overviewView === "cards" && overviewStageStrip}
       </div>
 
       {/* Active overdue-filter banner. Owner request 2026-06-23: clicking an
@@ -8304,61 +8421,34 @@ export default function ProductionPage({
         {/* Clear-all-filters bar — shown only when at least one column
             filter or sort is active so the operator has a one-click
             reset without scrubbing each column individually. */}
-        {/* Top bar: Cards / Grid toggle, plus the clear-all-filters shortcut
-            when any column filter or sort is active. */}
-        <div
-          className={`px-4 py-1.5 border-b text-[11px] flex items-center justify-between gap-3 ${
-            anyOverviewFilterActive || overviewSort
-              ? "bg-[#FFFBEC] border-[#F0E6BC] text-[#6B5C32]"
-              : "bg-white border-[#E6E0D9]"
-          }`}
-        >
-          {anyOverviewFilterActive || overviewSort ? (
-            <span className="flex items-center gap-3">
-              <span className="flex items-center gap-1.5">
-                <Filter className="h-3 w-3" />
-                Column filters / sort active
-              </span>
-              <button
-                type="button"
-                className="text-[11px] font-semibold text-[#6B5C32] hover:underline"
-                onClick={clearAllOverviewFilters}
-              >
-                Clear all filters
-              </button>
+        {/* Clear-all-filters bar (Grid) — shown only when at least one column
+            filter or sort is active so the operator has a one-click reset
+            without scrubbing each column individually. Cards has the same
+            Clear at the end of its filter strip. */}
+        {overviewView === "grid" && (anyOverviewFilterActive || overviewSort) && (
+          <div className="px-4 py-2 bg-[#FFFBEC] border-b border-[#F0E6BC] text-[11px] text-[#6B5C32] flex items-center justify-between">
+            <span className="flex items-center gap-1.5">
+              <Filter className="h-3 w-3" />
+              Column filters / sort active
             </span>
-          ) : (
-            <span />
-          )}
-          <div className="inline-flex rounded border border-[#D4CFC7] overflow-hidden" role="group" aria-label="Overview layout">
-            {(["cards", "grid"] as const).map((v) => (
-              <button
-                key={v}
-                type="button"
-                aria-pressed={overviewView === v}
-                onClick={() => setOverviewView(v)}
-                className={`px-2.5 py-0.5 text-[11px] font-semibold ${
-                  overviewView === v ? "bg-[#6B5C32] text-white" : "bg-white text-[#5A5550] hover:bg-[#F5F2ED]"
-                }`}
-              >
-                {v === "cards" ? "Cards" : "Grid"}
-              </button>
-            ))}
+            <button
+              type="button"
+              className="text-[11px] font-semibold text-[#6B5C32] hover:underline"
+              onClick={clearAllOverviewFilters}
+            >
+              Clear all filters
+            </button>
           </div>
-        </div>
+        )}
         {overviewView === "cards" ? (
           visibleOrders.length === 0 ? (
-            <>
-              {overviewCardsHeader}
-              {overviewEmpty}
-            </>
+            overviewEmpty
           ) : (
             <OverviewVirtualRows
               key="cards"
               count={visibleOrders.length}
               resetKey={overviewFilters}
               estimateSize={CARD_HEIGHT}
-              header={overviewCardsHeader}
               className="overflow-y-auto overflow-x-hidden bg-[#F7F5F1]"
               style={{ maxHeight: "calc(100vh - 320px)" }}
               renderRow={(rowIndex, rowStart, measureRef) => {
@@ -9985,7 +10075,6 @@ function OverviewVirtualRows({
   count,
   resetKey,
   estimateSize = 36,
-  header,
   className,
   style,
   renderRow,
@@ -9993,9 +10082,6 @@ function OverviewVirtualRows({
   count: number;
   resetKey: unknown;
   estimateSize?: number;
-  // Rendered sticky at the top INSIDE the scroll box (Cards view) so it
-  // shares the scrollbar-narrowed width with the rows below it.
-  header?: React.ReactNode;
   className?: string;
   style?: React.CSSProperties;
   renderRow: (
@@ -10016,7 +10102,6 @@ function OverviewVirtualRows({
   }, [resetKey]);
   return (
     <div ref={scrollRef} className={className} style={style}>
-      {header && <div className="sticky top-0 z-20">{header}</div>}
       <div
         style={{
           height: `${virtualizer.getTotalSize()}px`,
