@@ -5579,15 +5579,21 @@ function ExportButtons({ build, filenameBase, title, subtitle, pdfOpts, moneyFor
 // their own rows.
 type PlDrillLine = {
   id: string; date: string; description: string; otherSide: { code: string; name: string }[];
-  ref1: string; ref2: string | null; debitSen: number; creditSen: number; sourceType: string; sourceId: string;
+  ref1: string; ref2: string | null; docs?: string | null; debitSen: number; creditSen: number; sourceType: string; sourceId: string;
 };
 type PlDrillData = {
   historical?: boolean;
+  account?: { code: string; name: string; type: string | null };
   lines: PlDrillLine[];
   extra: { kind: "payroll" | "opening_slice"; ym: string; sen: number }[];
   debitSen: number; creditSen: number; netSen: number; tied?: boolean;
 };
 const plDrillAmt = (sen: number) => (sen / 100).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// Owner 2026-09-30 「p&L 点开要看的东西和 cash flow 一样」: the same layout as
+// the Cash Flow drill — Description = the document's overall description,
+// Ref. 2 = who it is with (the related documents on hover), one Amount column
+// in the line's own direction (income as income, cost as cost; a reversal in
+// brackets), month blocks with a total each when the period spans months.
 function PlDrillPanel({ period, account, line }: { period: string; account: string; line: "all" | "sofa" | "bedframe" }) {
   const [data, setData] = useState<PlDrillData | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -5599,7 +5605,35 @@ function PlDrillPanel({ period, account, line }: { period: string; account: stri
       .catch(() => { if (!dead) setErr("Could not load the ledger lines"); });
     return () => { dead = true; };
   }, [period, account]);
+  // Income accounts read credit as positive, everything else debit.
+  const creditNormal = data?.account?.type === "REVENUE";
+  const signed = (debitSen: number, creditSen: number) => (creditNormal ? creditSen - debitSen : debitSen - creditSen);
+  const amt = (sen: number) => (sen < 0 ? `(${plDrillAmt(-sen)})` : plDrillAmt(sen));
+  const amtCls = (sen: number) => `py-1 pl-3 text-right tabular-nums whitespace-nowrap ${sen < 0 ? "text-[#9A3A2D]" : ""}`;
+  const lines = data?.lines ?? [];
+  const months = [...new Set(lines.map((l) => l.date.slice(0, 7)))].sort();
+  const byMonth = months.length > 1;
+  const lineSum = (ls: PlDrillLine[]) => ls.reduce((s, l) => s + signed(l.debitSen, l.creditSen), 0);
+  const extraSum = (data?.extra ?? []).reduce((s, e) => s + (creditNormal ? -e.sen : e.sen), 0);
+  const total = lineSum(lines) + extraSum;
   const th = "py-1 pr-3 font-medium text-left";
+  const row = (l: PlDrillLine) => {
+    const sen = signed(l.debitSen, l.creditSen);
+    return (
+      <tr key={l.id || `${l.sourceType}:${l.sourceId}:${l.debitSen}:${l.creditSen}`} className="border-t border-[#F0ECE9] align-top text-[#374151]">
+        <td className="py-1 pr-3 whitespace-nowrap">{l.date.replace(/-/g, "/")}</td>
+        <td className="py-1 pr-3">{l.description || "—"}</td>
+        <td className="py-1 pr-3 whitespace-nowrap" title={l.otherSide.map((o) => `${o.code} ${o.name}`).join(", ")}>{l.otherSide.length ? l.otherSide.map((o) => shortBankName(o.name) || o.code).join(", ") : "—"}</td>
+        <td className="py-1 pr-3 whitespace-nowrap">{l.ref1}</td>
+        <td className="py-1 pr-3">
+          {l.docs
+            ? <span className="underline decoration-dotted cursor-help" title={l.docs}>{l.ref2 || "—"}</span>
+            : (l.ref2 ?? "")}
+        </td>
+        <td className={amtCls(sen)}>{amt(sen)}</td>
+      </tr>
+    );
+  };
   return (
     <div className="bg-[#FAF8F5] border-y border-dashed border-[#E2DDD8] px-4 py-2">
       {!data && !err && <div className="text-xs text-[#9CA3AF] py-1">Loading the ledger lines…</div>}
@@ -5612,38 +5646,42 @@ function PlDrillPanel({ period, account, line }: { period: string; account: stri
               <tr className="text-[11px] uppercase tracking-wide text-[#6B7280]">
                 <th className={th}>Date</th><th className={th}>Description</th><th className={th}>Other side</th>
                 <th className={th}>Ref. 1</th><th className={th}>Ref. 2</th>
-                <th className="py-1 pl-3 font-medium text-right">Debit</th><th className="py-1 pl-3 font-medium text-right">Credit</th>
+                <th className="py-1 pl-3 font-medium text-right">Amount</th>
               </tr>
             </thead>
             <tbody>
-              {data.lines.map((l) => (
-                <tr key={l.id || `${l.sourceType}:${l.sourceId}:${l.debitSen}:${l.creditSen}`} className="border-t border-[#F0ECE9] align-top text-[#374151]">
-                  <td className="py-1 pr-3 whitespace-nowrap">{l.date.replace(/-/g, "/")}</td>
-                  <td className="py-1 pr-3">{l.description || "—"}</td>
-                  <td className="py-1 pr-3">{l.otherSide.length ? l.otherSide.map((o) => `${o.code} ${o.name}`).join(", ") : "—"}</td>
-                  <td className="py-1 pr-3 whitespace-nowrap">{l.ref1}</td>
-                  <td className="py-1 pr-3 whitespace-nowrap">{l.ref2 ?? ""}</td>
-                  <td className="py-1 pl-3 text-right tabular-nums">{l.debitSen ? plDrillAmt(l.debitSen) : ""}</td>
-                  <td className="py-1 pl-3 text-right tabular-nums">{l.creditSen ? plDrillAmt(l.creditSen) : ""}</td>
-                </tr>
-              ))}
-              {data.extra.map((e) => (
-                <tr key={`${e.kind}:${e.ym}`} className="border-t border-[#F0ECE9] align-top italic text-[#6B7280]">
-                  <td className="py-1 pr-3 whitespace-nowrap">{drillMonthLabel(e.ym)}</td>
-                  <td className="py-1 pr-3" colSpan={4}>{e.kind === "payroll"
-                    ? `Payroll ${drillMonthLabel(e.ym)} from the payslips, not posted to the ledger yet`
-                    : `Opening balance: this month's share (${drillMonthLabel(e.ym)})`}</td>
-                  <td className="py-1 pl-3 text-right tabular-nums">{e.sen > 0 ? plDrillAmt(e.sen) : ""}</td>
-                  <td className="py-1 pl-3 text-right tabular-nums">{e.sen < 0 ? plDrillAmt(-e.sen) : ""}</td>
-                </tr>
-              ))}
-              {data.lines.length === 0 && data.extra.length === 0 && (
-                <tr><td colSpan={7} className="py-1 text-[#9CA3AF]">No ledger lines in this period.</td></tr>
+              {byMonth
+                ? months.map((m) => {
+                  const ls = lines.filter((l) => l.date.startsWith(m));
+                  return (
+                    <Fragment key={m}>
+                      {ls.map(row)}
+                      <tr className="border-t border-[#E2DDD8] font-semibold text-[#4B5563] bg-[#F7F4EF]">
+                        <td className="py-1" colSpan={5}>{drillMonthLabel(m)} total</td>
+                        <td className={amtCls(lineSum(ls))}>{amt(lineSum(ls))}</td>
+                      </tr>
+                    </Fragment>
+                  );
+                })
+                : lines.map(row)}
+              {data.extra.map((e) => {
+                const sen = creditNormal ? -e.sen : e.sen;
+                return (
+                  <tr key={`${e.kind}:${e.ym}`} className="border-t border-[#F0ECE9] align-top italic text-[#6B7280]">
+                    <td className="py-1 pr-3 whitespace-nowrap">{drillMonthLabel(e.ym)}</td>
+                    <td className="py-1 pr-3" colSpan={4}>{e.kind === "payroll"
+                      ? `Payroll ${drillMonthLabel(e.ym)} from the payslips, not posted to the ledger yet`
+                      : `Opening balance: this month's share (${drillMonthLabel(e.ym)})`}</td>
+                    <td className={amtCls(sen)}>{amt(sen)}</td>
+                  </tr>
+                );
+              })}
+              {lines.length === 0 && data.extra.length === 0 && (
+                <tr><td colSpan={6} className="py-1 text-[#9CA3AF]">No ledger lines in this period.</td></tr>
               )}
               <tr className="border-t border-[#9CA3AF] font-semibold text-[#1F1D1B]">
                 <td className="py-1" colSpan={5}>Total</td>
-                <td className="py-1 pl-3 text-right tabular-nums">{plDrillAmt(data.debitSen)}</td>
-                <td className="py-1 pl-3 text-right tabular-nums">{plDrillAmt(data.creditSen)}</td>
+                <td className={amtCls(total)}>{amt(total)}</td>
               </tr>
             </tbody>
           </table>

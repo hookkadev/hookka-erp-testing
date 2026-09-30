@@ -73,11 +73,13 @@ test("GET /pl-drill: read permission, same period window, refs, other side, tie 
   assert.match(ep, /const startYm = periodStartYm\(period\);\n  const endYm = periodEndYm\(period\);/, "the statement's own window");
   assert.match(ep, /selectHistoricalWindow\(historical, openingMonth, startYm, "all"\)/, "a month from the old books says so");
   assert.match(ep, /await glWindowSigned\(db, orgId, startYm, endYm, dc, trace\);/);
-  assert.match(ep, /SELECT id, invoiceNo, salesOrderId, doNo FROM invoices WHERE id IN/);
-  assert.match(ep, /SELECT id, companySOId FROM sales_orders WHERE id IN/, "an invoice's Ref. 2 is its SO");
-  assert.match(ep, /SELECT id, piNo, poRef, supplier_invoice_no FROM purchase_invoices WHERE id IN/);
+  // Since 2026-09-30 (owner 「p&L 点开要看的东西和 cash flow 一样」): Ref. 2 = the
+  // counterparty; the SO / supplier invoice no. moved to the hover (docs).
+  assert.match(ep, /SELECT id, invoiceNo, salesOrderId, doNo, customerName FROM invoices WHERE id IN/);
+  assert.match(ep, /SELECT id, companySOId FROM sales_orders WHERE id IN/, "an invoice's SO rides along for the hover");
+  assert.match(ep, /SELECT id, piNo, poRef, supplier_invoice_no, supplierName FROM purchase_invoices WHERE id IN/);
   assert.match(ep, /r\.supplierInvoiceNo \?\? r\.supplier_invoice_no/, "dual-key read of the snake_case column");
-  assert.match(ep, /ref1: docNoFromDescription\(l\.description\) \?\? r\?\.ref1 \?\? l\.sourceId,/);
+  assert.match(ep, /const ref1 = docNoFromDescription\(l\.description\) \?\? r\?\.ref1 \?\? l\.sourceId;/);
   assert.match(ep, /otherSide: otherSideCodes\(l, trace\.entryLegs\.get\(key\) \?\? \[\], resolve\)/);
   assert.match(ep, /tied: debitSen - creditSen === netSen,/);
 });
@@ -89,7 +91,7 @@ test("computed lines that ARE one account's ledger figure open too, without join
   assert.match(rows, /line\("SST CHARGES", 1, p\.sstSen, y\.sstSen, undefined, undefined, "706-0000"\);/);
 });
 
-test("the P&L: name opens the lines under the row (not in edit mode); the panel shows the seven columns", () => {
+test("the P&L: name opens the lines under the row (not in edit mode); the panel shows its columns", () => {
   const tab = slice(ui, "function PLStatementTab(", "\nfunction ");
   assert.match(tab, /const drillCode = row\.drillCode \?\? row\.accountCode;/);
   assert.match(tab, /const canDrill = !edit && !!drillCode;/, "edit mode keeps the row for dragging");
@@ -97,7 +99,7 @@ test("the P&L: name opens the lines under the row (not in edit mode); the panel 
   assert.match(tab, /<tr><td colSpan=\{5\} className="p-0"><PlDrillPanel period=\{period\} account=\{drillCode\} line=\{line\} \/><\/td><\/tr>/);
   const panel = slice(ui, "function PlDrillPanel(", "function PLStatementTab(");
   assert.match(panel, /fetch\(`\/api\/accounting\/pl-drill\?period=\$\{encodeURIComponent\(period\)\}&account=\$\{encodeURIComponent\(account\)\}`\)/);
-  for (const h of ["Date", "Description", "Other side", "Ref. 1", "Ref. 2", "Debit", "Credit"]) assert.ok(panel.includes(`>${h}</th>`), `column ${h}`);
+  for (const h of ["Date", "Description", "Other side", "Ref. 1", "Ref. 2", "Amount"]) assert.ok(panel.includes(`>${h}</th>`), `column ${h}`);
   assert.match(panel, /from the payslips, not posted to the ledger yet/);
   assert.match(panel, /Opening balance: this month's share/);
 });
