@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-30**: #617 (BUG-2026-09-30-229/-230, Self-check reconciliations + cancelled opening seeds) closed ✅ below with its prod check.
 > **Last verified: 2026-09-30**: branch `fix/pillow-fab-sew-sticker` (DEV-26) added below (its entry is the newest).
 > **Last verified: 2026-09-30**: branch `fix/selfcheck-recon-and-opening-seeds` added below (its entry is the newest).
 > **Last verified: 2026-09-30**: #616 (BUG-2026-09-30-228, receipt drill text) closed ✅ below with its prod check.
@@ -109,7 +110,7 @@ Verified: `tsc -p tsconfig.app.json` exit 0; `npm test` all pass. NOT verified o
 tsc strict 0; `npm test` 5047 pass / 0 fail.
 ---
 
-## 2026-09-30 — 🔵 Self-check reds: the reconciliations copy the control cards; cancelled opening seeds out (owner「先查 8 和 9」→「确定没有问题才做」)(BUG-2026-09-30-229/-230)(branch `fix/selfcheck-recon-and-opening-seeds`)
+## 2026-09-30 — ✅ Self-check reds: the reconciliations copy the control cards; cancelled opening seeds out (owner「先查 8 和 9」→「确定没有问题才做」)(BUG-2026-09-30-229/-230)(#617 ffcc915c MERGED, deployed, prod-verified)
 
 1. Investigated first (prod, read-only): the Self-check headline is the reconciliation's drift, not the card's. Creditor:
    the card's gap is the opening leg only; the reconciliation added three trade-finance repayments as supplier advances.
@@ -117,10 +118,15 @@ tsc strict 0; `npm test` 5047 pass / 0 fail.
    opening); the reconciliation added every receipt held on account, labelled "void payment GL leak" though all were live.
    The opening gap: bills changed after the last opening post (the owner's cleanup of one supplier's pre-opening bills),
    plus four CANCELLED supplier seeds the opening sum still counted.
-2. 🔵 `ap-recon.ts`: a `TF_REPAYMENT` payment is never an advance. `/ar-reconciliation`: on-account remainders as advance
+2. ✅ `ap-recon.ts`: a `TF_REPAYMENT` payment is never an advance. `/ar-reconciliation`: on-account remainders as advance
    rows (the card's rule). `openingControlSums` + the Opening Balance supplier list: CANCELLED seeds out. Guard
    `tests/selfcheck-recon-mirrors-controls.test.mjs`; class C18 rows 6–8.
-3. After deploy (owner): re-post the opening — the page then shows the difference to place; the owner chooses the account.
+3. ✅ Prod (measured before/after): each reconciliation now reads exactly its card (same drift, same advances) with one item
+   each — the opening leg (creditor) and the receipt knocked off against invoices outside the books (debtor); the control
+   cards, trial balance and the other opening totals unchanged; the Opening Balance page lists no cancelled seed and its
+   difference grew by exactly the cancelled seeds. Self-check page read back the same.
+4. 🟡 Owner: re-post the opening (place the difference — his choice of account); the customer opening for the debtor item
+   waits for that customer's statement.
 
 ## 2026-09-30 — ✅ Drills: an official receipt reads its own text, never a lone "from" (BUG-2026-09-30-228)(#616 d68542b0 MERGED, deployed, prod-verified)
 
