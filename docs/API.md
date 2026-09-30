@@ -30,8 +30,8 @@ as a Cloudflare Pages Function via `functions/api/[[route]].ts`. There is no
 - **Health** — `GET /api/health` is registered directly on the app (not via a
   route module) and is exempt from the rate limiter.
 
-**Counts at generation time:** 142 mounts, 140 route files in
-`src/api/routes/`, 989 top-level handler registrations discovered.
+**Counts at generation time:** 143 mounts, 141 route files in
+`src/api/routes/`, 994 top-level handler registrations discovered.
 
 ## Scope and limits of this file
 
@@ -122,7 +122,7 @@ offsets pointing past the end of their own file.
 | `/api/price-history` | `src/api/routes/price-history.ts` | `GET /` <sub>:56</sub><br>`POST /` <sub>:100</sub> | gated |
 | `/api/auth/oauth` | `src/api/routes/auth-oauth.ts` | `GET /google/start` <sub>:52</sub><br>`GET /google/callback` <sub>:97</sub> | **public** (PUBLIC_PREFIXES) |
 | `/api/auth/totp` | `src/api/routes/auth-totp.ts` | `POST /enroll` <sub>:84</sub><br>`POST /verify` <sub>:141</sub><br>`POST /login-verify` <sub>:197</sub><br>`POST /setup-start` <sub>:396</sub><br>`POST /setup-confirm` <sub>:472</sub><br>`POST /dismiss-prompt` <sub>:543</sub><br>`POST /disable` <sub>:565</sub> | gated (some paths public) |
-| `/api/auth` | `src/api/routes/auth.ts` | `POST /login` <sub>:150</sub><br>`POST /logout` <sub>:459</sub><br>`GET /me` <sub>:492</sub><br>`GET /me/permissions` <sub>:522</sub><br>`POST /change-password` <sub>:659</sub><br>`POST /forgot-password` <sub>:791</sub><br>`POST /reset-password` <sub>:947</sub><br>`GET /role-permissions/:role` <sub>:1128</sub><br>`GET /invite/:token` <sub>:1182</sub><br>`POST /accept-invite` <sub>:1227</sub> | gated (some paths public) |
+| `/api/auth` | `src/api/routes/auth.ts` | `POST /login` <sub>:151</sub><br>`POST /logout` <sub>:460</sub><br>`GET /me` <sub>:493</sub><br>`GET /me/permissions` <sub>:523</sub><br>`POST /change-password` <sub>:677</sub><br>`POST /forgot-password` <sub>:809</sub><br>`POST /reset-password` <sub>:965</sub><br>`GET /role-permissions/:role` <sub>:1146</sub><br>`GET /invite/:token` <sub>:1200</sub><br>`POST /accept-invite` <sub>:1245</sub> | gated (some paths public) |
 | `/api/users` | `src/api/routes/users.ts` | `POST /backfill-org-from-aliases` <sub>:165</sub><br>`GET /` <sub>:224</sub><br>`POST /` <sub>:253</sub><br>`PUT /:id` <sub>:350</sub><br>`DELETE /:id` <sub>:551</sub><br>`POST /:id/reset-password` <sub>:627</sub><br>`POST /invite` <sub>:768</sub><br>`GET /invites` <sub>:913</sub><br>`POST /invites/:token/resend` <sub>:934</sub><br>`DELETE /invites/:token` <sub>:989</sub><br>`GET /:id` <sub>:1019</sub> | gated |
 | `/api/presence` | `src/api/routes/presence.ts` | `POST /` <sub>:56</sub><br>`GET /` <sub>:106</sub><br>`DELETE /` <sub>:131</sub> | gated |
 | `/api/bom-master-templates` | `src/api/routes/bom-master-templates.ts` | `GET /` <sub>:80</sub><br>`GET /:id` <sub>:89</sub><br>`PUT /:id` <sub>:101</sub><br>`DELETE /:id` <sub>:179</sub><br>`PUT /` <sub>:190</sub> | gated |
@@ -199,6 +199,7 @@ offsets pointing past the end of their own file.
 | `/api/assistant` | `src/api/routes/assistant.ts` | `POST /chat` <sub>:522</sub> | gated |
 | `/api/agents` | `src/api/routes/agent-console.ts` | `GET /status` <sub>:165</sub><br>`GET /review` <sub>:410</sub><br>`POST /run-now` <sub>:562</sub><br>`POST /pause` <sub>:703</sub><br>`POST /kill-all` <sub>:730</sub><br>`POST /gate` <sub>:757</sub><br>`POST /phase` <sub>:787</sub><br>`POST /rollback-last-batch` <sub>:839</sub><br>`GET /config-proposals` <sub>:953</sub><br>`POST /config-proposals/decide` <sub>:983</sub> | gated |
 | `/api/org-chart` | `src/api/routes/org-chart.ts` | `GET /` <sub>:205</sub><br>`POST /auto-wire-production` <sub>:263</sub><br>`PUT /reporting` <sub>:367</sub><br>`PUT /photo` <sub>:438</sub> | gated |
+| `/api/user-permissions` | `src/api/routes/user-permissions.ts` | `GET /catalog` <sub>:63</sub><br>`GET /` <sub>:70</sub><br>`GET /:userId` <sub>:93</sub><br>`PUT /:userId` <sub>:110</sub><br>`DELETE /:userId` <sub>:169</sub> | gated |
 
 ---
 
