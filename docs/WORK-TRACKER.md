@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-30**: #594 (General Ledger source links) closed ✅ below.
 > **Last verified: 2026-09-30**: branch `fix/gl-source-link-opens-pi` added below (its entry is the newest).
 > **Last verified: 2026-09-29**: #588 (Cash Flow drill tidy + payroll month) closed ✅ below with its prod check; #589 corrected its fallback note.
 > **Last verified: 2026-09-29**: branch `feat/cashflow-drill-tidy` added below (its entry is the newest).
@@ -44,13 +45,15 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ---
 
-## 2026-09-30 — 🔵 A finance user's click on a purchase invoice still lands on the PI list (owner: colleague on finance@hookka.com「点 ap invoice 还是跳去 purchase invoice list」)(branch `fix/gl-source-link-opens-pi`)
+## 2026-09-30 — ✅ A finance user's click on a purchase invoice still lands on the PI list (owner: colleague on finance@hookka.com「点 ap invoice 还是跳去 purchase invoice list」)(#594 a435e752 MERGED, deployed, live-checked)
 
 1. Checked (code): AP Invoices has opened the PI itself since #559, for every role — the endpoint is accounting:read, the PI
    detail route has no permission guard and GET /purchase-invoices/:id only needs a login. The list jump is the pre-#559
    code, i.e. a browser still running the old bundle → reload. Not measured as that user (no credentials in this session).
-2. 🔵 The General Ledger's source link still sent a purchase-invoice leg to the PI list (and a supplier payment to the PI
+2. ✅ The General Ledger's source link still sent a purchase-invoice leg to the PI list (and a supplier payment to the PI
    list too): now `/procurement/pi/:id` and `/invoices/supplier-payments`. Guard `tests/ledger-source-links.test.mjs`.
+3. ✅ Live check (the public accounting bundle after deploy): the source-link switch now returns the PI detail path and the
+   supplier-payment page. The colleague's browser was not checked — the owner is to ask for a hard reload (Ctrl+Shift+R).
 
 ## 2026-09-29 — ✅ Cash Flow drill tidy + payroll month read right (owner「有一点点乱，有没有优化的建议」→「好像可以，月份一起修」)(#588 12295837 + #589 MERGED, deployed, prod-verified)
 
