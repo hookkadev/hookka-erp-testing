@@ -69,7 +69,6 @@ test("stageTint: any failed JC in the dept wins over ok ones", () => {
 
 test("pipeline columns come from the stage list, not a hardcoded 9", () => {
   assert.match(CARDS, /pipelineCols\(stages\.length\)/);
-  assert.match(PAGE, /pipelineCols\(overviewStages\.length\)/, "sticky stage header uses the same template");
   assert.doesNotMatch(PAGE, /OVERVIEW_COL_KEYS/, "grid columns derive from overviewStages too");
 });
 
@@ -104,4 +103,20 @@ test("cards have a fixed height equal to the virtualizer estimate", () => {
 test("Grid keeps the original CellBox look; the Cards pills are separate", () => {
   assert.match(PAGE, /<CellBox cell=\{c\} \/>/);
   assert.ok(!CARDS.includes('from "./CellBox"'), "Cards must not render CellBox");
+});
+
+test("Cards: no column headers; stage pills under the page filter bar", () => {
+  // The spreadsheet header row only renders in the Grid branch.
+  assert.doesNotMatch(PAGE, /overviewCardsHeader/, "Cards must not render the two-tier column header");
+  // One pill per stage (data-driven), sharing the Grid's stage filter popover.
+  assert.match(PAGE, /overviewStages\.map\(\(d\) => \(\s*<FilterPill[\s\S]*?\{renderStageFilter\(d\.code\)\}/);
+  assert.match(PAGE, /renderFilter=\{\(\) => renderStageFilter\(d\.code\)\}/, "Grid stage headers use the same popover");
+  // The strip + toggle live in the page filter bar, Cards-only for the strip.
+  assert.match(PAGE, /\{activeTab === "ALL" && overviewViewToggle\}\s*\{activeTab === "ALL" && overviewView === "cards" && overviewStageStrip\}/);
+});
+
+test("Cards: sort, More filters and select-all replace the hidden headers", () => {
+  assert.match(PAGE, /label="More filters"[\s\S]*?overviewFieldFilters\.map/);
+  assert.match(PAGE, /<optgroup label="Stage due date">/);
+  assert.match(PAGE, /Select all \(\{visibleOrders\.length\}\)/);
 });
