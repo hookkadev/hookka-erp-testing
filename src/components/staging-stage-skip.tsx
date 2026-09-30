@@ -12,7 +12,7 @@ import { todayYmdMY } from "@/lib/utils";
 import { REPAIR_DEPT_CODES, REPAIR_DEPT_LABELS } from "@/lib/repair-scope";
 import { planCompleteUpTo, planReset, type SkipPO, type SkipPatch } from "@/lib/staging-stage-skip";
 
-type LinkedPORef = { id: string; poNo: string; status: string; deliveryDoNo?: string };
+type LinkedPORef = { id: string; poNo: string; status: string; deliveryDoNo?: string; deliveryStatus?: string };
 
 export function StagingStageSkipCard({ linkedPOs, onChanged }: { linkedPOs: LinkedPORef[]; onChanged: () => void }) {
   const { confirm } = useConfirm();
@@ -22,9 +22,12 @@ export function StagingStageSkipCard({ linkedPOs, onChanged }: { linkedPOs: Link
 
   if (!window.location.hostname.startsWith("staging.")) return null;
 
-  // A PO already on a delivery order is left alone: moving it would change a
-  // document that exists, not set up a test.
-  const open = linkedPOs.filter((po) => !po.deliveryDoNo && po.status !== "CANCELLED");
+  // A PO already on a live delivery order is left alone: moving it would
+  // change a document that exists, not set up a test. The SO still reports a
+  // CANCELLED DO as the PO's delivery, and that one no longer holds it.
+  const open = linkedPOs.filter(
+    (po) => (!po.deliveryDoNo || po.deliveryStatus === "CANCELLED") && po.status !== "CANCELLED",
+  );
 
   const run = async (mode: "complete" | "reset") => {
     const label = REPAIR_DEPT_LABELS[upTo as keyof typeof REPAIR_DEPT_LABELS];
@@ -40,8 +43,19 @@ export function StagingStageSkipCard({ linkedPOs, onChanged }: { linkedPOs: Link
     setBusy(true);
     const lines: string[] = [];
     try {
+      // The SO's per-PO delivery field is first-DO-wins and can name a
+      // cancelled DO while a live one exists, so ask the server which POs a
+      // live DO holds before writing anything.
+      const lr = await fetch("/api/delivery-orders/linked-po-ids");
+      const lj = (await lr.json().catch(() => ({}))) as { poIds?: string[] };
+      if (!lr.ok || !Array.isArray(lj.poIds)) throw new Error("Could not check which orders are on a delivery order.");
+      const onLiveDo = new Set(lj.poIds);
       const pos: SkipPO[] = [];
       for (const po of open) {
+        if (onLiveDo.has(po.id)) {
+          lines.push(`${po.poNo} is on a live delivery order, left alone.`);
+          continue;
+        }
         const r = await fetch(`/api/production-orders/${encodeURIComponent(po.id)}?fresh=1`);
         const j = (await r.json().catch(() => ({}))) as { data?: SkipPO };
         if (!r.ok || !j.data) throw new Error(`Could not read ${po.poNo}.`);

@@ -52,6 +52,8 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 - Asked: a way to skip production stages easily on staging, so a test case can start from a chosen stage (e.g. ready for DO).
 - SO detail page gains a card, rendered only when the host starts with `staging.`: "Complete up to <stage>" and "Reset stages" for the order's production orders not yet on a DO. Writes go through the existing `POST /api/production-orders/bulk-patch`, one wave per job-card `sequence` (bulk-patch runs a batch in parallel and the upstream sequence lock would refuse a later stage in the same wave). No new endpoint, no schema change.
 - Test: `tests/staging-stage-skip.test.mjs`. Not usable on local dev: local proxies to prod, and the host check hides the card there.
+- #599 merged and deployed. Used live on staging 2026-09-30: test order SO-2609-397 pushed to Packing, 14 job cards in 8 waves, 0 failed; reset put all 14 back to WAITING.
+- Fix (branch `fix/staging-stage-skip-cancelled-do`): after a DO was cancelled the card said "0 of 1 can be moved", because the SO reports a cancelled DO as the PO's delivery. The card now ignores a CANCELLED delivery, and before writing asks `GET /api/delivery-orders/linked-po-ids` which POs a live DO holds, since the SO's per-PO delivery field is first-DO-wins and can name a cancelled DO while a live one exists.
 
 ## 2026-09-30 — 🔵 BUG-06: finish the Transfer / Convert duplicate guard on staging (branch `test/bug06-do-guard-behavioural` → `staging`)
 
@@ -59,7 +61,8 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 - Sales page path (T-006 R1): already fixed on staging. Proved by a new behavioural test that runs the real `createDeliveryOrderForPOs`.
 - Second gap found by the same test: `items` naming an already-delivered PO went past the guard. Fixed, BUG-2026-09-30-223.
 - tsc strict 0; `npm test` 5168 pass / 0 fail / 3 skip.
-- Staging state: UNMEASURED against the staging DB.
+- Measured on staging 2026-09-30 (all 10 BUG-06 cases pass): 3, 6, 7, 8, 9 read-only or refused; 1, 2, 4, 5, 10 on test order SO-2609-397 (RX HOMICE, the only customer with no overdue invoices). DO-2609-090 created, the stale second tab refused with 409, repeat transfer shows "Nothing ready", cancel frees the PO, same Idempotency-Key twice gives DO-2609-091 once. Cleanup: both DOs, the SO and its PO cancelled, job cards reset.
+- Found on the way, not fixed: (a) the Sales "Transfer to Delivery Order" dialog has no credit override, so on staging it fails for every customer with overdue invoices (6 of 7 with open orders), while the Delivery page offers the override; (b) the ready list is a cached snapshot, so for about a minute after a DO is created the dialog still offers the PO (the server guard refuses it); (c) the SO detail's per-PO delivery field is first-DO-wins and can show a cancelled DO. Prod state of (a) UNMEASURED.
 
 ## 2026-09-30 — 🔵 /m Warehouse: movements show the time, not just the date (branch `feat/m-warehouse-movement-time` → `staging`)
 - DEV-09 asks for "Date / Time" on movements. `WarehouseScreen.tsx` `MovementRow` and `MovementCard` now format `createdAt` with `dateTimeShort` ("28 Sep, 14:05") instead of `dateShort`. Display only, no API or schema change.

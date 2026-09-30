@@ -50,3 +50,10 @@ test("card renders only on the staging host and writes through bulk-patch", () =
   assert.match(src, /if \(!window\.location\.hostname\.startsWith\("staging\."\)\) return null;/);
   assert.match(src, /\/api\/production-orders\/bulk-patch/);
 });
+
+test("a PO whose only DO was cancelled can still be moved", () => {
+  const src = readFileSync(new URL("../src/components/staging-stage-skip.tsx", import.meta.url), "utf8");
+  assert.match(src, /!po\.deliveryDoNo \|\| po\.deliveryStatus === "CANCELLED"/);
+  // ...but the server decides what a live DO holds, before any write.
+  assert.ok(src.indexOf("/api/delivery-orders/linked-po-ids") < src.indexOf("/api/production-orders/bulk-patch"));
+});
