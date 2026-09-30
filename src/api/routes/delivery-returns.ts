@@ -255,7 +255,7 @@ app.post("/", async (c) => {
       notes: String(body.notes ?? ""),
     });
     if (!created.ok) {
-      return c.json({ success: false, error: created.error }, 409);
+      return c.json({ success: false, error: created.error }, created.status ?? 409);
     }
 
     const header = await c.var.DB

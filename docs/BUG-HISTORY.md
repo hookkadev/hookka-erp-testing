@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-09-30**: newest entry BUG-2026-09-30-224 (branch `fix/t006-r7-return-qty`, to staging); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-30**: newest entry BUG-2026-09-30-223 (branch `test/bug06-do-guard-behavioural`, to staging); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-222 (branch `fix/report-emails-mobile`, to staging); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-221 (branch `fix/overdue-email-mobile`, to staging; -220 is taken on staging); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
@@ -55,6 +56,20 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-09-30-224 — delivery return cap passed a negative or missing quantity `delivery-orders` 🟡
+
+**Symptom:** measured on staging 2026-09-30. `POST /api/delivery-returns` accepted `quantity: -1` (201, stored as -1). An open negative return lowers the "already returned" sum, so a later return could go over what the DO line delivered. With the whole delivered qty already returned, a line with no `quantity` was accepted (201) and stored as 1, while `quantity: 1` sent explicitly was refused with 409.
+
+**Root cause:** `createDeliveryReturnRecord` read the same field two ways. The T-006 R7 cap summed `Number(it.quantity) || 0` (missing counts as 0, negative passes through) and the insert bound `Number(it.quantity ?? 1)` (missing writes 1). Nothing required a positive number. Separately, the cap is keyed by production order, so a line with no `productionOrderId` skipped it entirely.
+
+**Fix:** `delivery-return-create.ts:276` reads each line's quantity once, refuses missing, zero, negative and non-finite values with a 400, and the cap (`:363`) and the insert (`:478`) both use that value. A line with no production order is refused (400) when the DO's own lines carry one (`:307`); a legacy DO with no production-order lines is left as it was, since there is nothing to key a cap on. The result carries `status: 400` for these, and the office route sends `created.status ?? 409`, so a real cap refusal is still 409.
+
+**Test:** `tests/t006-r7-delivery-return.test.mjs` now drives the real create function on a stateful fake DB. The negative, omitted, zero/null/non-numeric and PO-less cases fail on the old code; a valid partial return asserts the stored quantity equals what the cap measured. Class: [C26](BUG-CLASSES.md#c26--a-guard-and-the-write-it-guards-read-the-same-input-two-ways).
+
+**Not changed:** the driver flow in `public-do-qr.ts` ignores `ok: false` from the create (it only logs a throw), so a refused driver return is silent. Its quantities come from the DO lines, not the client.
 
 ---
 

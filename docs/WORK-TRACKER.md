@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-30**: branch `fix/t006-r7-return-qty` (to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-09-30**: branch `feat/production-overview-cards-narrow` added below as item 8 of the Production Overview Cards entry.
 > **Last verified: 2026-09-30**: branch `feat/production-overview-card-filters` added below as item 7 of the Production Overview Cards entry (stacked on #595).
 > **Last verified: 2026-09-30**: branch `feat/production-overview-card-pills` added below as item 6 of the Production Overview Cards entry (stacked on #592).
@@ -47,6 +48,13 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-09-30 — 🔵 T-006 R7: delivery return quantity must be positive (branch `fix/t006-r7-return-qty` to `staging`)
+
+- Asked: close the two request shapes that got past the R7 return cap on staging (`quantity: -1`, and `quantity` omitted after a full return).
+- `createDeliveryReturnRecord` reads each line's quantity once and refuses anything not greater than 0 with a 400; the cap and the insert use the same value. A line with no production order is refused when the DO has production-order lines. BUG-2026-09-30-224.
+- Test: `tests/t006-r7-delivery-return.test.mjs` runs the real create function on a fake DB; the new cases fail on the old code.
+- Not done: the driver flow ignores a refused create (`public-do-qr.ts`), and other capped create paths are unswept for the same shape (BUG-CLASSES C26 row 3).
 
 ## 2026-09-30 — 🔵 Staging test tool: skip production stages (branch `feat/staging-stage-skip` to `staging`, STAGING ONLY, never PR to main)
 
