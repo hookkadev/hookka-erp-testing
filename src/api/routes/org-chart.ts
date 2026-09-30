@@ -19,6 +19,8 @@
 import { Hono } from "hono";
 import type { Env } from "../worker";
 import { requirePermission } from "../lib/rbac";
+import { getOrgId } from "../lib/tenant";
+import { removeStoredFile } from "./files";
 import {
   personKey,
   parsePersonKey,
@@ -60,6 +62,31 @@ export function _resetOrgReportingMigForTests(): void {
   _mig = null;
 }
 
+// Photo support (2026-09-28, "can the org chart have a picture for each
+// account too"). One column on EACH table rather than a join — `users` and
+// `workers` already have no link between them by design (see the file header)
+// and a photo is exactly the kind of per-person fact that belongs directly on
+// the row it is a photo OF, not in a third table keyed by the composite
+// (source, id) the way org_reporting has to be.
+let _photoMig: Promise<void> | null = null;
+function ensureOrgPhotoColumns(db: D1Database): Promise<void> {
+  if (_photoMig) return _photoMig;
+  _photoMig = (async () => {
+    await db
+      .prepare('ALTER TABLE users ADD COLUMN IF NOT EXISTS photo_file_id TEXT')
+      .run();
+    await db
+      .prepare('ALTER TABLE workers ADD COLUMN IF NOT EXISTS photo_file_id TEXT')
+      .run();
+  })();
+  return _photoMig;
+}
+
+/** For tests — reset the module-level migration cache. */
+export function _resetOrgPhotoMigForTests(): void {
+  _photoMig = null;
+}
+
 /**
  * Everyone on the chart, from both tables.
  *
@@ -72,7 +99,7 @@ async function loadPeople(db: D1Database): Promise<OrgPerson[]> {
 
   const uRes = await db
     .prepare(
-      "SELECT id, displayName, email, department, position, reportsTo, isActive FROM users",
+      "SELECT id, displayName, email, department, position, reportsTo, isActive, photoFileId FROM users",
     )
     .all<{
       id: string;
@@ -82,6 +109,8 @@ async function loadPeople(db: D1Database): Promise<OrgPerson[]> {
       position: string | null;
       reportsTo: string | null;
       isActive: boolean | number | null;
+      photoFileId?: string | null;
+      photo_file_id?: string | null;
     }>();
   for (const u of uRes.results ?? []) {
     people.push({
@@ -94,12 +123,13 @@ async function loadPeople(db: D1Database): Promise<OrgPerson[]> {
       ref: (u.email ?? "").trim(),
       active: u.isActive !== false && u.isActive !== 0,
       managerKey: u.reportsTo ? personKey("user", u.reportsTo) : null,
+      photoFileId: u.photoFileId ?? u.photo_file_id ?? null,
     });
   }
 
   const wRes = await db
     .prepare(
-      "SELECT id, empNo, name, position, status, departmentCode FROM workers WHERE empNo NOT LIKE 'TEST%'",
+      "SELECT id, empNo, name, position, status, departmentCode, photoFileId FROM workers WHERE empNo NOT LIKE 'TEST%'",
     )
     .all<{
       id: string;
@@ -109,6 +139,8 @@ async function loadPeople(db: D1Database): Promise<OrgPerson[]> {
       status: string | null;
       departmentCode?: string | null;
       departmentcode?: string | null;
+      photoFileId?: string | null;
+      photo_file_id?: string | null;
     }>();
   for (const w of wRes.results ?? []) {
     people.push({
@@ -127,6 +159,7 @@ async function loadPeople(db: D1Database): Promise<OrgPerson[]> {
       ref: (w.empNo ?? "").trim(),
       active: (w.status ?? "").toUpperCase() === "ACTIVE",
       managerKey: null,
+      photoFileId: w.photoFileId ?? w.photo_file_id ?? null,
     });
   }
 
@@ -172,7 +205,7 @@ async function loadPeople(db: D1Database): Promise<OrgPerson[]> {
 app.get("/", async (c) => {
   const denied = await requirePermission(c, "users", "read");
   if (denied) return denied;
-  await ensureOrgReporting(c.var.DB);
+  await Promise.all([ensureOrgReporting(c.var.DB), ensureOrgPhotoColumns(c.var.DB)]);
   const people = await loadPeople(c.var.DB);
   // Ship the department list alongside the people so a department added in
   // Settings shows up on the chart with its real NAME and its real order,
@@ -230,7 +263,7 @@ app.get("/", async (c) => {
 app.post("/auto-wire-production", async (c) => {
   const denied = await requirePermission(c, "users", "update");
   if (denied) return denied;
-  await ensureOrgReporting(c.var.DB);
+  await Promise.all([ensureOrgReporting(c.var.DB), ensureOrgPhotoColumns(c.var.DB)]);
 
   const productionHeadKey = (c.req.query("head") ?? "").trim();
   if (!parsePersonKey(productionHeadKey)) {
@@ -351,7 +384,7 @@ app.put("/reporting", async (c) => {
     return c.json({ success: false, error: "managerKey must be user:<id> or worker:<id>" }, 400);
   }
 
-  await ensureOrgReporting(c.var.DB);
+  await Promise.all([ensureOrgReporting(c.var.DB), ensureOrgPhotoColumns(c.var.DB)]);
   const people = await loadPeople(c.var.DB);
   const byKey = new Map(people.map((p) => [p.key, p]));
   if (!byKey.has(pk)) return c.json({ success: false, error: "Person not found" }, 400);
@@ -378,6 +411,90 @@ app.put("/reporting", async (c) => {
   ]);
 
   return c.json({ success: true, data: { personKey: pk, managerKey: mk } });
+});
+
+// ---------------------------------------------------------------------------
+// PUT /api/org-chart/photo — set or clear one person's photo.
+//
+// The client uploads the image through the EXISTING /api/files store first
+// (resourceType "org-photo", resourceId the person's composite key) and only
+// hands this endpoint the resulting file id — this route never touches file
+// bytes. Same gate as /reporting (users:update): whoever may re-point who a
+// person reports to may also set their photo, and no other role can.
+//
+// fileId null/absent CLEARS the photo (falls back to initials), matching how
+// `managerKey` clearing already works on /reporting.
+// ---------------------------------------------------------------------------
+async function isOwnPhoto(db: D1Database, orgId: string, fileId: string, pk: string): Promise<boolean> {
+  const row = await db
+    .prepare(
+      "SELECT id FROM file_assets WHERE id = ? AND orgId = ? AND resourceType = 'org-photo' AND resourceId = ?",
+    )
+    .bind(fileId, orgId, pk)
+    .first<{ id: string }>();
+  return !!row;
+}
+
+app.put("/photo", async (c) => {
+  const denied = await requirePermission(c, "users", "update");
+  if (denied) return denied;
+  let body: { personKey?: unknown; fileId?: unknown };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ success: false, error: "Invalid request body" }, 400);
+  }
+  const pk = typeof body.personKey === "string" ? body.personKey.trim() : "";
+  const fileId = typeof body.fileId === "string" ? body.fileId.trim() : "";
+
+  const parsed = parsePersonKey(pk);
+  if (!parsed) {
+    return c.json({ success: false, error: "personKey must be user:<id> or worker:<id>" }, 400);
+  }
+
+  await ensureOrgPhotoColumns(c.var.DB);
+  const people = await loadPeople(c.var.DB);
+  const existing = people.find((p) => p.key === pk);
+  if (!existing) {
+    return c.json({ success: false, error: "Person not found" }, 400);
+  }
+  const oldFileId = existing.photoFileId;
+
+  // Only a photo uploaded FOR THIS PERSON may be set — not merely any file in
+  // the org. The previous photo is deleted on change, so accepting any file id
+  // would let users:update delete an unrelated document (a sales-order PDF)
+  // by pointing a photo at it and then changing the photo.
+  const orgId = getOrgId(c);
+  if (fileId && !(await isOwnPhoto(c.var.DB, orgId, fileId, pk))) {
+    return c.json({ success: false, error: "That file was not found." }, 400);
+  }
+
+  const table = parsed.source === "user" ? "users" : "workers";
+  await c.var.DB
+    .prepare(`UPDATE ${table} SET photoFileId = ? WHERE id = ?`)
+    .bind(fileId || null, parsed.id)
+    .run();
+
+  // The pointer moved — the PREVIOUS file (if any, and if actually different)
+  // is now unreachable from the app, so free it via the one shared delete
+  // path rather than leaving it in Supabase Storage forever. Best-effort:
+  // the pointer write already succeeded, so a delete failure here (storage
+  // hiccup, already gone) must not turn a successful photo change into an
+  // error — it's logged and left for the sweeper.
+  // Same guard on the way out: a pointer written before the check above
+  // existed could name a non-photo file, and that file must survive.
+  if (oldFileId && oldFileId !== fileId && (await isOwnPhoto(c.var.DB, orgId, oldFileId, pk))) {
+    try {
+      const removed = await removeStoredFile(c, oldFileId);
+      if (!removed.ok) {
+        console.warn("[org-chart/photo] could not remove previous photo:", oldFileId, removed.error);
+      }
+    } catch (err) {
+      console.warn("[org-chart/photo] could not remove previous photo:", oldFileId, err);
+    }
+  }
+
+  return c.json({ success: true, data: { personKey: pk, fileId: fileId || null } });
 });
 
 export default app;

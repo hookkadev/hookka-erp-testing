@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-09-30**: BUG-2026-09-29-214 and BUG-2026-09-30-227 (org-chart photos, staging ids) brought to `main` on branch `feat/org-chart-to-main`; a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-222 (branch `fix/storage-delete-not-found`; ids 219-221 are on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-217 (branch `fix/scan-short-supplier-code`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-216 (branch `fix/staging-no-nightly-wipe`; ids 213-215 are on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
@@ -48,6 +49,18 @@ Entries themselves stay newest-first.
 
 ---
 
+## BUG-2026-09-30-227 — Org-chart photo route could delete ANY file in the org `org-chart` `auth-rbac` 🟢
+
+🟢 **Fixed** (branch `fix/org-photo-file-scope` → `staging`, not yet deployed) · Found by code review while verifying the org-chart photo feature live on staging. No incident: nothing measured says it was ever exploited, and the normal UI cannot trigger it.
+
+**The hole.** `PUT /api/org-chart/photo` accepted a `fileId` if it was *any* `file_assets` row in the caller's org. Since #563 (delete the previous photo on change), the old pointer's file is deleted when a photo changes. Together: a `users:update` holder could set someone's photo to a sales-order PDF's file id, change the photo, and the PDF was removed from storage and `file_assets` — a delete of a document they had no `files:delete` right to.
+
+**Fix.** One `isOwnPhoto()` check (`resourceType = 'org-photo' AND resourceId = <personKey>`, org-scoped), used twice: a new `fileId` must be a photo uploaded for that person, and the old pointer is only deleted if it passes the same check, so a pointer written before this fix can never take an unrelated file with it.
+
+**Regression.** `tests/org-chart-photos.test.mjs`: a non-photo file and another person's photo are refused; an old pointer to a non-photo file survives a photo change. The 3 new tests fail on the pre-fix route; all 26 pass after.
+
+---
+
 ## BUG-2026-09-29-222 — A file already gone from storage could never be deleted, and streamed as a 500 `platform` 🟢
 
 🟢 **Fixed** (branch `fix/storage-delete-not-found`, not yet deployed) · Found while verifying the org-chart "delete the old photo on change" feature on staging.
@@ -61,6 +74,28 @@ Entries themselves stay newest-first.
 **Regression.** `tests/supabase-storage-not-found.test.mjs` calls the real `deleteFile` / `getFile` against stubbed responses; 3 of its 7 tests fail on the pre-fix code.
 
 **Not repaired by this fix.** Rows already stuck before the fix (staging's pre-move org photos) stay until deleted again, now that a retry would succeed.
+
+---
+
+## BUG-2026-09-29-214 — Org Chart photo uploaded fine, but never displayed — Supabase itself refused its own signed URL `platform` `ui-frontend` 🟢
+
+🟢 **Fixed** · Owner uploaded a photo on the staging Org Chart right after the feature shipped (feat/org-chart-photos). The file appeared correctly in Supabase Storage, but the card kept showing initials.
+
+**Root cause — measured, not guessed.** `PersonAvatar` fetched the photo via `GET /api/files/:id/download`, which 302s to a Supabase presigned URL (`signedDownloadUrl` → `POST /storage/v1/object/sign/...`). That POST succeeded and returned a token. The browser then followed the redirect to fetch the actual bytes, and Supabase's own Storage API refused its own token:
+
+```json
+{"statusCode":"400","error":"InvalidSignature","message":"Invalid signature","code":"InvalidSignature"}
+```
+
+Confirmed live: opening that exact signed URL directly in a browser tab reproduced the same `InvalidSignature` response straight from the staging storage project's own Supabase host — the right project, a correctly-shaped token, refused by Supabase's own verification. Not a bug in this app's code: the request to create the token and the request to redeem it both reached the correct project and the correct object; something inside Supabase's own sign/verify pair disagreed. Most likely tied to `staging` being a brand-new Supabase project (created earlier this week for BUG-2026-09-28-210 / the file-storage secrets gap) whose signing keys had not fully settled.
+
+**Fix.** `PersonAvatar` now fetches via `GET /api/files/:id/stream` instead of `/download`. `/stream` proxies the object bytes straight through this Worker using the service_role key on every request (`getFile()`) — no presigned URL, no external signature to fail. `Content-Disposition: attachment` on that route does not stop an `<img>` from rendering inline; that header only affects a direct navigation, never an embedded resource fetch. The tradeoff (a full round-trip through the Worker instead of a cached redirect) is the right one for a ~40 KB avatar; `/download`'s presign-and-cache path stays the default for the large PDFs and videos it was built for.
+
+**Regression.** `tests/org-chart-photos.test.mjs` — asserts the avatar's `<img src>` points at `/stream`, and asserts a regression back to `/download` would fail the test.
+
+**Verify.** `npm test` 5,080 pass / 0 fail; `tsc -p tsconfig.app.json` clean. Verified live on staging after this fix: the same uploaded photo now renders on the card. **Prod is unaffected** — this only touches the Org Chart photo feature, which has not been promoted past `staging` yet.
+
+**Still open.** If Supabase's signing keys on the staging project settle on their own, `/download` may start working there too — no action needed either way, since `/stream` works regardless and this fix does not depend on that happening.
 
 ---
 

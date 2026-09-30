@@ -22,9 +22,12 @@ import {
   Users,
   Pencil,
   Printer,
+  Loader2,
+  X,
 } from "lucide-react";
 import { useCachedJson, invalidateCachePrefix } from "@/lib/cached-fetch";
 import { buildOrgTree, countSubtree, type OrgNode, type OrgPerson } from "@/lib/org-people";
+import { uploadFileAsset } from "@/lib/upload-file";
 
 /**
  * Fallback column order, used only until the server's department list arrives
@@ -60,6 +63,135 @@ function initials(name: string): string {
   if (parts.length === 0) return "?";
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+// Accepted image types the upload input offers — mirrors the image subset of
+// ALLOWED_MIME in src/api/routes/files.ts (that list also allows PDF/video,
+// which a headshot never is).
+const PHOTO_ACCEPT = "image/png,image/jpeg,image/webp,image/gif,image/heic,image/heif";
+
+/**
+ * The circle every card shows: the person's photo once they have one,
+ * initials until they do (owner 2026-08-02: "他们的头像啊,好像没有" — a face is
+ * what makes a row of boxes read as people; initials was the placeholder until
+ * there was somewhere to store a photo. There is now — 2026-09-28).
+ *
+ * A MODULE-LEVEL component, not a closure defined inside TreeCard/the board
+ * loop: a component recreated on every render of its parent remounts (loses
+ * its own state, e.g. mid-upload) every time anything else on the chart
+ * changes. Takes its data and callback as props instead.
+ */
+/**
+ * Owner 2026-09-29: clicking a set photo was opening the upload picker again
+ * — every click became "replace it", with no way to just look. Split into two
+ * targets: the circle itself views (or, with no photo yet, uploads — there is
+ * nothing to view), and a small pencil badge is the one dedicated "change
+ * photo" control, always available to canManage regardless of whether a photo
+ * is already set. Positioned bottom-right of the AVATAR, not the card — the
+ * existing reports-to pencil sits at the CARD's own top-right corner
+ * (org-chart.tsx's `absolute right-1 top-1` on the card `<div>`), a different
+ * element at a different corner, so the two never overlap.
+ */
+function PersonAvatar({
+  person,
+  canManage,
+  uploading,
+  onUpload,
+  onView,
+}: {
+  person: Pick<OrgPerson, "key" | "name" | "source" | "photoFileId">;
+  canManage: boolean;
+  uploading: boolean;
+  onUpload: (file: File) => void;
+  onView: () => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const tint =
+    person.source === "worker"
+      ? "bg-[#F0ECE9] text-[#6B5C32]"
+      : "bg-[#E0EDF0] text-[#3E6570]";
+  const label = person.source === "worker" ? "Factory employee" : "Office account";
+  const hasPhoto = !!person.photoFileId;
+  // No photo yet: nothing to view, so the circle itself starts the upload —
+  // one click instead of two for the common first-time case. Once a photo
+  // exists, the circle only views it; the badge is the one way to change it.
+  const primaryAction = hasPhoto ? onView : () => inputRef.current?.click();
+  return (
+    <span className="relative inline-flex h-7 w-7 shrink-0">
+      <span
+        className={`flex h-7 w-7 items-center justify-center overflow-hidden rounded-full text-[10px] font-bold cursor-pointer ${
+          hasPhoto ? "" : tint
+        }`}
+        role="button"
+        tabIndex={0}
+        title={hasPhoto ? `View ${person.name}'s photo` : canManage ? `Add ${person.name}'s photo` : label}
+        onClick={primaryAction}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            primaryAction();
+          }
+        }}
+      >
+        {hasPhoto ? (
+          // /stream, not /download — BUG-2026-09-29-214: /download 302s to a
+          // Supabase presigned URL, and presigned-URL verification threw
+          // "InvalidSignature" on the staging Supabase project (measured, not
+          // guessed — reproduced against the live signed URL, which is what
+          // Supabase's own storage API returned). /stream instead proxies the
+          // bytes straight through this Worker with the service_role key on
+          // every request — no signing step, so nothing to fail. Also skips a
+          // redirect hop, which is exactly the tradeoff you want for a ~40 KB
+          // avatar (a big PDF/video is the case /download's caching is worth
+          // it for). Content-Disposition: attachment on /stream does not stop
+          // an <img> from rendering inline — that header only affects a direct
+          // navigation, never an embedded resource fetch.
+          <img
+            src={`/api/files/${person.photoFileId}/stream`}
+            alt=""
+            className="h-full w-full object-cover"
+          />
+        ) : (
+          initials(person.name)
+        )}
+        {uploading && (
+          <span className="absolute inset-0 flex items-center justify-center bg-black/45">
+            <Loader2 className="h-3 w-3 animate-spin text-white" />
+          </span>
+        )}
+      </span>
+      {canManage && (
+        <>
+          <button
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            disabled={uploading}
+            title={`Change ${person.name}'s photo`}
+            aria-label={`Change ${person.name}'s photo`}
+            className="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full border border-white bg-[#6B5C32] text-white disabled:opacity-50"
+          >
+            <Pencil className="h-2 w-2" />
+          </button>
+          <input
+            ref={inputRef}
+            type="file"
+            accept={PHOTO_ACCEPT}
+            className="hidden"
+            // Reset so picking the SAME file again (e.g. after a failed
+            // upload) still fires onChange — the browser only fires it on a
+            // value change.
+            onClick={(e) => {
+              (e.target as HTMLInputElement).value = "";
+            }}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) onUpload(file);
+            }}
+          />
+        </>
+      )}
+    </span>
+  );
 }
 
 function deptOf(p: OrgPerson): string {
@@ -109,6 +241,12 @@ export function OrgChart({ canManage }: Props) {
   const [zoom, setZoom] = useState(100);
   const [showInactive, setShowInactive] = useState(false);
   const [saving, setSaving] = useState<string | null>(null);
+  const [uploadingPhoto, setUploadingPhoto] = useState<string | null>(null);
+  /** The person whose photo is open in the lightbox, or null when closed. */
+  const [viewingPhoto, setViewingPhoto] = useState<Pick<
+    OrgPerson,
+    "name" | "photoFileId"
+  > | null>(null);
   const [error, setError] = useState<string | null>(null);
   /** Which card has its reporting-line picker open. */
   const [editing, setEditing] = useState<string | null>(null);
@@ -335,6 +473,45 @@ ${styles}
     [refresh],
   );
 
+  // Two-step: the file goes to the EXISTING /api/files store (same helper
+  // every other upload surface uses — size cap, timeout, read-back
+  // verification), then only its id is handed to this endpoint. This route
+  // never sees image bytes.
+  const uploadPhoto = useCallback(
+    async (personKey: string, file: File) => {
+      setUploadingPhoto(personKey);
+      setError(null);
+      try {
+        const uploaded = await uploadFileAsset({
+          file,
+          resourceType: "org-photo",
+          resourceId: personKey,
+        });
+        if (!uploaded.ok) {
+          setError(uploaded.error);
+          return;
+        }
+        const res = await fetch("/api/org-chart/photo", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ personKey, fileId: uploaded.id }),
+        });
+        const body = (await res.json()) as { success?: boolean; error?: string };
+        if (!res.ok || !body.success) {
+          setError(body.error || `Could not save the photo (HTTP ${res.status})`);
+          return;
+        }
+        invalidateCachePrefix("/api/org-chart");
+        refresh();
+      } catch {
+        setError("Could not reach the server.");
+      } finally {
+        setUploadingPhoto(null);
+      }
+    },
+    [refresh],
+  );
+
   // Who this person may report to: everyone except themselves and anyone who
   // already reports up through them — choosing one of those is exactly the loop
   // the server rejects, so it is not offered.
@@ -409,18 +586,15 @@ ${styles}
               the same person looked like two different things depending on the
               view. Owner 2026-08-02:「他们的头像啊,好像没有」— Houzs put a face
               on every card, and a face is what makes a row of boxes read as
-              people. Initials until there is somewhere to store a photo. */}
+              people. Photo once set, initials until then. */}
           <div className="flex items-center gap-2">
-            <span
-              className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${
-                node.source === "worker"
-                  ? "bg-[#F0ECE9] text-[#6B5C32]"
-                  : "bg-[#E0EDF0] text-[#3E6570]"
-              }`}
-              title={node.source === "worker" ? "Factory employee" : "Office account"}
-            >
-              {initials(node.name)}
-            </span>
+            <PersonAvatar
+              person={node}
+              canManage={canManage}
+              uploading={uploadingPhoto === node.key}
+              onUpload={(file) => void uploadPhoto(node.key, file)}
+              onView={() => setViewingPhoto(node)}
+            />
             <div className="min-w-0 flex-1 text-left">
               <div className="truncate text-[11px] font-semibold uppercase leading-tight text-[#1F1D1B]">
                 {node.name}
@@ -931,20 +1105,13 @@ ${styles}
                                 }`}
                               >
                                 <div className="flex items-start gap-2">
-                                  <span
-                                    className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${
-                                      p.source === "worker"
-                                        ? "bg-[#F0ECE9] text-[#6B5C32]"
-                                        : "bg-[#E0EDF0] text-[#3E6570]"
-                                    }`}
-                                    title={
-                                      p.source === "worker"
-                                        ? "Factory employee"
-                                        : "Office account"
-                                    }
-                                  >
-                                    {initials(p.name)}
-                                  </span>
+                                  <PersonAvatar
+                                    person={p}
+                                    canManage={canManage}
+                                    uploading={uploadingPhoto === p.key}
+                                    onUpload={(file) => void uploadPhoto(p.key, file)}
+                                    onView={() => setViewingPhoto(p)}
+                                  />
                                   <div className="min-w-0 flex-1 pr-4">
                                     <div className="truncate text-[11px] font-semibold uppercase leading-tight text-[#1F1D1B]">
                                       {p.name}
@@ -1022,6 +1189,37 @@ ${styles}
           )}
         </div>
       </div>
+
+      {/* The lightbox — clicking an already-set photo views it larger instead
+          of reopening the upload picker (owner 2026-09-29). `fixed inset-0`
+          escapes normal layout regardless of where it sits in the tree, so
+          it does not need to be a sibling of the whole page. */}
+      {viewingPhoto?.photoFileId && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setViewingPhoto(null)}
+        >
+          <div className="flex max-h-full max-w-full flex-col items-center gap-2">
+            <img
+              src={`/api/files/${viewingPhoto.photoFileId}/stream`}
+              alt={viewingPhoto.name}
+              className="max-h-[80vh] max-w-[80vw] rounded-lg object-contain shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            />
+            <div className="text-sm font-medium text-white">{viewingPhoto.name}</div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setViewingPhoto(null)}
+            aria-label="Close"
+            className="absolute right-4 top-4 text-white/80 hover:text-white"
+          >
+            <X className="h-6 w-6" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
