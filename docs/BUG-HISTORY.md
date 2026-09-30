@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-09-30**: newest entry BUG-2026-09-30-231 (branch `fix/pillow-fab-sew-sticker`, DEV-26); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-30**: newest entries BUG-2026-09-30-229 / -230 (branch `fix/selfcheck-recon-and-opening-seeds`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-30**: newest entry BUG-2026-09-30-228 (branch `fix/drill-receipt-description`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-30**: BUG-2026-09-29-214 and BUG-2026-09-30-227 (org-chart photos, staging ids) brought to `main` on branch `feat/org-chart-to-main`; a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
@@ -51,6 +52,39 @@ Entries themselves stay newest-first.
 
 ---
 
+## BUG-2026-09-30-231 — Pillows had a Fab Cut QR sticker and no Fab Sew one `production-orders` `ui-frontend` 🟡
+
+🟡 **Fix in progress** (branch `fix/pillow-fab-sew-sticker` → `main`, DEV-26) · Reported by Siti: the sewing department had
+no pillow sticker to scan.
+
+**What happened.** On the Fab Sew sheet the pillow rows were listed, and the QR Stickers panel under it had none for them.
+Fab Cut printed a pillow sticker; Fab Sew did not, from either the Fab Sew page or "Print Fab Sew Stickers" on the Fab Cut
+page. Measured on staging 2026-09-30 (read-only): 392 open accessory orders on Fab Sew, 320 with no sticker, every one a
+pillow (Square Pillow 280, Long Pillow 38, 5543-Long Pillow 2). Prod data is UNMEASURED; the code on `main` was the same.
+
+**Root cause.** Two things that were each reasonable. (1) Commit `dd9b2d3a` (2026-05-15) hid a sofa's Back Cushion /
+Armrest / Headrest rows from the Fab Sew stickers, because they are sewn with the base and the BASE sticker travels with
+the assembly. The check read the row's type only, not that the row was a sofa. (2) The BOM editor offers six WIP types and
+none for a pillow; the pillow BOMs carry a real WIP component (they have a foam step), so it was typed `SOFA_CUSHION`, the
+closest. A pillow's Fab Sew card therefore looked like a sofa back cushion and was hidden. Its Fab Cut card is typed
+`ACCESSORY`, which is why cutting had a sticker. The other accessories (A01, A02, SB02, BC05) have no WIP component, fall
+back to `FG_MAIN`, and always printed.
+
+**Fix.** One rule, `travelsWithBaseSticker` (`src/pages/production/baserows-core.ts`), replaces the two inline copies in
+`src/pages/production/index.tsx` (`onScreenStickers` and `loadFabSewStickers`). It skips those three types unless the row's
+category is ACCESSORY. Nothing else changes: a pillow order has one Fab Sew card with quantity 1, so it prints one sticker
+per SO ID, and the scan path already completes it (`scan-complete-shared` fans a `SOFA_*` card out to the PO's Fab Sew
+cards, of which a pillow has one). Against the staging rows the new rule adds 320 stickers, all pillows, and still skips
+the 671 sofa sub-part cards.
+
+**Known and left.** A worker outside the Sewing section who scans a pillow sticker gets "Upholstery already complete" (a
+pillow has no Upholstery card; nothing is written). Left as is, decided with the requester's side.
+
+**Regression.** `tests/pillow-fab-sew-sticker.test.mjs`: a staging-shaped pillow order through `buildBaseRows` keeps its
+sticker, the same row on a SOFA is still skipped, and both builders call the one rule.
+
+**Lesson.** A `wipType` of `SOFA_*` says which BOM type was picked, not what the order is. A rule meant for one category
+has to check the category.
 ## BUG-2026-09-30-230 — The opening sum still counted CANCELLED supplier opening seeds `accounting` `opening-balance` 🟢
 
 🟢 **Fixed** (branch `fix/selfcheck-recon-and-opening-seeds` → `main`) · Found while the owner asked what the Self-check's
