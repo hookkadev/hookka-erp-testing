@@ -7913,13 +7913,13 @@ export default function ProductionPage({
       {/* Legend — only for Overview. Cards use their own pill colours (plus
           In progress / N/A); Grid keeps the original CellBox colours. */}
       {activeTab === "ALL" && overviewView === "cards" && (
-        <div className="flex items-center gap-4 text-[10px] text-[#6B7280] px-1">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-[#6B7280] px-1">
           <span className="flex items-center gap-1.5"><span className="inline-block h-3 w-3 rounded-sm bg-[#2D5A54]" /> Completed</span>
           <span className="flex items-center gap-1.5"><span className="inline-block h-3 w-3 rounded-sm bg-[#2563EB]" /> In progress</span>
           <span className="flex items-center gap-1.5"><span className="inline-block h-3 w-3 rounded-sm bg-[#B0892A]" /> Pending</span>
           <span className="flex items-center gap-1.5"><span className="inline-block h-3 w-3 rounded-sm bg-[#991B1B]" /> Overdue</span>
           <span className="flex items-center gap-1.5"><span className="inline-block h-3 w-3 rounded-sm border border-dashed border-[#D1CCC4]" /> N/A</span>
-          <span className="flex items-center gap-1.5"><span className="inline-block h-1.5 w-1.5 rounded-full bg-[#22D3EE]" /> Date moved off plan</span>
+          <span className="flex items-center gap-1.5 whitespace-nowrap"><span className="inline-block h-1.5 w-1.5 rounded-full bg-[#22D3EE]" /> Date moved off plan</span>
         </div>
       )}
       {activeTab === "ALL" && overviewView === "grid" && (
@@ -8449,7 +8449,7 @@ export default function ProductionPage({
               count={visibleOrders.length}
               resetKey={overviewFilters}
               estimateSize={CARD_HEIGHT}
-              className="overflow-y-auto overflow-x-hidden bg-[#F7F5F1]"
+              className="@container overflow-y-auto overflow-x-hidden bg-[#F7F5F1]"
               style={{ maxHeight: "calc(100vh - 320px)" }}
               renderRow={(rowIndex, rowStart, measureRef) => {
                 const order = visibleOrders[rowIndex];

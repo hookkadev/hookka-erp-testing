@@ -68,7 +68,7 @@ test("stageTint: any failed JC in the dept wins over ok ones", () => {
 });
 
 test("pipeline columns come from the stage list, not a hardcoded 9", () => {
-  assert.match(CARDS, /pipelineCols\(stages\.length\)/);
+  assert.match(CARDS, /"--cols": stages\.length, "--cols-narrow": Math\.ceil\(stages\.length \/ 2\)/);
   assert.doesNotMatch(PAGE, /OVERVIEW_COL_KEYS/, "grid columns derive from overviewStages too");
 });
 
@@ -95,7 +95,9 @@ test("stageKind: pill state per cell; in progress is display-only", () => {
 });
 
 test("cards have a fixed height equal to the virtualizer estimate", () => {
-  assert.match(CARDS, /style=\{\{ height: CARD_HEIGHT,/);
+  assert.match(CARDS, /"--card-h": `\$\{CARD_HEIGHT\}px`,\s*"--card-h-narrow": `\$\{CARD_HEIGHT_NARROW\}px`/);
+  assert.match(CARDS, /h-\(--card-h\) @max-4xl:h-\(--card-h-narrow\)/, "narrow cards get their own fixed height");
+  assert.match(PAGE, /className="@container overflow-y-auto/, "the cards scroll box is the container the narrow layout queries");
   assert.match(PAGE, /estimateSize=\{CARD_HEIGHT\}/);
   assert.equal(CARD_HEIGHT, 128);
 });
