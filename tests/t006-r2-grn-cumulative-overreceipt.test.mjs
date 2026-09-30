@@ -31,3 +31,24 @@ test('the error message names both the already-received and this-receipt quantit
   assert.match(block, /already received \$\{alreadyReceived\}/);
   assert.match(block, /this receipt \$\{item\.receivedQty\}/);
 });
+
+// The concurrency half: the ceiling also sits in the counter statement, and
+// no path raises the counter around it. Behaviour is driven through the route
+// in purchasing-convert-flow.test.mjs and purchase-edit-cascade.test.mjs.
+test('no statement raises the PO counter without the ceiling guard', () => {
+  assert.doesNotMatch(
+    SRC,
+    /SET receivedQty = receivedQty \+ \?/,
+    'every increase must go through poCounterIncrement',
+  );
+  assert.equal(SRC.split('poCounterIncrement(db,').length - 1, 2, 'receipt post and qty edit');
+});
+
+test('a raised guard is mapped to 409 around both batches that can carry it', () => {
+  assert.equal(
+    SRC.split('if (isPoOverReceiptRace(e)) {').length - 1,
+    2,
+    'POST / and PUT /:id',
+  );
+  assert.match(SRC, /error: PO_OVER_RECEIPT_RACE_ERROR \}, 409\)/);
+});
