@@ -47,6 +47,12 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
+## 2026-09-30 — 🔵 Staging test tool: skip production stages (branch `feat/staging-stage-skip` to `staging`, STAGING ONLY, never PR to main)
+
+- Asked: a way to skip production stages easily on staging, so a test case can start from a chosen stage (e.g. ready for DO).
+- SO detail page gains a card, rendered only when the host starts with `staging.`: "Complete up to <stage>" and "Reset stages" for the order's production orders not yet on a DO. Writes go through the existing `POST /api/production-orders/bulk-patch`, one wave per job-card `sequence` (bulk-patch runs a batch in parallel and the upstream sequence lock would refuse a later stage in the same wave). No new endpoint, no schema change.
+- Test: `tests/staging-stage-skip.test.mjs`. Not usable on local dev: local proxies to prod, and the host check hides the card there.
+
 ## 2026-09-30 — 🔵 BUG-06: finish the Transfer / Convert duplicate guard on staging (branch `test/bug06-do-guard-behavioural` → `staging`)
 
 - Asked: go back to BUG-06 ("Transfer / convert: one entry point bypasses the duplicate guard"), test case it, finish it; work goes to staging, PR #448 to main closed.

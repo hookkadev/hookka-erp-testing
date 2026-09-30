@@ -1,5 +1,7 @@
 # Sales — Module Guide
 
+> **Last verified: 2026-09-30** (branch `feat/staging-stage-skip`, STAGING ONLY): `SalesOrderDetailPage` anchor re-measured (:560) and the staging-only "skip production stages" card noted. Nothing else re-checked.
+
 > **Last verified: 2026-09-29** (branch `chore/sync-main-into-staging`, staging<-main merge): the symbol table anchors re-derived (create.tsx :2415 / :3052, detail.tsx :559, sales-orders.ts :1748 / :3206 / :2533; sales-orders.ts is 5,954 lines). Nothing else re-checked.
 
 > **Last verified: 2026-09-29** (CopyFromSourceModal / LineItemCard anchors moved to 2390 / 3016 by BUG-2026-09-29-211; the sales-orders.ts line count below is stale, it measured 5,853 on 2026-09-29. Other create.tsx anchors as re-derived 2026-09-23 after BUG-2026-09-23-183; rest as of 2026-08-19) against `src/api/routes/sales-orders.ts` (**5,733** lines),
@@ -59,7 +61,7 @@ Owns the customer-facing order lifecycle: **Sales Orders** (SO) and their line i
 - Pages
   - `/sales` → `src/pages/sales/index.tsx:172` (`SalesPage` — SO list, dual-mode SO vs service-order)
   - `/sales/create` → `src/pages/sales/create.tsx:213` (`CreateSalesOrderPage`; OCR/scan-PO lands here)
-  - `/sales/:id` → `src/pages/sales/detail.tsx:559` (`SalesOrderDetailPage`; linked POs/JCs/DOs/invoices)
+  - `/sales/:id` → `src/pages/sales/detail.tsx:560` (`SalesOrderDetailPage`; linked POs/JCs/DOs/invoices; on the staging host only, `StagingStageSkipCard` from `src/components/staging-stage-skip.tsx`)
   - `/sales/:id/edit` → `src/pages/sales/edit.tsx` (Edit SO; re-runs sofa-combo on save)
   - `/consignment` list/create/edit/detail/return → `src/pages/consignment/{index,create,edit,detail,return}.tsx`
   - `/consignment/note` → `src/pages/consignment/note.tsx:454` (`ConsignmentNotePage`; 3 inline tabs)
@@ -101,7 +103,7 @@ Owns the customer-facing order lifecycle: **Sales Orders** (SO) and their line i
 | `CreateSalesOrderPage` | `src/pages/sales/create.tsx:213` | Main create form (parties, items, totals) |
 | `CopyFromSourceModal` | `src/pages/sales/create.tsx:2415` | 2-step copy-draft picker |
 | `LineItemCard` | `src/pages/sales/create.tsx:3052` | Per-line item editor |
-| `SalesOrderDetailPage` | `src/pages/sales/detail.tsx:559` | SO detail; linked POs/JCs/DOs/invoices |
+| `SalesOrderDetailPage` | `src/pages/sales/detail.tsx:560` | SO detail; linked POs/JCs/DOs/invoices |
 | `app.post("/")` (create) | `src/api/routes/sales-orders.ts:1748` | SO create + combo pass + snapshot invalidation |
 | `app.put("/:id")` (edit) | `src/api/routes/sales-orders.ts:3206` | SO edit + re-run combo pass |
 | `app.post("/:id/confirm")` | `src/api/routes/sales-orders.ts:2533` | DRAFT/PENDING → IN_PRODUCTION, cascade to POs |
