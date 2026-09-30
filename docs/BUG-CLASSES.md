@@ -1,5 +1,7 @@
 # Recurring bug classes — the index that makes P5 executable
 
+> **Last verified: 2026-09-30**: restamped on branch `fix/t006-r7-return-qty` (staging only): adds C26, a guard and the write it guards reading one input two ways (BUG-2026-09-30-224). Nothing else re-checked.
+
 > **Last verified: 2026-09-29**: restamped on branch `fix/staging-notes-history` (staging only): C15 gains row 6, the staging patch notes that read a depth-1 clone and printed "0 PRs" (BUG-2026-09-29-215). Nothing else re-checked.
 
 > **Last verified: 2026-09-25**: restamped on branch `feat/dashboard-kpi-no-icons` (PR #524): C15 gains row 5, the Worker Efficiency card that printed worker ids after a refused `/api/workers` read (BUG-2026-09-25-194). Nothing else re-checked.
@@ -1744,4 +1746,21 @@ re-queues; it never re-kicks under waitUntil.
 | 3 | every other `waitUntil(` in `src/api` | ⬜ not audited for duration; grep and check the slowest |
 
 Test: `tests/scan-queue-client-driven.test.mjs` (no `waitUntil(` in scan-queue.ts).
+
+## C26 — a guard and the write it guards read the same input two ways
+
+**Shape.** A check parses a request field one way (`Number(x) || 0`) and the INSERT a few lines
+later parses it another (`Number(x ?? 1)`). Each looks reasonable alone. The request that
+lands in the gap (missing, negative) passes the check as one value and is stored as another.
+
+**The rule.** Parse and validate the field ONCE at the top, reject what is not valid with a
+400, and hand the one parsed value to both the guard and the write.
+
+| # | site | state |
+|---|---|---|
+| 1 | `delivery-return-create.ts` T-006 R7 cap vs item insert (quantity: missing counted 0, stored 1; negative accepted) | ✅ fixed 2026-09-30 (BUG-2026-09-30-224) |
+| 2 | same function: a line with no `productionOrderId` skipped the cap | ✅ fixed 2026-09-30, refused when the DO has production-order lines |
+| 3 | other capped create paths (purchase return, GRN, PI) | ⬜ unswept |
+
+Test: `tests/t006-r7-delivery-return.test.mjs` (real create function, fake DB).
 

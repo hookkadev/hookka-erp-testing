@@ -1,5 +1,7 @@
 # Hookka ERP — Codebase Map (the single authoritative map)
 
+> **Restamped 2026-09-30** (branch `fix/t006-r7-return-qty`): Delivery Returns row, route length and its dedicated test re-checked. Nothing else re-checked.
+
 > **Restamped 2026-09-29** (branch `chore/sync-main-into-staging`, staging<-main merge): Inventory row RM tab / RM Settings / BatchEditRMDialog line ranges re-measured on the merged file. Nothing else re-checked.
 
 > **Restamped 2026-09-29 on branch `fix/scan-short-supplier-code`:** scan-modal internal-code resolution (`codeFamilyMatch` in `supplier-material-candidates.ts`) re-checked against the source; only that entry changed.
@@ -2007,7 +2009,7 @@ column read RM 0.00. The **credit-notes source three rows above it has the ident
 
 | Frontend page | API route | Primary tables | Tests |
 |---|---|---|---|
-| `src/pages/delivery-returns/index.tsx` — `/delivery-returns` (`src/dashboard-routes.tsx:300`; sidebar SALES & CUSTOMERS → "Delivery Return"); DataGrid list + create-from-DO modal; `?createFrom=<doId>` deep link from a DO (419). Detail page: `src/pages/delivery-returns/detail.tsx` at `/delivery-returns/:id` (`:302`) | `src/api/routes/delivery-returns.ts` (483) — 8 handlers, see below | `delivery_returns`, `delivery_return_items` (runtime-ensured by `ensureDeliveryReturnTables`, `src/api/lib/delivery-return-create.ts`); cascades touch `fg_batches`, `fg_units`, `cost_ledger`, `fg_stock_events` | **NONE dedicated.** The file appears only inside cross-cutting suites: `tests/fg-stock-events.test.mjs`, `tests/customer-scope.test.mjs`, `tests/customer-scope-sql.test.mjs`, `tests/derived-permissions.test.mjs`, `tests/nav-permissions.test.mjs`, `tests/permission-wildcards.test.mjs`, `tests/record-load-failure-class.test.mjs`, `tests/reverse-doc-links.test.mjs` |
+| `src/pages/delivery-returns/index.tsx` — `/delivery-returns` (`src/dashboard-routes.tsx:300`; sidebar SALES & CUSTOMERS → "Delivery Return"); DataGrid list + create-from-DO modal; `?createFrom=<doId>` deep link from a DO (419). Detail page: `src/pages/delivery-returns/detail.tsx` at `/delivery-returns/:id` (`:302`) | `src/api/routes/delivery-returns.ts` (508) — 8 handlers, see below | `delivery_returns`, `delivery_return_items` (runtime-ensured by `ensureDeliveryReturnTables`, `src/api/lib/delivery-return-create.ts`); cascades touch `fg_batches`, `fg_units`, `cost_ledger`, `fg_stock_events` | `tests/t006-r7-delivery-return.test.mjs` (R7 cap, quantity validation and cancel refusal; runs the real `createDeliveryReturnRecord` on a fake DB). Also inside cross-cutting suites: `tests/fg-stock-events.test.mjs`, `tests/customer-scope.test.mjs`, `tests/customer-scope-sql.test.mjs`, `tests/derived-permissions.test.mjs`, `tests/nav-permissions.test.mjs`, `tests/permission-wildcards.test.mjs`, `tests/record-load-failure-class.test.mjs`, `tests/reverse-doc-links.test.mjs` |
 
 **Route surface — `src/api/routes/delivery-returns.ts`**
 

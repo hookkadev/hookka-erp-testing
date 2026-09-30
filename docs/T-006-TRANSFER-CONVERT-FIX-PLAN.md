@@ -1,5 +1,6 @@
 # T-006 — Transfer / Convert foundation: fix plan
 
+> **Last verified: 2026-09-30** (branch `fix/t006-r7-return-qty`): R7 cap re-read in source. A negative or missing quantity got past it, fixed as BUG-2026-09-30-224, see the R7 follow-up below. Nothing else re-checked.
 > **Last verified: 2026-09-30** (branch `test/bug06-do-guard-behavioural`): R1 re-checked by behaviour against staging. The Sales page path is closed; a second gap on the same guard (`items` naming POs the guard never saw) is fixed as BUG-2026-09-30-223, see the R1 follow-up below. PR #448 to `main` was closed unmerged on 2026-09-30; T-006 lives on staging.
 > **Last verified: 2026-09-24** against the live staging DB (branch `fix/t006-live-findings`):
 > the real route code run in a rolled-back transaction. R1, R2, R3, R5, R7, R10 held as written.
@@ -234,6 +235,14 @@ set-membership, not by quantity), `delivery-returns.ts:459-483` (cancel block-li
    it, per PRD wording itself ("or is refused").
 
 **Test (A7):** DO line qty 3, return 1, assert invoiceable qty is 2 (not 0, not 3).
+
+**R7 follow-up, 2026-09-30 (BUG-2026-09-30-224).** Measured on staging: `quantity: -1` was stored
+as -1 and lowered the returned sum, and an omitted quantity passed the cap as 0 but was
+stored as 1. The create now reads each line's quantity once, refuses anything not greater
+than 0 with a 400, and the cap and the insert use the same value. A line with no
+`productionOrderId` is refused when the DO has production-order lines, since the cap is keyed
+by production order. Covered by `tests/t006-r7-delivery-return.test.mjs`, which now runs the
+real create function on a fake DB.
 
 ## R8 — PO-sourced GRN lines have blank `material_code` (BUG-2026-08-13-052)
 
