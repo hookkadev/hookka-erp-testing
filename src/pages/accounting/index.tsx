@@ -15061,6 +15061,7 @@ type CfApiRow = {
 type CfDrillItem = {
   key: string; ym: string; date: string; description: string;
   otherSide: { code: string; name: string }[]; ref1: string; ref2: string | null;
+  docs?: string | null; // the PIs / bills the payment settled — on hover
   sen: number; ofSen: number | null;
 };
 type CfDrillData = {
@@ -15100,7 +15101,11 @@ function CfDrillPanel({ period, lineKey }: { period: string; lineKey: string }) 
       <td className="py-1 pr-3">{it.description || "—"}</td>
       <td className="py-1 pr-3 whitespace-nowrap" title={it.otherSide.map((o) => `${o.code} ${o.name}`).join(", ")}>{it.otherSide.length ? it.otherSide.map((o) => shortBankName(o.name) || o.code).join(", ") : "—"}</td>
       <td className="py-1 pr-3 whitespace-nowrap">{it.ref1}</td>
-      <td className="py-1 pr-3">{it.ref2 ?? ""}</td>
+      <td className="py-1 pr-3">
+        {it.docs
+          ? <span className="underline decoration-dotted cursor-help" title={it.docs}>{it.ref2 || "—"}</span>
+          : (it.ref2 ?? "")}
+      </td>
       {anySplit && <td className="py-1 pl-3 text-right tabular-nums whitespace-nowrap text-[#6B7280]">{it.ofSen ? plDrillAmt(it.ofSen) : ""}</td>}
       {anySplit && <td className="py-1 pl-3 text-right tabular-nums whitespace-nowrap text-[#6B7280]">{it.ofSen ? `${((Math.abs(it.sen) / it.ofSen) * 100).toFixed(1)}%` : ""}</td>}
       <td className={amtCls(it.sen)}>{amt(it.sen)}</td>

@@ -63,7 +63,7 @@ test("the department split reads the named month, and keeps the old mix when tha
 test("the drill's description is the voucher's purpose, else the line text without its number", () => {
   const fn = slice(api, "async function computeCashflowStatement(", 'app.get("/cashflow-statement"');
   assert.match(fn, /SELECT id, payee, description FROM payment_vouchers WHERE id IN/);
-  assert.match(fn, /const description = purpose \?\? withoutDocNo\(legText, ref1\);/);
+  assert.match(fn, /const description = purpose \?\? tidyDescription\(legText, ref1, who\);/);
 });
 
 test("the panel: whole payment + share only when split, short bank, one Amount in brackets, month blocks with totals", () => {
