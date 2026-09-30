@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-30**: branch `fix/drill-receipt-description` added below (its entry is the newest); the #614 entry corrected (its receipt premise was wrong).
 > **Last verified: 2026-09-30**: branch `feat/org-chart-to-main` (org-chart photos + Add Department, staging → main) added below (its entry is the newest).
 > **Last verified: 2026-09-30**: #614 (drill labels / empty descriptions) closed ✅ below with its prod check.
 > **Last verified: 2026-09-30**: branch `fix/drill-variant-noise` added below (its entry is the newest); #612 closed ✅ with its prod check.
@@ -94,11 +95,21 @@ Verified: `tsc -p tsconfig.app.json` exit 0; `npm test` all pass. NOT verified o
 tsc strict 0; `npm test` 5047 pass / 0 fail.
 ---
 
+## 2026-09-30 — 🔵 Drills: an official receipt reads its own text, never a lone "from" (BUG-2026-09-30-228)(branch `fix/drill-receipt-description`)
+
+1. Owner opened the receipt the drill showed as "from": its header note is empty and its text is on its line. The "from" was
+   the drill's own doing — the bank leg's text "<no> · from <payer>" with the payer taken out (it is Ref. 2). #614 below had
+   read it as typed data; it was not.
+2. 🔵 `officialReceiptTexts` (one lookup for the P&L / balance-sheet and Cash Flow drills): the note, else the receipt lines'
+   text, else "Official receipt". `tidyDescription` never leaves a lone "to" / "from". `ownDescription` back to
+   "empty → none". Guard `tests/drill-tf-interest-and-corrections.test.mjs`.
+
 ## 2026-09-30 — ✅ Drills: an edited document is not labelled, a description that says nothing is not shown (follow-up to #612)(#614 ba33071b MERGED, deployed, prod-verified)
 
 1. Found by #612's prod check: every edit re-posts the document and hides its older legs (each restate family does), so the
-   re-post IS the document — labelling it `re-posted on edit` marked hundreds of ordinary lines. And one official receipt's own
-   description is just "from" (its payer is in its own field), which replaced a readable ledger text.
+   re-post IS the document — labelling it `re-posted on edit` marked hundreds of ordinary lines. And one official receipt's
+   drill line read "from" — **corrected 2026-09-30: that was not typed data (the receipt's note is empty, its text is on its
+   line); the drill made it — see the BUG-2026-09-30-228 entry above.**
 2. ✅ `drillVariant`: an edit's re-post says nothing (void / unvoid / reversal / edit adjustment / GL re-sync stay).
    `ownDescription`: a description that is empty or a lone "from" / "to" / "for" does not replace the ledger text — an
    official receipt then shows "Official receipt". Applied to every typed description the drills use (vouchers, bills, JVs,
