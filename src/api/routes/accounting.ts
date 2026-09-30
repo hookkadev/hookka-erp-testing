@@ -3238,7 +3238,7 @@ app.get("/ar-reconciliation", async (c) => {
         isOpening?: number | null; is_opening?: number | null;
       }>(),
     c.var.DB.prepare(
-      `SELECT pr.id AS id, pr.receiptNumber AS receiptNumber, pr.customerName AS customerName,
+      `SELECT pr.id AS id, pr.receiptNumber AS receiptNumber, pr.customerId AS customerId, pr.customerName AS customerName,
               pr.date AS date, pr.amount AS amount, pr.method AS method, pr.allocations AS allocations,
               dl.state AS lifecycleState
          FROM payment_records pr
@@ -3246,7 +3246,8 @@ app.get("/ar-reconciliation", async (c) => {
                 ON dl.sourceType = 'payment' AND dl.sourceId = pr.id
         WHERE 1=1`,
     ).all<{
-      id: string; receiptNumber?: string; receipt_number?: string; customerName?: string; customer_name?: string;
+      id: string; receiptNumber?: string; receipt_number?: string; customerId?: string; customer_id?: string;
+      customerName?: string; customer_name?: string;
       date?: string; amount?: number; method?: string; allocations?: string | unknown[];
       lifecycleState?: string | null; lifecyclestate?: string | null;
     }>().catch(() => ({ results: [] as never[] })),
@@ -3314,9 +3315,25 @@ app.get("/ar-reconciliation", async (c) => {
         date,
       });
     }
-    // NOTE: deliberately NO synthetic "unapplied remainder" row — /ar-control
-    // subtracts no advances, so the mirror must not either; a receipt whose GL
-    // exceeds its allocations surfaces as a payment_gl_mismatch item instead.
+    // What the receipt holds on account — the part its allocations don't cover.
+    // /ar-control nets it off as an unapplied customer advance
+    // (loadUnappliedCustomerAdvances: live receipts with a customer, amount −
+    // Σ allocations, positive only), so the mirror carries it as an advance row
+    // too. Before, every receipt held on account read as a "void payment GL
+    // leak" (BUG-2026-09-30-229).
+    const onAccountSen = Math.round(Number(r.amount) || 0) - allocs.reduce((s, a) => s + Math.round(Number(a.amount) || 0), 0);
+    if (onAccountSen > 0 && String(r.customerId ?? r.customer_id ?? "")) {
+      receiptRows.push({
+        paymentNo: recId,
+        purchaseInvoiceId: null,
+        bookedSen: 0,
+        amountSen: onAccountSen,
+        method: String(r.method ?? ""),
+        active,
+        supplierName: name,
+        date,
+      });
+    }
   }
 
   const report = buildApReconciliation(
@@ -16246,10 +16263,12 @@ async function openingControlSums(db: Env["Variables"]["DB"]): Promise<{
       arByControl.set(ctl, (arByControl.get(ctl) ?? 0) + amt);
       arTotalSen += amt;
     }
+    // A cancelled seed is not an opening bill — the customer seeds above and
+    // the pre-opening PIs below leave it out too (BUG-2026-09-30-230).
     const pi = await db
       .prepare(
         `SELECT COALESCE(SUM(amountSen),0) AS s FROM purchase_invoices
-          WHERE isOpening = 1 AND status != 'DRAFT'`,
+          WHERE isOpening = 1 AND status NOT IN ('DRAFT','CANCELLED')`,
       )
       .first<{ s: number }>();
     apTotalSen = Number(pi?.s) || 0;
@@ -16372,7 +16391,7 @@ app.get("/opening-balance", async (c) => {
         `SELECT id, piNo, supplierId, supplierName, invoiceDate, dueDate,
                 amountSen, status
            FROM purchase_invoices
-          WHERE isOpening = 1 AND status != 'DRAFT'
+          WHERE isOpening = 1 AND status NOT IN ('DRAFT','CANCELLED')
           ORDER BY supplierName, invoiceDate, piNo`,
       )
       .all();

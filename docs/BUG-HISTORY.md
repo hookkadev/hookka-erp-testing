@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-09-30**: newest entries BUG-2026-09-30-229 / -230 (branch `fix/selfcheck-recon-and-opening-seeds`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-30**: newest entry BUG-2026-09-30-228 (branch `fix/drill-receipt-description`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-30**: BUG-2026-09-29-214 and BUG-2026-09-30-227 (org-chart photos, staging ids) brought to `main` on branch `feat/org-chart-to-main`; a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-222 (branch `fix/storage-delete-not-found`; ids 219-221 are on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
@@ -47,6 +48,53 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-09-30-230 — The opening sum still counted CANCELLED supplier opening seeds `accounting` `opening-balance` 🟢
+
+🟢 **Fixed** (branch `fix/selfcheck-recon-and-opening-seeds` → `main`) · Found while the owner asked what the Self-check's
+creditor gap was (2026-09-30).
+
+**What happened.** `openingControlSums` derives the opening 400-0000 leg from the supplier opening seeds with
+`status != 'DRAFT'` — a seed the owner had CANCELLED still counted. The customer seeds (`NOT IN ('DRAFT','CANCELLED')`)
+and the pre-opening PIs already left cancelled rows out, and so do the aging and the reconciliation. The Opening Balance
+page listed the cancelled seeds too, as ordinary rows with a "remove" button and no status. Measured on prod: four
+cancelled seeds inside the posted opening leg.
+
+**Fix.** Both supplier-seed queries (the sum and the page's list) exclude CANCELLED, like the customer side. Nothing is
+re-posted by the fix: the opening leg changes only when the owner re-posts the opening.
+
+**Regression.** `tests/selfcheck-recon-mirrors-controls.test.mjs` pins both seed queries on both sides and that no
+`isOpening = 1 AND status != 'DRAFT'` is left.
+
+---
+
+## BUG-2026-09-30-229 — Self-check read the control gaps many times too large: trade-finance repayments counted as supplier advances, receipts held on account as "void payment GL leaks" `accounting` `reconciliation` 🟢
+
+🟢 **Fixed** (branch `fix/selfcheck-recon-and-opening-seeds` → `main`) · Found investigating the owner's two red Self-check
+cards (2026-09-30).
+
+**What happened.** The Self-check headline shows the itemized reconciliation's drift (`/ap-reconciliation`,
+`/ar-reconciliation`), not the control card's. Both reconciliations had drifted from the cards they decompose (class C18):
+- **Creditor.** A trade-finance repayment is a supplier payment with no PI and method `TF_REPAYMENT`, posted DR TF account
+  / CR bank. `loadUnappliedSupplierAdvances` (the card) leaves it out; `ap-recon.ts` counted it as an unapplied advance
+  and itemized each as a "payment GL mismatch".
+- **Debtor.** Since 2026-08-06 `/ar-control` nets receipts held on account off as unapplied customer advances
+  (`loadUnappliedCustomerAdvances`); `/ar-reconciliation` still built rows from allocations only, under a comment saying
+  the card "subtracts no advances". A receipt with nothing allocated then had GL and no rows, and read as a **void payment
+  GL leak** — though every one measured was live.
+
+Measured on prod: the cards read a small creditor gap and a small debtor gap; the Self-check read each many times larger,
+the difference exactly the three repayments and the on-account receipts.
+
+**Fix.** `ap-recon.ts`: a `TF_REPAYMENT` payment is never an advance and claims nothing on the control (its GL on the
+control, if any, is itemized as a stray). `/ar-reconciliation`: each live receipt with a customer carries its on-account
+remainder (amount − Σ allocations, positive only) as an advance row — the card's own rule.
+
+**Regression.** `tests/selfcheck-recon-mirrors-controls.test.mjs`: the prod shapes (repayments + a stale opening leg →
+only the opening item; on-account receipts tie; a receipt knocked off against invoices outside the books stays an item),
+and pins that each reconciliation copies its card's advance rule.
 
 ---
 
