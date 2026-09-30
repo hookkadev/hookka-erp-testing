@@ -84,7 +84,9 @@ export function shortBankName(name: string | null | undefined): string {
 // "(edited)" marker of a re-posted document. "Supplier payment (edited)" →
 // "Supplier payment"; "Receipt HOR-2606-008 · Houzs Century" → "Receipt";
 // "Other creditor payment · HPV-2606-070 · Houzs Venture" → "Other creditor
-// payment". Nothing left → the text without its number.
+// payment". Nothing left but "to" / "from" (a voucher's "to <payee>", a
+// receipt's "from <payer>") → the text without its number, never a lone
+// preposition (BUG-2026-09-30-228).
 export function tidyDescription(
   description: string | null | undefined,
   docNo: string | null | undefined,
@@ -101,7 +103,7 @@ export function tidyDescription(
     .replace(/\s*·\s*(?:·\s*)+/g, " · ")
     .replace(/^[\s·:\-–]+/, "")
     .replace(/[\s·:\-–]+$/, "")
-    .replace(/(?:^|\s+)to$/i, "")
+    .replace(/(?:^|\s+)(?:to|from)$/i, "")
     .replace(/\s{2,}/g, " ")
     .trim();
   return s || base;
@@ -126,10 +128,8 @@ export function drillVariant(sourceType: string, sourceId = ""): string {
   return "";
 }
 
-// A document's own description, or null when it says nothing: empty, or a lone
-// "from" / "to" / "for" (an official receipt keyed as "from", its payer in its
-// own field). Then the drill keeps the ledger text, or the document's kind.
+// A document's own description, or null when it has none (then the drill
+// keeps the ledger text, or the document's kind).
 export function ownDescription(description: string | null | undefined): string | null {
-  const s = (description ?? "").trim();
-  return s && !/^(?:from|to|for)$/i.test(s) ? s : null;
+  return (description ?? "").trim() || null;
 }

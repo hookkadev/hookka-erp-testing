@@ -8395,6 +8395,40 @@ app.get("/pl-statement", async (c) => {
   });
 });
 
+// An official receipt's payer and description, for the drills: its header
+// note when it has one, else its lines' text (the receipt popup shows both;
+// the note is often empty), else the document's kind (BUG-2026-09-30-228).
+async function officialReceiptTexts(
+  db: Env["Variables"]["DB"],
+  ids: string[],
+): Promise<Map<string, { payer: string; text: string }>> {
+  const out = new Map<string, { payer: string; text: string }>();
+  for (let i = 0; i < ids.length; i += 200) {
+    const part = ids.slice(i, i + 200);
+    const ph = part.map(() => "?").join(",");
+    const lineText = new Map<string, string[]>();
+    try {
+      const lines = await db.prepare(`SELECT receiptId, description FROM official_receipt_lines WHERE receiptId IN (${ph}) ORDER BY lineOrder`)
+        .bind(...part).all<Record<string, unknown>>();
+      for (const r of lines.results ?? []) {
+        const id = String(r.receiptId ?? r.receipt_id ?? ""), text = String(r.description ?? "").trim();
+        const seen = lineText.get(id) ?? [];
+        if (id && text && !seen.includes(text)) lineText.set(id, [...seen, text]);
+      }
+    } catch { /* the header note, or the kind */ }
+    const heads = await db.prepare(`SELECT id, receivedFrom, description FROM official_receipts WHERE id IN (${ph})`)
+      .bind(...part).all<Record<string, unknown>>();
+    for (const r of heads.results ?? []) {
+      const id = String(r.id);
+      out.set(id, {
+        payer: String(r.receivedFrom ?? r.received_from ?? "").trim(),
+        text: ownDescription(String(r.description ?? "")) ?? (lineText.get(id)?.join(" · ") || "Official receipt"),
+      });
+    }
+  }
+  return out;
+}
+
 // One drill line per ledger leg, shared by the P&L and balance-sheet drills
 // (owner 2026-09-30: the P&L drill shows what the Cash Flow drill shows, and
 // 「Balance sheet 也要这样点开看」). Ref. 1 = the document, Ref. 2 = who it is
@@ -8512,8 +8546,8 @@ async function buildDrillLines(
     } catch { /* the line keeps its own text */ }
   }
   try {
-    for (const r of await chunked<Record<string, unknown>>(idsOf(isOr), (ph) => `SELECT id, receivedFrom, description FROM official_receipts WHERE id IN (${ph})`)) {
-      setInfo(isOr, String(r.id), { party: str(r.receivedFrom ?? r.received_from) || null, header: ownDescription(str(r.description)) ?? "Official receipt" });
+    for (const [id, r] of await officialReceiptTexts(db, idsOf(isOr))) {
+      setInfo(isOr, id, { party: r.payer || null, header: r.text });
     }
   } catch { /* the line keeps its own text */ }
   // The documents that mostly sit on balance-sheet accounts (the balance-sheet
@@ -9493,15 +9527,15 @@ async function computeCashflowStatement(
         setOnce(party, `rc::${String(r.id)}`, String(r.customerName ?? r.customer_name ?? "").trim());
       }
     } catch { /* Ref. 2 stays empty */ }
-    // An official receipt names its payer and carries its own description; a
-    // JV its description; trade-finance interest the lender (the facility
+    // An official receipt names its payer and carries its description (its
+    // note, else its lines' text); a JV its description; trade-finance interest the lender (the facility
     // account on the entry), with whom the draw paid on hover.
     const ownPurpose = new Map<string, string>(); // "or::id" / "jv::id" → the document's description
     try {
       const orIds = [...new Set(ents.filter((e) => e.sourceType.startsWith("official_receipt")).map((e) => e.sourceId))];
-      for (const r of await chunkIds(orIds, (ph) => `SELECT id, receivedFrom, description FROM official_receipts WHERE id IN (${ph})`)) {
-        setOnce(party, `or::${String(r.id)}`, String(r.receivedFrom ?? r.received_from ?? "").trim());
-        setOnce(ownPurpose, `or::${String(r.id)}`, ownDescription(String(r.description ?? "")) ?? "Official receipt");
+      for (const [id, r] of await officialReceiptTexts(c.var.DB, orIds)) {
+        setOnce(party, `or::${id}`, r.payer);
+        setOnce(ownPurpose, `or::${id}`, r.text);
       }
     } catch { /* Ref. 2 stays empty */ }
     try {

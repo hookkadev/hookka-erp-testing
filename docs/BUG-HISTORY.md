@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-09-30**: newest entry BUG-2026-09-30-228 (branch `fix/drill-receipt-description`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-30**: BUG-2026-09-29-214 and BUG-2026-09-30-227 (org-chart photos, staging ids) brought to `main` on branch `feat/org-chart-to-main`; a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-222 (branch `fix/storage-delete-not-found`; ids 219-221 are on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-217 (branch `fix/scan-short-supplier-code`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
@@ -46,6 +47,32 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-09-30-228 — An official receipt's drill line read "from" — and #614 blamed the data `accounting` `ui-frontend` 🟢
+
+🟢 **Fixed** (branch `fix/drill-receipt-description` → `main`) · Found by the owner: he opened the receipt the drill showed as "from" and its own
+text was right there on its line.
+
+**What happened.** The drills (P&L / balance sheet / Cash Flow, 2026-09-29/30) show a document's own description instead of
+the ledger text. An official receipt's description came from its header note, which is often empty — the receipt's text
+sits on its line (the receipt popup shows "Note —" and the line). With no note, the drill fell back to the bank leg's ledger
+text "<receipt no> · from <payer>", took the payer out (it is Ref. 2) and left the preposition alone: "from".
+`tidyDescription` already guarded "to <payee>" that way, not "from <payer>".
+
+**The second mistake.** #614 read that "from" as typed data ("a receipt keyed as 'from'"), added a lone-preposition rule to
+`ownDescription` on that premise, and the owner was told to have staff fix the receipt. Nobody had typed "from".
+
+**Fix.** `officialReceiptTexts` (accounting.ts, above `buildDrillLines`) — one lookup for both drills: the header note,
+else the receipt lines' text (unique, in line order), else "Official receipt". `tidyDescription` never leaves a lone "to"
+/ "from". `ownDescription` is back to "empty → none" (the preposition rule had no real case).
+
+**Regression.** `tests/drill-tf-interest-and-corrections.test.mjs` (receipt: note, else lines, else kind; dual-key line
+read; a failed line read keeps the rest; no lone preposition); `tests/pl-drill-like-cashflow.test.mjs` pins the lookup.
+
+**Lesson.** A value the drill *shows* is not a value the database *holds*: before calling data wrong, read the stored row —
+here one look at the receipt would have shown an empty note, not "from".
 
 ---
 

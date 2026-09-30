@@ -64,7 +64,7 @@ test("P&L / balance-sheet lines: a PI edit finds its PI, interest names the lend
 
 test("Cash Flow lines: official receipts, JVs and interest have their counterparty / description", () => {
   const fn = slice(api, "async function computeCashflowStatement(", 'app.get("/cashflow-statement"');
-  assert.match(fn, /SELECT id, receivedFrom, description FROM official_receipts WHERE id IN/);
+  assert.match(fn, /for \(const \[id, r\] of await officialReceiptTexts\(c\.var\.DB, orIds\)\) \{/);
   assert.match(fn, /SELECT id, description FROM journal_entries WHERE id IN/);
   assert.match(fn, /: sourceType\.startsWith\("official_receipt"\) \? "or"\n\s+: sourceType\.startsWith\("tf_interest"\) \? "tf"\n\s+: sourceType === "manual" \|\| sourceType\.startsWith\("manual_"\) \? "jv" : "";/);
   assert.match(fn, /: kind === "or" \|\| kind === "jv" \? ownPurpose\.get\(`\$\{kind\}::\$\{e\.sourceId\}`\) : undefined;/);
@@ -73,18 +73,23 @@ test("Cash Flow lines: official receipts, JVs and interest have their counterpar
   assert.match(fn, /const variant = drillVariant\(e\.sourceType, e\.sourceId\);/);
 });
 
-test("a description that says nothing does not replace the ledger text", () => {
-  const own = drill.ownDescription;
-  assert.equal(own("Rental - Sep'26"), "Rental - Sep'26");
-  assert.equal(own("  from "), null, "an official receipt keyed as 'from'");
-  assert.equal(own("To"), null);
-  assert.equal(own(""), null);
-  assert.equal(own(null), null);
-  assert.equal(own("from HONG LEONG"), "from HONG LEONG", "a real sentence stays");
+test("BUG-2026-09-30-228: a receipt reads its note, else its lines, never a lone 'from'", () => {
+  // The receipt's header note was empty and its text sat on its line; the
+  // drill fell back to the ledger text "<no> · from <payer>", took the payer
+  // out (it is Ref. 2) and left "from".
+  assert.equal(drill.tidyDescription("HOR-2609-003 · from THE BANK", "HOR-2609-003", "THE BANK"), "from THE BANK", "never a lone 'from'");
+  assert.equal(drill.tidyDescription("HPV-2608-030 · to A SUPPLIER", "HPV-2608-030", "A SUPPLIER"), "to A SUPPLIER", "nor a lone 'to'");
+  assert.equal(drill.ownDescription("  Rental - Sep'26 "), "Rental - Sep'26");
+  assert.equal(drill.ownDescription("   "), null);
+  assert.equal(drill.ownDescription(null), null);
+  const helper = slice(api, "async function officialReceiptTexts(", "\n}\n");
+  assert.match(helper, /SELECT receiptId, description FROM official_receipt_lines WHERE receiptId IN \(\$\{ph\}\) ORDER BY lineOrder/);
+  assert.match(helper, /const id = String\(r\.receiptId \?\? r\.receipt_id \?\? ""\)/, "dual-key read");
+  assert.match(helper, /text: ownDescription\(String\(r\.description \?\? ""\)\) \?\? \(lineText\.get\(id\)\?\.join\(" · "\) \|\| "Official receipt"\),/, "note, else the lines, else the kind");
+  assert.match(helper, /\} catch \{ \/\* the header note, or the kind \*\/ \}/, "a failed line read keeps the rest");
   const fn = slice(api, "async function buildDrillLines(", "\n}\n");
-  assert.match(fn, /header: ownDescription\(str\(r\.description\)\) \?\? "Official receipt" \}\);/, "an official receipt falls back to its kind");
-  assert.match(fn, /header: ownDescription\(str\(r\.description\)\) \}\);/, "a voucher / JV falls back to the ledger text");
+  assert.match(fn, /header: ownDescription\(str\(r\.description\)\) \}\);/, "a voucher / JV without a description keeps the ledger text");
   const cf = slice(api, "async function computeCashflowStatement(", 'app.get("/cashflow-statement"');
-  assert.match(cf, /ownDescription\(String\(r\.description \?\? ""\)\) \?\? "Official receipt"\);/);
+  assert.match(cf, /setOnce\(ownPurpose, `or::\$\{id\}`, r\.text\);/);
   assert.doesNotMatch(cf, /const purpose = String\(r\.description \?\? ""\)\.trim\(\);/, "every voucher purpose goes through ownDescription");
 });
