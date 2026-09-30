@@ -1,11 +1,17 @@
 # Bug History
 
+> **Last verified: 2026-09-30** (branch `chore/sync-staging-from-main-0930`, staging<-main merge): both logs merged. Numbering follows `main`: staging's report-emails entry BUG-2026-09-29-222 is renumbered to -232 (main's -222 is the storage not-found bug) and staging's customer-credit entry BUG-2026-09-28-218 to -233 (main's -218 is the PR label workflow). The one BUG-2026-09-29-214 entry kept is main's copy. Newest entry is BUG-2026-09-28-233.
+> **Last verified: 2026-09-30**: newest entry BUG-2026-09-30-231 (branch `fix/pillow-fab-sew-sticker`, DEV-26); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-09-30**: newest entries BUG-2026-09-30-229 / -230 (branch `fix/selfcheck-recon-and-opening-seeds`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-09-30**: newest entry BUG-2026-09-30-228 (branch `fix/drill-receipt-description`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-09-30**: BUG-2026-09-29-214 and BUG-2026-09-30-227 (org-chart photos, staging ids) brought to `main` on branch `feat/org-chart-to-main`; a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
+> **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-222 (branch `fix/storage-delete-not-found`; ids 219-221 are on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-09-30**: newest entry BUG-2026-09-30-227 (branch `fix/org-photo-file-scope`, to staging; renumbered from 224, which `fix/t006-r7-return-qty` claimed first); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-09-30**: newest entry BUG-2026-09-30-226 (branch `fix/t006-r2-grn-receipt-race`, to staging); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-30**: newest entry BUG-2026-09-30-225 (branch `fix/staging-so-detail-live-do`, to staging); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-30**: newest entry BUG-2026-09-30-224 (branch `fix/t006-r7-return-qty`, to staging); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-30**: newest entry BUG-2026-09-30-223 (branch `test/bug06-do-guard-behavioural`, to staging); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
-> **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-222 (branch `fix/report-emails-mobile`, to staging); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-232 (branch `fix/report-emails-mobile`, to staging); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-29**: newest entry BUG-2026-09-29-221 (branch `fix/overdue-email-mobile`, to staging; -220 is taken on staging); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-29** (branch `chore/sync-main-into-staging`, staging<-main merge): both logs merged; staging's customer-credit entry renumbered BUG-2026-09-28-210 to -218 (main's -210 is the RM stock-qty bug) and staging's DEV-05 dual-key BUG-2026-09-29-216 (PR #572) to -219 (main's -216 is the staging nightly wipe). Newest entry is -219.
 
@@ -59,6 +65,112 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-09-30-231 — Pillows had a Fab Cut QR sticker and no Fab Sew one `production-orders` `ui-frontend` 🟡
+
+🟡 **Fix in progress** (branch `fix/pillow-fab-sew-sticker` → `main`, DEV-26) · Reported by Siti: the sewing department had
+no pillow sticker to scan.
+
+**What happened.** On the Fab Sew sheet the pillow rows were listed, and the QR Stickers panel under it had none for them.
+Fab Cut printed a pillow sticker; Fab Sew did not, from either the Fab Sew page or "Print Fab Sew Stickers" on the Fab Cut
+page. Measured on staging 2026-09-30 (read-only): 392 open accessory orders on Fab Sew, 320 with no sticker, every one a
+pillow (Square Pillow 280, Long Pillow 38, 5543-Long Pillow 2). Prod data is UNMEASURED; the code on `main` was the same.
+
+**Root cause.** Two things that were each reasonable. (1) Commit `dd9b2d3a` (2026-05-15) hid a sofa's Back Cushion /
+Armrest / Headrest rows from the Fab Sew stickers, because they are sewn with the base and the BASE sticker travels with
+the assembly. The check read the row's type only, not that the row was a sofa. (2) The BOM editor offers six WIP types and
+none for a pillow; the pillow BOMs carry a real WIP component (they have a foam step), so it was typed `SOFA_CUSHION`, the
+closest. A pillow's Fab Sew card therefore looked like a sofa back cushion and was hidden. Its Fab Cut card is typed
+`ACCESSORY`, which is why cutting had a sticker. The other accessories (A01, A02, SB02, BC05) have no WIP component, fall
+back to `FG_MAIN`, and always printed.
+
+**Fix.** One rule, `travelsWithBaseSticker` (`src/pages/production/baserows-core.ts`), replaces the two inline copies in
+`src/pages/production/index.tsx` (`onScreenStickers` and `loadFabSewStickers`). It skips those three types unless the row's
+category is ACCESSORY. Nothing else changes: a pillow order has one Fab Sew card with quantity 1, so it prints one sticker
+per SO ID, and the scan path already completes it (`scan-complete-shared` fans a `SOFA_*` card out to the PO's Fab Sew
+cards, of which a pillow has one). Against the staging rows the new rule adds 320 stickers, all pillows, and still skips
+the 671 sofa sub-part cards.
+
+**Known and left.** A worker outside the Sewing section who scans a pillow sticker gets "Upholstery already complete" (a
+pillow has no Upholstery card; nothing is written). Left as is, decided with the requester's side.
+
+**Regression.** `tests/pillow-fab-sew-sticker.test.mjs`: a staging-shaped pillow order through `buildBaseRows` keeps its
+sticker, the same row on a SOFA is still skipped, and both builders call the one rule.
+
+**Lesson.** A `wipType` of `SOFA_*` says which BOM type was picked, not what the order is. A rule meant for one category
+has to check the category.
+## BUG-2026-09-30-230 — The opening sum still counted CANCELLED supplier opening seeds `accounting` `opening-balance` 🟢
+
+🟢 **Fixed** (branch `fix/selfcheck-recon-and-opening-seeds` → `main`) · Found while the owner asked what the Self-check's
+creditor gap was (2026-09-30).
+
+**What happened.** `openingControlSums` derives the opening 400-0000 leg from the supplier opening seeds with
+`status != 'DRAFT'` — a seed the owner had CANCELLED still counted. The customer seeds (`NOT IN ('DRAFT','CANCELLED')`)
+and the pre-opening PIs already left cancelled rows out, and so do the aging and the reconciliation. The Opening Balance
+page listed the cancelled seeds too, as ordinary rows with a "remove" button and no status. Measured on prod: four
+cancelled seeds inside the posted opening leg.
+
+**Fix.** Both supplier-seed queries (the sum and the page's list) exclude CANCELLED, like the customer side. Nothing is
+re-posted by the fix: the opening leg changes only when the owner re-posts the opening.
+
+**Regression.** `tests/selfcheck-recon-mirrors-controls.test.mjs` pins both seed queries on both sides and that no
+`isOpening = 1 AND status != 'DRAFT'` is left.
+
+---
+
+## BUG-2026-09-30-229 — Self-check read the control gaps many times too large: trade-finance repayments counted as supplier advances, receipts held on account as "void payment GL leaks" `accounting` `reconciliation` 🟢
+
+🟢 **Fixed** (branch `fix/selfcheck-recon-and-opening-seeds` → `main`) · Found investigating the owner's two red Self-check
+cards (2026-09-30).
+
+**What happened.** The Self-check headline shows the itemized reconciliation's drift (`/ap-reconciliation`,
+`/ar-reconciliation`), not the control card's. Both reconciliations had drifted from the cards they decompose (class C18):
+- **Creditor.** A trade-finance repayment is a supplier payment with no PI and method `TF_REPAYMENT`, posted DR TF account
+  / CR bank. `loadUnappliedSupplierAdvances` (the card) leaves it out; `ap-recon.ts` counted it as an unapplied advance
+  and itemized each as a "payment GL mismatch".
+- **Debtor.** Since 2026-08-06 `/ar-control` nets receipts held on account off as unapplied customer advances
+  (`loadUnappliedCustomerAdvances`); `/ar-reconciliation` still built rows from allocations only, under a comment saying
+  the card "subtracts no advances". A receipt with nothing allocated then had GL and no rows, and read as a **void payment
+  GL leak** — though every one measured was live.
+
+Measured on prod: the cards read a small creditor gap and a small debtor gap; the Self-check read each many times larger,
+the difference exactly the three repayments and the on-account receipts.
+
+**Fix.** `ap-recon.ts`: a `TF_REPAYMENT` payment is never an advance and claims nothing on the control (its GL on the
+control, if any, is itemized as a stray). `/ar-reconciliation`: each live receipt with a customer carries its on-account
+remainder (amount − Σ allocations, positive only) as an advance row — the card's own rule.
+
+**Regression.** `tests/selfcheck-recon-mirrors-controls.test.mjs`: the prod shapes (repayments + a stale opening leg →
+only the opening item; on-account receipts tie; a receipt knocked off against invoices outside the books stays an item),
+and pins that each reconciliation copies its card's advance rule.
+
+---
+
+## BUG-2026-09-30-228 — An official receipt's drill line read "from" — and #614 blamed the data `accounting` `ui-frontend` 🟢
+
+🟢 **Fixed** (branch `fix/drill-receipt-description` → `main`) · Found by the owner: he opened the receipt the drill showed as "from" and its own
+text was right there on its line.
+
+**What happened.** The drills (P&L / balance sheet / Cash Flow, 2026-09-29/30) show a document's own description instead of
+the ledger text. An official receipt's description came from its header note, which is often empty — the receipt's text
+sits on its line (the receipt popup shows "Note —" and the line). With no note, the drill fell back to the bank leg's ledger
+text "<receipt no> · from <payer>", took the payer out (it is Ref. 2) and left the preposition alone: "from".
+`tidyDescription` already guarded "to <payee>" that way, not "from <payer>".
+
+**The second mistake.** #614 read that "from" as typed data ("a receipt keyed as 'from'"), added a lone-preposition rule to
+`ownDescription` on that premise, and the owner was told to have staff fix the receipt. Nobody had typed "from".
+
+**Fix.** `officialReceiptTexts` (accounting.ts, above `buildDrillLines`) — one lookup for both drills: the header note,
+else the receipt lines' text (unique, in line order), else "Official receipt". `tidyDescription` never leaves a lone "to"
+/ "from". `ownDescription` is back to "empty → none" (the preposition rule had no real case).
+
+**Regression.** `tests/drill-tf-interest-and-corrections.test.mjs` (receipt: note, else lines, else kind; dual-key line
+read; a failed line read keeps the rest; no lone preposition); `tests/pl-drill-like-cashflow.test.mjs` pins the lookup.
+
+**Lesson.** A value the drill *shows* is not a value the database *holds*: before calling data wrong, read the stored row —
+here one look at the receipt would have shown an empty note, not "from".
 
 ---
 
@@ -128,7 +240,7 @@ Entries themselves stay newest-first.
 
 ---
 
-## BUG-2026-09-29-222 — the Schedule, Efficiency and Morning Brief emails were unreadable on a phone `reports` `ui-frontend` 🟢
+## BUG-2026-09-29-232 — the Schedule, Efficiency and Morning Brief emails were unreadable on a phone `reports` `ui-frontend` 🟢
 
 🟢 Fixed on `staging` (branch `fix/report-emails-mobile`, BUG-36 follow-up to -221).
 
@@ -220,7 +332,7 @@ remembered.
 
 ---
 
-## BUG-2026-09-28-218 — customer credit control let DOs through: no overdue-term block, undelivered DOs not counted `delivery-orders` `accounting` 🟡
+## BUG-2026-09-28-233 — customer credit control let DOs through: no overdue-term block, undelivered DOs not counted `delivery-orders` `accounting` 🟡
 
 🟡 **Fix in progress** (branch `feat/customer-credit-control` → `staging`). Client tracker BUG-34.
 
@@ -231,6 +343,54 @@ remembered.
 **Fix.** One shared gate, `src/api/lib/customer-credit.ts` (`checkCustomerCredit` + `gateCredit`): PAYMENT_OVERDUE when an issued, unpaid invoice is past `dueDateForTerms(invoiceDate, creditTerms)` (`src/lib/terms.ts`, last day of invoice month + term months), and CREDIT_LIMIT_EXCEEDED on outstanding + undelivered DOs (DRAFT / LOADED / IN_TRANSIT, priced by `do-value.ts`) + this DO. Run at DO create (all paths, incl. the delivery agent), packing-list-first (summed per customer, replaces `projectCreditFailure`) and DRAFT→LOADED (office button and driver QR). Admin override: `creditOverride: { reason }`, allowed for `delivery-orders:credit-override` (ADMIN / SUPER_ADMIN always) while kv_config `credit-override-enabled` is not `false`; each override is an audit event (`credit-override`). Invoice due dates now follow the customer's term on the DO auto-invoice and the manual invoice. Consignment-note convert keeps its limit-only check (it bills goods already out).
 
 **Verified.** `tsc -p tsconfig.app.json` exit 0; `tests/customer-credit-gate.test.mjs` + `tests/terms.test.mjs` + full `npm test` pass. NOT verified on staging yet; staging data impact UNMEASURED.
+
+---
+
+## BUG-2026-09-29-222 — A file already gone from storage could never be deleted, and streamed as a 500 `platform` 🟢
+
+🟢 **Fixed** (branch `fix/storage-delete-not-found`, not yet deployed) · Found while verifying the org-chart "delete the old photo on change" feature on staging.
+
+**Symptom, measured.** Staging's storage log (SG project, 2026-09-29 17:47:58) shows the old-photo delete answered **HTTP 400**. The photo change itself succeeded, but `removeStoredFile` gave up and the old `file_assets` row stayed. Earlier the same day, `/api/files/:id/stream` for a photo whose object had been removed answered a generic **500 "stream failed"**, not a 404.
+
+**Root cause.** `deleteFile` and `getFile` in `src/api/lib/supabase-storage.ts` treated only HTTP **404** as "object not found". Supabase Storage reports a missing object as HTTP **400** with a JSON body whose `statusCode` is `"404"` / `error` `"not_found"`. The 400 status is measured; the body shape is Supabase's documented not-found envelope (the same `{statusCode,error,message}` envelope measured for `InvalidSignature` in BUG-2026-09-29-214), UNMEASURED for this exact response. So "already gone" was treated as a hard failure: the delete threw before the row delete, and the stream threw instead of returning null → 404.
+
+**Fix.** One exported `isObjectNotFound(status, body)`, used by both: 404, or 400 whose body says not-found / `NoSuchKey`. Any other 400 (e.g. `InvalidSignature`) still fails.
+
+**Regression.** `tests/supabase-storage-not-found.test.mjs` calls the real `deleteFile` / `getFile` against stubbed responses; 3 of its 7 tests fail on the pre-fix code.
+
+**Not repaired by this fix.** Rows already stuck before the fix (staging's pre-move org photos) stay until deleted again, now that a retry would succeed.
+
+---
+
+## BUG-2026-09-29-214 — Org Chart photo uploaded fine, but never displayed — Supabase itself refused its own signed URL `platform` `ui-frontend` 🟢
+
+🟢 **Fixed** · Owner uploaded a photo on the staging Org Chart right after the feature shipped (feat/org-chart-photos). The file appeared correctly in Supabase Storage, but the card kept showing initials.
+
+**Root cause — measured, not guessed.** `PersonAvatar` fetched the photo via `GET /api/files/:id/download`, which 302s to a Supabase presigned URL (`signedDownloadUrl` → `POST /storage/v1/object/sign/...`). That POST succeeded and returned a token. The browser then followed the redirect to fetch the actual bytes, and Supabase's own Storage API refused its own token:
+
+```json
+{"statusCode":"400","error":"InvalidSignature","message":"Invalid signature","code":"InvalidSignature"}
+```
+
+Confirmed live: opening that exact signed URL directly in a browser tab reproduced the same `InvalidSignature` response straight from the staging storage project's own Supabase host — the right project, a correctly-shaped token, refused by Supabase's own verification. Not a bug in this app's code: the request to create the token and the request to redeem it both reached the correct project and the correct object; something inside Supabase's own sign/verify pair disagreed. Most likely tied to `staging` being a brand-new Supabase project (created earlier this week for BUG-2026-09-28-210 / the file-storage secrets gap) whose signing keys had not fully settled.
+
+**Fix.** `PersonAvatar` now fetches via `GET /api/files/:id/stream` instead of `/download`. `/stream` proxies the object bytes straight through this Worker using the service_role key on every request (`getFile()`) — no presigned URL, no external signature to fail. `Content-Disposition: attachment` on that route does not stop an `<img>` from rendering inline; that header only affects a direct navigation, never an embedded resource fetch. The tradeoff (a full round-trip through the Worker instead of a cached redirect) is the right one for a ~40 KB avatar; `/download`'s presign-and-cache path stays the default for the large PDFs and videos it was built for.
+
+**Regression.** `tests/org-chart-photos.test.mjs` — asserts the avatar's `<img src>` points at `/stream`, and asserts a regression back to `/download` would fail the test.
+
+**Verify.** `npm test` 5,080 pass / 0 fail; `tsc -p tsconfig.app.json` clean. Verified live on staging after this fix: the same uploaded photo now renders on the card. **Prod is unaffected** — this only touches the Org Chart photo feature, which has not been promoted past `staging` yet.
+
+**Still open.** If Supabase's signing keys on the staging project settle on their own, `/download` may start working there too — no action needed either way, since `/stream` works regardless and this fix does not depend on that happening.
+
+---
+
+## BUG-2026-09-29-218 — Staging PR label workflow never ran; every `staging` label was added by hand `ci-cd` 🟡
+
+**Symptom:** PRs into `staging` (#572, #577 and others) had no `staging` label unless someone added it manually.
+
+**Root cause:** `label-staging-prs.yml` (#552) was merged to `staging` only. `pull_request_target` always runs the workflow file from the default branch (`main`), whatever the PR's base, so the workflow was never triggered. Zero `pull_request_target` runs on 2026-09-29; every `staging` label that day was added by a person.
+
+**Fix:** `.github/workflows/label-prs.yml` on `main`, covering PRs into `main` and `staging`: base `staging` gets `staging`, and the title type prefix gets a type label (`fix` gets `bug`, `feat` gets `enhancement`, and so on). The title is passed through env, never spliced into the script. Checked locally against real PR titles with a stub `gh`, including a title with shell syntax.
 
 ---
 
@@ -250,9 +410,11 @@ remembered.
 
 **Symptom:** everything created on staging was gone the next morning; the app looked freshly cloned from prod.
 
-**Root cause:** `.github/workflows/sync-staging.yml` carried `schedule: cron '0 18 * * *'` (02:00 SGT). Schedules fire from the default branch, so the copy on `main` ran nightly: `DROP SCHEMA public CASCADE`, then `pg_restore` of a prod dump. Nothing distinguished a test record from prod data. Separately `scripts/sanitize-staging.mjs` still carried the old staging ref (`zaxy...`), so after the wipe it refused to run and the payroll/PII scrub and PIN steps were skipped.
+**Root cause:** `.github/workflows/sync-staging.yml` carried `schedule: cron '0 18 * * *'` (02:00 SGT). Schedules fire from the default branch, so the copy on `main` ran nightly: `DROP SCHEMA public CASCADE`, then `pg_restore` of a prod dump. Nothing distinguished a test record from prod data. Separately `scripts/sanitize-staging.mjs` still carried the old staging ref, so after the wipe it refused to run and the payroll/PII scrub and PIN steps were skipped.
 
-**Fix:** cron removed (manual `workflow_dispatch` only). New default `mode=merge` runs `scripts/merge-prod-into-staging.mjs`: per table, COPY prod rows into a temp table and `INSERT ... ON CONFLICT DO NOTHING`, so nothing in staging is deleted or overwritten. `mode=reset` keeps the old full clone behind `confirm=SYNC`. Sanitiser `STAGING_REF` is now `kahxgvbfanbraazetefr`. Pinned by `tests/sync-staging-no-nightly-wipe.test.mjs`. NOT run against a live database yet (no credentials in the dev session): the first `mode=merge` run on GitHub is the live check.
+**Fix:** cron removed (manual `workflow_dispatch` only). New default `mode=merge` runs `scripts/merge-prod-into-staging.mjs`: per table, COPY prod rows into a temp table and `INSERT ... ON CONFLICT DO NOTHING`, so nothing in staging is deleted or overwritten. `mode=reset` keeps the old full clone behind `confirm=SYNC`. Sanitiser `STAGING_REF` now matches the current staging project. Pinned by `tests/sync-staging-no-nightly-wipe.test.mjs`. NOT run against a live database yet (no credentials in the dev session): the first `mode=merge` run on GitHub is the live check.
+
+**Follow-up (same day):** the same stale ref was still in `.mcp.json` (the Supabase MCP connector), the `CLAUDE.md` environment table, `docs/PRE-DEPLOY-CHECKLIST.md`, `docs/RBAC-REMEDIATION.md`, the write allowlists of `scripts/clone-prod-to-staging.mjs` and `scripts/repair-uncosted-deliveries.mjs`, and `scripts/seed-sandbox-rbac.sql`. All now name the current staging project, and every project ref now comes from `.env` / GitHub secrets (`SUPABASE_PROJECT_REF`, `SUPABASE_STAGING_REF`) instead of source. Measured: Hyperdrive `hookka-erp-staging` targets this project, and it was written at 18:22 UTC on 2026-09-28 by the last nightly sync. Nothing deployed uses the old staging project. The test now fails if any tracked file names a known project ref.
 
 ---
 
@@ -267,28 +429,6 @@ remembered.
 **Regression.** `tests/staging-notes.test.mjs`: the fetch-depth line must use the quoted `'0'`, and the script must carry the shallow guard. Proved by hand: a `git clone --depth 1` of staging makes the script exit 1; the full worktree gives 30 PRs.
 
 **Verify.** Live check on staging after the deploy of this fix: pending at time of writing.
-
----
-
-## BUG-2026-09-29-214 — Org Chart photo uploaded fine, but never displayed — Supabase itself refused its own signed URL `platform` `ui-frontend` 🟢
-
-🟢 **Fixed** · Owner uploaded a photo on the staging Org Chart right after the feature shipped (feat/org-chart-photos). The file appeared correctly in Supabase Storage, but the card kept showing initials.
-
-**Root cause — measured, not guessed.** `PersonAvatar` fetched the photo via `GET /api/files/:id/download`, which 302s to a Supabase presigned URL (`signedDownloadUrl` → `POST /storage/v1/object/sign/...`). That POST succeeded and returned a token. The browser then followed the redirect to fetch the actual bytes, and Supabase's own Storage API refused its own token:
-
-```json
-{"statusCode":"400","error":"InvalidSignature","message":"Invalid signature","code":"InvalidSignature"}
-```
-
-Confirmed live: opening that exact signed URL directly in a browser tab reproduced the same `InvalidSignature` response straight from `zaxygxwadidiqcphibma.supabase.co` — the right project, a correctly-shaped token, refused by Supabase's own verification. Not a bug in this app's code: the request to create the token and the request to redeem it both reached the correct project and the correct object; something inside Supabase's own sign/verify pair disagreed. Most likely tied to `staging` being a brand-new Supabase project (created earlier this week for BUG-2026-09-28-210 / the file-storage secrets gap) whose signing keys had not fully settled.
-
-**Fix.** `PersonAvatar` now fetches via `GET /api/files/:id/stream` instead of `/download`. `/stream` proxies the object bytes straight through this Worker using the service_role key on every request (`getFile()`) — no presigned URL, no external signature to fail. `Content-Disposition: attachment` on that route does not stop an `<img>` from rendering inline; that header only affects a direct navigation, never an embedded resource fetch. The tradeoff (a full round-trip through the Worker instead of a cached redirect) is the right one for a ~40 KB avatar; `/download`'s presign-and-cache path stays the default for the large PDFs and videos it was built for.
-
-**Regression.** `tests/org-chart-photos.test.mjs` — asserts the avatar's `<img src>` points at `/stream`, and asserts a regression back to `/download` would fail the test.
-
-**Verify.** `npm test` 5,080 pass / 0 fail; `tsc -p tsconfig.app.json` clean. Verified live on staging after this fix: the same uploaded photo now renders on the card. **Prod is unaffected** — this only touches the Org Chart photo feature, which has not been promoted past `staging` yet.
-
-**Still open.** If Supabase's signing keys on the staging project settle on their own, `/download` may start working there too — no action needed either way, since `/stream` works regardless and this fix does not depend on that happening.
 
 ---
 
@@ -6399,7 +6539,7 @@ Independently, the isolated joins were replayed against the same prod rows asser
 
 **Verified.** Replayed both pipelines against live prod rows: **957 POs and 13,418 attached job cards, output byte-identical** (`JSON.stringify` equal), join **6,865 ms → 8 ms**, fetch **30.77 MB → 10.76 MB**, ~**7.3 s** of server work removed. The `/delivery` variant benefits more — join **18,132 ms → 33 ms** — with its row count unchanged. The exact new SQL was run through the real `translateSql` compat layer and executed on prod: correct snake_case rewriting inside the nested sub-select, 13,418 rows, matching expectation; the `includeArchive` UNION form parses in both the existing and the new position. `tests/production-orders-jobcard-grouping.test.mjs` (6 tests) pins order-equivalence including the equal-`sequence` stable-sort tie, empty-bucket and orphan-card cases, non-mutation of the shared array, and the SQL shape. Full suite 3,690 pass / 0 fail; `npx tsc -p tsconfig.app.json --noEmit` exit 0. **Not yet observed on a running prod deploy** — Actions is billing-blocked, so the end-to-end cold-call timing is a projection from the measured server-side saving, not a measurement.
 
-**Prod DB note (corrects the entry below).** The local `.dev.vars` `DATABASE_URL` is indeed dead (`28P01`), but a **working** read-only DSN for live prod exists in the repo's own scripts (`db.vpwdqtsxexpiqxzweivd.supabase.co`, used by ~65 `scripts/*.mjs`) — that is how the live figures above were read. The second DSN in `scripts/` (`db.zaxygxwadidiqcphibma…`) is a **stale copy**, last written 2026-08-10. Both are hardcoded credentials sitting in tracked files and belong on the rotation list.
+**Prod DB note (corrects the entry below).** The local `.dev.vars` `DATABASE_URL` is indeed dead (`28P01`), but a **working** read-only DSN for live prod exists in the repo's own scripts (the prod host, used by ~65 `scripts/*.mjs`) — that is how the live figures above were read. The second DSN in `scripts/` (the old staging project) is a **stale copy**, last written 2026-08-10. Both are hardcoded credentials sitting in tracked files and belong on the rotation list.
 ## BUG-2026-08-13-004 — Department Efficiency let unmeasured job cards divide their own estimate by itself, burying the 4,289 real recordings at ~100% `ui-frontend` `production-orders` `data-integrity` 🟢
 
 **Symptom.** Reports › Production › **Department Efficiency** parked every department near **100%** whatever the date range, and the **Export CSV** button shipped that as a KPI. The dead Master Tracker page (`src/pages/production/tracker.tsx`, deleted in the same branch) carried the same expression in an "Actual Hours / Efficiency %" table.

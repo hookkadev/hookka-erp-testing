@@ -186,6 +186,8 @@ jobs:
         env:
           PROD_DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
           STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+          SUPABASE_STAGING_REF: ${{ secrets.SUPABASE_STAGING_REF }}
         run: node scripts/merge-prod-into-staging.mjs --apply
       # MANDATORY. The steps above have just loaded verbatim production rows
       # into a public-internet test site: real payroll, real bank accounts and
@@ -206,6 +208,8 @@ jobs:
         env:
           STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
           STAGING_TEST_PASSWORD: ${{ secrets.STAGING_TEST_PASSWORD }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+          SUPABASE_STAGING_REF: ${{ secrets.SUPABASE_STAGING_REF }}
         run: node scripts/sanitize-staging.mjs --apply
 
       # Staging is a TEST environment — after cloning prod, set every worker's

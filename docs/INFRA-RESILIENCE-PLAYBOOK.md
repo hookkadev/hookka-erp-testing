@@ -104,7 +104,7 @@ Status legend: ✅ live · ⚠️ written, not deployed · ⏳ blocked/waiting �
   — sitting uncommitted in the working tree. *(Both have since shipped.)*
 - ⏳ **Blocked:** compute → Small (Supabase platform incident on project
   resizing; retry once their status page clears). Verify it lands on the **prod**
-  project `vpwdqtsxexpiqxzweivd` ("weisiang329-eng's Project"), not a sibling.
+  project (`SUPABASE_PROJECT_REF`, "weisiang329-eng's Project"), not a sibling.
   *(Outcome unknown from source.)*
 - ⬜ **Not started:** keep-warm heartbeat; don't-logout-on-transient; Sentry DSN;
   uptime alerting; PITR. *(Keep-warm and Sentry have since landed.)*

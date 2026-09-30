@@ -51,7 +51,7 @@ test("the Finance Cost block sits below the operating result, so interest no lon
   });
   const m = st.columns.findIndex((c) => c.key === "2026-09");
   const head = st.rows.find((r) => r.kind === "group" && r.groupId === "FINANCE_COST");
-  assert.equal(head.values[m], 164208);
+  assert.equal(head.values[m], -164208); // money out reads negative (cash view)
   const idx = (pred) => st.rows.findIndex(pred);
   assert.ok(idx((r) => r.kind === "result") < idx((r) => r === head), "below Net operation surplus");
   assert.equal(st.rows.find((r) => r.kind === "result").values[m], 0, "not operating");

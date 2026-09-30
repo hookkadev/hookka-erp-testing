@@ -56,9 +56,9 @@ const sep = () => cf.buildStatement({
   stockGroupOverride: {}, fyeMonth: 8, period: "2026-09",
 });
 
-test("the block is outflow-signed, NOT operating, and is the first block after the operating result", () => {
+test("the block reads the bank's way (cash view), is NOT operating, and is the first block after the operating result", () => {
   assert.equal(cf.SECTION_LABELS.TRADE_FINANCE, "Trade Finance");
-  assert.ok(cf.OUTFLOW_SECTIONS.has("TRADE_FINANCE"), "+ = cash out, − = the lender lent");
+  assert.equal(cf.displaySign("TRADE_FINANCE"), 1, "cash view: the lender lent = money in (+), a repayment = money out (−)");
   assert.ok(!cf.OPERATING_SECTIONS.has("TRADE_FINANCE"), "sits below Net operation surplus");
   assert.equal(cf.SECTION_ORDER.indexOf("TRADE_FINANCE"), cf.SECTION_ORDER.indexOf("TAXATION") + 1);
   const st = sep();
@@ -69,12 +69,12 @@ test("the block is outflow-signed, NOT operating, and is the first block after t
   assert.ok(!st.rows.some((r) => r.kind === "group" && ["FINANCE_COST", "CAPEX"].includes(r.groupId) && st.rows.indexOf(r) < head), "first of the lower blocks");
 });
 
-test("raw material 加, drawdown 减: the purchase shows under Raw Materials, the facility side negative below", () => {
+test("the purchase shows under Raw Materials (money out, −) and the drawdown below (money in, +): one cancels the other", () => {
   const st = sep();
   const m = st.columns.findIndex((c) => c.key === "2026-09");
   const fabr = st.rows.find((r) => r.kind === "line" && r.label === "B.M-FABR");
   assert.equal(fabr.section, "RAW_MATERIALS");
-  assert.equal(fabr.values[m], 3335238, "the TF-paid purchase is spend, by material, in the month of the draw");
+  assert.equal(fabr.values[m], -3335238, "the TF-paid purchase is spend (money out, −), by material, in the month of the draw");
   const lines = st.rows.filter((r) => r.kind === "line" && r.section === "TRADE_FINANCE");
   assert.deepEqual(lines.map((r) => r.label), [
     "Drawdown — OCEAN SKY TRADING SDN. BHD.",
@@ -82,17 +82,17 @@ test("raw material 加, drawdown 减: the purchase shows under Raw Materials, th
     "Repaid to HOUZS CENTURY SDN BHD",
   ]);
   const val = (label) => lines.find((r) => r.label === label).values[m];
-  assert.equal(val("Drawdown — OCEAN SKY TRADING SDN. BHD."), -3335238, "the lender lent → negative");
-  assert.equal(val("Interest charged by HOUZS CENTURY SDN BHD"), -163708);
-  assert.equal(val("Repaid to HOUZS CENTURY SDN BHD"), 9806752, "real cash out → positive");
+  assert.equal(val("Drawdown — OCEAN SKY TRADING SDN. BHD."), 3335238, "the lender lent → money in, positive");
+  assert.equal(val("Interest charged by HOUZS CENTURY SDN BHD"), 163708);
+  assert.equal(val("Repaid to HOUZS CENTURY SDN BHD"), -9806752, "real cash out → negative");
   const group = st.rows.find((r) => r.kind === "group" && r.label === "TRADE FINANCE - HOUZS CENTURY SDN BHD");
   assert.equal(group.groupId, "TRADE_FINANCE>310-0020");
-  assert.equal(group.values[m], 9806752 - 3335238 - 163708, "nets to the change in what is owed");
+  assert.equal(group.values[m], -(9806752 - 3335238 - 163708), "nets to the change in what is owed (repaid more than drawn → negative)");
   for (const l of lines) assert.equal(l.groupId, "TRADE_FINANCE>310-0020");
   // The interest expense lands on its own account line (General Expense).
   const intExp = st.rows.find((r) => r.kind === "line" && r.label === "INTEREST ON TRADE FINANCE");
   assert.equal(intExp.section, "GENERAL_EXPENSE");
-  assert.equal(intExp.values[m], 163708);
+  assert.equal(intExp.values[m], -163708);
 });
 
 test("the operating result counts the purchase and the interest, not the facility; the bank surplus is bank legs only", () => {
