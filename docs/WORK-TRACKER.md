@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-30**: branch `feat/production-overview-cards-narrow-main` added below as item 5 of the Production Overview Cards to `main` entry (#597 merged).
 > **Last verified: 2026-09-30**: branch `feat/production-overview-cards-main` added below (its entry is the newest).
 > **Last verified: 2026-09-30**: #598 (Cash Flow stock accounts → Raw Materials) closed ✅ below with its prod check.
 > **Last verified: 2026-09-30**: branch `feat/cashflow-stock-accounts-rm` added below (its entry is the newest).
@@ -53,6 +54,7 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 - 2. 🔵 Card per work order: header (SO ID, hold pill, product + specs, Customer PO, customer | Special, Qty, Cust DD, Our DD) over stage tiles (label, status pill, date). Pills: Completed teal, In progress blue (some JCs done), Pending gold, Overdue dark red + "! date", N/A dashed. Off-plan dates: cyan dot. Fixed 128px rows, virtualized, memoized.
 - 3. 🔵 Stage columns from `overviewStages()`: the 9 `DEPARTMENTS` in today's order/labels plus extra `isProduction` depts from `/api/departments`.
 - 4. 🔵 Cards has no column headers: stage pills (status + date popover, count badge), More filters (8 order-level filters), Sort, Select all and Clear sit on a second line of the page filter bar; the toggle sits at its right end. Same filters/sort as Grid.
+- 5. 🔵 (branch `feat/production-overview-cards-narrow-main` → `main`; staging #601 merged) Cards scale on a narrow list (< 56rem, e.g. a tablet or a half-width window): two-line header, stages in two rows, pills shrink to their tile, legend wraps. Row 210px there; 128px unchanged on wide screens.
 - Applied to `main` as one commit (the three staging commits, cherry-picked; code identical to staging apart from the pre-existing main/staging drift). Guard: `tests/production-overview-cards.test.mjs`.
 
 ## 2026-09-30 — ✅ Cash Flow: payments booked to a raw-material stock account read as Raw Materials (owner「不要动到 P&L」+ re-booked the loan line himself)(#598 c284ab0a MERGED, deployed, prod-verified)
