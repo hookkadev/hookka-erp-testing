@@ -30,8 +30,8 @@ as a Cloudflare Pages Function via `functions/api/[[route]].ts`. There is no
 - **Health** — `GET /api/health` is registered directly on the app (not via a
   route module) and is exempt from the rate limiter.
 
-**Counts at generation time:** 144 mounts, 142 route files in
-`src/api/routes/`, 1000 top-level handler registrations discovered.
+**Counts at generation time:** 145 mounts, 143 route files in
+`src/api/routes/`, 1001 top-level handler registrations discovered.
 
 ## Scope and limits of this file
 
@@ -201,6 +201,7 @@ offsets pointing past the end of their own file.
 | `/api/org-chart` | `src/api/routes/org-chart.ts` | `GET /` <sub>:205</sub><br>`POST /auto-wire-production` <sub>:263</sub><br>`PUT /reporting` <sub>:367</sub><br>`PUT /photo` <sub>:438</sub> | gated |
 | `/api/user-permissions` | `src/api/routes/user-permissions.ts` | `GET /catalog` <sub>:63</sub><br>`GET /` <sub>:70</sub><br>`GET /:userId` <sub>:93</sub><br>`PUT /:userId` <sub>:110</sub><br>`DELETE /:userId` <sub>:169</sub> | gated |
 | `/api/staging-mail` | `src/api/routes/staging-mail.ts` | `GET /` <sub>:42</sub><br>`GET /:id` <sub>:80</sub><br>`GET /:id/attachments/:aid` <sub>:91</sub> | gated |
+| `/api/staging-schema` | `src/api/routes/staging-schema.ts` | `GET /` <sub>:17</sub> | gated |
 
 ---
 

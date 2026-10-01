@@ -1,6 +1,9 @@
 # Hookka ERP — Work Tracker
 
 > **Last verified: 2026-10-01**: branch `feat/staging-mail-outbox` (to `staging`, STAGING ONLY) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: branch `feat/staging-schema-check` (to `staging`, STAGING ONLY) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: branch `feat/staging-api-log` (to `staging`, STAGING ONLY) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: branch `feat/staging-delivery-skip` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-09-30**: branch `chore/sync-staging-from-main-0930`, staging<-main merge added below (its entry is the newest).
 > **Last verified: 2026-09-30**: #617 entry item 4 — owner re-posted the opening; creditor Self-check card green (measured).
 > **Last verified: 2026-09-30**: #617 (BUG-2026-09-30-229/-230, Self-check reconciliations + cancelled opening seeds) closed ✅ below with its prod check.
@@ -96,6 +99,30 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 - Gaps: a send MailSlurp refused is not stored there, and direct `sendMail` failures (reports, mail center, CRM, auth, users) are only logged, so neither shows. The page only fills while MailSlurp is the active provider (`sendMail` prefers Brevo, then Resend).
 - Test: `tests/staging-mail.test.mjs` (7, stubbed fetch, no network).
 - UNMEASURED: nothing was run against MailSlurp or staging. After merge, open `/staging-mail` on staging as an admin and open a report email; check a non-admin gets 403.
+
+## 2026-10-01: 🔵 Staging test tool, schema check page (branch `feat/staging-schema-check` to `staging`, STAGING ONLY, never PR to main)
+
+- Asked: a staging-only page that lists missing tables, missing columns and type mismatches between what the code expects and what the staging DB has, since migrations do not auto-apply.
+- Expected = `tests/db-schema.json` (with `tests/db-boolean-columns.json` for types). It is the only complete column-level source: a prod `information_schema` snapshot that `tests/sql-columns-exist.test.mjs` holds route SQL to, and that self-apply PRs extend by hand. `check-schema-applied.mjs` knows tables only; migrations are inert here; self-apply statements are scattered and partial.
+- `/staging-schema` page plus `GET /api/staging-schema`: 404 unless `isStagingRequest`, then `requireSuperAdmin`; one SELECT on `information_schema.columns`, no DDL. Diff in `src/api/lib/staging-schema-diff.ts`.
+- Blind spots, shown on the page: names only (types checked for real booleans only); a prod snapshot, so a self-applied column missing on staging may just mean its write path has not run there yet; only as fresh as its last refresh.
+- Test: `tests/staging-schema-diff.test.mjs` (5, fixtures only).
+- UNMEASURED: never run against a live DB. Open the page on staging after merge.
+
+## 2026-10-01: 🔵 Staging test tool: API log drawer (branch `feat/staging-api-log` to `staging`, STAGING ONLY, never PR to main)
+
+- Asked: a way to see recent API calls and their errors on staging, and copy one into a bug report.
+- Every dashboard page gains a small "API" button bottom-left, rendered only when the host starts with `staging.`. It opens a drawer with the last 50 `/api` calls: method, path (no query string), status, ms, and for failures the response body cut to 500 characters. "Copy as bug report" copies page URL, time, user agent and the picked call (or the last failed one).
+- Recording rides the existing `window.fetch` patch in `src/lib/api-client.ts` (two host-gated lines, CSRF untouched). The log is in memory only. Request bodies are never kept; failure bodies are read from a clone, and never for auth / PIN / password / session / token / invite paths. No new endpoint, no server change.
+- Test: `tests/staging-api-log.test.mjs`. UNMEASURED: not checked in a browser (local dev proxies to prod and the host check hides it there). Check on staging after merge.
+
+## 2026-10-01: 🔵 Staging test tool, delivery and billing skip (branch `feat/staging-delivery-skip` to `staging`, STAGING ONLY, never PR to main)
+
+- Asked: carry the stage-skip tool past production. For an SO whose production is done, one click creates the DO, delivers it, raises the invoice and records a full payment, each step optional through a "go up to" selector (DO / Delivered / Invoiced / Paid), with a step log.
+- SO detail page gains `StagingDeliverySkipCard` (`src/components/staging-delivery-skip.tsx`, planner and runner `src/lib/staging-delivery-skip.ts`), rendered only when the host starts with `staging.`. Writes go through the operator endpoints only: `POST /api/delivery-orders` (finished POs no live DO holds), `PUT /api/delivery-orders/:id` to LOADED then DELIVERED with a proof of delivery, `POST /api/invoices` when a DO is still DELIVERED, `POST /api/payments` for each live invoice's balance. The runner re-reads `GET /api/sales-orders/:id` between writes, stops at the first refused write, and stops if a write did not move the order. No new endpoint, no schema change.
+- Email: there is no opt-out. `applyDeliveryOrderUpdate` queues the dispatch notice on the move to LOADED and the invoice notice on the move to DELIVERED (`fireCustomerNoticeBestEffort`), and `POST /api/invoices` queues the invoice notice too. The only skips are "already sent" and no hub/customer email on file. MailSlurp sends to the real recipient, and staging holds real customer addresses. The card says so in its confirm text; the "DO" target sends nothing. Open question for the owner: a recipient redirect in the MailSlurp branch of `src/api/lib/email.ts`.
+- "Finished" means PO status COMPLETED (the job-card rollup); `createDeliveryOrderForPOs` does not check readiness itself.
+- Test: `tests/staging-delivery-skip.test.mjs` (planner, runner against a stubbed fetch, source pins). UNMEASURED: not run on staging yet; check after merge, including that the staging user has the delivery-orders, invoices and payments permissions.
 
 ## 2026-09-30 — 🔵 Sync `staging` from `main` (branch `chore/sync-staging-from-main-0930` → `staging`)
 
