@@ -79,7 +79,7 @@ interface NavGroup {
 const navigationGroups: NavGroup[] = [
   // STAGING ONLY (never PR'd into main): latest PRs merged into staging.
   ...(window.location.hostname.startsWith("staging.")
-    ? [{ label: "PATCH NOTES", items: [{ name: "Patch Notes", href: "/staging-notes", icon: ScrollText }] }]
+    ? [{ label: "PATCH NOTES", items: [{ name: "Patch Notes", href: "/staging-notes", icon: ScrollText }, { name: "Schema Check", href: "/staging-schema", icon: Grid3x3 }] }]
     : []),
   {
     label: "OVERVIEW",
