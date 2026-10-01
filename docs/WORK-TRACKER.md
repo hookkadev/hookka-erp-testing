@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-01**: finance plan batch 2 (#663) closed ✅ with its prod check; batch 3 in progress (branch `feat/finance-scan-learn`).
 > **Last verified: 2026-10-01**: finance plan batch 2 in progress (branch `feat/pv-popup-form-transfer`).
 > **Last verified: 2026-10-01**: finance plan batch 1 (#662) closed ✅ with its prod check.
 > **Last verified: 2026-10-01**: owner said start — batch 1 of the finance plan in progress (branch `feat/finance-sidebar-accordion-selfcheck-wording`).
@@ -189,13 +190,17 @@ Four batches, each shipped and prod-verified before the next:
    `feat/finance-sidebar-accordion-selfcheck-wording`, guard `tests/finance-batch1-sidebar-selfcheck.test.mjs`.
    Prod: Reports → Daily → Monthly each closed the previous FINANCE group; Production and Consignment still open together;
    the debtor card reads "receipt GL mismatch" with the receipt number and invoice / receipt / 300-0000 wording.
-2. 🔵 (branch `feat/pv-popup-form-transfer`, guard `tests/pv-popup-form-transfer.test.mjs`) Payment voucher form as a popup in the layout the owner showed (Payment / Transfer switch; payee, number on save, date,
+2. ✅ (#663 ececcfdc, prod-verified; branch `feat/pv-popup-form-transfer`, guard `tests/pv-popup-form-transfer.test.mjs`) Payment voucher form as a popup in the layout the owner showed (Payment / Transfer switch; payee, number on save, date,
    paid from, printed description + internal notes, supplier bill no. + bill date, MYR only, line cards, scan inside the
    form, accrue / draft / post kept; no event, no product line — measured unused). Transfer = an ordinary voucher (own
    accounts on both sides, TR badge); Fund Transfer leaves the sidebar, its URL and old entries stay. List: single click
    does nothing, double click pops the whole voucher read-only with Print / Edit / Void + who/when, ledger entry, bank
    reconciliation state. New AP Payment form unchanged.
-3. ⚪ Scans (finance only — the shared OCR engine and party-alias memory untouched): a new payee is not skipped (suggestions
+   Prod (read-only, no voucher saved): list summary counts every door incl. TR and 4 old fund transfers (FT); single click
+   opens nothing; double click on a PV, an SP and an FT row shows header, lines, who/when, ledger entry and bank state
+   (matched lines name the statement line); New Payment Voucher opens the popup, Transfer swaps the fields (receiving
+   account list leaves out Paid from), Cancel closes it; sidebar has no Fund Transfer; `?tab=transfer` still loads.
+3. 🔵 (branch `feat/finance-scan-learn`) Scans (finance only — the shared OCR engine and party-alias memory untouched): a new payee is not skipped (suggestions
    from similar descriptions, marked); account learned per line from description (approved/posted vouchers and bills);
    voucher date defaults to today, bill date to the document date; SST as its own line; duplicate check on the supplier
    bill no.; one PDF with several bills → one record each; batch shows a review table, then "create all"; several
