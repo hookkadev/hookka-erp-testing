@@ -1,6 +1,7 @@
 # Bug History
 
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-234 (branch `fix/staging-mail-empty-body`, STAGING ONLY; ids up to 233 are taken on `main` / `staging`); a log, so "verified" means the newest entry matches the code.
+> **Last verified: 2026-10-01**: entry BUG-2026-10-01-232 added (branch `fix/grn-number-collision`, to staging); its text matches the code on that branch.
 > **Last verified: 2026-09-30** (branch `chore/sync-staging-from-main-0930`, staging<-main merge): both logs merged. Numbering follows `main`: staging's report-emails entry BUG-2026-09-29-222 is renumbered to -232 (main's -222 is the storage not-found bug) and staging's customer-credit entry BUG-2026-09-28-218 to -233 (main's -218 is the PR label workflow). The one BUG-2026-09-29-214 entry kept is main's copy. Newest entry is BUG-2026-09-28-233.
 > **Last verified: 2026-09-30**: newest entry BUG-2026-09-30-231 (branch `fix/pillow-fab-sew-sticker`, DEV-26); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-30**: newest entries BUG-2026-09-30-229 / -230 (branch `fix/selfcheck-recon-and-opening-seeds`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
@@ -90,6 +91,18 @@ calls `/html`. Fails before the fix, passes after.
 **Not fixed yet (2026-10-01, after #629).** The owner still sees an empty white frame, not the "no body" message, so a body
 arrives and renders blank. Cause UNMEASURED. Branch `fix/staging-mail-show-source` adds a "Show source" toggle and the body length
 so the next look shows what MailSlurp returns.
+
+---
+
+## BUG-2026-10-01-232 — Two GRNs created in the same instant: the second failed with a raw database error `grn` `purchasing` 🟡
+
+**Symptom:** Measured on staging 2026-09-30 while testing T-006 R2. Two GRN creates fired together for the same PO: in two of three rounds the second answered `500 duplicate key value violates unique constraint "ux_grns_grn_number"`. No duplicate GRN was written (the unique index held), but the person saw a database error instead of a retry.
+
+**Root cause:** `generateGrnNumber` reads the last GRN number of the month and adds one. Two requests in the same instant read the same last number, so the second INSERT collides on `ux_grns_grn_number`. Nothing caught it. The PO number had the same race and was fixed long ago with a retry (`purchase-orders.ts` 5.3); GRN never got it.
+
+**Fix:** `POST /api/grn` builds and runs its batch in a loop. On a GRN number collision (`isGrnNumberCollision`) the batch has already rolled back, so it reads the next number, rebuilds the statements (the number is in the header and in the stock notes) and tries again, up to 5 times. After that it answers 409 "Another GRN was being saved at the same moment and took this GRN number. Please try again."
+
+**Test:** `tests/purchasing-convert-flow.test.mjs` "GRN number collision" (2 cases). The mock has no unique index, so the collision is injected as the Postgres error; both cases failed on the old code with a 500.
 
 ---
 

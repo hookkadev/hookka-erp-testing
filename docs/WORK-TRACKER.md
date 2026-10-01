@@ -5,6 +5,7 @@
 > **Last verified: 2026-10-01**: branch `feat/dev22-worker-penalty` (to `staging`) added below (in progress, its entry is the newest).
 > **Last verified: 2026-10-01**: branch `feat/staging-api-log-in-topbar` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `fix/staging-mail-empty-body` (to `staging`, STAGING ONLY) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: branch `fix/grn-number-collision` added below.
 > **Last verified: 2026-10-01**: corrected two staging-tool claims below: the today-override cache rows are not wiped nightly, and the delivery-skip notices go to sanitised `@staging.invalid` addresses in code (live UNMEASURED).
 > **Last verified: 2026-10-01**: branch `feat/staging-today-override` (staging-only today override) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `feat/staging-mail-outbox` (to `staging`, STAGING ONLY) added below (its entry is the newest).
@@ -136,6 +137,12 @@ Ask (ticket DEV-22, High): a Worker Penalty module for confirmed order / product
 6. 🔵 Worker app My Pay: penalty card (date, PO No., reason, amount, payroll month, status).
 7. ✅ Tests + docs: `tests/worker-penalties.test.mjs` (9), employees module guide, CODEBASE-MAP, API.md regenerated.
 8. 🟡 Items 5 and 6 are typecheck / lint / unit clean but NOT yet driven in a browser. The local `.dev.vars` points at PRODUCTION (checked 2026-10-01 by project ref only), so no local run; owner chose to verify on staging after the PR merges.
+
+## 2026-10-01 — 🔵 GRN number collision returns a retry, not a 500 (branch `fix/grn-number-collision` → `staging`)
+
+- Asked: fix #5 from the T-006 test findings. Two GRNs created in the same instant: the second failed with `500 duplicate key ... ux_grns_grn_number` (measured on staging 2026-09-30).
+- `POST /api/grn` now retries with the next number on a collision (up to 5), then answers 409 with a plain message. BUG-2026-10-01-232, C27 row 5.
+- Not yet verified on staging. After deploy: 5 rounds, each a fresh 10-unit PO with two GRN creates of 4 fired at once (both fit, so only the number can collide). Pass = every response 201 with two different consecutive GRN numbers, no 500 and no "took this GRN number" 409.
 
 ## 2026-10-01: 🔵 Staging test tool, today override (branch `feat/staging-today-override` to `staging`, STAGING ONLY, never PR to main)
 

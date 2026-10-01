@@ -1,5 +1,6 @@
 # Recurring bug classes — the index that makes P5 executable
 
+> **Last verified: 2026-10-01**: restamped on branch `fix/grn-number-collision` (staging only): C27 row 2 marked verified on staging (2026-09-30), row 5 added for read-max-then-insert document numbers (BUG-2026-10-01-232).
 > **Last verified: 2026-09-30**: restamped on branch `fix/t006-r2-grn-receipt-race` (staging only): adds C27, a ceiling checked before the write with nothing in the write to back it (BUG-2026-09-30-226); C10 row 4 renamed to the functions that now exist. Nothing else re-checked.
 > **Last verified: 2026-09-30**: restamped on branch `fix/staging-so-detail-live-do` (staging): C21 gains row 18, the SO detail page that showed a cancelled DO as a production order's delivery (BUG-2026-09-30-225). Nothing else re-checked.
 > **Last verified: 2026-09-30**: restamped on branch `fix/t006-r7-return-qty` (staging only): adds C26, a guard and the write it guards reading one input two ways (BUG-2026-09-30-224). Nothing else re-checked.
@@ -1792,9 +1793,10 @@ raise has nothing to roll back. Map the error to a 409.
 | # | site | state |
 |---|---|---|
 | 1 | `purchase-invoices.ts` PI create vs `grn_items.invoiced_qty` | ✅ CHECK constraint + 23514 mapped to 409 (T-006 R5) |
-| 2 | `grn.ts` GRN create / DRAFT → POSTED / qty edit vs `purchase_order_items.receivedQty` | ✅ fixed in code 2026-09-30 (BUG-2026-09-30-226), guarded UPDATE. Real row-lock behaviour UNVERIFIED until run on staging |
+| 2 | `grn.ts` GRN create / DRAFT → POSTED / qty edit vs `purchase_order_items.receivedQty` | ✅ fixed 2026-09-30 (BUG-2026-09-30-226), guarded UPDATE. Verified on staging 2026-09-30: two DRAFT receipts posted at the same instant, one posted and the other got the 409 and rolled back |
 | 3 | `purchase-invoices.ts` `checkPoRemaining` (PO invoiced ceiling) | ⬜ unswept: read-then-write, no backstop known |
 | 4 | delivery return cap (T-006 R7), DO invoiceable qty, stock allocation | ⬜ unswept |
+| 5 | Document numbers read as last+1 then inserted (`generateGrnNumber`). The unique index is the backstop; the gap was the collision surfacing as a raw 500 | ✅ GRN 2026-10-01 (BUG-2026-10-01-232): retry with the next number, 409 after 5, same as the PO number (`purchase-orders.ts` 5.3). ⬜ other document numbers (PI, DO, SO, invoice) not swept for the same 500 |
 
 Test: `tests/purchasing-convert-flow.test.mjs` ("R2 race"), `tests/purchase-edit-cascade.test.mjs`.
 A fake DB cannot show locking. It can show that a stale read ends with nothing written.
