@@ -6,6 +6,7 @@
 // MailSlurp REST (x-api-key header), from the official client's generated API:
 //   GET /sent?inboxId=&page=&size=&sort=DESC   -> PageSentEmailProjection
 //   GET /sent/{id}                             -> SentEmailDto (body, attachments)
+//   GET /sent/{id}/html                        -> the HTML body as text
 //   GET /attachments/{id}/metadata             -> { id, name, contentType, contentLength }
 //   GET /attachments/{id}/bytes                -> raw file
 // Only mail MailSlurp accepted shows up here. A send it refused is not stored.
@@ -52,6 +53,16 @@ async function getJson<T>(f: FetchFn, apiKey: string, path: string): Promise<T> 
   });
   if (!res.ok) throw new MailSlurpError(res.status, `MailSlurp ${res.status}`);
   return (await res.json()) as T;
+}
+
+// Text, or "" on 404, for endpoints that return a body instead of JSON.
+async function getText(f: FetchFn, apiKey: string, path: string): Promise<string> {
+  const res = await f(`${MAILSLURP_API}${path}`, {
+    headers: { "x-api-key": apiKey, Accept: "text/html" },
+  });
+  if (res.status === 404) return "";
+  if (!res.ok) throw new MailSlurpError(res.status, `MailSlurp ${res.status}`);
+  return await res.text();
 }
 
 type Raw = Record<string, unknown>;
@@ -113,12 +124,18 @@ export async function getSentMail(
   if (!r) return null;
   const ids = (Array.isArray(r.attachments) ? r.attachments.map(String) : []).filter(isUuid);
   const attachments = await Promise.all(ids.map((aid) => getMeta(f, apiKey, aid)));
-  return {
-    ...toRow(r),
-    body: String(r.body ?? ""),
-    isHtml: Boolean(r.isHTML ?? r.html),
-    attachments,
-  };
+  // SentEmailDto.body is nullable, and staging's sent records came back
+  // without it (BUG-2026-10-01-234), so fall back to the HTML endpoint.
+  let body = String(r.body ?? "");
+  let isHtml = Boolean(r.isHTML ?? r.html);
+  if (!body.trim()) {
+    const html = await getText(f, apiKey, `/sent/${id}/html`);
+    if (html.trim()) {
+      body = html;
+      isHtml = true;
+    }
+  }
+  return { ...toRow(r), body, isHtml, attachments };
 }
 
 // The attachment's bytes, only when `aid` is one of that sent email's

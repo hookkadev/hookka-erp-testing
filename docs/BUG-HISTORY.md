@@ -1,6 +1,7 @@
 # Bug History
 
-> **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-232 (branch `fix/grn-number-collision`, to staging); a log, so "verified" means the newest entry matches the code on that branch.
+> **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-234 (branch `fix/staging-mail-empty-body`, STAGING ONLY; ids up to 233 are taken on `main` / `staging`); a log, so "verified" means the newest entry matches the code.
+> **Last verified: 2026-10-01**: entry BUG-2026-10-01-232 added (branch `fix/grn-number-collision`, to staging); its text matches the code on that branch.
 > **Last verified: 2026-09-30** (branch `chore/sync-staging-from-main-0930`, staging<-main merge): both logs merged. Numbering follows `main`: staging's report-emails entry BUG-2026-09-29-222 is renumbered to -232 (main's -222 is the storage not-found bug) and staging's customer-credit entry BUG-2026-09-28-218 to -233 (main's -218 is the PR label workflow). The one BUG-2026-09-29-214 entry kept is main's copy. Newest entry is BUG-2026-09-28-233.
 > **Last verified: 2026-09-30**: newest entry BUG-2026-09-30-231 (branch `fix/pillow-fab-sew-sticker`, DEV-26); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-30**: newest entries BUG-2026-09-30-229 / -230 (branch `fix/selfcheck-recon-and-opening-seeds`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
@@ -66,6 +67,26 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-10-01-234 — Mail Outbox showed an empty frame when a sent email was opened `ui-frontend` 🟡
+
+🟡 **Fix in progress** (branch `fix/staging-mail-empty-body` → `staging`, STAGING ONLY) · Found by the owner on the first
+use of `/staging-mail` after the MailSlurp secrets were added to the Pages Preview environment.
+
+**What happened.** The list of sent mail loaded, and clicking a row showed an empty body.
+
+**Likely cause.** `getSentMail` (`src/api/lib/staging-mail.ts`) took the body only from `GET /sent/{id}`. In MailSlurp's
+own client `SentEmailDto.body` is nullable, and the client has a separate `GET /sent/{id}/html` for the content. An empty
+`body` matches what was seen. The actual MailSlurp response is UNMEASURED: the API key is a staging secret this session
+does not hold.
+
+**Fix.** When the sent record has no body, read `/sent/{id}/html` (a 404 there stays empty). If the body is still empty, the
+page now says "MailSlurp returned no body for this email." instead of an empty frame, so a different cause shows itself.
+
+**Test.** `tests/staging-mail.test.mjs`: the fallback is used when `body` is null, a 404 stays empty, and a full record never
+calls `/html`. Fails before the fix, passes after.
 
 ---
 

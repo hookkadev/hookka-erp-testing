@@ -68,18 +68,23 @@ export function ResourceDocuments({
   resourceId,
   title = "Documents & photos",
   hint,
+  photosOnly = false,
+  emptyText,
 }: {
   resourceType: string;
   resourceId: string;
   title?: string;
   hint?: string;
+  /** Every upload is a PHOTO and the category picker is hidden (DEV-22 penalty evidence). */
+  photosOnly?: boolean;
+  emptyText?: string;
 }) {
   const { toast } = useToast();
   const { confirm } = useConfirm();
   const [rows, setRows] = useState<FileRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
-  const [category, setCategory] = useState<DocCategory>("AGREEMENT");
+  const [category, setCategory] = useState<DocCategory>(photosOnly ? "PHOTO" : "AGREEMENT");
   const inputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -191,7 +196,7 @@ export function ResourceDocuments({
           {hint && <div className="text-xs text-[#9CA3AF]">{hint}</div>}
         </div>
         <div className="flex items-center gap-2">
-          <select
+          {!photosOnly && <select
             className="h-9 rounded-md border border-[#E2DDD8] bg-white px-2 text-sm"
             value={category}
             onChange={(e) => setCategory(e.target.value as DocCategory)}
@@ -202,10 +207,11 @@ export function ResourceDocuments({
                 {c.label}
               </option>
             ))}
-          </select>
+          </select>}
           <input
             ref={inputRef}
             type="file"
+            accept={photosOnly ? "image/*" : undefined}
             multiple
             className="hidden"
             onChange={onPick}
@@ -226,8 +232,8 @@ export function ResourceDocuments({
         <div className="py-6 text-center text-sm text-[#9CA3AF]">Loading…</div>
       ) : rows.length === 0 ? (
         <div className="rounded-md border border-dashed border-[#E2DDD8] py-6 text-center text-sm text-[#9CA3AF]">
-          Nothing attached yet — upload the purchase agreement, warranty, manual
-          or photos of the machine.
+          {emptyText ??
+            "Nothing attached yet — upload the purchase agreement, warranty, manual or photos of the machine."}
         </div>
       ) : (
         <div className="space-y-4">

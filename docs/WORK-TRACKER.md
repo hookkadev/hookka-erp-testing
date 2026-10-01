@@ -1,6 +1,9 @@
 # Hookka ERP — Work Tracker
 
-> **Last verified: 2026-10-01**: branch `fix/grn-number-collision` added below (its entry is the newest).
+> **Last verified: 2026-10-01**: branch `feat/dev22-worker-penalty` (to `staging`) added below (in progress, its entry is the newest).
+> **Last verified: 2026-10-01**: branch `feat/staging-api-log-in-topbar` (to `staging`, STAGING ONLY) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: branch `fix/staging-mail-empty-body` (to `staging`, STAGING ONLY) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: branch `fix/grn-number-collision` added below.
 > **Last verified: 2026-10-01**: corrected two staging-tool claims below: the today-override cache rows are not wiped nightly, and the delivery-skip notices go to sanitised `@staging.invalid` addresses in code (live UNMEASURED).
 > **Last verified: 2026-10-01**: branch `feat/staging-today-override` (staging-only today override) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `feat/staging-mail-outbox` (to `staging`, STAGING ONLY) added below (its entry is the newest).
@@ -92,6 +95,32 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-01: 🔵 Staging: API log button moves into the topbar, tab strip hidden (branch `feat/staging-api-log-in-topbar` to `staging`, STAGING ONLY, never PR into main)
+
+- Asked: remove the workspace tab strip at the top on staging and put the API log button there. The floating bottom-left button sat over the sidebar.
+- `topbar.tsx` renders `StagingApiLog` instead of `WorkspaceTabs` when the host starts with `staging.`; every other host keeps the tabs. The drawer drops down from the button. The floating mount in `DashboardLayout.tsx` is removed.
+- Side effect: the strip is what records visited pages as tabs, so on staging no tabs build up at all.
+- Test: `tests/staging-api-log.test.mjs` pins the placement; `tests/workspace-tabs.test.mjs` still passes. UNMEASURED: not looked at in a browser; check on staging after deploy.
+
+## 2026-10-01: 🔵 Mail Outbox opened an email to an empty frame (branch `fix/staging-mail-empty-body` to `staging`, STAGING ONLY, never PR into main)
+
+- Asked: the Mail Outbox list loaded but clicking an email showed nothing. BUG-2026-10-01-234.
+- `getSentMail` now falls back to MailSlurp `GET /sent/{id}/html` when the sent record's `body` is empty; the page shows "MailSlurp returned no body for this email." if it is still empty.
+- Setup done the same day: `MAILSLURP_API_KEY` and `MAILSLURP_INBOX_ID` added as secrets on the Pages Preview environment (names checked, values not seen); a stray copy on Production removed by the owner; staging redeployed.
+- Test: `tests/staging-mail.test.mjs` (8 pass). UNMEASURED: the real MailSlurp response; check by opening an email on `/staging-mail` after deploy.
+
+## 2026-09-30 — 🔵 DEV-22 Worker Penalty + payroll deduction (branch `feat/dev22-worker-penalty` → `staging`)
+
+Ask (ticket DEV-22, High): a Worker Penalty module for confirmed order / production mistakes, with approval, a payroll deduction, and the worker seeing it in the app. Owner's answers: approval gated on a new `worker-penalties:approve` right and the creator may not approve their own penalty; the deduction lands in the payroll month of the APPROVAL date, rolling to the next month when that month's payroll is already approved; net pay is not clamped (same rule as advances).
+1. ✅ Backend lib + tables (`worker_penalties`, `worker_penalty_lines`, `payslips.penalty_deduction_sen`), runtime self-applied.
+2. ✅ API `/api/worker-penalties`: CRUD, submit / approve / reject / revoke, production-order lookup with the job-card PICs as suggested workers.
+3. ✅ Payroll: generate + projected subtract the period's approved penalties after statutory; payroll approval posts them (and refuses while the stored slips disagree with the approved penalties); back to DRAFT un-posts.
+4. ✅ RBAC: `worker-penalties` resource (HR + Office via allExcept), `approve` in the Permissions catalog.
+5. 🔵 Employees > Worker Penalty tab (list, create from a production order, multi-worker amounts, photos, approval actions) + Payroll tab Penalty column.
+6. 🔵 Worker app My Pay: penalty card (date, PO No., reason, amount, payroll month, status).
+7. ✅ Tests + docs: `tests/worker-penalties.test.mjs` (9), employees module guide, CODEBASE-MAP, API.md regenerated.
+8. 🟡 Items 5 and 6 are typecheck / lint / unit clean but NOT yet driven in a browser. The local `.dev.vars` points at PRODUCTION (checked 2026-10-01 by project ref only), so no local run; owner chose to verify on staging after the PR merges.
 
 ## 2026-10-01 — 🔵 GRN number collision returns a retry, not a 500 (branch `fix/grn-number-collision` → `staging`)
 
