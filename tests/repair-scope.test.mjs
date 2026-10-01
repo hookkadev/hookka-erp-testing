@@ -702,7 +702,7 @@ test("builder: scope filter sits AFTER the Headboard-Only filter and BEFORE the 
 });
 
 test("builder: L1 processes filtered by the same dept set; zero-step scope throws", () => {
-  assert.match(builderSrc, /l1ProcsAll\.filter\(\(p\) =>\s*\(repairScope\.depts as readonly string\[\]\)\.includes\(p\.deptCode\)/);
+  assert.match(builderSrc, /l1NotInWips\.filter\(\(p\) =>\s*\(repairScope\.depts as readonly string\[\]\)\.includes\(p\.deptCode\)/);
   assert.match(builderSrc, /matches no production steps for product/);
 });
 
