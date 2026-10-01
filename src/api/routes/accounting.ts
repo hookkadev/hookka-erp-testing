@@ -39,6 +39,7 @@ import { ensureFinanceOrgColumns } from "../lib/ensure-finance-org";
 import { apRowBeforeOpening, legBeforeOpening, rowBeforeOpening } from "../../lib/opening-floor";
 import { applyOpeningSlice, windowCoversMonth } from "../../lib/opening-slice";
 import { docNoFromDescription, drillVariant, otherSideCodes, ownDescription, tidyDescription } from "../../lib/ledger-drill";
+import { PV_KIND_TRANSFER, validatePvTransfer } from "../../lib/pv-transfer";
 import { labourInjectMonths } from "../../lib/labour-inject";
 import { projectedLabourByDept } from "../lib/labour-projection";
 import { groupPayslipsByMonthDept, forecastEntryKind, monthHasDeptForecast, labourMappedAccounts } from "../../lib/salary-dept";
@@ -10240,7 +10241,9 @@ let _pendingPvApCols: Promise<void> | null = null;
 function ensurePvApColumns(db: Env["Variables"]["DB"]): Promise<void> {
   if (!_pendingPvApCols) {
     _pendingPvApCols = (async () => {
-      for (const col of ["pv_kind TEXT", "party_kind TEXT", "party_id TEXT", "advance_sen INTEGER"]) {
+      // notes / bill_no / bill_date (owner 2026-10-01, the voucher form):
+      // internal notes, the supplier's own bill number and date.
+      for (const col of ["pv_kind TEXT", "party_kind TEXT", "party_id TEXT", "advance_sen INTEGER", "notes TEXT", "bill_no TEXT", "bill_date TEXT"]) {
         await db.prepare(`ALTER TABLE payment_vouchers ADD COLUMN IF NOT EXISTS ${col}`).run().catch(() => {});
       }
       await db.prepare(
@@ -10264,6 +10267,15 @@ function ensurePvApColumns(db: Env["Variables"]["DB"]): Promise<void> {
 }
 
 const PV_KIND_AP = "AP";
+
+// The voucher form's own fields (owner 2026-10-01): internal notes (never
+// printed), the supplier's bill number and date.
+function pvExtraFields(body: Record<string, unknown>): { notes: string | null; billNo: string | null; billDate: string | null } {
+  const notes = String(body.notes ?? "").trim();
+  const billNo = String(body.billNo ?? "").trim();
+  const billDate = String(body.billDate ?? "").trim();
+  return { notes: notes || null, billNo: billNo || null, billDate: /^\d{4}-\d{2}-\d{2}$/.test(billDate) ? billDate : null };
+}
 type PvPartyKind = "SUPPLIER" | "OTHER";
 type PvAllocDocKind = "PI" | "AP";
 type PvAlloc = { docKind: PvAllocDocKind; docId: string; amountSen: number };
@@ -10782,11 +10794,28 @@ app.post("/payment-vouchers", async (c) => {
       return c.json({ success: true, data: { id, pvNo } }, 201);
     }
 
-    const v = validateDocLines(coa, body.lines);
-    if (!v.ok) return c.json({ success: false, error: v.error }, 400);
-    const h = validatePvHeader(coa, body);
-    if (!h.ok) return c.json({ success: false, error: h.error }, 400);
-    const { accrued, accrualAccount, payFrom } = h;
+    // A transfer between our own accounts (owner 2026-10-01) is an ordinary
+    // voucher whose one line is the receiving bank / cash account.
+    const isTransfer = body.kind === PV_KIND_TRANSFER;
+    let v: { lines: { accountCode: string; description: string; amountSen: number }[]; totalSen: number };
+    let accrued = false;
+    let accrualAccount: string | null = null;
+    let payFrom: string | null = null;
+    if (isTransfer) {
+      const t = validatePvTransfer(coa, body);
+      if (!t.ok) return c.json({ success: false, error: t.error }, 400);
+      v = { lines: t.v.lines, totalSen: t.v.amountSen };
+      payFrom = t.v.payFrom;
+    } else {
+      const lv = validateDocLines(coa, body.lines);
+      if (!lv.ok) return c.json({ success: false, error: lv.error }, 400);
+      const h = validatePvHeader(coa, body);
+      if (!h.ok) return c.json({ success: false, error: h.error }, 400);
+      v = lv;
+      ({ accrued, accrualAccount, payFrom } = h);
+    }
+    await ensurePvApColumns(c.var.DB);
+    const extra = pvExtraFields(body as Record<string, unknown>);
     const pvNo = asDraft
       ? `${PV_DRAFT_PREFIX}${id.slice(3)}`
       : await issueDocNumber(c.var.DB, {
@@ -10800,16 +10829,18 @@ app.post("/payment-vouchers", async (c) => {
            id, pvNo, date, payee, description, payFrom, accrued,
            accrualAccount, settledAt, productLine, totalSen, status,
            approval_state, approved_at, approved_by,
-           createdBy, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           createdBy, created_at, updated_at,
+           pv_kind, notes, bill_no, bill_date
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).bind(
         id, pvNo, date,
-        String(body.payee ?? ""), String(body.description ?? ""),
-        payFrom, accrued ? 1 : 0, accrualAccount, productLine,
+        isTransfer ? "" : String(body.payee ?? ""), String(body.description ?? ""),
+        payFrom, accrued ? 1 : 0, accrualAccount, isTransfer ? null : productLine,
         v.totalSen, asDraft ? "DRAFT" : "POSTED",
         asDraft ? "DRAFT" : "APPROVED",
         asDraft ? null : now, asDraft ? null : actorUserId,
         actorUserId, now, now,
+        isTransfer ? PV_KIND_TRANSFER : null, extra.notes, extra.billNo, extra.billDate,
       ),
       ...v.lines.map((l, idx) =>
         c.var.DB.prepare(
@@ -10820,7 +10851,7 @@ app.post("/payment-vouchers", async (c) => {
     ];
     if (!asDraft) {
       statements.push(...await pvPostingStatements(c.var.DB, orgId, actorUserId, {
-        id, pvNo, payee: String(body.payee ?? ""), description: String(body.description ?? ""),
+        id, pvNo, payee: isTransfer ? "" : String(body.payee ?? ""), description: String(body.description ?? ""),
         accrued: accrued ? 1 : 0, accrualAccount, payFrom, totalSen: v.totalSen,
       }, v.lines));
     }
@@ -10881,15 +10912,29 @@ app.put("/payment-vouchers/:id", async (c) => {
       ]);
       return c.json({ success: true });
     }
-    const v = validateDocLines(coa, body.lines);
-    if (!v.ok) return c.json({ success: false, error: v.error }, 400);
-    const h = validatePvHeader(coa, body);
-    if (!h.ok) return c.json({ success: false, error: h.error }, 400);
+    // The kind is fixed at birth — a transfer stays a transfer.
+    const isTransfer = String(pv.pvKind ?? pv.pv_kind ?? "") === PV_KIND_TRANSFER;
+    let v: { lines: { accountCode: string; description: string; amountSen: number }[]; totalSen: number };
+    let h: { accrued: boolean; accrualAccount: string | null; payFrom: string | null };
+    if (isTransfer) {
+      const t = validatePvTransfer(coa, body);
+      if (!t.ok) return c.json({ success: false, error: t.error }, 400);
+      v = { lines: t.v.lines, totalSen: t.v.amountSen };
+      h = { accrued: false, accrualAccount: null, payFrom: t.v.payFrom };
+    } else {
+      const lv = validateDocLines(coa, body.lines);
+      if (!lv.ok) return c.json({ success: false, error: lv.error }, 400);
+      const hv = validatePvHeader(coa, body);
+      if (!hv.ok) return c.json({ success: false, error: hv.error }, 400);
+      v = lv;
+      h = hv;
+    }
+    const extra = pvExtraFields(body as Record<string, unknown>);
     await c.var.DB.batch([
       c.var.DB.prepare(
         `UPDATE payment_vouchers SET date = ?, payee = ?, description = ?, payFrom = ?, accrued = ?,
-                accrualAccount = ?, totalSen = ?, updated_at = ? WHERE id = ?`,
-      ).bind(date, String(body.payee ?? ""), String(body.description ?? ""), h.payFrom, h.accrued ? 1 : 0, h.accrualAccount, v.totalSen, now, id),
+                accrualAccount = ?, totalSen = ?, notes = ?, bill_no = ?, bill_date = ?, updated_at = ? WHERE id = ?`,
+      ).bind(date, isTransfer ? "" : String(body.payee ?? ""), String(body.description ?? ""), h.payFrom, h.accrued ? 1 : 0, h.accrualAccount, v.totalSen, extra.notes, extra.billNo, extra.billDate, now, id),
       c.var.DB.prepare("DELETE FROM payment_voucher_lines WHERE voucherId = ?").bind(id),
       ...v.lines.map((l, idx) =>
         c.var.DB.prepare(
@@ -11283,23 +11328,34 @@ app.post("/payment-vouchers/:id/restate", async (c) => {
     const body = await c.req.json();
     const date = String(body.date || "");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return c.json({ success: false, error: "date must be YYYY-MM-DD" }, 400);
-    const accrued = body.accrued === true || body.accrued === 1;
+    const accrued = (body.accrued === true || body.accrued === 1) && String(pv.pvKind ?? pv.pv_kind ?? "") !== PV_KIND_TRANSFER;
     const productLine = body.productLine === "SOFA" || body.productLine === "BEDFRAME" ? body.productLine : null;
     const coaRes = await c.var.DB.prepare(`SELECT code, type, specialAccountType, ${EFFECTIVE_POSTABLE_SQL} FROM chart_of_accounts`).all<{ code: string; type: CoaRow["type"]; specialAccountType: string | null; isPostable: number | null }>();
     const coa = new Map((coaRes.results ?? []).map((a) => [a.code, a] as const));
-    const v = validateDocLines(coa, body.lines);
-    if (!v.ok) return c.json({ success: false, error: v.error }, 400);
+    const isTransfer = String(pv.pvKind ?? pv.pv_kind ?? "") === PV_KIND_TRANSFER;
+    let v: { lines: { accountCode: string; description: string; amountSen: number }[]; totalSen: number };
     let payFrom: string | null = null;
     let accrualAccount: string | null = null;
-    if (accrued) {
-      accrualAccount = String(body.accrualAccount || "");
-      if (accrualAccount.startsWith("405")) return c.json({ success: false, error: "Expense accrual must use a 410-x accrued-expense account, not 405 Other Creditors." }, 400);
-      const acct = coa.get(accrualAccount);
-      if (!acct || acct.type !== "LIABILITY" || (acct.isPostable ?? 1) !== 1) return c.json({ success: false, error: "Pick a postable LIABILITY accrual account (410-x)" }, 400);
+    if (isTransfer) {
+      // A transfer stays a transfer: its one line is the receiving account.
+      const t = validatePvTransfer(coa, body);
+      if (!t.ok) return c.json({ success: false, error: t.error }, 400);
+      v = { lines: t.v.lines, totalSen: t.v.amountSen };
+      payFrom = t.v.payFrom;
     } else {
-      payFrom = String(body.payFrom || "");
-      const acct = coa.get(payFrom);
-      if (!acct || (acct.specialAccountType !== "SBK" && acct.specialAccountType !== "SCH")) return c.json({ success: false, error: "Pay From must be a bank (SBK) or cash (SCH) account" }, 400);
+      const lv = validateDocLines(coa, body.lines);
+      if (!lv.ok) return c.json({ success: false, error: lv.error }, 400);
+      v = lv;
+      if (accrued) {
+        accrualAccount = String(body.accrualAccount || "");
+        if (accrualAccount.startsWith("405")) return c.json({ success: false, error: "Expense accrual must use a 410-x accrued-expense account, not 405 Other Creditors." }, 400);
+        const acct = coa.get(accrualAccount);
+        if (!acct || acct.type !== "LIABILITY" || (acct.isPostable ?? 1) !== 1) return c.json({ success: false, error: "Pick a postable LIABILITY accrual account (410-x)" }, 400);
+      } else {
+        payFrom = String(body.payFrom || "");
+        const acct = coa.get(payFrom);
+        if (!acct || (acct.specialAccountType !== "SBK" && acct.specialAccountType !== "SCH")) return c.json({ success: false, error: "Pay From must be a bank (SBK) or cash (SCH) account" }, 400);
+      }
     }
     const now = new Date().toISOString();
     const actorUserId = (c as unknown as { get: (k: string) => string | undefined }).get("userId") ?? null;
@@ -11318,7 +11374,8 @@ app.post("/payment-vouchers/:id/restate", async (c) => {
     statements.push(...jeStmts);
     statements.push(c.var.DB.prepare(`UPDATE ledger_journal_entries SET hidden = 1 WHERE sourceId = ? AND orgId = ? AND sourceType LIKE 'payment_voucher%' AND sourceType <> ?`).bind(id, orgId, postSource));
     // 3. Update the voucher row + replace its lines (same id + pvNo); un-settle.
-    statements.push(c.var.DB.prepare(`UPDATE payment_vouchers SET date = ?, payee = ?, description = ?, payFrom = ?, accrued = ?, accrualAccount = ?, settledAt = NULL, productLine = ?, totalSen = ?, status = 'POSTED', updated_at = ? WHERE id = ?`).bind(date, String(body.payee ?? ""), String(body.description ?? ""), payFrom, accrued ? 1 : 0, accrualAccount, productLine, v.totalSen, now, id));
+    const extra = pvExtraFields(body as Record<string, unknown>);
+    statements.push(c.var.DB.prepare(`UPDATE payment_vouchers SET date = ?, payee = ?, description = ?, payFrom = ?, accrued = ?, accrualAccount = ?, settledAt = NULL, productLine = ?, totalSen = ?, notes = ?, bill_no = ?, bill_date = ?, status = 'POSTED', updated_at = ? WHERE id = ?`).bind(date, isTransfer ? "" : String(body.payee ?? ""), String(body.description ?? ""), payFrom, accrued ? 1 : 0, accrualAccount, isTransfer ? null : productLine, v.totalSen, extra.notes, extra.billNo, extra.billDate, now, id));
     statements.push(c.var.DB.prepare("DELETE FROM payment_voucher_lines WHERE voucherId = ?").bind(id));
     v.lines.forEach((l, idx) => {
       statements.push(c.var.DB.prepare(`INSERT INTO payment_voucher_lines (id, voucherId, accountCode, description, amountSen, lineOrder) VALUES (?, ?, ?, ?, ?, ?)`).bind(`pvl-${crypto.randomUUID().slice(0, 8)}`, id, l.accountCode, l.description, l.amountSen, idx));
@@ -11329,6 +11386,89 @@ app.post("/payment-vouchers/:id/restate", async (c) => {
     console.error("[pv] restate failed:", e);
     return c.json({ success: false, error: "Failed to update the payment voucher" }, 400);
   }
+});
+
+// One document's ledger lines and whether its bank / cash lines are matched
+// on an imported bank statement — the "Ledger entry" and "Bank" blocks of the
+// voucher popup (owner 2026-10-01). Read-only. A leg counts as matched when a
+// statement line holds it directly or through a split / group match.
+const DOC_TRAIL_FAMILIES = new Set(["payment_voucher", "supplier_payment", "other_party_payment", "fund_transfer"]);
+app.get("/doc-trail", async (c) => {
+  const denied = await requirePermission(c, "accounting", "read");
+  if (denied) return denied;
+  const family = String(c.req.query("family") ?? "");
+  const sourceId = String(c.req.query("sourceId") ?? "").trim();
+  if (!DOC_TRAIL_FAMILIES.has(family) || !sourceId) {
+    return c.json({ success: false, error: "family and sourceId are required" }, 400);
+  }
+  const db = c.var.DB;
+  const orgId = getOrgId(c);
+  const legRes = await db.prepare(
+    `SELECT id, accountCode, debitSen, creditSen, description FROM ledger_journal_entries
+      WHERE hidden = 0 AND sourceId = ? AND orgId = ? AND sourceType LIKE ?
+      ORDER BY legNo`,
+  ).bind(sourceId, orgId, `${family}%`).all<{ id: string; accountCode: string; debitSen: number; creditSen: number; description: string | null }>();
+  const legs = legRes.results ?? [];
+  const coaRes = await db.prepare("SELECT code, name, specialAccountType FROM chart_of_accounts")
+    .all<{ code: string; name: string; specialAccountType: string | null }>();
+  const coa = new Map((coaRes.results ?? []).map((a) => [a.code, a] as const));
+  const moneyLegs = legs.filter((l) => {
+    const t = coa.get(l.accountCode)?.specialAccountType;
+    return t === "SBK" || t === "SCH";
+  });
+  const matched = new Map<string, { date: string; text: string }>();
+  const withStatements = new Set<string>();
+  if (moneyLegs.length) {
+    const ids = moneyLegs.map((l) => String(l.id));
+    const ph = ids.map(() => "?").join(",");
+    try {
+      const direct = await db.prepare(
+        `SELECT matchedLegId, txnDate, description FROM bank_statement_lines WHERE matchedLegId IN (${ph})`,
+      ).bind(...ids).all<Record<string, unknown>>();
+      for (const r of direct.results ?? []) {
+        matched.set(String(r.matchedLegId ?? r.matched_leg_id ?? ""), { date: String(r.txnDate ?? r.txn_date ?? "").slice(0, 10), text: String(r.description ?? "") });
+      }
+    } catch { /* no statements imported yet */ }
+    try {
+      const split = await db.prepare(
+        `SELECT s.leg_id, l.txnDate, l.description FROM bank_line_leg_splits s JOIN bank_statement_lines l ON l.id = s.line_id WHERE s.leg_id IN (${ph})`,
+      ).bind(...ids).all<Record<string, unknown>>();
+      for (const r of split.results ?? []) {
+        const legId = String(r.legId ?? r.leg_id ?? "");
+        if (!matched.has(legId)) matched.set(legId, { date: String(r.txnDate ?? r.txn_date ?? "").slice(0, 10), text: String(r.description ?? "") });
+      }
+    } catch { /* split matching not in use */ }
+    for (const code of new Set(moneyLegs.map((l) => l.accountCode))) {
+      try {
+        const any = await db.prepare("SELECT 1 AS x FROM bank_statement_lines WHERE accountCode = ? LIMIT 1").bind(code).first();
+        if (any) withStatements.add(code);
+      } catch { /* none */ }
+    }
+  }
+  return c.json({
+    success: true,
+    data: {
+      legs: legs.map((l) => ({
+        accountCode: l.accountCode,
+        accountName: coa.get(l.accountCode)?.name ?? "",
+        debitSen: Number(l.debitSen) || 0,
+        creditSen: Number(l.creditSen) || 0,
+        description: l.description ?? "",
+      })),
+      bank: moneyLegs.map((l) => {
+        const m = matched.get(String(l.id));
+        return {
+          accountCode: l.accountCode,
+          accountName: coa.get(l.accountCode)?.name ?? "",
+          sen: (Number(l.debitSen) || 0) - (Number(l.creditSen) || 0),
+          hasStatements: withStatements.has(l.accountCode),
+          matched: !!m,
+          statementDate: m?.date ?? null,
+          statementText: m?.text ?? null,
+        };
+      }),
+    },
+  });
 });
 
 app.get("/official-receipts", async (c) => {

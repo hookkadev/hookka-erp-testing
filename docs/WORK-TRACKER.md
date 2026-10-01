@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-01**: finance plan batch 2 in progress (branch `feat/pv-popup-form-transfer`).
 > **Last verified: 2026-10-01**: finance plan batch 1 (#662) closed ✅ with its prod check.
 > **Last verified: 2026-10-01**: owner said start — batch 1 of the finance plan in progress (branch `feat/finance-sidebar-accordion-selfcheck-wording`).
 > **Last verified: 2026-10-01**: branch `fix/worker-history-snapshot-stale` (BUG-2026-10-01-245) added below (its entry is the newest).
@@ -188,7 +189,7 @@ Four batches, each shipped and prod-verified before the next:
    `feat/finance-sidebar-accordion-selfcheck-wording`, guard `tests/finance-batch1-sidebar-selfcheck.test.mjs`.
    Prod: Reports → Daily → Monthly each closed the previous FINANCE group; Production and Consignment still open together;
    the debtor card reads "receipt GL mismatch" with the receipt number and invoice / receipt / 300-0000 wording.
-2. ⚪ Payment voucher form as a popup in the layout the owner showed (Payment / Transfer switch; payee, number on save, date,
+2. 🔵 (branch `feat/pv-popup-form-transfer`, guard `tests/pv-popup-form-transfer.test.mjs`) Payment voucher form as a popup in the layout the owner showed (Payment / Transfer switch; payee, number on save, date,
    paid from, printed description + internal notes, supplier bill no. + bill date, MYR only, line cards, scan inside the
    form, accrue / draft / post kept; no event, no product line — measured unused). Transfer = an ordinary voucher (own
    accounts on both sides, TR badge); Fund Transfer leaves the sidebar, its URL and old entries stay. List: single click

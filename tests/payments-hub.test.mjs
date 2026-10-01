@@ -23,10 +23,12 @@ test("the three doors are read and merged into one list, newest first", () => {
   // The two foreign doors load with the vouchers, cache-busted like the Receipts hub.
   assert.match(tab, /fetch\(`\/api\/supplier-payments\?\$\{bust\}`, \{ cache: "no-store" \}\)/);
   assert.match(tab, /fetch\(`\/api\/accounting\/other-party-payments\?type=CREDITOR&\$\{bust\}`, \{ cache: "no-store" \}\)/);
-  assert.match(tab, /const payRows = useMemo\(\(\) => buildPayRows\(rows, spRows, ocpRows\), \[rows, spRows, ocpRows\]\);/);
+  assert.match(tab, /const payRows = useMemo\(\(\) => buildPayRows\(rows, spRows, ocpRows, ftRows\), \[rows, spRows, ocpRows, ftRows\]\);/);
+  // The old Fund Transfer page's entries are listed too (2026-10-01).
+  assert.match(tab, /fetch\(`\/api\/accounting\/fund-transfers\?\$\{bust\}`, \{ cache: "no-store" \}\)/);
   assert.match(merge, /return rows\.sort\(\(a, b\) => b\.date\.localeCompare\(a\.date\) \|\| b\.no\.localeCompare\(a\.no\)\);/);
   // The list waits for all three — a half-loaded merge would read as "missing".
-  assert.match(tab, /const payLoading = rows === null \|\| spRows === null \|\| ocpRows === null;/);
+  assert.match(tab, /const payLoading = rows === null \|\| spRows === null \|\| ocpRows === null \|\| ftRows === null;/);
 });
 
 test("an AP voucher's settlement document is listed once, as the voucher", () => {
@@ -37,7 +39,9 @@ test("an AP voucher's settlement document is listed once, as the voucher", () =>
 });
 
 test("foreign rows carry their door badge and read as Approved / Cancelled on the existing chips", () => {
-  assert.match(ui, /type PayDoor = "PV" \| "AP" \| "SP" \| "OCP";/);
+  assert.match(ui, /type PayDoor = "PV" \| "AP" \| "TR" \| "SP" \| "OCP" \| "FT";/);
+  assert.match(merge, /door: r\.pvKind === "AP" \? "AP" : r\.pvKind === "TRANSFER" \? "TR" : "PV",/);
+  assert.match(merge, /door: "FT", key: `f:\$\{t\.no\}`/);
   assert.match(merge, /door: "SP", key: `s:\$\{g\.paymentNo\}`/);
   assert.match(merge, /door: "OCP", key: `o:\$\{g\.paymentNo\}`/);
   // No new chip set: a foreign door posts on save → Approved; voided → Cancelled.
@@ -47,11 +51,11 @@ test("foreign rows carry their door badge and read as Approved / Cancelled on th
 });
 
 test("a foreign row prints, opens and voids through ITS OWN document — never the voucher endpoints", () => {
-  assert.match(tab, /: row\.sp \? buildSupplierPaymentVoucher\(row\.sp\)\s*\n\s*: buildOtherPartyPaymentVoucher\(row\.ocp!, accounts\);/);
-  assert.match(tab, /\? `\/api\/supplier-payments\/\$\{encodeURIComponent\(row\.no\)\}\/lifecycle`\s*\n\s*: `\/api\/accounting\/other-party-payments\/\$\{encodeURIComponent\(row\.no\)\}\/lifecycle`;/);
-  assert.match(tab, /const foreignHref = \(row: PayRow\) => row\.sp \? "\/invoices\/supplier-payments" : "\/accounting\?tab=ocreditorpay";/);
-  // Double-click opens the shared shell; single click still expands.
-  assert.match(tab, /onClick=\{\(\) => setExpandedPv\(\(m\) => \(\{ \.\.\.m, \[g\.key\]: !m\[g\.key\] \}\)\)\}\s*\n\s*onDoubleClick=\{\(\) => setDetailPayKey\(g\.key\)\}/);
+  assert.match(tab, /: row\.sp \? buildSupplierPaymentVoucher\(row\.sp\)\s*\n\s*: row\.ft \? buildFundTransferVoucher\(row\.ft, accounts\)\s*\n\s*: buildOtherPartyPaymentVoucher\(row\.ocp!, accounts\);/);
+  assert.match(tab, /\? `\/api\/supplier-payments\/\$\{encodeURIComponent\(row\.no\)\}\/lifecycle`\s*\n\s*: row\.ft\s*\n\s*\? `\/api\/accounting\/fund-transfers\/\$\{encodeURIComponent\(row\.no\)\}\/lifecycle`\s*\n\s*: `\/api\/accounting\/other-party-payments\/\$\{encodeURIComponent\(row\.no\)\}\/lifecycle`;/);
+  assert.match(tab, /const foreignHref = \(row: PayRow\) => row\.sp \? "\/invoices\/supplier-payments" : row\.ft \? "\/accounting\?tab=transfer" : "\/accounting\?tab=ocreditorpay";/);
+  // Double-click opens the shared shell; single click does nothing (owner 2026-10-01).
+  assert.match(tab, /onDoubleClick=\{\(\) => setDetailPayKey\(g\.key\)\}\s*\n\s*title="Double-click to open"/);
   assert.match(tab, /title=\{`\$\{PAY_DOOR_LABEL\[g\.door\]\} \$\{g\.no\}`\}/);
 });
 

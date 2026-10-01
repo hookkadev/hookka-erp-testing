@@ -179,20 +179,26 @@ function buildPvVoucher(
   const dmy = (iso?: string | null) => (iso ? formatDateDMY(String(iso).slice(0, 10)) : undefined);
   const watermark = pv.status === "VOID" ? "CANCELLED" : st === "DRAFT" ? "DRAFT" : st !== "APPROVED" ? "NOT YET APPROVED" : undefined;
   const pvx = pv as PvRow & { preparedByName?: string | null; checkedByName?: string | null; approvedByName?: string | null; createdByName?: string | null };
+  // A transfer names the account that receives the money; a payment prints the
+  // supplier's bill no. / date with its description (notes stay internal).
+  const isTransfer = pv.pvKind === "TRANSFER";
+  const billNo = (pv.billNo ?? pv.bill_no) ?? "";
+  const billDate = String((pv.billDate ?? pv.bill_date) ?? "").slice(0, 10);
+  const billText = billNo ? `Bill no. ${billNo}${/^d{4}-d{2}-d{2}$/.test(billDate) ? ` dated ${formatDateDMY(billDate)}` : ""}` : "";
   return {
     // A voided voucher must never print as a clean/valid document.
     title: pv.status === "VOID" ? "PAYMENT VOUCHER — VOID" : "PAYMENT VOUCHER",
     company: VOUCHER_COMPANY,
     docNo: pv.pvNo,
     date: formatDateDMY(pv.date),
-    partyLabel: "Pay To",
-    partyName: pv.payee ?? "",
+    partyLabel: isTransfer ? "Transfer To" : "Pay To",
+    partyName: isTransfer ? (pv.lines[0] ? accountLabel(accounts, pv.lines[0].accountCode) : "") : pv.payee ?? "",
     columns: [{ label: "Account" }, { label: "Description" }, { label: "Amount", align: "right" }],
     lines,
     footerNote: paidFrom,
     totalCells: ["", "Total", formatCurrency(pv.totalSen)],
     amountWords: amountInWords(pv.totalSen),
-    remarks: pv.description ?? undefined,
+    remarks: [pv.description ?? "", billText].filter(Boolean).join(" · ") || undefined,
     signatures: [
       { label: "Prepared by", name: pvx.preparedByName ?? pvx.createdByName ?? undefined, on: dmy(pv.preparedAt ?? pv.prepared_at) ?? (pvx.preparedByName ? undefined : formatDateDMY(pv.date)) },
       { label: "Checked by", name: pvx.checkedByName ?? undefined, on: dmy(pv.checkedAt ?? pv.checked_at) },
@@ -7100,9 +7106,80 @@ function DocDetailModal({ title, badges, onClose, children, actions, wide }: {
 }
 function DetailField({ label, children, span }: { label: string; children: React.ReactNode; span?: number }) {
   return (
-    <div className={span === 2 ? "col-span-2" : span === 3 ? "col-span-3" : undefined}>
+    <div className={span === 2 ? "col-span-2" : span === 3 ? "col-span-3" : span === 4 ? "col-span-2 sm:col-span-4" : undefined}>
       <p className="text-[#9CA3AF] text-xs">{label}</p>
       <p className="font-medium">{children}</p>
+    </div>
+  );
+}
+
+// The ledger lines one money-out document posted, and whether its bank / cash
+// lines are on an imported bank statement — the popup's "Ledger entry" and
+// "Bank" blocks (owner 2026-10-01: double-click shows everything). Read-only,
+// from GET /api/accounting/doc-trail.
+type DocTrail = {
+  legs: { accountCode: string; accountName: string; debitSen: number; creditSen: number; description: string }[];
+  bank: { accountCode: string; accountName: string; sen: number; hasStatements: boolean; matched: boolean; statementDate: string | null; statementText: string | null }[];
+};
+const docSectionHead = "px-3 py-1.5 border-b border-[#E2DDD8] border-l-4 border-l-[#3E6570] text-[11px] font-bold uppercase tracking-wide text-[#3E6570]";
+function DocTrailBlock({ family, sourceId }: { family: "payment_voucher" | "supplier_payment" | "other_party_payment" | "fund_transfer"; sourceId: string }) {
+  const [data, setData] = useState<DocTrail | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    let dead = false;
+    fetch(`/api/accounting/doc-trail?family=${encodeURIComponent(family)}&sourceId=${encodeURIComponent(sourceId)}`, { cache: "no-store" })
+      .then((r) => r.json() as Promise<{ success?: boolean; error?: string; data?: DocTrail }>)
+      .then((j) => { if (dead) return; if (j?.success && j.data) setData(j.data); else setErr(j?.error || "Could not load the ledger entry"); })
+      .catch(() => { if (!dead) setErr("Could not load the ledger entry"); });
+    return () => { dead = true; };
+  }, [family, sourceId]);
+  if (err) return <div className="text-xs text-[#9A3A2D]">{err}</div>;
+  if (!data) return <div className="text-xs text-[#9CA3AF]">Loading the ledger entry…</div>;
+  const dr = data.legs.reduce((s, l) => s + l.debitSen, 0);
+  const cr = data.legs.reduce((s, l) => s + l.creditSen, 0);
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-5 gap-3">
+      <section className="rounded-md border border-[#E2DDD8] sm:col-span-3">
+        <div className={docSectionHead}>Ledger entry</div>
+        {data.legs.length === 0 ? (
+          <div className="px-3 py-2 text-xs text-[#9CA3AF]">Nothing posted yet — a voucher reaches the ledger when it is approved (or posted now).</div>
+        ) : (
+          <table className="w-full text-xs">
+            <thead><tr className="text-[#9CA3AF] text-left"><th className="px-3 py-1 font-medium">Account</th><th className="px-3 py-1 font-medium text-right">Debit</th><th className="px-3 py-1 font-medium text-right">Credit</th></tr></thead>
+            <tbody>
+              {data.legs.map((l, i) => (
+                <tr key={i} className="border-t border-[#F0ECE9]">
+                  <td className="px-3 py-1">{l.accountCode} · {l.accountName}</td>
+                  <td className="px-3 py-1 text-right tabular-nums">{l.debitSen ? formatCurrency(l.debitSen) : ""}</td>
+                  <td className="px-3 py-1 text-right tabular-nums">{l.creditSen ? formatCurrency(l.creditSen) : ""}</td>
+                </tr>
+              ))}
+              <tr className="border-t-2 border-[#1F1D1B] font-semibold">
+                <td className="px-3 py-1">Total</td>
+                <td className="px-3 py-1 text-right tabular-nums">{formatCurrency(dr)}</td>
+                <td className="px-3 py-1 text-right tabular-nums">{formatCurrency(cr)}</td>
+              </tr>
+            </tbody>
+          </table>
+        )}
+      </section>
+      <section className="rounded-md border border-[#E2DDD8] sm:col-span-2">
+        <div className={docSectionHead}>Bank</div>
+        <div className="px-3 py-2 space-y-1.5 text-xs">
+          {data.bank.length === 0 ? (
+            <div className="text-[#9CA3AF]">No bank / cash line on the ledger yet.</div>
+          ) : data.bank.map((b, i) => (
+            <div key={i}>
+              <div className="font-medium text-[#1F1D1B]">{shortBankName(b.accountName) || b.accountCode} · {b.sen < 0 ? "out" : "in"} {formatCurrency(Math.abs(b.sen))}</div>
+              {b.matched
+                ? <div className="text-[#27500A]">✓ On the bank statement {b.statementDate}{b.statementText ? ` — ${b.statementText}` : ""}</div>
+                : b.hasStatements
+                  ? <div className="text-[#7A5B12]">Not matched to the bank statement yet</div>
+                  : <div className="text-[#9CA3AF]">No bank statement imported for this account</div>}
+            </div>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }
@@ -9004,7 +9081,12 @@ type PvRow = {
   lines: { accountCode: string; description: string | null; amountSen: number }[];
   // AP Payment (Houzs adoption, 2026-09-22): pays a creditor's bills instead
   // of expense lines. EXPENSE / undefined = the classic voucher.
-  pvKind?: "AP" | "EXPENSE";
+  pvKind?: "AP" | "EXPENSE" | "TRANSFER";
+  // The voucher form's own fields (owner 2026-10-01): internal notes (never
+  // printed), the supplier's bill number and date.
+  notes?: string | null;
+  billNo?: string | null; bill_no?: string | null;
+  billDate?: string | null; bill_date?: string | null;
   partyKind?: "SUPPLIER" | "OTHER" | null;
   partyId?: string | null;
   advanceSen?: number;
@@ -9015,6 +9097,19 @@ type PvRow = {
   attachmentCount?: number;
 };
 type PvAllocOut = { docKind: "PI" | "AP"; docId: string; docNo: string; docRef: string; amountSen: number };
+// The voucher form (owner 2026-10-01, the layout he showed): Payment = expense
+// lines; Transfer = money between our own bank / cash accounts.
+type PvFormState = {
+  date: string; payee: string; description: string; accrued: boolean; payFrom: string; accrualAccount: string;
+  productLine: string; notes: string; billNo: string; billDate: string;
+  mode: "PAYMENT" | "TRANSFER"; transferTo: string; transferAmount: string;
+};
+function blankPvForm(): PvFormState {
+  return {
+    date: new Date().toISOString().slice(0, 10), payee: "", description: "", accrued: false, payFrom: "", accrualAccount: "",
+    productLine: "", notes: "", billNo: "", billDate: "", mode: "PAYMENT", transferTo: "", transferAmount: "",
+  };
+}
 type PvAttachment = { id: string; filename: string; contentType: string; sizeBytes: number; uploadedAt: string };
 type PvAttachmentList = { rows: PvAttachment[]; canAdd: boolean; canDelete: boolean };
 
@@ -9099,7 +9194,9 @@ const PV_STATUS_CHIPS: { key: PvStatusChip; label: string }[] = [
 // lists. The hub merges them READ-SIDE: no engine, no write path and no
 // recorded entry is touched, and each row still prints / voids through its own
 // document's endpoint (the money-out twin of the Receipts hub).
-type PayDoor = "PV" | "AP" | "SP" | "OCP";
+// TR = a transfer between our own accounts recorded as a voucher (owner
+// 2026-10-01); FT = one recorded on the old Fund Transfer page.
+type PayDoor = "PV" | "AP" | "TR" | "SP" | "OCP" | "FT";
 type PayRow = {
   door: PayDoor; key: string; no: string; date: string; payee: string; via: string; note: string;
   totalSen: number;
@@ -9107,16 +9204,18 @@ type PayRow = {
   // when it is saved — so it reads as Approved on the chips.
   state: string;
   advanceOpen: boolean;
-  pv?: PvRow; sp?: SupplierPaymentGroup; ocp?: PaymentGroup;
+  pv?: PvRow; sp?: SupplierPaymentGroup; ocp?: PaymentGroup; ft?: FtRow;
 };
 const PAY_DOOR_LABEL: Record<PayDoor, string> = {
-  PV: "Payment Voucher", AP: "AP Payment", SP: "Supplier Payment", OCP: "Other Creditor Payment",
+  PV: "Payment Voucher", AP: "AP Payment", TR: "Transfer", SP: "Supplier Payment", OCP: "Other Creditor Payment", FT: "Fund Transfer",
 };
 const PAY_DOOR_HINT: Record<PayDoor, string> = {
   PV: "Payment Voucher — pays an expense",
   AP: "AP Payment — pays creditor bills through the approval ladder",
   SP: "Supplier Payment — recorded on the Supplier Payment page (posts on save)",
   OCP: "Other Creditor Payment — recorded on the Other Creditor Payments page (posts on save)",
+  TR: "Transfer — moves money between our own bank / cash accounts, through the approval ladder",
+  FT: "Fund Transfer — recorded on the old Fund Transfer page (posted on save)",
 };
 const payDoorChip = (d: PayDoor) => (
   <span
@@ -9124,6 +9223,7 @@ const payDoorChip = (d: PayDoor) => (
       d === "PV" ? "bg-[#F6F1E7] text-[#6B5C32]"
       : d === "AP" ? "bg-[#EEF2FB] text-[#2C4170]"
       : d === "SP" ? "bg-[#EAF3DE] text-[#27500A]"
+      : d === "TR" || d === "FT" ? "bg-[#E8F1F3] text-[#3E6570]"
       : "bg-[#F7E5E1] text-[#9A3A2D]"}`}
     title={PAY_DOOR_HINT[d]}
   >{d}</span>
@@ -9134,13 +9234,13 @@ const payDoorChip = (d: PayDoor) => (
 const spAdvanceOpenSen = (g: SupplierPaymentGroup) =>
   g.lines.filter((l) => !l.purchaseInvoiceId && l.amountSen > 0).reduce((s, l) => s + l.amountSen, 0);
 
-function buildPayRows(pv: PvRow[] | null, sp: SupplierPaymentGroup[] | null, ocp: PaymentGroup[] | null): PayRow[] {
+function buildPayRows(pv: PvRow[] | null, sp: SupplierPaymentGroup[] | null, ocp: PaymentGroup[] | null, ft: FtRow[] | null = null): PayRow[] {
   // An AP voucher's settlement document carries the voucher's own number — it
   // is the same payment seen from the other side, so it is listed once, as the
   // voucher (which owns the ladder trail and the attachments).
   const pvNos = new Set((pv ?? []).map((r) => r.pvNo).filter(Boolean));
   const rows: PayRow[] = (pv ?? []).map((r) => ({
-    door: r.pvKind === "AP" ? "AP" : "PV",
+    door: r.pvKind === "AP" ? "AP" : r.pvKind === "TRANSFER" ? "TR" : "PV",
     key: `v:${r.id}`, no: r.pvNo, date: String(r.date ?? "").slice(0, 10),
     payee: r.payee ?? "", via: r.payFrom ?? "", note: r.description ?? "",
     totalSen: r.totalSen, state: r.status === "VOID" ? "VOID" : (r.lifecycleState ?? "ACTIVE"),
@@ -9165,6 +9265,16 @@ function buildPayRows(pv: PvRow[] | null, sp: SupplierPaymentGroup[] | null, ocp
       note: [g.reference, `${g.lines.length} bill${g.lines.length === 1 ? "" : "s"}`].filter(Boolean).join(" · "),
       totalSen: g.totalSen, state: g.lifecycleState ?? "ACTIVE",
       advanceOpen: false, ocp: g,
+    });
+  }
+  // Transfers recorded on the old Fund Transfer page (it left the menu on
+  // 2026-10-01; its entries stay as they are and are listed here).
+  for (const t of ft ?? []) {
+    rows.push({
+      door: "FT", key: `f:${t.no}`, no: t.no, date: String(t.date ?? "").slice(0, 10),
+      payee: `Transfer to ${t.toName || t.toAccount}`, via: t.fromAccount, note: t.description ?? "",
+      totalSen: t.amountSen, state: t.lifecycleState ?? "ACTIVE",
+      advanceOpen: false, ft: t,
     });
   }
   return rows.sort((a, b) => b.date.localeCompare(a.date) || b.no.localeCompare(a.no));
@@ -9271,8 +9381,8 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
   // go to their own endpoints.
   const [spRows, setSpRows] = useState<SupplierPaymentGroup[] | null>(null);
   const [ocpRows, setOcpRows] = useState<PaymentGroup[] | null>(null);
+  const [ftRows, setFtRows] = useState<FtRow[] | null>(null);
   const [migrationMissing, setMigrationMissing] = useState(false);
-  const [expandedPv, setExpandedPv] = useState<Record<string, boolean>>({});
   // Double-click → the voucher's detail popup (resolved from `rows` by id so
   // it re-renders after a rung / void / attachment change).
   const [detailPvId, setDetailPvId] = useState<string | null>(null);
@@ -9282,15 +9392,7 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
   const initialPay = parsePayLink(new URLSearchParams(window.location.search).get("pay"));
   const [showForm, setShowForm] = useState(!!initialPay);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({
-    date: new Date().toISOString().slice(0, 10),
-    payee: "",
-    description: "",
-    accrued: false,
-    payFrom: "",
-    accrualAccount: "",
-    productLine: "",
-  });
+  const [form, setForm] = useState<PvFormState>(blankPvForm);
   const [lines, setLines] = useState<{ accountCode: string; description: string; amount: string }[]>([
     { accountCode: "", description: "", amount: "" },
   ]);
@@ -9413,6 +9515,10 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
       .then((r) => r.json() as Promise<{ success?: boolean; data?: PaymentGroup[] }>)
       .then((j) => setOcpRows(j?.success ? j.data ?? [] : []))
       .catch(() => setOcpRows([]));
+    fetch(`/api/accounting/fund-transfers?${bust}`, { cache: "no-store" })
+      .then((r) => r.json() as Promise<{ success?: boolean; data?: FtRow[] }>)
+      .then((j) => setFtRows(j?.success ? j.data ?? [] : []))
+      .catch(() => setFtRows([]));
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -9434,6 +9540,9 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
   const totalSen = postableLines.reduce((s, l) => s + toSen(l.amount), 0);
   const droppedLines = lines.filter((l) => !pvLineWillPost(l) && toSen(l.amount) > 0).length;
   const pvMoneyError = firstMoneyFieldError(lines.map((l, i) => ({ label: `Line ${i + 1} amount`, value: l.amount })));
+  // A transfer has one amount (same money parser).
+  const transferSen = toSen(form.transferAmount);
+  const transferMoneyError = form.transferAmount.trim() ? firstMoneyFieldError([{ label: "Amount", value: form.transferAmount }]) : null;
 
   // Ladder position (Houzs four tiers). Legacy rows carry no state → APPROVED.
   const apState = (r: PvRow): PvApprovalState => (r.approvalState ?? r.approval_state) ?? "APPROVED";
@@ -9446,8 +9555,8 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
   // Every money-out door in one list, newest first (owner 2026-09-28). A
   // foreign door has no ladder — it posts when it is saved — so it reads as
   // Approved on the chips, Cancelled once voided.
-  const payRows = useMemo(() => buildPayRows(rows, spRows, ocpRows), [rows, spRows, ocpRows]);
-  const payLoading = rows === null || spRows === null || ocpRows === null;
+  const payRows = useMemo(() => buildPayRows(rows, spRows, ocpRows, ftRows), [rows, spRows, ocpRows, ftRows]);
+  const payLoading = rows === null || spRows === null || ocpRows === null || ftRows === null;
   const matchesChip = (row: PayRow, chip: PvStatusChip) => {
     if (chip === "ALL") return true;
     if (chip === "ADVANCE_OPEN") return row.state === "ACTIVE" && row.advanceOpen && (!row.pv || isPosted(row.pv));
@@ -9484,7 +9593,7 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
     setEditingId(null);
     setFormKind("EXPENSE");
     setPendingScanFile(null);
-    setForm({ date: new Date().toISOString().slice(0, 10), payee: "", description: "", accrued: false, payFrom: "", accrualAccount: "", productLine: "" });
+    setForm(blankPvForm());
     setLines([{ accountCode: "", description: "", amount: "" }]);
     setApForm({ date: new Date().toISOString().slice(0, 10), payFrom: "", partyKind: "SUPPLIER", partyId: "", reference: "", advance: "" });
     setApAlloc({});
@@ -9546,23 +9655,35 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
   // mode: "draft" saves onto the four-tier ladder (no number, no GL yet);
   // "post" is the legacy one-click road — number + GL immediately.
   const handleSave = async (mode: "draft" | "post") => {
-    if (pvMoneyError) { toast.error(pvMoneyError); return; }
-    const body = {
-      date: form.date,
-      payee: form.payee,
-      description: form.description,
-      accrued: form.accrued,
-      payFrom: form.accrued ? undefined : (form.payFrom || defaultBankCode(bankCash)),
-      accrualAccount: form.accrued ? form.accrualAccount : undefined,
-      productLine: form.productLine || undefined,
-      saveAs: mode === "draft" && !editingId ? "draft" : undefined,
-      lines: postableLines
-        .map((l) => ({ accountCode: l.accountCode, description: l.description, amountSen: toSen(l.amount) })),
-    };
-    if (body.lines.length === 0) {
+    const isTransfer = form.mode === "TRANSFER";
+    if (isTransfer) {
+      if (transferMoneyError) { toast.error(transferMoneyError); return; }
+    } else if (pvMoneyError) { toast.error(pvMoneyError); return; }
+    if (!isTransfer && postableLines.length === 0) {
       toast.error("Add at least one line with an account and a positive amount");
       return;
     }
+    const common = {
+      date: form.date,
+      description: form.description,
+      notes: form.notes,
+      saveAs: mode === "draft" && !editingId ? "draft" : undefined,
+    };
+    // A transfer is an ordinary voucher whose one line is the receiving account
+    // (owner 2026-10-01); a payment carries its expense lines and the bill.
+    const body = isTransfer
+      ? { ...common, kind: "TRANSFER", payFrom: form.payFrom || defaultBankCode(bankCash), transferTo: form.transferTo, amountSen: transferSen }
+      : {
+          ...common,
+          payee: form.payee,
+          billNo: form.billNo,
+          billDate: form.billDate || undefined,
+          accrued: form.accrued,
+          payFrom: form.accrued ? undefined : (form.payFrom || defaultBankCode(bankCash)),
+          accrualAccount: form.accrued ? form.accrualAccount : undefined,
+          lines: postableLines
+            .map((l) => ({ accountCode: l.accountCode, description: l.description, amountSen: toSen(l.amount) })),
+        };
     setSaving(true);
     try {
       const url = editingId
@@ -9582,7 +9703,7 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
           try { await uploadPvAttachment(newId, pendingScanFile); }
           catch (e) { toast.error(`Saved, but the scan could not be attached: ${(e as Error).message}`); }
         }
-        toast.success(editingId ? "Voucher updated" : mode === "draft" ? "Draft saved — Prepare it when ready" : "Payment posted");
+        toast.success(editingId ? "Voucher updated" : mode === "draft" ? "Draft saved — Prepare it when ready" : isTransfer ? "Transfer posted" : "Payment posted");
         resetForm();
         load();
       } else toast.error(j?.error || (editingId ? "Update failed" : "Save failed"));
@@ -9690,6 +9811,7 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
   const payVoucherOf = (row: PayRow): VoucherSpec =>
     row.pv ? { ...buildPvVoucher(row.pv, accounts), footerText: printFooter }
     : row.sp ? buildSupplierPaymentVoucher(row.sp)
+    : row.ft ? buildFundTransferVoucher(row.ft, accounts)
     : buildOtherPartyPaymentVoucher(row.ocp!, accounts);
   // A foreign row voids / restores through its own document's endpoint — the
   // same call its own page makes (the Receipts hub does exactly this).
@@ -9703,7 +9825,9 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
     if (!(await confirm({ title: `${verb} ${PAY_DOOR_LABEL[row.door].toLowerCase()}?`, message: `${verb} ${row.no}?${extra}`, danger: true }))) return;
     const url = row.sp
       ? `/api/supplier-payments/${encodeURIComponent(row.no)}/lifecycle`
-      : `/api/accounting/other-party-payments/${encodeURIComponent(row.no)}/lifecycle`;
+      : row.ft
+        ? `/api/accounting/fund-transfers/${encodeURIComponent(row.no)}/lifecycle`
+        : `/api/accounting/other-party-payments/${encodeURIComponent(row.no)}/lifecycle`;
     const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action }) });
     const j = asMutationResponse(await res.json());
     if (j?.success) {
@@ -9713,9 +9837,16 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
     } else toast.error(j?.error || `${verb} failed`);
   };
   // Where a foreign row lives — its own page, for edit / knock-off / FX.
-  const foreignHref = (row: PayRow) => row.sp ? "/invoices/supplier-payments" : "/accounting?tab=ocreditorpay";
-  // What a foreign row settled — shown inline on expand and in the popup.
-  const foreignDetailTable = (row: PayRow) => (
+  const foreignHref = (row: PayRow) => row.sp ? "/invoices/supplier-payments" : row.ft ? "/accounting?tab=transfer" : "/accounting?tab=ocreditorpay";
+  // What a foreign row settled — shown in its popup.
+  const foreignDetailTable = (row: PayRow) => row.ft ? (
+    <table className="w-full text-xs">
+      <thead><tr className="text-[#9CA3AF] text-left"><th className="py-1 pr-4 font-medium">From</th><th className="py-1 pr-4 font-medium">To</th><th className="py-1 font-medium text-right">Amount</th></tr></thead>
+      <tbody>
+        <tr className="border-t border-[#F0ECE9]"><td className="py-1 pr-4">{accountLabel(accounts, row.ft.fromAccount)}</td><td className="py-1 pr-4">{accountLabel(accounts, row.ft.toAccount)}</td><td className="py-1 text-right tabular-nums">{formatCurrency(row.ft.amountSen)}</td></tr>
+      </tbody>
+    </table>
+  ) : (
     <table className="w-full text-xs">
       <thead>
         <tr className="text-[#9CA3AF] text-left">
@@ -9797,8 +9928,17 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
       return;
     }
     setFormKind("EXPENSE");
-    setForm({ date: r.date, payee: r.payee ?? "", description: r.description ?? "", accrued: r.accrued === 1, payFrom: r.payFrom ?? "", accrualAccount: r.accrualAccount ?? "", productLine: r.productLine ?? "" });
-    setLines(r.lines.length ? r.lines.map((l) => ({ accountCode: l.accountCode, description: l.description ?? "", amount: (l.amountSen / 100).toFixed(2) })) : [{ accountCode: "", description: "", amount: "" }]);
+    const isTransfer = r.pvKind === "TRANSFER";
+    setForm({
+      ...blankPvForm(),
+      date: r.date, payee: r.payee ?? "", description: r.description ?? "", accrued: r.accrued === 1,
+      payFrom: r.payFrom ?? "", accrualAccount: r.accrualAccount ?? "", productLine: r.productLine ?? "",
+      notes: r.notes ?? "", billNo: (r.billNo ?? r.bill_no) ?? "", billDate: String((r.billDate ?? r.bill_date) ?? "").slice(0, 10),
+      mode: isTransfer ? "TRANSFER" : "PAYMENT",
+      transferTo: isTransfer ? (r.lines[0]?.accountCode ?? "") : "",
+      transferAmount: isTransfer ? (r.totalSen / 100).toFixed(2) : "",
+    });
+    setLines(!isTransfer && r.lines.length ? r.lines.map((l) => ({ accountCode: l.accountCode, description: l.description ?? "", amount: (l.amountSen / 100).toFixed(2) })) : [{ accountCode: "", description: "", amount: "" }]);
     setShowForm(true);
   };
 
@@ -9822,7 +9962,12 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
     const lastAcct = prior?.lines?.[0]?.accountCode ?? "";
     setForm((f) => ({
       ...f,
-      date: d.docDate ?? new Date().toISOString().slice(0, 10),
+      mode: "PAYMENT",
+      // The voucher is dated the day it is keyed; the bill keeps its own number
+      // and date (owner 2026-10-01).
+      date: new Date().toISOString().slice(0, 10),
+      billNo: d.docNo ?? f.billNo,
+      billDate: d.docDate ?? f.billDate,
       payee: d.partyName ?? f.payee,
       description: [d.docType, d.docNo].filter(Boolean).join(" · ") || f.description,
       accrued: false,
@@ -10019,97 +10164,171 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
         );
       })()}
 
-      {showForm && formKind === "EXPENSE" && (
-        <Card>
-          <CardContent className="p-4 space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs font-medium text-[#6B7280] mb-1 block">Date</label>
-                <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} className={`${selCls} w-full`} />
+      {showForm && formKind === "EXPENSE" && (() => {
+        // The voucher form as a popup (owner 2026-10-01 「我开的 pv 我希望像图 3」
+        // + 「要 pop out」): HEADER, then LINES as cards; Payment or Transfer.
+        const isTransfer = form.mode === "TRANSFER";
+        const editingRow = editingId ? (rows ?? []).find((x) => x.id === editingId) : undefined;
+        const pvNoText = !editingRow ? "(assigned on save)" : editingRow.pvNo.startsWith("DRAFT-") ? "(assigned at Check)" : editingRow.pvNo;
+        const payFromCode = form.payFrom || defaultBankCode(bankCash);
+        const cannot = saving || (isTransfer
+          ? !form.transferTo || transferSen <= 0 || !!transferMoneyError || payFromCode === form.transferTo
+          : totalSen <= 0 || !!pvMoneyError || (form.accrued ? !form.accrualAccount : !payFromCode));
+        const fieldLabel = "text-[11px] font-semibold uppercase tracking-wide text-[#6B7280] mb-1 block";
+        const sectionHead = "px-4 py-2 border-b border-[#E2DDD8] border-l-4 border-l-[#3E6570] text-xs font-bold uppercase tracking-wide text-[#3E6570] flex items-center justify-between gap-3";
+        return (
+          <div className="fixed inset-0 z-40 bg-black/40 overflow-y-auto p-4" role="dialog" aria-modal="true">
+            <div className="mx-auto my-4 w-full max-w-5xl rounded-lg bg-[#F7F5F2] shadow-2xl">
+              <div className="flex items-center justify-between px-5 py-3 rounded-t-lg bg-white border-b border-[#E2DDD8]">
+                <h3 className="text-base font-semibold text-[#1F1D1B]">
+                  {editingRow ? `Edit ${isTransfer ? "transfer" : "payment voucher"} ${editingRow.pvNo.startsWith("DRAFT-") ? "(draft)" : editingRow.pvNo}` : isTransfer ? "New transfer" : "New payment voucher"}
+                </h3>
+                <button onClick={resetForm} title="Close without saving" className="text-[#9CA3AF] hover:text-[#1F1D1B] text-lg leading-none cursor-pointer">✕</button>
               </div>
-              <div>
-                <label className="text-xs font-medium text-[#6B7280] mb-1 block">
-                  {form.accrued ? "Accrual account" : "Pay from"}
-                  <span className="ml-1 text-[#B4B2A9] cursor-help" title={form.accrued ? "Liability account credited (CR)" : "Bank / cash account credited (CR)"}>ⓘ</span>
-                </label>
-                {form.accrued ? (
-                  <select value={form.accrualAccount} onChange={(e) => setForm({ ...form, accrualAccount: e.target.value })} className={`${selCls} w-full`}>
-                    <option value="">— pick 410-x / 405-0000 —</option>
-                    {accrualOpts.map((a) => <option key={a.code} value={a.code}>{a.code} {a.name}</option>)}
-                  </select>
-                ) : (
-                  <select value={form.payFrom || defaultBankCode(bankCash)} onChange={(e) => setForm({ ...form, payFrom: e.target.value })} className={`${selCls} w-full`}>
-                    <option value="">— pick bank/cash —</option>
-                    {bankCash.map((a) => <option key={a.code} value={a.code}>{a.code} {a.name}</option>)}
-                  </select>
-                )}
-              </div>
-              <div>
-                <label className="text-xs font-medium text-[#6B7280] mb-1 block">Payee</label>
-                <input type="text" placeholder="Who was paid" value={form.payee} onChange={(e) => setForm({ ...form, payee: e.target.value })} className={`${selCls} w-full`} />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-[#6B7280] mb-1 block">Product line (optional)</label>
-                <select value={form.productLine} onChange={(e) => setForm({ ...form, productLine: e.target.value })} className={`${selCls} w-full`}>
-                  <option value="">(shared — allocate by sales ratio)</option>
-                  <option value="SOFA">Sofa</option>
-                  <option value="BEDFRAME">Bedframe</option>
-                </select>
-              </div>
-              <div className="sm:col-span-2">
-                <label className="text-xs font-medium text-[#6B7280] mb-1 block">Description</label>
-                <input type="text" placeholder="e.g. Factory rent June" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className={`${selCls} w-full`} />
-              </div>
-            </div>
-
-            <label className="flex items-center gap-2 text-sm text-[#1F1D1B] cursor-pointer">
-              <input type="checkbox" checked={form.accrued} onChange={(e) => setForm({ ...form, accrued: e.target.checked })} className="h-4 w-4 accent-[#6B5C32]" />
-              Accrue now, pay later
-            </label>
-
-            <div>
-              <label className="text-xs font-medium text-[#6B7280] mb-1 block">Expense lines (DR)</label>
-              <div className="border border-[#E2DDD8] rounded-md">
-                <div className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1.4fr)_7rem_2rem] bg-[#FAF8F5] text-[11px] font-medium text-[#9CA3AF]">
-                  <div className="px-2.5 py-1.5">Account</div>
-                  <div className="px-2.5 py-1.5">Description</div>
-                  <div className="px-2.5 py-1.5 text-right">Amount (RM)</div>
-                  <div />
-                </div>
-                {lines.map((l, i) => (
-                  <div
-                    key={i}
-                    className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1.4fr)_7rem_2rem] items-center border-t border-[#F0ECE9]"
-                    onKeyDown={(e) => { if (e.key === "Insert") { e.preventDefault(); setLines((prev) => [...prev.slice(0, i + 1), { accountCode: "", description: "", amount: "" }, ...prev.slice(i + 1)]); } }}
-                  >
-                    <div className="px-1 py-1">
-                      <AccountPicker accounts={lineAccounts} value={l.accountCode} onChange={(code) => setLines(lines.map((x, j) => (j === i ? { ...x, accountCode: code } : x)))} placeholder="Account…" />
+              <div className="p-4 space-y-4">
+                <section className="rounded-md border border-[#E2DDD8] bg-white">
+                  <div className={sectionHead}><span>Header</span></div>
+                  <div className="p-4 space-y-3">
+                    <div className="inline-flex rounded-md border border-[#E2DDD8] overflow-hidden" title={editingRow ? "The kind is fixed once saved" : undefined}>
+                      {(["PAYMENT", "TRANSFER"] as const).map((m) => (
+                        <button key={m} type="button" disabled={!!editingRow}
+                          onClick={() => setForm((f) => ({ ...f, mode: m, accrued: m === "TRANSFER" ? false : f.accrued }))}
+                          className={`px-5 py-2 text-sm font-semibold ${form.mode === m ? "bg-[#3E6570] text-white" : "bg-white text-[#1F1D1B] hover:bg-[#FAF8F5]"} ${m === "TRANSFER" ? "border-l border-[#E2DDD8]" : ""} disabled:cursor-not-allowed`}>
+                          {m === "PAYMENT" ? "Payment" : "Transfer"}
+                        </button>
+                      ))}
                     </div>
-                    <input type="text" placeholder="Line description" value={l.description} onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, description: e.target.value } : x)))} className="border-0 bg-transparent px-2.5 py-1.5 text-sm w-full focus:outline-none" />
-                    <input type="text" placeholder="0.00" value={l.amount} onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, amount: e.target.value } : x)))} className={`border-0 bg-transparent px-2.5 py-1.5 text-sm w-full text-right tabular-nums focus:outline-none ${isUnreadableMoney(l.amount) ? "text-[#9A3A2D] underline decoration-wavy" : ""}`} />
-                    <button onClick={() => setLines(lines.length > 1 ? lines.filter((_, j) => j !== i) : lines)} title="Remove line" className="text-[#B4B2A9] hover:text-[#9A3A2D] text-sm">✕</button>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {isTransfer ? (
+                        <div>
+                          <label className={fieldLabel}>Transfer to *</label>
+                          <select value={form.transferTo} onChange={(e) => setForm({ ...form, transferTo: e.target.value })} className={`${selCls} w-full`}>
+                            <option value="">— which of our accounts receives it —</option>
+                            {bankCash.filter((a) => a.code !== payFromCode).map((a) => <option key={a.code} value={a.code}>{a.code} · {a.name}</option>)}
+                          </select>
+                        </div>
+                      ) : (
+                        <div>
+                          <label className={fieldLabel}>Payee *</label>
+                          <input type="text" placeholder="Who are we paying?" value={form.payee} onChange={(e) => setForm({ ...form, payee: e.target.value })} className={`${selCls} w-full`} />
+                        </div>
+                      )}
+                      <div>
+                        <label className={fieldLabel}>PV #</label>
+                        <input type="text" readOnly value={pvNoText} className={`${selCls} w-full bg-[#FAF8F5] text-[#6B7280]`} />
+                      </div>
+                      <div>
+                        <label className={fieldLabel}>Voucher date *</label>
+                        <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} className={`${selCls} w-full`} />
+                      </div>
+                      <div>
+                        <label className={fieldLabel}>{form.accrued && !isTransfer ? "Accrual account (credit) *" : "Paid from (credit) *"}</label>
+                        {form.accrued && !isTransfer ? (
+                          <select value={form.accrualAccount} onChange={(e) => setForm({ ...form, accrualAccount: e.target.value })} className={`${selCls} w-full`}>
+                            <option value="">— pick 410-x —</option>
+                            {accrualOpts.map((a) => <option key={a.code} value={a.code}>{a.code} · {a.name}</option>)}
+                          </select>
+                        ) : (
+                          <select value={payFromCode} onChange={(e) => setForm({ ...form, payFrom: e.target.value })} className={`${selCls} w-full`}>
+                            <option value="">— pick bank / cash —</option>
+                            {bankCash.map((a) => <option key={a.code} value={a.code}>{a.code} · {a.name}</option>)}
+                          </select>
+                        )}
+                      </div>
+                      {isTransfer && (
+                        <div>
+                          <label className={fieldLabel}>Amount (MYR) *</label>
+                          <input type="text" placeholder="0.00" value={form.transferAmount} onChange={(e) => setForm({ ...form, transferAmount: e.target.value })} className={`${selCls} w-full text-right tabular-nums ${transferMoneyError ? "text-[#9A3A2D] underline decoration-wavy" : ""}`} />
+                        </div>
+                      )}
+                      <div>
+                        <label className={fieldLabel}>Description <span className="normal-case font-normal text-[#9CA3AF]">(printed on the voucher)</span></label>
+                        <input type="text" placeholder={isTransfer ? "e.g. Petty cash top-up" : "e.g. Factory rent June"} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className={`${selCls} w-full`} />
+                      </div>
+                      <div className={isTransfer ? "sm:col-span-2" : ""}>
+                        <label className={fieldLabel}>Notes <span className="normal-case font-normal text-[#9CA3AF]">(internal — not printed)</span></label>
+                        <textarea rows={2} placeholder="Internal notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} className={`${selCls} w-full`} />
+                      </div>
+                      {!isTransfer && (
+                        <>
+                          <div>
+                            <label className={fieldLabel}>Bill no. <span className="normal-case font-normal text-[#9CA3AF]">(the supplier's own)</span></label>
+                            <input type="text" placeholder="Filled when the bill is scanned" value={form.billNo} onChange={(e) => setForm({ ...form, billNo: e.target.value })} className={`${selCls} w-full`} />
+                          </div>
+                          <div>
+                            <label className={fieldLabel}>Bill date</label>
+                            <input type="date" value={form.billDate} onChange={(e) => setForm({ ...form, billDate: e.target.value })} className={`${selCls} w-full`} />
+                          </div>
+                        </>
+                      )}
+                    </div>
+                    {!isTransfer && (
+                      <label className="flex items-center gap-2 text-sm text-[#1F1D1B] cursor-pointer">
+                        <input type="checkbox" checked={form.accrued} onChange={(e) => setForm({ ...form, accrued: e.target.checked })} className="h-4 w-4 accent-[#6B5C32]" />
+                        Accrue now, pay later
+                      </label>
+                    )}
                   </div>
-                ))}
-              </div>
-              <div className="flex items-center justify-between mt-2">
-                <div className="flex items-center gap-3">
-                  <Button variant="outline" size="sm" onClick={() => setLines([...lines, { accountCode: "", description: "", amount: "" }])}>
-                    <Plus className="h-4 w-4" /> Add line
-                  </Button>
-                  <span className="text-[11px] text-[#B4B2A9]">press <span className="font-medium text-[#6B7280]">Insert</span> to add a line below</span>
-                </div>
-                <span className="text-sm text-[#6B7280]">Total <span className="text-lg font-semibold text-[#1F1D1B] tabular-nums">{pvMoneyError ? "—" : formatCurrency(totalSen)}</span></span>
-                {pvMoneyError && <span className="text-[11px] text-[#9A3A2D]">{pvMoneyError}</span>}
-                {droppedLines > 0 && (
-                  <span className="text-[11px] text-[#9A3A2D]">{droppedLines} line{droppedLines === 1 ? "" : "s"} with an amount but no account — not counted, and will not be posted.</span>
-                )}
-              </div>
-            </div>
+                </section>
 
-            {(() => {
-              const cannot = saving || totalSen <= 0 || !!pvMoneyError || (form.accrued ? !form.accrualAccount : !(form.payFrom || defaultBankCode(bankCash)));
-              return (
-                <div className="flex flex-wrap gap-2 pt-3 border-t border-[#F0ECE9] items-center">
+                {!isTransfer && (
+                  <section className="rounded-md border border-[#E2DDD8] bg-white">
+                    <div className={sectionHead}>
+                      <span>Lines</span>
+                      {!editingRow && <ScanPrefillButton label="Scan bill (OCR)" onResult={applyScan} />}
+                      <span className="normal-case font-normal text-[#6B7280] tracking-normal">{lines.length} line{lines.length === 1 ? "" : "s"} · total {pvMoneyError ? "—" : formatCurrency(totalSen)}</span>
+                    </div>
+                    <div className="p-4 space-y-3">
+                      {lines.map((l, i) => (
+                        <div
+                          key={i}
+                          className="rounded-lg border border-[#E2DDD8] bg-[#FAF8F5] p-3"
+                          onKeyDown={(e) => { if (e.key === "Insert") { e.preventDefault(); setLines((prev) => [...prev.slice(0, i + 1), { accountCode: "", description: "", amount: "" }, ...prev.slice(i + 1)]); } }}
+                        >
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-[11px] font-bold uppercase tracking-wide text-[#6B7280]">Line {i + 1}</span>
+                            <div className="flex items-center gap-3">
+                              <span className="text-sm font-semibold tabular-nums text-[#1F1D1B]">{formatCurrency(toSen(l.amount))}</span>
+                              <button onClick={() => setLines(lines.length > 1 ? lines.filter((_, j) => j !== i) : lines)} title="Remove line" className="text-[#B4B2A9] hover:text-[#9A3A2D] text-sm cursor-pointer">✕</button>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div>
+                              <label className={fieldLabel}>Account (debit) *</label>
+                              <AccountPicker accounts={lineAccounts} value={l.accountCode} onChange={(code) => setLines(lines.map((x, j) => (j === i ? { ...x, accountCode: code } : x)))} placeholder="— Expense / charge account —" />
+                            </div>
+                            <div>
+                              <label className={fieldLabel}>Description</label>
+                              <input type="text" placeholder="Line description" value={l.description} onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, description: e.target.value } : x)))} className={`${selCls} w-full`} />
+                            </div>
+                            <div>
+                              <label className={fieldLabel}>Amount (MYR)</label>
+                              <input type="text" placeholder="0.00" value={l.amount} onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, amount: e.target.value } : x)))} className={`${selCls} w-full text-right tabular-nums ${isUnreadableMoney(l.amount) ? "text-[#9A3A2D] underline decoration-wavy" : ""}`} />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-3">
+                          <Button variant="outline" size="sm" onClick={() => setLines([...lines, { accountCode: "", description: "", amount: "" }])}>
+                            <Plus className="h-4 w-4" /> Add line
+                          </Button>
+                          <span className="text-[11px] text-[#B4B2A9]">press <span className="font-medium text-[#6B7280]">Insert</span> to add a line below</span>
+                        </div>
+                        <span className="text-sm text-[#6B7280]">Total <span className="text-lg font-semibold text-[#1F1D1B] tabular-nums">{pvMoneyError ? "—" : formatCurrency(totalSen)}</span></span>
+                      </div>
+                      {pvMoneyError && <div className="text-[11px] text-[#9A3A2D]">{pvMoneyError}</div>}
+                      {droppedLines > 0 && (
+                        <div className="text-[11px] text-[#9A3A2D]">{droppedLines} line{droppedLines === 1 ? "" : "s"} with an amount but no account — not counted, and will not be posted.</div>
+                      )}
+                    </div>
+                  </section>
+                )}
+                {isTransfer && payFromCode && payFromCode === form.transferTo && (
+                  <div className="text-[11px] text-[#9A3A2D]">Transfer to and Paid from must be different accounts.</div>
+                )}
+
+                <div className="flex flex-wrap gap-2 items-center">
                   {editingId ? (
                     <Button variant="primary" size="sm" disabled={cannot} onClick={() => handleSave("post")}>
                       {saving ? "Updating…" : editingPosted ? "Update posted voucher" : "Save changes"}
@@ -10120,22 +10339,22 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
                         {saving ? "Saving…" : "Save as draft"}
                       </Button>
                       <Button variant="outline" size="sm" disabled={cannot} onClick={() => handleSave("post")} title="One click: number issued and posted to the ledger now">
-                        {form.accrued ? "Post now (accrued)" : "Post now"}
+                        {form.accrued && !isTransfer ? "Post now (accrued)" : "Post now"}
                       </Button>
                     </>
                   )}
                   <Button variant="outline" size="sm" onClick={resetForm}>Cancel</Button>
                   {pendingScanFile && !editingId && <span className="text-[11px] text-[#6B7280]">📎 {pendingScanFile.name} will be attached on save</span>}
                 </div>
-              );
-            })()}
-          </CardContent>
-        </Card>
-      )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {!payLoading && (
         <div className="text-[11px] uppercase tracking-wide text-[#9CA3AF]" title="Every payment out, whichever page it was recorded on — all four share one HPV number series">
-          {payRows.length} payment{payRows.length === 1 ? "" : "s"} · {doorCount("PV")} voucher · {doorCount("AP")} AP · {doorCount("SP")} supplier · {doorCount("OCP")} other creditor
+          {payRows.length} payment{payRows.length === 1 ? "" : "s"} · {doorCount("PV")} voucher · {doorCount("AP")} AP · {doorCount("TR")} transfer · {doorCount("SP")} supplier · {doorCount("OCP")} other creditor · {doorCount("FT")} old fund transfer
         </div>
       )}
       <div className="inline-flex flex-wrap rounded-md border border-[#E2DDD8] bg-white overflow-hidden text-xs">
@@ -10161,7 +10380,7 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
         </select>
         <select value={doorFilter} onChange={(e) => setDoorFilter(e.target.value as "" | PayDoor)} className="rounded-md border border-[#E2DDD8] px-2 py-1.5 text-sm" title="Which page the payment was recorded on">
           <option value="">All doors</option>
-          {(["PV", "AP", "SP", "OCP"] as PayDoor[]).map((d) => <option key={d} value={d}>{PAY_DOOR_LABEL[d]}</option>)}
+          {(["PV", "AP", "TR", "SP", "OCP", "FT"] as PayDoor[]).map((d) => <option key={d} value={d}>{PAY_DOOR_LABEL[d]}</option>)}
         </select>
         {bankHiddenSp > 0 && (
           <span className="text-[11px] text-[#9A3A2D]">{bankHiddenSp} supplier payment{bankHiddenSp === 1 ? "" : "s"} hidden — no bank leg on their ledger posting (contra settlement); pick All banks to see them</span>
@@ -10199,6 +10418,10 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
               const head = ["Supplier Payment", row.no, row.date, row.payee, "", row.state, "", "", (row.totalSen / 100).toFixed(2)];
               return row.sp.lines.map((l) => [...head, "400-0000", accounts.find((a) => a.code === "400-0000")?.name ?? "", l.piNo || "Advance / unallocated", (l.amountSen / 100).toFixed(2)]);
             }
+            if (row.ft) {
+              const head = ["Fund Transfer", row.no, row.date, row.payee, accountLabel(accounts, row.ft.fromAccount), row.state, row.note, "", (row.totalSen / 100).toFixed(2)];
+              return [[...head, row.ft.toAccount, row.ft.toName, "Transfer", (row.totalSen / 100).toFixed(2)]];
+            }
             if (row.ocp) {
               const head = ["Other Creditor Payment", row.no, row.date, row.payee, row.via ? accountLabel(accounts, row.via) : "", row.state, row.ocp.reference ?? "", "", (row.totalSen / 100).toFixed(2)];
               return row.ocp.lines.map((l) => [...head, "405-0000", accounts.find((a) => a.code === "405-0000")?.name ?? "", l.billNo, (l.amountSen / 100).toFixed(2)]);
@@ -10206,7 +10429,7 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
             const r = row.pv!;
             const bank = r.payFrom || r.accrualAccount || "";
             const head = [
-              r.pvKind === "AP" ? "AP Payment" : "Payment Voucher",
+              r.pvKind === "AP" ? "AP Payment" : r.pvKind === "TRANSFER" ? "Transfer" : "Payment Voucher",
               r.pvNo ?? r.id,
               r.date ?? "",
               r.payee ?? "",
@@ -10257,30 +10480,32 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
               <tbody>
                 {visibleRows.map((row) => {
                   // A row from another door: read-only here apart from print /
-                  // void (its own endpoint) — expand shows what it settled,
-                  // double-click opens the popup, "open ↗" goes to its page.
+                  // void (its own endpoint) — double-click opens the popup with
+                  // everything, "open ↗" goes to its page. Single click does
+                  // nothing (owner 2026-10-01 「我不要点一次打开」).
                   if (!row.pv) {
                     const g = row;
                     return (
                       <React.Fragment key={g.key}>
                         <tr
                           className={`border-b border-[#F0ECE9] cursor-pointer hover:bg-[#FAF8F5] ${g.state !== "ACTIVE" ? "opacity-50" : g.advanceOpen ? "text-blue-600" : ""}`}
-                          onClick={() => setExpandedPv((m) => ({ ...m, [g.key]: !m[g.key] }))}
                           onDoubleClick={() => setDetailPayKey(g.key)}
-                          title="Click to expand · double-click to open"
+                          title="Double-click to open"
                         >
                           <td className="px-3 py-1.5 w-8" onClick={(e) => e.stopPropagation()}>
                             <input type="checkbox" checked={pvSel.isSelected(g.key)} onChange={() => pvSel.toggle(g.key)} className="h-3.5 w-3.5 accent-[#6B5C32]" />
                           </td>
                           <td className="px-3 py-1.5 tabular-nums text-xs whitespace-nowrap">
-                            <span className="inline-block w-3 text-[#9CA3AF]">{expandedPv[g.key] ? "▾" : "▸"}</span> {g.no}
+                            {g.no}
                             <span className="ml-2">{payDoorChip(g.door)}</span>
                           </td>
                           <td className="px-3 py-1.5 text-xs text-[#6B7280] whitespace-nowrap">{g.date}</td>
-                          <td className="px-3 py-1.5">{[g.payee, g.ocp?.reference].filter(Boolean).join(" · ")}</td>
+                          <td className="px-3 py-1.5">{[g.payee, g.ocp?.reference, g.ft?.description].filter(Boolean).join(" · ")}</td>
                           <td className="px-3 py-1.5 text-xs">{g.via || <span className="text-[#9CA3AF]" title="No bank leg on this payment's ledger posting (contra settlement)">—</span>}</td>
                           <td className="px-3 py-1.5 text-xs text-[#6B7280]">
-                            {g.sp
+                            {g.ft
+                              ? <span>→ {g.ft.toName || g.ft.toAccount}</span>
+                              : g.sp
                               ? <span title={g.sp.lines.map((l) => `${l.piNo || "Advance"} ${formatCurrency(l.amountSen)}`).join("\n")}>{g.sp.lines.filter((l) => l.purchaseInvoiceId).length} invoice{g.sp.lines.filter((l) => l.purchaseInvoiceId).length === 1 ? "" : "s"}{spAdvanceOpenSen(g.sp) > 0 ? " + advance" : ""}</span>
                               : <span title={(g.ocp?.lines ?? []).map((l) => `${l.billNo} ${formatCurrency(l.amountSen)}`).join("\n")}>{g.ocp?.lines.length ?? 0} bill{(g.ocp?.lines.length ?? 0) === 1 ? "" : "s"}</span>}
                           </td>
@@ -10303,11 +10528,6 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
                             />
                           </td>
                         </tr>
-                        {expandedPv[g.key] && (
-                          <tr className="bg-[#FAF8F5] border-b border-[#F0ECE9]">
-                            <td colSpan={9} className="px-8 py-2">{foreignDetailTable(g)}</td>
-                          </tr>
-                        )}
                       </React.Fragment>
                     );
                   }
@@ -10316,20 +10536,19 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
                   <React.Fragment key={r.id}>
                   <tr
                     className={`border-b border-[#F0ECE9] cursor-pointer hover:bg-[#FAF8F5] ${r.status === "VOID" ? "opacity-50" : ""}`}
-                    onClick={() => setExpandedPv((m) => ({ ...m, [r.id]: !m[r.id] }))}
                     onDoubleClick={() => setDetailPvId(r.id)}
-                    title="Click to expand · double-click to open"
+                    title="Double-click to open"
                   >
                     <td className="px-3 py-1.5 w-8" onClick={(e) => e.stopPropagation()}>
                       <input type="checkbox" checked={pvSel.isSelected(row.key)} onChange={() => pvSel.toggle(row.key)} className="h-3.5 w-3.5 accent-[#6B5C32]" />
                     </td>
                     <td className="px-3 py-1.5 tabular-nums text-xs whitespace-nowrap">
-                      <span className="inline-block w-3 text-[#9CA3AF]">{expandedPv[r.id] ? "▾" : "▸"}</span> {r.pvNo}
-                      <span className="ml-2">{payDoorChip(r.pvKind === "AP" ? "AP" : "PV")}</span>
-                      {(r.attachmentCount ?? 0) > 0 && <span className="ml-1.5 text-[10px] text-[#6B7280]" title={`${r.attachmentCount} attachment${r.attachmentCount === 1 ? "" : "s"} — expand to see`}>📎{r.attachmentCount}</span>}
+                      {r.pvNo}
+                      <span className="ml-2">{payDoorChip(row.door)}</span>
+                      {(r.attachmentCount ?? 0) > 0 && <span className="ml-1.5 text-[10px] text-[#6B7280]" title={`${r.attachmentCount} attachment${r.attachmentCount === 1 ? "" : "s"} — double-click to see`}>📎{r.attachmentCount}</span>}
                     </td>
                     <td className="px-3 py-1.5 text-xs text-[#6B7280] whitespace-nowrap">{r.date}</td>
-                    <td className="px-3 py-1.5">{[r.payee, r.description].filter(Boolean).join(" · ")}</td>
+                    <td className="px-3 py-1.5">{r.pvKind === "TRANSFER" ? [`Transfer to ${shortBankName(accounts.find((a) => a.code === r.lines[0]?.accountCode)?.name) || (r.lines[0]?.accountCode ?? "")}`, r.description].filter(Boolean).join(" · ") : [r.payee, r.description].filter(Boolean).join(" · ")}</td>
                     <td className="px-3 py-1.5 text-xs">
                       {r.accrued === 1 && !r.settledAt
                         ? <span className="text-[#9A3A2D]">accrued → {r.accrualAccount}</span>
@@ -10338,7 +10557,9 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
                     <td className="px-3 py-1.5 text-xs text-[#6B7280]">
                       {r.pvKind === "AP"
                         ? <span title={(r.allocs ?? []).map((a) => `${a.docNo} ${formatCurrency(a.amountSen)}`).join("\n")}>{(r.allocs ?? []).length} bill{(r.allocs ?? []).length === 1 ? "" : "s"}{(r.advanceSen ?? 0) > 0 ? " + advance" : ""}</span>
-                        : (r.productLine ?? "shared")}
+                        : r.pvKind === "TRANSFER"
+                          ? <span>→ {shortBankName(accounts.find((a) => a.code === r.lines[0]?.accountCode)?.name) || r.lines[0]?.accountCode}</span>
+                          : `${r.lines.length} line${r.lines.length === 1 ? "" : "s"}`}
                     </td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(r.totalSen)}</td>
                     <td className="px-3 py-1.5 text-xs">
@@ -10395,67 +10616,6 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
                       />
                     </td>
                   </tr>
-                  {expandedPv[r.id] && (
-                    <tr className="bg-[#FAF8F5] border-b border-[#F0ECE9]">
-                      <td colSpan={9} className="px-8 py-2">
-                        {r.pvKind === "AP" ? (
-                          <table className="w-full text-xs">
-                            <thead>
-                              <tr className="text-[#9CA3AF] text-left">
-                                <th className="py-1 pr-4 font-medium">Bill</th>
-                                <th className="py-1 pr-4 font-medium">Ref</th>
-                                <th className="py-1 font-medium text-right">Paid</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {(r.allocs ?? []).map((a, i) => (
-                                <tr key={i} className="border-t border-[#F0ECE9]">
-                                  <td className="py-1 pr-4 whitespace-nowrap tabular-nums">{a.docNo || a.docId} <span className="text-[10px] text-[#9CA3AF]">{a.docKind === "PI" ? "purchase invoice" : "other-creditor bill"}</span></td>
-                                  <td className="py-1 pr-4 text-[#6B7280]">{a.docRef}</td>
-                                  <td className="py-1 text-right tabular-nums">{formatCurrency(a.amountSen)}</td>
-                                </tr>
-                              ))}
-                              {(r.advanceSen ?? 0) > 0 && (
-                                <tr className="border-t border-[#F0ECE9]">
-                                  <td className="py-1 pr-4">Advance / unallocated{(r.advanceOpenSen ?? 0) > 0 && isPosted(r) ? <span className="ml-1 text-[10px] text-[#7A5B12]">· {formatCurrency(r.advanceOpenSen ?? 0)} still unapplied</span> : null}</td>
-                                  <td className="py-1 pr-4" />
-                                  <td className="py-1 text-right tabular-nums">{formatCurrency(r.advanceSen ?? 0)}</td>
-                                </tr>
-                              )}
-                              {(r.allocs ?? []).length === 0 && (r.advanceSen ?? 0) <= 0 && (
-                                <tr><td colSpan={3} className="py-1 text-[#9CA3AF]">No bills on this voucher.</td></tr>
-                              )}
-                            </tbody>
-                          </table>
-                        ) : r.lines.length === 0 ? (
-                          <div className="text-xs text-[#9CA3AF]">No line detail.</div>
-                        ) : (
-                          <table className="w-full text-xs">
-                            <thead>
-                              <tr className="text-[#9CA3AF] text-left">
-                                <th className="py-1 pr-4 font-medium">Account</th>
-                                <th className="py-1 pr-4 font-medium">Description</th>
-                                <th className="py-1 font-medium text-right">Amount</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {r.lines.map((l, i) => {
-                                const nm = accounts.find((a) => a.code === l.accountCode)?.name;
-                                return (
-                                  <tr key={i} className="border-t border-[#F0ECE9]">
-                                    <td className="py-1 pr-4 whitespace-nowrap">{l.accountCode}{nm ? ` · ${nm}` : ""}</td>
-                                    <td className="py-1 pr-4">{l.description ?? ""}</td>
-                                    <td className="py-1 text-right tabular-nums">{formatCurrency(l.amountSen)}</td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                        )}
-                        <PvAttachmentsBlock pv={r} onChanged={load} />
-                      </td>
-                    </tr>
-                  )}
                   </React.Fragment>
                   );
                 })}
@@ -10513,14 +10673,60 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
                   : null}
             </>}
           >
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <DetailField label="Date">{r.date}</DetailField>
-              <DetailField label={r.pvKind === "AP" ? (r.partyKind === "OTHER" ? "Other creditor" : "Supplier") : "Payee"} span={2}>{r.payee || "—"}</DetailField>
-              <DetailField label={r.accrued === 1 && !r.settledAt ? "Accrued to" : "Paid from"}>{r.accrued === 1 && !r.settledAt ? (r.accrualAccount ? accountLabel(accounts, r.accrualAccount) : "—") : (r.payFrom ? accountLabel(accounts, r.payFrom) : "—")}</DetailField>
-              <DetailField label={r.pvKind === "AP" ? "Reference" : "Description"} span={3}>{r.description || "—"}</DetailField>
-              <DetailField label="Total"><span className="tabular-nums">{formatCurrency(r.totalSen)}</span></DetailField>
-              {r.pvKind !== "AP" && <DetailField label="Product line">{r.productLine ?? "shared"}</DetailField>}
-            </div>
+            {/* The voucher as it was keyed (owner 2026-10-01: double-click shows
+                everything, in the form's own layout). */}
+            <section className="rounded-md border border-[#E2DDD8]">
+              <div className={docSectionHead}>Header</div>
+              <div className="p-3 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+                {r.pvKind === "TRANSFER"
+                  ? <DetailField label="Transfer to" span={2}>{r.lines[0] ? accountLabel(accounts, r.lines[0].accountCode) : "—"}</DetailField>
+                  : <DetailField label={r.pvKind === "AP" ? (r.partyKind === "OTHER" ? "Other creditor" : "Supplier") : "Payee"} span={2}>{r.payee || "—"}</DetailField>}
+                <DetailField label="PV #">{r.pvNo.startsWith("DRAFT-") ? "(assigned at Check)" : r.pvNo}</DetailField>
+                <DetailField label="Voucher date">{r.date}</DetailField>
+                <DetailField label={r.accrued === 1 && !r.settledAt ? "Accrued to" : "Paid from"} span={2}>{r.accrued === 1 && !r.settledAt ? (r.accrualAccount ? accountLabel(accounts, r.accrualAccount) : "—") : (r.payFrom ? accountLabel(accounts, r.payFrom) : "—")}</DetailField>
+                <DetailField label="Total"><span className="tabular-nums">{formatCurrency(r.totalSen)}</span></DetailField>
+                <DetailField label="Kind">{r.pvKind === "AP" ? "AP payment" : r.pvKind === "TRANSFER" ? "Transfer" : "Payment"}</DetailField>
+                <DetailField label={r.pvKind === "AP" ? "Reference" : "Description (printed)"} span={4}>{r.description || "—"}</DetailField>
+                {r.pvKind !== "AP" && r.pvKind !== "TRANSFER" && (
+                  <>
+                    <DetailField label="Bill no.">{(r.billNo ?? r.bill_no) || "—"}</DetailField>
+                    <DetailField label="Bill date">{String((r.billDate ?? r.bill_date) ?? "").slice(0, 10) || "—"}</DetailField>
+                  </>
+                )}
+                <DetailField label="Notes (internal)" span={r.pvKind !== "AP" && r.pvKind !== "TRANSFER" ? 2 : 4}>{r.notes || "—"}</DetailField>
+              </div>
+            </section>
+            <section className="rounded-md border border-[#E2DDD8]">
+              <div className={docSectionHead}>{r.pvKind === "AP" ? "Bills paid" : r.pvKind === "TRANSFER" ? "Transfer" : "Lines"}</div>
+              <div className="p-3">
+                <div className="border border-[#E2DDD8] rounded-md overflow-x-auto">
+                  {r.pvKind === "AP" ? (
+                    <table className="w-full text-sm">
+                      <thead className="bg-[#FAF8F5]"><tr className="text-xs text-[#6B7280]"><th className="text-left px-3 py-1.5 font-medium">Bill</th><th className="text-left px-3 py-1.5 font-medium">Ref</th><th className="text-right px-3 py-1.5 font-medium">Paid</th></tr></thead>
+                      <tbody>
+                        {(r.allocs ?? []).map((a, i) => (
+                          <tr key={i} className="border-t border-[#F0ECE9]"><td className="px-3 py-1.5 whitespace-nowrap tabular-nums">{a.docNo || a.docId} <span className="text-[10px] text-[#9CA3AF]">{a.docKind === "PI" ? "purchase invoice" : "other-creditor bill"}</span></td><td className="px-3 py-1.5 text-[#6B7280]">{a.docRef}</td><td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(a.amountSen)}</td></tr>
+                        ))}
+                        {(r.advanceSen ?? 0) > 0 && <tr className="border-t border-[#F0ECE9]"><td className="px-3 py-1.5">Advance / unallocated{(r.advanceOpenSen ?? 0) > 0 && isPosted(r) ? <span className="ml-1 text-[10px] text-[#7A5B12]">· {formatCurrency(r.advanceOpenSen ?? 0)} still unapplied</span> : null}</td><td /><td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(r.advanceSen ?? 0)}</td></tr>}
+                        <tr className="border-t-2 border-[#1F1D1B] font-semibold"><td className="px-3 py-1.5" colSpan={2}>Total</td><td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(r.totalSen)}</td></tr>
+                      </tbody>
+                    </table>
+                  ) : (
+                    <table className="w-full text-sm">
+                      <thead className="bg-[#FAF8F5]"><tr className="text-xs text-[#6B7280]"><th className="text-left px-3 py-1.5 font-medium">Account</th><th className="text-left px-3 py-1.5 font-medium">Description</th><th className="text-right px-3 py-1.5 font-medium">Amount</th></tr></thead>
+                      <tbody>
+                        {r.lines.map((l, i) => (
+                          <tr key={i} className="border-t border-[#F0ECE9]"><td className="px-3 py-1.5 whitespace-nowrap">{accountLabel(accounts, l.accountCode)}</td><td className="px-3 py-1.5 text-[#6B7280]">{l.description ?? ""}</td><td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(l.amountSen)}</td></tr>
+                        ))}
+                        {r.lines.length === 0 && <tr><td colSpan={3} className="px-3 py-2 text-xs text-[#9CA3AF]">No line detail.</td></tr>}
+                        <tr className="border-t-2 border-[#1F1D1B] font-semibold"><td className="px-3 py-1.5" colSpan={2}>Total</td><td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(r.totalSen)}</td></tr>
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </div>
+            </section>
+            <PvAttachmentsBlock pv={r} onChanged={load} />
             {/* Ladder trail — who did what, when. */}
             <div className="rounded-md bg-[#FAF8F5] border border-[#F0ECE9] px-3 py-2 text-xs grid grid-cols-2 sm:grid-cols-4 gap-2">
               <div><span className="text-[#9CA3AF]">Prepared</span><br />{rx.preparedByName ?? rx.createdByName ?? "—"} · {dmy(r.preparedAt ?? r.prepared_at)}</div>
@@ -10529,32 +10735,7 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
               <div><span className="text-[#9CA3AF]">Settled</span><br />{r.accrued === 1 ? dmy(r.settledAt) : "n/a"}</div>
               {(r.rejectReason ?? r.reject_reason) && st === "DRAFT" && r.status !== "VOID" && <div className="col-span-2 sm:col-span-4 text-[#9A3A2D]">↩ Rejected: {r.rejectReason ?? r.reject_reason}</div>}
             </div>
-            <div className="border border-[#E2DDD8] rounded-md overflow-x-auto">
-              {r.pvKind === "AP" ? (
-                <table className="w-full text-sm">
-                  <thead className="bg-[#FAF8F5]"><tr className="text-xs text-[#6B7280]"><th className="text-left px-3 py-1.5 font-medium">Bill</th><th className="text-left px-3 py-1.5 font-medium">Ref</th><th className="text-right px-3 py-1.5 font-medium">Paid</th></tr></thead>
-                  <tbody>
-                    {(r.allocs ?? []).map((a, i) => (
-                      <tr key={i} className="border-t border-[#F0ECE9]"><td className="px-3 py-1.5 whitespace-nowrap tabular-nums">{a.docNo || a.docId} <span className="text-[10px] text-[#9CA3AF]">{a.docKind === "PI" ? "purchase invoice" : "other-creditor bill"}</span></td><td className="px-3 py-1.5 text-[#6B7280]">{a.docRef}</td><td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(a.amountSen)}</td></tr>
-                    ))}
-                    {(r.advanceSen ?? 0) > 0 && <tr className="border-t border-[#F0ECE9]"><td className="px-3 py-1.5">Advance / unallocated{(r.advanceOpenSen ?? 0) > 0 && isPosted(r) ? <span className="ml-1 text-[10px] text-[#7A5B12]">· {formatCurrency(r.advanceOpenSen ?? 0)} still unapplied</span> : null}</td><td /><td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(r.advanceSen ?? 0)}</td></tr>}
-                    <tr className="border-t-2 border-[#1F1D1B] font-semibold"><td className="px-3 py-1.5" colSpan={2}>Total</td><td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(r.totalSen)}</td></tr>
-                  </tbody>
-                </table>
-              ) : (
-                <table className="w-full text-sm">
-                  <thead className="bg-[#FAF8F5]"><tr className="text-xs text-[#6B7280]"><th className="text-left px-3 py-1.5 font-medium">Account</th><th className="text-left px-3 py-1.5 font-medium">Description</th><th className="text-right px-3 py-1.5 font-medium">Amount</th></tr></thead>
-                  <tbody>
-                    {r.lines.map((l, i) => (
-                      <tr key={i} className="border-t border-[#F0ECE9]"><td className="px-3 py-1.5 whitespace-nowrap">{accountLabel(accounts, l.accountCode)}</td><td className="px-3 py-1.5 text-[#6B7280]">{l.description ?? ""}</td><td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(l.amountSen)}</td></tr>
-                    ))}
-                    {r.lines.length === 0 && <tr><td colSpan={3} className="px-3 py-2 text-xs text-[#9CA3AF]">No line detail.</td></tr>}
-                    <tr className="border-t-2 border-[#1F1D1B] font-semibold"><td className="px-3 py-1.5" colSpan={2}>Total</td><td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(r.totalSen)}</td></tr>
-                  </tbody>
-                </table>
-              )}
-            </div>
-            <PvAttachmentsBlock pv={r} onChanged={load} />
+            <DocTrailBlock family="payment_voucher" sourceId={r.id} />
           </DocDetailModal>
         );
       })()}
@@ -10585,13 +10766,14 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
           >
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <DetailField label="Date">{g.date}</DetailField>
-              <DetailField label={g.sp ? "Supplier" : "Other creditor"} span={2}>{g.payee || "—"}</DetailField>
+              <DetailField label={g.sp ? "Supplier" : g.ft ? "Transfer" : "Other creditor"} span={2}>{g.payee || "—"}</DetailField>
               <DetailField label="Paid from">{g.via ? accountLabel(accounts, g.via) : <span title="No bank leg on this payment's ledger posting (contra settlement)">—</span>}</DetailField>
-              <DetailField label="Reference" span={3}>{g.ocp?.reference || "—"}</DetailField>
+              <DetailField label={g.ft ? "Description" : "Reference"} span={3}>{(g.ft ? g.ft.description : g.ocp?.reference) || "—"}</DetailField>
               <DetailField label="Total"><span className="tabular-nums">{formatCurrency(g.totalSen)}</span></DetailField>
             </div>
             <div className="text-[11px] text-[#9CA3AF]">Recorded on the {PAY_DOOR_LABEL[g.door]} page — it posted when it was saved (no approval ladder). Edit, knock-off and FX live on that page.</div>
             <div className="border border-[#E2DDD8] rounded-md px-3 py-2">{foreignDetailTable(g)}</div>
+            <DocTrailBlock family={g.sp ? "supplier_payment" : g.ft ? "fund_transfer" : "other_party_payment"} sourceId={g.no} />
           </DocDetailModal>
         );
       })()}

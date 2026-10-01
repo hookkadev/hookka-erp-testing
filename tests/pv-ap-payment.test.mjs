@@ -95,7 +95,7 @@ test("an AP voucher posts through the settlement builders, never through pvPosti
 
 test("create: AP kind writes allocs (no lines); Post now adds the settlement in the same batch", () => {
   const body = handler(acc, 'app.post("/payment-vouchers", async (c) => {');
-  const ap = body.slice(body.indexOf("if (body.kind === PV_KIND_AP) {"), body.indexOf("const v = validateDocLines(coa, body.lines);"));
+  const ap = body.slice(body.indexOf("if (body.kind === PV_KIND_AP) {"), body.indexOf("const isTransfer = body.kind === PV_KIND_TRANSFER;"));
   assert.ok(ap.length > 0, "AP branch missing");
   assert.match(ap, /await validatePvAp\(c\.var\.DB, orgId, coa, body as Record<string, unknown>, null\)/);
   assert.match(ap, /\.\.\.pvAllocStatements\(c\.var\.DB, id, ap\.v\.allocs\)/);

@@ -228,7 +228,9 @@ const navigationGroups: NavGroup[] = [
         name: "Daily", href: "/accounting?tab=payments", icon: Wallet, children: [
           { name: "Payment Vouchers", href: "/accounting?tab=payments", icon: Wallet },
           { name: "Receipts", href: "/accounting?tab=receipts", icon: Receipt },
-          { name: "Fund Transfer", href: "/accounting?tab=transfer", icon: Wallet },
+          // Fund Transfer left the menu 2026-10-01: a transfer is now a voucher
+          // (Payment Vouchers → New Payment Voucher → Transfer); ?tab=transfer
+          // still opens the old page and its entries are listed on the hub.
           { name: "Cash Position", href: "/accounting?tab=dailycash", icon: Wallet },
         ],
       },
