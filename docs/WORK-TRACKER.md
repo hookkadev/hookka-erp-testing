@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-01**: branch `feat/staging-api-log` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-09-30**: branch `chore/sync-staging-from-main-0930`, staging<-main merge added below (its entry is the newest).
 > **Last verified: 2026-09-30**: #617 entry item 4 — owner re-posted the opening; creditor Self-check card green (measured).
 > **Last verified: 2026-09-30**: #617 (BUG-2026-09-30-229/-230, Self-check reconciliations + cancelled opening seeds) closed ✅ below with its prod check.
@@ -85,6 +86,13 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-01: 🔵 Staging test tool: API log drawer (branch `feat/staging-api-log` to `staging`, STAGING ONLY, never PR to main)
+
+- Asked: a way to see recent API calls and their errors on staging, and copy one into a bug report.
+- Every dashboard page gains a small "API" button bottom-left, rendered only when the host starts with `staging.`. It opens a drawer with the last 50 `/api` calls: method, path (no query string), status, ms, and for failures the response body cut to 500 characters. "Copy as bug report" copies page URL, time, user agent and the picked call (or the last failed one).
+- Recording rides the existing `window.fetch` patch in `src/lib/api-client.ts` (two host-gated lines, CSRF untouched). The log is in memory only. Request bodies are never kept; failure bodies are read from a clone, and never for auth / PIN / password / session / token / invite paths. No new endpoint, no server change.
+- Test: `tests/staging-api-log.test.mjs`. UNMEASURED: not checked in a browser (local dev proxies to prod and the host check hides it there). Check on staging after merge.
 
 ## 2026-09-30 — 🔵 Sync `staging` from `main` (branch `chore/sync-staging-from-main-0930` → `staging`)
 

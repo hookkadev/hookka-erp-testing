@@ -29,6 +29,7 @@
 import { clearAuth } from "./auth";
 import { readCsrfCookie, CSRF_HEADER_NAME } from "./csrf";
 import { reportApiCall } from "./fe-rum";
+import { recordApiCall } from "./staging-api-log"; // staging-only API log drawer, never PR into main
 
 const originalFetch = window.fetch.bind(window);
 
@@ -139,6 +140,7 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
         status: 0,
         duration: performance.now() - t0,
       });
+      if (window.location.hostname.startsWith("staging.")) recordApiCall({ method: methodOf(input, init), path: pathOf(url), status: 0, ms: performance.now() - t0, error: err });
     }
     // Re-throw so callers' .catch() still fires; we only OBSERVE here.
     throw err;
@@ -151,6 +153,7 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       status: aborted ? 0 : response.status,
       duration: performance.now() - t0,
     });
+    if (window.location.hostname.startsWith("staging.")) recordApiCall({ method: methodOf(input, init), path: pathOf(url), status: aborted ? 0 : response.status, ms: performance.now() - t0 }, response);
   }
 
   // 401 on /api/* → auth expired / invalid. Wipe state and redirect, but
