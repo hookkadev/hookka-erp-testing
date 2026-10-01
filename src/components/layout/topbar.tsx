@@ -6,6 +6,7 @@ import { GlobalSearch } from "./global-search";
 import { NotificationBell } from "./notification-bell";
 import { WorkspaceTabs } from "./workspace-tabs";
 import { clearAuth, getCurrentUser } from "@/lib/auth";
+import { StagingTodayControl } from "@/components/staging-today-control"; // staging-only
 
 interface TopbarProps {
   user?: {
@@ -105,6 +106,7 @@ export function Topbar({ user }: TopbarProps) {
           Staging · patch notes
         </Link>
       )}
+      <StagingTodayControl />
 
       {/* Notifications — real feed + real unread count (see notification-bell.tsx) */}
       <NotificationBell />

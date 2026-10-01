@@ -29,6 +29,8 @@
 import { clearAuth } from "./auth";
 import { readCsrfCookie, CSRF_HEADER_NAME } from "./csrf";
 import { reportApiCall } from "./fe-rum";
+import { readStagingToday, STAGING_TODAY_HEADER } from "./staging-today"; // staging-only
+import { recordApiCall } from "./staging-api-log"; // staging-only API log drawer, never PR into main
 
 const originalFetch = window.fetch.bind(window);
 
@@ -97,6 +99,8 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const csrf = readCsrfCookie();
       if (csrf) headers.set(CSRF_HEADER_NAME, csrf);
     }
+    const fakeToday = readStagingToday(); // staging-only today override, off unless set in this tab
+    if (fakeToday) headers.set(STAGING_TODAY_HEADER, fakeToday);
     const controller = new AbortController();
     timeoutId = setTimeout(() => {
       aborted = true;
@@ -139,6 +143,7 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
         status: 0,
         duration: performance.now() - t0,
       });
+      if (window.location.hostname.startsWith("staging.")) recordApiCall({ method: methodOf(input, init), path: pathOf(url), status: 0, ms: performance.now() - t0, error: err });
     }
     // Re-throw so callers' .catch() still fires; we only OBSERVE here.
     throw err;
@@ -151,6 +156,7 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       status: aborted ? 0 : response.status,
       duration: performance.now() - t0,
     });
+    if (window.location.hostname.startsWith("staging.")) recordApiCall({ method: methodOf(input, init), path: pathOf(url), status: aborted ? 0 : response.status, ms: performance.now() - t0 }, response);
   }
 
   // 401 on /api/* → auth expired / invalid. Wipe state and redirect, but
