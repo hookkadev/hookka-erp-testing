@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-01**: finance improvement plan logged below as ⚪ queued (owner confirmed every point; start on his word).
 > **Last verified: 2026-10-01**: branch `fix/dev08-accessory-so-ready` (DEV-08) added below (its entry is the newest).
 > **Last verified: 2026-09-30**: branch `feat/dev22-worker-penalty` (to `staging`) added below (in progress, its entry is the newest).
 > **Last verified: 2026-10-01**: branch `feat/cn-pdf-size-column` (DEV-30) added below (its entry is the newest).
@@ -149,6 +150,28 @@ Verified: `tsc -p tsconfig.app.json` exit 0; `npm test` all pass. NOT verified o
 4. 🔵 **Bug-id collisions — followed `main`:** main's numbers stand; staging's colliding entries renumbered after main's max (194) and every staging-side reference (code comments, tests, docs, short forms) moved with them: 09-23-184→196, 185→197; 09-24-182→198, 183→199, 184→200, 185→201, 186→202 (186b→202b), 187→203, 188→204, 189→205, 190→206, 191→207; rack-scan 09-25-193→195.
 tsc strict 0; `npm test` 5047 pass / 0 fail.
 ---
+
+## 2026-10-01 — ⚪ Finance improvements, confirmed point by point with the owner — queued until he says start
+
+Four batches, each shipped and prod-verified before the next:
+1. ⚪ FINANCE sidebar: opening one group closes the others (finance section only). Self-check debtor item shows the receipt
+   number and debtor wording.
+2. ⚪ Payment voucher form as a popup in the layout the owner showed (Payment / Transfer switch; payee, number on save, date,
+   paid from, printed description + internal notes, supplier bill no. + bill date, MYR only, line cards, scan inside the
+   form, accrue / draft / post kept; no event, no product line — measured unused). Transfer = an ordinary voucher (own
+   accounts on both sides, TR badge); Fund Transfer leaves the sidebar, its URL and old entries stay. List: single click
+   does nothing, double click pops the whole voucher read-only with Print / Edit / Void + who/when, ledger entry, bank
+   reconciliation state. New AP Payment form unchanged.
+3. ⚪ Scans (finance only — the shared OCR engine and party-alias memory untouched): a new payee is not skipped (suggestions
+   from similar descriptions, marked); account learned per line from description (approved/posted vouchers and bills);
+   voucher date defaults to today, bill date to the document date; SST as its own line; duplicate check on the supplier
+   bill no.; one PDF with several bills → one record each; batch shows a review table, then "create all"; several
+   receipts into one voucher.
+4. ⚪ Finance tables: no wrapping, drag a column edge (only that column changes, the rest shift), widths remembered;
+   reports resize the description column only; monthly reports stop stretching to full width. Monthly P&L and Cash
+   Flow drills in the monthly layout: each ledger line under the row with its amount in its month column, counterparty
+   name kept, last row "N entries · open in GL".
+Not wanted: opening-out-of-date reminder, % toggle, on-account receipts reminder.
 
 ## 2026-09-30 — ✅ Self-check reds: the reconciliations copy the control cards; cancelled opening seeds out (owner「先查 8 和 9」→「确定没有问题才做」)(BUG-2026-09-30-229/-230)(#617 ffcc915c MERGED, deployed, prod-verified)
 
