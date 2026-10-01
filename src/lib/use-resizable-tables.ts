@@ -75,15 +75,17 @@ function readWidths(key: string): number[] | null {
 }
 function writeWidths(key: string, widths: number[] | null) {
   try {
-    if (widths) localStorage.setItem(STORE + key, JSON.stringify(widths.map((w) => Math.round(w))));
+    if (widths) localStorage.setItem(STORE + key, JSON.stringify(widths.map((w) => Math.ceil(w))));
     else localStorage.removeItem(STORE + key);
   } catch { /* storage blocked: widths are just not remembered */ }
 }
 
 // Pin every column at a width; the table is their sum (so a narrower column
-// pulls the rest left instead of stretching a neighbour).
+// pulls the rest left instead of stretching a neighbour). Measured widths are
+// fractional (85.3px) — rounding DOWN cut the last letter off a column that
+// fitted exactly (prod check 2026-10-01: dates showed "2026-10-…"), so up.
 export function sumWidths(widths: number[]): number {
-  return Math.round(widths.reduce((s, w) => s + w, 0));
+  return widths.reduce((s, w) => s + Math.ceil(w), 0);
 }
 function freeze(t: HTMLTableElement, widths: number[]) {
   let cg = t.querySelector<HTMLTableColElement>(":scope > colgroup[data-fin-cols]");
@@ -94,7 +96,7 @@ function freeze(t: HTMLTableElement, widths: number[]) {
   }
   while (cg.children.length > widths.length) cg.lastElementChild!.remove();
   while (cg.children.length < widths.length) cg.appendChild(document.createElement("col"));
-  widths.forEach((w, i) => { (cg!.children[i] as HTMLElement).style.width = `${Math.round(w)}px`; });
+  widths.forEach((w, i) => { (cg!.children[i] as HTMLElement).style.width = `${Math.ceil(w)}px`; });
   t.style.tableLayout = "fixed";
   t.style.width = `${sumWidths(widths)}px`;
   t.style.minWidth = "0";
@@ -182,7 +184,7 @@ function startDrag(e: PointerEvent, t: HTMLTableElement, col: number, scope: str
   document.body.style.cursor = "col-resize";
   const move = (ev: PointerEvent) => {
     widths[col] = Math.max(MIN_W, startW + ev.clientX - startX);
-    (cg.children[col] as HTMLElement).style.width = `${Math.round(widths[col])}px`;
+    (cg.children[col] as HTMLElement).style.width = `${Math.ceil(widths[col])}px`;
     t.style.width = `${sumWidths(widths)}px`;
   };
   const up = () => {
@@ -231,10 +233,12 @@ export function useResizableTables(scope: string): (el: HTMLElement | null) => v
 // The same, without React: watch `el` and enhance its tables; returns the stop.
 export function attachResizableTables(el: HTMLElement, scope: string): () => void {
   ensureCss();
-  let raf = 0;
-  const pass = () => { raf = 0; el.querySelectorAll("table").forEach((t) => enhance(t, scope)); };
+  // A short timeout, not requestAnimationFrame: a tab opened in the background
+  // runs no frames, and the pass would wait until it is looked at.
+  let timer = 0;
+  const pass = () => { timer = 0; el.querySelectorAll("table").forEach((t) => enhance(t, scope)); };
   pass();
-  const mo = new MutationObserver(() => { if (!raf) raf = requestAnimationFrame(pass); });
+  const mo = new MutationObserver(() => { if (!timer) timer = window.setTimeout(pass, 40); });
   mo.observe(el, { childList: true, subtree: true });
-  return () => { mo.disconnect(); if (raf) cancelAnimationFrame(raf); };
+  return () => { mo.disconnect(); if (timer) window.clearTimeout(timer); };
 }
