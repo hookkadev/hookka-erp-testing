@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-01**: DEV-31 entry updated with the staging test run (#651 merged, measured on staging).
 > **Last verified: 2026-10-01**: branch `feat/dev08-pillow-follows-sofa` (DEV-08 rule B) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `fix/accessory-l1-only-job-cards` (to `staging`, BUG-2026-10-01-241) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `fix/schedule-email-size` (to `staging`) added item 10 under BUG-36 (2026-09-29 entry).
@@ -131,7 +132,7 @@ Ask: on Fabric Cutting every accessory line shows twice, though the quantity is 
 
 Prod measured 2026-10-01 with read-only queries (counts above). Staging gave the same picture.
 
-## 2026-10-01: 🔵 DEV-31 worker sees their department and hours there today (branch `feat/dev31-worker-dept-hours` to `staging`)
+## 2026-10-01: ✅ DEV-31 worker sees their department and hours there today (branch `feat/dev31-worker-dept-hours` to `staging`)
 
 - Asked (ticket DEV-31, High, VIOLET): after scanning a department QR the worker should see which department they are in and how many hours they work there that day. Photo 1 is the office Working Hours grid with a punch-out split (Fabric Sewing · Bedframe 4.34h + R&D 3.19h), so "hours" = hours worked per department, not a planned target.
 - Already built before this: dept QR → `POST /api/worker/dept-scan` → `dept_scan_events`; punch-out splits the day into `working_hour_entries`. Missing: the worker never saw the split.
@@ -139,8 +140,10 @@ Prod measured 2026-10-01 with read-only queries (counts above). Staging gave the
 - Owner 2026-10-01: no "of 9h" target or progress bar on the card, it reads as pressure to hit 9h. The card shows hours worked only.
 - The punch-out autofill now calls the same `splitDayHours` helper (same result, checked by a test that compares it to the old inline path).
 - Tests: 7 new cases in `tests/dept-scan-split.test.mjs`; `npm test` and `tsc -p tsconfig.app.json` clean.
-- Worktree `../hookka-dev31` has `node_modules` as a JUNCTION into the main checkout. Before `git worktree remove`, run `cmd //c rmdir node_modules` inside it (removes the link only), or the removal can follow it into the real `node_modules`.
-- 🟡 Not driven in a browser yet: needs a worker login on staging after merge (punch in, scan two dept QRs, check home + scan card, punch out, compare with Working Hours).
+- #651 merged into `staging` 2026-10-01; worktree removed (junction unlinked first).
+- ✅ Tested on staging 2026-10-01 with TEST-002 (home Fab Cut), punch 16:17 to 16:37, dept QRs opened as scan URLs: card on home dept since clock-in; Fab Sew · Sofa scan; Packing scan; back to Fab Sew (minutes summed, a stretch under 0.1h folds into the largest as at punch-out). Saved after punch-out: Fab Sew · Sofa 0.21h + Packing 0.12h, the same rows on the office Working Hours. Scan before punch-in shows "punch in first". TEST-001 (same-minute in/out) shows the broken-punch 9h Packing row.
+- ❌ My Pay rows for the punch-out day did not show: `/api/worker/history` kept serving the snapshot taken before clock-out (clockOut null, 0 min) on both test workers. Pre-existing snapshot freshness issue, not DEV-31; split out as its own task.
+- Test rows left on staging for TEST-001 and TEST-002 (2026-10-01).
 
 ## 2026-10-01: 🔵 Staging top bar: Patch notes pill hidden under the search box (branch `fix/staging-topbar-patch-notes-hidden` to `staging`, STAGING ONLY, never PR into main)
 
