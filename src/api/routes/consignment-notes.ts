@@ -856,7 +856,7 @@ app.post("/", async (c) => {
         return c.json(
           {
             success: false,
-            error: `Cannot create consignment note — ${mutex.conflicts.length} PO${mutex.conflicts.length === 1 ? "" : "s"} already on an active delivery order: ${mutex.conflicts.join(", ")}`,
+            error: mutex.message,
             conflicts: mutex.conflicts,
             reason: mutex.reason,
           },
@@ -875,7 +875,7 @@ app.post("/", async (c) => {
           return c.json(
             {
               success: false,
-              error: `Cannot create consignment note — ${mutex.conflicts.length} PO${mutex.conflicts.length === 1 ? "" : "s"} already on an active delivery order: ${mutex.conflicts.join(", ")}`,
+              error: mutex.message,
               conflicts: mutex.conflicts,
               reason: mutex.reason,
             },
@@ -2003,13 +2003,14 @@ app.post("/:id/notify-customer", async (c) => {
 //   - not_found            → 404
 //   - invalid_transition   → 400 with descriptive message (gap 5)
 //   - items_locked         → 403 with descriptive message (latent gap 3)
+//   - po_conflict          → 409, PO already on a DO or another CN (BUG-2026-10-01-238)
 // ----------------------------------------------------------------------------
 function mapUpdateCNError(
   res: Extract<
     Awaited<ReturnType<typeof updateConsignmentNoteById>>,
     { ok: false }
   >,
-): { status: 400 | 403 | 404; body: Record<string, unknown> } {
+): { status: 400 | 403 | 404 | 409; body: Record<string, unknown> } {
   if (res.reason === "not_found") {
     return {
       status: 404,
@@ -2038,6 +2039,12 @@ function mapUpdateCNError(
         reason: "items_locked",
         currentStatus: res.currentStatus,
       },
+    };
+  }
+  if (res.reason === "po_conflict") {
+    return {
+      status: 409,
+      body: { success: false, error: res.message, reason: "po_conflict" },
     };
   }
   // Exhaustiveness guard.

@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-238 (branch `fix/cn-duplicate-po`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-237 (branch `fix/bom-accessory-category`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-236 (staging id, brought to `main` on branch `feat/dev22-worker-penalty-main`; ids 232-235 are on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-30**: newest entry BUG-2026-09-30-231 (branch `fix/pillow-fab-sew-sticker`, DEV-26); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
@@ -53,6 +54,38 @@ Entries themselves stay newest-first.
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
 
 ---
+
+## BUG-2026-10-01-238 — One production order on several consignment notes `consignment` `do-cn-parity` 🟡
+
+🟡 **Fix in progress** (branch `fix/cn-duplicate-po` → `main`) · Found on staging 2026-10-01.
+
+**What happened.** Measured on staging (read-only): 35 production orders sat on more than one non-cancelled CN. The same
+23 POs were on CGN-2609-002/004/006/008 (Houzs), the same 5 on CGN-2609-003/005/007/009 (Carress), plus two older pairs
+(CGN-2607-003/004, CGN-2608-003/004). Each copy shows the full CO amount, and dispatching the second and later copies
+moves no `fg_units`, so stock and the CN list disagree. Production is UNMEASURED.
+
+**Root cause.** Two layers. (1) No CN write path refused a PO that was already on another CN: `validatePOMutex(…, "CN")`
+only looked at delivery orders, and the CN items-replace (CN PUT/PATCH and legacy `PUT /api/consignments/:id`) ran no PO
+check at all. The DO side has had the rule since 2026-05-16 ("a PO can only be delivered once", `delivery-orders/_helpers.ts`);
+the CN mirror never got it. (2) `GET /api/consignment-notes/ready-planning` is snapshot-cached with
+`staleWhileRevalidate`, so the refresh right after Create CN still listed the POs just used, and a second click made a
+second CN. The interleaved Houzs/Carress numbers match `confirmCreateCN` posting one CN per customer per click
+(inferred: `consignment_notes` has no created-at column). The 3 rows left on the Pending CN tab were correct: the other
+unit of each CO, never consigned.
+
+**Fix.** `validatePOMutex` CN branch also rejects a PO on another CN with `status <> 'CANCELLED'` (the same predicate as
+the Pending CN dedup), names the PO and the CN, takes `excludeCnId` for edits, and returns the 409 `message` every caller
+uses. Wired into all four paths: `POST /api/consignment-notes`, legacy `POST /api/consignments`, the shared
+`updateConsignmentNoteById` items-replace (new `po_conflict` result, 409 via `mapUpdateCNError`, checked before the
+DELETE), and the legacy PUT pre-flight (it deletes items before calling the helper). `confirmCreateCN` in
+`consignment/note.tsx` now shows the server's error instead of a generic toast. Existing duplicates are not touched.
+
+**Regression.** `tests/cn-po-once.test.mjs`: refused with PO and CN named, CANCELLED ignored, the edited CN excluded,
+the DO check still first, the edit refused before any write, and all four paths call the guard. 4 of its 6 tests fail
+on the old code.
+
+**Class.** No class row fits exactly. It is DO/CN mirror drift: CODEBASE-MAP already warns that CN is a DO-parity mirror
+and fixes usually belong in both; the DO duplicate guard was the fix that did not cross over.
 
 ## BUG-2026-10-01-237: Accessory BOMs showed "Category: BEDFRAME" `bom` `ui-frontend` 🟡
 
