@@ -487,7 +487,8 @@ function PenaltyDetail({
       footer={footer}
     >
       {confirmDialog}
-      <div className="space-y-5">
+      {/* Same body padding as the Delivery Order drawer. */}
+      <div className="px-6 py-5 space-y-5 max-md:px-4 max-sm:px-3">
         {p.rejectedReason && isDraft && (
           <div className="rounded-md border border-[#E8C9C3] bg-[#FBEFEC] px-3 py-2 text-xs text-[#9A3A2D]">
             <span className="font-semibold">Rejected:</span> {p.rejectedReason}
@@ -690,7 +691,7 @@ function PenaltyEditor({
         </div>
       }
     >
-      <div className="space-y-6">
+      <div className="px-6 py-5 space-y-6 max-md:px-4 max-sm:px-3">
         {/* 1. The order */}
         <section>
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[#6B5C32]">1. Production Order</h3>
