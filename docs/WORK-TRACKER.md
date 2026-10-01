@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-01**: branch `fix/staging-sticky-topbar` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `feat/dev22-worker-penalty` (to `staging`) added below (in progress, its entry is the newest).
 > **Last verified: 2026-10-01**: branch `feat/staging-api-log-in-topbar` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `fix/staging-mail-empty-body` (to `staging`, STAGING ONLY) added below (its entry is the newest).
@@ -94,6 +95,13 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-01: 🔵 Staging: the topbar stays on screen when scrolling (branch `fix/staging-sticky-topbar` to `staging`, STAGING ONLY)
+
+- Asked: keep the top part fixed so the API log button is reachable without scrolling back up.
+- Cause: `topbar.tsx` has `sticky top-0`, but `DashboardLayout.tsx` wraps Topbar + Breadcrumbs in a div only as tall as they are, and a sticky child cannot leave its parent, so the whole block scrolled away. The wrapper is now `sticky top-0 z-30`.
+- `main` has the same wrapper, so prod's header scrolls away too. Not changed there: this branch is staging only.
+- Test: `tests/staging-api-log.test.mjs` pins the sticky wrapper. UNMEASURED: not looked at in a browser; check on staging after deploy.
 
 ## 2026-10-01: 🔵 Staging: API log button moves into the topbar, tab strip hidden (branch `feat/staging-api-log-in-topbar` to `staging`, STAGING ONLY, never PR into main)
 
