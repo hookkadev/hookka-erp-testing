@@ -59,6 +59,14 @@ export interface CutCard {
   customerDd: string | null;
   /** Hookka expected DD as YYYY-MM-DD, or "" / null. */
   expectedDd: string | null;
+  /**
+   * ACCESSORY only (DEV-08 rule A, Violet 2026-10-01): the SO also carries a
+   * sofa/bedframe. "WAITING_CUT" = that main item is still in this cutting
+   * queue, so the pillow is cut on the main item's lead; "CUT" = the main item
+   * is already past cutting, so the pillow is behind and cut as soon as
+   * possible. Absent = a pillow-only SO, cut just in time as before.
+   */
+  mainItem?: "WAITING_CUT" | "CUT";
 }
 
 /** A snapshot cell — string or number (mirrors the static JSON). */
@@ -353,7 +361,9 @@ function buildGroups(laneRows: CutCard[], lane: Lane, cal: Calendar, cfg: Capaci
   const cap = cfg.setupCap[lane];
   const buckets = new Map<string, CutCard[]>();
   for (const r of laneRows) {
-    const key = `${r.config}\u0000${r.size}`;
+    // mainItem splits the bucket so a pillow pulled forward by its sofa never
+    // drags same-config pillow-only orders forward with it.
+    const key = `${r.config}\u0000${r.size}\u0000${r.mainItem ?? ""}`;
     const arr = buckets.get(key) ?? [];
     arr.push(r);
     buckets.set(key, arr);
@@ -389,10 +399,12 @@ function buildGroups(laneRows: CutCard[], lane: Lane, cal: Calendar, cfg: Capaci
     if (cur === undefined || peDay(s.earliest) < peDay(cur)) modelEarliest.set(s.bmodel, s.earliest);
   }
   const isCluster = cfg.clusterLanes.includes(lane);
+  // Pillows whose sofa is already cut go first; constant for every other row.
+  const behindRank = (s: Sub): number => (s.items[0]?.mainItem === "CUT" ? 0 : 1);
   const orderKey = (s: Sub): (number | string)[] =>
     isCluster
-      ? [peDay(modelEarliest.get(s.bmodel) ?? ""), s.bmodel, peDay(s.earliest), sizeRank(s.sz), s.cfg]
-      : [peDay(s.earliest), s.bmodel, sizeRank(s.sz), s.cfg];
+      ? [behindRank(s), peDay(modelEarliest.get(s.bmodel) ?? ""), s.bmodel, peDay(s.earliest), sizeRank(s.sz), s.cfg]
+      : [behindRank(s), peDay(s.earliest), s.bmodel, sizeRank(s.sz), s.cfg];
 
   const sortedSubs = [...subs].sort((a, b) => {
     const ka = orderKey(a);
@@ -440,9 +452,13 @@ function buildGroups(laneRows: CutCard[], lane: Lane, cal: Calendar, cfg: Capaci
         .filter((x): x is string => parseYmd(x) !== null)
         .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
       const chMin = cdds.length ? cdds[0] : "";
-      const lead = isCluster ? cfg.modelLeadDays : cfg.chunkLeadDays;
+      // DEV-08 rule A: a pillow is cut with its sofa (the sofa's lead), or at
+      // once when the sofa is already cut. Buckets are split by mainItem, so a
+      // chunk is all one kind.
+      const mainItem = ch[0]?.mainItem;
+      const lead = isCluster || mainItem === "WAITING_CUT" ? cfg.modelLeadDays : cfg.chunkLeadDays;
       let floor: number;
-      if (!chMin) {
+      if (!chMin || mainItem === "CUT") {
         floor = cal.day1;
       } else {
         floor = Math.max(cal.day1, cal.backWorkday(peDay(chMin), lead));
