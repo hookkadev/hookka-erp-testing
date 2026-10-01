@@ -3839,7 +3839,10 @@ function EditBOMDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-white rounded-xl shadow-xl w-[min(1360px,96vw)] max-h-[90vh] flex flex-col">
+      {/* The WIP tab needs a DEFINITE height: with only max-h the body grew to
+          its content and overflow-hidden clipped both panes, so neither could
+          scroll (owner 2026-10-01「这里不能scroll」). */}
+      <div className={`bg-white rounded-xl shadow-xl w-[min(1360px,96vw)] flex flex-col ${tab === "wip" ? "h-[90vh]" : "max-h-[90vh]"}`}>
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[#E2DDD8]">
           <div>
@@ -4049,7 +4052,7 @@ function EditBOMDialog({
                 return next;
               });
             return (
-              <div className="grid h-full grid-cols-1 md:grid-cols-[minmax(320px,400px)_minmax(0,1fr)]">
+              <div className="grid h-full grid-cols-1 grid-rows-[auto_minmax(0,1fr)] md:grid-rows-[minmax(0,1fr)] md:grid-cols-[minmax(320px,400px)_minmax(0,1fr)]">
                 {/* ── Structure (nested colour cards, like BOM Structure) ── */}
                 <div className="flex min-h-0 max-h-[40vh] md:max-h-none flex-col border-b md:border-b-0 md:border-r border-[#E2DDD8] bg-gradient-to-b from-[#FAF9F7] to-[#F3EFE8]">
                   <div className="flex items-center justify-between px-3 py-2.5 border-b border-[#E2DDD8]">
@@ -4063,7 +4066,7 @@ function EditBOMDialog({
                       + Add
                     </button>
                   </div>
-                  <div className="flex-1 overflow-y-auto p-2.5 space-y-2">
+                  <div className="min-h-0 flex-1 overflow-y-auto p-2.5 space-y-2">
                     {wipComponents.length === 0 && (
                       <p className="px-2 py-6 text-center text-xs text-gray-400">
                         No WIP components yet.

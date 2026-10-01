@@ -73,6 +73,8 @@ Entries themselves stay newest-first.
 
 **Fix.** `src/pages/bom.tsx`: new `WipTreeCard` draws the left tree as nested gradient cards in the BOM Structure palette (`WIP_LEVEL_HEX`), with L-badge, the name resolved by `buildWipCodeDisplay` (`wipDisplayName`), qty, minutes and process pills. Editing stays in the full-width right pane, whose header now carries the node's level colour. Selection resolves against the full tree, so collapsing a parent no longer jumps the right pane to another node. Dialog widened to 1360px; the panes stack below `md`.
 
+**Follow-up (#669 on prod, owner「这里不能scroll」).** Neither pane scrolled: the dialog had only `max-h-[90vh]`, so the body grew to its content and `overflow-hidden` clipped it. On the WIP tab the dialog now has a definite `h-[90vh]` and the grid rows are `minmax(0,1fr)`. Measured in a static repro of the same classes: old left pane clientHeight = scrollHeight = 2460 (clipped, no scroll); new 441 of 2460 at 1280×720, 280 of 2460 at 375×812 (right pane 486/2200 and 244/2200).
+
 **Regression.** UI-only; verified by eye (see Verify).
 
 **Verify.** Prod: Edit BOM on 1003(A)(HF)(W)-(K) → WIP Components: nested coloured cards with real names; click a card → right pane edits that node; desktop and phone width.
