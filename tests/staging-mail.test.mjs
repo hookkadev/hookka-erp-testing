@@ -107,6 +107,26 @@ test("detail uses the raw message when the sent record's body is cut at the firs
   assert.equal(d.isHtml, true);
 });
 
+// Measured on staging 2026-10-01: MailSlurp's /sent/{id}/raw (and the content
+// of /raw/json) for the brief was the bare HTML, 31,976 chars, no MIME
+// headers, with blank lines inside it. The MIME parser read the first HTML
+// lines as headers and decoded 0 chars.
+test("a raw message that is already bare HTML is used as is", async () => {
+  const bare = `${FIRST_LINE}\n<style>p{}</style>\n</head><body>\n\n\n<h2>1 · Today's Plan</h2>\n</body></html>\n`;
+  assert.equal(htmlFromRawMime(bare), bare.trim());
+  assert.equal(htmlFromRawMime(`  \r\n${bare}`), bare.trim());
+  const { f } = stub({
+    [`/sent/${SENT}`]: { ...sentDto(INBOX), body: FIRST_LINE, attachments: [] },
+    [`/sent/${SENT}/html`]: FIRST_LINE,
+    [`/sent/${SENT}/raw`]: bare,
+    [`/sent/${SENT}/raw/json`]: { content: bare },
+  });
+  const d = await getSentMail(f, "KEY", INBOX, SENT);
+  assert.equal(d.body, bare.trim());
+  assert.equal(d.isHtml, true);
+  assert.equal(d.sources[2].decoded, bare.trim().length);
+});
+
 test("raw base64 html is decoded as utf-8; no html part gives empty", () => {
   const b64 = Buffer.from(BRIEF, "utf8").toString("base64").replace(/(.{76})/g, "$1\r\n");
   const raw = `Content-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n${b64}\r\n`;

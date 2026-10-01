@@ -87,7 +87,10 @@ async function probe(
 
 // The HTML part of a raw MIME message, decoded; "" when there is none.
 // Handles nested multipart, base64 and quoted-printable; utf-8 by default.
+// MailSlurp's /sent/{id}/raw returned the bare HTML with no MIME headers
+// (measured 2026-10-01), so text that already starts with a tag is the HTML.
 export function htmlFromRawMime(raw: string): string {
+  if (/^\s*</.test(raw)) return raw.trim();
   const cut = raw.search(/\r?\n\r?\n/);
   if (cut < 0) return "";
   const head = raw.slice(0, cut).replace(/\r?\n[ \t]+/g, " ");

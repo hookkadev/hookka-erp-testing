@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-01**: BUG-2026-10-01-234 measured and fixed on branch `fix/staging-mail-bare-raw` (STAGING ONLY): MailSlurp's raw is bare HTML; a log, so "verified" means the entry matches the code.
 > **Last verified: 2026-10-01**: BUG-2026-10-01-234 still open after #635; diagnostics branch `fix/staging-mail-source-diagnostics` (STAGING ONLY) noted in the entry; a log, so "verified" means the entry matches the code.
 > **Last verified: 2026-10-01**: BUG-2026-10-01-234 corrected (measured cause: MailSlurp's sent record holds only the first line; branch `fix/staging-mail-raw-body`, STAGING ONLY); a log, so "verified" means the entry matches the code.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-235 (branch `perf/production-qr-speed-staging` → `staging`; -234 is the staging mail entry); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
@@ -131,6 +132,13 @@ measures instead of fixing: the detail response lists each source (record, `/htm
 length and decoded length, failures are reported instead of swallowed, `/raw/json` is added as a fourth source, and a "Show raw"
 view prints the raw message. A sender change (sending the HTML on one line) is held back until the raw message is measured: delivery
 works today, and every staging email would go through it.
+
+**Measured and fixed (2026-10-01, branch `fix/staging-mail-bare-raw`).** The sources line read `record 121 · html 121 · raw
+31,976 -> 0 decoded · raw/json 31,976 -> 0 decoded`, and "Show raw" showed the full brief as bare HTML with no MIME headers.
+So `/raw` holds the whole email; `htmlFromRawMime` took the HTML's first lines for headers (the brief has blank lines in it),
+found no `Content-Type` and returned nothing. It now returns text that already starts with a tag as the HTML. Old emails are
+covered too, since the fix is on the read side. Test: `tests/staging-mail.test.mjs` uses that bare-HTML shape (fails before,
+passes after). No sender change was needed.
 
 ---
 

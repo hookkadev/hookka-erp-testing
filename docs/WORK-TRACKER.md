@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-01**: branch `fix/staging-mail-bare-raw` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `fix/staging-mail-source-diagnostics` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `fix/staging-mail-raw-body` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `fix/staging-mail-show-source` (to `staging`, STAGING ONLY) added below (its entry is the newest).
@@ -99,6 +100,12 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-01: 🔵 Mail Outbox shows the whole email, measured cause (branch `fix/staging-mail-bare-raw` to `staging`, STAGING ONLY)
+
+- The #636 sources line: `record 121 · html 121 · raw 31,976 -> 0 decoded · raw/json 31,976 -> 0 decoded`. "Show raw" was the full brief as bare HTML, no MIME headers.
+- `htmlFromRawMime` now returns text that already starts with a tag as the HTML. Read-side fix, so old emails show too. BUG-2026-10-01-234.
+- Test: `tests/staging-mail.test.mjs` (13 pass; the bare-HTML case fails before). UNMEASURED until opened on staging: the brief should show about 31,976 characters and render.
 
 ## 2026-10-01: 🟡 Mail Outbox: measure every body source (branch `fix/staging-mail-source-diagnostics` to `staging`, STAGING ONLY)
 
