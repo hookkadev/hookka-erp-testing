@@ -31,11 +31,25 @@ export interface SentMailAttachment {
   size: number;
 }
 
+// Where a body could come from, measured, so the page can show why the body it
+// picked is short (BUG-2026-10-01-234). status 0 = the call itself failed.
+export interface BodySource {
+  name: "record" | "html" | "raw" | "raw/json";
+  status: number;
+  length: number;
+  decoded?: number;
+  error?: string;
+}
+
 export interface SentMailDetail extends SentMailRow {
   body: string;
   isHtml: boolean;
   attachments: SentMailAttachment[];
+  sources: BodySource[];
+  raw: string; // the longer raw message, cut to RAW_LIMIT, for "Show raw"
 }
+
+const RAW_LIMIT = 20000;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const isUuid = (s: string): boolean => UUID_RE.test(s);
@@ -56,14 +70,19 @@ async function getJson<T>(f: FetchFn, apiKey: string, path: string): Promise<T> 
   return (await res.json()) as T;
 }
 
-// Text, or "" on 404, for endpoints that return a body instead of JSON.
-async function getText(f: FetchFn, apiKey: string, path: string): Promise<string> {
-  const res = await f(`${MAILSLURP_API}${path}`, {
-    headers: { "x-api-key": apiKey, Accept: "text/html, text/plain" },
-  });
-  if (res.status === 404) return "";
-  if (!res.ok) throw new MailSlurpError(res.status, `MailSlurp ${res.status}`);
-  return await res.text();
+// Status and text of an endpoint, never throwing: the caller reports it.
+async function probe(
+  f: FetchFn,
+  apiKey: string,
+  path: string,
+  accept: string,
+): Promise<{ status: number; text: string; error?: string }> {
+  try {
+    const res = await f(`${MAILSLURP_API}${path}`, { headers: { "x-api-key": apiKey, Accept: accept } });
+    return { status: res.status, text: res.ok ? await res.text() : "" };
+  } catch (e) {
+    return { status: 0, text: "", error: e instanceof Error ? e.message : String(e) };
+  }
 }
 
 // The HTML part of a raw MIME message, decoded; "" when there is none.
@@ -179,14 +198,41 @@ export async function getSentMail(
   const ids = (Array.isArray(r.attachments) ? r.attachments.map(String) : []).filter(isUuid);
   const attachments = await Promise.all(ids.map((aid) => getMeta(f, apiKey, aid)));
   // The sent record's body can stop at the first line break while the
-  // delivered email is whole (BUG-2026-10-01-234), so also read /html and the
-  // raw message and show the longest. A failing fallback keeps the body.
+  // delivered email is whole (BUG-2026-10-01-234). Read /html and both raw
+  // forms too, show the longest, and report what each one returned.
   const body = String(r.body ?? "");
-  const soft = (path: string) => getText(f, apiKey, path).catch(() => "");
-  const [html, raw] = await Promise.all([soft(`/sent/${id}/html`), soft(`/sent/${id}/raw`)]);
-  const best = [htmlFromRawMime(raw), html].reduce((a, b) => (b.length > a.length ? b : a), body);
+  const [h, rw, rj] = await Promise.all([
+    probe(f, apiKey, `/sent/${id}/html`, "text/html"),
+    probe(f, apiKey, `/sent/${id}/raw`, "text/plain"),
+    probe(f, apiKey, `/sent/${id}/raw/json`, "application/json"),
+  ]);
+  let rawJson = "";
+  let rawJsonError = rj.error;
+  if (rj.status === 200) {
+    try {
+      rawJson = String((JSON.parse(rj.text) as { content?: unknown }).content ?? "");
+    } catch {
+      rawJsonError = "response is not JSON";
+    }
+  }
+  const fromRaw = htmlFromRawMime(rw.text);
+  const fromRawJson = htmlFromRawMime(rawJson);
+  const sources: BodySource[] = [
+    { name: "record", status: 200, length: body.length },
+    { name: "html", status: h.status, length: h.text.length, ...(h.error ? { error: h.error } : {}) },
+    { name: "raw", status: rw.status, length: rw.text.length, decoded: fromRaw.length, ...(rw.error ? { error: rw.error } : {}) },
+    {
+      name: "raw/json",
+      status: rj.status,
+      length: rawJson.length,
+      decoded: fromRawJson.length,
+      ...(rawJsonError ? { error: rawJsonError } : {}),
+    },
+  ];
+  const best = [h.text, fromRaw, fromRawJson].reduce((a, b) => (b.length > a.length ? b : a), body);
   const isHtml = best === body ? Boolean(r.isHTML ?? r.html) : true;
-  return { ...toRow(r), body: best, isHtml, attachments };
+  const raw = (rw.text.length >= rawJson.length ? rw.text : rawJson).slice(0, RAW_LIMIT);
+  return { ...toRow(r), body: best, isHtml, attachments, sources, raw };
 }
 
 // The attachment's bytes, only when `aid` is one of that sent email's

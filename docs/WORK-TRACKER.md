@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-01**: branch `fix/staging-mail-source-diagnostics` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `fix/staging-mail-raw-body` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `fix/staging-mail-show-source` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `fix/staging-sticky-topbar` (to `staging`, STAGING ONLY) added below (its entry is the newest).
@@ -98,6 +99,13 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-01: 🟡 Mail Outbox: measure every body source (branch `fix/staging-mail-source-diagnostics` to `staging`, STAGING ONLY)
+
+- #635 did not work: the brief still shows 121 characters. Its fallbacks swallowed failures, so the page could not say why.
+- Each opened email now shows "Sources: record N · html N · raw N -> N decoded · raw/json N" (or the HTTP status / error), and a "Show raw" view. `/raw/json` added as a fourth source; longest still wins.
+- Not a fix. Next: read the sources line and the raw message's `Content-Type` / `Content-Transfer-Encoding`, then fix the call, the decoder, or (only if raw is also short) the sender. BUG-2026-10-01-234 stays open.
+- Test: `tests/staging-mail.test.mjs` (12 pass).
 
 ## 2026-10-01: 🔵 Mail Outbox shows the whole email (branch `fix/staging-mail-raw-body` to `staging`, STAGING ONLY)
 
