@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-01**: BUG-2026-10-01-234 corrected (measured cause: MailSlurp's sent record holds only the first line; branch `fix/staging-mail-raw-body`, STAGING ONLY); a log, so "verified" means the entry matches the code.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-235 (branch `perf/production-qr-speed-staging` → `staging`; -234 is the staging mail entry); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-234 (branch `fix/staging-mail-empty-body`, STAGING ONLY; ids up to 233 are taken on `main` / `staging`); a log, so "verified" means the newest entry matches the code.
 > **Last verified: 2026-10-01**: entry BUG-2026-10-01-232 added (branch `fix/grn-number-collision`, to staging); its text matches the code on that branch.
@@ -101,25 +102,27 @@ back to the exact sticker URL (jsQR).
 **Lesson.** A comment that says a library caches is a claim; check it before relying on it.
 ## BUG-2026-10-01-234 — Mail Outbox showed an empty frame when a sent email was opened `ui-frontend` 🟡
 
-🟡 **Fix in progress** (branch `fix/staging-mail-empty-body` → `staging`, STAGING ONLY) · Found by the owner on the first
-use of `/staging-mail` after the MailSlurp secrets were added to the Pages Preview environment.
+🟡 **Fix in progress** (branch `fix/staging-mail-raw-body` → `staging`, STAGING ONLY; earlier rounds #629 and #633) · Found
+by the owner on the first use of `/staging-mail` after the MailSlurp secrets were added to the Pages Preview environment.
 
-**What happened.** The list of sent mail loaded, and clicking a row showed an empty body.
+**What happened.** The list of sent mail loaded, and clicking a row showed an empty white frame.
 
-**Likely cause.** `getSentMail` (`src/api/lib/staging-mail.ts`) took the body only from `GET /sent/{id}`. In MailSlurp's
-own client `SentEmailDto.body` is nullable, and the client has a separate `GET /sent/{id}/html` for the content. An empty
-`body` matches what was seen. The actual MailSlurp response is UNMEASURED: the API key is a staging secret this session
-does not hold.
+**Cause (measured 2026-10-01).** MailSlurp's sent record (`GET /sent/{id}`) held a `body` of 121 characters for the
+Production Morning Brief: exactly its first line (`renderBriefHtml` in `src/api/lib/production-brief.ts`, which has a line
+break after the viewport meta). A page cut there has no `<body>`, so it renders blank. The send path posts the full HTML
+(`sendEmailViaMailSlurp`), and the copy delivered to the receiving MailSlurp inbox is complete (owner checked it in the
+MailSlurp dashboard). So only the stored sent record is short; delivery is fine.
 
-**Fix.** When the sent record has no body, read `/sent/{id}/html` (a 404 there stays empty). If the body is still empty, the
-page now says "MailSlurp returned no body for this email." instead of an empty frame, so a different cause shows itself.
+**Wrong first guess (#629).** It assumed `body` came back empty and added a `/sent/{id}/html` fallback only for an empty
+body, so the fallback never ran. #633 added "Show source" and the body length, which is what showed the 121 characters.
 
-**Test.** `tests/staging-mail.test.mjs`: the fallback is used when `body` is null, a 404 stays empty, and a full record never
-calls `/html`. Fails before the fix, passes after.
+**Fix.** `getSentMail` also reads `GET /sent/{id}/html` and the raw SMTP message (`GET /sent/{id}/raw`, decoded by
+`htmlFromRawMime`: multipart, base64, quoted-printable) and shows the longest. A failing fallback keeps the record's body.
 
-**Not fixed yet (2026-10-01, after #629).** The owner still sees an empty white frame, not the "no body" message, so a body
-arrives and renders blank. Cause UNMEASURED. Branch `fix/staging-mail-show-source` adds a "Show source" toggle and the body length
-so the next look shows what MailSlurp returns.
+**Test.** `tests/staging-mail.test.mjs`: a record cut at the first line plus a multipart quoted-printable raw message gives
+the full HTML; base64 raw decodes as utf-8; `/html` wins when it is longest; `/html` and `/raw` failing keep the body. Two
+cases fail on the previous reader. UNMEASURED: whether `/html` or `/raw` holds the full body on MailSlurp's side; check by
+opening the brief on `/staging-mail` (the length should be thousands of characters).
 
 ---
 

@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-01**: branch `fix/staging-mail-raw-body` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `fix/staging-mail-show-source` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `fix/staging-sticky-topbar` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `feat/dev22-worker-penalty` (to `staging`) added below (in progress, its entry is the newest).
@@ -97,6 +98,12 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-01: 🔵 Mail Outbox shows the whole email (branch `fix/staging-mail-raw-body` to `staging`, STAGING ONLY)
+
+- "Show source" (#633) showed the brief's body as 121 characters: its first line only. The owner opened the delivered copy in the MailSlurp dashboard and it is complete. So MailSlurp's stored sent record is short; delivery is fine. BUG-2026-10-01-234 corrected (the #629 "empty body" guess was wrong).
+- `getSentMail` now also reads `GET /sent/{id}/html` and the raw SMTP message (`GET /sent/{id}/raw`, decoded by `htmlFromRawMime`) and shows the longest.
+- Test: `tests/staging-mail.test.mjs` (11 pass; 2 fail on the old reader). UNMEASURED: which of `/html` or `/raw` is whole on MailSlurp's side; check on `/staging-mail` after deploy (length should be in the thousands).
 
 ## 2026-10-01 — 🔵 Production QR show / print load time (branch `perf/production-qr-speed-staging` → `staging`, BUG-2026-10-01-235)
 
