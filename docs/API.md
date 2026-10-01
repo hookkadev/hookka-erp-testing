@@ -169,7 +169,7 @@ offsets pointing past the end of their own file.
 | `/api/payslips` | `src/api/routes/payslips.ts` | `GET /` <sub>:603</sub><br>`GET /projected` <sub>:738</sub><br>`POST /` <sub>:1032</sub><br>`PUT /` <sub>:1497</sub><br>`GET /:id` <sub>:1570</sub> | gated |
 | `/api/production-leadtimes` | `src/api/routes/production-leadtimes.ts` | `GET /` <sub>:193</sub><br>`PUT /settings` <sub>:202</sub><br>`PUT /` <sub>:230</sub><br>`POST /recalc-all` <sub>:310</sub><br>`GET /history` <sub>:411</sub><br>`POST /schedule` <sub>:526</sub><br>`DELETE /history/:id` <sub>:602</sub> | gated |
 | `/api/production/leadtimes` | `src/api/routes/production-leadtimes.ts` | `GET /` <sub>:193</sub><br>`PUT /settings` <sub>:202</sub><br>`PUT /` <sub>:230</sub><br>`POST /recalc-all` <sub>:310</sub><br>`GET /history` <sub>:411</sub><br>`POST /schedule` <sub>:526</sub><br>`DELETE /history/:id` <sub>:602</sub> | gated |
-| `/api/production/sync-jobcards-from-bom` | `src/api/routes/jobcard-sync.ts` | `POST /` <sub>:211</sub> | gated |
+| `/api/production/sync-jobcards-from-bom` | `src/api/routes/jobcard-sync.ts` | `POST /` <sub>:213</sub> | gated |
 | `/api/promise-date` | `src/api/routes/promise-date.ts` | `GET /` <sub>:206</sub> | gated |
 | `/api/cs-agent` | `src/api/routes/cs-agent.ts` | `GET /promise` <sub>:31</sub><br>`GET /procurement/readiness` <sub>:76</sub> | gated |
 | `/api/qc-templates` | `src/api/routes/qc-templates.ts` | `GET /` <sub>:105</sub><br>`GET /:id` <sub>:149</sub><br>`POST /` <sub>:164</sub><br>`PUT /:id` <sub>:266</sub><br>`DELETE /:id` <sub>:365</sub> | gated |

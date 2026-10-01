@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-01**: accessories entry (BUG-2026-10-01-244) got item 7, the (FC) follow-up on branch `claude/main-accessories-duplicate-cards-fdxaik`.
 > **Last verified: 2026-10-01**: finance plan batch 3 (#664) closed ✅ with its prod check; batch 4 in progress (branch `feat/finance-tables-drills`).
 > **Last verified: 2026-10-01**: finance plan batch 2 (#663) closed ✅ with its prod check; batch 3 in progress (branch `feat/finance-scan-learn`).
 > **Last verified: 2026-10-01**: finance plan batch 2 in progress (branch `feat/pv-popup-form-transfer`).
@@ -86,6 +87,7 @@ Ask: on Fabric Cutting every accessory line shows twice, though the quantity is 
 5. ⚪ Not in this change: FG-level Fab Cut / Fab Sew cards add to a `wip_items` row named after the product and Packing never takes it off (prod: `BC05-MF` 8, `SB02` 9, `A02` 2). Older than this bug.
 
 6. ✅ Verified on staging: SO-2610-002 (BC05-MF) got 3 cards; control SO-2610-003 (SQUARE PILLOW) got its usual 4.
+7. 🔵 Follow-up (branch `claude/main-accessories-duplicate-cards-fdxaik` → `main`): #660 kept the wrong Fab Cut card. The L1 one is labelled with the bare product code; the right one is the auto-generated `(FC)` card with the fabric code (IT team: a BOM without WIP components is incomplete setup, not the SOP shape). New rule: auto-generated cards first, and an L1 step is skipped when that dept already has one. An L1-only BOM gets an auto-generated chain of its own L1 steps only (no Wood Cut / Foam / etc.), so Fab Cut goes through the (FC) merge. Builder and jobcard-sync both.
 
 Prod measured 2026-10-01 with read-only queries (counts above). Staging gave the same picture.
 
