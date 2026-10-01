@@ -12,7 +12,6 @@ import { useAutoUpdateOnNavigate } from "@/lib/use-version-check";
 import { DASHBOARD_ROUTE_ELEMENTS } from "@/dashboard-routes";
 import { FloatingChatButton } from "@/components/assistant/FloatingChatButton";
 import { MobileBottomNav } from "@/components/layout/mobile-bottom-nav";
-import { StagingApiLog } from "@/components/staging-api-log"; // staging-only, never PR into main
 
 // Lives inside ToastProvider so it can pop a toast when a new deploy lands.
 // Polls for a new bundle hash every 2 min + on focus. On change: offers an
@@ -201,7 +200,6 @@ export default function DashboardLayout() {
             dashboard route (state survives in-page navigation). */}
         <div className="print:hidden">
           <FloatingChatButton />
-          <StagingApiLog />
         </div>
       </div>
       <ScrollRestoration />

@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-01**: branch `feat/staging-api-log-in-topbar` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `fix/staging-mail-empty-body` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: corrected two staging-tool claims below: the today-override cache rows are not wiped nightly, and the delivery-skip notices go to sanitised `@staging.invalid` addresses in code (live UNMEASURED).
 > **Last verified: 2026-10-01**: branch `feat/staging-today-override` (staging-only today override) added below (its entry is the newest).
@@ -92,6 +93,13 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-01: 🔵 Staging: API log button moves into the topbar, tab strip hidden (branch `feat/staging-api-log-in-topbar` to `staging`, STAGING ONLY, never PR into main)
+
+- Asked: remove the workspace tab strip at the top on staging and put the API log button there. The floating bottom-left button sat over the sidebar.
+- `topbar.tsx` renders `StagingApiLog` instead of `WorkspaceTabs` when the host starts with `staging.`; every other host keeps the tabs. The drawer drops down from the button. The floating mount in `DashboardLayout.tsx` is removed.
+- Side effect: the strip is what records visited pages as tabs, so on staging no tabs build up at all.
+- Test: `tests/staging-api-log.test.mjs` pins the placement; `tests/workspace-tabs.test.mjs` still passes. UNMEASURED: not looked at in a browser; check on staging after deploy.
 
 ## 2026-10-01: 🔵 Mail Outbox opened an email to an empty frame (branch `fix/staging-mail-empty-body` to `staging`, STAGING ONLY, never PR into main)
 

@@ -1,5 +1,5 @@
-// Staging-only test tool on every dashboard page: a floating button that opens
-// a drawer with the last 50 /api calls (method, path, status, ms, and the
+// Staging-only test tool on every dashboard page: a topbar button (in place of
+// the workspace tab strip, see topbar.tsx) that opens a drawer with the last 50 /api calls (method, path, status, ms, and the
 // error body for failures), plus "Copy as bug report". The log lives in memory
 // (src/lib/staging-api-log.ts), fed by the fetch patch in api-client.ts.
 // Renders only on the staging host. Staging-only: never PR this into main.
@@ -43,20 +43,20 @@ function ApiLogDrawer() {
   };
 
   return (
-    <div className="print:hidden">
+    <div className="relative print:hidden">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-label={open ? "Close API log" : "Open API log"}
         aria-expanded={open}
         title="API log (staging)"
-        className="fixed bottom-20 left-4 z-40 flex h-10 items-center gap-1.5 rounded-full bg-amber-500 px-3 text-xs font-semibold text-white shadow-lg hover:bg-amber-600 md:bottom-6"
+        className="flex h-8 items-center gap-1.5 rounded-full bg-amber-500 px-3 text-xs font-semibold text-white hover:bg-amber-600"
       >
         <Activity className="h-4 w-4" />
         API{failures > 0 && <span className="rounded-full bg-red-600 px-1.5">{failures}</span>}
       </button>
       {open && (
-        <div className="fixed bottom-32 left-4 z-50 flex max-h-[70vh] w-[min(36rem,calc(100vw-2rem))] flex-col rounded-lg border border-stone-200 bg-white shadow-xl md:bottom-20">
+        <div className="absolute left-0 top-full z-50 mt-2 flex max-h-[70vh] w-[min(36rem,calc(100vw-2rem))] flex-col rounded-lg border border-stone-200 bg-white shadow-xl">
           <div className="flex items-center gap-2 border-b border-stone-200 px-3 py-2">
             <span className="flex-1 text-sm font-semibold">API log (last {entries.length}, staging only)</span>
             <button type="button" onClick={copyReport} className="rounded border border-stone-300 px-2 py-1 text-xs hover:bg-stone-100">
