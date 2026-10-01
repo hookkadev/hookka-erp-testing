@@ -105,7 +105,8 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
   | Where | What |
   |---|---|
   | `todayYmdMY()` callers (production completedDate, employees effectiveFrom, rd/detail, service-cases, stage-skip) | document dates written, on purpose |
-  | `src/pages/employees.tsx` future effective-from badge, `src/pages/worker/scan.tsx` today history | reads, left out (worker portal has no topbar, so no banner) |
+  | `src/pages/employees.tsx` future effective-from badge | read, left out of scope |
+  | `src/pages/worker/scan.tsx` today history | read, left out: the worker portal mounts `WorkerLayout` (`src/router.tsx`), not the topbar, so it would show no banner |
   | `src/pages/production/utils.ts` `todayISO` | production page cold-start date filter (from = to = real today) |
   | `src/lib/delivery-list-filters.ts` `startOfMonthMYT` | delivery list default month |
   | `accounting.ts` inline `new Date()` (AP/AR aging, trial-balance `asOf` default and about ten more) | aging and period defaults |
