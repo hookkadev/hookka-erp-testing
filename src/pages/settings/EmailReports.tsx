@@ -1,5 +1,5 @@
 // Settings → Email Reports (BUG-36). One card per email report: on/off, when
-// it goes out (daily / weekly / monthly at an SGT time), the PICs who receive
+// it goes out (daily / weekly / monthly at one or more SGT times), the PICs who receive
 // it, and a test send. Backed by GET/PUT /api/reports/settings
 // (kv_config['daily_report_settings']). The 15-minute cron in
 // .github/workflows/daily-reports.yml sends whatever is due.
@@ -10,14 +10,14 @@ import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { useToast } from "@/components/ui/toast";
 import { X } from "lucide-react";
-import { DEFAULT_TIMES, type Frequency } from "@/api/lib/report-settings";
+import { DEFAULT_TIMES, MAX_TIMES, type Frequency } from "@/api/lib/report-settings";
 
 type Kind = "brief" | "schedule" | "overdue" | "efficiency";
 type Setting = {
   enabled: boolean;
   recipients: string[];
   frequency: Frequency;
-  time: string;
+  times: string[];
   weekday: number;
   monthDay: number;
 };
@@ -150,7 +150,8 @@ function ReportCard({
   const [enabled, setEnabled] = useState(saved?.enabled ?? true);
   const [pics, setPics] = useState<string[]>(saved?.recipients ?? fallback);
   const [frequency, setFrequency] = useState<Frequency>(saved?.frequency ?? "daily");
-  const [time, setTime] = useState(saved?.time ?? DEFAULT_TIMES[report.kind]);
+  const [times, setTimes] = useState<string[]>(saved?.times ?? [DEFAULT_TIMES[report.kind]]);
+  const [newTime, setNewTime] = useState("");
   const [weekday, setWeekday] = useState(saved?.weekday ?? 1);
   const [monthDay, setMonthDay] = useState(saved?.monthDay ?? 1);
   const [draft, setDraft] = useState("");
@@ -161,7 +162,7 @@ function ReportCard({
     saved.enabled !== enabled ||
     saved.recipients.join(",") !== pics.join(",") ||
     saved.frequency !== frequency ||
-    saved.time !== time ||
+    saved.times.join(",") !== times.join(",") ||
     saved.weekday !== weekday ||
     saved.monthDay !== monthDay;
 
@@ -178,6 +179,12 @@ function ReportCard({
     setDraft("");
   }
 
+  function addTime() {
+    if (!newTime || times.includes(newTime)) return;
+    setTimes([...times, newTime].sort());
+    setNewTime("");
+  }
+
   async function save() {
     setBusy("save");
     try {
@@ -185,7 +192,7 @@ function ReportCard({
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          [report.kind]: { enabled, recipients: pics, frequency, time, weekday, monthDay },
+          [report.kind]: { enabled, recipients: pics, frequency, times, weekday, monthDay },
         }),
       });
       const j = (await r.json().catch(() => ({}))) as ApiResp;
@@ -282,15 +289,44 @@ function ReportCard({
             </select>
           )}
           <span className="text-[#6B7280]">at</span>
-          <input
-            type="time"
-            aria-label="Time"
-            required
-            step={900}
-            value={time}
-            onChange={(e) => e.target.value && setTime(e.target.value)}
-            className="h-9 rounded-md border border-[#E2DDD8] bg-white px-2 text-sm text-[#1F1D1B] focus:outline-none focus:ring-2 focus:ring-[#6B5C32]"
-          />
+          {times.map((t) => (
+            <span
+              key={t}
+              className="inline-flex items-center gap-1 rounded-full bg-[#F0ECE9] px-3 py-1 text-sm text-[#1F1D1B]"
+            >
+              {t}
+              {times.length > 1 && (
+                <button
+                  type="button"
+                  aria-label={`Remove ${t}`}
+                  onClick={() => setTimes(times.filter((x) => x !== t))}
+                  className="cursor-pointer text-[#6B7280] hover:text-[#9A3A2D]"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </span>
+          ))}
+          {times.length < MAX_TIMES && (
+            <>
+              <input
+                type="time"
+                aria-label="Add a send time"
+                step={900}
+                value={newTime}
+                onChange={(e) => setNewTime(e.target.value)}
+                className="h-9 rounded-md border border-[#E2DDD8] bg-white px-2 text-sm text-[#1F1D1B] focus:outline-none focus:ring-2 focus:ring-[#6B5C32]"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                disabled={!newTime || times.includes(newTime)}
+                onClick={addTime}
+              >
+                Add time
+              </Button>
+            </>
+          )}
         </div>
         {!saved && (
           <p className="text-xs text-[#8A7F73]">

@@ -58,7 +58,7 @@ import { productionRevenueByDay } from "../lib/production-revenue";
 import {
   REPORT_KINDS,
   invalidEmailsIn,
-  isDue,
+  dueSlot,
   loadLastSent,
   loadReportSettings,
   normalizeReportSettings,
@@ -900,7 +900,7 @@ async function sendScheduled(c: Parameters<typeof dispatchReport>[0], kind: Repo
 
 // POST /api/internal/reports/due-trigger — the 15-minute cron
 // (.github/workflows/daily-reports.yml). Sends every report whose schedule on
-// Settings → Email Reports has come due today and has not gone out yet.
+// Settings → Email Reports has a send time that has come due and not gone out.
 internal.post("/due-trigger", async (c) => {
   const authDenied = await authCron(c);
   if (authDenied) return authDenied;
@@ -914,10 +914,11 @@ internal.post("/due-trigger", async (c) => {
   const results: Partial<Record<ReportKind, unknown>> = {};
   for (const kind of REPORT_KINDS) {
     if (settings[kind]?.enabled === false) continue;
-    if (!isDue(kind, settings[kind], now, lastSent[kind])) continue;
+    const slot = dueSlot(kind, settings[kind], now, lastSent[kind]);
+    if (!slot) continue;
     // Marked before sending: a failed send is not retried, rather than risk
     // emailing the same report twice.
-    lastSent[kind] = ymdInSgt(now);
+    lastSent[kind] = slot;
     await saveLastSent(c.var.DB, lastSent);
     results[kind] = await sendScheduled(c, kind);
   }
@@ -930,7 +931,7 @@ internal.post("/due-trigger", async (c) => {
 //        `fallback` is who an UNCONFIGURED report goes to today, so the page
 //        can prefill instead of showing an empty list.
 //   PUT  /api/reports/settings  body = { brief?: {enabled, recipients[],
-//        frequency, time, weekday, monthDay}, ... }
+//        frequency, times[], weekday, monthDay}, ... }
 // SUPER_ADMIN only: the lists are staff emails.
 // ---------------------------------------------------------------------------
 app.get("/settings", async (c) => {
