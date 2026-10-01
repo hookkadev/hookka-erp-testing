@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-01**: branch `fix/grn-number-collision` added below (its entry is the newest).
 > **Last verified: 2026-09-30**: branch `chore/sync-staging-from-main-0930`, staging<-main merge added below (its entry is the newest).
 > **Last verified: 2026-09-30**: #617 entry item 4 — owner re-posted the opening; creditor Self-check card green (measured).
 > **Last verified: 2026-09-30**: #617 (BUG-2026-09-30-229/-230, Self-check reconciliations + cancelled opening seeds) closed ✅ below with its prod check.
@@ -85,6 +86,12 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-01 — 🔵 GRN number collision returns a retry, not a 500 (branch `fix/grn-number-collision` → `staging`)
+
+- Asked: fix #5 from the T-006 test findings. Two GRNs created in the same instant: the second failed with `500 duplicate key ... ux_grns_grn_number` (measured on staging 2026-09-30).
+- `POST /api/grn` now retries with the next number on a collision (up to 5), then answers 409 with a plain message. BUG-2026-10-01-232, C27 row 5.
+- Not yet verified on staging. After deploy: 5 rounds, each a fresh 10-unit PO with two GRN creates of 4 fired at once (both fit, so only the number can collide). Pass = every response 201 with two different consecutive GRN numbers, no 500 and no "took this GRN number" 409.
 
 ## 2026-09-30 — 🔵 Sync `staging` from `main` (branch `chore/sync-staging-from-main-0930` → `staging`)
 
