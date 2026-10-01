@@ -45,6 +45,7 @@ export default function StagingMail() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [detailError, setDetailError] = useState("");
+  const [showSource, setShowSource] = useState(false);
 
   useEffect(() => {
     if (!onStaging) return;
@@ -59,6 +60,7 @@ export default function StagingMail() {
   const toggle = (id: string) => {
     setDetail(null);
     setDetailError("");
+    setShowSource(false);
     setOpenId(openId === id ? null : id);
   };
 
@@ -155,7 +157,25 @@ export default function StagingMail() {
                                 ))}
                               </ul>
                             )}
-                            {detail.body.trim() ? (
+                            {detail.body.trim() && (
+                              <div className="flex items-center gap-3 text-xs text-[#6B7280]">
+                                <span>
+                                  {detail.isHtml ? "HTML" : "Text"}, {detail.body.length.toLocaleString()} characters
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setShowSource((v) => !v)}
+                                  className="text-[#6B5C32] hover:underline"
+                                >
+                                  {showSource ? "Show rendered" : "Show source"}
+                                </button>
+                              </div>
+                            )}
+                            {detail.body.trim() && showSource ? (
+                              <pre className="max-h-[600px] overflow-auto whitespace-pre-wrap break-all rounded border border-[#E5E1DC] bg-[#FAF9F7] p-3 text-xs">
+                                {detail.body}
+                              </pre>
+                            ) : detail.body.trim() ? (
                               <iframe
                                 title={`Body of ${detail.subject}`}
                                 sandbox=""
