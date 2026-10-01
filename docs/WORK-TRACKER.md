@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-01**: branch `fix/bom-editor-layered` (BUG-2026-10-01-247, Edit BOM tree back to layered colour cards) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: OCB attachments + New AP Payment popup (#668) closed ✅ with its prod check.
 > **Last verified: 2026-10-01**: OCB attachments + New AP Payment popup in progress (branch `feat/ocb-attachments-ap-popup`).
 > **Last verified: 2026-10-01**: accessories entry (BUG-2026-10-01-244) got item 7, the (FC) follow-up on branch `claude/main-accessories-duplicate-cards-fdxaik`.
@@ -141,6 +142,13 @@ Ask: staging, TEST-001: after clock-out `/api/worker/today` had the punch-out an
 3. ⚪ Owner decision: turn off Hyperdrive caching on both configs (`wrangler hyperdrive update <id> --caching-disabled`). The same cached-rebuild risk is in `lib/snapshot.ts` and the other snapshot helpers; not changed here.
 4. ⚪ To check on staging after deploy: clock in, open My Pay, clock out, open My Pay within a minute. The day must show the clock-out and the department hours.
 
+
+## 2026-10-01 — 🔵 Edit BOM: the WIP tree back to layered colour cards (owner「A 然后我整个UI 又要像B那种 … 有颜色这样的 渐变」)(branch `fix/bom-editor-layered` → `main`, BUG-2026-10-01-247)
+
+Ask: the Edit BOM WIP tab used to look layered like the BOM Structure view; since 2026-08-04 it is a flat list of identical "{DIVAN_HEIGHT} Divan- {SI…" rows and hard to read. Keep the two-pane editor (option A) but give it the colour / nesting / gradient look of the old one (option B).
+
+1. 🔵 Left tree = nested gradient cards in the BOM Structure palette (L2 blue, L3 purple, L4 orange, L5 green), L-badge, resolved name ("8" Divan- 6FT Foam"), qty, minutes, process pills. Right pane header in the selected node's level colour. Dialog widened to 1360px; stacks on phone width. tsc strict + eslint exit 0. Visual check on localhost (prod API) pending the owner's login.
+2. ⚪ PR → CI → merge → prod check: open Edit BOM on 1003(A)(HF)(W)-(K), WIP tab, desktop + phone width.
 
 ## 2026-09-30 — 🔵 DEV-26 Pillow sticker for Fab Sew (Siti, High) (branch `fix/pillow-fab-sew-sticker` → `main`, BUG-2026-09-30-231)
 
