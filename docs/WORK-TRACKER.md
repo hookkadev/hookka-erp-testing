@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-01**: finance plan batch 3 (#664) closed ✅ with its prod check; batch 4 in progress (branch `feat/finance-tables-drills`).
 > **Last verified: 2026-10-01**: finance plan batch 2 (#663) closed ✅ with its prod check; batch 3 in progress (branch `feat/finance-scan-learn`).
 > **Last verified: 2026-10-01**: finance plan batch 2 in progress (branch `feat/pv-popup-form-transfer`).
 > **Last verified: 2026-10-01**: finance plan batch 1 (#662) closed ✅ with its prod check.
@@ -200,7 +201,7 @@ Four batches, each shipped and prod-verified before the next:
    opens nothing; double click on a PV, an SP and an FT row shows header, lines, who/when, ledger entry and bank state
    (matched lines name the statement line); New Payment Voucher opens the popup, Transfer swaps the fields (receiving
    account list leaves out Paid from), Cancel closes it; sidebar has no Fund Transfer; `?tab=transfer` still loads.
-3. 🔵 (branch `feat/finance-scan-learn`) Scans (finance only — the shared OCR engine and party-alias memory untouched): a new payee is not skipped (suggestions
+3. ✅ (#664 2717a176, prod-verified; branch `feat/finance-scan-learn`) Scans (finance only — the shared OCR engine and party-alias memory untouched): a new payee is not skipped (suggestions
    from similar descriptions, marked); account learned per line from description (approved/posted vouchers and bills);
    voucher date defaults to today, bill date to the document date; SST as its own line; duplicate check on the supplier
    bill no.; one PDF with several bills → one record each; batch shows a review table, then "create all"; several
@@ -212,7 +213,14 @@ Four batches, each shipped and prod-verified before the next:
    further receipts to the same voucher and flags a known bill no.; creditor-bill form learns per line and never counts
    the SST twice (also closes a latent double count when the printed lines already carried the tax). Guards
    `tests/scan-account-learn.test.mjs`, `tests/finance-scan-learn-ui.test.mjs`.
-4. ⚪ Finance tables: no wrapping, drag a column edge (only that column changes, the rest shift), widths remembered;
+   Prod (read-only, a made-up two-bill PDF, nothing created): Scan Bills gave one row per bill ("bill 1 of 2"), voucher
+   date today, bill dates from the bills, SST as its own 706-0000 line, a new payee's account marked Suggested, the bill
+   with no similar history flagged "pick an account", Create all (2) offered; the voucher form put both receipts into one
+   voucher (3 lines, bill nos. joined, "Add another receipt"); a typed bill no. already on an other-creditor bill showed
+   "Already recorded". Memory measured: approved vouchers and active bills give the lines to learn from; bill references
+   and purchase-invoice supplier nos. give the duplicates. Follow-up in batch 4: weight rarer shared words higher (the
+   suggestion matched a place name before the word "transport"; same account, weaker reason shown).
+4. 🔵 (branch `feat/finance-tables-drills`) Finance tables: no wrapping, drag a column edge (only that column changes, the rest shift), widths remembered;
    reports resize the description column only; monthly reports stop stretching to full width. Monthly P&L and Cash
    Flow drills in the monthly layout: each ledger line under the row with its amount in its month column, counterparty
    name kept, last row "N entries · open in GL".
