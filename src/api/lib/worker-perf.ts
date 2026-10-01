@@ -275,6 +275,51 @@ function isFresh(
   return builtMs >= currentMs;
 }
 
+// ─────────────── 3a. reads that Hyperdrive cannot serve from cache ───────────
+
+// BUG-2026-10-01-245. Hyperdrive caches plain SELECTs at the proxy and never
+// invalidates them on a write. Both halves of this snapshot were exposed:
+//   • the freshness probe is the SAME parameterless SQL on every call, so a
+//     cached copy hides a just-made write (the row count it carries included);
+//   • when the probe does see the write, the rebuild's own reads can still come
+//     from cache, and the stale result is stored under the NEW signature —
+//     served as fresh until something else touches a source table.
+// On staging (few writes) that pinned a worker's /history day at clock-in state
+// for hours. `batch` runs inside a transaction, which Hyperdrive does not cache
+// (same mechanism as freshAll in worker-penalties.ts). `run` and `batch` pass
+// through. A DB without `batch` (tests, old stubs) is returned unchanged.
+type AnyStmt = {
+  bind(...args: unknown[]): AnyStmt;
+  all<T = unknown>(): Promise<{ results?: T[] }>;
+  first<T = unknown>(): Promise<T | null>;
+  run(): Promise<unknown>;
+};
+
+export function freshReads(db: DbLike): DbLike {
+  const raw = db as unknown as {
+    prepare(sql: string): AnyStmt;
+    batch?: (stmts: unknown[]) => Promise<Array<{ results?: unknown[] }>>;
+  };
+  if (typeof raw.batch !== "function") return db;
+  const batch = raw.batch.bind(raw);
+  const wrap = (stmt: AnyStmt): AnyStmt => ({
+    bind: (...args: unknown[]) => wrap(stmt.bind(...args)),
+    all: async <T>() => {
+      const [res] = await batch([stmt]);
+      return { results: (res?.results ?? []) as T[] };
+    },
+    first: async <T>() => {
+      const [res] = await batch([stmt]);
+      return ((res?.results ?? [])[0] ?? null) as T | null;
+    },
+    run: () => stmt.run(),
+  });
+  return {
+    prepare: (sql: string) => wrap(raw.prepare(sql)),
+    batch,
+  } as unknown as DbLike;
+}
+
 /**
  * Cache-aside read-through for a worker-portal payload.
  *
@@ -294,17 +339,19 @@ export async function withWorkerSnapshot<T extends Record<string, unknown>>(
     orgId: string;
     cacheKey: string;
   },
-  computeFresh: () => Promise<T>,
+  /** Gets the DB to read with: its reads bypass Hyperdrive's cache. */
+  computeFresh: (db: DbLike) => Promise<T>,
 ): Promise<T> {
+  const fresh = freshReads(db);
   const [snap, sig] = await Promise.all([
-    readWorkerSnapshot(db, opts.tableName, opts.orgId, opts.cacheKey),
-    getSourceSignature(db as never, opts.sourceTables),
+    readWorkerSnapshot(fresh, opts.tableName, opts.orgId, opts.cacheKey),
+    getSourceSignature(fresh as never, opts.sourceTables),
   ]);
   const currentMax = sig.maxUpdatedAt;
   if (isFresh(snap, currentMax, sig.rowCount) && snap) {
     return snap.data as T;
   }
-  const data = await computeFresh();
+  const data = await computeFresh(fresh);
   try {
     await writeWorkerSnapshot(
       db,

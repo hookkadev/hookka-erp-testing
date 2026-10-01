@@ -1,5 +1,6 @@
 # Recurring bug classes — the index that makes P5 executable
 
+> **Last verified: 2026-10-01**: branch `fix/worker-history-snapshot-stale` **adds C29 — a read right after a write, served from Hyperdrive's cache** (BUG-2026-10-01-245). Nothing else re-checked.
 > **Last verified: 2026-10-01**: branch `fix/dev08-accessory-so-ready` **adds C28 — UPHOLSTERY cards as the proxy for "made"** (BUG-2026-10-01-241, DEV-08). Nothing else re-checked.
 > **Last verified: 2026-09-25**: restamped on branch `feat/dashboard-kpi-no-icons` (PR #524): C15 gains row 5, the Worker Efficiency card that printed worker ids after a refused `/api/workers` read (BUG-2026-09-25-194). Nothing else re-checked.
 > **Last verified: 2026-09-25** — restamped on branch `feat/ocr-dashboard-tab`: C23 gains the OCR-tab row (BUG-2026-09-25-192, `readQueueRow` dual-key fix); no other class re-checked.
@@ -1741,3 +1742,24 @@ order-level cascades use `siblingUphGateDone` in `production-orders/_helpers.ts`
 Test: `tests/so-ready-accessory-gate.test.mjs` (no `mine.length === 0) return true` left in
 `_helpers.ts`; every cascade goes through `siblingUphGateDone`).
 
+---
+
+## C29 — a read right after a write, served from Hyperdrive's cache
+
+**Shape.** A plain SELECT that runs soon after a write returns the pre-write rows. Hyperdrive caches non-mutating queries at the proxy (60 s by default) and never invalidates them on a write. Reads inside a transaction, or that call `NOW()`, are not cached.
+
+**Why it keeps happening.** Local dev and tests have no Hyperdrive, so the code is right everywhere it is tested. On prod a busy table hides it, because the next write moves things along. On staging, with few writes, it sticks.
+
+**The rule.** A read that decides money, a state change, or what a cache stores reads through a transaction: `freshAll` / `freshFirst` (`worker-penalties.ts`) or `freshReads` (`worker-perf.ts`). For a snapshot, the probe AND the rebuild must both be fresh: a fresh probe with cached rebuild reads stores old rows under a new signature. The cheaper fix for everything at once is `--caching-disabled` on the Hyperdrive configs, which is the owner's decision.
+
+**Instances**
+
+| # | where | state |
+|---|---|---|
+| 1 | `/bulk-patch` PIC readback (`production-orders.ts`) | ✅ 2026-06-26 (BUG-2026-06-26-001), batch re-read |
+| 2 | BOM list after a save (`bom.ts`) | ✅ `NOW()` CTE |
+| 3 | worker penalties + payroll status reads | ✅ on `staging` (BUG-2026-10-01-236), `freshAll` |
+| 4 | worker `/history` + `/payslips` snapshot (`withWorkerSnapshot`) | ✅ 2026-10-01 on branch `fix/worker-history-snapshot-stale` (BUG-2026-10-01-245), not deployed |
+| 5 | `lib/snapshot.ts`, dashboard / delivery / invoice snapshots: probe and rebuild are plain reads | ⬜ open; needs `freshReads` on both, or the infra switch |
+
+Test: `tests/worker-history-snapshot-fresh.test.mjs` (row 4).

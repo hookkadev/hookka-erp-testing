@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-01**: branch `fix/worker-history-snapshot-stale` (BUG-2026-10-01-245) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `fix/accessory-l1-only-job-cards-main` (BUG-2026-10-01-244, staging #656) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: finance improvement plan logged below as ⚪ queued (owner confirmed every point; start on his word).
 > **Last verified: 2026-10-01**: branch `fix/dev08-accessory-so-ready` (DEV-08) added below (its entry is the newest).
@@ -119,6 +120,16 @@ Ask (DEV-08): sofa and its accessories (pillow) must be scheduled together, show
 3. 🟡 Parked, needs reporter: align SOFA + ACCESSORY sewing days for the same SO (`runSewing` schedules each lane independently). Violet has not answered which schedule screen she means.
 4. 🟡 Parked: per-SO sibling status on Production / Planning rows. The SO detail "Linked Production Orders" table already shows per-PO status.
 5. Not a gap: armrest is a sofa WIP (`SOFA_ARMREST`, mig 0027), not a separate SKU, so it already rides on the sofa PO.
+
+
+## 2026-10-01 — 🔵 Worker My Pay / home showed the clock-in state after clock-out (branch `fix/worker-history-snapshot-stale` → `main`, BUG-2026-10-01-245)
+
+Ask: staging, TEST-001: after clock-out `/api/worker/today` had the punch-out and the 9h row, `/api/worker/history` for the same day still had clockOut null, 0 minutes, no department rows. Confirm the cause, fix where all writers route through, regression test, log it.
+
+1. 🔵 Cause (inferred from code and BUG-2026-10-01-236, not reproduced): the snapshot's freshness probe and its rebuild reads are plain SELECTs that Hyperdrive caches. The insert did move the row count, so missing `updated_at` alone does not explain this case. Fix: `withWorkerSnapshot` reads through `freshReads` (transactions). Verified locally: tsc strict exit 0, `npm test` 0 fail, new test fails 3 of 4 on the old code. PR to `main`, not deployed.
+2. 🔵 Second defect, the one in the ask: worker.ts's six `UPDATE attendance_records` never bumped `updated_at` (attendance.ts and the Working Hours grid do; no trigger exists). A punch-out that adds no row was invisible to the probe. All six bump it now; a class test scans `src/api` for any UPDATE of the two tables that does not.
+3. ⚪ Owner decision: turn off Hyperdrive caching on both configs (`wrangler hyperdrive update <id> --caching-disabled`). The same cached-rebuild risk is in `lib/snapshot.ts` and the other snapshot helpers; not changed here.
+4. ⚪ To check on staging after deploy: clock in, open My Pay, clock out, open My Pay within a minute. The day must show the clock-out and the department hours.
 
 
 ## 2026-09-30 — 🔵 DEV-26 Pillow sticker for Fab Sew (Siti, High) (branch `fix/pillow-fab-sew-sticker` → `main`, BUG-2026-09-30-231)

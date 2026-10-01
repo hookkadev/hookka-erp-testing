@@ -1,5 +1,7 @@
 # Employees & Payroll — Module Guide
 
+> **Last verified: 2026-10-01** (branch `fix/worker-history-snapshot-stale`): `POST /clock` / `POST /dept-scan` anchors re-derived after worker.ts grew 5 lines (BUG-2026-10-01-245). Nothing else re-checked.
+
 > **Last verified: 2026-10-01** (branch `feat/dev22-worker-penalty`) — Worker Penalty (DEV-22) added to entry points, data model, core flows and gotchas, checked against `src/api/lib/worker-penalties.ts`, `src/api/routes/worker-penalties.ts`, `src/api/routes/payslips.ts`. Nothing else re-checked.
 
 > **Last verified: 2026-08-14** (branch `docs/docs-vs-code-audit`) — corrected against the
@@ -79,7 +81,7 @@ Owns the whole workforce lifecycle: the **employee master** (workers + effective
 | `payrollPeriodForApproval` / `findPenaltyDrift` / `postPenaltiesForPeriod` | `src/api/lib/worker-penalties.ts:303 / 449 / 502` | Penalty payroll month, approval drift guard, posting on payroll approval |
 | `POST /login` / `resolveWorkerToken` | `src/api/routes/worker-auth.ts:124 / 337` | PIN login + token resolution |
 | `getWorker` (token gate) | `src/api/routes/worker.ts:160` | X-Worker-Token → ACTIVE worker or 401/403 |
-| `POST /clock` / `POST /dept-scan` | `src/api/routes/worker.ts:1067 / 1324` | Clock in/out + department scan |
+| `POST /clock` / `POST /dept-scan` | `src/api/routes/worker.ts:1078 / 1335` | Clock in/out + department scan |
 | `GET /salary/effective` | `src/api/routes/workers.ts:1242` | Day-weighted salary per period |
 | `POST /auto-from-punch` / `settle-period` | `src/api/routes/payroll-hour-deductions.ts:149 / 211` | Short-hour docks |
 
