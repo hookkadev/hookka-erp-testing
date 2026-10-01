@@ -61,6 +61,7 @@ import {
   blockingDepartments,
   type SequenceLockRefusal,
 } from "@/lib/sequence-unlock";
+import { DeptDayCard, type DeptDay } from "./dept-day-card";
 
 // Loose passthrough envelopes — runtime validation at boundaries while
 // keeping the page's local Order/JobCard types as the typed view of `data`.
@@ -254,7 +255,13 @@ type Result =
   // Department QR (owner 2026-06-11): "I am now working in <dept>" — the
   // day's hours re-route to this department (and, for per-line QRs, this
   // Sofa/Bedframe line) from `time` until the next scan or punch-out.
-  | { kind: "deptscan"; deptName: string; category: string | null; time: string }
+  | {
+      kind: "deptscan";
+      deptName: string;
+      category: string | null;
+      time: string;
+      deptDay?: DeptDay | null;
+    }
   // Owner 2026-06-26 unified scan model: the scanned sticker belongs to a
   // DIFFERENT department than the worker's CURRENT one (latest dept-QR scan /
   // punch) — block it and show the "wrong department" popup instead of letting
@@ -987,7 +994,12 @@ export default function WorkerScanPage() {
           const j = (await res.json().catch(() => ({}))) as {
             success?: boolean;
             error?: string;
-            data?: { departmentName?: string; category?: string | null; time?: string };
+            data?: {
+              departmentName?: string;
+              category?: string | null;
+              time?: string;
+              deptDay?: DeptDay | null;
+            };
           };
           if (j?.success && j.data) {
             setResult({
@@ -995,6 +1007,7 @@ export default function WorkerScanPage() {
               deptName: j.data.departmentName || code,
               category: j.data.category ?? null,
               time: j.data.time || "",
+              deptDay: j.data.deptDay ?? null,
             });
           } else {
             setResult({
@@ -2852,6 +2865,7 @@ export default function WorkerScanPage() {
           </div>
         </div>
       )}
+      {result.kind === "deptscan" && <DeptDayCard day={result.deptDay} t={t} />}
 
       {result.kind === "error" && (
         <div className="bg-[#FDF6F4] border border-[#F5C5BF] rounded-xl p-4 text-[#9A3A2D] flex items-start gap-2">

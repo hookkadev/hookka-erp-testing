@@ -37,6 +37,7 @@ import { AnnouncementCategoryBadge } from "@/components/announcement-category-ba
 import { deriveWipName } from "@/lib/wip-name";
 import { compressImage } from "@/lib/image-compress";
 import { z } from "zod";
+import { DeptDayCard, type DeptDay } from "./dept-day-card";
 
 // workerFetch handles auth + 401 redirect, but we still want runtime-typed
 // JSON parsing on top — cast through a passthrough envelope schema.
@@ -66,6 +67,8 @@ type TodayData = {
   doneToday: number;
   doneByDept: Record<string, number>;
   earningsSen: number;
+  /** DEV-31 — absent on an older cached payload. */
+  deptDay?: DeptDay | null;
 };
 
 type DailyRow = {
@@ -1133,6 +1136,7 @@ export default function WorkerHomePage() {
                 </span>
               </button>
             )}
+            <DeptDayCard day={data.deptDay} t={t} />
           </>
         )}
         {clockErr && (
