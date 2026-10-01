@@ -63,9 +63,18 @@ import {
   ensureAdvanceTables,
   loadPeriodAdvances,
   markAdvancesSettled,
-  netPayAfterAdvanceSen,
   totalAdvanceSen,
 } from "../lib/employee-advances";
+// DEV-22 worker penalties — approved ones come off net pay in their payroll
+// month, after statutory, exactly like advances. See ../lib/worker-penalties.ts.
+import {
+  ensureWorkerPenaltyTables,
+  loadPeriodPenaltySen,
+  linkPenaltyLinesToPayslip,
+  netPayAfterAdvanceAndPenaltySen,
+  findPenaltyDrift,
+  postPenaltiesForPeriod,
+} from "../lib/worker-penalties";
 
 // Data-entry grace before an unrecorded working day is treated as a confirmed
 // absence. Spec (Wei Siang, 2026-06-02): the office keys Working Hours a few
@@ -165,6 +174,10 @@ type PayslipRow = {
   // deleting an advance later can never move an approved net pay.
   advanceDeductionSen?: number | null;
   advance_deduction_sen?: number | null;
+  // Approved worker penalties recovered in this payslip (DEV-22). Snapshotted
+  // for the same reason as the advance column.
+  penaltyDeductionSen?: number | null;
+  penalty_deduction_sen?: number | null;
   bankAccount: string;
   paymentMethod: string | null;
   bankName: string | null;
@@ -216,6 +229,8 @@ function rowToPayslip(r: PayslipRow) {
     // hands the raw column through. Absent (legacy row) reads as 0.
     advanceDeductionSen:
       Number(r.advanceDeductionSen ?? r.advance_deduction_sen ?? 0) || 0,
+    penaltyDeductionSen:
+      Number(r.penaltyDeductionSen ?? r.penalty_deduction_sen ?? 0) || 0,
     bankAccount: r.bankAccount,
     paymentMethod: normalizePaymentMethod(r.paymentMethod),
     bankName: r.bankName ?? "",
@@ -591,6 +606,7 @@ app.get("/", async (c) => {
   // the advance feature has no advance_deduction_sen and every row would read
   // back a silent 0 that looks like "no advance taken".
   await ensureAdvanceTables(c.var.DB);
+  await ensureWorkerPenaltyTables(c.var.DB);
   // RBAC gate (P3.3-followup) — payslips:read.
   const denied = await requirePermission(c, "payslips", "read");
   if (denied) return denied;
@@ -819,6 +835,8 @@ app.get("/projected", async (c) => {
   // the month-end generation uses, so the in-progress estimate and the
   // finalised payslip can never disagree about what is still owed.
   const advancesByWorker = await loadPeriodAdvances(c.var.DB, period);
+  // Approved penalties for the month — same helper as generation.
+  const penaltySenByWorker = await loadPeriodPenaltySen(c.var.DB, period);
 
   // Month-cumulative efficiency per worker (job_cards production minutes ÷
   // production-dept working hours) — drives the efficiency allowance below.
@@ -944,6 +962,7 @@ app.get("/projected", async (c) => {
     // Advances are NOT added to totalDeductions — that figure is the statutory
     // total the payslip and every YTD reads. They come off after it.
     const advanceSen = totalAdvanceSen(advancesByWorker.get(worker.id));
+    const penaltySen = penaltySenByWorker.get(worker.id) ?? 0;
     const hourlyRate =
       worker.workingHoursPerDay > 0
         ? Math.round(labor.payrollDailyRateSen / worker.workingHoursPerDay)
@@ -982,8 +1001,9 @@ app.get("/projected", async (c) => {
       pcb: stat.pcb,
       pcbStatus: stat.pcbStatus,
       totalDeductions,
-      netPay: netPayAfterAdvanceSen(grossPay, totalDeductions, advanceSen),
+      netPay: netPayAfterAdvanceAndPenaltySen(grossPay, totalDeductions, advanceSen, penaltySen),
       advanceDeductionSen: advanceSen,
+      penaltyDeductionSen: penaltySen,
       bankAccount: worker.bankAccount ?? "",
       paymentMethod: normalizePaymentMethod(worker.paymentMethod),
       bankName: worker.bankName ?? "",
@@ -1019,6 +1039,7 @@ app.post("/", async (c) => {
   // binds that column, so the DDL has to have landed first.
   await ensurePaymentColumns(c.var.DB);
   await ensureAdvanceTables(c.var.DB);
+  await ensureWorkerPenaltyTables(c.var.DB);
   // Same reason: the INSERT below binds payslips.pcb_status, and the worker
   // SELECT reads the three tax-profile columns. Migration 0229 is inert until
   // this runs.
@@ -1206,6 +1227,7 @@ app.post("/", async (c) => {
     // below. Same helper as /projected so the finalised figure equals the
     // estimate the screen was showing a moment earlier.
     const advancesByWorker = await loadPeriodAdvances(c.var.DB, period);
+    const penaltySenByWorker = await loadPeriodPenaltySen(c.var.DB, period);
 
     // Month-cumulative efficiency per worker — the basis for the efficiency
     // allowance written into each generated payslip's allowancesSen.
@@ -1335,7 +1357,10 @@ app.post("/", async (c) => {
       // over. Snapshotted onto the row so a later edit to the advance cannot
       // move an approved net pay.
       const advanceSen = totalAdvanceSen(advancesByWorker.get(worker.id));
-      const netPay = netPayAfterAdvanceSen(grossPay, totalDeductions, advanceSen);
+      // Approved penalties (DEV-22) — outside totalDeductions for the same
+      // reason as the advance, and snapshotted the same way.
+      const penaltySen = penaltySenByWorker.get(worker.id) ?? 0;
+      const netPay = netPayAfterAdvanceAndPenaltySen(grossPay, totalDeductions, advanceSen, penaltySen);
       // Where the money actually goes. This used to be
       //   `CIMB-${empNo}XXXX`
       // — a placeholder MANUFACTURED from the employee number, printed on every
@@ -1371,7 +1396,7 @@ app.post("/", async (c) => {
            allowancesSen, grossPaySen, epfEmployeeSen, epfEmployerSen,
            socsoEmployeeSen, socsoEmployerSen, eisEmployeeSen, eisEmployerSen, pcbSen,
            pcb_status,
-           totalDeductionsSen, netPaySen, advance_deduction_sen,
+           totalDeductionsSen, netPaySen, advance_deduction_sen, penalty_deduction_sen,
            bankAccount, paymentMethod, bankName, status
          ) VALUES (
            ?, ?, ?, ?, ?, ?,
@@ -1381,7 +1406,7 @@ app.post("/", async (c) => {
            ?, ?, ?, ?,
            ?, ?, ?, ?, ?,
            ?,
-           ?, ?, ?,
+           ?, ?, ?, ?,
            ?, ?, ?, 'DRAFT'
          )`,
       )
@@ -1419,6 +1444,7 @@ app.post("/", async (c) => {
           totalDeductions,
           netPay,
           advanceSen,
+          penaltySen,
           bankAccount,
           paymentMethod,
           bankName,
@@ -1431,6 +1457,11 @@ app.post("/", async (c) => {
         .bind(id)
         .first<PayslipRow>();
       if (inserted) rows.push(inserted);
+      // Production Order -> Penalty -> Worker -> Payslip: the line now names
+      // the slip that carries its deduction.
+      if (inserted && penaltySen > 0) {
+        await linkPenaltyLinesToPayslip(c.var.DB, period, worker.id, id);
+      }
     }
 
     const data = rows.map(rowToPayslip);
@@ -1476,6 +1507,27 @@ app.put("/", async (c) => {
         400,
       );
     }
+    // A month cannot be signed off while its stored payslips disagree with the
+    // penalties approved for it (one approved after the drafts were generated,
+    // or revoked since). Approving anyway would post a deduction no payslip
+    // took. Regenerate first. Refused BEFORE the status flip, as a 409 with the
+    // names, not swallowed by the catch below.
+    if (status !== "DRAFT") {
+      await ensureWorkerPenaltyTables(c.var.DB);
+      const drift = await findPenaltyDrift(c.var.DB, period);
+      if (drift.length > 0) {
+        const names = drift.slice(0, 5).map((d) => d.employeeName || d.workerId).join(", ");
+        const more = drift.length > 5 ? ` and ${drift.length - 5} more` : "";
+        return c.json(
+          {
+            success: false,
+            error: `Worker penalties changed since these payslips were generated (${names}${more}). Regenerate the period before approving.`,
+            penaltyDrift: drift,
+          },
+          409,
+        );
+      }
+    }
     const res = await c.var.DB.prepare(
       `UPDATE payslips
          SET status = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
@@ -1497,7 +1549,16 @@ app.put("/", async (c) => {
       // successful approval failed. Swallow it here instead.
       console.warn("[payslips] advance settle skipped:", e);
     }
-    return c.json({ success: true, updated: res.meta?.changes ?? 0 });
+    // Same for penalties: approving posts the month's lines against their
+    // payslips (a worker with no slip rolls to next month); back to DRAFT
+    // un-posts them. Best-effort for the same reason as above.
+    let penalties: { posted: number; rolled: number } | undefined;
+    try {
+      penalties = await postPenaltiesForPeriod(c.var.DB, period, status !== "DRAFT");
+    } catch (e) {
+      console.warn("[payslips] penalty posting skipped:", e);
+    }
+    return c.json({ success: true, updated: res.meta?.changes ?? 0, penalties });
   } catch {
     return c.json({ success: false, error: "Invalid request body" }, 400);
   }

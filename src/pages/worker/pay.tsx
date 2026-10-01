@@ -222,6 +222,39 @@ type PayAttRow = {
 };
 type PayMonthHistory = { daily: PayDailyRow[]; attendance: PayAttRow[] };
 
+// DEV-22: the worker's own approved penalties, one row per penalty line.
+type WorkerPenalty = {
+  id: string;
+  penaltyNo: string;
+  date: string;
+  poNo: string;
+  productName: string;
+  reason: string;
+  amountSen: number;
+  payrollPeriod: string;
+  deductedSen: number;
+  status: "APPROVED" | "DEDUCTED";
+};
+
+function asWorkerPenalties(v: unknown): WorkerPenalty[] {
+  if (!isRecord(v) || !Array.isArray(v.data)) return [];
+  return v.data
+    .filter(isRecord)
+    .map((r) => ({
+      id: asString(r.id) ?? "",
+      penaltyNo: asString(r.penaltyNo) ?? "",
+      date: asString(r.date) ?? "",
+      poNo: asString(r.poNo) ?? "",
+      productName: asString(r.productName) ?? "",
+      reason: asString(r.reason) ?? "",
+      amountSen: asNumber(r.amountSen) ?? 0,
+      payrollPeriod: asString(r.payrollPeriod) ?? "",
+      deductedSen: asNumber(r.deductedSen) ?? 0,
+      status: r.status === "DEDUCTED" ? ("DEDUCTED" as const) : ("APPROVED" as const),
+    }))
+    .filter((p) => p.id);
+}
+
 function asPayMonthHistory(v: unknown): PayMonthHistory | null {
   if (!isRecord(v) || !isRecord(v.data)) return null;
   const d = v.data;
@@ -260,6 +293,7 @@ export default function WorkerPayPage() {
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState<string | null>(null);
   const [hist, setHist] = useState<PayMonthHistory | null>(null);
+  const [penalties, setPenalties] = useState<WorkerPenalty[]>([]);
 
   const loadPay = useCallback(async () => {
     try {
@@ -280,6 +314,23 @@ export default function WorkerPayPage() {
       }
     })();
   }, [loadPay]);
+
+  // Penalties are a separate read: the pay card must render even if this fails.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await workerFetch("/api/worker/penalties");
+        const list = asWorkerPenalties(await res.json());
+        if (!cancelled) setPenalties(list);
+      } catch {
+        /* leave the list empty */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Daily attendance for the month being viewed. Swallows errors — the pay
   // card must render even if the history slice fails.
@@ -320,8 +371,13 @@ export default function WorkerPayPage() {
   // Home, which is for efficiency). Options = the in-progress current month
   // (live estimate) + every finalised payslip, newest first. (Wei Siang
   // 2026-06-09: "Pay 只能选月份".)
+  // A month whose only news is a scheduled penalty is still a month to pick.
   const months = Array.from(
-    new Set([pay.current.period, ...pay.history.map((p) => p.period)]),
+    new Set([
+      pay.current.period,
+      ...pay.history.map((p) => p.period),
+      ...penalties.map((p) => p.payrollPeriod).filter(Boolean),
+    ]),
   ).sort((a, b) => (a < b ? 1 : -1));
   const selected = period ?? pay.current.period;
   const isCurrent = selected === pay.current.period;
@@ -356,12 +412,72 @@ export default function WorkerPayPage() {
         </div>
       )}
 
+      {/* Penalties deducted (or to be deducted) in the SAME payroll month. */}
+      {penalties.some((p) => p.payrollPeriod === selected) && (
+        <PenaltyCard
+          penalties={penalties.filter((p) => p.payrollPeriod === selected)}
+          t={t}
+        />
+      )}
+
       {/* Daily attendance for the SAME month — moved here from Home (owner
           2026-06-12): money on top, the per-day punch records that produced
           it right underneath. */}
       {hist && hist.daily.length > 0 && (
         <DailyAttendanceCard hist={hist} t={t} />
       )}
+    </div>
+  );
+}
+
+// DEV-22 — every approved penalty in the month: when, which order, why, how
+// much, and whether it has actually come off an approved payslip yet.
+function PenaltyCard({ penalties, t }: { penalties: WorkerPenalty[]; t: Translate }) {
+  const total = penalties.reduce((s, p) => s + p.amountSen, 0);
+  return (
+    <div className="bg-white rounded-xl border border-[#D8D2CC] overflow-hidden">
+      <div className="bg-[#4A2520] px-4 py-2.5 flex items-center justify-between">
+        <p className="text-[11px] font-bold uppercase tracking-wider text-white">
+          {t("pay.penalties")}
+        </p>
+        <p className="text-sm font-bold text-[#F0A99C] tabular-nums">− {rm(total)}</p>
+      </div>
+      <div className="divide-y divide-[#F0ECE9]">
+        {penalties.map((p) => (
+          <div key={p.id} className="px-4 py-3 text-sm">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="font-semibold text-[#1F1D1B]">{fmtDay(p.date)} · {p.penaltyNo}</p>
+                {p.poNo && (
+                  <p className="text-xs text-[#8A8680]">
+                    {t("pay.penaltyOrder")}: {p.poNo}{p.productName ? ` · ${p.productName}` : ""}
+                  </p>
+                )}
+              </div>
+              <p className="shrink-0 font-bold tabular-nums text-[#9A3A2D]">− {rm(p.amountSen)}</p>
+            </div>
+            <p className="mt-1 text-xs text-[#5A5550]">
+              {t("pay.penaltyReason")}: {p.reason}
+            </p>
+            <div className="mt-1.5 flex items-center justify-between text-[11px]">
+              <span className="text-[#8A8680]">
+                {t("pay.penaltyPayrollMonth")}: {monthLabel(p.payrollPeriod)}
+              </span>
+              <span
+                className={`rounded px-1.5 py-0.5 font-semibold ${
+                  p.status === "DEDUCTED"
+                    ? "bg-[#EEF3E4] text-[#4F7C3A]"
+                    : "bg-[#FBF1DC] text-[#9C6F1E]"
+                }`}
+              >
+                {p.status === "DEDUCTED"
+                  ? `${t("pay.penaltyDeducted")} ${rm(p.deductedSen)}`
+                  : t("pay.penaltyApproved")}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

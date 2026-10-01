@@ -40,6 +40,7 @@ export const SPECIAL_ACTIONS: Record<string, string[]> = {
   "sales-orders": ["confirm", "edit"],
   "service-cases": ["approve"],
   users: ["role-change"],
+  "worker-penalties": ["approve"],
 };
 
 export function catalog(): { resource: string; actions: string[] }[] {

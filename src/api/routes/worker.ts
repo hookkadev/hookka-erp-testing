@@ -74,6 +74,7 @@ import {
 import { DEFAULT_ORG_ID } from "../lib/tenant";
 import { normalizeStoredPcbStatus } from "../../lib/pcb";
 import { ensurePayrollTaxColumns } from "../lib/payroll-tax-columns";
+import { ensureWorkerPenaltyTables } from "../lib/worker-penalties";
 // One shared completion core with the desktop QC page — see the QC-on-the-
 // phone block below for why the phone must not own a second copy.
 import { completeInspection } from "./qc-pending";
@@ -2295,6 +2296,49 @@ app.get("/payslips", async (c) => {
   );
 
   return c.json({ success: true, data: payslipsData });
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/worker/penalties — DEV-22: the worker's own penalties, so a
+// deduction on their pay is never a surprise. Only APPROVED / POSTED are
+// shown: a draft or one still pending approval is not yet a decision, and
+// may yet be rejected. One row per line (a penalty naming three workers shows
+// each worker only their own amount).
+// ---------------------------------------------------------------------------
+app.get("/penalties", async (c) => {
+  const auth = await getWorker(c);
+  if (!auth.ok) return auth.response;
+  await ensureWorkerPenaltyTables(c.var.DB);
+  const res = await c.var.DB.prepare(
+    `SELECT l.id, p.penalty_no, p.penalty_date, p.po_no, p.customer_name, p.product_name, p.reason,
+            p.status, p.approved_at, l.amount_sen, l.payroll_period, l.payslip_id, l.posted_at
+       FROM worker_penalty_lines l
+       JOIN worker_penalties p ON p.id = l.penalty_id
+      WHERE l.worker_id = ? AND p.status IN ('APPROVED', 'POSTED')
+      ORDER BY l.payroll_period DESC, p.penalty_date DESC`,
+  )
+    .bind(auth.workerId)
+    .all<Record<string, unknown>>();
+  const s = (a: unknown, b: unknown) => String(a ?? b ?? "");
+  const data = (res.results ?? []).map((r) => {
+    const posted = !!(r.postedAt ?? r.posted_at);
+    const amountSen = Number(r.amountSen ?? r.amount_sen) || 0;
+    return {
+      id: String(r.id),
+      penaltyNo: s(r.penaltyNo, r.penalty_no),
+      date: s(r.penaltyDate, r.penalty_date),
+      poNo: s(r.poNo, r.po_no),
+      productName: s(r.productName, r.product_name),
+      reason: s(r.reason, r.reason),
+      amountSen,
+      payrollPeriod: s(r.payrollPeriod, r.payroll_period),
+      // What has actually come off a signed-off payslip. Until the month's
+      // payroll is approved the deduction is scheduled, not taken.
+      deductedSen: posted ? amountSen : 0,
+      status: posted ? "DEDUCTED" : "APPROVED",
+    };
+  });
+  return c.json({ success: true, data });
 });
 
 /**

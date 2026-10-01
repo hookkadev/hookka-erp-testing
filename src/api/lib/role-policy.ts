@@ -132,6 +132,9 @@ export const ALL_RESOURCES = [
   "organisations",
   // People
   "workers", "attendance", "leaves", "payroll", "payslips",
+  // DEV-22 worker penalties. `approve` is its own action (SPECIAL_ACTIONS in
+  // routes/user-permissions.ts) so raising and approving can be split.
+  "worker-penalties",
   // Comms & system
   "announcements", "mail-center", "notifications", "settings", "users",
   // Attachments. Registered 2026-08-21, and its ABSENCE is the whole story of
@@ -369,6 +372,7 @@ const HR: RolePolicy = {
   leaves: OPEN,
   payroll: OPEN,
   payslips: OPEN,
+  "worker-penalties": OPEN,
   departments: OPEN,
   // Sees who has an account; opening or disabling one is requireSuperAdmin, and
   // `role-change` is never granted to anyone — see NEVER_WILDCARD.
