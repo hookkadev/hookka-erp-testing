@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-239 (branch `fix/worker-login-keypad-capture`, to staging then main); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-238 (branch `fix/cn-duplicate-po`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-237 (branch `fix/bom-accessory-category`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-236 (staging id, brought to `main` on branch `feat/dev22-worker-penalty-main`; ids 232-235 are on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
@@ -52,6 +53,22 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-10-01-239 — Worker login: typing the Employee No. also typed into the PIN `worker-portal` `ui-frontend` 🟢
+
+🟢 **Fixed** (branch `fix/worker-login-keypad-capture` → `staging`, then `main`; not yet deployed) · Owner report: on the worker login page, typing the employee number also fills the PIN keypad.
+
+**Root cause.** The PIN keypad in `src/pages/worker/login.tsx` listens for keys on the whole window so a hardware keyboard works. It stood down for **Backspace** when a text box had focus, but not for **digits**. So every digit of the employee number was read twice: once by the box, once by the keypad. The 6th digit auto-submits, so an employee number with six digits sent a login with that accidental PIN, each one counting toward the 10-per-15-minute lock.
+
+**Fix.** One guard at the top of the listener, before any key is read: `isTypingTarget(document.activeElement)` (`src/lib/typing-target.ts`: input, textarea, select, contenteditable). The digit test is now `/^[0-9]$/`.
+
+**Sweep.** 34 window/document key listeners in `src`; this is the only one that reads printable keys. No second instance.
+
+**Regression.** `tests/worker-login-keypad-focus.test.mjs`: the helper, and that the guard runs before the digit branch (fails on the old page).
+
+**Verify.** Not driven in a browser locally (local dev needs the owner's DB string). To check on staging: type an employee number containing digits; the PIN bars must stay empty.
 
 ---
 
