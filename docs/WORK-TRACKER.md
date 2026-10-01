@@ -205,6 +205,13 @@ Four batches, each shipped and prod-verified before the next:
    voucher date defaults to today, bill date to the document date; SST as its own line; duplicate check on the supplier
    bill no.; one PDF with several bills → one record each; batch shows a review table, then "create all"; several
    receipts into one voucher.
+   Built: the scan endpoint returns every bill in the file (`docs`); `src/lib/scan-account-learn.ts` (guess by description:
+   same payee → payee's usual → another payee's similar line marked suggested; duplicate by bill no.; SST line) fed by
+   `loadScanMemory` (finance documents only, read-only, dropped after each save); Scan Bills = review table (PV/OCB per
+   row from the payee's last kind, duplicates unticked, new creditor registered once, Create all); voucher form adds
+   further receipts to the same voucher and flags a known bill no.; creditor-bill form learns per line and never counts
+   the SST twice (also closes a latent double count when the printed lines already carried the tax). Guards
+   `tests/scan-account-learn.test.mjs`, `tests/finance-scan-learn-ui.test.mjs`.
 4. ⚪ Finance tables: no wrapping, drag a column edge (only that column changes, the rest shift), widths remembered;
    reports resize the description column only; monthly reports stop stretching to full width. Monthly P&L and Cash
    Flow drills in the monthly layout: each ledger line under the row with its amount in its month column, counterparty
