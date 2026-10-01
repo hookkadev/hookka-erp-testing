@@ -1,6 +1,8 @@
 # Hookka ERP — Work Tracker
 
 > **Last verified: 2026-10-01**: branch `fix/bom-editor-layered` (BUG-2026-10-01-247, Edit BOM tree back to layered colour cards) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: OCB attachments + New AP Payment popup (#668) closed ✅ with its prod check.
+> **Last verified: 2026-10-01**: OCB attachments + New AP Payment popup in progress (branch `feat/ocb-attachments-ap-popup`).
 > **Last verified: 2026-10-01**: accessories entry (BUG-2026-10-01-244) got item 7, the (FC) follow-up on branch `claude/main-accessories-duplicate-cards-fdxaik`.
 > **Last verified: 2026-10-01**: finance plan batch 4 (#665) closed ✅ with its prod check — the plan is done.
 > **Last verified: 2026-10-01**: finance plan batch 3 (#664) closed ✅ with its prod check; batch 4 in progress (branch `feat/finance-tables-drills`).
@@ -193,6 +195,23 @@ Verified: `tsc -p tsconfig.app.json` exit 0; `npm test` all pass. NOT verified o
 4. 🔵 **Bug-id collisions — followed `main`:** main's numbers stand; staging's colliding entries renumbered after main's max (194) and every staging-side reference (code comments, tests, docs, short forms) moved with them: 09-23-184→196, 185→197; 09-24-182→198, 183→199, 184→200, 185→201, 186→202 (186b→202b), 187→203, 188→204, 189→205, 190→206, 191→207; rack-scan 09-25-193→195.
 tsc strict 0; `npm test` 5047 pass / 0 fail.
 ---
+
+## 2026-10-01 — ✅ Other-creditor bill attachments; New AP Payment as a popup (owner「OCB 附件要做」+「new ap payment 的页面还是这样」)(#668 82f632d4, prod-verified; branch `feat/ocb-attachments-ap-popup`)
+
+1. ✅ Bill attachments: `GET/POST/DELETE /api/accounting/other-party-bills/:billNo/attachments` on the shared file store
+   (`storeUploadedFile` / `removeStoredFile`, resourceType `other_party_bill`, resourceId = bill id); a voided bill takes no
+   file; once money is paid against a bill its files are locked; the bills list carries `attachmentCount`. UI: one
+   `DocAttachmentsBlock` (the voucher's block now wraps it) in the AP Invoices bill popup and the Other Creditor Bills card,
+   "Print + files" there; the bill form holds the scanned file and files picked with "Attach files" and attaches them
+   when the new bill is saved; Scan Bills' OCB rows attach their scan.
+2. ✅ New AP Payment opens as the same popup as the voucher form (HEADER: creditor kind, creditor, PV #, payment date,
+   paid from, reference; BILLS TO PAY: the bills table, advance, total); fields and save rules unchanged.
+   Guard `tests/ocb-attachments-ap-popup.test.mjs`.
+3. Prod (read-only, nothing uploaded or saved): New AP Payment opens as the popup (Header / Bills to pay, every field),
+   the creditor picker loads that creditor into Bills to pay, Cancel closes it; every bill in the list carries
+   attachmentCount; an unpaid bill allows add + remove, a paid one add only, a voided one nothing; a post to a missing bill
+   is refused (404); the AP Invoices bill popup and the Other Creditor Bills card show the files block; the New Bill form
+   has Attach files. The first real upload is the owner's.
 
 ## 2026-10-01 — ✅ Finance improvements, confirmed point by point with the owner (owner「做」2026-10-01)
 
