@@ -15,8 +15,7 @@
 //      rolls a line whose worker has no payslip to the next month, and only
 //      marks the penalty POSTED once every line is posted. Back to DRAFT
 //      un-posts.
-//   5. Rights: `worker-penalties` is a resource with `approve` in the catalog;
-//      HR and Office hold it.
+//   5. Rights: `worker-penalties` is a resource; HR and Office hold it.
 // ---------------------------------------------------------------------------
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -226,12 +225,11 @@ test("payroll reads go through batch (uncached by Hyperdrive) when the DB has it
 });
 
 // ---- 5. rights -------------------------------------------------------------
-test("worker-penalties is a resource with approve in the catalog; HR and Office hold it", async () => {
+// On `main` there is no per-account Permissions tab (that lives on staging),
+// so there is no catalog to check; the role policy is the whole grant.
+test("worker-penalties is a resource; HR and Office hold it (approve included via *)", async () => {
   const { ALL_RESOURCES, permissionsForRole } = await import(src("src/api/lib/role-policy.ts"));
-  const { catalog } = await import(src("src/api/routes/user-permissions.ts"));
   assert.ok(ALL_RESOURCES.includes("worker-penalties"));
-  const entry = catalog().find((e) => e.resource === "worker-penalties");
-  assert.ok(entry && entry.actions.includes("approve"));
   assert.ok(permissionsForRole("HR").has("worker-penalties:*"));
   assert.ok(permissionsForRole("OFFICE").has("worker-penalties:*"));
   assert.ok(!permissionsForRole("SALES").has("worker-penalties:*"));
