@@ -78,12 +78,12 @@ test("the form is a popup: Payment | Transfer, the voucher's own fields, lines a
   assert.match(tab, /Notes <span className="normal-case font-normal text-\[#9CA3AF\]">\(internal — not printed\)<\/span>/);
   assert.match(tab, /Description <span className="normal-case font-normal text-\[#9CA3AF\]">\(printed on the voucher\)<\/span>/);
   assert.doesNotMatch(tab, /Product line \(optional\)/, "no Product line");
-  assert.match(tab, /<ScanPrefillButton label="Scan bill \(OCR\)" onResult=\{applyScan\} \/>/, "scan inside the form");
+  assert.match(tab, /<ScanPrefillButton label=\{pendingScanFiles\.length \? "Add another receipt \(OCR\)" : "Scan bill \(OCR\)"\} allDocs onResult=\{applyScan\} \/>/, "scan inside the form");
   // Save: a transfer sends its accounts and amount; a payment its lines and bill.
   assert.match(tab, /\? \{ \.\.\.common, kind: "TRANSFER", payFrom: form\.payFrom \|\| defaultBankCode\(bankCash\), transferTo: form\.transferTo, amountSen: transferSen \}/);
   assert.match(tab, /billNo: form\.billNo,\n\s+billDate: form\.billDate \|\| undefined,/);
   // A scanned bill: the voucher is dated today, the bill keeps its own no. and date.
-  assert.match(tab, /date: new Date\(\)\.toISOString\(\)\.slice\(0, 10\),\n\s+billNo: d\.docNo \?\? f\.billNo,\n\s+billDate: d\.docDate \?\? f\.billDate,/);
+  assert.match(tab, /date: new Date\(\)\.toISOString\(\)\.slice\(0, 10\),\n\s+billNo: docNos\.join\(", "\) \|\| f\.billNo,\n\s+billDate: d\.docDate \?\? f\.billDate,/);
 });
 
 test("the list: no single-click expand; transfers and old fund transfers are doors; the popup shows everything", () => {
