@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { ChevronDown, LogOut, User, Building2 } from "lucide-react";
+import { ChevronDown, LogOut, User, Building2, ScrollText } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { GlobalSearch } from "./global-search";
 import { NotificationBell } from "./notification-bell";
@@ -8,7 +8,7 @@ import { WorkspaceTabs } from "./workspace-tabs";
 import { clearAuth, getCurrentUser } from "@/lib/auth";
 import { StagingTodayControl } from "@/components/staging-today-control"; // staging-only
 import { StagingApiLog } from "@/components/staging-api-log"; // staging-only, never PR into main
-import { StagingRoleSwitch } from "@/components/staging-role-switch"; // staging-only, never PR into main
+import { StagingViewAs } from "@/components/staging-view-as"; // staging-only, never PR into main
 
 interface TopbarProps {
   user?: {
@@ -59,14 +59,25 @@ export function Topbar({ user }: TopbarProps) {
     : "—";
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b border-[#E2DDD8] bg-white px-6">
+    <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-[#E2DDD8] bg-white px-4 xl:px-6">
       {/* Workspace tab strip (open pages persist as browser-style tabs).
           Renders a plain flex spacer until a 2nd tab exists. */}
-      {/* Staging only (never PR'd into main): the API log button takes the tab strip's place. */}
+      {/* Staging only (never PR'd into main): the staging tools take the tab strip's
+          place, all in one row on the left. Labels drop to icons as the bar narrows
+          (sidebar open) instead of wrapping. */}
       {window.location.hostname.startsWith("staging.") ? (
-        <div className="flex flex-1 items-center gap-2">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
           <StagingApiLog />
-          <StagingRoleSwitch />
+          <StagingViewAs />
+          <StagingTodayControl />
+          <Link
+            to="/staging-notes"
+            title="Staging patch notes"
+            className="flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-amber-100 px-3 text-xs font-semibold text-amber-800 hover:bg-amber-200"
+          >
+            <ScrollText className="h-4 w-4" />
+            <span className="hidden 2xl:inline">Patch notes</span>
+          </Link>
         </div>
       ) : (
         <WorkspaceTabs />
@@ -76,10 +87,10 @@ export function Topbar({ user }: TopbarProps) {
       <GlobalSearch />
 
       {/* Organisation Switcher */}
-      <div className="relative">
+      <div className="relative shrink-0">
         <button
           onClick={() => { setOrgDropdownOpen(!orgDropdownOpen); setUserDropdownOpen(false); }}
-          className="flex items-center gap-2 rounded-md border border-[#E2DDD8] px-3 py-1.5 text-sm hover:bg-[#F0ECE9] transition-colors"
+          className="flex h-9 items-center gap-2 rounded-md border border-[#E2DDD8] px-3 py-1.5 text-sm hover:bg-[#F0ECE9] transition-colors"
         >
           <Building2 className="h-4 w-4 text-[#6B5C32]" />
           <span className="hidden sm:inline font-medium text-[#1F1D1B]">{currentOrg}</span>
@@ -107,22 +118,11 @@ export function Topbar({ user }: TopbarProps) {
         )}
       </div>
 
-      {/* Staging-only marker + link to the latest PRs merged into staging. */}
-      {window.location.hostname.startsWith("staging.") && (
-        <Link
-          to="/staging-notes"
-          className="rounded-md bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-800 hover:bg-amber-200"
-        >
-          Staging · patch notes
-        </Link>
-      )}
-      <StagingTodayControl />
-
       {/* Notifications — real feed + real unread count (see notification-bell.tsx) */}
       <NotificationBell />
 
       {/* User menu */}
-      <div className="relative">
+      <div className="relative shrink-0">
         <button
           onClick={() => { setUserDropdownOpen(!userDropdownOpen); setOrgDropdownOpen(false); }}
           className="flex items-center gap-2 rounded-md p-1.5 hover:bg-[#F0ECE9] transition-colors"
@@ -130,11 +130,11 @@ export function Topbar({ user }: TopbarProps) {
           <div className="h-8 w-8 rounded-full bg-[#6B5C32] flex items-center justify-center text-white text-sm font-medium">
             {displayName.charAt(0).toUpperCase() || "U"}
           </div>
-          <div className="hidden sm:block text-left">
+          <div className="hidden xl:block whitespace-nowrap text-left">
             <p className="text-sm font-medium text-[#1F1D1B]">{displayName}</p>
             <p className="text-xs text-[#9CA3AF]">{displayRole}</p>
           </div>
-          <ChevronDown className="h-3 w-3 text-[#9CA3AF] hidden sm:block" />
+          <ChevronDown className="h-3 w-3 text-[#9CA3AF] hidden xl:block" />
         </button>
         {userDropdownOpen && (
           <div className="absolute right-0 top-full mt-1 w-48 rounded-md border border-[#E2DDD8] bg-white shadow-lg py-1 z-50">

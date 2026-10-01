@@ -23,7 +23,7 @@
 // ---------------------------------------------------------------------------
 import type { MiddlewareHandler } from "hono";
 import type { Env } from "../worker";
-import { stagingRoleFromRequest } from "./staging-role"; // staging-only, never PR into main
+import { stagingViewAsUser } from "./staging-view-as"; // staging-only, never PR into main
 
 // Exact-match endpoints that always bypass the dashboard auth gate.
 export const PUBLIC_PATHS = [
@@ -492,21 +492,24 @@ export const authMiddleware: MiddlewareHandler<Env> = async (c, next) => {
     );
   }
 
+  // Staging-only (never PR into main): a real SUPER_ADMIN may act as another
+  // user via X-Staging-View-As. `row` itself is left alone: the KV cache holds it.
+  const viewAs = await stagingViewAsUser(c, row);
+  if (viewAs) {
+    (c as unknown as { set: (k: string, v: unknown) => void }).set("stagingRealUserId", row.userId);
+    (c as unknown as { set: (k: string, v: unknown) => void }).set("stagingRealRole", row.role);
+  }
+  const eff = viewAs ?? row;
+
   // Stash on ctx so downstream handlers can read via c.get('userId').
   // Cast avoids needing to touch the exported Env in worker.ts.
   (c as unknown as { set: (k: string, v: unknown) => void }).set(
     "userId",
-    row.userId,
+    eff.userId,
   );
-  // Staging-only (never PR into main): a real SUPER_ADMIN may view as another
-  // role via X-Staging-Role. row.role itself is left alone: the KV cache holds it.
-  const stagingRole = stagingRoleFromRequest(c, row.role);
-  if (stagingRole) {
-    (c as unknown as { set: (k: string, v: unknown) => void }).set("stagingRealRole", row.role);
-  }
   (c as unknown as { set: (k: string, v: unknown) => void }).set(
     "userRole",
-    stagingRole ?? row.role,
+    eff.role,
   );
   // Hand the resolved orgId to tenantMiddleware so it can skip its own
   // `SELECT orgId FROM users` DB round-trip (perf audit 2026-07-31). Only set
@@ -518,6 +521,10 @@ export const authMiddleware: MiddlewareHandler<Env> = async (c, next) => {
       "orgId",
       row.orgId,
     );
+  }
+  // Staging "view as": the viewed account's org wins.
+  if (viewAs?.orgId) {
+    (c as unknown as { set: (k: string, v: unknown) => void }).set("orgId", viewAs.orgId);
   }
 
   await next();

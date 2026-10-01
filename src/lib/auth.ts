@@ -16,7 +16,7 @@
 // api-client; once those are confirmed CSRF-safe in a follow-up sweep the
 // shim can be deleted.
 // ---------------------------------------------------------------------------
-import { readStagingRole } from "./staging-role"; // staging-only "view as role", never PR into main
+import { readStagingViewAs, writeStagingViewAs } from "./staging-view-as"; // staging-only "view as", never PR into main
 
 export type AuthUser = {
   id: string;
@@ -82,9 +82,10 @@ export function getAuthToken(): string | null {
 export function getCurrentUser(): AuthUser | null {
   const blob = readBlob();
   if (!blob) return null;
-  // Staging-only: every role check on the client follows the "view as role" pick.
-  const viewAs = readStagingRole();
-  return viewAs ? { ...blob.user, role: viewAs } : blob.user;
+  // Staging-only: every role check on the client follows the "view as" pick.
+  // Only the role: id stays yours so per-account browser state is untouched.
+  const viewAs = readStagingViewAs();
+  return viewAs ? { ...blob.user, role: viewAs.role } : blob.user;
 }
 
 export function setAuth(data: { user: AuthUser; rememberMe?: boolean }): void {
@@ -247,6 +248,8 @@ export function clearAuth(): void {
     } catch {
       /* best-effort */
     }
+    // Staging "view as": the next account signed in on this tab starts as itself.
+    writeStagingViewAs(null);
   } catch {
     // localStorage can throw in private-mode quotas; best-effort is fine.
   }

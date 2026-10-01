@@ -541,7 +541,7 @@ export function GlobalSearch() {
       {/* Trigger button in the topbar */}
       <button
         onClick={() => setOpen(true)}
-        className="relative hidden md:flex items-center h-9 w-80 rounded-md border border-[#E2DDD8] bg-[#FAF9F7] px-3 text-sm text-[#9CA3AF] hover:border-[#6B5C32]/40 transition-colors cursor-pointer"
+        className="relative hidden md:flex items-center h-9 w-56 2xl:w-80 shrink rounded-md border border-[#E2DDD8] bg-[#FAF9F7] px-3 text-sm text-[#9CA3AF] hover:border-[#6B5C32]/40 transition-colors cursor-pointer"
       >
         <Search className="h-4 w-4 mr-2 shrink-0" />
         <span className="flex-1 text-left truncate whitespace-nowrap">

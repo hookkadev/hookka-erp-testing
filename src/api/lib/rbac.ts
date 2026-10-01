@@ -182,10 +182,8 @@ export async function getRolePermissions(
  * failure; both callers catch and fail closed.
  */
 async function getEffectivePermissions(c: Context<Env>, role: string): Promise<PermSet> {
-  const get = (c as unknown as { get: (k: string) => string | undefined }).get.bind(c);
-  const userId = get("userId");
-  // Staging "view as role": the account's own list must not mask the role being viewed.
-  if (userId && !get("stagingRealRole")) {
+  const userId = (c as unknown as { get: (k: string) => string | undefined }).get("userId");
+  if (userId) {
     const own = await getUserOverride(c, userId);
     if (own) return own;
   }
