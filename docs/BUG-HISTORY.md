@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-235 (branch `perf/production-qr-speed-staging` → `staging`; -234 is the staging mail entry); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-234 (branch `fix/staging-mail-empty-body`, STAGING ONLY; ids up to 233 are taken on `main` / `staging`); a log, so "verified" means the newest entry matches the code.
 > **Last verified: 2026-09-30** (branch `chore/sync-staging-from-main-0930`, staging<-main merge): both logs merged. Numbering follows `main`: staging's report-emails entry BUG-2026-09-29-222 is renumbered to -232 (main's -222 is the storage not-found bug) and staging's customer-credit entry BUG-2026-09-28-218 to -233 (main's -218 is the PR label workflow). The one BUG-2026-09-29-214 entry kept is main's copy. Newest entry is BUG-2026-09-28-233.
 > **Last verified: 2026-09-30**: newest entry BUG-2026-09-30-231 (branch `fix/pillow-fab-sew-sticker`, DEV-26); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
@@ -69,6 +70,34 @@ Entries themselves stay newest-first.
 
 ---
 
+## BUG-2026-10-01-235 — Production Show QR / Print were slow, and a big FG print could fire before its QRs were drawn `production-orders` `ui-frontend` 🟡
+
+🟡 **Fix in progress** (branch `perf/production-qr-speed-staging` → `staging`) · Reported by the owner: loading the Production QRs,
+showing them and printing take very long and hold up the people printing.
+
+**What happened.** Every QR on the Production page (screen tiles and the hidden print containers) was a PNG drawn on a
+canvas: 600 px for job-card prints, 72-104 px for FG prints. Measured in Chromium 2026-10-01 (qrcode 1.5.4): 200 codes at
+600 px took 4.7 s of main-thread time before the print dialog could open (1.4 s at 104 px). Nothing was cached: `qr-img.tsx` claimed
+`qrcode` memoises, it does not, so Show / hide / Print paid again each time. The FG and Foam packing prints waited a fixed
+1500 ms for the QRs, sized for ~100 PNGs: a larger batch printed grey placeholders, a small one sat idle. The FG prints
+also used the 72-104 px bitmap, which is soft at 34 mm.
+
+**Fix.** `getQRCodeSvgDataURL` in `src/lib/qr-utils.ts`: the same code (level Q, 2-module quiet zone) as an SVG data
+URL, 200 codes in 0.5-0.8 s in the same Chromium, half the bytes, vector at any print size, memoised for the session so a
+QR already shown costs nothing on Print. `<QRImg>` and both
+job-card print builders use it. The PNG function stays for jsPDF callers. The FG / Foam print timers now fire at 300 ms
+and wait on `whenQrsReady` (no `(loading)` placeholder or undecoded `<img>` left in `#batch-fg-print`, 10 s cap) instead
+of 1500 ms.
+
+**Not fixed here.** Building FG stickers sends 2 requests per PO plus one full sales-order read per SO. That fan-out is the
+likely bulk of the Packing Show QR wait, but the prod split between network and QR time is UNMEASURED; it needs a Network
+waterfall before a batch endpoint is built.
+
+**Regression.** `tests/qr-utils.test.mjs`: the SVG is a data URL whose viewBox equals the level-Q module count plus the
+quiet zone, and a second call returns the memoised string. Checked in Chromium: the SVG at 104 px and at 34 mm decodes
+back to the exact sticker URL (jsQR).
+
+**Lesson.** A comment that says a library caches is a claim; check it before relying on it.
 ## BUG-2026-10-01-234 — Mail Outbox showed an empty frame when a sent email was opened `ui-frontend` 🟡
 
 🟡 **Fix in progress** (branch `fix/staging-mail-empty-body` → `staging`, STAGING ONLY) · Found by the owner on the first

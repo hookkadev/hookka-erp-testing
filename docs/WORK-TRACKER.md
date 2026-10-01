@@ -94,6 +94,15 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
+## 2026-10-01 — 🔵 Production QR show / print load time (branch `perf/production-qr-speed-staging` → `staging`, BUG-2026-10-01-235)
+
+Ask: Production pages load slowly, worst on Show QR and Print; make it faster, or cache it so a click or refresh does not pay again.
+
+1. 🔵 QR generation: SVG instead of 600 px PNG (Chromium, 200 codes: 0.5-0.8 s vs 4.7 s), memoised per session. Covers on-screen tiles and every sticker print on the Production page.
+2. 🔵 FG / Foam packing print waited a fixed 1.5 s for QRs, which is too short for a large batch (blank QRs) and wasted time on a small one. Pre-build the QRs, then print.
+3. ⚪ FG sticker load fans out 2 requests per PO plus one full SO read per SO. A single batch endpoint is the real cold-load fix; needs a prod / staging Network waterfall first to confirm the request fan-out dominates. Prod split UNMEASURED.
+
+
 ## 2026-10-01: 🔵 Staging: API log button moves into the topbar, tab strip hidden (branch `feat/staging-api-log-in-topbar` to `staging`, STAGING ONLY, never PR into main)
 
 - Asked: remove the workspace tab strip at the top on staging and put the API log button there. The floating bottom-left button sat over the sidebar.
