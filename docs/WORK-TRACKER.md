@@ -137,6 +137,8 @@ Ask (ticket DEV-22, High): a Worker Penalty module for confirmed order / product
 6. 🔵 Worker app My Pay: penalty card (date, PO No., reason, amount, payroll month, status).
 7. ✅ Tests + docs: `tests/worker-penalties.test.mjs` (9), employees module guide, CODEBASE-MAP, API.md regenerated.
 8. 🟡 Items 5 and 6 are typecheck / lint / unit clean but NOT yet driven in a browser. The local `.dev.vars` points at PRODUCTION (checked 2026-10-01 by project ref only), so no local run; owner chose to verify on staging after the PR merges.
+9. ✅ #628 merged and deployed to staging. Driven on staging 2026-10-01: tab renders, order lookup CO-2608-006-01 pulls product / qty / customer and per-department PICs, two suggested workers added (RM 50.00 + RM 25.50), WP-2610-001 submitted, self-approval refused, Payroll tab shows the Penalty column.
+10. 🔵 Owner 2026-10-01 (no second approver account): a SUPER_ADMIN may approve a penalty they raised; every other role still needs a second person (`selfApprovalBlocked`, branch `feat/dev22-superadmin-self-approve`). Then finish on staging: approve, payroll estimate, generate + approve Oct payroll, POSTED, drift banner.
 
 ## 2026-10-01 — 🔵 GRN number collision returns a retry, not a 500 (branch `fix/grn-number-collision` → `staging`)
 

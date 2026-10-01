@@ -14,7 +14,8 @@
 //   POST   /api/worker-penalties/:id/revoke              — APPROVED -> DRAFT (nothing posted yet)
 //
 // Gated on its own resource, `worker-penalties`, with `approve` as a separate
-// right. The order lookup lives HERE rather than reusing /api/production-orders
+// right; the raiser cannot approve their own unless they are a Super Admin.
+// The order lookup lives HERE rather than reusing /api/production-orders
 // because HR, who raises penalties, holds no production-orders right — and
 // should not be handed the whole production board just to pick an order.
 //
@@ -32,6 +33,7 @@ import {
   loadLockedPayrollPeriods,
   payrollPeriodForApproval,
   todayYmdMalaysia,
+  selfApprovalBlocked,
   PENALTY_HEADER_COLS,
   PENALTY_DRAFT,
   PENALTY_PENDING,
@@ -578,9 +580,9 @@ app.post("/:id/approve", async (c) => {
   if (!before) return c.json({ success: false, error: "Not found" }, 404);
   if (before.status !== PENALTY_PENDING) return conflict(c, "Only a penalty pending approval can be approved.");
   const userId = ctxGet(c, "userId");
-  if (userId && before.createdBy && userId === before.createdBy) {
+  if (selfApprovalBlocked(userId, before.createdBy, ctxGet(c, "userRole"))) {
     return c.json(
-      { success: false, error: "You raised this penalty, so someone else has to approve it." },
+      { success: false, error: "You raised this penalty, so someone else (or a Super Admin) has to approve it." },
       403,
     );
   }

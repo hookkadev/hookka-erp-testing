@@ -7,7 +7,9 @@
 //
 // Owner's answers (2026-09-30):
 //  - Approval is its own right (`worker-penalties:approve`) and the person who
-//    raised a penalty may not approve it.
+//    raised a penalty may not approve it — except a Super Admin (owner
+//    2026-10-01: there is no second approver account, so the owner raises
+//    and approves).
 //  - The deduction lands in the payroll month of the APPROVAL date. If that
 //    month's payroll is already approved, it rolls to the next open month.
 //  - Net pay is not clamped at zero — the same rule as salary advances.
@@ -286,6 +288,19 @@ export function payrollPeriodForApproval(
   // not a reason to spin.
   for (let i = 0; i < 60 && lockedPeriods.has(p); i++) p = nextPeriod(p);
   return p;
+}
+
+/**
+ * Is this approval refused because the approver raised the penalty? A Super
+ * Admin may approve their own; every other role needs a second person.
+ */
+export function selfApprovalBlocked(
+  approverId: string,
+  createdBy: string,
+  approverRole: string,
+): boolean {
+  if (!approverId || !createdBy || approverId !== createdBy) return false;
+  return (approverRole || "").toUpperCase() !== "SUPER_ADMIN";
 }
 
 /** Sum of line amounts per worker. */
