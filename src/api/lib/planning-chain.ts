@@ -171,6 +171,14 @@ export interface ChainInput {
    * reported is what the floor was actually planned to work.
    */
   collectOt?: (d: PlannedOtDay) => void;
+  /**
+   * OPTIONAL. Company SO ids that carry a SOFA or BEDFRAME line in ANY state
+   * (not cancelled), including lines already past sewing or fully done. The
+   * chain only sees WAITING cards, so without this it cannot tell "this SO has
+   * no sofa" from "its sofa is already made and waiting for the pillows".
+   * When omitted, derived from `chainCards` (main lines still WAITING).
+   */
+  soIdsWithMainItem?: Set<string>;
 }
 
 /**
@@ -573,6 +581,7 @@ function runSewing(
   chain: ChainConfig,
   cutLastDay: Map<string, number>,
   budgets?: Record<string, number>,
+  mainSoIds: Set<string> = new Set(),
 ): SewResult {
   const byLane: Record<Lane, SewCard[]> = { BEDFRAME: [], SOFA: [], ACCESSORY: [] };
   for (const c of chainCards) {
@@ -640,8 +649,28 @@ function runSewing(
     }
     const load = loadByLane[lane];
     const cap = capOf(lane);
-    const sl = (g: SewGroup): number =>
-      slackFor(cal, chain, "FAB_SEW", lane, g.cdd, g.floor, g.mins, cap);
+    // DEV-08 rule B (Violet, 2026-10-01): a pillow must be finished before its
+    // sofa is packed. Wood Cut already waits for the WHOLE SO's sewing, so a
+    // pillow sewn after its sofa holds the sofa back. A pillow on an SO with a
+    // sofa/bedframe is therefore due by that main item's last sew day; if the
+    // main item is already past sewing (or done), the pillow is behind and due
+    // now. ACCESSORY is the last lane in SEW_LANE_ORDER, so main groups are
+    // placed by this point.
+    const mainSewEnd = new Map<string, number>();
+    if (lane === "ACCESSORY") {
+      for (const ml of ["BEDFRAME", "SOFA"] as Lane[]) {
+        for (const g of groupsByLane[ml]) {
+          if (g.so) mainSewEnd.set(g.so, Math.max(mainSewEnd.get(g.so) ?? g.end, g.end));
+        }
+      }
+    }
+    const sl = (g: SewGroup): number => {
+      const base = slackFor(cal, chain, "FAB_SEW", lane, g.cdd, g.floor, g.mins, cap);
+      if (lane !== "ACCESSORY" || !g.so || !mainSoIds.has(g.so)) return base;
+      const due = mainSewEnd.get(g.so) ?? cal.day1;
+      const tied = due - g.floor - durationDays(g.mins, cap) + 1;
+      return base === UNDATED_SLACK ? tied : Math.min(base, tied);
+    };
     // COMMITTED groups are placed first so they claim their day BEFORE free
     // work competes for it — otherwise free work takes the slot and the pinned
     // group lands on top of it, which is the double-booking this fixes.
@@ -1247,6 +1276,12 @@ interface PackUnit {
   so: string;
   lane: ChainLane;
   cards: ChainCard[];
+  /**
+   * The SO's pillow (ACCESSORY) packing cards, packed with this unit (DEV-08).
+   * Kept apart from `cards` so they add work and rows but never pin, re-key or
+   * re-date the sofa / bedframe unit.
+   */
+  acc: ChainCard[];
   /** Packing work content in MINUTES. */
   pmin: number;
   cdd: number;
@@ -1545,18 +1580,32 @@ function runFraming(
 
   // ── Packing: no cap; pack day = SO's upholstery day ────────────────────────
   const packByUnit = new Map<string, ChainCard[]>();
+  const accBySo = new Map<string, ChainCard[]>();
   for (const c of input.packing) {
+    if (c.lane === "ACCESSORY") {
+      if (!c.soId) continue;
+      const arr = accBySo.get(c.soId) ?? [];
+      arr.push(c);
+      accBySo.set(c.soId, arr);
+      continue;
+    }
     if (c.lane !== "BEDFRAME" && c.lane !== "SOFA") continue;
     const k = `${c.soId}|${c.lane}`;
     const arr = packByUnit.get(k) ?? [];
     arr.push(c);
     packByUnit.set(k, arr);
   }
+  // DEV-08 rule B: pillows are packed with their SO's sofa (else bedframe) so
+  // the full set ships together. A pillow-only SO has no unit to join and is
+  // left out, as before.
+  const accHome = (so: string, lane: ChainLane): boolean =>
+    lane === "SOFA" || !packByUnit.has(`${so}|SOFA`);
   const packUnits: PackUnit[] = [];
   for (const [k, cards] of packByUnit) {
     const [so, laneStr] = k.split("|");
     const lane = laneStr as ChainLane;
     const ud = uphDayMap.get(k);
+    const acc = accHome(so, lane) ? (accBySo.get(so) ?? []) : [];
     const cdds = cards
       .map((c) => c.customerDd)
       .filter((x): x is string => !!x)
@@ -1566,7 +1615,8 @@ function runFraming(
       so,
       lane,
       cards,
-      pmin: cards.reduce((a, c) => a + c.mins, 0),
+      acc,
+      pmin: [...cards, ...acc].reduce((a, c) => a + c.mins, 0),
       cdd: cdds.length ? (parseYmd(cdds[0]) ?? FAR_DAY) : FAR_DAY,
       models,
       modelKey: models.length ? models[0] : "",
@@ -1888,7 +1938,7 @@ function renderFraming(
     packRows.push([
       `${fmtIso(d)} ${DOW[dowOf(d)]}`,
       cal.dayLabelNum(d),
-      us.reduce((a, u) => a + u.cards.length, 0),
+      us.reduce((a, u) => a + u.cards.length + u.acc.length, 0),
       bf.length,
       sf.length,
       us.map((u) => `${u.so}(${u.models.join("+")})`).join(", "),
@@ -2227,7 +2277,7 @@ function renderPacking(
     const upTxt = u.uphDay !== null ? fmtMonDayDow(u.uphDay) : "Done / day 1";
     // Upstream (Upholstery) day for this whole SO unit. Display only.
     const upColTxt = u.uphDay !== null ? fmtMonDayDow(u.uphDay) : "—";
-    u.cards.forEach((c, i) => {
+    [...u.cards, ...u.acc].forEach((c, i) => {
       const first = i === 0;
       calRows.push([
         "",
@@ -2263,7 +2313,7 @@ function renderPacking(
         LANE_LABEL[lane],
         us.map((u) => `${u.so}(${u.models.join("+")})`).join(", "),
         us.length,
-        us.reduce((a, u) => a + u.cards.length, 0),
+        us.reduce((a, u) => a + u.cards.length + u.acc.length, 0),
       ]);
     }
   }
@@ -2446,7 +2496,14 @@ export function computeChain(input: ChainInput): ChainOutput {
 
   const budgets = input.dailyBudgetByDept;
   const byDept = (d: ChainDept): ChainCard[] => input.chainCards.filter((c) => c.dept === d);
-  const sew = runSewing(input.chainCards, cal, chain, cut.cutLastDay, budgets);
+  const mainSoIds =
+    input.soIdsWithMainItem ??
+    new Set(
+      input.chainCards
+        .filter((c) => (c.lane === "SOFA" || c.lane === "BEDFRAME") && c.soId)
+        .map((c) => c.soId),
+    );
+  const sew = runSewing(input.chainCards, cal, chain, cut.cutLastDay, budgets, mainSoIds);
   const wood = runWood(input.chainCards, cal, chain, sew.sewEnd, budgets);
   const fr = runFraming(
     {
@@ -2497,7 +2554,7 @@ export function computeChain(input: ChainInput): ChainOutput {
     }
     for (const u of fr.foamCutUnits) for (const c of u.cards) send("FOAM_CUTTING", c, u.day);
     for (const u of fr.uphUnits) for (const c of u.cards) send("UPHOLSTERY", c, u.uphDay);
-    for (const u of fr.packUnits) for (const c of u.cards) send("PACKING", c, u.packDay);
+    for (const u of fr.packUnits) for (const c of [...u.cards, ...u.acc]) send("PACKING", c, u.packDay);
   }
 
   if (input.collectOt) {

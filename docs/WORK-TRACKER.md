@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-01**: branch `feat/dev08-pillow-follows-sofa` (DEV-08 rule B) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `fix/staging-sticky-topbar` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `feat/dev22-worker-penalty` (to `staging`) added below (in progress, its entry is the newest).
 > **Last verified: 2026-10-01**: branch `feat/staging-api-log-in-topbar` (to `staging`, STAGING ONLY) added below (its entry is the newest).
@@ -95,6 +96,17 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-01 — 🔵 DEV-08 Pillows scheduled with their sofa, rule B (Violet, High) (branch `feat/dev08-pillow-follows-sofa` → `staging`)
+
+Violet chose rule B (WhatsApp 2026-10-01): a pillow is guaranteed finished before its sofa is packed, so the full set is packed and shipped together. The SO-status half of DEV-08 is on `fix/dev08-accessory-so-ready` → `main` (BUG-2026-10-01-234).
+
+1. 🔵 Sewing (`runSewing`, `src/api/lib/planning-chain.ts`): a pillow group whose SO has a sofa group is due no later than the sofa group's last sew day, so it never pushes the SO's Wood Cut floor (= whole-SO sew end + 2). Pillow-only SOs unchanged. Main item already past sewing or done → pillow due now; `soIdsWithMainItem` (new query in `loadChainInputs`, falls back to WAITING cards on error) tells "sofa done" from "no sofa"; a held (ON_HOLD) main item does not pull its pillows forward.
+2. 🔵 Packing (`runFraming` packing block): ACCESSORY PACKING cards ride their SO's sofa / bedframe pack day and show in the same SO group on the Packing schedule. Today they are dropped (`lane !== BEDFRAME && !== SOFA → continue`). Held as `PackUnit.acc` so they add minutes and rows but never pin or re-key the sofa unit. Side effect: the Phase-2 collector now emits PACKING assignments for those pillow cards, so Proposals can suggest their due date (= the sofa's pack day). Pillow-only SOs still not on Packing.
+3. ✅ `tests/planning-pillow-follows-sofa.test.mjs` (7 cases; 5 fail on the old engine, the 2 "unchanged" cases pass on both). tsc strict exit 0; `npm test` 5355 / 0 fail; doc gates OK; `docs/modules/planning.md` anchors re-derived + gotcha added.
+4. ⚪ Before/after on staging data: list SOs whose sew / pack day moves, and run the new `soIdsWithMainItem` SQL for real (UNMEASURED: only exercised by the engine tests, never against a DB). MEASURED on staging (hookka-erp-staging-sg) 2026-10-01, one READ ONLY transaction, old vs new engine over the same data: 5069 assignments identical, 178 new = PACKING/ACCESSORY rows, 24 SOs, every one on its sofa's pack day. Sewing change moved NOTHING: ACCESSORY sew capacity is never the limit, the cut floor is. 5 of 21 SOs still sew pillows on/after the sofa's pack day (e.g. SO-2609-021: sofa packs 10-10, pillow cut 10-22..24, sewn 10-28 = its customer DD). Cause: cutting is JIT, accessory floor = DD - chunkLeadDays (3) vs sofa modelLeadDays (6), and the sofa then runs ahead on free capacity. Rule B needs a cutting change; decision pending. `soIdsWithMainItem` SQL ran fine (31 SOs, key `mainSoId`). Packing page not yet checked in a browser (Pack Calendar rows checked via computeDeptSchedule).
+6. 🔵 Cutting, Violet chose A (WhatsApp 2026-10-01 15:35, "we always missed out the pillow, after delivery only found out this order got pillows"): a pillow on an SO with a sofa/bedframe is cut with it. Main item still waiting to be cut → pillow uses the main item's lead (`modelLeadDays`) instead of `chunkLeadDays`; main item already cut → pillow cut as soon as possible. Pillow-only SOs unchanged. Same rule on the standalone Fabric Cutting sheet. Done (`CutCard.mainItem`, `tagPillowCuts`). MEASURED on staging (read-only, old vs new engine incl. cutting): pillow cuts 87 earlier / 20 later (pillow-only orders displaced in the ACCESSORY pool, at most +7d), pillow sewing 62 cards earlier (up to 18d), 0 later; SO-2609-021 pillow sew 10-28 → 10-10 (= sofa pack day), SO-2609-198 10-23 → 10-10. Side effect: sofa wood→pack reshuffles within slack (17 SOs pack later, up to +11d; 13 earlier) because SOs no longer held by their pillows join Wood Cut sooner; SOs packed after customer DD: 117 before, 117 after, 0 newly late. Still after the sofa's pack day: SO-2609-093 / -198 / -223, all cut on day 1 and waiting on ACCESSORY sew capacity (175 pillow sew cards, near days full) — a capacity/OT call, not code.
+5. Not changed: Wood Cut waits for the whole SO's sewing (owner-confirmed Python port, Wei Siang 2026-06).
 
 ## 2026-10-01: 🔵 Staging: the topbar stays on screen when scrolling (branch `fix/staging-sticky-topbar` to `staging`, STAGING ONLY)
 
