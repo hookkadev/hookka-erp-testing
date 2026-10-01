@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-01**: branch `feat/staging-view-as-user` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `feat/staging-role-switcher` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `fix/staging-mail-bare-raw` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `fix/staging-mail-source-diagnostics` (to `staging`, STAGING ONLY) added below (its entry is the newest).
@@ -101,6 +102,14 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-01: 🔵 Staging: "View as" picks a user, not a role; topbar tidied (branch `feat/staging-view-as-user` to `staging`, STAGING ONLY, never PR into main)
+
+- Asked: switch by user instead of by role, so what you see follows that account in User Management > Permissions; and fix the cramped top bar when the sidebar is open (labels wrapping onto two lines), make it scale and easy to click.
+- View as: the picker lists active accounts from `/api/users`. The pick's id goes out as `X-Staging-View-As`; `auth-middleware.ts` swaps in that user's id, role and org when `stagingViewAsUser` agrees (staging request, real SUPER_ADMIN, active user). So the gate and `/me/permissions` use the account's own Permissions-tab list with no special case, and customer scope and "my own" screens show that account's data. Non-GET calls under `/api/auth/` (password, 2FA, logout) are never impersonated. Writes are saved as the viewed account; the audit journal records the real account (`stagingRealUserId` / `stagingRealRole`). Replaces the role switcher from #640 (its rbac.ts and auth.ts hunks are reverted, no longer needed).
+- Top bar: all staging tools (API, View as, fake date, patch notes) sit in one row on the left as same-height (h-9) pills that never wrap; labels drop to icons below xl / 2xl. The search box narrows to w-56 below 2xl, and the user name / role block hides below xl (avatar stays).
+- Sign-out (`clearAuth`) clears the pick. Limits: the client keeps your user id (only the role follows the pick), so a screen comparing "my id" to an owner id can disagree while viewing; a failed user lookup silently falls back to you; `/api/users` is not org-filtered, so picking an account in another org swaps the tenant too.
+- Test: `tests/staging-view-as.test.mjs` (parse, per-tab read, server gate incl. ADMIN refused, inactive user, /api/auth writes, DB error, sign-out clears). UNMEASURED: not tried in a browser; check on staging after deploy.
 
 ## 2026-10-01: 🔵 Staging: "View as" role switcher next to the API button (branch `feat/staging-role-switcher` to `staging`, STAGING ONLY, never PR into main)
 
