@@ -42,6 +42,19 @@ test("a new payee: someone else's similar line, marked as a suggestion; nothing 
   assert.equal(m.guessAccount([], "ACME", "Transport"), null);
 });
 
+test("a shared rare word beats a shared common one (prod check 2026-10-01: a place name won over 'transport')", () => {
+  const H2 = [
+    ...["DO-0001 KLANG", "DO-0002 KLANG", "DO-0003 KLANG", "DO-0004 KLANG", "DO-0005 KLANG & BALAKONG"].map((d, i) => ({ payee: "COURIER A", description: d, accountCode: "900-D001", date: `2026-09-0${i + 1}` })),
+    { payee: "HAULIER B", description: "Transport charges - Penang", accountCode: "900-T003", date: "2026-08-01" },
+  ];
+  const g = m.guessAccount(H2, "NEW HAULIER SDN BHD", "Transport charges Shah Alam to Klang");
+  assert.deepEqual([g.accountCode, g.source], ["900-T003", "suggested"]);
+  assert.match(g.basis, /^HAULIER B: Transport charges/, "the reason shown is the transport line, not a delivery to Klang");
+  // A payee's own lines are judged on that payee's own words.
+  const own = m.guessAccount(H2, "COURIER A", "DO-0009 to Klang, urgent");
+  assert.deepEqual([own.accountCode, own.source], ["900-D001", "payee-description"]);
+});
+
 test("generic words never make two lines look alike", () => {
   // "CHARGES" / "INVOICE" / "SDN BHD" are not what was bought.
   assert.equal(m.guessAccount(H, "SOMEONE ELSE", "Service charges invoice"), null);

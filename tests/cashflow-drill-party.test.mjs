@@ -45,6 +45,8 @@ test("Ref. 2 is the counterparty; the documents ride along for the hover; AP vou
 });
 
 test("the panel shows the name, and the documents only on hover", () => {
-  const panel = slice(ui, "function CfDrillPanel(", "\nfunction ");
-  assert.match(panel, /<span className="underline decoration-dotted cursor-help" title=\{it\.docs\}>\{it\.ref2 \|\| "—"\}<\/span>/);
+  // Since 2026-10-01 the rows sit in the statement's own columns.
+  const rows = slice(ui, "function CfMonthlyDrillRows(", "\nfunction ");
+  assert.match(rows, /\$\{it\.ref2 \? ` · \$\{it\.ref2\}` : ""\} — \$\{it\.ref1\}/, "date · description · who — document no.");
+  assert.match(rows, /it\.docs \? `Settled: \$\{it\.docs\}` : "",/, "the documents on hover");
 });

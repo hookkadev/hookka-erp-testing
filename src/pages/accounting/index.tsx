@@ -27,6 +27,7 @@ import { buildAgingExportAoa, agingRowKind } from "@/lib/aging-export";
 import { isCleanImportShape, detectRawShape, parseRawStockTakeRows, impliedYmFromFilename, type ParsedRawItem } from "@/lib/stock-take-import";
 import { printVoucher, printVouchers, type VoucherSpec, type VoucherLine } from "@/lib/print-voucher";
 import { useRowSelection } from "@/lib/use-row-selection";
+import { useResizableTables } from "@/lib/use-resizable-tables";
 import { BatchActionsBar } from "@/components/accounting/batch-actions-bar";
 import { amountInWords } from "@/lib/amount-in-words";
 import { COMPANY } from "@/lib/constants";
@@ -599,8 +600,14 @@ export default function AccountingPage() {
     if (tab === "ar" || tab === "ap") refreshAging();
   }, [tab, refreshAging]);
 
+  // Finance tables (owner 2026-10-01 「我不想要 wrap text」+「letterhead 可以
+  // 左右拉」): no wrapping, and any column edge in a header can be dragged —
+  // only that column changes, the rest move with it; widths remembered per
+  // tab. Reports resize their description column only (data-col-resize).
+  const tablesRef = useResizableTables(`accounting:${tab}`);
+
   return (
-    <div className="space-y-6 max-md:space-y-4">
+    <div ref={tablesRef} data-fin-tables className="space-y-6 max-md:space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -5093,7 +5100,7 @@ function CostStructureTab() {
       <Card key={title}>
         <CardContent className="p-0 overflow-x-auto">
           <div className="px-3 py-2 bg-[#6B5C32] text-white text-sm font-semibold">{title} · {data.fyLabel} · all amounts RM</div>
-          <table className="text-[13px] whitespace-nowrap">
+          <table data-col-resize="first" className="text-[13px] whitespace-nowrap">
             <thead>
               <tr className="border-b border-[#E2DDD8] text-[11px] text-[#6B7280]">
                 <th className="px-3 py-2 text-left sticky left-0 bg-white">MONTH</th>
@@ -5242,7 +5249,7 @@ function CostExpenseClassesTab() {
       <Card>
         <CardContent className="p-0 overflow-x-auto">
           <div className="px-3 py-2 bg-[#6B5C32] text-white text-sm font-semibold">{title}</div>
-          <table className="text-[12px] whitespace-nowrap">
+          <table data-col-resize="first" className="text-[12px] whitespace-nowrap">
             <thead>
               <tr className="border-b border-[#E2DDD8] text-[11px] text-[#6B7280]">
                 <th className="px-3 py-2 text-left sticky left-0 bg-white">CLASS / ACCOUNT</th>
@@ -5397,7 +5404,7 @@ function MonthlyTrendTab() {
           {loading ? (
             <div className="py-12 text-center text-[#6B7280] text-sm">Loading…</div>
           ) : (
-            <table className="text-[12.5px] whitespace-nowrap">
+            <table data-col-resize="first" className="text-[12.5px] whitespace-nowrap">
               <thead>
                 <tr className="border-b border-[#E2DDD8] text-xs text-[#6B7280]">
                   <th className="px-3 py-2 text-left sticky left-0 bg-white">ITEM</th>
@@ -5421,7 +5428,7 @@ function MonthlyTrendTab() {
   );
 }
 
-type PlMatrixRow = { kind: "group" | "line" | "total" | "grandtotal" | "gap"; depth: number; label: string; groupId?: string; accountCode?: string; values: number[]; pctValues: number[] };
+type PlMatrixRow = { kind: "group" | "line" | "total" | "grandtotal" | "gap"; depth: number; label: string; groupId?: string; accountCode?: string; drillCode?: string; values: number[]; pctValues: number[] };
 type PlMonthlyData = { fyLabel: string; line: string; anchor: string; columns: { key: string; label: string; accum: boolean }[]; rows: PlMatrixRow[] };
 
 function MonthlyPlTab() {
@@ -5431,6 +5438,8 @@ function MonthlyPlTab() {
   const [data, setData] = useState<PlMonthlyData | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [level, setLevel] = useState<number | null>(null);
+  // Rows opened to their ledger lines (owner 2026-10-01), by account code.
+  const [drillOpen, setDrillOpen] = useState<Set<string>>(new Set());
 
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
@@ -5508,7 +5517,7 @@ function MonthlyPlTab() {
         {!data ? (
           <div className="py-12 text-center text-[#6B7280] text-sm">Loading…</div>
         ) : (
-          <table className="text-[13px] min-w-full">
+          <table data-col-resize="first" className="text-[13px]">
             <thead>
               <tr className="border-b border-[#E2DDD8] text-xs text-[#6B7280]">
                 <th rowSpan={2} className="px-3 py-2 text-left sticky left-0 bg-white align-bottom">Item</th>
@@ -5536,10 +5545,21 @@ function MonthlyPlTab() {
                 const rowBg = r.kind === "grandtotal" ? "bg-[#F7F5F2]" : r.kind === "total" ? "bg-[#FBFAF8]" : isGroup && r.depth === 0 ? "bg-[#F3F0EC]" : "bg-white";
                 const rowCls = r.kind === "grandtotal" ? "font-semibold border-t-2 border-[#C9C2BA]" : r.kind === "total" ? "font-medium border-t border-[#E2DDD8]" : isGroup && r.depth === 0 ? "font-semibold border-t border-[#E2DDD8]" : isGroup ? "font-medium" : "";
                 const deepLine = !isGroup && !isTot && r.depth >= 3;
+                const drillCode = r.kind === "line" ? (r.drillCode ?? r.accountCode) : undefined;
+                const drilled = !!drillCode && drillOpen.has(drillCode);
                 return (
-                  <tr key={i} className={`${rowBg} ${rowCls} ${isGroup ? "cursor-pointer" : ""}`} onClick={isGroup && r.groupId ? () => toggle(r.groupId!) : undefined}>
+                  <Fragment key={i}>
+                  <tr className={`${rowBg} ${rowCls} ${isGroup ? "cursor-pointer" : ""}`} onClick={isGroup && r.groupId ? () => toggle(r.groupId!) : undefined}>
                     {/* uppercase = display-only: unifies the COA's ALL-CAPS names with the owner-keyed Title Case historical labels */}
-                    <td className={`px-3 py-1.5 sticky left-0 ${rowBg} uppercase whitespace-nowrap ${deepLine ? "text-[12px] text-[#6B7280]" : ""} ${isGroup && r.depth === 0 ? "tracking-wide" : ""}`} style={{ paddingLeft: `${12 + r.depth * 16}px` }}>{isGroup ? (open ? "▾ " : "▸ ") : ""}{r.label}</td>
+                    <td className={`px-3 py-1.5 sticky left-0 ${rowBg} uppercase whitespace-nowrap ${deepLine ? "text-[12px] text-[#6B7280]" : ""} ${isGroup && r.depth === 0 ? "tracking-wide" : ""}`} style={{ paddingLeft: `${12 + r.depth * 16}px` }}>
+                      {isGroup ? (open ? "▾ " : "▸ ") : ""}
+                      {drillCode ? (
+                        <button type="button" className="uppercase text-left hover:underline decoration-dotted cursor-pointer" title="Show the ledger lines behind this row"
+                          onClick={() => setDrillOpen((prev) => { const n = new Set(prev); if (n.has(drillCode)) n.delete(drillCode); else n.add(drillCode); return n; })}>
+                          <span className="text-[10px] text-[#9CA3AF] mr-1">{drilled ? "▾" : "▸"}</span>{r.label}
+                        </button>
+                      ) : r.label}
+                    </td>
                     {r.values.map((v, j) => (
                       <React.Fragment key={j}>
                         <td className={`px-3 py-1.5 text-right tabular-nums border-l border-[#F0ECE9] ${deepLine ? "text-[12px]" : ""} ${v < 0 ? "text-[#9A3A2D]" : ""}`}>{fmt(v)}</td>
@@ -5547,6 +5567,8 @@ function MonthlyPlTab() {
                       </React.Fragment>
                     ))}
                   </tr>
+                  {drilled && drillCode && <PlMonthlyDrillRows account={drillCode} cols={cols} line={line} rowValues={r.values} depth={r.depth} />}
+                  </Fragment>
                 );
               })}
             </tbody>
@@ -5554,6 +5576,114 @@ function MonthlyPlTab() {
         )}
       </CardContent></Card>
     </div>
+  );
+}
+
+// Monthly P&L inline drill (owner 2026-10-01 「Monthly P&L 明细不能做到这样？」+
+// 「对方名字保留」): one row's ledger lines listed UNDER it — date · description
+// · who it is with — document no., the amount in its own month's column and in
+// Accumulated. The last row counts them, gives each month's subtotal (= the
+// row's figure for that month) and opens the General Ledger. Same pass as the
+// statement drill (/pl-drill over the financial year's months), so the lines
+// add up to the row; months keyed from the old books have no lines behind them.
+const glHref = (account: string, fromYm: string, toYm: string) => {
+  const [y, m] = toYm.split("-").map(Number);
+  const last = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+  return `/accounting?tab=gl&account=${encodeURIComponent(account)}&from=${fromYm}-01&to=${last}`;
+};
+const drillCellAmt = (sen: number) => (sen < 0 ? `(${plDrillAmt(-sen)})` : plDrillAmt(sen));
+function PlMonthlyDrillRows({ account, cols, line, rowValues, depth }: {
+  account: string;
+  cols: { key: string; label: string; accum: boolean }[];
+  line: "all" | "sofa" | "bedframe";
+  rowValues: number[];
+  depth: number;
+}) {
+  const months = cols.filter((c) => !c.accum).map((c) => c.key).sort();
+  const from = months[0] ?? "";
+  const to = months[months.length - 1] ?? "";
+  const [data, setData] = useState<(PlDrillData & { openingMonth?: string | null }) | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    if (!from || !to) return;
+    let dead = false;
+    fetch(`/api/accounting/pl-drill?account=${encodeURIComponent(account)}&from=${from}&to=${to}`)
+      .then((r) => r.json() as Promise<{ success?: boolean; data?: PlDrillData & { openingMonth?: string | null }; error?: string }>)
+      .then((j) => { if (dead) return; if (j?.success && j.data) setData(j.data); else setErr(j?.error || "Could not load the ledger lines"); })
+      .catch(() => { if (!dead) setErr("Could not load the ledger lines"); });
+    return () => { dead = true; };
+  }, [account, from, to]);
+  const pad = { paddingLeft: `${28 + depth * 16}px` };
+  const span = cols.length * 2;
+  const bg = "bg-[#FAF8F5]";
+  if (!data) {
+    return (
+      <tr className={bg}><td className={`px-3 py-1 sticky left-0 ${bg} text-[12px] ${err ? "text-[#9A3412]" : "text-[#9CA3AF]"}`} style={pad}>{err ?? "Loading the ledger lines…"}</td><td colSpan={span} /></tr>
+    );
+  }
+  // Income reads credit as positive, everything else debit — the row's own way.
+  const creditNormal = data.account?.type === "REVENUE";
+  const signed = (debitSen: number, creditSen: number) => (creditNormal ? creditSen - debitSen : debitSen - creditSen);
+  type Entry = { key: string; ym: string; text: string; title: string; sen: number; italic?: boolean };
+  const entries: Entry[] = data.lines.map((l) => ({
+    key: l.id || `${l.sourceType}:${l.sourceId}:${l.debitSen}:${l.creditSen}`,
+    ym: l.date.slice(0, 7),
+    text: `${l.date.slice(8, 10)}/${l.date.slice(5, 7)} · ${l.description || "—"}${l.ref2 ? ` · ${l.ref2}` : ""} — ${l.ref1}`,
+    title: [l.description, l.ref2, l.ref1, l.docs, l.otherSide.length ? `Other side: ${l.otherSide.map((o) => `${o.code} ${o.name}`).join(", ")}` : ""].filter(Boolean).join("\n"),
+    sen: signed(l.debitSen, l.creditSen),
+  }));
+  for (const e of data.extra) {
+    entries.push({
+      key: `${e.kind}:${e.ym}`, ym: e.ym, italic: true, sen: creditNormal ? -e.sen : e.sen,
+      text: e.kind === "payroll" ? `Payroll ${drillMonthLabel(e.ym)} from the payslips, not posted to the ledger yet` : `Opening balance: this month's share (${drillMonthLabel(e.ym)})`,
+      title: "",
+    });
+  }
+  entries.sort((a, b) => a.ym.localeCompare(b.ym));
+  const perMonth = new Map<string, number>();
+  for (const e of entries) perMonth.set(e.ym, (perMonth.get(e.ym) ?? 0) + e.sen);
+  const total = entries.reduce((sum, e) => sum + e.sen, 0);
+  const oldBooks = (ym: string) => !!data.openingMonth && ym < data.openingMonth;
+  // The lines must make the row, month by month (the All view only — the
+  // Sofa / Bedframe rows carry a share of each line).
+  const tied = line !== "all" || cols.every((c, j) => c.accum || oldBooks(c.key) || (perMonth.get(c.key) ?? 0) === (rowValues[j] ?? 0));
+  const amtCls = (sen: number) => `px-3 py-1 text-right tabular-nums border-l border-[#F0ECE9] ${sen < 0 ? "text-[#9A3A2D]" : ""}`;
+  return (
+    <>
+      {entries.map((e) => (
+        <tr key={e.key} className={`${bg} text-[12px] text-[#4B5563] ${e.italic ? "italic" : ""}`}>
+          <td className={`px-3 py-1 sticky left-0 ${bg}`} style={pad} title={e.title || e.text}>
+            <div className="truncate max-w-[34rem]">{e.text}</div>
+          </td>
+          {cols.map((c) => {
+            const on = c.accum || c.key === e.ym;
+            return (
+              <React.Fragment key={c.key}>
+                <td className={on ? amtCls(e.sen) : "border-l border-[#F0ECE9]"}>{on ? drillCellAmt(e.sen) : ""}</td>
+                <td />
+              </React.Fragment>
+            );
+          })}
+        </tr>
+      ))}
+      <tr className="bg-[#F7F4EF] text-[12px] font-semibold text-[#4B5563] border-t border-[#E2DDD8]">
+        <td className="px-3 py-1 sticky left-0 bg-[#F7F4EF]" style={pad}>
+          {entries.length} entr{entries.length === 1 ? "y" : "ies"} · <Link to={glHref(account, from, to)} className="underline decoration-dotted text-[#6B5C32]">open in GL</Link>
+          {line !== "all" && <span className="font-normal text-[#9CA3AF]"> · full amounts — this view carries a share</span>}
+          {!tied && <span className="font-normal text-[#9A3412]"> · these lines do not add up to the row — please report it</span>}
+        </td>
+        {cols.map((c) => {
+          const sen = c.accum ? total : (perMonth.get(c.key) ?? 0);
+          const old = !c.accum && oldBooks(c.key);
+          return (
+            <React.Fragment key={c.key}>
+              <td className={amtCls(sen)} title={old ? "Keyed from the old books — no ledger lines behind it" : undefined}>{old ? "old books" : drillCellAmt(sen)}</td>
+              <td />
+            </React.Fragment>
+          );
+        })}
+      </tr>
+    </>
   );
 }
 
@@ -5898,7 +6028,7 @@ function PLStatementTab() {
             <div className="py-12 text-center text-[#6B7280] text-sm">Loading…</div>
           ) : (
             <div className="overflow-x-auto">
-            <table className="w-full text-[13px]">
+            <table data-col-resize="first" className="w-full text-[13px]">
               <thead>
                 <tr className="text-[12px] text-[#6B7280]">
                   <td />
@@ -8587,7 +8717,7 @@ function TrialBalanceTab() {
           {loadingTb || !tb ? (
             <div className="py-12 text-center text-[#6B7280] text-sm">Loading trial balance…</div>
           ) : (
-            <table className="w-full text-sm">
+            <table data-col-resize="first" className="w-full text-sm">
               <thead>
                 <tr className="border-b border-[#E2DDD8] text-xs text-[#6B7280]">
                   <th className="px-4 py-2 text-left">Account</th>
@@ -8832,10 +8962,11 @@ const GL_CARD_CHROME_PX = 128;
 function GeneralLedgerTab({ accounts }: { accounts: ChartOfAccount[] }) {
   // Multi-account review (owner): 0 picked = full ledger; 1 picked =
   // inquiry mode with running balance; 2+ picked = listing filtered to
-  // the picked set.
-  const [picked, setPicked] = useState<string[]>([]);
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
+  // the picked set. A report drill's "open in GL" lands here with
+  // ?account=&from=&to= already picked (owner 2026-10-01).
+  const [picked, setPicked] = useState<string[]>(() => { const a = new URLSearchParams(window.location.search).get("account"); return a ? [a] : []; });
+  const [from, setFrom] = useState(() => new URLSearchParams(window.location.search).get("from") ?? "");
+  const [to, setTo] = useState(() => new URLSearchParams(window.location.search).get("to") ?? "");
   const [all, setAll] = useState<{
     rows: GlAllRow[];
     totalRows: number;
@@ -15622,7 +15753,7 @@ function BalanceSheetTab() {
         </CardHeader>
         <CardContent>
           <div className="border border-[#E2DDD8] rounded-lg overflow-hidden overflow-x-auto">
-            <table className="w-full text-sm">
+            <table data-col-resize="first" className="w-full text-sm">
               <thead>
                 <tr className="bg-[#F0ECE9]">
                   <th className="text-left px-4 py-2 font-semibold text-[#1F1D1B] w-28">Code</th>
@@ -15709,10 +15840,22 @@ type CfDrillData = {
   key: string; label: string; section: string; found: boolean; tied: boolean;
   items: CfDrillItem[]; months: { ym: string; label: string; sen: number }[];
 };
-function CfDrillPanel({ period, lineKey }: { period: string; lineKey: string }) {
+// Owner 2026-10-01 「Monthly P&L 明细不能做到这样？」→「monthly cash flow 也是
+// 需要」: the payments listed UNDER the line, in the statement's own columns —
+// date · description · who it is with — document no., the amount in its
+// month's column and in Accumulated. A payment split across lines shows this
+// line's share; the whole payment, the bank and the documents it settled are
+// on hover. The last row counts them and gives each month's subtotal (= the
+// line's figure).
+function CfMonthlyDrillRows({ period, lineKey, cols, depth, accountCode }: {
+  period: string;
+  lineKey: string;
+  cols: { key: string; label: string; accum?: boolean }[];
+  depth: number;
+  accountCode?: string;
+}) {
   const [data, setData] = useState<CfDrillData | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [month, setMonth] = useState<string>(period); // a month key, or "ALL"
   useEffect(() => {
     let dead = false;
     fetch(`/api/accounting/cashflow-drill?period=${encodeURIComponent(period)}&key=${encodeURIComponent(lineKey)}`)
@@ -15721,90 +15864,52 @@ function CfDrillPanel({ period, lineKey }: { period: string; lineKey: string }) 
       .catch(() => { if (!dead) setErr("Could not load the payments"); });
     return () => { dead = true; };
   }, [period, lineKey]);
-  const shown = data ? data.items.filter((it) => month === "ALL" || it.ym === month) : [];
-  const sum = (items: CfDrillItem[]) => items.reduce((s, it) => s + it.sen, 0);
-  const total = sum(shown);
-  const chips = data ? data.months.filter((m) => m.sen !== 0 || m.ym === period) : [];
-  // Owner 2026-09-29 「有一点点乱」: the whole payment + this line's share get
-  // their own columns (only when something here is split); one Amount column,
-  // money out in brackets like the statement; "All months" in month blocks,
-  // each with its total (= that month's figure on the statement).
-  const anySplit = shown.some((it) => it.ofSen);
-  const colCount = anySplit ? 8 : 6;
+  const pad = { paddingLeft: `${24 + depth * 16}px` };
+  const bg = "bg-[#FAF8F5]";
+  if (!data || !data.found) {
+    const msg = err ?? (data ? "This line is not on the statement any more — reload the page." : "Loading the payments…");
+    return <tr className={bg}><td className={`py-1 text-[12px] ${err ? "text-[#9A3412]" : "text-[#9CA3AF]"}`} style={pad}>{msg}</td><td colSpan={cols.length} /></tr>;
+  }
+  const amtCls = (sen: number) => `text-right px-2 tabular-nums whitespace-nowrap ${sen < 0 ? "text-[#9A3A2D]" : ""}`;
   const amt = (sen: number) => (sen < 0 ? `(${plDrillAmt(-sen)})` : plDrillAmt(sen));
-  const amtCls = (sen: number) => `py-1 pl-3 text-right tabular-nums whitespace-nowrap ${sen < 0 ? "text-[#9A3A2D]" : ""}`;
-  const blocks: { ym: string; label: string; items: CfDrillItem[] }[] = month === "ALL"
-    ? [...new Set(shown.map((it) => it.ym))].sort().map((ym) => ({ ym, label: data?.months.find((m) => m.ym === ym)?.label ?? ym, items: shown.filter((it) => it.ym === ym) }))
-    : [{ ym: month, label: "", items: shown }];
-  const itemRow = (it: CfDrillItem) => (
-    <tr key={it.key} className="border-t border-[#F0ECE9] align-top text-[#374151]">
-      <td className="py-1 pr-3 whitespace-nowrap">{it.date.replace(/-/g, "/")}</td>
-      <td className="py-1 pr-3">{it.description || "—"}</td>
-      <td className="py-1 pr-3 whitespace-nowrap" title={it.otherSide.map((o) => `${o.code} ${o.name}`).join(", ")}>{it.otherSide.length ? it.otherSide.map((o) => shortBankName(o.name) || o.code).join(", ") : "—"}</td>
-      <td className="py-1 pr-3 whitespace-nowrap">{it.ref1}</td>
-      <td className="py-1 pr-3">
-        {it.docs
-          ? <span className="underline decoration-dotted cursor-help" title={it.docs}>{it.ref2 || "—"}</span>
-          : (it.ref2 ?? "")}
-      </td>
-      {anySplit && <td className="py-1 pl-3 text-right tabular-nums whitespace-nowrap text-[#6B7280]">{it.ofSen ? plDrillAmt(it.ofSen) : ""}</td>}
-      {anySplit && <td className="py-1 pl-3 text-right tabular-nums whitespace-nowrap text-[#6B7280]">{it.ofSen ? `${((Math.abs(it.sen) / it.ofSen) * 100).toFixed(1)}%` : ""}</td>}
-      <td className={amtCls(it.sen)}>{amt(it.sen)}</td>
-    </tr>
-  );
-  const th = "py-1 pr-3 font-medium text-left";
-  const thR = "py-1 pl-3 font-medium text-right";
-  const chip = (on: boolean) => `px-2 py-0.5 rounded-full border text-[11px] ${on ? "bg-[#6B5C32] border-[#6B5C32] text-white" : "border-[#E2DDD8] text-[#6B7280] hover:bg-white"}`;
+  const perMonth = new Map<string, number>();
+  for (const it of data.items) perMonth.set(it.ym, (perMonth.get(it.ym) ?? 0) + it.sen);
+  const total = data.items.reduce((sum, it) => sum + it.sen, 0);
+  const months = cols.filter((c) => !c.accum).map((c) => c.key).sort();
   return (
-    <div className="bg-[#FAF8F5] border-y border-dashed border-[#E2DDD8] px-4 py-2 whitespace-normal">
-      {!data && !err && <div className="text-xs text-[#9CA3AF] py-1">Loading the payments…</div>}
-      {err && <div className="text-xs text-[#9A3412] py-1">{err}</div>}
-      {data && !data.found && <div className="text-xs text-[#6B7280] py-1">This line is not on the statement any more — reload the page.</div>}
-      {data && data.found && (
-        <>
-          <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
-            {chips.map((m) => (
-              <button key={m.ym} type="button" className={chip(month === m.ym)} onClick={() => setMonth(m.ym)}>{m.label}</button>
-            ))}
-            <button type="button" className={chip(month === "ALL")} onClick={() => setMonth("ALL")}>All months</button>
-            {!data.tied && <span className="text-[11px] text-[#9A3412] ml-2">These rows do not add up to the line — please report it.</span>}
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-[12px]">
-              <thead>
-                <tr className="text-[11px] uppercase tracking-wide text-[#6B7280]">
-                  <th className={th}>Date</th><th className={th}>Description</th><th className={th}>Bank</th>
-                  <th className={th}>Ref. 1</th><th className={th}>Ref. 2</th>
-                  {anySplit && <th className={thR} title="The whole payment — this line got a share of it">Whole payment</th>}
-                  {anySplit && <th className={thR} title="This line's share of the whole payment">Share</th>}
-                  <th className={thR}>Amount</th>
-                </tr>
-              </thead>
-              <tbody>
-                {blocks.map((b) => (
-                  <Fragment key={b.ym}>
-                    {b.items.map(itemRow)}
-                    {month === "ALL" && (
-                      <tr className="border-t border-[#E2DDD8] font-semibold text-[#4B5563] bg-[#F7F4EF]">
-                        <td className="py-1" colSpan={colCount - 1}>{b.label} total</td>
-                        <td className={amtCls(sum(b.items))}>{amt(sum(b.items))}</td>
-                      </tr>
-                    )}
-                  </Fragment>
-                ))}
-                {shown.length === 0 && (
-                  <tr><td colSpan={colCount} className="py-1 text-[#9CA3AF]">No money moved on this line {month === "ALL" ? "this financial year" : "in this month"}.</td></tr>
-                )}
-                <tr className="border-t border-[#9CA3AF] font-semibold text-[#1F1D1B]">
-                  <td className="py-1" colSpan={colCount - 1}>Total</td>
-                  <td className={amtCls(total)}>{amt(total)}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
-    </div>
+    <>
+      {data.items.map((it) => {
+        const bank = it.otherSide.map((o) => shortBankName(o.name) || o.code).join(", ");
+        const hover = [
+          it.ofSen ? `This line's share of a payment of RM ${plDrillAmt(it.ofSen)} (${((Math.abs(it.sen) / it.ofSen) * 100).toFixed(1)}%)` : "",
+          bank ? `Bank: ${it.otherSide.map((o) => `${o.code} ${o.name}`).join(", ")}` : "",
+          it.docs ? `Settled: ${it.docs}` : "",
+        ].filter(Boolean).join("\n");
+        const text = `${it.date.slice(8, 10)}/${it.date.slice(5, 7)} · ${it.description || "—"}${it.ref2 ? ` · ${it.ref2}` : ""} — ${it.ref1}`;
+        return (
+          <tr key={it.key} className={`${bg} text-[12px] text-[#4B5563]`} title={hover || undefined}>
+            <td className="py-1" style={pad}>
+              <div className="truncate max-w-[34rem]">{text}{it.ofSen ? <span className="text-[#9CA3AF]"> · share</span> : null}</div>
+            </td>
+            {cols.map((c) => {
+              const on = c.accum || c.key === it.ym;
+              return <td key={c.key} className={`${on ? amtCls(it.sen) : ""} ${c.accum ? "bg-[#F6F1E7]" : ""}`}>{on ? amt(it.sen) : ""}</td>;
+            })}
+          </tr>
+        );
+      })}
+      <tr className="bg-[#F7F4EF] text-[12px] font-semibold text-[#4B5563] border-t border-[#E2DDD8]">
+        <td className="py-1" style={pad}>
+          {data.items.length} entr{data.items.length === 1 ? "y" : "ies"}
+          {accountCode && months.length > 0 && <> · <Link to={glHref(accountCode, months[0], months[months.length - 1])} className="underline decoration-dotted text-[#6B5C32]">open in GL</Link></>}
+          {!data.tied && <span className="font-normal text-[#9A3412]"> · these payments do not add up to the line — please report it</span>}
+        </td>
+        {cols.map((c) => {
+          const sen = c.accum ? total : (perMonth.get(c.key) ?? 0);
+          return <td key={c.key} className={`${amtCls(sen)} ${c.accum ? "bg-[#F6F1E7]" : ""}`}>{amt(sen)}</td>;
+        })}
+      </tr>
+    </>
   );
 }
 type CfApiData = { period: string; columns: { key: string; label: string; accum?: boolean }[]; rows: CfApiRow[] };
@@ -16517,7 +16622,7 @@ function CashFlowTab() {
                 <div className="text-[11px] text-[#6B7280]">Accumulated + trailing 12 months · view {period}</div>
               </div>
             </div>
-            <table className="text-[13px]" style={{ minWidth: 760 }}>
+            <table data-col-resize="first" className="text-[13px]">
               <thead>
                 {/* PERIOD row bold on top (house rule), Accumulated tinted so
                     the cumulative column never reads as a 13th month. */}
@@ -16577,9 +16682,7 @@ function CashFlowTab() {
                         <td key={j} className={`text-right px-2 tabular-nums whitespace-nowrap ${typeof v === "number" && v < 0 ? "text-[#9A3A2D]" : ""} ${v === 0 ? "text-[#C7C1BA]" : ""} ${strong ? "font-semibold" : ""} ${cols[j]?.accum ? "bg-[#F6F1E7]" : ""}`}>{fmt(v)}</td>
                       ))}
                     </tr>
-                    {drilled && r.lineKey && (
-                      <tr><td colSpan={cols.length + 1} className="p-0"><CfDrillPanel period={period} lineKey={r.lineKey} /></td></tr>
-                    )}
+                    {drilled && r.lineKey && <CfMonthlyDrillRows period={period} lineKey={r.lineKey} cols={cols} depth={r.depth} accountCode={r.accountCode} />}
                     </Fragment>
                   );
                 })}

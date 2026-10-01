@@ -20,6 +20,7 @@ import { buildCustomerPaymentVoucher, hasUnallocated, unallocatedSen } from "@/l
 import { BatchActionsBar } from "@/components/accounting/batch-actions-bar";
 import { moneyFieldToSen, isUnreadableMoney } from "@/lib/money-field";
 import { parseMoneyInput } from "@/lib/parse-money";
+import { useResizableTables } from "@/lib/use-resizable-tables";
 
 const PaymentMutationSchema = mutationWithData(PaymentSchema);
 
@@ -596,6 +597,10 @@ export default function PaymentsPage() {
   const pendingCount = active.filter((p) => p.status === "RECEIVED").length;
   const bouncedCount = active.filter((p) => p.status === "BOUNCED").length;
 
+  // Finance tables (owner 2026-10-01): no wrapping; drag a column edge to
+  // resize — widths remembered (src/lib/use-resizable-tables.ts).
+  const tablesRef = useResizableTables("customer-payments");
+
   if (loading) {
     return (
       <div className="p-6">
@@ -608,7 +613,7 @@ export default function PaymentsPage() {
   }
 
   return (
-    <div className="p-6 space-y-6 max-md:p-4 max-sm:p-3 max-md:space-y-4">
+    <div ref={tablesRef} data-fin-tables className="p-6 space-y-6 max-md:p-4 max-sm:p-3 max-md:space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>

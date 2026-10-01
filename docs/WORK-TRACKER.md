@@ -224,6 +224,14 @@ Four batches, each shipped and prod-verified before the next:
    reports resize the description column only; monthly reports stop stretching to full width. Monthly P&L and Cash
    Flow drills in the monthly layout: each ledger line under the row with its amount in its month column, counterparty
    name kept, last row "N entries · open in GL".
+   Built: `src/lib/use-resizable-tables.ts` (one enhancer for every plain table under a page root marked `data-fin-tables`:
+   no wrap, a handle per header cell, widths pinned by its own colgroup, remembered per tab, double-click resets; reports
+   `data-col-resize="first"`; DataGrid skipped) on the accounting page and the supplier / customer payment and e-invoice
+   pages; Monthly P&L no longer stretched; `GET /pl-drill?from&to` + `PlMonthlyDrillRows`; `CfMonthlyDrillRows` replaces
+   the Cash Flow panel; the GL tab opens from `?account&from&to`. Checked locally on a harness page in a real browser:
+   one column changes and the rest shift, report figures keep their widths (a spanning month header used to split them
+   evenly until the colgroup), reload remembers, double-click resets, a colgroup grid is untouched. Also: scan guesses
+   weight rarer shared words higher. Guard `tests/finance-tables-drills.test.mjs`.
 Not wanted: opening-out-of-date reminder, % toggle, on-account receipts reminder.
 
 ## 2026-09-30 — ✅ Self-check reds: the reconciliations copy the control cards; cancelled opening seeds out (owner「先查 8 和 9」→「确定没有问题才做」)(BUG-2026-09-30-229/-230)(#617 ffcc915c MERGED, deployed, prod-verified)
