@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-01**: branch `fix/accessory-l1-only-job-cards-main` (BUG-2026-10-01-244, staging #656) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: finance improvement plan logged below as ⚪ queued (owner confirmed every point; start on his word).
 > **Last verified: 2026-10-01**: branch `fix/dev08-accessory-so-ready` (DEV-08) added below (its entry is the newest).
 > **Last verified: 2026-09-30**: branch `feat/dev22-worker-penalty` (to `staging`) added below (in progress, its entry is the newest).
@@ -67,6 +68,21 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-01 — 🔵 Accessories doubled on Fab Cut (Violet) (staging #656 merged + verified; branch `fix/accessory-l1-only-job-cards-main` → `main`, BUG-2026-10-01-244)
+
+Ask: on Fabric Cutting every accessory line shows twice, though the quantity is 1. Owner confirmed accessory BOMs are meant to be L1-only.
+
+1. 🔵 Cause: an accessory BOM has an empty WIP tree and its steps on the L1 tab. The builder answered the empty tree with the FG_MAIN fallback (all 9 depts) and then added the L1 cards too. BC05-MF qty 1 had 12 cards. Fixed in the builder and jobcard-sync through one helper, `breakBomIntoJobCardWips`. Tests in `tests/bom-explosion.test.mjs`.
+2. ✅ Foam: the fallback was the only source of a Foam card on these orders (prod: 16 worked). Owner decision: follow the BOM as it is, add no step. Nothing to do before deploy.
+3. ⚪ A01's active BOM on prod is fully empty (no tree, no L1). It keeps the fallback chain until someone fills it in.
+4. ⚪ Not in this change: the 463 cards already created on prod (53 pending orders; 81 of the cards already COMPLETED). Cleanup needs a reviewed script and an owner decision on the completed ones.
+5. ⚪ Not in this change: FG-level Fab Cut / Fab Sew cards add to a `wip_items` row named after the product and Packing never takes it off (prod: `BC05-MF` 8, `SB02` 9, `A02` 2). Older than this bug.
+
+6. ✅ Verified on staging: SO-2610-002 (BC05-MF) got 3 cards; control SO-2610-003 (SQUARE PILLOW) got its usual 4.
+
+Prod measured 2026-10-01 with read-only queries (counts above). Staging gave the same picture.
+
 
 ## 2026-09-30 — 🔵 DEV-22 Worker Penalty + payroll deduction (branch `feat/dev22-worker-penalty` → `staging`)
 

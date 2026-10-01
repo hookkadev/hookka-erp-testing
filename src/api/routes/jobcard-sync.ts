@@ -25,7 +25,7 @@ import { Hono } from "hono";
 import type { Env } from "../worker";
 import { requirePermission } from "../lib/rbac";
 import {
-  breakBomIntoWips,
+  breakBomIntoJobCardWips,
   deriveJobCardId,
   type BomVariantContext,
 } from "../lib/bom-wip-breakdown";
@@ -110,8 +110,12 @@ function computeExpectedJcs(
     legHeightInches: po.legHeightInches ?? null,
     gapInches: po.gapInches ?? null,
   };
-  const wips = breakBomIntoWips(
+  // Same rule as the SO-confirm builder: an L1-only BOM gets no WIP cards
+  // (BUG-2026-10-01-244).
+  const l1Procs = parseL1Processes(bomRow?.l1Processes ?? null);
+  const wips = breakBomIntoJobCardWips(
     bomRow?.wipComponents ?? null,
+    l1Procs.length,
     productCode,
     variants,
   );
@@ -139,7 +143,6 @@ function computeExpectedJcs(
     }
   }
   // FG-level l1Processes — single JC per process, wipKey="FG".
-  const l1Procs = parseL1Processes(bomRow?.l1Processes ?? null);
   for (const l1p of l1Procs) {
     expected.push({
       wipKey: "FG",

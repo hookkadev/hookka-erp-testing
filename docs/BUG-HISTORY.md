@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-244 (branch `fix/accessory-l1-only-job-cards-main`; merged to staging as 241 in #656, renumbered because DEV-08 holds 241 on main); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-242 (branch `fix/worker-login-signin-text`, to staging then main); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-243 (branch `fix/worker-today-hours-utc`; ids 240 and 242 are on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-241 (branch `fix/dev08-accessory-so-ready`, DEV-08); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
@@ -58,6 +59,22 @@ Entries themselves stay newest-first.
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
 
 ---
+
+## BUG-2026-10-01-244 — Accessories got every job card twice, plus one in every dept `production-orders` `bom` 🟢
+
+🟢 **Fixed** (staging #656, verified there; branch `fix/accessory-l1-only-job-cards-main` → `main`, not yet deployed) · Report: on Fabric Cutting every accessory line shows twice although its quantity is 1.
+
+**Root cause.** Accessory BOMs are L1-only on purpose: an empty WIP tree (`wipComponents = "[]"`) and Fab Cut / Fab Sew / Packing on the L1 tab. `breakBomIntoWips` answers an empty tree with the synthetic `FG_MAIN` WIP that walks all 9 depts, meant for a BOM with no steps at all. `production-builder.ts` used it and then also inserted one FG card per L1 step. So BC05-MF qty 1 got 12 cards: Fab Cut (the merged `| (FC)` one and the L1 one), Fab Sew and Packing twice, plus Wood Cut, Foam Cutting, Foam, Framing, Webbing and Upholstery. `jobcard-sync.ts` computed the same set, so "Sync Job Cards from BOM" would have put them back after any cleanup.
+
+**Fix.** `breakBomIntoJobCardWips` in `src/api/lib/bom-wip-breakdown.ts`: the same breakdown, but an empty tree with at least one L1 step gets no WIP cards. A BOM with no tree and no L1 keeps the fallback; a BOM with a tree (SQUARE PILLOW) is unchanged. The builder and jobcard-sync both call it. An L1-only PO now takes its `currentDepartment` from its L1 steps. Its L1 cards are due on the packing anchor; with no delivery date at all they would be due on the order date, but all 472 accessory POs on prod since 2026-08-01 have one (measured). Stickers are unchanged in kind: the L1 Fab Cut row (`wipType` FG) already got a `FG-FAB_CUT` sticker, so each accessory now prints one Fab Cut sticker instead of two. Its WIP label is the bare product code; the fabric code is no longer in it.
+
+**Measured on prod (read only, 2026-10-01).** 15 active accessory BOMs have this shape. 53 pending accessory orders (created 15 Sep to 1 Oct) plus 4 completed and 1 cancelled carry 463 fallback cards; 81 are COMPLETED. 16 fallback Foam cards carry a worker; the L1 lists do not include Foam. Owner decision 2026-10-01: follow the BOM as it is and add no step, so after this fix those accessories get no Foam card unless someone adds Foam to their BOM. Existing cards are not touched by this fix.
+
+**Sweep.** Every `INSERT INTO job_cards`: only the builder and jobcard-sync create cards from a BOM. The stock-PO clone copies an existing PO's cards; the others are archive or aggregation writes. No bug class fits; noted here only.
+
+**Regression.** `tests/bom-explosion.test.mjs`: the three BOM shapes, and that both card creators call `breakBomIntoJobCardWips` (fails on the old code).
+
+**Verified on staging (2026-10-01, after #656 deployed).** Test order SO-2610-002 (BC05-MF, qty 1) got 3 cards: FAB_CUT, FAB_SEW, PACKING, all `wipKey` FG. Control SO-2610-003 (SQUARE PILLOW, tree BOM) got its usual 4: merged FC, FAB_SEW, FOAM, PACKING FG, matching a pre-fix order card for card. Both under TEST COMPANY.
 
 ## BUG-2026-10-01-242 — Worker login told returning workers to "Create a 6-digit PIN" `worker-portal` `ui-frontend` 🟢
 

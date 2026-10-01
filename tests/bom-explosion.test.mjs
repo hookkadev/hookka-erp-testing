@@ -50,7 +50,7 @@ try {
   throw err;
 }
 
-const { breakBomIntoWips, resolveWipTokens } = bom;
+const { breakBomIntoWips, breakBomIntoJobCardWips, resolveWipTokens } = bom;
 
 // ===========================================================================
 // resolveWipTokens — `{TOKEN}` substitution against a variant context.
@@ -651,4 +651,51 @@ test("breakBomIntoWips: an array of only junk entries → FG_MAIN fallback", () 
   const wips = breakBomIntoWips(raw, "P");
   assert.equal(wips.length, 1);
   assert.equal(wips[0].wipType, "FG_MAIN");
+});
+
+// ===========================================================================
+// breakBomIntoJobCardWips — the WIPs that get job cards (BUG-2026-10-01-244).
+// An accessory BOM with an empty tree and steps on the L1 tab used to get the
+// FG_MAIN fallback (all 9 depts) on top of its L1 cards: BC05-MF qty 1 had 12
+// cards, Fab Cut / Fab Sew / Packing twice.
+// ===========================================================================
+
+test("breakBomIntoJobCardWips: empty tree + L1 steps → no WIP cards (L1-only BOM)", () => {
+  assert.deepEqual(breakBomIntoJobCardWips("[]", 3, "BC05-MF"), []);
+  assert.deepEqual(breakBomIntoJobCardWips(null, 1, "BC05-MF"), []);
+});
+
+test("breakBomIntoJobCardWips: empty tree + no L1 steps → FG_MAIN fallback stays", () => {
+  const wips = breakBomIntoJobCardWips("[]", 0, "LEGACY");
+  assert.equal(wips.length, 1);
+  assert.equal(wips[0].wipKey, "LEGACY::FG_MAIN");
+});
+
+test("breakBomIntoJobCardWips: real tree + L1 steps → tree unchanged (SQUARE PILLOW shape)", () => {
+  const raw = JSON.stringify([
+    {
+      wipCode: "SQUARE PILLOW {FABRIC} (FOAM)",
+      wipType: "SOFA_CUSHION",
+      processes: [{ deptCode: "FOAM", minutes: 35 }],
+      children: [
+        { wipCode: "SQUARE PILLOW {FABRIC}", processes: [{ deptCode: "FAB_SEW", minutes: 10 }] },
+      ],
+    },
+  ]);
+  const wips = breakBomIntoJobCardWips(raw, 1, "SQUARE PILLOW", { fabricCode: "MODENZA-01" });
+  assert.deepEqual(wips, breakBomIntoWips(raw, "SQUARE PILLOW", { fabricCode: "MODENZA-01" }));
+  assert.equal(wips.length, 1);
+  assert.notEqual(wips[0].wipType, "FG_MAIN");
+});
+
+test("job card creators go through breakBomIntoJobCardWips, not breakBomIntoWips", async () => {
+  const { readFileSync } = await import("node:fs");
+  for (const f of [
+    "src/api/routes/_shared/production-builder.ts",
+    "src/api/routes/jobcard-sync.ts",
+  ]) {
+    const src = readFileSync(resolve(process.cwd(), f), "utf8");
+    assert.match(src, /breakBomIntoJobCardWips\(/, `${f} must use the L1-aware breakdown`);
+    assert.doesNotMatch(src, /breakBomIntoWips\(/, `${f} must not call breakBomIntoWips directly`);
+  }
 });
