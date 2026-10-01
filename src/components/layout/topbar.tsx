@@ -8,6 +8,7 @@ import { WorkspaceTabs } from "./workspace-tabs";
 import { clearAuth, getCurrentUser } from "@/lib/auth";
 import { StagingTodayControl } from "@/components/staging-today-control"; // staging-only
 import { StagingApiLog } from "@/components/staging-api-log"; // staging-only, never PR into main
+import { StagingRoleSwitch } from "@/components/staging-role-switch"; // staging-only, never PR into main
 
 interface TopbarProps {
   user?: {
@@ -63,8 +64,9 @@ export function Topbar({ user }: TopbarProps) {
           Renders a plain flex spacer until a 2nd tab exists. */}
       {/* Staging only (never PR'd into main): the API log button takes the tab strip's place. */}
       {window.location.hostname.startsWith("staging.") ? (
-        <div className="flex flex-1 items-center">
+        <div className="flex flex-1 items-center gap-2">
           <StagingApiLog />
+          <StagingRoleSwitch />
         </div>
       ) : (
         <WorkspaceTabs />

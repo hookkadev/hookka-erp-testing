@@ -30,6 +30,7 @@ import { clearAuth } from "./auth";
 import { readCsrfCookie, CSRF_HEADER_NAME } from "./csrf";
 import { reportApiCall } from "./fe-rum";
 import { readStagingToday, STAGING_TODAY_HEADER } from "./staging-today"; // staging-only
+import { readStagingRole, STAGING_ROLE_HEADER } from "./staging-role"; // staging-only "view as role", never PR into main
 import { recordApiCall } from "./staging-api-log"; // staging-only API log drawer, never PR into main
 
 const originalFetch = window.fetch.bind(window);
@@ -101,6 +102,8 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     }
     const fakeToday = readStagingToday(); // staging-only today override, off unless set in this tab
     if (fakeToday) headers.set(STAGING_TODAY_HEADER, fakeToday);
+    const viewAsRole = readStagingRole(); // staging-only, off unless picked in this tab
+    if (viewAsRole) headers.set(STAGING_ROLE_HEADER, viewAsRole);
     const controller = new AbortController();
     timeoutId = setTimeout(() => {
       aborted = true;

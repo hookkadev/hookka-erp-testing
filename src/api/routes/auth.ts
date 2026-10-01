@@ -556,6 +556,19 @@ app.get("/me/permissions", async (c) => {
       .bind(userId)
       .first<{ roleId: string | null; legacyRole: string | null; roleName: string | null }>();
 
+    // Staging "view as role" (never PR into main): answer for the viewed role,
+    // the same one auth-middleware stamped as userRole for the gate.
+    const get = (c as unknown as { get: (k: string) => string | undefined }).get.bind(c);
+    const viewingAs = get("stagingRealRole") ? get("userRole") ?? null : null;
+    if (roleRow && viewingAs) {
+      const r = await c.var.DB.prepare("SELECT id FROM roles WHERE name = ? LIMIT 1")
+        .bind(viewingAs)
+        .first<{ id: string }>();
+      roleRow.roleId = r?.id ?? null;
+      roleRow.roleName = viewingAs;
+      roleRow.legacyRole = viewingAs;
+    }
+
     if (!roleRow) {
       // Authenticated but no users row — shouldn't happen in practice.
       return c.json({ success: true, permissions: [] });
@@ -581,7 +594,7 @@ app.get("/me/permissions", async (c) => {
     // An account a Super Admin has edited uses its OWN list — the same lookup,
     // in the same order, as the gate (rbac.ts getEffectivePermissions), so the
     // menu can never show a page the API refuses or hide one it allows.
-    const own = await getUserOverride(c, userId);
+    const own = viewingAs ? null : await getUserOverride(c, userId);
     if (own) {
       const ownPerms = new Set(withDashboardAccess(own, roleName));
       return c.json({
