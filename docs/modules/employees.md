@@ -76,7 +76,7 @@ Owns the whole workforce lifecycle: the **employee master** (workers + effective
 | `computeMonthlyLabor` call sites | `src/api/routes/payslips.ts:885 / 1286` | Projected (all) + generate (per worker) |
 | `calcStatutory` / `buildDayDetailForPeriod` | `src/api/routes/payslips.ts:318 / 503` | EPF/SOCSO/EIS/PCB + per-day detail |
 | `WorkerPenaltyTab` | `src/components/worker-penalty-tab.tsx:153` | Worker Penalty tab (DEV-22) — list, editor, detail drawer |
-| `payrollPeriodForApproval` / `findPenaltyDrift` / `postPenaltiesForPeriod` | `src/api/lib/worker-penalties.ts:281 / 424 / 477` | Penalty payroll month, approval drift guard, posting on payroll approval |
+| `payrollPeriodForApproval` / `findPenaltyDrift` / `postPenaltiesForPeriod` | `src/api/lib/worker-penalties.ts:303 / 449 / 502` | Penalty payroll month, approval drift guard, posting on payroll approval |
 | `POST /login` / `resolveWorkerToken` | `src/api/routes/worker-auth.ts:124 / 337` | PIN login + token resolution |
 | `getWorker` (token gate) | `src/api/routes/worker.ts:160` | X-Worker-Token → ACTIVE worker or 401/403 |
 | `POST /clock` / `POST /dept-scan` | `src/api/routes/worker.ts:1067 / 1324` | Clock in/out + department scan |

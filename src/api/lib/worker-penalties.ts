@@ -34,18 +34,40 @@
 // so every read here is dual-keyed.
 // ---------------------------------------------------------------------------
 
+type Stmt = {
+  run(): Promise<unknown>;
+  all<T = unknown>(): Promise<{ results?: T[] }>;
+  first<T = unknown>(): Promise<T | null>;
+};
+
 /** The subset of D1Database this module needs (kept narrow so tests can stub). */
 interface Runner {
-  prepare(sql: string): {
-    bind(...args: unknown[]): {
-      run(): Promise<unknown>;
-      all<T = unknown>(): Promise<{ results?: T[] }>;
-      first<T = unknown>(): Promise<T | null>;
-    };
-    run(): Promise<unknown>;
-    all<T = unknown>(): Promise<{ results?: T[] }>;
-    first<T = unknown>(): Promise<T | null>;
-  };
+  prepare(sql: string): Stmt & { bind(...args: unknown[]): Stmt };
+  batch?(stmts: unknown[]): Promise<Array<{ results?: unknown[] }>>;
+}
+
+// ---------------------------------------------------------------------------
+// Fresh reads. Hyperdrive caches plain SELECTs at the proxy, so a read right
+// after a write can be served the pre-write rows (BUG-HISTORY: the
+// /bulk-patch PIC readback). Measured on staging 2026-10-01: after a payroll
+// month went back to DRAFT the penalty rows were APPROVED in the database
+// while the unchanged list query still returned POSTED. Every read that a
+// payroll figure or a status guard depends on goes through here: `batch`
+// runs inside a transaction, which Hyperdrive does not cache. Stubs without
+// `batch` (tests) fall back to a plain read.
+// ---------------------------------------------------------------------------
+export async function freshAll<T>(db: Runner, stmt: Stmt): Promise<T[]> {
+  if (typeof db.batch === "function") {
+    const [res] = await db.batch([stmt]);
+    return ((res?.results ?? []) as T[]);
+  }
+  const res = await stmt.all<T>();
+  return res.results ?? [];
+}
+
+export async function freshFirst<T>(db: Runner, stmt: Stmt): Promise<T | null> {
+  const rows = await freshAll<T>(db, stmt);
+  return rows[0] ?? null;
 }
 
 export const PENALTY_DRAFT = "DRAFT";
@@ -368,18 +390,20 @@ export function computePenaltyDrift(
 export async function loadPeriodPenaltyLines(db: Runner, period: string): Promise<PenaltyLine[]> {
   if (!PERIOD_RE.test(period)) return [];
   try {
-    const res = await db
-      .prepare(
-        `SELECT l.id, l.penalty_id, l.worker_id, l.emp_no, l.worker_name, l.department_code,
-                l.amount_sen, l.payroll_period, l.payslip_id, l.posted_at
-           FROM worker_penalty_lines l
-           JOIN worker_penalties p ON p.id = l.penalty_id
-          WHERE l.payroll_period = ? AND p.status IN ('APPROVED', 'POSTED')
-          ORDER BY l.id`,
-      )
-      .bind(period)
-      .all<PenaltyLineRow>();
-    return (res.results ?? []).map(rowToPenaltyLine);
+    const rows = await freshAll<PenaltyLineRow>(
+      db,
+      db
+        .prepare(
+          `SELECT l.id, l.penalty_id, l.worker_id, l.emp_no, l.worker_name, l.department_code,
+                  l.amount_sen, l.payroll_period, l.payslip_id, l.posted_at
+             FROM worker_penalty_lines l
+             JOIN worker_penalties p ON p.id = l.penalty_id
+            WHERE l.payroll_period = ? AND p.status IN ('APPROVED', 'POSTED')
+            ORDER BY l.id`,
+        )
+        .bind(period),
+    );
+    return rows.map(rowToPenaltyLine);
   } catch (e) {
     console.warn("[worker-penalties] period read skipped:", e);
     return [];
@@ -414,24 +438,23 @@ export async function linkPenaltyLinesToPayslip(
 
 /** Every YYYY-MM holding a payslip that is no longer DRAFT. */
 export async function loadLockedPayrollPeriods(db: Runner): Promise<Set<string>> {
-  const res = await db
-    .prepare("SELECT DISTINCT period FROM payslips WHERE status <> 'DRAFT'")
-    .all<{ period: string }>();
-  return new Set((res.results ?? []).map((r) => str(r.period)).filter((p) => PERIOD_RE.test(p)));
+  const rows = await freshAll<{ period: string }>(
+    db,
+    db.prepare("SELECT DISTINCT period FROM payslips WHERE status <> 'DRAFT'"),
+  );
+  return new Set(rows.map((r) => str(r.period)).filter((p) => PERIOD_RE.test(p)));
 }
 
 /** Stored payslips for the month disagreeing with its approved penalties. */
 export async function findPenaltyDrift(db: Runner, period: string): Promise<PenaltyDrift[]> {
   const expected = await loadPeriodPenaltySen(db, period);
-  const res = await db
-    .prepare(
-      // SELECT *: penalty_deduction_sen is runtime-added, so the CI schema
-      // snapshot cannot list it.
-      "SELECT * FROM payslips WHERE period = ?",
-    )
-    .bind(period)
-    .all<{ employeeId?: string; employee_id?: string; employeeName?: string; employee_name?: string; penaltyDeductionSen?: number; penalty_deduction_sen?: number }>();
-  const slips = (res.results ?? []).map((r) => ({
+  const rows = await freshAll<{ employeeId?: string; employee_id?: string; employeeName?: string; employee_name?: string; penaltyDeductionSen?: number; penalty_deduction_sen?: number }>(
+    db,
+    // SELECT *: penalty_deduction_sen is runtime-added, so the CI schema
+    // snapshot cannot list it.
+    db.prepare("SELECT * FROM payslips WHERE period = ?").bind(period),
+  );
+  const slips = rows.map((r) => ({
     employeeId: str(r.employeeId ?? r.employee_id),
     employeeName: str(r.employeeName ?? r.employee_name),
     penaltyDeductionSen: num(r.penaltyDeductionSen ?? r.penalty_deduction_sen),
@@ -445,13 +468,15 @@ export async function findPenaltyDrift(db: Runner, period: string): Promise<Pena
  */
 async function refreshPostedHeaders(db: Runner, penaltyIds: string[]): Promise<void> {
   for (const id of penaltyIds) {
-    const row = await db
-      .prepare(
-        `SELECT COUNT(*) AS total, COUNT(posted_at) AS posted
-           FROM worker_penalty_lines WHERE penalty_id = ?`,
-      )
-      .bind(id)
-      .first<{ total: number | string; posted: number | string }>();
+    const row = await freshFirst<{ total: number | string; posted: number | string }>(
+      db,
+      db
+        .prepare(
+          `SELECT COUNT(*) AS total, COUNT(posted_at) AS posted
+             FROM worker_penalty_lines WHERE penalty_id = ?`,
+        )
+        .bind(id),
+    );
     const total = num(row?.total);
     const posted = num(row?.posted);
     const status = total > 0 && posted === total ? PENALTY_POSTED : PENALTY_APPROVED;
@@ -486,12 +511,12 @@ export async function postPenaltiesForPeriod(
   let postedCount = 0;
   let rolled = 0;
   if (posted) {
-    const slipRes = await db
-      .prepare("SELECT id, employeeId FROM payslips WHERE period = ?")
-      .bind(period)
-      .all<{ id: string; employeeId?: string; employee_id?: string }>();
+    const slipRows = await freshAll<{ id: string; employeeId?: string; employee_id?: string }>(
+      db,
+      db.prepare("SELECT id, employeeId FROM payslips WHERE period = ?").bind(period),
+    );
     const slipByWorker = new Map(
-      (slipRes.results ?? []).map((s) => [str(s.employeeId ?? s.employee_id), s.id] as const),
+      slipRows.map((s) => [str(s.employeeId ?? s.employee_id), s.id] as const),
     );
     for (const l of lines) {
       const slipId = slipByWorker.get(l.workerId);
@@ -534,18 +559,20 @@ export async function loadPenaltiesWithLines(db: Runner, headers: PenaltyRow[]):
   if (headers.length === 0) return [];
   const ids = headers.map((h) => h.id);
   const placeholders = ids.map(() => "?").join(", ");
-  const res = await db
-    .prepare(
-      `SELECT id, penalty_id, worker_id, emp_no, worker_name, department_code,
-              amount_sen, payroll_period, payslip_id, posted_at
-         FROM worker_penalty_lines
-        WHERE penalty_id IN (${placeholders})
-        ORDER BY emp_no, id`,
-    )
-    .bind(...ids)
-    .all<PenaltyLineRow>();
+  const lineRows = await freshAll<PenaltyLineRow>(
+    db,
+    db
+      .prepare(
+        `SELECT id, penalty_id, worker_id, emp_no, worker_name, department_code,
+                amount_sen, payroll_period, payslip_id, posted_at
+           FROM worker_penalty_lines
+          WHERE penalty_id IN (${placeholders})
+          ORDER BY emp_no, id`,
+      )
+      .bind(...ids),
+  );
   const byPenalty = new Map<string, PenaltyLine[]>();
-  for (const raw of res.results ?? []) {
+  for (const raw of lineRows) {
     const l = rowToPenaltyLine(raw);
     const arr = byPenalty.get(l.penaltyId) ?? [];
     arr.push(l);

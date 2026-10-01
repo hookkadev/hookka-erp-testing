@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-236 (branch `fix/dev22-penalty-fresh-reads` → `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-10-01**: BUG-2026-10-01-234 measured and fixed on branch `fix/staging-mail-bare-raw` (STAGING ONLY): MailSlurp's raw is bare HTML; a log, so "verified" means the entry matches the code.
 > **Last verified: 2026-10-01**: BUG-2026-10-01-234 still open after #635; diagnostics branch `fix/staging-mail-source-diagnostics` (STAGING ONLY) noted in the entry; a log, so "verified" means the entry matches the code.
 > **Last verified: 2026-10-01**: BUG-2026-10-01-234 corrected (measured cause: MailSlurp's sent record holds only the first line; branch `fix/staging-mail-raw-body`, STAGING ONLY); a log, so "verified" means the entry matches the code.
@@ -73,6 +74,32 @@ Entries themselves stay newest-first.
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
 
 ---
+
+## BUG-2026-10-01-236 — Worker Penalty status and payroll reads could be served from Hyperdrive's cache `employees` `payroll` 🟡
+
+🟡 **Fix in progress** (branch `fix/dev22-penalty-fresh-reads` → `staging`) · Found while driving DEV-22 on staging.
+
+**What happened.** Measured on staging 2026-10-01: October payroll was approved (both test penalties POSTED), then put
+back to DRAFT through `PUT /api/payslips`. The database rows went back to APPROVED. A fresh query combination showed
+APPROVED, but `GET /api/worker-penalties` with the same URL kept returning POSTED for minutes, with
+`Cache-Control: no-store` on the response. So the stale copy came from Hyperdrive caching the identical
+SELECT at the proxy, the same class as the `/bulk-patch` PIC readback entry. The display was wrong. Worse, the money
+paths read the same way. A penalty approved, and its month generated and approved, inside the cache window could be
+missed by `loadPeriodPenaltyLines`. The drift guard read the same stale rows, so it would have agreed; the penalty would
+have stayed APPROVED in a locked month and never been deducted. `loadLockedPayrollPeriods` could also hand out a month
+that had just been approved.
+
+**Fix.** `freshAll` / `freshFirst` in `src/api/lib/worker-penalties.ts` read through `DB.batch` (a transaction, which
+Hyperdrive does not cache). Used by every read a payroll figure or a status guard depends on: the period's lines (generate,
+projected, drift, posting), locked months, the payslips read by drift and posting, the header recount, `loadOne` (every
+status guard), the next penalty number, the list and its counts, and the worker app's `GET /api/worker/penalties`. The
+production-order lookup and the worker / display-name reads stay on the cached path.
+
+**Regression.** `tests/worker-penalties.test.mjs`: with a DB that has `batch`, `loadLockedPayrollPeriods` uses the batch
+result and issues no plain read; a stub without `batch` falls back.
+
+**Lesson.** On this stack a SELECT right after a write is not a read of the write. Anything that decides money or a
+state transition reads through a transaction.
 
 ## BUG-2026-10-01-235 — Production Show QR / Print were slow, and a big FG print could fire before its QRs were drawn `production-orders` `ui-frontend` 🟡
 
