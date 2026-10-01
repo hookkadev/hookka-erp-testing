@@ -1,6 +1,11 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-01**: corrected two staging-tool claims below: the today-override cache rows are not wiped nightly, and the delivery-skip notices go to sanitised `@staging.invalid` addresses in code (live UNMEASURED).
 > **Last verified: 2026-10-01**: branch `feat/staging-today-override` (staging-only today override) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: branch `feat/staging-mail-outbox` (to `staging`, STAGING ONLY) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: branch `feat/staging-schema-check` (to `staging`, STAGING ONLY) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: branch `feat/staging-api-log` (to `staging`, STAGING ONLY) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: branch `feat/staging-delivery-skip` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-09-30**: branch `chore/sync-staging-from-main-0930`, staging<-main merge added below (its entry is the newest).
 > **Last verified: 2026-09-30**: #617 entry item 4 — owner re-posted the opening; creditor Self-check card green (measured).
 > **Last verified: 2026-09-30**: #617 (BUG-2026-09-30-229/-230, Self-check reconciliations + cancelled opening seeds) closed ✅ below with its prod check.
@@ -91,7 +96,7 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 - Asked: a staging-only fake "today" so month-end, overdue, aging, leave and payroll-month screens can be tested without waiting for the calendar. Scoped to named date helpers only.
 - Done: topbar control next to the patch-notes badge (staging hosts only). Sets a fake date per tab in sessionStorage, off by default; a red "Fake date: yyyy-mm-dd" pill shows while it is on, and set/clear reloads the page. `api-client.ts` sends it as `X-Staging-Today` on `/api/*` calls only while set. The server reads it only when `isStagingRequest(c)` is true (`src/api/lib/staging-gate.ts`) and the value is a real yyyy-mm-dd date; anywhere else it is ignored.
-- Persisted dates: the override affects READS only. `todayYmdMY()` is unchanged, because almost all of its callers write a date into a document (completed date, effective-from, R&D created/issued/work dates, service-case dates, stage-skip). Reads use a new wrapper, `todayYmdMYForReads()`. One write side effect: the production overdue snapshot cache is keyed by date, so a fake-date request writes a cache row under the fake date on the staging DB. Real-date requests never read it; the nightly wipe clears it.
+- Persisted dates: the override affects READS only. `todayYmdMY()` is unchanged, because almost all of its callers write a date into a document (completed date, effective-from, R&D created/issued/work dates, service-case dates, stage-skip). Reads use a new wrapper, `todayYmdMYForReads()`. One write side effect: the production overdue snapshot cache is keyed by date, so a fake-date request writes a cache row under the fake date on the staging DB. Real-date requests never read it. Nothing clears it: the nightly staging wipe was removed on 2026-09-29 (`fix/staging-no-nightly-wipe`), so these rows stay until someone deletes them. They are harmless, because only a request carrying the same fake date reads them.
 - Honours the override:
 
   | Helper | Caller | Screen |
@@ -118,6 +123,51 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 - Server gap: the aging, leave and payroll reads are inline `new Date()` in route handlers, not helpers, so they were left alone rather than threading the override through dozens of sites.
 - Tests: `tests/staging-today.test.mjs` (5: parsing, off by default, prod host and invalid values ignored, gate refuses prod/canary/custom domain/unbound DB, `overdueTodayUtc` unchanged off staging) and `tests/warm-overdue-counts.test.mjs` (6) pass. `tsc -p tsconfig.app.json` exit 0; eslint 0 errors on touched files.
 - UNMEASURED: not checked on staging. After merge, set a fake date on staging and confirm the red pill, the `X-Staging-Today` header on `/api/*` calls, and that production overdue counts move; on the prod host the control must not appear.
+
+## 2026-10-01: 🔵 Staging test tool, test order factory (branch `feat/staging-test-order-factory` to `staging`, STAGING ONLY, never PR to main)
+
+- Asked: on the Sales Orders list, staging only, a one-click "New test SO" (customer + number of lines, products random or chosen) that creates the SO through the normal create API and opens it, plus a "Void my test docs from today" cleanup.
+- `src/components/staging-test-order-factory.tsx` on `sales/index.tsx`, rendered only when the host starts with `staging.` (sales mode only). Logic in `src/lib/staging-test-order-factory.ts`. No new endpoint, no schema change.
+- Create: `POST /api/sales-orders` as DRAFT. Each line is seeded the way `sales/create.tsx` seeds it after product, seat and fabric are picked (customer price row first, sofa seat x fabric tier, bedframe PRICE_1 uses price1); divan / leg / total-height / special surcharges are left out so the server derives them. The server then applies `resolveSoBasePriceSen` and the sofa combo pass as usual. Never mixes sofa and bedframe; sofa qty 1; every line gets a fabric. Sofa legs are not sent, because an omitted leg price is derived from the bedframe leg list.
+- Tag: `reference` = `[TEST yyyy-mm-dd by <userId>]` (the paginated list search covers `reference`). `sales_orders` has no creator column, so "created by me" is the user id in that tag, self-asserted.
+- Cleanup: list search on the tag, then only rows whose `reference` holds the exact tag AND whose `createdAt` is today (MY time). Each one's detail is read and any SO with a live DO or invoice is skipped and logged. The confirm dialog lists what will be cancelled and what is left alone. Cancel is `PUT /api/sales-orders/:id {status: CANCELLED}`; never DELETE.
+- Email: SO create sends none. Confirm (not done by this tool) enqueues a PO emission whose inline fallback only logs.
+- Test: `tests/staging-test-order-factory.test.mjs` (12 pass, stubbed fetch). tsc strict exit 0.
+- UNMEASURED: not tried in a browser (local dev proxies to prod, and the host check hides the tool there). Check on staging after merge.
+
+## 2026-10-01: 🔵 Staging test tool, mail outbox page (branch `feat/staging-mail-outbox` to `staging`, STAGING ONLY, never PR to main)
+
+- Asked: a staging page listing the mail staging has sent (time, to, subject, status/error, body, attachments), so report and PO emails can be checked without opening MailSlurp.
+- Source: staging sends every email through one MailSlurp inbox, and MailSlurp keeps each sent message with its body and attachments. `outbox_emails` only holds the `enqueueEmail` path; the report emails (`reports.ts` `sendMail`) never touch it. So sent mail is read from the MailSlurp API (`GET /sent`, `GET /sent/{id}`, attachment metadata and bytes), proxied by the worker. No new storage.
+- `/staging-mail` (sidebar group PATCH NOTES): sent mail newest first, 50 a page; a click opens the body in a sandboxed iframe (scripts off) and lists attachments as download links. A "Queued, not sent" card shows `outbox_emails` rows that are not SENT, with status, tries and last error.
+- `/api/staging-mail`: read-only, 404 unless `isStagingRequest`, then SUPER_ADMIN / ADMIN only. The MailSlurp key never leaves the worker. Detail and download refuse a sent email from another inbox, and a download only serves an attachment of that email.
+- Gaps: a send MailSlurp refused is not stored there, and direct `sendMail` failures (reports, mail center, CRM, auth, users) are only logged, so neither shows. The page only fills while MailSlurp is the active provider (`sendMail` prefers Brevo, then Resend).
+- Test: `tests/staging-mail.test.mjs` (7, stubbed fetch, no network).
+- UNMEASURED: nothing was run against MailSlurp or staging. After merge, open `/staging-mail` on staging as an admin and open a report email; check a non-admin gets 403.
+
+## 2026-10-01: 🔵 Staging test tool, schema check page (branch `feat/staging-schema-check` to `staging`, STAGING ONLY, never PR to main)
+
+- Asked: a staging-only page that lists missing tables, missing columns and type mismatches between what the code expects and what the staging DB has, since migrations do not auto-apply.
+- Expected = `tests/db-schema.json` (with `tests/db-boolean-columns.json` for types). It is the only complete column-level source: a prod `information_schema` snapshot that `tests/sql-columns-exist.test.mjs` holds route SQL to, and that self-apply PRs extend by hand. `check-schema-applied.mjs` knows tables only; migrations are inert here; self-apply statements are scattered and partial.
+- `/staging-schema` page plus `GET /api/staging-schema`: 404 unless `isStagingRequest`, then `requireSuperAdmin`; one SELECT on `information_schema.columns`, no DDL. Diff in `src/api/lib/staging-schema-diff.ts`.
+- Blind spots, shown on the page: names only (types checked for real booleans only); a prod snapshot, so a self-applied column missing on staging may just mean its write path has not run there yet; only as fresh as its last refresh.
+- Test: `tests/staging-schema-diff.test.mjs` (5, fixtures only).
+- UNMEASURED: never run against a live DB. Open the page on staging after merge.
+
+## 2026-10-01: 🔵 Staging test tool: API log drawer (branch `feat/staging-api-log` to `staging`, STAGING ONLY, never PR to main)
+
+- Asked: a way to see recent API calls and their errors on staging, and copy one into a bug report.
+- Every dashboard page gains a small "API" button bottom-left, rendered only when the host starts with `staging.`. It opens a drawer with the last 50 `/api` calls: method, path (no query string), status, ms, and for failures the response body cut to 500 characters. "Copy as bug report" copies page URL, time, user agent and the picked call (or the last failed one).
+- Recording rides the existing `window.fetch` patch in `src/lib/api-client.ts` (two host-gated lines, CSRF untouched). The log is in memory only. Request bodies are never kept; failure bodies are read from a clone, and never for auth / PIN / password / session / token / invite paths. No new endpoint, no server change.
+- Test: `tests/staging-api-log.test.mjs`. UNMEASURED: not checked in a browser (local dev proxies to prod and the host check hides it there). Check on staging after merge.
+
+## 2026-10-01: 🔵 Staging test tool, delivery and billing skip (branch `feat/staging-delivery-skip` to `staging`, STAGING ONLY, never PR to main)
+
+- Asked: carry the stage-skip tool past production. For an SO whose production is done, one click creates the DO, delivers it, raises the invoice and records a full payment, each step optional through a "go up to" selector (DO / Delivered / Invoiced / Paid), with a step log.
+- SO detail page gains `StagingDeliverySkipCard` (`src/components/staging-delivery-skip.tsx`, planner and runner `src/lib/staging-delivery-skip.ts`), rendered only when the host starts with `staging.`. Writes go through the operator endpoints only: `POST /api/delivery-orders` (finished POs no live DO holds), `PUT /api/delivery-orders/:id` to LOADED then DELIVERED with a proof of delivery, `POST /api/invoices` when a DO is still DELIVERED, `POST /api/payments` for each live invoice's balance. The runner re-reads `GET /api/sales-orders/:id` between writes, stops at the first refused write, and stops if a write did not move the order. No new endpoint, no schema change.
+- Email: there is no opt-out. `applyDeliveryOrderUpdate` queues the dispatch notice on the move to LOADED and the invoice notice on the move to DELIVERED (`fireCustomerNoticeBestEffort`), and `POST /api/invoices` queues the invoice notice too. The only skips are "already sent" and no hub/customer email on file. MailSlurp sends to the address on file. Corrected 2026-10-01: the notice reads `customers.email` and `delivery_hubs.email`, and `scripts/sanitize-staging.mjs` (step 4, contact details) rewrites both to `<table>-<id>@staging.invalid`, an unroutable domain, and the sync workflow runs it after every merge. So in code these notices cannot reach a real customer. Live staging is UNMEASURED: nobody has queried whether every row is sanitised. The card says so in its confirm text; the "DO" target sends nothing. Open question for the owner: a recipient redirect in the MailSlurp branch of `src/api/lib/email.ts`.
+- "Finished" means PO status COMPLETED (the job-card rollup); `createDeliveryOrderForPOs` does not check readiness itself.
+- Test: `tests/staging-delivery-skip.test.mjs` (planner, runner against a stubbed fetch, source pins). UNMEASURED: not run on staging yet; check after merge, including that the staging user has the delivery-orders, invoices and payments permissions.
 
 ## 2026-09-30 — 🔵 Sync `staging` from `main` (branch `chore/sync-staging-from-main-0930` → `staging`)
 
