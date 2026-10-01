@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-01**: branch `feat/cn-pdf-size-column` (DEV-30) added below (its entry is the newest).
 > **Last verified: 2026-09-30**: #617 entry item 4 — owner re-posted the opening; creditor Self-check card green (measured).
 > **Last verified: 2026-09-30**: #617 (BUG-2026-09-30-229/-230, Self-check reconciliations + cancelled opening seeds) closed ✅ below with its prod check.
 > **Last verified: 2026-09-30**: branch `fix/pillow-fab-sew-sticker` (DEV-26) added below (its entry is the newest).
@@ -63,6 +64,17 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+
+## 2026-10-01 — 🔵 DEV-30 Size column on the Consignment Note PDF (Siti, High) (branch `feat/cn-pdf-size-column` → `main`)
+
+Ask (DEV-30): the CN PDF should show the item size the CO shows (a sofa's seat size, e.g. 28), as a Size column left of Set.
+
+1. 🔵 New Size column between Description and Set. Value comes from `GET /api/consignment-notes/:id/print-extras` (`sizeLabel`: the production order's, which is copied from the CO line; the CO line itself as fallback). Lines without one print "-". Verified on a locally rendered sample PDF.
+2. ⚪ Noticed, not changed: the Description still prints "Size: 1A(LHF)" for sofas, which is `products.sizeLabel` (the module code), not the seat size. Two different things both labelled size; owner to decide whether to rename or drop it.
+3. ⚪ The dispatch-notice email PDF only has the Size value when print-extras was already fetched for that CN (same as the other rich detail); otherwise it prints "-".
+
+Prod data is UNMEASURED (no prod access this session): how many CO lines carry a blank size.
 
 
 ## 2026-09-30 — 🔵 DEV-26 Pillow sticker for Fab Sew (Siti, High) (branch `fix/pillow-fab-sew-sticker` → `main`, BUG-2026-09-30-231)

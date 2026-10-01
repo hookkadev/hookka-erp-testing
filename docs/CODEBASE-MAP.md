@@ -1,5 +1,7 @@
 # Hookka ERP — Codebase Map (the single authoritative map)
 
+> **Restamped 2026-10-01 on branch `feat/cn-pdf-size-column`:** Delivery & Consignment, CN workbench row: the CN PDF Size column and its print-extras source. Nothing else re-checked.
+
 > **Last verified: 2026-09-30** on branch `fix/pillow-fab-sew-sticker`, against `src/pages/production/baserows-core.ts`
 > and the two sticker builders in `src/pages/production/index.tsx`: the Production gotcha on `travelsWithBaseSticker`
 > added. Only that line was checked; the index.tsx line ranges in the big-file index were NOT re-measured and have drifted.
@@ -409,7 +411,7 @@ authoritative current detail.** New here? Start with [ONBOARDING-PATH.md](ONBOAR
 | `src/components/ui/document-detail-drawer.tsx` — the SHARED right slide-over chrome (doc no / type / status badge / "Open full page" / close + a pinned action bar); model in `src/lib/document-drawer.ts` | `GET /api/delivery-orders/:id/print-extras` feeds the spec line | — | `tests/document-drawer.test.mjs` |
 | `src/components/ui/status-tab-strip.tsx` — the SHARED status tab strip (per state: count + money); rules in `src/lib/status-tab-strip.ts` (`tabTotals`/`tabValueSen`; a bucket summing to nothing shows its count, never RM 0.00). Used by SO / PO / GRN / PI / Invoices / CO **and DO** lists — `delivery/index.tsx` is the pattern it came from and was folded in on 2026-08-08, so there are no hand-written copies left. Money renders through `formatCurrency` everywhere (`formatRM`'s plain space was the DO page's second spelling of the same amount). | money either from the list rows already fetched, or from that list's `/stats` aggregate (which must carry `customerScopeSql`) | — | `tests/status-tab-strip.test.mjs` |
 | `src/pages/delivery/agent-tab.tsx` — Delivery Agent tab (brief strip + proposal approve/reject) | `src/api/routes/delivery-agent.ts` — brief.json / proposals / run / cron trigger; lib `src/api/lib/delivery-agent.ts` (runtime self-apply) | `delivery_proposals` / `delivery_briefs` (snake_case) | |
-| `src/pages/consignment/note.tsx` — CN workbench, DO-parity (5219) | `src/api/routes/consignment-notes.ts` — CN lifecycle | `consignment_notes` / `cn_packing_lists` | `tests/do-scan-sort.test.mjs` |
+| `src/pages/consignment/note.tsx` — CN workbench, DO-parity (5219); PDF in `src/lib/generate-cn-pdf.ts`, whose Size column is the CO line size from `GET /:id/print-extras` (`coSizeLabel`), not `products.sizeLabel` | `src/api/routes/consignment-notes.ts` — CN lifecycle | `consignment_notes` / `cn_packing_lists` | `tests/do-scan-sort.test.mjs`, `tests/cn-pdf-size-column.test.mjs` |
 | `src/pages/consignment/index.tsx` — CO list | `src/api/routes/cn-packing-lists.ts` — CN packing lists | `consignment_orders` | `tests/pl-first-autosplit.test.mjs` |
 | `src/pages/consignment/create.tsx` — create CO (1782) | `src/api/routes/consignment-orders.ts` — CO CRUD (2815) | `drivers` | `tests/three-pl-state-rates.test.mjs` |
 | `src/pages/consignment/edit.tsx` — edit CO | `src/api/routes/consignments.ts` — legacy/aggregate (536) | `three_pl_vehicles` / `three_pl_drivers` / `three_pl_state_rates` | `tests/cn-do-parity-gaps.test.mjs` |
