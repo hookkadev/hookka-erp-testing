@@ -138,3 +138,12 @@ test("every route sits behind the staging gate and an admin role check", () => {
   assert.ok(src.indexOf('app.use("*"') < src.indexOf("app.get("));
   assert.doesNotMatch(readFileSync("src/pages/staging-mail.tsx", "utf8"), /MAILSLURP|x-api-key/);
 });
+
+test("an opened email can be shown as source text, so a body that renders blank is still readable", () => {
+  const page = readFileSync("src/pages/staging-mail.tsx", "utf8");
+  assert.match(page, /Show source/);
+  assert.match(page, /characters/); // the length is shown, so "empty" and "renders blank" can be told apart
+  // The source view prints the body as a React text child (escaped), never as HTML.
+  assert.match(page, /<pre[^>]*>\s*\{detail\.body\}\s*<\/pre>/);
+  assert.doesNotMatch(page, /dangerouslySetInnerHTML/);
+});
