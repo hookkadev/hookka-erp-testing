@@ -419,3 +419,26 @@ export function breakBomIntoWips(
   }
   return wips;
 }
+
+// The WIPs that get job cards. Same as breakBomIntoWips, except an L1-only
+// BOM gets none.
+//
+// An empty tree with steps on the L1 tab is how accessory BOMs are meant to
+// look (cushions, bolsters, SB02): every step becomes one FG-level card from
+// l1Processes. breakBomIntoWips still answers that empty tree with the
+// FG_MAIN fallback, which is right only for a BOM with no steps at all. Adding
+// it next to the L1 cards gave every such PO a second Fab Cut / Fab Sew /
+// Packing card plus one in every other dept (BUG-2026-10-01-244). The
+// production builder and jobcard-sync both create cards through this, so they
+// cannot disagree.
+export function breakBomIntoJobCardWips(
+  rawWipComponents: string | null | undefined,
+  l1ProcessCount: number,
+  productCode: string,
+  variants?: BomVariantContext | null,
+): WipBreakdownItem[] {
+  const wips = breakBomIntoWips(rawWipComponents, productCode, variants);
+  const fallbackOnly =
+    wips.length === 1 && wips[0].wipKey === `${productCode}::FG_MAIN`;
+  return fallbackOnly && l1ProcessCount > 0 ? [] : wips;
+}
