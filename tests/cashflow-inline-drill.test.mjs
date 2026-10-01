@@ -104,14 +104,14 @@ test("endpoints: the drill is read-only and validated; the statement never ships
   assert.match(api, /const \{ bankByMonth: _bank, drill: _drill, sources: _sources, \.\.\.statement \} = await computeCashflowStatement\(c\.var\.DB, period, editable, getOrgId\(c\)\);/);
 });
 
-test("the tab: a line's name opens the payments under the row (not in Edit); month chips, statement month first", () => {
+test("the tab: a line's name opens the payments under the row (not in Edit), in the statement's own columns", () => {
   const tab = slice(ui, "function CashFlowTab(", "\nfunction ");
   assert.match(tab, /const canDrill = !edit && r\.kind === "line" && !!r\.lineKey;/);
   assert.match(tab, /const drillKey = canDrill \? `\$\{period\}\|\$\{r\.lineKey\}` : "";/, "a new period starts closed");
-  assert.match(tab, /<tr><td colSpan=\{cols\.length \+ 1\} className="p-0"><CfDrillPanel period=\{period\} lineKey=\{r\.lineKey\} \/><\/td><\/tr>/);
-  const panel = slice(ui, "function CfDrillPanel(", "\nfunction ");
-  assert.match(panel, /fetch\(`\/api\/accounting\/cashflow-drill\?period=\$\{encodeURIComponent\(period\)\}&key=\$\{encodeURIComponent\(lineKey\)\}`\)/);
-  assert.match(panel, /const \[month, setMonth\] = useState<string>\(period\);/);
-  for (const h of ["Date", "Description", "Bank", "Ref. 1", "Ref. 2", "Amount"]) assert.ok(panel.includes(`>${h}</th>`), `column ${h}`);
-  assert.match(panel, />All months<\/button>/);
+  assert.match(tab, /\{drilled && r\.lineKey && <CfMonthlyDrillRows period=\{period\} lineKey=\{r\.lineKey\} cols=\{cols\} depth=\{r\.depth\} accountCode=\{r\.accountCode\} \/>\}/);
+  const rows = slice(ui, "function CfMonthlyDrillRows(", "\nfunction ");
+  assert.match(rows, /fetch\(`\/api\/accounting\/cashflow-drill\?period=\$\{encodeURIComponent\(period\)\}&key=\$\{encodeURIComponent\(lineKey\)\}`\)/);
+  assert.match(rows, /const on = c\.accum \|\| c\.key === it\.ym;/, "the amount sits in its month's column and in Accumulated");
+  assert.match(rows, /entr\{data\.items\.length === 1 \? "y" : "ies"\}/, "the last row counts them");
+  assert.match(rows, /open in GL<\/Link>/);
 });

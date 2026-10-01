@@ -13,6 +13,7 @@ import { buildSupplierPaymentVoucher } from "@/lib/supplier-payment-voucher";
 import { useRowSelection } from "@/lib/use-row-selection";
 import { BatchActionsBar } from "@/components/accounting/batch-actions-bar";
 import { CreditCard, Printer } from "lucide-react";
+import { useResizableTables } from "@/lib/use-resizable-tables";
 // One money parser. NOTE: `rateStr` on this page is an FX RATE, not money, and
 // deliberately keeps `parseFloat` - see the comment at `rowBankSenWith`.
 import { moneyFieldToRinggit, moneyFieldToSen, firstMoneyFieldError, isUnreadableMoney } from "@/lib/money-field";
@@ -683,6 +684,10 @@ export default function SupplierPaymentsPage() {
   // Ticked-row selection for batch print + export, keyed by payment number.
   const sel = useRowSelection(filteredHistory, (p) => p.paymentNo);
 
+  // Finance tables (owner 2026-10-01): no wrapping; drag a column edge to
+  // resize — widths remembered (src/lib/use-resizable-tables.ts).
+  const tablesRef = useResizableTables("supplier-payments");
+
   if (loading) {
     return (
       <div className="p-6">
@@ -695,7 +700,7 @@ export default function SupplierPaymentsPage() {
   }
 
   return (
-    <div className="p-6 space-y-6 max-md:p-4 max-sm:p-3 max-md:space-y-4">
+    <div ref={tablesRef} data-fin-tables className="p-6 space-y-6 max-md:p-4 max-sm:p-3 max-md:space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
