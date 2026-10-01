@@ -16,6 +16,7 @@
 // api-client; once those are confirmed CSRF-safe in a follow-up sweep the
 // shim can be deleted.
 // ---------------------------------------------------------------------------
+import { readStagingRole } from "./staging-role"; // staging-only "view as role", never PR into main
 
 export type AuthUser = {
   id: string;
@@ -80,7 +81,10 @@ export function getAuthToken(): string | null {
 
 export function getCurrentUser(): AuthUser | null {
   const blob = readBlob();
-  return blob ? blob.user : null;
+  if (!blob) return null;
+  // Staging-only: every role check on the client follows the "view as role" pick.
+  const viewAs = readStagingRole();
+  return viewAs ? { ...blob.user, role: viewAs } : blob.user;
 }
 
 export function setAuth(data: { user: AuthUser; rememberMe?: boolean }): void {
@@ -214,7 +218,7 @@ function wipeLiveUserKeys(): void {
  */
 const API_CACHE_PREFIX = "hookka-cache:";
 
-function wipeApiCache(): void {
+export function wipeApiCache(): void {
   try {
     const toRemove: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {

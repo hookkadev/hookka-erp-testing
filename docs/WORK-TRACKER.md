@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-01**: branch `feat/staging-role-switcher` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `fix/staging-mail-bare-raw` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `fix/staging-mail-source-diagnostics` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `fix/staging-mail-raw-body` (to `staging`, STAGING ONLY) added below (its entry is the newest).
@@ -100,6 +101,15 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-01: 🔵 Staging: "View as" role switcher next to the API button (branch `feat/staging-role-switcher` to `staging`, STAGING ONLY, never PR into main)
+
+- Asked: a staging tool beside the API button, top left, to swap between roles and use the app as that role.
+- `src/components/staging-role-switch.tsx`: a "View as" picker in the topbar after `StagingApiLog`, listing `ROLE_OPTIONS`. Per tab (sessionStorage), off by default, shown only to a real SUPER_ADMIN on a `staging.` host. Picking wipes the `hookka-cache:` API cache and reloads; the pill turns red while a role is active.
+- The pick is sent as `X-Staging-Role` from the `api-client.ts` fetch patch. `auth-middleware.ts` stamps it as `userRole` only when `stagingRoleFromRequest` (`src/api/lib/staging-role.ts`) agrees: staging request (`isStagingRequest`), real role SUPER_ADMIN, known role. ADMIN is refused so it cannot pick SUPER_ADMIN. So the API gate, `/api/auth/me/permissions` (menu, nav hiding, home page) and the client role checks (`getCurrentUser()` in `auth.ts`) all act as the picked role.
+- While viewing as a role the account's own permission list is skipped (rbac.ts and /me/permissions), and the audit journal records the real role (`stagingRealRole`).
+- Limits: it is a role view, not a user view. `userId` stays yours, so "my own" data (attendance, payslip, KPI card) is still yours. Staging admin pages (Mail Outbox, Schema Check) 403 under a non-admin role, as they should.
+- Test: `tests/staging-role.test.mjs` (parse, per-tab read, server gate incl. ADMIN refused, prod and canary refused). UNMEASURED: not tried in a browser; check on staging after deploy.
 
 ## 2026-10-01: 🔵 Mail Outbox shows the whole email, measured cause (branch `fix/staging-mail-bare-raw` to `staging`, STAGING ONLY)
 

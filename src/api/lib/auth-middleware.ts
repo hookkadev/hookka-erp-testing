@@ -23,6 +23,7 @@
 // ---------------------------------------------------------------------------
 import type { MiddlewareHandler } from "hono";
 import type { Env } from "../worker";
+import { stagingRoleFromRequest } from "./staging-role"; // staging-only, never PR into main
 
 // Exact-match endpoints that always bypass the dashboard auth gate.
 export const PUBLIC_PATHS = [
@@ -497,9 +498,15 @@ export const authMiddleware: MiddlewareHandler<Env> = async (c, next) => {
     "userId",
     row.userId,
   );
+  // Staging-only (never PR into main): a real SUPER_ADMIN may view as another
+  // role via X-Staging-Role. row.role itself is left alone: the KV cache holds it.
+  const stagingRole = stagingRoleFromRequest(c, row.role);
+  if (stagingRole) {
+    (c as unknown as { set: (k: string, v: unknown) => void }).set("stagingRealRole", row.role);
+  }
   (c as unknown as { set: (k: string, v: unknown) => void }).set(
     "userRole",
-    row.role,
+    stagingRole ?? row.role,
   );
   // Hand the resolved orgId to tenantMiddleware so it can skip its own
   // `SELECT orgId FROM users` DB round-trip (perf audit 2026-07-31). Only set
