@@ -34,6 +34,7 @@ import { postJobCardLabor } from "../lib/po-cost-cascade";
 import { resolveWorkerToken } from "./worker-auth";
 import { workerCoversDept } from "../../lib/worker";
 import { requirePermission } from "../lib/rbac";
+import { stagingTodayFromRequest } from "../lib/staging-today"; // staging-only today override
 import {
   sequenceBlockers,
   blockerMessage,
@@ -121,8 +122,9 @@ import type {
 // existing behaviour - deliberately preserved rather than "harmonised", since
 // changing it here would silently orphan every stored snapshot row.
 // ---------------------------------------------------------------------------
-export function overdueTodayUtc(): string {
-  return new Date().toISOString().slice(0, 10);
+export function overdueTodayUtc(c?: Context<Env>): string {
+  // Staging-only: c carries the X-Staging-Today override (null off staging).
+  return (c && stagingTodayFromRequest(c)) || new Date().toISOString().slice(0, 10);
 }
 export function overdueCountsCacheKey(
   dept: string | null,
@@ -165,7 +167,7 @@ export async function computeOverdueCounts(
   const orgId = orgIdArg ?? getOrgId(c);
   const dept =
     deptArg && deptArg.trim().length > 0 ? deptArg.trim().toUpperCase() : null;
-  const today = overdueTodayUtc();
+  const today = overdueTodayUtc(c);
 
   // PR 7 — cache-aside snapshot. cache_key encodes both the dept
   // filter AND today's date — overdue counts are inherently

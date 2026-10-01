@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-01**: branch `feat/staging-today-override` (staging-only today override) added below (its entry is the newest).
 > **Last verified: 2026-09-30**: branch `chore/sync-staging-from-main-0930`, staging<-main merge added below (its entry is the newest).
 > **Last verified: 2026-09-30**: #617 entry item 4 — owner re-posted the opening; creditor Self-check card green (measured).
 > **Last verified: 2026-09-30**: #617 (BUG-2026-09-30-229/-230, Self-check reconciliations + cancelled opening seeds) closed ✅ below with its prod check.
@@ -85,6 +86,37 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-01: 🔵 Staging test tool, today override (branch `feat/staging-today-override` to `staging`, STAGING ONLY, never PR to main)
+
+- Asked: a staging-only fake "today" so month-end, overdue, aging, leave and payroll-month screens can be tested without waiting for the calendar. Scoped to named date helpers only.
+- Done: topbar control next to the patch-notes badge (staging hosts only). Sets a fake date per tab in sessionStorage, off by default; a red "Fake date: yyyy-mm-dd" pill shows while it is on, and set/clear reloads the page. `api-client.ts` sends it as `X-Staging-Today` on `/api/*` calls only while set. The server reads it only when `isStagingRequest(c)` is true (`src/api/lib/staging-gate.ts`) and the value is a real yyyy-mm-dd date; anywhere else it is ignored.
+- Persisted dates: the override affects READS only. `todayYmdMY()` is unchanged, because almost all of its callers write a date into a document (completed date, effective-from, R&D created/issued/work dates, service-case dates, stage-skip). Reads use a new wrapper, `todayYmdMYForReads()`. One write side effect: the production overdue snapshot cache is keyed by date, so a fake-date request writes a cache row under the fake date on the staging DB. Real-date requests never read it; the nightly wipe clears it.
+- Honours the override:
+
+  | Helper | Caller | Screen |
+  |---|---|---|
+  | `todayYmdMYForReads()` (client) | `src/pages/accounting/index.tsx` overview | P&L month default |
+  | `todayYmdMYForReads()` (client) | `src/pages/production/index.tsx` baserows `today` | production grid overdue marks |
+  | `overdueTodayUtc(c)` (server) | `computeOverdueCounts` in `production-orders.ts` | production overdue counts |
+
+- Does NOT honour it (known date reads, real date still used):
+
+  | Where | What |
+  |---|---|
+  | `todayYmdMY()` callers (production completedDate, employees effectiveFrom, rd/detail, service-cases, stage-skip) | document dates written, on purpose |
+  | `src/pages/employees.tsx` future effective-from badge, `src/pages/worker/scan.tsx` today history | reads, left out (worker portal has no topbar, so no banner) |
+  | `src/pages/production/utils.ts` `todayISO` | production page cold-start date filter (from = to = real today) |
+  | `src/lib/delivery-list-filters.ts` `startOfMonthMYT` | delivery list default month |
+  | `accounting.ts` inline `new Date()` (AP/AR aging, trial-balance `asOf` default and about ten more) | aging and period defaults |
+  | `invoices.ts`, `dashboard-prototype.ts` inline `new Date()` | overdue on invoices and dashboard |
+  | `customer-credit.ts` `decideCredit(..., todayYmdMY())` | credit block on DO create (a write gate, no request context) |
+  | `leave-entitlement.ts` `currentLeaveYear()`, `payslips.ts` inline `new Date()` | leave year, payroll month |
+  | `reports.ts` cron date helpers, `agent-learning.ts` `ymdInSgt` (planning), `fabric-usage.ts` `FABRIC_METRICS_TODAY` | crons and planners, no request context |
+
+- Server gap: the aging, leave and payroll reads are inline `new Date()` in route handlers, not helpers, so they were left alone rather than threading the override through dozens of sites.
+- Tests: `tests/staging-today.test.mjs` (5: parsing, off by default, prod host and invalid values ignored, gate refuses prod/canary/custom domain/unbound DB, `overdueTodayUtc` unchanged off staging) and `tests/warm-overdue-counts.test.mjs` (6) pass. `tsc -p tsconfig.app.json` exit 0; eslint 0 errors on touched files.
+- UNMEASURED: not checked on staging. After merge, set a fake date on staging and confirm the red pill, the `X-Staging-Today` header on `/api/*` calls, and that production overdue counts move; on the prod host the control must not appear.
 
 ## 2026-09-30 — 🔵 Sync `staging` from `main` (branch `chore/sync-staging-from-main-0930` → `staging`)
 
