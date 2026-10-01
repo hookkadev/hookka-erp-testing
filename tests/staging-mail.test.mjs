@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { getSentAttachment, getSentMail, listSentMail } from "../src/api/lib/staging-mail.ts";
+import { getSentAttachment, getSentMail, htmlFromRawMime, listSentMail } from "../src/api/lib/staging-mail.ts";
 import { isStagingRequest } from "../src/api/lib/staging-gate.ts";
 
 const INBOX = "11111111-1111-4111-8111-111111111111";
@@ -71,24 +71,64 @@ test("detail returns body and attachment names for our inbox", async () => {
   assert.equal("inboxId" in d, false);
 });
 
-// BUG-2026-10-01-234: staging's sent records came back with no body, so the
-// page showed an empty frame. The HTML endpoint fills it in.
-test("detail falls back to the HTML endpoint when the sent record has no body", async () => {
-  const { f, calls } = stub({
+// BUG-2026-10-01-234: the sent record's body stops at the first line break
+// (121 chars of the Production Morning Brief) while the delivered email is
+// whole. The page takes the longest of body, /html and the raw message.
+const BRIEF =
+  '<!doctype html><html><head><meta charset="utf-8" />\n<style>p{color:red}</style></head><body><p>Today’s plan</p></body></html>';
+const FIRST_LINE = BRIEF.split("\n")[0];
+
+test("detail uses the raw message when the sent record's body is cut at the first line", async () => {
+  // Quoted-printable: "=" escaped, the curly quote as utf-8 bytes, one soft line break.
+  const qp = BRIEF.replace(/=/g, "=3D").replace("’", "=E2=80=99").replace("<style>", "=\r\n<style>");
+  const raw = [
+    "Subject: brief",
+    "Content-Type: multipart/alternative;",
+    ' boundary="b1"',
+    "",
+    "--b1",
+    "Content-Type: text/plain; charset=UTF-8",
+    "",
+    "plain version",
+    "--b1",
+    "Content-Type: text/html; charset=UTF-8",
+    "Content-Transfer-Encoding: quoted-printable",
+    "",
+    qp,
+    "--b1--",
+    "",
+  ].join("\r\n");
+  const { f } = stub({
+    [`/sent/${SENT}`]: { ...sentDto(INBOX), body: FIRST_LINE, attachments: [] },
+    [`/sent/${SENT}/raw`]: raw,
+  });
+  const d = await getSentMail(f, "KEY", INBOX, SENT);
+  assert.equal(d.body, BRIEF);
+  assert.equal(d.isHtml, true);
+});
+
+test("raw base64 html is decoded as utf-8; no html part gives empty", () => {
+  const b64 = Buffer.from(BRIEF, "utf8").toString("base64").replace(/(.{76})/g, "$1\r\n");
+  const raw = `Content-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n${b64}\r\n`;
+  assert.equal(htmlFromRawMime(raw), BRIEF);
+  assert.equal(htmlFromRawMime("Content-Type: text/plain\r\n\r\nhello"), "");
+  assert.equal(htmlFromRawMime(""), "");
+});
+
+test("detail falls back to /html when that is longest, and failing fallbacks keep the body", async () => {
+  const viaHtml = stub({
     [`/sent/${SENT}`]: { ...sentDto(INBOX), body: null, isHTML: null, attachments: [] },
     [`/sent/${SENT}/html`]: "<p>from html</p>",
   });
-  const d = await getSentMail(f, "KEY", INBOX, SENT);
+  const d = await getSentMail(viaHtml.f, "KEY", INBOX, SENT);
   assert.equal(d.body, "<p>from html</p>");
   assert.equal(d.isHtml, true);
-  assert.ok(calls.some((c) => c.url.endsWith(`/sent/${SENT}/html`)));
 
-  const none = stub({ [`/sent/${SENT}`]: { ...sentDto(INBOX), body: "", attachments: [] } });
-  assert.equal((await getSentMail(none.f, "KEY", INBOX, SENT)).body, ""); // 404 on /html stays empty
-
-  const full = stub({ [`/sent/${SENT}`]: { ...sentDto(INBOX), attachments: [] } });
-  await getSentMail(full.f, "KEY", INBOX, SENT);
-  assert.equal(full.calls.some((c) => c.url.endsWith("/html")), false); // only when needed
+  // /html and /raw both 500: the record's own body still shows.
+  const ok = stub({ [`/sent/${SENT}`]: { ...sentDto(INBOX), attachments: [] } });
+  const f = async (url, init) =>
+    /\/(html|raw)$/.test(String(url)) ? new Response("boom", { status: 500 }) : ok.f(url, init);
+  assert.equal((await getSentMail(f, "KEY", INBOX, SENT)).body, "<p>hi</p>");
 });
 
 test("detail hides mail from another inbox, unknown ids and non-uuids", async () => {
