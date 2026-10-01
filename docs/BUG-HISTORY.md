@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-01**: BUG-2026-10-01-234 still open after #635; diagnostics branch `fix/staging-mail-source-diagnostics` (STAGING ONLY) noted in the entry; a log, so "verified" means the entry matches the code.
 > **Last verified: 2026-10-01**: BUG-2026-10-01-234 corrected (measured cause: MailSlurp's sent record holds only the first line; branch `fix/staging-mail-raw-body`, STAGING ONLY); a log, so "verified" means the entry matches the code.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-235 (branch `perf/production-qr-speed-staging` → `staging`; -234 is the staging mail entry); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-234 (branch `fix/staging-mail-empty-body`, STAGING ONLY; ids up to 233 are taken on `main` / `staging`); a log, so "verified" means the newest entry matches the code.
@@ -123,6 +124,13 @@ body, so the fallback never ran. #633 added "Show source" and the body length, w
 the full HTML; base64 raw decodes as utf-8; `/html` wins when it is longest; `/html` and `/raw` failing keep the body. Two
 cases fail on the previous reader. UNMEASURED: whether `/html` or `/raw` holds the full body on MailSlurp's side; check by
 opening the brief on `/staging-mail` (the length should be thousands of characters).
+
+**#635 did not fix it (2026-10-01).** The owner still sees 121 characters after the deploy, so `/html` and `/raw` either came
+back short or failed, and #635 swallowed failures, so the page could not say which. Branch `fix/staging-mail-source-diagnostics`
+measures instead of fixing: the detail response lists each source (record, `/html`, `/raw`, `/raw/json`) with its HTTP status,
+length and decoded length, failures are reported instead of swallowed, `/raw/json` is added as a fourth source, and a "Show raw"
+view prints the raw message. A sender change (sending the HTML on one line) is held back until the raw message is measured: delivery
+works today, and every staging email would go through it.
 
 ---
 

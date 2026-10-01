@@ -124,11 +124,13 @@ test("detail falls back to /html when that is longest, and failing fallbacks kee
   assert.equal(d.body, "<p>from html</p>");
   assert.equal(d.isHtml, true);
 
-  // /html and /raw both 500: the record's own body still shows.
+  // /html and both raw forms 500: the record's own body still shows.
   const ok = stub({ [`/sent/${SENT}`]: { ...sentDto(INBOX), attachments: [] } });
   const f = async (url, init) =>
-    /\/(html|raw)$/.test(String(url)) ? new Response("boom", { status: 500 }) : ok.f(url, init);
-  assert.equal((await getSentMail(f, "KEY", INBOX, SENT)).body, "<p>hi</p>");
+    /\/(html|raw|raw\/json)$/.test(String(url)) ? new Response("boom", { status: 500 }) : ok.f(url, init);
+  const d500 = await getSentMail(f, "KEY", INBOX, SENT);
+  assert.equal(d500.body, "<p>hi</p>");
+  assert.deepEqual(d500.sources.map((s) => s.status), [200, 500, 500, 500]);
 });
 
 test("detail hides mail from another inbox, unknown ids and non-uuids", async () => {
@@ -179,11 +181,37 @@ test("every route sits behind the staging gate and an admin role check", () => {
   assert.doesNotMatch(readFileSync("src/pages/staging-mail.tsx", "utf8"), /MAILSLURP|x-api-key/);
 });
 
-test("an opened email can be shown as source text, so a body that renders blank is still readable", () => {
+test("an opened email can be shown as source or raw text, so a body that renders blank is still readable", () => {
   const page = readFileSync("src/pages/staging-mail.tsx", "utf8");
-  assert.match(page, /Show source/);
+  assert.match(page, /\["rendered", "source", "raw"\]/);
+  assert.match(page, /Show \{v\}/);
   assert.match(page, /characters/); // the length is shown, so "empty" and "renders blank" can be told apart
-  // The source view prints the body as a React text child (escaped), never as HTML.
-  assert.match(page, /<pre[^>]*>\s*\{detail\.body\}\s*<\/pre>/);
+  assert.match(page, /Sources: \{detail\.sources\.map\(describeSource\)/);
+  // Source and raw are printed as a React text child (escaped), never as HTML.
+  assert.match(page, /<pre[^>]*>\s*\{view === "raw" \? detail\.raw : detail\.body\}\s*<\/pre>/);
   assert.doesNotMatch(page, /dangerouslySetInnerHTML/);
+});
+
+test("detail reports each body source, and raw/json is decoded and used when it is longest", async () => {
+  const raw = `Content-Type: text/html; charset=utf-8\r\n\r\n${BRIEF}\r\n`;
+  const { f } = stub({
+    [`/sent/${SENT}`]: { ...sentDto(INBOX), body: FIRST_LINE, attachments: [] },
+    [`/sent/${SENT}/html`]: FIRST_LINE,
+    [`/sent/${SENT}/raw/json`]: { content: raw },
+  });
+  const d = await getSentMail(f, "KEY", INBOX, SENT);
+  assert.equal(d.body, BRIEF);
+  assert.equal(d.raw, raw);
+  assert.deepEqual(d.sources, [
+    { name: "record", status: 200, length: FIRST_LINE.length },
+    { name: "html", status: 200, length: FIRST_LINE.length },
+    { name: "raw", status: 404, length: 0, decoded: 0 },
+    { name: "raw/json", status: 200, length: raw.length, decoded: BRIEF.length },
+  ]);
+
+  // A network failure is reported, not swallowed.
+  const down = async (url, init) =>
+    String(url).endsWith("/html") ? Promise.reject(new Error("socket hang up")) : f(url, init);
+  const e = await getSentMail(down, "KEY", INBOX, SENT);
+  assert.deepEqual(e.sources[1], { name: "html", status: 0, length: 0, error: "socket hang up" });
 });
