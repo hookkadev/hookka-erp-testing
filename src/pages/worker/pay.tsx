@@ -212,7 +212,14 @@ function asWorkerPayResponse(v: unknown): WorkerPayResponse | null {
 // Per-day attendance for the selected month — the same /history slice the
 // Home page used to render (owner 2026-06-12: "搬进去 Pay 的里面" — the daily
 // punch records belong under the pay breakdown, following the month picker).
-type PayDailyRow = { date: string; workingMinutes: number; productionMinutes: number };
+type PayDeptHours = { name: string; category: string | null; hours: number };
+type PayDailyRow = {
+  date: string;
+  workingMinutes: number;
+  productionMinutes: number;
+  /** DEV-31: the day's Working Hours rows by department (office-grid split). */
+  deptHours: PayDeptHours[];
+};
 type PayAttRow = {
   date: string;
   clockIn: string | null;
@@ -266,6 +273,17 @@ function asPayMonthHistory(v: unknown): PayMonthHistory | null {
             date: r.date,
             workingMinutes: asNumber(r.workingMinutes) ?? 0,
             productionMinutes: asNumber(r.productionMinutes) ?? 0,
+            deptHours: (Array.isArray(r.deptHours) ? r.deptHours : [])
+              .map((x) =>
+                isRecord(x) && typeof x.name === "string"
+                  ? {
+                      name: x.name,
+                      category: typeof x.category === "string" ? x.category : null,
+                      hours: asNumber(x.hours) ?? 0,
+                    }
+                  : null,
+              )
+              .filter((x): x is PayDeptHours => !!x && x.hours > 0),
           }
         : null,
     )
@@ -544,6 +562,20 @@ function DailyAttendanceCard({ hist, t }: { hist: PayMonthHistory; t: Translate 
                       {" "}· {t("home.lateBy")} {att.lateMinutes}m
                     </span>
                   )}
+                </p>
+              )}
+              {r.deptHours.length > 0 && (
+                <p className="mt-0.5 text-xs text-[#6B5C32] tabular-nums">
+                  {r.deptHours
+                    .map(
+                      (d) =>
+                        `${d.name}${
+                          d.category
+                            ? ` · ${d.category.charAt(0)}${d.category.slice(1).toLowerCase()}`
+                            : ""
+                        } ${d.hours.toFixed(2)}h`,
+                    )
+                    .join("  ·  ")}
                 </p>
               )}
             </div>
