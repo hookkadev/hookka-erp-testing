@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-243 (branch `fix/worker-today-hours-utc`; ids 240-242 are on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-239 (branch `fix/worker-login-keypad-capture`, to staging then main); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-238 (branch `fix/cn-duplicate-po`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-237 (branch `fix/bom-accessory-category`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
@@ -53,6 +54,24 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-10-01-243 — Worker home hid "Hours worked today" while punched in `worker-portal` `attendance` 🟢
+
+🟢 **Fixed** (branch `fix/worker-today-hours-utc` → `main`; not yet deployed) · Worker home clock card showed no hours for most of the working day.
+
+**Root cause.** `GET /api/worker/today` ticks `attendance.workingMinutes` for an open punch as "now minus clockIn". It read "now" with `new Date().getHours()`, which is UTC on Cloudflare Workers, while `clockIn` is Malaysia wall time (UTC+8). Punch in at 08:05, look at 10:30: the maths was 02:30 minus 08:05, negative, clamped to 0. The card renders only when the value is above 0 (`src/pages/worker/index.tsx`, `workingMinutes > 0 &&`), so it vanished until about 4pm.
+
+**Fix.** New `liveWorkingMinutes(clockIn, nowMs)` in `src/api/routes/worker.ts`, using the same +8h shift as `malaysiaNow()`.
+
+**Rules engine considered, not used.** The live figure stays raw elapsed (no lunch deduction) because punch-out stores raw `out - in` in `workingMinutes` and the card shows that stored value afterwards. A rules-engine live figure would sit an hour lower after lunch and then jump at punch-out. Known gap: DEV-31's `deptDay.hoursSoFar` on `staging` (`computeLiveDeptDay`) is rules-engine, so once this reaches staging the two cards differ by up to the lunch hour. Aligning them means changing what punch-out stores, which feeds payroll; that is an owner call, not this fix.
+
+**Sweep.** `.getHours()` / `.getMinutes()` in `src/api`: one more instance. `POST /api/attendance` (`src/api/routes/attendance.ts`) defaulted `date` and `time` from the UTC clock when the body omits them; now Malaysia-local. No other server-side reads.
+
+**Regression.** `tests/worker-today-live-hours.test.mjs`: 10:30 MY with an 08:05 punch gives 145 (old code gave 0), plus a guard that neither route reads `getHours()`.
+
+**Verify.** Not driven in a browser locally (local dev proxies to prod). To check on staging before 4pm MY: punch in on the worker app; "Hours worked today" must show and tick.
 
 ---
 

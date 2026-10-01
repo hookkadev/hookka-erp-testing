@@ -1,5 +1,6 @@
 # Hookka ERP — Codebase Map (the single authoritative map)
 
+> **Restamped 2026-10-01 on branch `fix/worker-today-hours-utc`:** Worker Portal row, added `tests/worker-today-live-hours.test.mjs`. Nothing else re-checked. Last verified: 2026-10-01.
 > **Restamped 2026-10-01 on branch `fix/cn-duplicate-po`:** Delivery & Consignment gotchas, the one-CN-per-PO rule (`validatePOMutex`). Nothing else re-checked. Last verified: 2026-10-01.
 > **Restamped 2026-10-01 on branch `fix/bom-accessory-category`:** Production & BOM gotcha on template category (product row wins). Nothing else re-checked.
 
@@ -765,7 +766,7 @@ authoritative current detail.** New here? Start with [ONBOARDING-PATH.md](ONBOAR
 | Frontend page | API route | Primary tables | Tests |
 |---|---|---|---|
 | `src/pages/employees.tsx` — 9-tab admin shell (11,784) | `src/api/routes/workers.ts` — employee master + salary effective-dating (1047) | `workers` / `worker_salary_history` | `tests/labor-engine.test.mjs` · `tests/virtual-group-window.test.mjs` |
-| `src/pages/worker/index.tsx` — worker mobile home | `src/api/routes/worker.ts` — self-service mobile backend (4130) | `departments` / `attendance_records` | `tests/attendance-rules.test.mjs` |
+| `src/pages/worker/index.tsx` — worker mobile home | `src/api/routes/worker.ts` — self-service mobile backend (4130) | `departments` / `attendance_records` | `tests/attendance-rules.test.mjs` / `tests/worker-today-live-hours.test.mjs` |
 | `src/pages/worker/scan.tsx` — clock/dept-scan/packing (3203) | `src/api/routes/worker-auth.ts` — PIN auth | `working_hour_entries` | `tests/auto-attendance-deduct.test.mjs` |
 | `src/pages/worker/pay.tsx` — payslip view | `src/api/routes/attendance.ts` — admin attendance (374) | `payroll_runs` / `payroll_*` (generated) / `payroll_payslips` | `tests/worker-auth.test.mjs` |
 | `src/pages/worker/me.tsx` — profile | `src/api/routes/departments.ts` — dept CRUD (431) | `payroll_hour_deductions` | `tests/worker-auth-default-protect.test.mjs` |
