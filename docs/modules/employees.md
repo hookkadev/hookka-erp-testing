@@ -1,6 +1,6 @@
 # Employees & Payroll — Module Guide
 
-> **Last verified: 2026-10-01** (branch `fix/worker-history-snapshot-stale`): `POST /clock` / `POST /dept-scan` anchors re-derived after worker.ts grew 5 lines (BUG-2026-10-01-244). Nothing else re-checked.
+> **Last verified: 2026-10-01** (branch `fix/worker-history-snapshot-stale`): `POST /clock` / `POST /dept-scan` anchors re-derived after worker.ts grew 5 lines (BUG-2026-10-01-245). Nothing else re-checked.
 
 > **Last verified: 2026-10-01** (branch `feat/dev22-worker-penalty`) — Worker Penalty (DEV-22) added to entry points, data model, core flows and gotchas, checked against `src/api/lib/worker-penalties.ts`, `src/api/routes/worker-penalties.ts`, `src/api/routes/payslips.ts`. Nothing else re-checked.
 

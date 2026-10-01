@@ -277,7 +277,7 @@ function isFresh(
 
 // ─────────────── 3a. reads that Hyperdrive cannot serve from cache ───────────
 
-// BUG-2026-10-01-244. Hyperdrive caches plain SELECTs at the proxy and never
+// BUG-2026-10-01-245. Hyperdrive caches plain SELECTs at the proxy and never
 // invalidates them on a write. Both halves of this snapshot were exposed:
 //   • the freshness probe is the SAME parameterless SQL on every call, so a
 //     cached copy hides a just-made write (the row count it carries included);

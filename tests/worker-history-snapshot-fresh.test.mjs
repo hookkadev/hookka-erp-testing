@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// worker-history-snapshot-fresh.test.mjs — BUG-2026-10-01-244.
+// worker-history-snapshot-fresh.test.mjs — BUG-2026-10-01-245.
 //
 // Staging 2026-10-01, worker TEST-001: clocked in, clocked out (the broken-
 // punch rule wrote a 9h working_hour_entries row). GET /api/worker/today

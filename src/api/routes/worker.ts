@@ -919,7 +919,7 @@ function parseCoord(v: unknown): number | null {
 }
 // Every write to attendance_records bumps updated_at: it is half of the
 // /history snapshot's freshness probe, and a clock-out that adds no row moves
-// nothing else (BUG-2026-10-01-244). Same ISO text the column default and
+// nothing else (BUG-2026-10-01-245). Same ISO text the column default and
 // attendance.ts write, so the per-table MAX stays comparable.
 const BUMP_UPDATED_AT = "updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')";
 async function stampPunchGeo(
