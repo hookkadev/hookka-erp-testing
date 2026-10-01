@@ -74,7 +74,7 @@ import {
 import { DEFAULT_ORG_ID } from "../lib/tenant";
 import { normalizeStoredPcbStatus } from "../../lib/pcb";
 import { ensurePayrollTaxColumns } from "../lib/payroll-tax-columns";
-import { ensureWorkerPenaltyTables } from "../lib/worker-penalties";
+import { ensureWorkerPenaltyTables, freshAll } from "../lib/worker-penalties";
 // One shared completion core with the desktop QC page — see the QC-on-the-
 // phone block below for why the phone must not own a second copy.
 import { completeInspection } from "./qc-pending";
@@ -2309,18 +2309,21 @@ app.get("/penalties", async (c) => {
   const auth = await getWorker(c);
   if (!auth.ok) return auth.response;
   await ensureWorkerPenaltyTables(c.var.DB);
-  const res = await c.var.DB.prepare(
-    `SELECT l.id, p.penalty_no, p.penalty_date, p.po_no, p.customer_name, p.product_name, p.reason,
-            p.status, p.approved_at, l.amount_sen, l.payroll_period, l.payslip_id, l.posted_at
-       FROM worker_penalty_lines l
-       JOIN worker_penalties p ON p.id = l.penalty_id
-      WHERE l.worker_id = ? AND p.status IN ('APPROVED', 'POSTED')
-      ORDER BY l.payroll_period DESC, p.penalty_date DESC`,
-  )
-    .bind(auth.workerId)
-    .all<Record<string, unknown>>();
+  // Fresh read (see freshAll): a deduction the worker was just told about
+  // must not be missing from their phone for the cache window.
+  const rows = await freshAll<Record<string, unknown>>(
+    c.var.DB,
+    c.var.DB.prepare(
+      `SELECT l.id, p.penalty_no, p.penalty_date, p.po_no, p.customer_name, p.product_name, p.reason,
+              p.status, p.approved_at, l.amount_sen, l.payroll_period, l.payslip_id, l.posted_at
+         FROM worker_penalty_lines l
+         JOIN worker_penalties p ON p.id = l.penalty_id
+        WHERE l.worker_id = ? AND p.status IN ('APPROVED', 'POSTED')
+        ORDER BY l.payroll_period DESC, p.penalty_date DESC`,
+    ).bind(auth.workerId),
+  );
   const s = (a: unknown, b: unknown) => String(a ?? b ?? "");
-  const data = (res.results ?? []).map((r) => {
+  const data = rows.map((r) => {
     const posted = !!(r.postedAt ?? r.posted_at);
     const amountSen = Number(r.amountSen ?? r.amount_sen) || 0;
     return {
