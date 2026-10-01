@@ -1,5 +1,7 @@
 # Employees & Payroll — Module Guide
 
+> **Last verified: 2026-10-01** (branch `feat/dev22-worker-penalty`) — Worker Penalty (DEV-22) added to entry points, data model, core flows and gotchas, checked against `src/api/lib/worker-penalties.ts`, `src/api/routes/worker-penalties.ts`, `src/api/routes/payslips.ts`. Nothing else re-checked.
+
 > **Last verified: 2026-08-14** (branch `docs/docs-vs-code-audit`) — corrected against the
 > source by the prose audit; the row(s) touched here are itemised in
 > [`docs/DOCS-VS-CODE-AUDIT.md`](../DOCS-VS-CODE-AUDIT.md). Only the claims listed there were
@@ -25,6 +27,7 @@ Owns the whole workforce lifecycle: the **employee master** (workers + effective
   - Payroll run header → `src/api/routes/payroll.ts` (205); payslip generate/read → `src/api/routes/payslips.ts` (1625)
   - Short-hour docks → `src/api/routes/payroll-hour-deductions.ts` (418)
   - Salary advances → `src/api/routes/employee-advances.ts` (CRUD + `GET /payout-listing`); the maths, the runtime self-apply and the payroll hook live in `src/api/lib/employee-advances.ts`
+  - Worker penalties (DEV-22) → `src/api/routes/worker-penalties.ts` (CRUD, `POST /:id/submit|approve|reject|revoke`, `GET /order-lookup[/:id]`); maths, payroll posting and runtime self-apply in `src/api/lib/worker-penalties.ts`; UI tab `src/components/worker-penalty-tab.tsx`; worker app reads `GET /api/worker/penalties`
   - Admin attendance → `src/api/routes/attendance.ts` (553); departments → `src/api/routes/departments.ts` (431)
   - Read-only aggregate → `src/api/routes/department-performance.ts` (848); leaves → `src/api/routes/leaves.ts` (354)
 - **Engine libs**
@@ -39,6 +42,7 @@ Owns the whole workforce lifecycle: the **employee master** (workers + effective
 - `attendance_records` — admin-side attendance (punch photos, dept breakdown JSON).
 - `payroll_records` / `payroll_payslips` — generated payslip rows per period; `payroll_hour_deductions` (mig 0152) = short-hour docks.
 - `employee_advances` (mig 0211, runtime self-applied by `ensureAdvanceTables`) — one row per cash advance: `worker_id`, `advance_date` (the day the cash was handed over — THIS is what puts it in a pay period), `amount_sen`, `note`, `entered_by`, `status` UNSETTLED|SETTLED. `payslips.advance_deduction_sen` snapshots what each generated payslip recovered.
+- `worker_penalties` (DEV-22, runtime self-applied by `ensureWorkerPenaltyTables`, no migration file) — header: `penalty_no` (`WP-YYMM-NNN`, unique), `penalty_date`, the production-order snapshot (`production_order_id`, `po_no`, `sales_order_no`, `customer_name`, `product_code`, `product_name`, `quantity` — copied server-side from `production_orders`), `reason`, `remarks`, `status` DRAFT | PENDING_APPROVAL | APPROVED | POSTED, `created_by[_name]`, `submitted_at`, `approved_by[_name]`, `approved_at`, `rejected_reason`. `worker_penalty_lines` — one row per responsible worker: `worker_id`, `emp_no` / `worker_name` / `department_code` snapshot, `amount_sen`, `payroll_period` (set at approval), `payslip_id`, `posted_at`. `payslips.penalty_deduction_sen` snapshots what each generated payslip took. Photos live in `file_assets` with `resourceType = 'worker-penalty'`.
 - `departments` — department master (`isProduction` flag gates the efficiency denominator); `leaves`, `worker_issues`, `public_holidays` (via `kv_config['public_holidays']`).
 
 ## Core flows
@@ -49,26 +53,30 @@ Owns the whole workforce lifecycle: the **employee master** (workers + effective
 5. **Short-hour dock** — `payroll-hour-deductions.ts` `POST /auto-from-punch` **:149** derives docks from punches; `POST /settle-period` **:211** folds them into the period.
 6. **Effective-dated salary** — `workers.ts` `GET /salary/effective` **:1242** returns each worker's day-weighted rate for a period; `resyncCurrentSalary` (`:1165`) keeps `workers.basicSalarySen` in sync with the latest history row.
 
+7. **Worker penalty (DEV-22)** — raised against a production order (`GET /order-lookup/:id` returns the order + each job card's `pic1/pic2` as suggested workers), one line per worker with its own amount. DRAFT → `submit` → PENDING_APPROVAL → `approve` (needs `worker-penalties:approve`; the raiser may not approve their own, 403, unless they are SUPER_ADMIN — owner 2026-10-01, `selfApprovalBlocked`) → APPROVED with every line's `payroll_period` = the approval date's Malaysian month, or the first later month with no non-DRAFT payslip (`payrollPeriodForApproval`). `reject` sends it back to DRAFT with a reason; `revoke` takes an unposted APPROVED one back to DRAFT. Generate + projected subtract `loadPeriodPenaltySen` after statutory (and after the advance). Payroll `PUT /api/payslips` to APPROVED/PAID first refuses with 409 when `findPenaltyDrift` finds a stored slip that disagrees with the approved penalties, then `postPenaltiesForPeriod` posts each line against its worker's slip (a worker with no slip that month rolls to the next month); the header turns POSTED only when every line is posted. Back to DRAFT un-posts.
+
 ## Key functions / sections (locate-to-function)
 | Symbol / section | file:line | Role |
 |---|---|---|
-| `EmployeesPage` (shell + tab switch) | `src/pages/employees.tsx:11643` | 9-tab admin host (default export, at file tail) |
-| `WorkingHoursTab` | `src/pages/employees.tsx:1015` | Tab 1 — flat working-hours grid |
-| `EmployeeMasterTab` | `src/pages/employees.tsx:2407` | Tab 2 — worker master + salary |
-| `EfficiencyOverviewTab` | `src/pages/employees.tsx:3871` | Tab 3 — efficiency overview |
-| `DepartmentLaborTab` | `src/pages/employees.tsx:4436` | Dept labor cost breakdown |
-| `EmployeeDetailTab` | `src/pages/employees.tsx:5413` | Tab 4 — guard-unmounted detail |
-| `PayrollTab` | `src/pages/employees.tsx:6789` | Tab 5 — payroll drafts |
-| `LaborCostTab` | `src/pages/employees.tsx:8638` | Tab 5b — labor cost + DepartmentsManager |
-| `LeaveManagementTab` / `AttendanceTab` | `src/pages/employees.tsx:10284 / 11411` | Leave + attendance tabs |
+| `EmployeesPage` (shell + tab switch) | `src/pages/employees.tsx:11747` | 9-tab admin host (default export, at file tail) |
+| `WorkingHoursTab` | `src/pages/employees.tsx:1032` | Tab 1 — flat working-hours grid |
+| `EmployeeMasterTab` | `src/pages/employees.tsx:2427` | Tab 2 — worker master + salary |
+| `EfficiencyOverviewTab` | `src/pages/employees.tsx:3886` | Tab 3 — efficiency overview |
+| `DepartmentLaborTab` | `src/pages/employees.tsx:4451` | Dept labor cost breakdown |
+| `EmployeeDetailTab` | `src/pages/employees.tsx:5430` | Tab 4 — guard-unmounted detail |
+| `PayrollTab` | `src/pages/employees.tsx:6806` | Tab 5 — payroll drafts |
+| `LaborCostTab` | `src/pages/employees.tsx:8735` | Tab 5b — labor cost + DepartmentsManager |
+| `LeaveManagementTab` / `AttendanceTab` | `src/pages/employees.tsx:10381 / 11515` | Leave + attendance tabs |
 | `computeMonthlyLabor` | `src/lib/labor-engine.ts:557` | THE payroll + cost engine (both divisors) |
 | `effectiveSalarySenForMonth` / `salaryAsOfSen` | `src/lib/labor-engine.ts:408 / 382` | Day-weighted effective salary |
 | `countElapsedWorkingDays` | `src/lib/labor-engine.ts:135` | Cost-side divisor (real Mon–Sat − holidays) |
 | `countPublicHolidaysInMonth` | `src/lib/labor-engine.ts:109` | Holiday count for both divisors |
 | `computeAttendanceDayDetail` | `src/lib/labor-engine.ts:301` | Per-day absence/OT day-type detail |
 | `laborRatePerMinuteSen` | `src/lib/costing.ts:73` | Per-minute rate for product/BOM costing |
-| `computeMonthlyLabor` call sites | `src/api/routes/payslips.ts:867 / 1264` | Projected (all) + generate (per worker) |
-| `calcStatutory` / `buildDayDetailForPeriod` | `src/api/routes/payslips.ts:303 / 488` | EPF/SOCSO/EIS/PCB + per-day detail |
+| `computeMonthlyLabor` call sites | `src/api/routes/payslips.ts:885 / 1286` | Projected (all) + generate (per worker) |
+| `calcStatutory` / `buildDayDetailForPeriod` | `src/api/routes/payslips.ts:318 / 503` | EPF/SOCSO/EIS/PCB + per-day detail |
+| `WorkerPenaltyTab` | `src/components/worker-penalty-tab.tsx:153` | Worker Penalty tab (DEV-22) — list, editor, detail drawer |
+| `payrollPeriodForApproval` / `findPenaltyDrift` / `postPenaltiesForPeriod` | `src/api/lib/worker-penalties.ts:303 / 449 / 502` | Penalty payroll month, approval drift guard, posting on payroll approval |
 | `POST /login` / `resolveWorkerToken` | `src/api/routes/worker-auth.ts:124 / 337` | PIN login + token resolution |
 | `getWorker` (token gate) | `src/api/routes/worker.ts:160` | X-Worker-Token → ACTIVE worker or 401/403 |
 | `POST /clock` / `POST /dept-scan` | `src/api/routes/worker.ts:1067 / 1324` | Clock in/out + department scan |
@@ -77,6 +85,7 @@ Owns the whole workforce lifecycle: the **employee master** (workers + effective
 
 ## Gotchas
 - **A salary advance is neither an earning nor a statutory deduction.** `netPay = gross − totalDeductions − advance`, and `totalDeductionsSen` stays statutory-only — folding advances into it would inflate every YTD and statutory report. The advance is subtracted AFTER the statutory block, in both `payslips.ts POST /` and `GET /projected` (one shared helper, so the finalised slip and the estimate cannot disagree). Net pay is deliberately NOT clamped at zero: drawing more than the month earns shows a negative net pay (a debt) rather than silently writing the difference off. Approving a period settles its advances (locking edit/delete); reverting to DRAFT unlocks them.
+- **A worker penalty is neither an earning nor a statutory deduction** — same rule as the advance: `netPay = gross − totalDeductions − advance − penalty`, not clamped, `totalDeductionsSen` stays statutory-only. The payroll month lives on each LINE, not the header, so a multi-worker penalty can post for one worker and roll for another. A penalty approved after the month's drafts were generated is not in them until Regenerate, and approval of that month is refused (409) until it is.
 - **Two divisors, both in `labor-engine.ts`, never revert either.** Pay side = ÷26 (`workingDaysPerMonth`) for absence, late/short docks, OT base; hourly = ÷26 ÷ the worker's DAY SPAN (daily hours + lunch, e.g. 9h→÷10). Cost side = ÷ ACTUAL Mon–Sat working days minus holidays (`countElapsedWorkingDays:135` → `costingDailyRateSen:706`). NEVER revert to fixed-26 or ÷calendar. (Note: `src/lib/costing.ts` is a *different* rate — per-minute product costing, not the payroll divisor.)
 - **Day-typed OT must stay byte-identical for weekday-only.** OT splits weekday(1.5×)/Sunday(2×)/holiday(3×) inline in `computeMonthlyLabor` (`labor-engine.ts:557`); premium routes to the dept line, not Overhead. Holidays from `kv_config['public_holidays']`.
 - **Three screens reconcile to the sen.** Payroll / Dept Labor / Labor Cost tie out via `roundSen` + `distributeRoundSen` (largest-remainder, `src/lib/utils.ts`); leftover sen → largest-fraction dept. Don't add per-screen ad-hoc plugs.
@@ -88,7 +97,7 @@ Owns the whole workforce lifecycle: the **employee master** (workers + effective
 - **UI is 100% English** — no Chinese strings/comments. Add a new tab to BOTH the tab array and the `activeTab` switch inside `EmployeesPage`.
 
 ## Common tasks (mini-playbook)
-- **Add a field to the worker master** → snake_case column self-applied via `ensurePendingMigrations`; persist in `workers.ts POST /` (:279) and `PUT /:id` (:455); surface in `rowToWorker` (:192); render in `EmployeeMasterTab` (`employees.tsx:2407`). camelCase col → `column-rename-map.json` entry.
+- **Add a field to the worker master** → snake_case column self-applied via `ensurePendingMigrations`; persist in `workers.ts POST /` (:279) and `PUT /:id` (:455); surface in `rowToWorker` (:192); render in `EmployeeMasterTab` (`employees.tsx:2427`). camelCase col → `column-rename-map.json` entry.
 - **Change payroll math** → edit `computeMonthlyLabor` (`labor-engine.ts:557`) ONLY; both `payslips.ts` (generate :1246, projected :855) call it. Verify with `tests/labor-engine.test.mjs`; keep weekday-only OT byte-identical.
 - **Adjust a statutory rate** → `calcStatutory` (`payslips.ts:295`); toggles live per-worker in the master.
 - **Touch the worker app** → gate every new endpoint with `getWorker` (`worker.ts:160`); add the route to `worker.ts` and the screen under `src/pages/worker/`.
