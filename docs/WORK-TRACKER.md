@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-09-30**: branch `feat/dev22-worker-penalty` (to `staging`) added below (in progress, its entry is the newest).
 > **Last verified: 2026-10-01**: branch `feat/cn-pdf-size-column` (DEV-30) added below (its entry is the newest).
 > **Last verified: 2026-09-30**: #617 entry item 4 — owner re-posted the opening; creditor Self-check card green (measured).
 > **Last verified: 2026-09-30**: #617 (BUG-2026-09-30-229/-230, Self-check reconciliations + cancelled opening seeds) closed ✅ below with its prod check.
@@ -64,6 +65,20 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-09-30 — 🔵 DEV-22 Worker Penalty + payroll deduction (branch `feat/dev22-worker-penalty` → `staging`)
+
+Ask (ticket DEV-22, High): a Worker Penalty module for confirmed order / production mistakes, with approval, a payroll deduction, and the worker seeing it in the app. Owner's answers: approval gated on a new `worker-penalties:approve` right and the creator may not approve their own penalty; the deduction lands in the payroll month of the APPROVAL date, rolling to the next month when that month's payroll is already approved; net pay is not clamped (same rule as advances).
+1. ✅ Backend lib + tables (`worker_penalties`, `worker_penalty_lines`, `payslips.penalty_deduction_sen`), runtime self-applied.
+2. ✅ API `/api/worker-penalties`: CRUD, submit / approve / reject / revoke, production-order lookup with the job-card PICs as suggested workers.
+3. ✅ Payroll: generate + projected subtract the period's approved penalties after statutory; payroll approval posts them (and refuses while the stored slips disagree with the approved penalties); back to DRAFT un-posts.
+4. ✅ RBAC: `worker-penalties` resource (HR + Office via allExcept), `approve` in the Permissions catalog.
+5. 🔵 Employees > Worker Penalty tab (list, create from a production order, multi-worker amounts, photos, approval actions) + Payroll tab Penalty column.
+6. 🔵 Worker app My Pay: penalty card (date, PO No., reason, amount, payroll month, status).
+7. ✅ Tests + docs: `tests/worker-penalties.test.mjs` (9), employees module guide, CODEBASE-MAP, API.md regenerated.
+8. 🟡 Items 5 and 6 are typecheck / lint / unit clean but NOT yet driven in a browser. The local `.dev.vars` points at PRODUCTION (checked 2026-10-01 by project ref only), so no local run; owner chose to verify on staging after the PR merges.
+9. ✅ #628 merged and deployed to staging. Driven on staging 2026-10-01: tab renders, order lookup CO-2608-006-01 pulls product / qty / customer and per-department PICs, two suggested workers added (RM 50.00 + RM 25.50), WP-2610-001 submitted, self-approval refused, Payroll tab shows the Penalty column.
+10. 🔵 Owner 2026-10-01 (no second approver account): a SUPER_ADMIN may approve a penalty they raised; every other role still needs a second person (`selfApprovalBlocked`, branch `feat/dev22-superadmin-self-approve`). Then finish on staging: approve, payroll estimate, generate + approve Oct payroll, POSTED, drift banner.
 
 
 ## 2026-10-01 — 🔵 DEV-30 Size column on the Consignment Note PDF (Siti, High) (branch `feat/cn-pdf-size-column` → `main`)
