@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-240 (branch `fix/schedule-email-size`, to staging); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-239 (branch `fix/worker-login-keypad-capture`, to staging then main); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-236 (branch `fix/dev22-penalty-fresh-reads` → `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-10-01**: BUG-2026-10-01-234 measured and fixed on branch `fix/staging-mail-bare-raw` (STAGING ONLY): MailSlurp's raw is bare HTML; a log, so "verified" means the entry matches the code.
@@ -75,6 +76,37 @@ Entries themselves stay newest-first.
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
 
 ---
+
+## BUG-2026-10-01-240 — Today's Production Orders email was too big to send on staging (and past Gmail's clip size) `reports` 🟢
+
+🟢 Fixed on `staging` (branch `fix/schedule-email-size`, BUG-36 follow-up).
+
+Symptom: Settings > Email Reports, "Send test now" on Today's Production
+Orders failed (owner saw a 504 toast); the other reports sent.
+
+Measured on staging 2026-10-01: `schedule.json` 139 ms (256 job cards), the
+HTML 117 ms but 199 KB (Efficiency 48 KB, Overdue 14 KB). One timed send to
+the card's sandbox address returned in 1.2 s with MailSlurp 400 "Free sandbox
+message body exceeds the 100000 byte limit." So the data and render were
+fast; the email body was simply twice the provider's cap. Gmail also clips
+HTML past ~102 KB, so on production the same email is likely cut off in Gmail
+(UNMEASURED: `main` has an older renderer without the phone layout).
+
+Fix (`schedule-overdue-report.ts`, email mode only):
+- Row markup is capped at `EMAIL_ROWS_BUDGET` (80,000 bytes) split evenly
+  across departments. Department totals always show; rows past a department's
+  share become "N more job cards ... not shown in this email" plus a link,
+  and a line under the summary says "This email lists X of Y job cards".
+- The link is `<origin>/api/reports/schedule?date=` where origin is the
+  request that triggered the send (cron on prod links to prod, a staging test
+  send to staging); `dispatchReport` passes it through.
+- Whitespace between row tags is stripped (~15% of each row), so about 119
+  rows fit instead of 98. A 100-card day is not capped at all.
+- The in-app page (`GET /api/reports/schedule`) is never capped.
+
+Regression: `tests/schedule-email-size.test.mjs` (256 and 1,000 cards stay
+under 100,000 bytes, every department still shows, light day and in-app page
+uncapped, no link without an origin).
 
 ## BUG-2026-10-01-239 — Worker login: typing the Employee No. also typed into the PIN `worker-portal` `ui-frontend` 🟢
 
