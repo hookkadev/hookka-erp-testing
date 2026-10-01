@@ -32,6 +32,7 @@ import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { IdCard, Delete, Sun, Moon } from "lucide-react";
 import { useT } from "@/lib/worker-i18n";
+import { isTypingTarget } from "@/lib/typing-target";
 import {
   WORKER_TOKEN_KEY,
   WORKER_ME_KEY,
@@ -502,12 +503,13 @@ export default function WorkerLoginPage() {
   useEffect(() => {
     if (mode !== "login") return;
     function onKey(ev: KeyboardEvent) {
-      if (ev.key >= "0" && ev.key <= "9") {
+      // Typing in the Employee No. box is not typing a PIN. Without this the
+      // keypad took every digit of the employee number too, and the 6th one
+      // auto-submitted a login with that accidental PIN.
+      if (isTypingTarget(document.activeElement as HTMLElement | null)) return;
+      if (/^[0-9]$/.test(ev.key)) {
         pressKey(ev.key);
       } else if (ev.key === "Backspace") {
-        // don't steal Backspace while focused in the empNo input
-        const el = document.activeElement as HTMLElement | null;
-        if (el && el.tagName === "INPUT") return;
         pressKey("back");
       }
     }
