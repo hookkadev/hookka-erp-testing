@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-01**: branch `feat/dev31-worker-dept-hours` (to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `feat/email-report-multi-times` (to `staging`) added items 7 and 8 under BUG-36 (2026-09-29 entry).
 > **Last verified: 2026-10-01**: branch `fix/staging-topbar-patch-notes-hidden` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `feat/staging-view-as-user` (to `staging`, STAGING ONLY) added below (its entry is the newest).
@@ -104,6 +105,17 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-01: 🔵 DEV-31 worker sees their department and hours there today (branch `feat/dev31-worker-dept-hours` to `staging`)
+
+- Asked (ticket DEV-31, High, VIOLET): after scanning a department QR the worker should see which department they are in and how many hours they work there that day. Photo 1 is the office Working Hours grid with a punch-out split (Fabric Sewing · Bedframe 4.34h + R&D 3.19h), so "hours" = hours worked per department, not a planned target.
+- Already built before this: dept QR → `POST /api/worker/dept-scan` → `dept_scan_events`; punch-out splits the day into `working_hour_entries`. Missing: the worker never saw the split.
+- Done: `GET /today` and `POST /dept-scan` return `deptDay` (live = the punch-out maths with now as the end; punched out = the saved rows). Card on the home clock card and the scan result. My Pay > Daily Attendance lists each day's department rows (`/history` `daily[].deptHours`, snapshot key `v2:`). Strings in en / ms / zh / my.
+- Owner 2026-10-01: no "of 9h" target or progress bar on the card, it reads as pressure to hit 9h. The card shows hours worked only.
+- The punch-out autofill now calls the same `splitDayHours` helper (same result, checked by a test that compares it to the old inline path).
+- Tests: 7 new cases in `tests/dept-scan-split.test.mjs`; `npm test` and `tsc -p tsconfig.app.json` clean.
+- Worktree `../hookka-dev31` has `node_modules` as a JUNCTION into the main checkout. Before `git worktree remove`, run `cmd //c rmdir node_modules` inside it (removes the link only), or the removal can follow it into the real `node_modules`.
+- 🟡 Not driven in a browser yet: needs a worker login on staging after merge (punch in, scan two dept QRs, check home + scan card, punch out, compare with Working Hours).
 
 ## 2026-10-01: 🔵 Staging top bar: Patch notes pill hidden under the search box (branch `fix/staging-topbar-patch-notes-hidden` to `staging`, STAGING ONLY, never PR into main)
 
