@@ -29,6 +29,7 @@ import { ObjectPageHeader } from "@/components/ui/object-page-header";
 import { useCachedJson, invalidateCache, invalidateCachePrefix, isUnknownOutcome } from "@/lib/cached-fetch";
 import { RecordLoadError } from "@/components/ui/record-load-error";
 import { StagingStageSkipCard } from "@/components/staging-stage-skip";
+import { StagingDeliverySkipCard } from "@/components/staging-delivery-skip";
 import { getCurrentUser } from "@/lib/auth";
 import type { SalesOrder, SOStatus, Customer } from "@/types";
 
@@ -1655,6 +1656,7 @@ export default function SalesOrderDetailPage() {
 
       {/* Staging-only: renders nothing off the staging host. */}
       <StagingStageSkipCard linkedPOs={linkedPOs} onChanged={fetchOrder} />
+      <StagingDeliverySkipCard soId={order.id} onChanged={fetchOrder} />
 
       {/* R15 — hands finished stock to this order, and takes it back. Renders
           nothing when there is neither stock nor a holding to show. */}

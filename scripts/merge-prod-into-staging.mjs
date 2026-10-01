@@ -34,11 +34,13 @@
 
 import postgres from "postgres";
 import { pipeline } from "node:stream/promises";
+import { projectRef } from "./_db.mjs";
 
 const APPLY = process.argv.includes("--apply");
 
-const STAGING_REF = "kahxgvbfanbraazetefr";
-const PROD_REF = "vpwdqtsxexpiqxzweivd";
+// From the environment (GitHub secrets), never from this public source file.
+const STAGING_REF = projectRef("staging");
+const PROD_REF = projectRef("prod");
 
 // Never copied: sanitize-staging.mjs deletes these anyway, so skip them rather
 // than land live prod credentials / queued customer mail even briefly.
@@ -62,11 +64,11 @@ if (!prodUrl || !stgUrl) {
 // Same paranoia as sanitize-staging.mjs: assert both ends positively, so a swapped
 // or mistyped secret can never make prod the write target.
 if (!prodUrl.includes(PROD_REF) || prodUrl.includes(STAGING_REF)) {
-  console.error(`REFUSING: PROD_DATABASE_URL must contain ${PROD_REF} and not ${STAGING_REF}.`);
+  console.error("REFUSING: PROD_DATABASE_URL must contain the prod ref and not the staging ref.");
   process.exit(1);
 }
 if (!stgUrl.includes(STAGING_REF) || stgUrl.includes(PROD_REF)) {
-  console.error(`REFUSING: STAGING_DATABASE_URL must contain ${STAGING_REF} and not ${PROD_REF}.`);
+  console.error("REFUSING: STAGING_DATABASE_URL must contain the staging ref and not the prod ref.");
   process.exit(1);
 }
 

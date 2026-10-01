@@ -60,11 +60,11 @@ test("a supplier filed under Capex takes its uncoded money there whole, named af
   const amz = st.rows.find((r) => r.kind === "line" && r.label === "AMAZON RENOVATION SERVICES");
   assert.ok(amz, "the supplier row under Capex is missing");
   assert.equal(amz.section, "CAPEX");
-  assert.equal(amz.values[m], 250000, "spend-signed positive under Capex");
+  assert.equal(amz.values[m], -250000, "money out reads negative (cash view)");
   assert.ok(!st.rows.some((r) => r.label === "Unallocated — AMAZON RENOVATION SERVICES"), "nothing left behind in Raw Materials");
   // Raw Materials keeps the rest: the filler supplier still nests, the stock line still splits.
   const rm = st.rows.find((r) => r.kind === "group" && r.groupId === "RAW_MATERIALS");
-  assert.equal(rm.values[m], 79000);
+  assert.equal(rm.values[m], -79000);
   const sun = st.rows.find((r) => r.kind === "line" && r.label.includes("SUNMAT"));
   assert.equal(sun.groupId, "RAW_MATERIALS>703-0000");
   // Capex sits below the operating result, so the surplus no longer carries the 250,000.

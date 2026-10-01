@@ -15,7 +15,9 @@ import { DataGrid, type Column, type ContextMenuItem } from "@/components/ui/dat
 import { MoneyInput } from "@/components/ui/money-input";
 import { useVirtualRows } from "@/components/ui/virtual-rows";
 import { DeferredBlock } from "@/components/ui/deferred-block";
-import { formatCurrency, formatDateDMY, formatRM, roundSen, todayYmdMY } from "@/lib/utils";
+import { formatCurrency, formatDateDMY, formatRM, roundSen } from "@/lib/utils";
+import { todayYmdMYForReads } from "@/lib/staging-today";
+import { monthLabel as drillMonthLabel, shortBankName } from "@/lib/ledger-drill";
 // Every money field on this page is `type="text" inputMode="decimal"` — the
 // browser lets a comma through, and `parseFloat("12,000")` is 12. One parser,
 // and a null the caller must refuse. See src/lib/parse-money.ts.
@@ -2331,7 +2333,7 @@ function OverviewTab({
   // /reports (BUG-2026-08-13-009): read GET /accounting/pl, which nets the
   // posted ledger per account and classifies by the account's own COA type,
   // and publish "—" — never RM 0.00 — for a category no account has posted to.
-  const ym = todayYmdMY().slice(0, 7);
+  const ym = todayYmdMYForReads().slice(0, 7); // staging-only today override (reads only)
   const { data: plResp } = useCachedJson<{ success?: boolean; data?: OverviewPl }>(
     `/api/accounting/pl?period=${ym}`,
   );
@@ -4994,6 +4996,9 @@ type PnlStmtRow = {
   badge?: string;
   accountCode?: string;
   bucket?: string;
+  // The account a computed line (a group's PURCHASE, carriage, SST) opens on in
+  // the inline drill — kept apart from accountCode, which also drives the drag.
+  drillCode?: string;
 };
 
 // Material data-quality warnings surfaced on the P&L (from the FIFO engine):
@@ -5567,10 +5572,136 @@ function ExportButtons({ build, filenameBase, title, subtitle, pdfOpts, moneyFor
   );
 }
 
+// P&L inline drill (owner 2026-09-29 「我要点开看 detail，就是这样」— the Houzs
+// P&L's click-a-line view): the ledger lines behind one account line for the
+// statement's period, opened under the row. GET /pl-drill picks them with the
+// same pass as the statement, so they sum to the line; report-layer additions
+// (payroll from payslips not yet posted, the opening month's share) show as
+// their own rows.
+type PlDrillLine = {
+  id: string; date: string; description: string; otherSide: { code: string; name: string }[];
+  ref1: string; ref2: string | null; docs?: string | null; debitSen: number; creditSen: number; sourceType: string; sourceId: string;
+};
+type PlDrillData = {
+  historical?: boolean;
+  account?: { code: string; name: string; type: string | null };
+  lines: PlDrillLine[];
+  extra: { kind: "payroll" | "opening_slice"; ym: string; sen: number }[];
+  debitSen: number; creditSen: number; netSen: number; tied?: boolean;
+};
+const plDrillAmt = (sen: number) => (sen / 100).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// Owner 2026-09-30 「p&L 点开要看的东西和 cash flow 一样」: the same layout as
+// the Cash Flow drill — Description = the document's overall description,
+// Ref. 2 = who it is with (the related documents on hover), one Amount column
+// in the line's own direction (income as income, cost as cost; a reversal in
+// brackets), month blocks with a total each when the period spans months.
+function PlDrillPanel({ period, account, line }: { period: string; account: string; line: "all" | "sofa" | "bedframe" }) {
+  const [data, setData] = useState<PlDrillData | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    let dead = false;
+    fetch(`/api/accounting/pl-drill?period=${encodeURIComponent(period)}&account=${encodeURIComponent(account)}`)
+      .then((r) => r.json() as Promise<{ success?: boolean; data?: PlDrillData; error?: string }>)
+      .then((j) => { if (dead) return; if (j?.success && j.data) setData(j.data); else setErr(j?.error || "Could not load the ledger lines"); })
+      .catch(() => { if (!dead) setErr("Could not load the ledger lines"); });
+    return () => { dead = true; };
+  }, [period, account]);
+  // Income accounts read credit as positive, everything else debit.
+  const creditNormal = data?.account?.type === "REVENUE";
+  const signed = (debitSen: number, creditSen: number) => (creditNormal ? creditSen - debitSen : debitSen - creditSen);
+  const amt = (sen: number) => (sen < 0 ? `(${plDrillAmt(-sen)})` : plDrillAmt(sen));
+  const amtCls = (sen: number) => `py-1 pl-3 text-right tabular-nums whitespace-nowrap ${sen < 0 ? "text-[#9A3A2D]" : ""}`;
+  const lines = data?.lines ?? [];
+  const months = [...new Set(lines.map((l) => l.date.slice(0, 7)))].sort();
+  const byMonth = months.length > 1;
+  const lineSum = (ls: PlDrillLine[]) => ls.reduce((s, l) => s + signed(l.debitSen, l.creditSen), 0);
+  const extraSum = (data?.extra ?? []).reduce((s, e) => s + (creditNormal ? -e.sen : e.sen), 0);
+  const total = lineSum(lines) + extraSum;
+  const th = "py-1 pr-3 font-medium text-left";
+  const row = (l: PlDrillLine) => {
+    const sen = signed(l.debitSen, l.creditSen);
+    return (
+      <tr key={l.id || `${l.sourceType}:${l.sourceId}:${l.debitSen}:${l.creditSen}`} className="border-t border-[#F0ECE9] align-top text-[#374151]">
+        <td className="py-1 pr-3 whitespace-nowrap">{l.date.replace(/-/g, "/")}</td>
+        <td className="py-1 pr-3">{l.description || "—"}</td>
+        <td className="py-1 pr-3 whitespace-nowrap" title={l.otherSide.map((o) => `${o.code} ${o.name}`).join(", ")}>{l.otherSide.length ? l.otherSide.map((o) => shortBankName(o.name) || o.code).join(", ") : "—"}</td>
+        <td className="py-1 pr-3 whitespace-nowrap">{l.ref1}</td>
+        <td className="py-1 pr-3">
+          {l.docs
+            ? <span className="underline decoration-dotted cursor-help" title={l.docs}>{l.ref2 || "—"}</span>
+            : (l.ref2 ?? "")}
+        </td>
+        <td className={amtCls(sen)}>{amt(sen)}</td>
+      </tr>
+    );
+  };
+  return (
+    <div className="bg-[#FAF8F5] border-y border-dashed border-[#E2DDD8] px-4 py-2">
+      {!data && !err && <div className="text-xs text-[#9CA3AF] py-1">Loading the ledger lines…</div>}
+      {err && <div className="text-xs text-[#9A3412] py-1">{err}</div>}
+      {data?.historical && <div className="text-xs text-[#6B7280] py-1">This month was keyed from the old books (historical P&amp;L), so there are no ledger lines behind it.</div>}
+      {data && !data.historical && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-[12px]">
+            <thead>
+              <tr className="text-[11px] uppercase tracking-wide text-[#6B7280]">
+                <th className={th}>Date</th><th className={th}>Description</th><th className={th}>Other side</th>
+                <th className={th}>Ref. 1</th><th className={th}>Ref. 2</th>
+                <th className="py-1 pl-3 font-medium text-right">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {byMonth
+                ? months.map((m) => {
+                  const ls = lines.filter((l) => l.date.startsWith(m));
+                  return (
+                    <Fragment key={m}>
+                      {ls.map(row)}
+                      <tr className="border-t border-[#E2DDD8] font-semibold text-[#4B5563] bg-[#F7F4EF]">
+                        <td className="py-1" colSpan={5}>{drillMonthLabel(m)} total</td>
+                        <td className={amtCls(lineSum(ls))}>{amt(lineSum(ls))}</td>
+                      </tr>
+                    </Fragment>
+                  );
+                })
+                : lines.map(row)}
+              {data.extra.map((e) => {
+                const sen = creditNormal ? -e.sen : e.sen;
+                return (
+                  <tr key={`${e.kind}:${e.ym}`} className="border-t border-[#F0ECE9] align-top italic text-[#6B7280]">
+                    <td className="py-1 pr-3 whitespace-nowrap">{drillMonthLabel(e.ym)}</td>
+                    <td className="py-1 pr-3" colSpan={4}>{e.kind === "payroll"
+                      ? `Payroll ${drillMonthLabel(e.ym)} from the payslips, not posted to the ledger yet`
+                      : `Opening balance: this month's share (${drillMonthLabel(e.ym)})`}</td>
+                    <td className={amtCls(sen)}>{amt(sen)}</td>
+                  </tr>
+                );
+              })}
+              {lines.length === 0 && data.extra.length === 0 && (
+                <tr><td colSpan={6} className="py-1 text-[#9CA3AF]">No ledger lines in this period.</td></tr>
+              )}
+              <tr className="border-t border-[#9CA3AF] font-semibold text-[#1F1D1B]">
+                <td className="py-1" colSpan={5}>Total</td>
+                <td className={amtCls(total)}>{amt(total)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+      {line !== "all" && data && !data.historical && (
+        <p className="text-[11px] text-[#9CA3AF] mt-1">Lines are shown at full value; the Sofa / Bedframe view carries a share of them.</p>
+      )}
+    </div>
+  );
+}
+
 function PLStatementTab() {
   const [period, setPeriod] = useState(new Date().toISOString().slice(0, 7));
   const [line, setLine] = useState<"all" | "sofa" | "bedframe">("all");
   const [level, setLevel] = useState(4);
+  // Lines opened in the inline drill, keyed by period + account so a new
+  // period starts with everything closed.
+  const [drillOpen, setDrillOpen] = useState<Set<string>>(new Set());
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [data, setData] = useState<{ rows: PnlStmtRow[]; netSalesSen: number; fyLabel: string; periodLabel: string; materialWarnings?: PnlMaterialWarnings } | null>(null);
   const loading = data === null;
@@ -5815,17 +5946,34 @@ function PLStatementTab() {
                     );
                   }
                   const draggable = edit && !!row.accountCode;
+                  const drillCode = row.drillCode ?? row.accountCode;
+                  const drillKey = drillCode ? `${period}|${drillCode}` : "";
+                  const canDrill = !edit && !!drillCode;
+                  const drilled = canDrill && drillOpen.has(drillKey);
                   return (
-                    <tr key={i} className={`hover:bg-[#F7F4EF] ${draggable ? "cursor-move" : ""} ${dragCode === row.accountCode ? "opacity-40" : ""}`}
+                    <Fragment key={i}>
+                    <tr className={`hover:bg-[#F7F4EF] ${draggable ? "cursor-move" : ""} ${dragCode === row.accountCode ? "opacity-40" : ""} ${drilled ? "bg-[#F7F4EF]" : ""}`}
                       draggable={draggable}
                       onDragStart={draggable ? (e) => { setDragCode(row.accountCode!); setDragClass(classOfBucket(row.bucket)); e.dataTransfer.setData("text/plain", row.accountCode!); e.dataTransfer.effectAllowed = "move"; } : undefined}
                       onDragEnd={draggable ? () => { setDragCode(null); setDragClass(null); setDragOverBucket(null); } : undefined}>
-                      <td className="py-0.5 text-[#4B5563]" style={pad}>{draggable ? "⠿ " : ""}{row.label}{row.badge ? <span className="ml-1 text-[10px] text-[#9CA3AF]">[{row.badge}]</span> : null}</td>
+                      <td className="py-0.5 text-[#4B5563]" style={pad}>
+                        {canDrill ? (
+                          <button type="button" className="text-left hover:underline decoration-dotted cursor-pointer" title="Show the ledger lines behind this figure"
+                            onClick={() => setDrillOpen((prev) => { const n = new Set(prev); if (n.has(drillKey)) n.delete(drillKey); else n.add(drillKey); return n; })}>
+                            <span className="text-[10px] text-[#9CA3AF] mr-1">{drilled ? "▾" : "▸"}</span>{row.label}
+                          </button>
+                        ) : <>{draggable ? "⠿ " : ""}{row.label}</>}
+                        {row.badge ? <span className="ml-1 text-[10px] text-[#9CA3AF]">[{row.badge}]</span> : null}
+                      </td>
                       <td className="text-right px-2 tabular-nums">{numCell(row.ytdSen)}</td>
                       <td className="text-right px-2 text-[#6B7280]">{pct(row.ytdSen)}</td>
                       <td className="text-right px-2 tabular-nums">{numCell(row.periodSen)}</td>
                       <td className="text-right px-2 text-[#6B7280]">{pct(row.periodSen)}</td>
                     </tr>
+                    {drilled && drillCode && (
+                      <tr><td colSpan={5} className="p-0"><PlDrillPanel period={period} account={drillCode} line={line} /></td></tr>
+                    )}
+                    </Fragment>
                   );
                 })}
               </tbody>
@@ -6695,8 +6843,34 @@ function ApInvoicesTab({ accounts }: { accounts: ChartOfAccount[] }) {
   // the Other Creditor Bills entry folded into this page). The mirror list
   // reloads when the manager posts (ver bump).
   const parties = useOtherPartiesList();
-  const [manage, setManage] = useState(false);
+  const { toast } = useToast();
+  const { confirm } = useConfirm();
   const [ver, setVer] = useState(0);
+  // Owner 2026-09-29 「ap invoice 就 pop out 出来给我填」: New AP bill / Edit /
+  // Copy open the bill form in a popup (no scrolling to an editor below), and
+  // double-clicking an AP bill opens its detail popup. The creditor register
+  // moved to the sidebar (Creditors › Other Creditors).
+  const [billPopup, setBillPopup] = useState<{ mode: "new" | "edit" | "copy"; bill?: OtherPartyBill } | null>(null);
+  const [detailBillNo, setDetailBillNo] = useState<string | null>(null);
+  const [bills, setBills] = useState<OtherPartyBill[]>([]);
+  useEffect(() => {
+    let dead = false;
+    fetch("/api/accounting/other-party-bills?type=CREDITOR")
+      .then((r) => r.json() as Promise<{ success?: boolean; data?: OtherPartyBill[] }>)
+      .then((j) => { if (!dead && j?.success) setBills(j.data ?? []); })
+      .catch(() => {});
+    return () => { dead = true; };
+  }, [ver]);
+  const billLifecycle = async (b: OtherPartyBill, action: "void" | "unvoid") => {
+    const verb = action === "unvoid" ? "Restore" : "Void";
+    if (!(await confirm({ title: `${verb} bill?`, message: `${verb} ${b.billNo}?${action === "void" ? " A reversal entry will be posted (nothing is deleted)." : ""}`, danger: true }))) return;
+    const res = await fetch(`/api/accounting/other-party-bills/${encodeURIComponent(b.billNo)}/lifecycle`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action }),
+    });
+    const j = asMutationResponse(await res.json());
+    if (j?.success) { toast.success(`${b.billNo} ${action === "void" ? "voided" : "restored"}`); setVer((v) => v + 1); }
+    else toast.error(j?.error || `${verb} failed`);
+  };
   const [data, setData] = useState<{ rows: ApInvRow[]; totals: { openSen: number; openCount: number; apOpenSen: number; piOpenSen: number } } | null>(null);
   const [kind, setKind] = useState<"ALL" | "AP" | "PI">("ALL");
   // Owner 2026-09-22: default ALL (the mirror is for looking things up, not only chasing).
@@ -6736,10 +6910,10 @@ function ApInvoicesTab({ accounts }: { accounts: ChartOfAccount[] }) {
       <div className="flex justify-between items-start flex-wrap gap-2">
         <div>
           <h2 className="text-lg font-semibold text-[#1F1D1B]">AP Invoices</h2>
-          <p className="text-[11px] text-[#9CA3AF]">Everything owed on paper in one list. <b>AP</b> = other-creditor bills (raise / edit them below); <b>PI</b> = purchase invoices, read-only mirror — Procurement's page is where they are created and posted.</p>
+          <p className="text-[11px] text-[#9CA3AF]">Everything owed on paper in one list. <b>AP</b> = other-creditor bills (New AP bill opens the form; double-click a bill to see / edit / copy / void it); <b>PI</b> = purchase invoices, read-only mirror — double-click opens the invoice on Procurement's page.</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => setManage((m) => !m)}>{manage ? "Hide bill editor" : "New AP bill"}</Button>
+          <Button variant="outline" size="sm" onClick={() => setBillPopup({ mode: "new" })}>New AP bill</Button>
           <Link to="/accounting?tab=payments"><Button variant="primary" size="sm">New AP Payment</Button></Link>
         </div>
       </div>
@@ -6802,11 +6976,11 @@ function ApInvoicesTab({ accounts }: { accounts: ChartOfAccount[] }) {
                   <tr key={`${r.kind}-${r.id}`} className={`border-b border-[#F0ECE9] hover:bg-[#FAF8F5] ${r.status === "CANCELLED" ? "opacity-50" : ""}`}
                     // Owner 2026-09-29 「直接点开 invoice，而不是跳去 purchase invoice list」:
                     // a PI opens ITS OWN detail page, not the list.
-                    onDoubleClick={() => { if (r.kind === "PI") navigate(`/procurement/pi/${r.id}`); else setManage(true); }}
+                    onDoubleClick={() => { if (r.kind === "PI") navigate(`/procurement/pi/${r.id}`); else setDetailBillNo(r.no); }}
                     title={r.kind === "PI" ? "Double-click: open this purchase invoice" : "Double-click: open the bill editor below"}>
                     <td className="px-3 py-1.5"><span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${r.kind === "PI" ? "bg-[#EEF2FB] text-[#2C4170]" : "bg-[#F6F1E7] text-[#6B5C32]"}`}>{r.kind}</span>{r.opening && <span className="ml-1 text-[10px] text-[#9CA3AF]">opening</span>}</td>
                     <td className="px-3 py-1.5 tabular-nums text-xs whitespace-nowrap">
-                      {r.kind === "PI" ? <Link to={`/procurement/pi/${r.id}`} className="underline decoration-dotted text-[#6B5C32]" title="Open this purchase invoice">{r.no}</Link> : <button type="button" onClick={() => setManage(true)} className="underline decoration-dotted text-[#6B5C32] cursor-pointer" title="Edit below (other-creditor bills)">{r.no}</button>}
+                      {r.kind === "PI" ? <Link to={`/procurement/pi/${r.id}`} className="underline decoration-dotted text-[#6B5C32]" title="Open this purchase invoice">{r.no}</Link> : <button type="button" onClick={() => setDetailBillNo(r.no)} className="underline decoration-dotted text-[#6B5C32] cursor-pointer" title="Open this bill">{r.no}</button>}
                     </td>
                     <td className="px-3 py-1.5">{r.supplier}</td>
                     <td className="px-3 py-1.5 text-xs text-[#6B7280]">{r.supplierRef}</td>
@@ -6831,14 +7005,69 @@ function ApInvoicesTab({ accounts }: { accounts: ChartOfAccount[] }) {
         </CardContent>
       </Card>
 
-      {manage && (
-        <div className="space-y-3">
-          <div className="text-sm font-semibold text-[#1F1D1B]">Other-creditor bills — raise / edit <span className="text-[11px] font-normal text-[#9CA3AF]">press Done to refresh the mirror above</span></div>
-          <OtherPartyBillsManager parties={parties} accounts={accounts} side="CREDITOR" />
-          <FoldSection title="Other creditors — names & contacts" hint="add / edit the parties these bills belong to">
-            <OtherPartiesTab side="CREDITOR" />
-          </FoldSection>
-          <Button variant="outline" size="sm" onClick={() => { setManage(false); setVer((v) => v + 1); }}>Done — refresh the list</Button>
+      {detailBillNo && (() => {
+        const b = bills.find((x) => x.billNo === detailBillNo);
+        if (!b) return null;
+        const close = () => setDetailBillNo(null);
+        const voided = (b.lifecycleState ?? "ACTIVE") !== "ACTIVE" || b.status === "VOID";
+        return (
+          <DocDetailModal
+            title={`Other creditor bill ${b.billNo}`}
+            badges={<span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${voided ? "bg-[#F0ECE9] text-[#9CA3AF]" : b.outstandingSen > 0 ? "bg-[#FBF3E4] text-[#7A5B12]" : "bg-[#EAF3DE] text-[#27500A]"}`}>{voided ? "VOID" : b.outstandingSen > 0 ? "OPEN" : "PAID"}</span>}
+            onClose={close}
+            wide
+            actions={<>
+              <Button variant="outline" size="sm" onClick={() => printVoucher(buildOtherPartyBillVoucher(b, accounts))}><Printer className="h-4 w-4" /> Print</Button>
+              {!voided && <Button variant="outline" size="sm" onClick={() => { close(); setBillPopup({ mode: "edit", bill: b }); }}>Edit</Button>}
+              <Button variant="outline" size="sm" onClick={() => { close(); setBillPopup({ mode: "copy", bill: b }); }}>Copy</Button>
+              {!voided
+                ? <Button variant="outline" size="sm" onClick={() => { close(); void billLifecycle(b, "void"); }}>Void</Button>
+                : <Button variant="outline" size="sm" onClick={() => { close(); void billLifecycle(b, "unvoid"); }}>Unvoid</Button>}
+            </>}
+          >
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <DetailField label="Creditor" span={2}>{b.partyName || "—"}</DetailField>
+              <DetailField label="Bill date">{b.billDate}</DetailField>
+              <DetailField label="Reference">{b.referenceNo || "—"}</DetailField>
+              <DetailField label="Description" span={4}>{b.description || "—"}</DetailField>
+              <DetailField label="Total"><span className="tabular-nums">{formatCurrency(b.totalSen)}</span></DetailField>
+              <DetailField label="Paid"><span className="tabular-nums">{formatCurrency(b.paidAmountSen)}</span></DetailField>
+              <DetailField label="Outstanding"><span className="tabular-nums">{formatCurrency(b.outstandingSen)}</span></DetailField>
+              {b.isOpening && <DetailField label="Kind">Opening balance</DetailField>}
+            </div>
+            <div className="border border-[#E2DDD8] rounded-md overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-[#FAF8F5]"><tr className="text-xs text-[#6B7280]"><th className="text-left px-3 py-1.5 font-medium">Account</th><th className="text-left px-3 py-1.5 font-medium">Description</th><th className="text-right px-3 py-1.5 font-medium">Amount</th></tr></thead>
+                <tbody>
+                  {b.items.map((it, i) => (
+                    <tr key={i} className="border-t border-[#F0ECE9]"><td className="px-3 py-1.5 whitespace-nowrap">{accountLabel(accounts, it.counterAccount)}</td><td className="px-3 py-1.5 text-[#6B7280]">{it.description || "—"}</td><td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(it.amountSen)}</td></tr>
+                  ))}
+                  {b.taxSen ? <tr className="border-t border-[#F0ECE9]"><td className="px-3 py-1.5" colSpan={2}>Tax / SST</td><td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(b.taxSen)}</td></tr> : null}
+                  <tr className="border-t-2 border-[#1F1D1B] font-semibold"><td className="px-3 py-1.5" colSpan={2}>Total</td><td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(b.totalSen)}</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </DocDetailModal>
+        );
+      })()}
+
+      {billPopup && (
+        // Deliberately NOT closed by a click outside — a half-filled bill must
+        // not vanish; ✕ or Cancel closes it.
+        <div className="fixed inset-0 bg-black/40 z-40 flex items-start justify-center overflow-y-auto p-4">
+          <div className="bg-[#F7F5F2] rounded-lg shadow-xl w-full max-w-5xl my-8 p-4 space-y-3" role="dialog" aria-modal="true">
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-semibold text-[#1F1D1B]">{billPopup.mode === "new" ? "New AP bill" : billPopup.mode === "edit" ? `Edit ${billPopup.bill?.billNo ?? ""}` : `Copy of ${billPopup.bill?.billNo ?? ""}`}</h2>
+              <button onClick={() => setBillPopup(null)} className="text-[#9CA3AF] hover:text-[#6B7280] text-lg leading-none" aria-label="Close">✕</button>
+            </div>
+            <OtherPartyBillsManager
+              key={`${billPopup.mode}:${billPopup.bill?.billNo ?? "new"}`}
+              parties={parties}
+              accounts={accounts}
+              side="CREDITOR"
+              formOnly={{ mode: billPopup.mode, bill: billPopup.bill, onDone: () => { setBillPopup(null); setVer((v) => v + 1); } }}
+            />
+          </div>
         </div>
       )}
     </div>
@@ -6924,19 +7153,43 @@ type OtherPartyBill = {
   items: { counterAccount: string; amountSen: number; description: string; lineNo: number }[];
 };
 
-function OtherPartyBillsManager({ parties, accounts, side }: { parties: OtherParty[]; accounts: ChartOfAccount[]; side: "DEBTOR" | "CREDITOR" }) {
+// The bill form opened on its own in a popup (owner 2026-09-29 「ap invoice 就
+// pop out 出来给我填」): AP Invoices hosts the manager in formOnly mode — no
+// list, no toolbar toggle, the form open from the first render; onDone closes
+// the popup (after a save or on Cancel).
+type BillPopupSpec = { mode: "new" | "edit" | "copy"; bill?: OtherPartyBill; onDone: () => void };
+// One builder for the Edit / Copy prefill (and the popup's first render).
+// Copy starts a fresh bill: today's date, no reference, never an opening.
+function billFormFrom(b: OtherPartyBill, mode: "edit" | "copy", today: string) {
+  return {
+    partyId: b.partyId,
+    billDate: mode === "edit" ? b.billDate : today,
+    referenceNo: mode === "edit" ? (b.referenceNo ?? "") : "",
+    description: b.description ?? "",
+    taxStr: b.taxSen ? (b.taxSen / 100).toString() : "",
+    lines: b.items.length
+      ? b.items.map((it) => ({ counterAccount: it.counterAccount, amountStr: (it.amountSen / 100).toString(), description: it.description ?? "" }))
+      : [{ counterAccount: "", amountStr: "", description: "" }],
+    isOpening: mode === "edit" ? !!b.isOpening : false,
+  };
+}
+
+function OtherPartyBillsManager({ parties, accounts, side, formOnly }: { parties: OtherParty[]; accounts: ChartOfAccount[]; side: "DEBTOR" | "CREDITOR"; formOnly?: BillPopupSpec }) {
   const { toast } = useToast();
   const { confirm } = useConfirm();
   const [bills, setBills] = useState<OtherPartyBill[] | null>(null);
-  const [showForm, setShowForm] = useState(false);
+  const [showForm, setShowForm] = useState(!!formOnly);
   const [q, setQ] = useState("");
   const [openBill, setOpenBill] = useState<string | null>(null);
   // Edit-in-place (owner 2026-07-09): non-null = the form saves via PUT to
   // this bill number instead of creating a new bill.
-  const [editingBillNo, setEditingBillNo] = useState<string | null>(null);
+  const [editingBillNo, setEditingBillNo] = useState<string | null>(formOnly?.mode === "edit" && formOnly.bill ? formOnly.bill.billNo : null);
   const today = new Date().toISOString().slice(0, 10);
   const blankLine = (): BillLineDraft => ({ counterAccount: "", amountStr: "", description: "" });
-  const [form, setForm] = useState({ partyId: "", billDate: today, referenceNo: "", description: "", taxStr: "", lines: [blankLine()], isOpening: false });
+  const [form, setForm] = useState(() =>
+    formOnly?.bill && formOnly.mode !== "new"
+      ? billFormFrom(formOnly.bill, formOnly.mode, today)
+      : { partyId: "", billDate: today, referenceNo: "", description: "", taxStr: "", lines: [blankLine()], isOpening: false });
 
   const load = () => {
     fetch(`/api/accounting/other-party-bills?type=${side}`)
@@ -7020,23 +7273,14 @@ function OtherPartyBillsManager({ parties, accounts, side }: { parties: OtherPar
       setEditingBillNo(null);
       setForm({ partyId: "", billDate: today, referenceNo: "", description: "", taxStr: "", lines: [blankLine()], isOpening: false });
       load();
+      formOnly?.onDone();
     } else toast.error(j?.error || (editingBillNo ? "Failed to save changes" : "Failed to create bill"));
   };
 
   // Copy = open a fresh bill prefilled from an existing one. F4 #1.
   const copyBill = (b: OtherPartyBill) => {
     setEditingBillNo(null);
-    setForm({
-      partyId: b.partyId,
-      billDate: today,
-      referenceNo: "",
-      description: b.description ?? "",
-      taxStr: b.taxSen ? (b.taxSen / 100).toString() : "",
-      lines: b.items.length
-        ? b.items.map((it) => ({ counterAccount: it.counterAccount, amountStr: (it.amountSen / 100).toString(), description: it.description ?? "" }))
-        : [blankLine()],
-      isOpening: false,
-    });
+    setForm(billFormFrom(b, "copy", today));
     setShowForm(true);
   };
 
@@ -7044,17 +7288,7 @@ function OtherPartyBillsManager({ parties, accounts, side }: { parties: OtherPar
   // (owner 2026-07-09 「开了无法edit,我要能edit」). Party stays fixed.
   const editBill = (b: OtherPartyBill) => {
     setEditingBillNo(b.billNo);
-    setForm({
-      partyId: b.partyId,
-      billDate: b.billDate,
-      referenceNo: b.referenceNo ?? "",
-      description: b.description ?? "",
-      taxStr: b.taxSen ? (b.taxSen / 100).toString() : "",
-      lines: b.items.length
-        ? b.items.map((it) => ({ counterAccount: it.counterAccount, amountStr: (it.amountSen / 100).toString(), description: it.description ?? "" }))
-        : [blankLine()],
-      isOpening: !!b.isOpening,
-    });
+    setForm(billFormFrom(b, "edit", today));
     setShowForm(true);
   };
 
@@ -7165,8 +7399,8 @@ function OtherPartyBillsManager({ parties, accounts, side }: { parties: OtherPar
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-end gap-3">
-        <ScanPrefillButton label="Scan Bill" onResult={applyScan} />
-        <Button variant="primary" size="sm" onClick={() => {
+        {(!formOnly || formOnly.mode !== "edit") && <ScanPrefillButton label="Scan Bill" onResult={applyScan} />}
+        {!formOnly && <Button variant="primary" size="sm" onClick={() => {
           if (editingBillNo) {
             setEditingBillNo(null);
             setForm({ partyId: "", billDate: today, referenceNo: "", description: "", taxStr: "", lines: [blankLine()], isOpening: false });
@@ -7174,7 +7408,7 @@ function OtherPartyBillsManager({ parties, accounts, side }: { parties: OtherPar
           } else setShowForm(!showForm);
         }}>
           <Plus className="h-4 w-4" /> New Bill
-        </Button>
+        </Button>}
       </div>
 
       {newPartyDraft && (
@@ -7337,11 +7571,12 @@ function OtherPartyBillsManager({ parties, accounts, side }: { parties: OtherPar
           </div>
           <div className="flex gap-2">
             <Button variant="primary" size="sm" disabled={!!billMoneyError} onClick={submit}>{editingBillNo ? "Save Changes (re-post)" : "Save & Post"}</Button>
-            <Button variant="outline" size="sm" onClick={() => { setShowForm(false); setEditingBillNo(null); }}>Cancel</Button>
+            <Button variant="outline" size="sm" onClick={() => { setShowForm(false); setEditingBillNo(null); formOnly?.onDone(); }}>Cancel</Button>
           </div>
         </CardContent></Card>
       )}
 
+      {!formOnly && (<>
       <div className="flex items-center">
         <input type="text" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search bill no / party / reference / description" className="rounded-md border border-[#E2DDD8] px-3 py-1.5 text-sm w-80 focus:outline-none focus:ring-2 focus:ring-[#6B5C32]" />
       </div>
@@ -7511,6 +7746,7 @@ function OtherPartyBillsManager({ parties, accounts, side }: { parties: OtherPar
           </table>
         )}
       </CardContent></Card>
+      </>)}
     </div>
   );
 }
@@ -7914,9 +8150,14 @@ function sourceHref(sourceType: string, sourceId: string): string | null {
       return "/invoices/credit-notes";
     case "debit_note":
       return "/invoices/debit-notes";
+    // A purchase invoice opens ITSELF, not the list (owner 2026-09-29 「直接点开
+    // invoice，而不是跳去 purchase invoice list」 — same rule as AP Invoices);
+    // the leg's sourceId is the PI's id. A supplier payment goes to the page
+    // that lists supplier payments.
     case "purchase_invoice":
+      return `/procurement/pi/${encodeURIComponent(sourceId)}`;
     case "supplier_payment":
-      return "/procurement/pi";
+      return "/invoices/supplier-payments";
     default:
       return null; // manual / manual_reversal / year_close — no doc page
   }
@@ -14627,6 +14868,83 @@ function GroupByCompanyCard({ period, options }: { period: string; options: Comp
   );
 }
 
+// Balance-sheet inline drill (owner 2026-09-30 「Balance sheet 也要这样点开看」):
+// the account's balance at the end of the previous month, the month's ledger
+// lines (the same columns as the P&L / Cash Flow drills) and the balance at
+// the end of the month — which is the figure on the sheet. GET /bs-drill
+// picks them the way the sheet does, so b/f + lines = c/f.
+type BsDrillData = {
+  account?: { code: string; name: string; type: string | null; section: string };
+  assetSide: boolean; bfSen: number; cfSen: number; lines: PlDrillLine[]; tied?: boolean;
+};
+const prevYmOf = (ym: string) => { const [y, m] = ym.split("-").map(Number); return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, "0")}`; };
+function BsDrillPanel({ period, account, company }: { period: string; account: string; company: string }) {
+  const [data, setData] = useState<BsDrillData | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    let dead = false;
+    fetch(`/api/accounting/bs-drill?period=${encodeURIComponent(period)}&account=${encodeURIComponent(account)}${orgIdParam(company)}`)
+      .then((r) => r.json() as Promise<{ success?: boolean; data?: BsDrillData; error?: string }>)
+      .then((j) => { if (dead) return; if (j?.success && j.data) setData(j.data); else setErr(j?.error || "Could not load the ledger lines"); })
+      .catch(() => { if (!dead) setErr("Could not load the ledger lines"); });
+    return () => { dead = true; };
+  }, [period, account, company]);
+  const signed = (l: PlDrillLine) => (data?.assetSide ? l.debitSen - l.creditSen : l.creditSen - l.debitSen);
+  const amt = (sen: number) => (sen < 0 ? `(${plDrillAmt(-sen)})` : plDrillAmt(sen));
+  const amtCls = (sen: number) => `py-1 pl-3 text-right tabular-nums whitespace-nowrap ${sen < 0 ? "text-[#9A3A2D]" : ""}`;
+  const th = "py-1 pr-3 font-medium text-left";
+  return (
+    <div className="bg-[#FAF8F5] border-y border-dashed border-[#E2DDD8] px-4 py-2">
+      {!data && !err && <div className="text-xs text-[#9CA3AF] py-1">Loading the ledger lines…</div>}
+      {err && <div className="text-xs text-[#9A3412] py-1">{err}</div>}
+      {data && (
+        <div className="overflow-x-auto">
+          {data.tied === false && <div className="text-[11px] text-[#9A3412] mb-1">These lines do not add up to the balance — please report it.</div>}
+          <table className="w-full text-[12px]">
+            <thead>
+              <tr className="text-[11px] uppercase tracking-wide text-[#6B7280]">
+                <th className={th}>Date</th><th className={th}>Description</th><th className={th}>Other side</th>
+                <th className={th}>Ref. 1</th><th className={th}>Ref. 2</th>
+                <th className="py-1 pl-3 font-medium text-right">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr className="border-t border-[#E2DDD8] font-semibold text-[#4B5563] bg-[#F7F4EF]">
+                <td className="py-1" colSpan={5}>Balance b/f · end of {drillMonthLabel(prevYmOf(period))}</td>
+                <td className={amtCls(data.bfSen)}>{amt(data.bfSen)}</td>
+              </tr>
+              {data.lines.map((l) => {
+                const sen = signed(l);
+                return (
+                  <tr key={l.id || `${l.sourceType}:${l.sourceId}:${l.debitSen}:${l.creditSen}`} className="border-t border-[#F0ECE9] align-top text-[#374151]">
+                    <td className="py-1 pr-3 whitespace-nowrap">{l.date.replace(/-/g, "/")}</td>
+                    <td className="py-1 pr-3">{l.description || "—"}</td>
+                    <td className="py-1 pr-3 whitespace-nowrap" title={l.otherSide.map((o) => `${o.code} ${o.name}`).join(", ")}>{l.otherSide.length ? l.otherSide.map((o) => shortBankName(o.name) || o.code).join(", ") : "—"}</td>
+                    <td className="py-1 pr-3 whitespace-nowrap">{l.ref1}</td>
+                    <td className="py-1 pr-3">
+                      {l.docs
+                        ? <span className="underline decoration-dotted cursor-help" title={l.docs}>{l.ref2 || "—"}</span>
+                        : (l.ref2 ?? "")}
+                    </td>
+                    <td className={amtCls(sen)}>{amt(sen)}</td>
+                  </tr>
+                );
+              })}
+              {data.lines.length === 0 && (
+                <tr><td colSpan={6} className="py-1 text-[#9CA3AF]">Nothing moved on this account in {drillMonthLabel(period)}.</td></tr>
+              )}
+              <tr className="border-t border-[#9CA3AF] font-semibold text-[#1F1D1B]">
+                <td className="py-1" colSpan={5}>Balance c/f · end of {drillMonthLabel(period)}</td>
+                <td className={amtCls(data.cfSen)}>{amt(data.cfSen)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function BalanceSheetTab() {
   const [period, setPeriod] = useState(new Date().toISOString().slice(0, 7));
   // Multi-company (Phase 2): "" = All companies (group) → URL unchanged =
@@ -14652,6 +14970,9 @@ function BalanceSheetTab() {
   const [bmap, setBmap] = useState<Record<string, string>>({});
   const [dragCode, setDragCode] = useState<string | null>(null);
   const [dragOverSec, setDragOverSec] = useState<string | null>(null);
+  // Accounts opened in the inline drill, keyed by period + company + account
+  // so a new month starts with everything closed.
+  const [bsDrillOpen, setBsDrillOpen] = useState<Set<string>>(new Set());
   useEffect(() => {
     if (!edit) return;
     fetch("/api/accounting/bs/section-map")
@@ -14710,17 +15031,33 @@ function BalanceSheetTab() {
       </tr>
       {entries.map((e) => {
         const draggable = edit && e.accountCode !== "NP-CURRENT";
+        // The unclosed-earnings line is the P&L's result, not an account.
+        const canDrill = !edit && e.accountCode !== "NP-CURRENT";
+        const drillKey = `${period}|${company}|${e.accountCode}`;
+        const drilled = canDrill && bsDrillOpen.has(drillKey);
         return (
-          <tr key={e.id} className={`border-t border-[#E2DDD8]/50 ${draggable ? "cursor-move" : ""} ${dragCode === e.accountCode ? "opacity-40" : ""}`}
+          <Fragment key={e.id}>
+          <tr className={`border-t border-[#E2DDD8]/50 ${draggable ? "cursor-move" : ""} ${dragCode === e.accountCode ? "opacity-40" : ""} ${drilled ? "bg-[#F7F4EF]" : ""}`}
             draggable={draggable}
             onDragStart={draggable ? (ev) => { setDragCode(e.accountCode); ev.dataTransfer.setData("text/plain", e.accountCode); ev.dataTransfer.effectAllowed = "move"; } : undefined}
             onDragEnd={draggable ? () => { setDragCode(null); setDragOverSec(null); } : undefined}>
             <td className="px-4 py-1.5 pl-8 text-[#6B7280] text-xs">{draggable ? "⠿ " : ""}{e.accountCode}</td>
-            <td className="px-4 py-1.5 text-[#4B5563]">{e.accountName}</td>
+            <td className="px-4 py-1.5 text-[#4B5563]">
+              {canDrill ? (
+                <button type="button" className="text-left hover:underline decoration-dotted cursor-pointer" title="Show the ledger lines behind this balance"
+                  onClick={() => setBsDrillOpen((prev) => { const n = new Set(prev); if (n.has(drillKey)) n.delete(drillKey); else n.add(drillKey); return n; })}>
+                  <span className="text-[10px] text-[#9CA3AF] mr-1">{drilled ? "▾" : "▸"}</span>{e.accountName}
+                </button>
+              ) : e.accountName}
+            </td>
             <td className={`px-4 py-1.5 text-right font-medium ${e.balance < 0 ? "text-[#9A3A2D]" : "text-[#1F1D1B]"}`}>
               {e.balance < 0 ? `(${formatCurrency(Math.abs(e.balance))})` : formatCurrency(e.balance)}
             </td>
           </tr>
+          {drilled && (
+            <tr><td colSpan={3} className="p-0"><BsDrillPanel period={period} account={e.accountCode} company={company} /></td></tr>
+          )}
+          </Fragment>
         );
       })}
       <tr className={`border-t border-[#E2DDD8] ${bgClass} font-semibold`}>
@@ -14848,7 +15185,122 @@ type CfApiRow = {
   groupId?: string;
   values: (number | null)[];
   accountCode?: string;
+  lineKey?: string;
 };
+
+// Cash Flow inline drill (owner 2026-09-29 「cash flow 也要这样点开看」): the
+// payments / receipts behind one line, opened under the row. GET
+// /cashflow-drill builds them from the statement's own computation, so a
+// month's rows sum to that month's figure; a payment split across lines says
+// "part of" its whole amount. Month chips filter; the statement's month first.
+type CfDrillItem = {
+  key: string; ym: string; date: string; description: string;
+  otherSide: { code: string; name: string }[]; ref1: string; ref2: string | null;
+  docs?: string | null; // the PIs / bills the payment settled — on hover
+  sen: number; ofSen: number | null;
+};
+type CfDrillData = {
+  key: string; label: string; section: string; found: boolean; tied: boolean;
+  items: CfDrillItem[]; months: { ym: string; label: string; sen: number }[];
+};
+function CfDrillPanel({ period, lineKey }: { period: string; lineKey: string }) {
+  const [data, setData] = useState<CfDrillData | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [month, setMonth] = useState<string>(period); // a month key, or "ALL"
+  useEffect(() => {
+    let dead = false;
+    fetch(`/api/accounting/cashflow-drill?period=${encodeURIComponent(period)}&key=${encodeURIComponent(lineKey)}`)
+      .then((r) => r.json() as Promise<{ success?: boolean; data?: CfDrillData; error?: string }>)
+      .then((j) => { if (dead) return; if (j?.success && j.data) setData(j.data); else setErr(j?.error || "Could not load the payments"); })
+      .catch(() => { if (!dead) setErr("Could not load the payments"); });
+    return () => { dead = true; };
+  }, [period, lineKey]);
+  const shown = data ? data.items.filter((it) => month === "ALL" || it.ym === month) : [];
+  const sum = (items: CfDrillItem[]) => items.reduce((s, it) => s + it.sen, 0);
+  const total = sum(shown);
+  const chips = data ? data.months.filter((m) => m.sen !== 0 || m.ym === period) : [];
+  // Owner 2026-09-29 「有一点点乱」: the whole payment + this line's share get
+  // their own columns (only when something here is split); one Amount column,
+  // money out in brackets like the statement; "All months" in month blocks,
+  // each with its total (= that month's figure on the statement).
+  const anySplit = shown.some((it) => it.ofSen);
+  const colCount = anySplit ? 8 : 6;
+  const amt = (sen: number) => (sen < 0 ? `(${plDrillAmt(-sen)})` : plDrillAmt(sen));
+  const amtCls = (sen: number) => `py-1 pl-3 text-right tabular-nums whitespace-nowrap ${sen < 0 ? "text-[#9A3A2D]" : ""}`;
+  const blocks: { ym: string; label: string; items: CfDrillItem[] }[] = month === "ALL"
+    ? [...new Set(shown.map((it) => it.ym))].sort().map((ym) => ({ ym, label: data?.months.find((m) => m.ym === ym)?.label ?? ym, items: shown.filter((it) => it.ym === ym) }))
+    : [{ ym: month, label: "", items: shown }];
+  const itemRow = (it: CfDrillItem) => (
+    <tr key={it.key} className="border-t border-[#F0ECE9] align-top text-[#374151]">
+      <td className="py-1 pr-3 whitespace-nowrap">{it.date.replace(/-/g, "/")}</td>
+      <td className="py-1 pr-3">{it.description || "—"}</td>
+      <td className="py-1 pr-3 whitespace-nowrap" title={it.otherSide.map((o) => `${o.code} ${o.name}`).join(", ")}>{it.otherSide.length ? it.otherSide.map((o) => shortBankName(o.name) || o.code).join(", ") : "—"}</td>
+      <td className="py-1 pr-3 whitespace-nowrap">{it.ref1}</td>
+      <td className="py-1 pr-3">
+        {it.docs
+          ? <span className="underline decoration-dotted cursor-help" title={it.docs}>{it.ref2 || "—"}</span>
+          : (it.ref2 ?? "")}
+      </td>
+      {anySplit && <td className="py-1 pl-3 text-right tabular-nums whitespace-nowrap text-[#6B7280]">{it.ofSen ? plDrillAmt(it.ofSen) : ""}</td>}
+      {anySplit && <td className="py-1 pl-3 text-right tabular-nums whitespace-nowrap text-[#6B7280]">{it.ofSen ? `${((Math.abs(it.sen) / it.ofSen) * 100).toFixed(1)}%` : ""}</td>}
+      <td className={amtCls(it.sen)}>{amt(it.sen)}</td>
+    </tr>
+  );
+  const th = "py-1 pr-3 font-medium text-left";
+  const thR = "py-1 pl-3 font-medium text-right";
+  const chip = (on: boolean) => `px-2 py-0.5 rounded-full border text-[11px] ${on ? "bg-[#6B5C32] border-[#6B5C32] text-white" : "border-[#E2DDD8] text-[#6B7280] hover:bg-white"}`;
+  return (
+    <div className="bg-[#FAF8F5] border-y border-dashed border-[#E2DDD8] px-4 py-2 whitespace-normal">
+      {!data && !err && <div className="text-xs text-[#9CA3AF] py-1">Loading the payments…</div>}
+      {err && <div className="text-xs text-[#9A3412] py-1">{err}</div>}
+      {data && !data.found && <div className="text-xs text-[#6B7280] py-1">This line is not on the statement any more — reload the page.</div>}
+      {data && data.found && (
+        <>
+          <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
+            {chips.map((m) => (
+              <button key={m.ym} type="button" className={chip(month === m.ym)} onClick={() => setMonth(m.ym)}>{m.label}</button>
+            ))}
+            <button type="button" className={chip(month === "ALL")} onClick={() => setMonth("ALL")}>All months</button>
+            {!data.tied && <span className="text-[11px] text-[#9A3412] ml-2">These rows do not add up to the line — please report it.</span>}
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-[12px]">
+              <thead>
+                <tr className="text-[11px] uppercase tracking-wide text-[#6B7280]">
+                  <th className={th}>Date</th><th className={th}>Description</th><th className={th}>Bank</th>
+                  <th className={th}>Ref. 1</th><th className={th}>Ref. 2</th>
+                  {anySplit && <th className={thR} title="The whole payment — this line got a share of it">Whole payment</th>}
+                  {anySplit && <th className={thR} title="This line's share of the whole payment">Share</th>}
+                  <th className={thR}>Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {blocks.map((b) => (
+                  <Fragment key={b.ym}>
+                    {b.items.map(itemRow)}
+                    {month === "ALL" && (
+                      <tr className="border-t border-[#E2DDD8] font-semibold text-[#4B5563] bg-[#F7F4EF]">
+                        <td className="py-1" colSpan={colCount - 1}>{b.label} total</td>
+                        <td className={amtCls(sum(b.items))}>{amt(sum(b.items))}</td>
+                      </tr>
+                    )}
+                  </Fragment>
+                ))}
+                {shown.length === 0 && (
+                  <tr><td colSpan={colCount} className="py-1 text-[#9CA3AF]">No money moved on this line {month === "ALL" ? "this financial year" : "in this month"}.</td></tr>
+                )}
+                <tr className="border-t border-[#9CA3AF] font-semibold text-[#1F1D1B]">
+                  <td className="py-1" colSpan={colCount - 1}>Total</td>
+                  <td className={amtCls(total)}>{amt(total)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 type CfApiData = { period: string; columns: { key: string; label: string; accum?: boolean }[]; rows: CfApiRow[] };
 // The four raw-material template categories a supplier can be assigned to
 // (mirrors RM_LINES in cashflow-engine.ts).
@@ -14875,6 +15327,9 @@ function CashFlowTab() {
   const [supCatGuess, setSupCatGuess] = useState<Record<string, string>>({});
   const [dragCode, setDragCode] = useState<string | null>(null);
   const [dragOverSec, setDragOverSec] = useState<string | null>(null);
+  // Lines opened in the inline drill, keyed by period + line so a new period
+  // starts with everything closed.
+  const [cfDrillOpen, setCfDrillOpen] = useState<Set<string>>(new Set());
   const { data: resp, refresh } = useCachedJson<{ success?: boolean; data?: CfApiData }>(
     `/api/accounting/cashflow-statement?period=${period}${edit ? "&editable=1" : ""}`,
   );
@@ -14997,9 +15452,11 @@ function CashFlowTab() {
         if (!a) { a = zeroCols(); m.set(k, a); }
         return a;
       };
-      // Mirrors OUTFLOW_SECTIONS in cashflow-engine.ts (every block but the
-      // collection block reads money out positive — owner 2026-09-29).
-      const OUTFLOW = new Set(["RAW_MATERIALS", "DIRECT_LABOUR", "FACTORY_OVERHEAD", "GENERAL_EXPENSE", "TAXATION", "FINANCE_COST", "CAPEX", "DEPOSIT", "LOAN", "UNALLOCATED"]);
+      // Mirrors OUTFLOW_SECTIONS in cashflow-engine.ts — EMPTY since owner
+      // 2026-09-29 「全部进钱 positive，出钱 negative」 (every line reads money in
+      // positive). This DEV-only preview is inert on prod: the backend has
+      // split raw materials itself since 2026-08-27.
+      const OUTFLOW = new Set<string>();
       const OPERATING = new Set(["REVENUE_COLLECTION", "RAW_MATERIALS", "DIRECT_LABOUR", "FACTORY_OVERHEAD", "GENERAL_EXPENSE", "TAXATION"]);
       const sp = await g("/api/supplier-payments");
       const piCache = new Map<string, Map<string, number>>();
@@ -15288,7 +15745,7 @@ function CashFlowTab() {
       const SEC_LABELS: Record<string, string> = {
         DIRECT_LABOUR: "Direct Labour", FACTORY_OVERHEAD: "Factory Overhead", GENERAL_EXPENSE: "General Expense",
         TAXATION: "Taxation", FINANCE_COST: "Finance Cost", CAPEX: "Capital Expenditure (CAPEX)",
-        DEPOSIT: "Deposit Incurred / (Repay)", LOAN: "Loan repaid / lent · (received)", UNALLOCATED: "Unallocated",
+        DEPOSIT: "Deposit refunded / (paid)", LOAN: "Loan received / (repaid · lent)", UNALLOCATED: "Unallocated",
       };
       const SEC_ORDER = ["FINANCE_COST", "CAPEX", "DEPOSIT", "LOAN", "UNALLOCATED"];
       const addInto = (section: string, label: string, values: number[], belowResult: boolean) => {
@@ -15581,9 +16038,13 @@ function CashFlowTab() {
                     r.kind === "bf" ? "text-[#6B7280] italic" :
                     r.kind === "subtotal" ? "font-semibold border-t border-[#E2DDD8]" :
                     r.kind === "section" ? "font-extrabold tracking-wide text-[#6B5C32] text-[12px]" : "";
+                  const canDrill = !edit && r.kind === "line" && !!r.lineKey;
+                  const drillKey = canDrill ? `${period}|${r.lineKey}` : "";
+                  const drilled = canDrill && cfDrillOpen.has(drillKey);
                   return (
-                    <tr key={i}
-                      className={`${rowCls} ${isGroup ? "cursor-pointer hover:bg-[#F7F4EF] bg-[#F0ECE9]/30 font-semibold" : ""} ${draggable ? "cursor-move" : ""} ${dragCode === r.accountCode ? "opacity-40" : ""} ${dropHere && dragOverSec === r.section ? "ring-2 ring-inset ring-[#6B5C32]" : ""}`}
+                    <Fragment key={i}>
+                    <tr
+                      className={`${rowCls} ${isGroup ? "cursor-pointer hover:bg-[#F7F4EF] bg-[#F0ECE9]/30 font-semibold" : ""} ${draggable ? "cursor-move" : ""} ${dragCode === r.accountCode ? "opacity-40" : ""} ${dropHere && dragOverSec === r.section ? "ring-2 ring-inset ring-[#6B5C32]" : ""} ${drilled ? "bg-[#F7F4EF]" : ""}`}
                       draggable={draggable}
                       onDragStart={draggable ? (e) => { setDragCode(r.accountCode!); e.dataTransfer.setData("text/plain", r.accountCode!); e.dataTransfer.effectAllowed = "move"; } : undefined}
                       onDragEnd={draggable ? () => { setDragCode(null); setDragOverSec(null); } : undefined}
@@ -15598,11 +16059,22 @@ function CashFlowTab() {
                         else void moveTo(src, r.section);
                       } : undefined}
                       onClick={isGroup && !edit ? () => { const n = new Set(collapsed); if (n.has(r.groupId!)) n.delete(r.groupId!); else n.add(r.groupId!); setCollapsed(n); } : undefined}>
-                      <td className="py-1 whitespace-nowrap" style={pad}>{isGroup ? (isOpen ? "▾ " : "▸ ") : ""}{draggable ? "⠿ " : ""}{r.label}</td>
+                      <td className="py-1 whitespace-nowrap" style={pad}>
+                        {canDrill ? (
+                          <button type="button" className="text-left hover:underline decoration-dotted cursor-pointer" title="Show the payments behind this line"
+                            onClick={() => setCfDrillOpen((prev) => { const n = new Set(prev); if (n.has(drillKey)) n.delete(drillKey); else n.add(drillKey); return n; })}>
+                            <span className="text-[10px] text-[#9CA3AF] mr-1">{drilled ? "▾" : "▸"}</span>{r.label}
+                          </button>
+                        ) : <>{isGroup ? (isOpen ? "▾ " : "▸ ") : ""}{draggable ? "⠿ " : ""}{r.label}</>}
+                      </td>
                       {r.values.map((v, j) => (
                         <td key={j} className={`text-right px-2 tabular-nums whitespace-nowrap ${typeof v === "number" && v < 0 ? "text-[#9A3A2D]" : ""} ${v === 0 ? "text-[#C7C1BA]" : ""} ${strong ? "font-semibold" : ""} ${cols[j]?.accum ? "bg-[#F6F1E7]" : ""}`}>{fmt(v)}</td>
                       ))}
                     </tr>
+                    {drilled && r.lineKey && (
+                      <tr><td colSpan={cols.length + 1} className="p-0"><CfDrillPanel period={period} lineKey={r.lineKey} /></td></tr>
+                    )}
+                    </Fragment>
                   );
                 })}
               </tbody>
@@ -15610,7 +16082,7 @@ function CashFlowTab() {
             </>
           )}
           <p className="text-[11px] text-[#9CA3AF] mt-3">Cash basis · classified from bank/cash ledger movements · Raw Materials traced to PI stock groups · Bank c/f = b/f + Cash Surplus.</p>
-          <p className="text-[11px] text-[#9CA3AF]">Signs: Revenue Collection = money in. Every other block, above and below Net operation surplus: amount = money out, (amount) = money in.</p>
+          <p className="text-[11px] text-[#9CA3AF]">Signs: every line reads the bank's way — amount = money in, (amount) = money out.</p>
         </CardContent>
       </Card>
     </div>

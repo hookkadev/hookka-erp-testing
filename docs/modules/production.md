@@ -1,5 +1,7 @@
 # Production & BOM — Module Guide
 
+> **Last verified: 2026-09-30** (branch `chore/sync-staging-from-main-0930`, staging<-main merge): only the `ProductionPage`, `filteredOrders` and `loadFgStickers` / `packingStickerUrl` anchors, re-derived on the merged file.
+>
 > **Last verified: 2026-09-30** (branch `feat/production-overview-card-filters`): only the `ProductionPage`, `filteredOrders` and
 > `loadFgStickers` / `packingStickerUrl` anchors, re-derived after the Cards filter strip (and its module-scope
 > `AnchoredPopover` / `FilterPill`) was added.
@@ -8,7 +10,10 @@
 > `loadFgStickers` / `packingStickerUrl` anchors, re-derived after the Overview Cards view was added.
 >
 > **Last verified: 2026-09-29** (branch `chore/sync-main-into-staging`, staging<-main merge): `ProductionPage` :564, `filteredOrders` :2930, `loadFgStickers` / `packingStickerUrl` :5643 / :5602 re-derived. Nothing else re-checked.
-
+>
+> **Last verified: 2026-09-30** (branch `feat/production-overview-cards-main`): only the `ProductionPage`, `filteredOrders` and
+> `loadFgStickers` / `packingStickerUrl` anchors, re-derived after the Overview Cards view (#592 / #595 / #596) was brought to `main`.
+>
 > **Last verified: 2026-09-29** (branch `feat/production-multi-select-filters`): only the `ProductionPage`,
 > `filteredOrders` and `loadFgStickers` / `packingStickerUrl` anchors, re-derived after the filter-bar options moved to module scope.
 >
@@ -69,7 +74,7 @@ Owns the shop floor: a **dept-tabbed WIP board** (one production_order per confi
 |---|---|---|
 | `ProductionPage` | `src/pages/production/index.tsx:631` | WIP board; every column/row branches on `activeTab` |
 | `filteredOrders` (memo) | `src/pages/production/index.tsx:3013` | Dept-narrow + overdue-set grid filter |
-| `loadFgStickers` / `packingStickerUrl` | `src/pages/production/index.tsx:5775 / 5734` | FG sticker set (immediate paint → /p/ token upgrade) |
+| `loadFgStickers` / `packingStickerUrl` | `src/pages/production/index.tsx:5767 / 5726` | FG sticker set (immediate paint → /p/ token upgrade) |
 | `BOMManagementPage` | `src/pages/bom.tsx:6245` | BOM page shell (tabs, list) |
 | `EditBOMDialog` / `MasterTemplatesDialog` | `src/pages/bom.tsx:3070 / 4001` | L1+WIP editor / master variants |
 | `rowToPO` | `production-orders/_helpers.ts:905` | PO row → API shape (dual-keyed reads) |

@@ -192,9 +192,14 @@ export function buildApReconciliation(input: {
   // Advances: LIVE rows with no PI and a positive remaining amount — mirrors
   // loadUnappliedSupplierAdvances (which excludes VOIDED/DELETED payments via
   // document_lifecycle since BUG-2026-07-08-003).
+  // A trade-finance repayment (method TF_REPAYMENT) has no PI either, but it
+  // pays down the trade-finance account, not the supplier: supplier-payments.ts
+  // posts it DR TF account / CR bank and loadUnappliedSupplierAdvances leaves
+  // it out. Never an advance here either (BUG-2026-09-30-229).
   let unappliedAdvanceSen = 0;
   for (const r of paymentRows) {
     if (r.purchaseInvoiceId) continue;
+    if (r.method === "TF_REPAYMENT") continue;
     if (r.amountSen <= 0) continue;
     if (!r.active) continue;
     unappliedAdvanceSen += r.amountSen;
@@ -283,7 +288,25 @@ export function buildApReconciliation(input: {
   // inactive vouchers should have zero visible GL and zero advance remainder.
   const payNos = new Set<string>([...byPay.keys(), ...glDrByPay.keys()]);
   for (const payNo of payNos) {
-    const rows = (byPay.get(payNo) ?? []).filter((r) => r.method !== "CREDIT_NOTE");
+    const all = byPay.get(payNo) ?? [];
+    // A trade-finance repayment settles the trade-finance account, so it
+    // claims nothing on this control; GL of it here would be a stray.
+    if (all.length > 0 && all.every((r) => r.method === "TF_REPAYMENT")) {
+      const glDrTf = glDrByPay.get(payNo) ?? 0;
+      if (glDrTf !== 0) {
+        items.push({
+          kind: "payment_gl_mismatch",
+          ref: payNo,
+          supplierName: all[0].supplierName,
+          expectedSen: 0,
+          actualSen: glDrTf,
+          contributionSen: -glDrTf,
+          note: "trade-finance repayment — it settles the trade-finance account, so its GL should not touch this control",
+        });
+      }
+      continue;
+    }
+    const rows = all.filter((r) => r.method !== "CREDIT_NOTE");
     if (rows.length === 0 && !glDrByPay.has(payNo)) continue;
     const glDr = glDrByPay.get(payNo) ?? 0;
     const active = rows.length > 0 ? rows.every((r) => r.active) : false;

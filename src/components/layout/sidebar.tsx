@@ -79,7 +79,7 @@ interface NavGroup {
 const navigationGroups: NavGroup[] = [
   // STAGING ONLY (never PR'd into main): latest PRs merged into staging.
   ...(window.location.hostname.startsWith("staging.")
-    ? [{ label: "PATCH NOTES", items: [{ name: "Patch Notes", href: "/staging-notes", icon: ScrollText }] }]
+    ? [{ label: "PATCH NOTES", items: [{ name: "Patch Notes", href: "/staging-notes", icon: ScrollText }, { name: "Schema Check", href: "/staging-schema", icon: Grid3x3 }, { name: "Mail Outbox", href: "/staging-mail", icon: Mail }] }]
     : []),
   {
     label: "OVERVIEW",
@@ -216,7 +216,7 @@ const navigationGroups: NavGroup[] = [
       // views. Retired from the MENU only — every route / tab still answers
       // its old URL: /invoices/payments, /invoices/supplier-payments (FX PIs,
       // advance knock-off, TF repayment — linked from Payment Vouchers),
-      // ?tab=ocreditorpay / odebtorpay / ocreditor / odebtor / ocreditorbills /
+      // ?tab=ocreditorpay / odebtorpay / odebtor / ocreditorbills /
       // plmonthly / coststruct.
       {
         name: "Reports", href: "/accounting?tab=overview", icon: BarChart3, children: [
@@ -260,6 +260,9 @@ const navigationGroups: NavGroup[] = [
         name: "Creditors", href: "/accounting?tab=ap", icon: Building2, children: [
           { name: "Creditor Aging", href: "/accounting?tab=ap", icon: Building2 },
           { name: "AP Invoices", href: "/accounting?tab=apinvoices", icon: BookOpen },
+          // Back in the menu (owner 2026-09-29 「other creditor maintenance 放 sidebar
+          // 旁边」): the creditor register, no longer folded under AP Invoices.
+          { name: "Other Creditors", href: "/accounting?tab=ocreditor", icon: Users },
           { name: "Supplier Discount", href: "/accounting?tab=supplier-discount", icon: CreditCard },
         ],
       },

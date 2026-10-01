@@ -1268,8 +1268,11 @@ parties in a single pass"* — which is true of the maths and false of the queri
 | 1 | `/customer-statement` vs `/debtor-ledger` | lifecycle VOID/DELETED receipts | ✅ 2026-08-13 (-080) |
 | 2 | `/supplier-statement` vs `/creditor-ledger` | lifecycle VOID/DELETED payments | ✅ 2026-08-13 (-080) |
 | 3 | `/ap-control` vs `rebuildApCounterSen` | the PI status set each one sums over (`CONFIRMED/APPROVED/PARTIAL_PAID` vs *everything but DRAFT/CANCELLED*) — legitimate, but it is what turned BUG-2026-08-13-081 into a permanent drift on one card and not the other | ✅ by fixing the writer, not the readers |
-| 4 | `/ar-control` vs `/ap-control` · `/ar-reconciliation` vs `/ap-reconciliation` | — | ✅ checked 2026-08-13, no divergence found |
+| 4 | `/ar-control` vs `/ap-control` · `/ar-reconciliation` vs `/ap-reconciliation` | — | ✅ checked 2026-08-13, no divergence found (it grew later — rows 6–7) |
 | 5 | `/payment-vouchers` vs `/official-receipts` | OR has no `/restate` endpoint, PV does | ⬜ owner decision, not a defect |
+| 6 | `/ap-control` (`loadUnappliedSupplierAdvances`) vs `/ap-reconciliation` (`ap-recon.ts`) | trade-finance repayments (`TF_REPAYMENT`) left out of the advances | ✅ 2026-09-30 (-229) |
+| 7 | `/ar-control` (`loadUnappliedCustomerAdvances`) vs `/ar-reconciliation` | receipts held on account netted off as advances | ✅ 2026-09-30 (-229) |
+| 8 | customer vs supplier opening seeds (`openingControlSums`, `/opening-balance` lists) | CANCELLED seeds left out | ✅ 2026-09-30 (-230) |
 
 **The rule.** When you add a predicate to one subsidiary-ledger surface, open its twin in
 the same commit and diff the query — not the file. And when the two must agree on a

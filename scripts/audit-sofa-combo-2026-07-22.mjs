@@ -10,14 +10,8 @@
 //
 // Usage: $env:DATABASE_URL="postgresql://…"; node scripts/audit-sofa-combo-2026-07-22.mjs
 import postgres from "postgres";
-import fs from "node:fs";
 
-let url = process.env.DATABASE_URL;
-if (!url) {
-  const s = fs.readFileSync(new URL("./audit-wip-both-dbs.mjs", import.meta.url), "utf8");
-  const m = s.match(/"(postgresql:\/\/[^"]*vpwdqtsxexpiqxzweivd[^"]*)"/);
-  if (m) url = m[1];
-}
+const url = process.env.DATABASE_URL;
 if (!url) throw new Error("set DATABASE_URL");
 const sql = postgres(url, { ssl: "require", max: 1, idle_timeout: 30 });
 const rm = (s) => `RM ${(Number(s || 0) / 100).toLocaleString("en-MY", { minimumFractionDigits: 2 })}`;

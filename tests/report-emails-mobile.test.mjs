@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // report-emails-mobile.test.mjs: the Schedule, Efficiency and Morning Brief
-// emails must read on a phone (BUG-2026-09-29-222, BUG-36 follow-up; the
+// emails must read on a phone (BUG-2026-09-29-232, BUG-36 follow-up; the
 // Overdue email is covered by overdue-email-mobile.test.mjs).
 //
 // Each was a desktop / A4 page with no viewport tag, so phones shrank it to
