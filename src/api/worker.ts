@@ -1478,6 +1478,12 @@ import agentConsole from "./routes/agent-console";
 app.route("/api/agents", agentConsole);
 app.route("/api/org-chart", orgChart);
 app.route("/api/user-permissions", userPermissions);
+// STAGING ONLY (never PR'd into main): sent-mail viewer, 404s off staging.
+import stagingMail from "./routes/staging-mail";
+app.route("/api/staging-mail", stagingMail);
+// STAGING ONLY, never PR into main: read-only schema check, see routes/staging-schema.ts.
+import stagingSchema from "./routes/staging-schema";
+app.route("/api/staging-schema", stagingSchema);
 
 // Catch-all error handler (Sprint 5). Hono's default behaviour is to surface
 // a 500 with the error message — fine for dev, but in prod we want every
