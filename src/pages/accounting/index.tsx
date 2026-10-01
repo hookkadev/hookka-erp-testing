@@ -6787,7 +6787,11 @@ function ScanBillsBatch({ accounts, bankCash, onDone }: {
           });
           const j = (await res.json()) as { success?: boolean; error?: string; data?: { billNo?: string } };
           if (!j?.success) throw new Error(j?.error || "save failed");
-          update(x.key, { state: "created", partyId, result: `bill ${j.data?.billNo ?? ""} posted` });
+          let note = `bill ${j.data?.billNo ?? ""} posted`;
+          if (j.data?.billNo) {
+            try { await uploadBillAttachment(j.data.billNo, x.file); } catch (e) { note += ` · attachment failed: ${(e as Error).message}`; }
+          }
+          update(x.key, { state: "created", partyId, result: note });
         }
         made += 1;
       } catch (e) {
@@ -7409,6 +7413,9 @@ function ApInvoicesTab({ accounts }: { accounts: ChartOfAccount[] }) {
             wide
             actions={<>
               <Button variant="outline" size="sm" onClick={() => printVoucher(buildOtherPartyBillVoucher(b, accounts))}><Printer className="h-4 w-4" /> Print</Button>
+              {(b.attachmentCount ?? 0) > 0 && (
+                <Button variant="outline" size="sm" onClick={() => void printBillWithFiles(b, accounts).catch((e: Error) => toast.error(`Not printed — ${e.message}`))}><Printer className="h-4 w-4" /> Print + files</Button>
+              )}
               {!voided && <Button variant="outline" size="sm" onClick={() => { close(); setBillPopup({ mode: "edit", bill: b }); }}>Edit</Button>}
               <Button variant="outline" size="sm" onClick={() => { close(); setBillPopup({ mode: "copy", bill: b }); }}>Copy</Button>
               {!voided
@@ -7438,6 +7445,7 @@ function ApInvoicesTab({ accounts }: { accounts: ChartOfAccount[] }) {
                 </tbody>
               </table>
             </div>
+            <BillAttachmentsBlock bill={b} onChanged={() => setVer((v) => v + 1)} />
           </DocDetailModal>
         );
       })()}
@@ -7615,6 +7623,7 @@ type OtherPartyBill = {
   subtotalSen: number; taxSen: number; totalSen: number; paidAmountSen: number;
   outstandingSen: number; status: string; isOpening?: boolean; lifecycleState?: string;
   items: { counterAccount: string; amountSen: number; description: string; lineNo: number }[];
+  attachmentCount?: number;
 };
 
 // The bill form opened on its own in a popup (owner 2026-09-29 「ap invoice 就
@@ -7719,8 +7728,18 @@ function OtherPartyBillsManager({ parties, accounts, side, formOnly }: { parties
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
-    const j = asMutationResponse(await res.json());
+    const rawRes = (await res.json()) as { data?: { billNo?: string } };
+    const j = asMutationResponse(rawRes);
     if (j?.success) {
+      // The new bill takes the files held for it.
+      const newBillNo = !editingBillNo ? rawRes?.data?.billNo : undefined;
+      if (newBillNo && pendingBillFiles.length) {
+        for (const f of pendingBillFiles) {
+          try { await uploadBillAttachment(newBillNo, f); }
+          catch (e) { toast.error(`Saved, but ${f.name} could not be attached: ${(e as Error).message}`); }
+        }
+      }
+      setPendingBillFiles([]);
       // TEACH: if this bill came from a scan, the letterhead OCR read now maps
       // to the party the operator actually filed it under — right first time or
       // corrected by hand. Next scan of the same letterhead resolves directly.
@@ -7796,6 +7815,10 @@ function OtherPartyBillsManager({ parties, accounts, side, formOnly }: { parties
   // Finance scan memory (creditor side): what earlier bills / vouchers booked,
   // and which bill numbers are already on our books.
   const [scanMemory, setScanMemory] = useState<ScanMemory | null>(null);
+  // Files that go onto the NEW bill once it is saved — the scanned bill, plus
+  // any picked by hand (owner 2026-10-01 「OCB 附件要做」).
+  const [pendingBillFiles, setPendingBillFiles] = useState<File[]>([]);
+  const billFileRef = useRef<HTMLInputElement | null>(null);
   const allSideParties = [...sideParties, ...extraParties.filter((p) => p.type === side)];
   // Unknown scanned party → a small NEW-PARTY dialog: name prefilled from the
   // letterhead, every other field OPTIONAL and left to the operator (owner
@@ -7826,9 +7849,10 @@ function OtherPartyBillsManager({ parties, accounts, side, formOnly }: { parties
       setCreatingParty(false);
     }
   };
-  const applyScan = async (d: ScanFinanceResult) => {
+  const applyScan = async (d: ScanFinanceResult, file: File) => {
     setEditingBillNo(null); // a scan always drafts a NEW bill, never overwrites an edit
     setScannedPartyName(d.partyName ?? null);
+    setPendingBillFiles([file]); // the scanned bill is the new bill's evidence
     const hit = scanNameMatch(allSideParties, d.partyName, partyAliases);
     // Last-used account for this party (latest bill's first line).
     const lastAcct = hit
@@ -8050,6 +8074,20 @@ function OtherPartyBillsManager({ parties, accounts, side, formOnly }: { parties
                 placeholder="0.00" className="w-full rounded-md border border-[#E2DDD8] px-3 py-2 text-sm text-right tabular-nums" />
               <p className="text-[10px] text-[#9CA3AF] mt-0.5">{side === "CREDITOR" ? "→ 706-0000 input SST" : "→ 350-0000 output SST"}</p>
             </div>
+            {!editingBillNo && (
+              <div className="sm:col-span-3 flex flex-wrap items-center gap-2 text-[11px] text-[#6B7280]">
+                <button type="button" onClick={() => billFileRef.current?.click()} className="text-[#6B5C32] hover:text-[#1F1D1B] underline decoration-dotted cursor-pointer">📎 Attach files</button>
+                <input ref={billFileRef} type="file" multiple accept=".pdf,image/*" className="sr-only" onChange={(e) => { const picked = Array.from(e.target.files ?? []); setPendingBillFiles((fs) => [...fs, ...picked]); e.target.value = ""; }} />
+                {pendingBillFiles.length > 0
+                  ? pendingBillFiles.map((f, i) => (
+                    <span key={`${f.name}:${i}`} className="inline-flex items-center gap-1 rounded-full bg-[#F0ECE9] px-2 py-0.5">
+                      {f.name}
+                      <button type="button" onClick={() => setPendingBillFiles((fs) => fs.filter((_, j) => j !== i))} title="Leave this file out" className="text-[#9CA3AF] hover:text-[#9A3A2D] cursor-pointer">✕</button>
+                    </span>
+                  ))
+                  : <span className="text-[#9CA3AF]">the bill / receipt is attached when the bill is saved</span>}
+              </div>
+            )}
             <div>
               <label className="text-xs font-medium text-[#6B7280] mb-1 block">Description</label>
               <input type="text" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })}
@@ -8125,6 +8163,7 @@ function OtherPartyBillsManager({ parties, accounts, side, formOnly }: { parties
                     </td>
                     <td className="px-4 py-1.5 font-mono text-xs">
                       <button onClick={() => setOpenBill(openBill === b.id ? null : b.id)} className="cursor-pointer hover:underline">{openBill === b.id ? "▾ " : "▸ "}{b.billNo}</button>
+                      {(b.attachmentCount ?? 0) > 0 && <span className="ml-1.5 text-[10px] text-[#6B7280] font-sans" title={`${b.attachmentCount} attachment${b.attachmentCount === 1 ? "" : "s"} — open the bill to see`}>📎{b.attachmentCount}</span>}
                     </td>
                     <td className="px-4 py-1.5">{b.partyName}</td>
                     <td className="px-4 py-1.5 text-xs text-[#6B7280] max-w-[16rem] truncate">{[b.referenceNo, b.description].filter(Boolean).join(" · ")}</td>
@@ -8138,6 +8177,9 @@ function OtherPartyBillsManager({ parties, accounts, side, formOnly }: { parties
                     </td>
                     <td className="px-4 py-1.5 text-right whitespace-nowrap">
                       <button onClick={() => printVoucher(buildOtherPartyBillVoucher(b, accounts))} title="Print bill voucher" className="inline-flex items-center gap-1 text-[#6B5C32] hover:text-[#1F1D1B] text-xs underline decoration-dotted cursor-pointer mr-3"><Printer className="h-3 w-3" />print</button>
+                      {(b.attachmentCount ?? 0) > 0 && (
+                        <button onClick={() => void printBillWithFiles(b, accounts).catch((e: Error) => toast.error(`Not printed — ${e.message}`))} title="The bill with its attached files behind it" className="inline-flex items-center gap-1 text-[#6B5C32] hover:text-[#1F1D1B] text-xs underline decoration-dotted cursor-pointer mr-3"><Printer className="h-3 w-3" />print + files</button>
+                      )}
                       {(b.lifecycleState ?? "ACTIVE") === "ACTIVE" && (
                         <button onClick={() => editBill(b)} className="text-[#6B5C32] hover:underline text-xs mr-3">Edit</button>
                       )}
@@ -8229,6 +8271,9 @@ function OtherPartyBillsManager({ parties, accounts, side, formOnly }: { parties
                                 <span className="tabular-nums">{formatCurrency(b.outstandingSen)}</span>
                               </div>
                             </div>
+                          </div>
+                          <div className="px-4 pb-3">
+                            <BillAttachmentsBlock bill={b} onChanged={load} />
                           </div>
                         </div>
                       </td>
@@ -9535,18 +9580,32 @@ function blankPvForm(): PvFormState {
 type PvAttachment = { id: string; filename: string; contentType: string; sizeBytes: number; uploadedAt: string };
 type PvAttachmentList = { rows: PvAttachment[]; canAdd: boolean; canDelete: boolean };
 
-async function fetchPvAttachments(pvId: string): Promise<PvAttachmentList> {
-  const res = await fetch(`/api/accounting/payment-vouchers/${pvId}/attachments?x=${Date.now()}`, { cache: "no-store" });
+// One fetch / upload for any document's attachments — a voucher's or (since
+// 2026-10-01, owner 「OCB 附件要做」) an other-party bill's; each document's
+// routes keep its own rules.
+const pvAttachBase = (pvId: string) => `/api/accounting/payment-vouchers/${pvId}/attachments`;
+const billAttachBase = (billNo: string) => `/api/accounting/other-party-bills/${encodeURIComponent(billNo)}/attachments`;
+async function fetchAttachments(base: string): Promise<PvAttachmentList> {
+  const res = await fetch(`${base}?x=${Date.now()}`, { cache: "no-store" });
   const j = (await res.json()) as { success?: boolean; error?: string; data?: PvAttachmentList };
   if (!j?.success || !j.data) throw new Error(j?.error || "Could not load attachments");
   return j.data;
 }
-async function uploadPvAttachment(pvId: string, file: File): Promise<void> {
+async function uploadAttachment(base: string, file: File): Promise<void> {
   const fd = new FormData();
   fd.append("file", file);
-  const res = await fetch(`/api/accounting/payment-vouchers/${pvId}/attachments`, { method: "POST", body: fd });
+  const res = await fetch(base, { method: "POST", body: fd });
   const j = (await res.json()) as { success?: boolean; error?: string };
   if (!j?.success) throw new Error(j?.error || "Upload failed");
+}
+async function fetchPvAttachments(pvId: string): Promise<PvAttachmentList> {
+  return fetchAttachments(pvAttachBase(pvId));
+}
+async function uploadPvAttachment(pvId: string, file: File): Promise<void> {
+  return uploadAttachment(pvAttachBase(pvId), file);
+}
+async function uploadBillAttachment(billNo: string, file: File): Promise<void> {
+  return uploadAttachment(billAttachBase(billNo), file);
 }
 const fmtBytes = (n: number) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} B`);
 
@@ -9716,27 +9775,56 @@ function pvApPrintDetail(pv: PvRow): { supplierName: string; piNo: string | null
 // more (not on a cancelled voucher), delete (only while Draft / Prepared —
 // evidence is locked from Check on). The server enforces the same rules.
 function PvAttachmentsBlock({ pv, onChanged }: { pv: PvRow; onChanged: () => void }) {
+  return (
+    <DocAttachmentsBlock
+      base={pvAttachBase(pv.id)} docNo={pv.pvNo} voided={pv.status === "VOID"} onChanged={onChanged}
+      lockedNote="Evidence locked — a checked or approved voucher keeps its files."
+    />
+  );
+}
+// Other-party bill attachments (owner 2026-10-01 「OCB 附件要做」): add while the
+// bill is active; remove until money is paid against it.
+function BillAttachmentsBlock({ bill, onChanged }: { bill: OtherPartyBill; onChanged: () => void }) {
+  return (
+    <DocAttachmentsBlock
+      base={billAttachBase(bill.billNo)} docNo={bill.billNo} voided={(bill.lifecycleState ?? "ACTIVE") !== "ACTIVE"} onChanged={onChanged}
+      lockedNote="Evidence locked — money has been paid against this bill, so its files stay."
+    />
+  );
+}
+// A bill printed with its files behind it — the voucher's own bundle, same
+// refusal when any file cannot be rendered.
+async function printBillWithFiles(b: OtherPartyBill, accounts: ChartOfAccount[]): Promise<void> {
+  const list = await fetchAttachments(billAttachBase(b.billNo));
+  if (!list.rows.length) throw new Error("no attachments on this bill — use print");
+  const appendix: { title: string; pages: string[] }[] = [];
+  for (const a of list.rows) appendix.push({ title: a.filename, pages: await attachmentToPages(a) });
+  printVoucher({ ...buildOtherPartyBillVoucher(b, accounts), appendix });
+}
+function DocAttachmentsBlock({ base, docNo, voided, lockedNote, onChanged }: {
+  base: string; docNo: string; voided: boolean; lockedNote: string; onChanged: () => void;
+}) {
   const { toast } = useToast();
   const { confirm } = useConfirm();
   const [ver, setVer] = useState(0);
   const [list, setList] = useState<(PvAttachmentList & { key: string }) | null>(null);
   const [busy, setBusy] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const key = `${pv.id}|${ver}`;
+  const key = `${base}|${ver}`;
   useEffect(() => {
     let dead = false;
-    fetchPvAttachments(pv.id)
+    fetchAttachments(base)
       .then((d) => { if (!dead) setList({ key, ...d }); })
       .catch((e: Error) => { if (!dead) { setList({ key, rows: [], canAdd: false, canDelete: false }); toast.error(e.message); } });
     return () => { dead = true; };
-  }, [key, pv.id, toast]);
+  }, [key, base, toast]);
   const loading = list?.key !== key;
   const addFiles = async (files: File[]) => {
     if (!files.length) return;
     setBusy(true);
     let ok = 0;
     for (const f of files) {
-      try { await uploadPvAttachment(pv.id, f); ok++; }
+      try { await uploadAttachment(base, f); ok++; }
       catch (e) { toast.error(`${f.name}: ${(e as Error).message}`); }
     }
     setBusy(false);
@@ -9744,10 +9832,10 @@ function PvAttachmentsBlock({ pv, onChanged }: { pv: PvRow; onChanged: () => voi
     if (inputRef.current) inputRef.current.value = "";
   };
   const remove = async (a: PvAttachment) => {
-    if (!(await confirm({ title: "Remove attachment?", message: `${a.filename} will be deleted from ${pv.pvNo}.`, danger: true }))) return;
+    if (!(await confirm({ title: "Remove attachment?", message: `${a.filename} will be deleted from ${docNo}.`, danger: true }))) return;
     setBusy(true);
     try {
-      const res = await fetch(`/api/accounting/payment-vouchers/${pv.id}/attachments/${encodeURIComponent(a.id)}`, { method: "DELETE" });
+      const res = await fetch(`${base}/${encodeURIComponent(a.id)}`, { method: "DELETE" });
       const j = asMutationResponse(await res.json());
       if (j?.success) { toast.success("Attachment removed"); setVer((v) => v + 1); onChanged(); }
       else toast.error(j?.error || "Delete failed");
@@ -9779,8 +9867,8 @@ function PvAttachmentsBlock({ pv, onChanged }: { pv: PvRow; onChanged: () => voi
           ))}
         </ul>
       ) : null}
-      {list && !loading && !list.canDelete && list.rows.length > 0 && pv.status !== "VOID" && (
-        <div className="text-[10px] text-[#9CA3AF] mt-1">Evidence locked — a checked or approved voucher keeps its files.</div>
+      {list && !loading && !list.canDelete && list.rows.length > 0 && !voided && (
+        <div className="text-[10px] text-[#9CA3AF] mt-1">{lockedNote}</div>
       )}
     </div>
   );
@@ -10483,51 +10571,76 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
           : otherCreditors.map((p) => ({ value: p.id, label: p.name }));
         const setAmt = (id: string, v: string) => setApAlloc((m) => { const n = { ...m }; if (v === "") delete n[id]; else n[id] = v; return n; });
         const cannot = saving || apTotalSen <= 0 || !!apMoneyError || !!apOverAlloc || !apForm.partyId || !(apForm.payFrom || defaultBankCode(bankCash));
+        // The same popup as the voucher form (owner 2026-10-01 「new ap payment
+        // 的页面还是这样」): HEADER, then the bills to pay; fields and rules unchanged.
+        const editingRow = editingId ? (rows ?? []).find((x) => x.id === editingId) : undefined;
+        const pvNoText = !editingRow ? "(assigned on save)" : editingRow.pvNo.startsWith("DRAFT-") ? "(assigned at Check)" : editingRow.pvNo;
+        const fieldLabel = "text-[11px] font-semibold uppercase tracking-wide text-[#6B7280] mb-1 block";
+        const sectionHead = "px-4 py-2 border-b border-[#E2DDD8] border-l-4 border-l-[#3E6570] text-xs font-bold uppercase tracking-wide text-[#3E6570] flex items-center justify-between gap-3";
         return (
-          <Card>
-            <CardContent className="p-4 space-y-4">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <div className="text-sm font-semibold text-[#1F1D1B]">{editingId ? "Edit AP payment" : "New AP Payment"} <span className="text-[11px] font-normal text-[#9CA3AF]">DR creditor control · CR Pay from — posted when approved</span></div>
-                <div className="inline-flex rounded-md border border-[#E2DDD8] overflow-hidden text-xs">
-                  {(["SUPPLIER", "OTHER"] as const).map((k) => (
-                    <button key={k} type="button" disabled={!!editingId}
-                      onClick={() => { setApForm((f) => ({ ...f, partyKind: k, partyId: "" })); setApAlloc({}); setApBills(null); }}
-                      className={`px-3 py-1.5 ${apForm.partyKind === k ? "bg-[#6B5C32] text-white" : "bg-white text-[#6B7280] hover:bg-[#FAF8F5]"} ${editingId ? "cursor-not-allowed" : "cursor-pointer"}`}>
-                      {k === "SUPPLIER" ? "Supplier (purchase invoices)" : "Other creditor (bills)"}
-                    </button>
-                  ))}
-                </div>
+          <div className="fixed inset-0 z-40 bg-black/40 overflow-y-auto p-4" role="dialog" aria-modal="true">
+            <div className="mx-auto my-4 w-full max-w-5xl rounded-lg bg-[#F7F5F2] shadow-2xl">
+              <div className="flex items-center justify-between px-5 py-3 rounded-t-lg bg-white border-b border-[#E2DDD8]">
+                <h3 className="text-base font-semibold text-[#1F1D1B]">
+                  {editingRow ? `Edit AP payment ${editingRow.pvNo.startsWith("DRAFT-") ? "(draft)" : editingRow.pvNo}` : "New AP payment"}
+                  <span className="ml-2 text-[11px] font-normal text-[#9CA3AF]">DR creditor control · CR Paid from — posted when approved</span>
+                </h3>
+                <button onClick={resetForm} title="Close without saving" className="text-[#9CA3AF] hover:text-[#1F1D1B] text-lg leading-none cursor-pointer">✕</button>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="sm:col-span-2">
-                  <label className="text-xs font-medium text-[#6B7280] mb-1 block">{apForm.partyKind === "SUPPLIER" ? "Supplier" : "Other creditor"}</label>
-                  <SearchableSelect
-                    value={apForm.partyId}
-                    onChange={(v) => { setApForm((f) => ({ ...f, partyId: v })); setApAlloc({}); }}
-                    options={partyOpts}
-                    placeholder={apForm.partyKind === "SUPPLIER" ? "Type supplier code or name…" : "Type creditor name…"}
-                    allowClear
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-[#6B7280] mb-1 block">Date</label>
-                  <input type="date" value={apForm.date} onChange={(e) => setApForm({ ...apForm, date: e.target.value })} className={`${selCls} w-full`} />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-[#6B7280] mb-1 block">Pay from <span className="ml-1 text-[#B4B2A9] cursor-help" title="Bank / cash account credited (CR)">ⓘ</span></label>
-                  <select value={apForm.payFrom || defaultBankCode(bankCash)} onChange={(e) => setApForm({ ...apForm, payFrom: e.target.value })} className={`${selCls} w-full`}>
-                    <option value="">— pick bank/cash —</option>
-                    {bankCash.map((a) => <option key={a.code} value={a.code}>{a.code} {a.name}</option>)}
-                  </select>
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="text-xs font-medium text-[#6B7280] mb-1 block">Reference / remarks</label>
-                  <input type="text" placeholder="e.g. TT ref, cheque no" value={apForm.reference} onChange={(e) => setApForm({ ...apForm, reference: e.target.value })} className={`${selCls} w-full`} />
-                </div>
-              </div>
+              <div className="p-4 space-y-4">
+                <section className="rounded-md border border-[#E2DDD8] bg-white">
+                  <div className={sectionHead}><span>Header</span></div>
+                  <div className="p-4 space-y-3">
+                    <div className="inline-flex rounded-md border border-[#E2DDD8] overflow-hidden" title={editingId ? "The creditor is fixed once saved" : undefined}>
+                      {(["SUPPLIER", "OTHER"] as const).map((k) => (
+                        <button key={k} type="button" disabled={!!editingId}
+                          onClick={() => { setApForm((f) => ({ ...f, partyKind: k, partyId: "" })); setApAlloc({}); setApBills(null); }}
+                          className={`px-5 py-2 text-sm font-semibold ${apForm.partyKind === k ? "bg-[#3E6570] text-white" : "bg-white text-[#1F1D1B] hover:bg-[#FAF8F5]"} ${k === "OTHER" ? "border-l border-[#E2DDD8]" : ""} disabled:cursor-not-allowed`}>
+                          {k === "SUPPLIER" ? "Supplier (purchase invoices)" : "Other creditor (bills)"}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className={fieldLabel}>{apForm.partyKind === "SUPPLIER" ? "Supplier *" : "Other creditor *"}</label>
+                        <SearchableSelect
+                          value={apForm.partyId}
+                          onChange={(v) => { setApForm((f) => ({ ...f, partyId: v })); setApAlloc({}); }}
+                          options={partyOpts}
+                          placeholder={apForm.partyKind === "SUPPLIER" ? "Type supplier code or name…" : "Type creditor name…"}
+                          allowClear
+                        />
+                      </div>
+                      <div>
+                        <label className={fieldLabel}>PV #</label>
+                        <input type="text" readOnly value={pvNoText} className={`${selCls} w-full bg-[#FAF8F5] text-[#6B7280]`} />
+                      </div>
+                      <div>
+                        <label className={fieldLabel}>Payment date *</label>
+                        <input type="date" value={apForm.date} onChange={(e) => setApForm({ ...apForm, date: e.target.value })} className={`${selCls} w-full`} />
+                      </div>
+                      <div>
+                        <label className={fieldLabel}>Paid from (credit) *</label>
+                        <select value={apForm.payFrom || defaultBankCode(bankCash)} onChange={(e) => setApForm({ ...apForm, payFrom: e.target.value })} className={`${selCls} w-full`}>
+                          <option value="">— pick bank / cash —</option>
+                          {bankCash.map((a) => <option key={a.code} value={a.code}>{a.code} · {a.name}</option>)}
+                        </select>
+                      </div>
+                      <div className="sm:col-span-2">
+                        <label className={fieldLabel}>Reference / remarks</label>
+                        <input type="text" placeholder="e.g. TT ref, cheque no" value={apForm.reference} onChange={(e) => setApForm({ ...apForm, reference: e.target.value })} className={`${selCls} w-full`} />
+                      </div>
+                    </div>
+                  </div>
+                </section>
 
-              <div>
-                <label className="text-xs font-medium text-[#6B7280] mb-1 block">Bills to pay {apBills?.partyName ? <span className="text-[#1F1D1B] font-semibold">· {apBills.partyName}</span> : null}</label>
+                <section className="rounded-md border border-[#E2DDD8] bg-white">
+                  <div className={sectionHead}>
+                    <span>Bills to pay{apBills?.partyName ? ` · ${apBills.partyName}` : ""}</span>
+                    <span className="normal-case font-normal text-[#6B7280] tracking-normal">total {apMoneyError ? "—" : formatCurrency(apTotalSen)}</span>
+                  </div>
+                  <div className="p-4 space-y-3">
+                <div>
                 {!apForm.partyId ? (
                   <div className="text-xs text-[#9CA3AF] border border-dashed border-[#E2DDD8] rounded-md px-3 py-4">Pick the creditor first — its unpaid bills appear here.</div>
                 ) : apBillsLoading || apBills === null ? (
@@ -10598,8 +10711,10 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
                 ) : <div />}
                 <span className="text-sm text-[#6B7280]">Total <span className="text-lg font-semibold text-[#1F1D1B] tabular-nums">{apMoneyError ? "—" : formatCurrency(apTotalSen)}</span>{apAdvanceSen > 0 && <span className="ml-2 text-[11px] text-[#9CA3AF]">incl. advance {formatCurrency(apAdvanceSen)}</span>}</span>
               </div>
+                  </div>
+                </section>
 
-              <div className="flex flex-wrap gap-2 pt-3 border-t border-[#F0ECE9] items-center">
+              <div className="flex flex-wrap gap-2 items-center">
                 {editingId ? (
                   <Button variant="primary" size="sm" disabled={cannot} onClick={() => void handleSaveAp("post")}>{saving ? "Updating…" : "Save changes"}</Button>
                 ) : (
@@ -10610,8 +10725,9 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
                 )}
                 <Button variant="outline" size="sm" onClick={resetForm}>Cancel</Button>
               </div>
-            </CardContent>
-          </Card>
+              </div>
+            </div>
+          </div>
         );
       })()}
 
