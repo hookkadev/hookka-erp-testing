@@ -1,6 +1,6 @@
 # Recurring bug classes — the index that makes P5 executable
 
-> **Last verified: 2026-10-01**: branch `fix/dev08-accessory-so-ready` **adds C26 — UPHOLSTERY cards as the proxy for "made"** (BUG-2026-10-01-234, DEV-08). Nothing else re-checked.
+> **Last verified: 2026-10-01**: branch `fix/dev08-accessory-so-ready` **adds C28 — UPHOLSTERY cards as the proxy for "made"** (BUG-2026-10-01-241, DEV-08). Nothing else re-checked.
 > **Last verified: 2026-09-25**: restamped on branch `feat/dashboard-kpi-no-icons` (PR #524): C15 gains row 5, the Worker Efficiency card that printed worker ids after a refused `/api/workers` read (BUG-2026-09-25-194). Nothing else re-checked.
 > **Last verified: 2026-09-25** — restamped on branch `feat/ocr-dashboard-tab`: C23 gains the OCR-tab row (BUG-2026-09-25-192, `readQueueRow` dual-key fix); no other class re-checked.
 > **Last verified: 2026-09-23** — branch `fix/invoice-line-so-ref` adds **C16 row 8** (invoice PDF read the DO field names for per-line SO/REF/CO SO). Nothing else re-checked.
@@ -1714,7 +1714,7 @@ re-queues; it never re-kicks under waitUntil.
 
 Test: `tests/scan-queue-client-driven.test.mjs` (no `waitUntil(` in scan-queue.ts).
 
-## C26 — UPHOLSTERY cards as the proxy for "made", and an accessory has none
+## C28 — UPHOLSTERY cards as the proxy for "made", and an accessory has none
 
 **Shape.** A gate decides "this PO / order is finished" by checking that every UPHOLSTERY job
 card is COMPLETED/TRANSFERRED. Accessories (pillow, cushion: FAB_CUT → FAB_SEW → PACKING, mig
@@ -1735,7 +1735,7 @@ order-level cascades use `siblingUphGateDone` in `production-orders/_helpers.ts`
 |---|---|---|
 | 1 | `poReadyForDelivery` (`src/lib/delivery-pipeline.ts`) — completed pillows never reached Pending Delivery | ✅ 2026-06-20 (BUG-2026-06-20-001) |
 | 2 | Consignment "ready to ship" list — completed pillows missing | ✅ 2026-07-01 (BUG-2026-07-01-004) |
-| 3 | `cascadeUpholsteryToSO` / `ToCO` / `cascadeUpholsteryRollbackToSO` — SO flipped to READY_TO_SHIP on the sofa's upholstery while its pillows were on Fab Sew | ✅ 2026-10-01 on branch `fix/dev08-accessory-so-ready` (BUG-2026-10-01-234), not deployed |
+| 3 | `cascadeUpholsteryToSO` / `ToCO` / `cascadeUpholsteryRollbackToSO` — SO flipped to READY_TO_SHIP on the sofa's upholstery while its pillows were on Fab Sew | ✅ 2026-10-01 on branch `fix/dev08-accessory-so-ready` (BUG-2026-10-01-241), not deployed |
 | 4 | `poInPlanning` (`src/lib/delivery-pipeline.ts`) — an in-production pillow does not preview in the Delivery Planning tab | ⬜ left by BUG-2026-06-20-001 as lower impact; changes what the Delivery page lists, so it needs the owner's call |
 
 Test: `tests/so-ready-accessory-gate.test.mjs` (no `mine.length === 0) return true` left in

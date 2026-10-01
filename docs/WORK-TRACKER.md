@@ -1,6 +1,8 @@
 # Hookka ERP — Work Tracker
 
 > **Last verified: 2026-10-01**: branch `fix/dev08-accessory-so-ready` (DEV-08) added below (its entry is the newest).
+> **Last verified: 2026-09-30**: branch `feat/dev22-worker-penalty` (to `staging`) added below (in progress, its entry is the newest).
+> **Last verified: 2026-10-01**: branch `feat/cn-pdf-size-column` (DEV-30) added below (its entry is the newest).
 > **Last verified: 2026-09-30**: #617 entry item 4 — owner re-posted the opening; creditor Self-check card green (measured).
 > **Last verified: 2026-09-30**: #617 (BUG-2026-09-30-229/-230, Self-check reconciliations + cancelled opening seeds) closed ✅ below with its prod check.
 > **Last verified: 2026-09-30**: branch `fix/pillow-fab-sew-sticker` (DEV-26) added below (its entry is the newest).
@@ -65,12 +67,37 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
+## 2026-09-30 — 🔵 DEV-22 Worker Penalty + payroll deduction (branch `feat/dev22-worker-penalty` → `staging`)
+
+Ask (ticket DEV-22, High): a Worker Penalty module for confirmed order / production mistakes, with approval, a payroll deduction, and the worker seeing it in the app. Owner's answers: approval gated on a new `worker-penalties:approve` right and the creator may not approve their own penalty; the deduction lands in the payroll month of the APPROVAL date, rolling to the next month when that month's payroll is already approved; net pay is not clamped (same rule as advances).
+1. ✅ Backend lib + tables (`worker_penalties`, `worker_penalty_lines`, `payslips.penalty_deduction_sen`), runtime self-applied.
+2. ✅ API `/api/worker-penalties`: CRUD, submit / approve / reject / revoke, production-order lookup with the job-card PICs as suggested workers.
+3. ✅ Payroll: generate + projected subtract the period's approved penalties after statutory; payroll approval posts them (and refuses while the stored slips disagree with the approved penalties); back to DRAFT un-posts.
+4. ✅ RBAC: `worker-penalties` resource (HR + Office via allExcept), `approve` in the Permissions catalog.
+5. 🔵 Employees > Worker Penalty tab (list, create from a production order, multi-worker amounts, photos, approval actions) + Payroll tab Penalty column.
+6. 🔵 Worker app My Pay: penalty card (date, PO No., reason, amount, payroll month, status).
+7. ✅ Tests + docs: `tests/worker-penalties.test.mjs` (9), employees module guide, CODEBASE-MAP, API.md regenerated.
+8. 🟡 Items 5 and 6 are typecheck / lint / unit clean but NOT yet driven in a browser. The local `.dev.vars` points at PRODUCTION (checked 2026-10-01 by project ref only), so no local run; owner chose to verify on staging after the PR merges.
+9. ✅ #628 merged and deployed to staging. Driven on staging 2026-10-01: tab renders, order lookup CO-2608-006-01 pulls product / qty / customer and per-department PICs, two suggested workers added (RM 50.00 + RM 25.50), WP-2610-001 submitted, self-approval refused, Payroll tab shows the Penalty column.
+10. 🔵 Owner 2026-10-01 (no second approver account): a SUPER_ADMIN may approve a penalty they raised; every other role still needs a second person (`selfApprovalBlocked`, branch `feat/dev22-superadmin-self-approve`). Then finish on staging: approve, payroll estimate, generate + approve Oct payroll, POSTED, drift banner.
+
+
+## 2026-10-01 — 🔵 DEV-30 Size column on the Consignment Note PDF (Siti, High) (branch `feat/cn-pdf-size-column` → `main`)
+
+Ask (DEV-30): the CN PDF should show the item size the CO shows (a sofa's seat size, e.g. 28), as a Size column left of Set.
+
+1. 🔵 New Size column between Description and Set. Value comes from `GET /api/consignment-notes/:id/print-extras` (`sizeLabel`: the production order's, which is copied from the CO line; the CO line itself as fallback). Lines without one print "-". Verified on a locally rendered sample PDF.
+2. ⚪ Noticed, not changed: the Description still prints "Size: 1A(LHF)" for sofas, which is `products.sizeLabel` (the module code), not the seat size. Two different things both labelled size; owner to decide whether to rename or drop it.
+3. ⚪ The dispatch-notice email PDF only has the Size value when print-extras was already fetched for that CN (same as the other rich detail); otherwise it prints "-".
+
+Prod data is UNMEASURED (no prod access this session): how many CO lines carry a blank size.
+
 
 ## 2026-10-01 — 🔵 DEV-08 Sofa + accessories as one order (Violet, High) (branch `fix/dev08-accessory-so-ready` → `main`)
 
 Ask (DEV-08): sofa and its accessories (pillow) must be scheduled together, show per-item + overall status, and the order is only Completed / Ready for Delivery when every item is done.
 
-1. 🔵 Bug: `cascadeUpholsteryToSO` (and its CO twin) flips the SO to READY_TO_SHIP once the sofa's UPHOLSTERY cards are done. A pillow PO has no UPHOLSTERY card, so it counts as done while still at FAB_SEW. Fix: a sibling with no UPHOLSTERY card counts only once the PO itself is COMPLETED (or CANCELLED); one `siblingUphGateDone` shared by all three cascades (BUG-2026-10-01-234, class C26). Verified locally: tsc strict exit 0, `npm test` 0 fail, new test fails 7 of 9 on the old code. PR to `main`, not deployed.
+1. 🔵 Bug: `cascadeUpholsteryToSO` (and its CO twin) flips the SO to READY_TO_SHIP once the sofa's UPHOLSTERY cards are done. A pillow PO has no UPHOLSTERY card, so it counts as done while still at FAB_SEW. Fix: a sibling with no UPHOLSTERY card counts only once the PO itself is COMPLETED (or CANCELLED); one `siblingUphGateDone` shared by all three cascades (BUG-2026-10-01-241, class C28). Verified locally: tsc strict exit 0, `npm test` 0 fail, new test fails 7 of 9 on the old code. PR to `main`, not deployed.
 2. 🔵 MEASURED on staging 2026-10-01 (read-only): 9 SOs at READY_TO_SHIP with unfinished pillow POs (24 PO rows incl. SO-2609-199's 3 SERVICE CHARGE lines, which have no UPH sibling so this fix does not touch them). 7 of them already shipped/invoiced the sofa (e.g. SO-2605-104 on DO-2606-034, pillows pending 4 months). Safety: on shipped SOs, accessory POs are COMPLETED 267 vs PENDING 2, so the floor does close pillow POs and the fix will not wedge normal orders. Prod still UNMEASURED. Query: `SELECT so.id, po.po_no, po.status FROM sales_orders so JOIN production_orders po ON po.sales_order_id = so.id WHERE so.status = 'READY_TO_SHIP' AND po.item_category = 'ACCESSORY' AND po.status NOT IN ('COMPLETED','CANCELLED')`. Prod impact UNMEASURED.
 3. 🟡 Parked, needs reporter: align SOFA + ACCESSORY sewing days for the same SO (`runSewing` schedules each lane independently). Violet has not answered which schedule screen she means.
 4. 🟡 Parked: per-SO sibling status on Production / Planning rows. The SO detail "Linked Production Orders" table already shows per-PO status.

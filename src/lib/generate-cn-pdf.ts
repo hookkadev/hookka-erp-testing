@@ -83,6 +83,10 @@ export type CNPdfItem = {
   // [{ label: "HB", racks: ["Rack 3"] },
   //  { label: "DIVAN", racks: ["Rack 3", "Rack 20"] }].
   componentRacks?: { label: string; racks: string[] }[];
+  // The CO line's size (a sofa's seat size, e.g. "28"), printed in its own
+  // Size column. sizeLabel above is the product master's, which for a sofa
+  // is the module code ("1A(LHF)") and stays in the Description.
+  coSizeLabel?: string | null;
 };
 
 // Greyscale only — colour ink is expensive on the floor printer, so the
@@ -247,6 +251,7 @@ export function renderCnInto(doc: jsPDF, data: CNPdfData) {
       String(i + 1),
       it.consignmentOrderNo || "-",
       desc,
+      it.coSizeLabel || "-",
       String(it.quantity ?? 0),
       fp.text || String(it.quantity ?? 0),
       String(fp.total || it.quantity || 0),
@@ -283,13 +288,14 @@ export function renderCnInto(doc: jsPDF, data: CNPdfData) {
   drawHeader();
 
   autoTable(doc, {
-    // Header halign per column matches the body (Set centred, Quantity /
+    // Header halign per column matches the body (Size / Set centred, Quantity /
     // Total Qty / M³ right) so nothing looks crooked.
     head: [
       [
         { content: "#", styles: { halign: "center" } },
         { content: "CO No." },
         { content: "Description" },
+        { content: "Size", styles: { halign: "center" } },
         { content: "Set", styles: { halign: "center" } },
         { content: "Quantity", styles: { halign: "right" } },
         { content: "Total Qty", styles: { halign: "right" } },
@@ -299,7 +305,7 @@ export function renderCnInto(doc: jsPDF, data: CNPdfData) {
     body,
     foot: [
       [
-        { content: "Total", colSpan: 3, styles: { halign: "right" } },
+        { content: "Total", colSpan: 4, styles: { halign: "right" } },
         { content: `${totalSets} SETS`, styles: { halign: "center" } },
         { content: grandBreakdown, styles: { halign: "right" } },
         { content: `${totalPcsAll} ITEMS`, styles: { halign: "right" } },
@@ -337,12 +343,13 @@ export function renderCnInto(doc: jsPDF, data: CNPdfData) {
     },
     columnStyles: {
       0: { cellWidth: 8, halign: "center" }, // #
-      1: { cellWidth: 26 }, // CO No.
+      1: { cellWidth: 22 }, // CO No.
       2: { cellWidth: "auto" }, // Description (code / name / build spec)
-      3: { cellWidth: 14, halign: "center" }, // Set (no. of sets)
-      4: { cellWidth: QTY_COL_W, halign: "right" }, // Quantity (piece breakdown)
-      5: { cellWidth: 18, halign: "right" }, // Total Qty (pcs)
-      6: { cellWidth: 16, halign: "right" }, // M³ (line total)
+      3: { cellWidth: 14, halign: "center" }, // Size (CO line, e.g. 28)
+      4: { cellWidth: 12, halign: "center" }, // Set (no. of sets)
+      5: { cellWidth: QTY_COL_W, halign: "right" }, // Quantity (piece breakdown)
+      6: { cellWidth: 18, halign: "right" }, // Total Qty (pcs)
+      7: { cellWidth: 16, halign: "right" }, // M³ (line total)
     },
     didParseCell: (d) => {
       // Description is column 2 — nudge it up a touch like the DO does.
@@ -353,9 +360,9 @@ export function renderCnInto(doc: jsPDF, data: CNPdfData) {
       ) {
         d.cell.styles.fontSize = 7.6;
       }
-      // Reserve room under the pieces text (Quantity, col 4) for the small
+      // Reserve room under the pieces text (Quantity, col 5) for the small
       // rack line so it never collides with the pieces above.
-      if (d.section === "body" && d.column.index === 4) {
+      if (d.section === "body" && d.column.index === 5) {
         const rx = rowExtras[d.row.index];
         if (rx) {
           d.cell.styles.minCellHeight = Math.max(
@@ -367,8 +374,8 @@ export function renderCnInto(doc: jsPDF, data: CNPdfData) {
     },
     didDrawCell: (d) => {
       // Rack location line, small + grey, bottom-anchored in the Quantity
-      // cell (col 4) under the pieces text.
-      if (d.section === "body" && d.column.index === 4) {
+      // cell (col 5) under the pieces text.
+      if (d.section === "body" && d.column.index === 5) {
         const rx = rowExtras[d.row.index];
         if (rx && rx.rackLines.length > 0) {
           const x = d.cell.x + 1.8;
@@ -384,7 +391,7 @@ export function renderCnInto(doc: jsPDF, data: CNPdfData) {
       }
       // Thin dashed separator under every item row (drawn once per row, on
       // the last column) so rows are easy to read across.
-      if (d.section === "body" && d.column.index === 6) {
+      if (d.section === "body" && d.column.index === 7) {
         const y = d.cell.y + d.cell.height;
         doc.setDrawColor(...HAIR);
         doc.setLineWidth(0.1);

@@ -1,6 +1,10 @@
 # Bug History
 
-> **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-234 (branch `fix/dev08-accessory-so-ready`, DEV-08); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-241 (branch `fix/dev08-accessory-so-ready`, DEV-08); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-239 (branch `fix/worker-login-keypad-capture`, to staging then main); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
+> **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-238 (branch `fix/cn-duplicate-po`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-237 (branch `fix/bom-accessory-category`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-236 (staging id, brought to `main` on branch `feat/dev22-worker-penalty-main`; ids 232-235 are on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-30**: newest entry BUG-2026-09-30-231 (branch `fix/pillow-fab-sew-sticker`, DEV-26); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-30**: newest entries BUG-2026-09-30-229 / -230 (branch `fix/selfcheck-recon-and-opening-seeds`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-30**: newest entry BUG-2026-09-30-228 (branch `fix/drill-receipt-description`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
@@ -53,7 +57,7 @@ Entries themselves stay newest-first.
 
 ---
 
-## BUG-2026-10-01-234 — An SO went Ready to Ship on the sofa's upholstery while its pillows were still on Fab Sew `production-orders` `sales-orders` 🟡
+## BUG-2026-10-01-241 — An SO went Ready to Ship on the sofa's upholstery while its pillows were still on Fab Sew `production-orders` `sales-orders` 🟡
 
 🟡 **Fix in progress** (branch `fix/dev08-accessory-so-ready` → `main`, DEV-08) · Reported by Violet: the sofa is done but the
 pillow is not, so the order is incomplete and delivery planning goes wrong.
@@ -64,7 +68,7 @@ UNMEASURED (query in the DEV-08 WORK-TRACKER entry).
 
 **Root cause.** `cascadeUpholsteryToSO` (and its CO twin and `cascadeUpholsteryRollbackToSO`) decide "the whole order is made"
 by checking every sibling PO's UPHOLSTERY cards. A pillow (FAB_CUT → FAB_SEW → PACKING, mig 0032) has none, and an empty set
-was read as done: `if (mine.length === 0) return true`. Third instance of class C26.
+was read as done: `if (mine.length === 0) return true`. Third instance of class C28.
 
 **Fix.** One predicate, `siblingUphGateDone` (`src/api/routes/production-orders/_helpers.ts`), used by all three cascades: a
 sibling with no UPHOLSTERY card counts only when the PO itself is COMPLETED (or CANCELLED). No new trigger needed: the
@@ -72,10 +76,107 @@ cascade already re-runs after every job-card update, so the pillow's last card c
 already wrongly at READY_TO_SHIP drops back to IN_PRODUCTION the next time any card on it is updated.
 
 **Regression.** `tests/so-ready-accessory-gate.test.mjs` runs the real cascades on an in-memory DB: sofa done + pillow in
-progress stays IN_PRODUCTION; pillow COMPLETED or CANCELLED flips it; rollback and the CO twin agree; plus a C26 class guard.
+progress stays IN_PRODUCTION; pillow COMPLETED or CANCELLED flips it; rollback and the CO twin agree; plus a C28 class guard.
 7 of its 9 cases fail on the old code.
 
 **Lesson.** "No card of type X" is not "type X is done". Ask what the item's own route is.
+## BUG-2026-10-01-239 — Worker login: typing the Employee No. also typed into the PIN `worker-portal` `ui-frontend` 🟢
+
+🟢 **Fixed** (branch `fix/worker-login-keypad-capture` → `staging`, then `main`; not yet deployed) · Owner report: on the worker login page, typing the employee number also fills the PIN keypad.
+
+**Root cause.** The PIN keypad in `src/pages/worker/login.tsx` listens for keys on the whole window so a hardware keyboard works. It stood down for **Backspace** when a text box had focus, but not for **digits**. So every digit of the employee number was read twice: once by the box, once by the keypad. The 6th digit auto-submits, so an employee number with six digits sent a login with that accidental PIN, each one counting toward the 10-per-15-minute lock.
+
+**Fix.** One guard at the top of the listener, before any key is read: `isTypingTarget(document.activeElement)` (`src/lib/typing-target.ts`: input, textarea, select, contenteditable). The digit test is now `/^[0-9]$/`.
+
+**Sweep.** 34 window/document key listeners in `src`; this is the only one that reads printable keys. No second instance.
+
+**Regression.** `tests/worker-login-keypad-focus.test.mjs`: the helper, and that the guard runs before the digit branch (fails on the old page).
+
+**Verify.** Not driven in a browser locally (local dev needs the owner's DB string). To check on staging: type an employee number containing digits; the PIN bars must stay empty.
+
+---
+
+## BUG-2026-10-01-238 — One production order on several consignment notes `consignment` `do-cn-parity` 🟡
+
+🟡 **Fix in progress** (branch `fix/cn-duplicate-po` → `main`) · Found on staging 2026-10-01.
+
+**What happened.** Measured on staging (read-only): 35 production orders sat on more than one non-cancelled CN. The same
+23 POs were on CGN-2609-002/004/006/008 (Houzs), the same 5 on CGN-2609-003/005/007/009 (Carress), plus two older pairs
+(CGN-2607-003/004, CGN-2608-003/004). Each copy shows the full CO amount, and dispatching the second and later copies
+moves no `fg_units`, so stock and the CN list disagree. Production is UNMEASURED.
+
+**Root cause.** Two layers. (1) No CN write path refused a PO that was already on another CN: `validatePOMutex(…, "CN")`
+only looked at delivery orders, and the CN items-replace (CN PUT/PATCH and legacy `PUT /api/consignments/:id`) ran no PO
+check at all. The DO side has had the rule since 2026-05-16 ("a PO can only be delivered once", `delivery-orders/_helpers.ts`);
+the CN mirror never got it. (2) `GET /api/consignment-notes/ready-planning` is snapshot-cached with
+`staleWhileRevalidate`, so the refresh right after Create CN still listed the POs just used, and a second click made a
+second CN. The interleaved Houzs/Carress numbers match `confirmCreateCN` posting one CN per customer per click
+(inferred: `consignment_notes` has no created-at column). The 3 rows left on the Pending CN tab were correct: the other
+unit of each CO, never consigned.
+
+**Fix.** `validatePOMutex` CN branch also rejects a PO on another CN with `status <> 'CANCELLED'` (the same predicate as
+the Pending CN dedup), names the PO and the CN, takes `excludeCnId` for edits, and returns the 409 `message` every caller
+uses. Wired into all four paths: `POST /api/consignment-notes`, legacy `POST /api/consignments`, the shared
+`updateConsignmentNoteById` items-replace (new `po_conflict` result, 409 via `mapUpdateCNError`, checked before the
+DELETE), and the legacy PUT pre-flight (it deletes items before calling the helper). `confirmCreateCN` in
+`consignment/note.tsx` now shows the server's error instead of a generic toast. Existing duplicates are not touched.
+
+**Regression.** `tests/cn-po-once.test.mjs`: refused with PO and CN named, CANCELLED ignored, the edited CN excluded,
+the DO check still first, the edit refused before any write, and all four paths call the guard. 4 of its 6 tests fail
+on the old code.
+
+**Class.** No class row fits exactly. It is DO/CN mirror drift: CODEBASE-MAP already warns that CN is a DO-parity mirror
+and fixes usually belong in both; the DO duplicate guard was the fix that did not cross over.
+
+## BUG-2026-10-01-237: Accessory BOMs showed "Category: BEDFRAME" `bom` `ui-frontend` 🟡
+
+🟡 **Fix in progress** (branch `fix/bom-accessory-category` → `main`). Reported from the BOM page: BC04 (Back Cushion 04),
+an ACCESSORY product, showed `Category: BEDFRAME` in its BOM Structure card.
+
+**Root cause.** `bom_templates.category` only allows `BEDFRAME` / `SOFA` (CHECK in `0001_init.sql`), and every write in
+`src/api/routes/bom.ts` (POST, bulk PUT, PUT `:id` insert default) and both readers (`rowToTemplate`, `rowToTemplateListItem`)
+coerce anything else to `BEDFRAME`. So an accessory BOM is stored and read back as a bedframe. The BOM page printed that
+stored value (tree card, print sheet) and used it for the "Copy from existing BOM" filter, which therefore never listed
+other accessory BOMs. `/api/wip-times` filtered and grouped by the same column, so `?category=ACCESSORY` returned nothing
+and accessory routing counted under BEDFRAME.
+
+**Fix.** The product row is the source of truth for category (the rule `routes/bom.ts` already uses for root checks:
+`productCategory ?? templateCategory`). `withProductCategory` (`src/pages/bom-category.ts`) overlays the product's
+category on every template the BOM page holds, through one `useMemo` over the template state so every setter path is
+covered. `loadActiveBomRows` (`src/api/lib/wip-times-core.ts`) now filters and selects `COALESCE(p.category, bt.category)`.
+The Edit BOM dialog's "Load Default" picker also narrowed an accessory to BEDFRAME before
+`loadAllMasterTemplates`, so it offered bedframe masters; it now passes ACCESSORY. The `/api/wip-times` PUT handlers select
+`bt.category` too but never read it, so they are unchanged. The stored column is unchanged; widening it needs a constraint change and is not needed by any reader today.
+How many prod templates belong to accessory products is UNMEASURED.
+
+**Test.** `tests/bom-accessory-category.test.mjs`.
+
+---
+## BUG-2026-10-01-236 — Worker Penalty status and payroll reads could be served from Hyperdrive's cache `employees` `payroll` 🟡
+
+🟡 **Fix in progress** (branch `fix/dev22-penalty-fresh-reads` → `staging`) · Found while driving DEV-22 on staging.
+
+**What happened.** Measured on staging 2026-10-01: October payroll was approved (both test penalties POSTED), then put
+back to DRAFT through `PUT /api/payslips`. The database rows went back to APPROVED. A fresh query combination showed
+APPROVED, but `GET /api/worker-penalties` with the same URL kept returning POSTED for minutes, with
+`Cache-Control: no-store` on the response. So the stale copy came from Hyperdrive caching the identical
+SELECT at the proxy, the same class as the `/bulk-patch` PIC readback entry. The display was wrong. Worse, the money
+paths read the same way. A penalty approved, and its month generated and approved, inside the cache window could be
+missed by `loadPeriodPenaltyLines`. The drift guard read the same stale rows, so it would have agreed; the penalty would
+have stayed APPROVED in a locked month and never been deducted. `loadLockedPayrollPeriods` could also hand out a month
+that had just been approved.
+
+**Fix.** `freshAll` / `freshFirst` in `src/api/lib/worker-penalties.ts` read through `DB.batch` (a transaction, which
+Hyperdrive does not cache). Used by every read a payroll figure or a status guard depends on: the period's lines (generate,
+projected, drift, posting), locked months, the payslips read by drift and posting, the header recount, `loadOne` (every
+status guard), the next penalty number, the list and its counts, and the worker app's `GET /api/worker/penalties`. The
+production-order lookup and the worker / display-name reads stay on the cached path.
+
+**Regression.** `tests/worker-penalties.test.mjs`: with a DB that has `batch`, `loadLockedPayrollPeriods` uses the batch
+result and issues no plain read; a stub without `batch` falls back.
+
+**Lesson.** On this stack a SELECT right after a write is not a read of the write. Anything that decides money or a
+state transition reads through a transaction.
 
 ## BUG-2026-09-30-231 — Pillows had a Fab Cut QR sticker and no Fab Sew one `production-orders` `ui-frontend` 🟡
 

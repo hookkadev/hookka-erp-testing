@@ -621,12 +621,13 @@ app.get("/:id/print-extras", async (c) => {
     divanHeightInches: number | null;
     legHeightInches: number | null;
     specialOrder: string | null;
+    sizeLabel: string | null;
   };
   const coSpecByCode = new Map<string, CoSpec>();
   if (cnRow.consignmentOrderId) {
     const coiRes = await c.var.DB.prepare(
       `SELECT productCode, itemCategory, gapInches, divanHeightInches,
-              legHeightInches, specialOrder
+              legHeightInches, specialOrder, sizeLabel
          FROM consignment_order_items
         WHERE consignmentOrderId = ?`,
     )
@@ -638,6 +639,7 @@ app.get("/:id/print-extras", async (c) => {
         divanHeightInches: number | null;
         legHeightInches: number | null;
         specialOrder: string | null;
+        sizeLabel: string | null;
       }>();
     for (const s of coiRes.results ?? []) {
       const pc = (s.productCode || "").trim();
@@ -650,6 +652,7 @@ app.get("/:id/print-extras", async (c) => {
         divanHeightInches: prev?.divanHeightInches ?? s.divanHeightInches ?? null,
         legHeightInches: prev?.legHeightInches ?? s.legHeightInches ?? null,
         specialOrder: prev?.specialOrder ?? s.specialOrder ?? null,
+        sizeLabel: prev?.sizeLabel || s.sizeLabel || null,
       });
     }
   }
@@ -722,6 +725,9 @@ app.get("/:id/print-extras", async (c) => {
       divanHeightInches: number | null;
       legHeightInches: number | null;
       totalHeightInches: number | null;
+      // The CO line's size (a sofa's seat size, e.g. "28"), for the PDF's
+      // Size column. Not products.sizeLabel, which is the module code.
+      sizeLabel: string | null;
       packedDate: string | null;
       componentRacks: { label: string; racks: string[] }[];
     }
@@ -768,6 +774,8 @@ app.get("/:id/print-extras", async (c) => {
       divanHeightInches: d,
       legHeightInches: l,
       totalHeightInches: total,
+      // PO copies it from the CO line but stores "" when blank, hence ||.
+      sizeLabel: r.sizeLabel || fb?.sizeLabel || null,
       packedDate,
       componentRacks,
     };
@@ -848,7 +856,7 @@ app.post("/", async (c) => {
         return c.json(
           {
             success: false,
-            error: `Cannot create consignment note — ${mutex.conflicts.length} PO${mutex.conflicts.length === 1 ? "" : "s"} already on an active delivery order: ${mutex.conflicts.join(", ")}`,
+            error: mutex.message,
             conflicts: mutex.conflicts,
             reason: mutex.reason,
           },
@@ -867,7 +875,7 @@ app.post("/", async (c) => {
           return c.json(
             {
               success: false,
-              error: `Cannot create consignment note — ${mutex.conflicts.length} PO${mutex.conflicts.length === 1 ? "" : "s"} already on an active delivery order: ${mutex.conflicts.join(", ")}`,
+              error: mutex.message,
               conflicts: mutex.conflicts,
               reason: mutex.reason,
             },
@@ -1995,13 +2003,14 @@ app.post("/:id/notify-customer", async (c) => {
 //   - not_found            → 404
 //   - invalid_transition   → 400 with descriptive message (gap 5)
 //   - items_locked         → 403 with descriptive message (latent gap 3)
+//   - po_conflict          → 409, PO already on a DO or another CN (BUG-2026-10-01-238)
 // ----------------------------------------------------------------------------
 function mapUpdateCNError(
   res: Extract<
     Awaited<ReturnType<typeof updateConsignmentNoteById>>,
     { ok: false }
   >,
-): { status: 400 | 403 | 404; body: Record<string, unknown> } {
+): { status: 400 | 403 | 404 | 409; body: Record<string, unknown> } {
   if (res.reason === "not_found") {
     return {
       status: 404,
@@ -2030,6 +2039,12 @@ function mapUpdateCNError(
         reason: "items_locked",
         currentStatus: res.currentStatus,
       },
+    };
+  }
+  if (res.reason === "po_conflict") {
+    return {
+      status: 409,
+      body: { success: false, error: res.message, reason: "po_conflict" },
     };
   }
   // Exhaustiveness guard.

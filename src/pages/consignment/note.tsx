@@ -78,7 +78,10 @@ type CnPrintExtraItem = Pick<
   | "legHeightInches"
   | "totalHeightInches"
   | "componentRacks"
->;
+> & {
+  // The CO line's size (e.g. "28"); lands on CNPdfItem.coSizeLabel.
+  sizeLabel?: string | null;
+};
 
 // ---------------------------------------------------------------------------
 // Types
@@ -1252,6 +1255,9 @@ export default function ConsignmentNotePage() {
       }
 
       let okCount = 0;
+      // Server's own reason for a refused CN (e.g. "already on a consignment
+      // note", BUG-2026-10-01-238) — shown instead of a generic failure.
+      const errors: string[] = [];
       for (const [, group] of byCustomer.entries()) {
         const first = group[0];
         // For multi-customer batches, re-resolve the hub for each group's
@@ -1292,12 +1298,15 @@ export default function ConsignmentNotePage() {
           body: JSON.stringify(body),
         });
         if (res.ok) okCount += 1;
+        else {
+          const err = (await res.json().catch(() => null)) as { error?: string } | null;
+          errors.push(err?.error || `Failed to create consignment note for ${first.customerName}`);
+        }
       }
       if (okCount > 0) {
         toast.success(`Created ${okCount} consignment note${okCount === 1 ? "" : "s"}`);
-      } else {
-        toast.error("Failed to create consignment notes");
       }
+      for (const e of errors) toast.error(e);
     } catch {
       toast.error("Failed to create consignment notes");
     } finally {
@@ -1415,6 +1424,9 @@ export default function ConsignmentNotePage() {
             legHeightInches: ex?.legHeightInches ?? null,
             totalHeightInches: ex?.totalHeightInches ?? null,
             componentRacks: ex?.componentRacks,
+            // Renamed so it can't clobber the product-master sizeLabel that
+            // feeds the Description.
+            coSizeLabel: ex?.sizeLabel ?? null,
           };
         }),
       };

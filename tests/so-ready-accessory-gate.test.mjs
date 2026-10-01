@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// so-ready-accessory-gate.test.mjs — BUG-2026-10-01-234 (DEV-08).
+// so-ready-accessory-gate.test.mjs — BUG-2026-10-01-241 (DEV-08).
 //
 // An SO with a sofa + pillows flipped to READY_TO_SHIP the moment the sofa's
 // UPHOLSTERY cards were done, while the pillows were still on Fab Sew. The
@@ -135,7 +135,7 @@ test("rollback uses the same gate: an unfinished pillow is not 'still ready'", a
   assert.equal(done.orders[0].status, "READY_TO_SHIP");
 });
 
-test("class guard (C26): no READY_TO_SHIP gate in _helpers.ts treats zero UPHOLSTERY cards as done", () => {
+test("class guard (C28): no READY_TO_SHIP gate in _helpers.ts treats zero UPHOLSTERY cards as done", () => {
   const src = readFileSync(new URL("../src/api/routes/production-orders/_helpers.ts", import.meta.url), "utf8");
   assert.ok(
     !/mine\.length === 0\)\s*return true/.test(src),
