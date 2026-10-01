@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-246 (branch `fix/fin-tables-ceil`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-245 (branch `fix/worker-history-snapshot-stale`; ids 240 and 242 are on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-244 (branch `fix/accessory-l1-only-job-cards-main`; merged to staging as 241 in #656, renumbered because DEV-08 holds 241 on main); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-242 (branch `fix/worker-login-signin-text`, to staging then main); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
@@ -58,6 +59,22 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-10-01-246 — A pinned finance column cut its last letter ("2026-10-…") `accounting` `ui-frontend` 🟢
+
+🟢 **Fixed** (branch `fix/fin-tables-ceil` → `main`) · Found in the prod check of #665 (finance plan batch 4), 2026-10-01.
+
+**What happened.** On Payment Vouchers, dragging one column edge pinned every column at its measured width. The Date column then showed "2026-10-…" instead of the date, though nothing about it had changed.
+
+**Root cause.** Measured widths are fractional (85.3px). `src/lib/use-resizable-tables.ts` rounded them with `Math.round` when pinning, so a column whose text fitted exactly lost a fraction of a pixel and the cut-off rule ("…") kicked in. Same class as any measure-then-pin code: rounding must never go below the measured size.
+
+**Fix.** Pinned widths, the stored widths and the table's sum round UP (`Math.ceil`). Also: the enhancer schedules its pass with a short timeout instead of `requestAnimationFrame` — a tab opened in the background runs no frames, so its tables had no handles until looked at (found in the same check; no user-visible harm, but it blocked verification).
+
+**Regression.** `tests/finance-tables-drills.test.mjs`: `sumWidths([82.4, 100, 102.3])` is 286; the pin uses `Math.ceil`; no `requestAnimationFrame`.
+
+**Verify.** Prod: drag a Payment Vouchers column; every other column keeps its text whole (dates included); double-click resets.
 
 ---
 

@@ -27,7 +27,8 @@ test("columns: a spanning header cell counts each real column; its edge is the l
   // A Monthly P&L header: Item, then each month over RM + %.
   assert.equal(rt.columnCount([1, 2, 2, 2]), 7);
   assert.deepEqual(rt.edgeColumns([1, 2, 2, 2]), [0, 2, 4, 6]);
-  assert.equal(rt.sumWidths([82.4, 100, 102.3]), 285);
+  // Fractional measured widths round UP — rounding down cut a column that fitted exactly (prod 2026-10-01).
+  assert.equal(rt.sumWidths([82.4, 100, 102.3]), 286);
 });
 
 test("widths are kept per page/tab and header; a report by its description column only", () => {
@@ -38,6 +39,8 @@ test("widths are kept per page/tab and header; a report by its description colum
 test("the enhancer: one column changes, the table is the sum of its columns, a colgroup pins them", () => {
   assert.match(lib, /t\.style\.tableLayout = "fixed";\n  t\.style\.width = `\$\{sumWidths\(widths\)\}px`;\n  t\.style\.minWidth = "0";/);
   assert.match(lib, /widths\[col\] = Math\.max\(MIN_W, startW \+ ev\.clientX - startX\);/);
+  assert.match(lib, /style\.width = `\$\{Math\.ceil\(w\)\}px`/, "pinned widths round up");
+  assert.doesNotMatch(lib, /requestAnimationFrame\(/, "a background tab still gets its handles");
   assert.match(lib, /cg\.dataset\.finCols = "1";/, "its own colgroup, marked");
   assert.match(lib, /if \(mode === "off" \|\| t\.querySelector\(":scope > colgroup:not\(\[data-fin-cols\]\)"\)\) return;/, "DataGrid (own colgroup) is left alone");
   assert.match(lib, /writeWidths\(keyOf\(scope, t, firstOnly\), firstOnly \? \[widths\[0\]\] : widths\);/, "remembered");
