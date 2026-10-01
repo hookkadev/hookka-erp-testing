@@ -4406,9 +4406,19 @@ app.get("/other-party-bills", async (c) => {
     }
   }
 
+  // Attachment count per bill (owner 2026-10-01 「OCB 附件要做」).
+  const attachCountById = new Map<string, number>();
+  if (bills.length > 0) {
+    const attRes = await c.var.DB.prepare(
+      "SELECT resourceId, COUNT(*) AS n_files FROM file_assets WHERE orgId = ? AND resourceType = ? GROUP BY resourceId",
+    ).bind(orgId, OCB_ATTACH_RESOURCE).all<Record<string, unknown>>().catch(() => ({ results: [] as Record<string, unknown>[] }));
+    for (const r of attRes.results ?? []) attachCountById.set(String(r.resourceId ?? r.resource_id ?? ""), Math.round(Number(r.nFiles ?? r.n_files) || 0));
+  }
+
   const data = bills.map((b) => ({
     id: b.id,
     billNo: b.billNo,
+    attachmentCount: attachCountById.get(b.id) ?? 0,
     partyId: b.partyId,
     partyType: b.partyType,
     partyName: b.partyName,
@@ -4431,6 +4441,90 @@ app.get("/other-party-bills", async (c) => {
     })),
   }));
   return c.json({ success: true, data, total: data.length });
+});
+
+// ---------------------------------------------------------------------------
+// Other-party bill attachments (owner 2026-10-01 「OCB 附件要做」): the same file
+// store and the same one upload / one delete path as the payment vouchers
+// (resourceType 'other_party_bill', resourceId = the bill's id). A bill posts
+// the moment it is saved, so the evidence rules follow its life instead of an
+// approval ladder: a voided / deleted bill takes no new file, and once money
+// has been paid against the bill its files are locked (nothing deleted). Scan
+// Bill / Scan Bills attach the scanned file here automatically.
+// ---------------------------------------------------------------------------
+const OCB_ATTACH_RESOURCE = "other_party_bill";
+type OcbAttachTarget = { id: string; billNo: string; paidAmountSen: number; active: boolean };
+async function ocbForAttach(db: Env["Variables"]["DB"], orgId: string, billNo: string): Promise<OcbAttachTarget | null> {
+  const b = await db.prepare(
+    `SELECT other_party_bills.*, dl.state AS lifecycleState
+       FROM other_party_bills
+       LEFT JOIN document_lifecycle dl
+         ON dl.orgId = other_party_bills.orgId
+        AND dl.sourceType = 'other_party_bill'
+        AND dl.sourceId = other_party_bills.billNo
+      WHERE other_party_bills.billNo = ? AND other_party_bills.orgId = ?`,
+  ).bind(billNo, orgId).first<OtherPartyBillRow & { lifecycleState: string | null }>();
+  if (!b) return null;
+  return { id: b.id, billNo: b.billNo, paidAmountSen: Number(b.paidAmountSen) || 0, active: (b.lifecycleState ?? "ACTIVE") === "ACTIVE" };
+}
+
+app.get("/other-party-bills/:billNo/attachments", async (c) => {
+  const denied = await requirePermission(c, "accounting", "read");
+  if (denied) return denied;
+  const orgId = getOrgId(c);
+  const bill = await ocbForAttach(c.var.DB, orgId, c.req.param("billNo"));
+  if (!bill) return c.json({ success: false, error: "Bill not found" }, 404);
+  const res = await c.var.DB.prepare(
+    "SELECT id, filename, contentType, sizeBytes, uploadedAt, uploadedBy FROM file_assets WHERE orgId = ? AND resourceType = ? AND resourceId = ? ORDER BY uploadedAt ASC",
+  ).bind(orgId, OCB_ATTACH_RESOURCE, bill.id).all<Record<string, unknown>>().catch(() => ({ results: [] as Record<string, unknown>[] }));
+  const rows = (res.results ?? []).map((r) => ({
+    id: String(r.id), filename: String(r.filename ?? ""), contentType: String(r.contentType ?? r.content_type ?? ""),
+    sizeBytes: Math.round(Number(r.sizeBytes ?? r.size_bytes) || 0), uploadedAt: String(r.uploadedAt ?? r.uploaded_at ?? ""),
+  }));
+  return c.json({
+    success: true,
+    data: {
+      rows,
+      // What the client may do — the server re-checks on write.
+      canAdd: bill.active,
+      canDelete: bill.active && bill.paidAmountSen === 0,
+    },
+  });
+});
+
+app.post("/other-party-bills/:billNo/attachments", async (c) => {
+  const denied = await requirePermission(c, "accounting", "update");
+  if (denied) return denied;
+  const bill = await ocbForAttach(c.var.DB, getOrgId(c), c.req.param("billNo"));
+  if (!bill) return c.json({ success: false, error: "Bill not found" }, 404);
+  if (!bill.active) return c.json({ success: false, error: "A voided bill takes no attachments" }, 400);
+  let form: FormData;
+  try { form = await c.req.formData(); } catch { return c.json({ success: false, error: "invalid multipart body" }, 400); }
+  const file = form.get("file");
+  if (!(file instanceof File)) return c.json({ success: false, error: "file field required" }, 400);
+  const stored = await storeUploadedFile(c, { file, resourceType: OCB_ATTACH_RESOURCE, resourceId: bill.id });
+  if (!stored.ok) return c.json({ success: false, error: stored.error }, stored.status);
+  return c.json({ success: true, data: stored.data }, 201);
+});
+
+app.delete("/other-party-bills/:billNo/attachments/:fileId", async (c) => {
+  const denied = await requirePermission(c, "accounting", "update");
+  if (denied) return denied;
+  const fileId = c.req.param("fileId");
+  const bill = await ocbForAttach(c.var.DB, getOrgId(c), c.req.param("billNo"));
+  if (!bill) return c.json({ success: false, error: "Bill not found" }, 404);
+  if (!bill.active) return c.json({ success: false, error: "A voided bill's attachments are kept as evidence" }, 400);
+  if (bill.paidAmountSen !== 0) {
+    return c.json({ success: false, error: `Evidence is locked once money is paid against a bill (${bill.billNo} is part-paid or paid)` }, 400);
+  }
+  // The file must belong to THIS bill — never delete by id alone.
+  const own = await c.var.DB.prepare(
+    "SELECT id FROM file_assets WHERE id = ? AND orgId = ? AND resourceType = ? AND resourceId = ?",
+  ).bind(fileId, getOrgId(c), OCB_ATTACH_RESOURCE, bill.id).first<{ id: string }>();
+  if (!own) return c.json({ success: false, error: "Attachment not found on this bill" }, 404);
+  const removed = await removeStoredFile(c, fileId);
+  if (!removed.ok) return c.json({ success: false, error: removed.error }, removed.status);
+  return c.json({ success: true });
 });
 
 // Corrections report (Houzs adoption Phase 4, 2026-09-22): every posted
