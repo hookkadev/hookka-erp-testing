@@ -1,6 +1,7 @@
 # Hookka ERP — Work Tracker
 
 > **Last verified: 2026-10-01**: accessories entry (BUG-2026-10-01-244) got item 7, the (FC) follow-up on branch `claude/main-accessories-duplicate-cards-fdxaik`.
+> **Last verified: 2026-10-01**: finance plan batch 4 (#665) closed ✅ with its prod check — the plan is done.
 > **Last verified: 2026-10-01**: finance plan batch 3 (#664) closed ✅ with its prod check; batch 4 in progress (branch `feat/finance-tables-drills`).
 > **Last verified: 2026-10-01**: finance plan batch 2 (#663) closed ✅ with its prod check; batch 3 in progress (branch `feat/finance-scan-learn`).
 > **Last verified: 2026-10-01**: finance plan batch 2 in progress (branch `feat/pv-popup-form-transfer`).
@@ -185,7 +186,7 @@ Verified: `tsc -p tsconfig.app.json` exit 0; `npm test` all pass. NOT verified o
 tsc strict 0; `npm test` 5047 pass / 0 fail.
 ---
 
-## 2026-10-01 — 🔵 Finance improvements, confirmed point by point with the owner (owner「做」2026-10-01)
+## 2026-10-01 — ✅ Finance improvements, confirmed point by point with the owner (owner「做」2026-10-01)
 
 Four batches, each shipped and prod-verified before the next:
 1. ✅ (#662 f3fe0964, prod-verified) FINANCE sidebar: opening one group closes the others (finance section only). Self-check debtor item shows the receipt
@@ -222,7 +223,7 @@ Four batches, each shipped and prod-verified before the next:
    "Already recorded". Memory measured: approved vouchers and active bills give the lines to learn from; bill references
    and purchase-invoice supplier nos. give the duplicates. Follow-up in batch 4: weight rarer shared words higher (the
    suggestion matched a place name before the word "transport"; same account, weaker reason shown).
-4. 🔵 (branch `feat/finance-tables-drills`) Finance tables: no wrapping, drag a column edge (only that column changes, the rest shift), widths remembered;
+4. ✅ (#665, prod-verified; branch `feat/finance-tables-drills`) Finance tables: no wrapping, drag a column edge (only that column changes, the rest shift), widths remembered;
    reports resize the description column only; monthly reports stop stretching to full width. Monthly P&L and Cash
    Flow drills in the monthly layout: each ledger line under the row with its amount in its month column, counterparty
    name kept, last row "N entries · open in GL".
@@ -234,6 +235,14 @@ Four batches, each shipped and prod-verified before the next:
    one column changes and the rest shift, report figures keep their widths (a spanning month header used to split them
    evenly until the colgroup), reload remembers, double-click resets, a colgroup grid is untouched. Also: scan guesses
    weight rarer shared words higher. Guard `tests/finance-tables-drills.test.mjs`.
+   Prod (#665 e6ecdc17 + fix #667 b9a25301, read-only; the one test drag was reset): every finance page (30+ accounting tabs,
+   supplier / customer payment, e-invoice) — no wrapping, no page-level horizontal overflow, no table spilling out of its
+   card; Payment Vouchers: dragging one column changed only it and the table shrank by the same amount, width saved,
+   double-click reset. First check found BUG-2026-10-01-246 (pinned widths rounded down → a date column cut to "2026-10-…");
+   #667 rounds up and schedules with a timeout (a background tab had no handles until looked at); re-checked: no cell cut
+   outside the narrowed column. Monthly P&L no longer stretched; drills tie to the row month by month (sales, an expense,
+   a purchase group, carriage with none); "open in GL" lands on the account with the FY dates picked. Cash Flow drill
+   rows tie to the line; a split payment shows its share with the whole payment / bank / settled bills on hover.
 Not wanted: opening-out-of-date reminder, % toggle, on-account receipts reminder.
 
 ## 2026-09-30 — ✅ Self-check reds: the reconciliations copy the control cards; cancelled opening seeds out (owner「先查 8 和 9」→「确定没有问题才做」)(BUG-2026-09-30-229/-230)(#617 ffcc915c MERGED, deployed, prod-verified)
