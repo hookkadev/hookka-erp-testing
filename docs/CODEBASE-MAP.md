@@ -1,5 +1,6 @@
 # Hookka ERP — Codebase Map (the single authoritative map)
 
+> **Last verified: 2026-10-01 on branch `feat/dev31-worker-dept-hours` (to `staging`)**: the Employees & Payroll worker rows (`worker.ts` 4,397 / `scan.tsx` 3,326 lines by `wc -l`) and the new `dept-day-card.tsx` row for DEV-31, read from `src/api/routes/worker.ts`, `src/api/lib/punch-autofill.ts`, `src/lib/dept-scan-split.ts`. Nothing else re-checked.
 > **Last verified: 2026-10-01 on branch `feat/email-report-multi-times` (to `staging`)**: the Reports row's email-schedule wording (multiple send times, `dueSlot`), read from `src/api/lib/report-settings.ts`. Nothing else re-checked.
 > **Last verified: 2026-10-01 on branch `fix/staging-topbar-patch-notes-hidden` (STAGING ONLY)**: the staging-notes row's topbar pill wording, read from `src/components/layout/topbar.tsx`. Nothing else re-checked.
 > **Last verified: 2026-10-01 on branch `feat/staging-view-as-user` (STAGING ONLY)**: the view-as row (was the role switcher row), the staging-notes row's topbar badge and the today-override row's placement, all read from `src/components/layout/topbar.tsx` and `src/api/lib/auth-middleware.ts`. Nothing else re-checked.
@@ -837,9 +838,10 @@ authoritative current detail.** New here? Start with [ONBOARDING-PATH.md](ONBOAR
 | Frontend page | API route | Primary tables | Tests |
 |---|---|---|---|
 | `src/pages/employees.tsx` — 9-tab admin shell (11,784) | `src/api/routes/workers.ts` — employee master + salary effective-dating (1047) | `workers` / `worker_salary_history` | `tests/labor-engine.test.mjs` · `tests/virtual-group-window.test.mjs` |
-| `src/pages/worker/index.tsx` — worker mobile home | `src/api/routes/worker.ts` — self-service mobile backend (4130) | `departments` / `attendance_records` | `tests/attendance-rules.test.mjs` |
-| `src/pages/worker/scan.tsx` — clock/dept-scan/packing (3203) | `src/api/routes/worker-auth.ts` — PIN auth | `working_hour_entries` | `tests/auto-attendance-deduct.test.mjs` |
+| `src/pages/worker/index.tsx` — worker mobile home (clock card shows the DEV-31 "Today's departments" card) | `src/api/routes/worker.ts` — self-service mobile backend (4397); `GET /today` and `POST /dept-scan` return `deptDay` | `departments` / `attendance_records` | `tests/attendance-rules.test.mjs` |
+| `src/pages/worker/scan.tsx` — clock/dept-scan/packing (3326) | `src/api/routes/worker-auth.ts` — PIN auth | `working_hour_entries` | `tests/auto-attendance-deduct.test.mjs` |
 | `src/pages/worker/pay.tsx` — payslip view | `src/api/routes/attendance.ts` — admin attendance (374) | `payroll_runs` / `payroll_*` (generated) / `payroll_payslips` | `tests/worker-auth.test.mjs` |
+| `src/pages/worker/dept-day-card.tsx` — DEV-31 "Today's departments" card (home + dept-scan result); Pay > Daily Attendance lists each day's department rows from `/history` `daily[].deptHours` | `worker.ts` `buildDeptDay` → `computeLiveDeptDay` in `src/api/lib/punch-autofill.ts` (live = the punch-out maths with now as the end) → `splitDayHours` / `currentStation` in `src/lib/dept-scan-split.ts`. Punched out → the saved `working_hour_entries` rows | `dept_scan_events` / `working_hour_entries` | `tests/dept-scan-split.test.mjs` |
 | `src/pages/worker/me.tsx` — profile | `src/api/routes/departments.ts` — dept CRUD (431) | `payroll_hour_deductions` | `tests/worker-auth-default-protect.test.mjs` |
 | `src/pages/worker/team.tsx` — team view | `src/api/routes/working-hour-entries.ts` — efficiency source (1667); `GET /summary` entries carry `name` + `departmentCode` since 2026-09-25 (snapshot key `v2:`) so callers without `workers:read` still get names | `leaves` / `worker_issues` | `tests/jc-minutes-total.test.mjs` |
 | `src/pages/worker/issue.tsx` — issue submission | `src/api/routes/payroll.ts` — run generation (308) | `public_holidays` (via kv_config['public_holidays']) | |

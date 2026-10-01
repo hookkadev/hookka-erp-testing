@@ -1,5 +1,7 @@
 # Payroll & Worker Portal — Explanation Guide
 
+> **Last verified: 2026-10-01** (branch `feat/dev31-worker-dept-hours`) — the Home / Scan / My Pay bullets about department hours (DEV-31), read from `src/pages/worker/dept-day-card.tsx`, `src/pages/worker/pay.tsx`, `src/api/routes/worker.ts`. Nothing else re-checked.
+
 > **Last verified: 2026-08-14** (branch `docs/docs-vs-code-audit`) — corrected against the
 > source by the prose audit; the row(s) touched here are itemised in
 > [`docs/DOCS-VS-CODE-AUDIT.md`](DOCS-VS-CODE-AUDIT.md). Only the claims listed there were
@@ -50,11 +52,20 @@ Workers log in with their employee PIN at `/worker`. Pages:
 - The punch time uses Malaysia time and lands instantly in the office's
   **Attendance** tab (time + location badge + the two selfies) and pre-fills
   the **Working Hours** grid's Punch column.
+- After punching in, a **Today's departments** card shows where the worker is
+  now (the last department QR scanned, else their own department since
+  clock-in) and the hours so far in each department, worked out the same way
+  punch-out will save them (pay rules first, then split by scan time). After
+  punch-out it shows the saved Working Hours rows instead.
 
 ### Scan
 - Shop-floor job-card scanning (Fab Cut / Fab Sew stickers). Not pay-related.
+- Scanning a **department QR** moves the worker's hours to that department
+  from that minute and shows the same Today's departments card.
 
 ### My Pay
+- **Daily Attendance** lists each day's hours by department under the punch
+  times, the same rows the office sees on Working Hours.
 - **Month picker** (current month = live estimate; past months = the
   finalised payslip).
 - The **estimate** updates in real time as Working Hours are keyed and is
