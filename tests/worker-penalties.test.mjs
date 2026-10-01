@@ -52,6 +52,15 @@ test("the approval month is Malaysia's date, not UTC's", () => {
   assert.equal(lib.todayYmdMalaysia(new Date("2026-09-30T15:59:00Z")), "2026-09-30");
 });
 
+test("the raiser cannot approve their own penalty, unless they are a Super Admin", () => {
+  assert.equal(lib.selfApprovalBlocked("u1", "u1", "HR"), true);
+  assert.equal(lib.selfApprovalBlocked("u1", "u1", "OFFICE"), true);
+  assert.equal(lib.selfApprovalBlocked("u1", "u1", "ADMIN"), true);
+  assert.equal(lib.selfApprovalBlocked("u1", "u1", "SUPER_ADMIN"), false);
+  assert.equal(lib.selfApprovalBlocked("u1", "u1", "super_admin"), false);
+  assert.equal(lib.selfApprovalBlocked("u2", "u1", "HR"), false, "a second person is always fine");
+});
+
 // ---- 2. the deduction ------------------------------------------------------
 test("a penalty comes off after statutory, with the advance, and is not clamped", () => {
   // gross 2,000.00, statutory 250.00, advance 300.00, penalty 150.00
