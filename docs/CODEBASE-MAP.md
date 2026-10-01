@@ -1,5 +1,7 @@
 # Hookka ERP — Codebase Map (the single authoritative map)
 
+> **Restamped 2026-10-01 on branch `feat/staging-test-order-factory` (STAGING ONLY; Last verified: 2026-10-01 for the Sales row named here):** `sales/index.tsx` line count re-measured (2,240) and the staging-only test order factory noted. Nothing else re-checked.
+
 > **Last verified: 2026-09-30** (branch `chore/sync-staging-from-main-0930`, staging<-main merge): the production `reuseUnchanged` anchor re-measured on the merged file; customer-credit gate id follows BUG-HISTORY (-233). Nothing else re-checked.
 
 > **Restamped 2026-09-30** (branch `fix/t006-r2-grn-receipt-race`, staging; Last verified: 2026-09-30 for the two Procurement GRN notes named here): the Post-to-Stock cascade note and the POSTED-GRN edit note now describe the guarded PO counter (T-006 R2 race, BUG-2026-09-30-226). Nothing else re-checked.
@@ -280,7 +282,7 @@ authoritative current detail.** New here? Start with [ONBOARDING-PATH.md](ONBOAR
 
 | Frontend page | API route | Primary tables | Tests |
 |---|---|---|---|
-| `src/pages/sales/index.tsx` — SO list (2181), dual-mode SO vs service-order | `src/api/routes/sales-orders.ts` — 5,865 lines (re-measured 2026-09-23; create POST now WARNS, not 409s, on a repeated customer PO/SO ref — BUG-2026-09-23-185) (+ `sales-orders/_helpers.ts`, 1,462); SO CRUD + status cascades + snapshot | `sales_orders` / `sales_order_items` / `so_status_changes` | `tests/sofa-combo.test.mjs` |
+| `src/pages/sales/index.tsx` — SO list (2240), dual-mode SO vs service-order; staging host only: `StagingTestOrderFactory` (`src/components/staging-test-order-factory.tsx`, logic `src/lib/staging-test-order-factory.ts`) creates a tagged DRAFT test SO and cancels your own from today | `src/api/routes/sales-orders.ts` — 5,865 lines (re-measured 2026-09-23; create POST now WARNS, not 409s, on a repeated customer PO/SO ref — BUG-2026-09-23-185) (+ `sales-orders/_helpers.ts`, 1,462); SO CRUD + status cascades + snapshot | `sales_orders` / `sales_order_items` / `so_status_changes` | `tests/sofa-combo.test.mjs` |
 | `src/pages/sales/create.tsx` — Create SO (3760, re-measured 2026-09-23); OCR/scan-PO lands here | `src/api/routes/consignment-orders.ts` — CO CRUD + co_status_changes (2815) | `consignment_orders` / `consignment_order_items` / `co_status_changes` | `tests/so-category.test.mjs` |
 | `src/pages/sales/detail.tsx` — SO detail (2048); linked POs/JCs/DOs/invoices; Customer PO number opens the original PO inline; staging host only: `StagingStageSkipCard` (`src/components/staging-stage-skip.tsx`, planner `src/lib/staging-stage-skip.ts`) completes job cards up to a stage or resets them, via `bulk-patch` | `src/api/routes/consignment-notes.ts` — CN (DO-equiv) dispatch/delivered (2152) | `consignment_notes` / `consignment_items` | |
 | `src/pages/sales/edit.tsx` — Edit SO (1634); re-runs sofa-combo on save; unit price + build-up via `@/lib/pricing` | `src/api/routes/consignments.ts` — legacy/shared reads (536) | `sofa_combo_rules` / `customer_products` / `price_overrides` | |

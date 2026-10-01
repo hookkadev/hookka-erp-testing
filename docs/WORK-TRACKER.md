@@ -86,6 +86,17 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
+## 2026-10-01: 🔵 Staging test tool, test order factory (branch `feat/staging-test-order-factory` to `staging`, STAGING ONLY, never PR to main)
+
+- Asked: on the Sales Orders list, staging only, a one-click "New test SO" (customer + number of lines, products random or chosen) that creates the SO through the normal create API and opens it, plus a "Void my test docs from today" cleanup.
+- `src/components/staging-test-order-factory.tsx` on `sales/index.tsx`, rendered only when the host starts with `staging.` (sales mode only). Logic in `src/lib/staging-test-order-factory.ts`. No new endpoint, no schema change.
+- Create: `POST /api/sales-orders` as DRAFT. Each line is seeded the way `sales/create.tsx` seeds it after product, seat and fabric are picked (customer price row first, sofa seat x fabric tier, bedframe PRICE_1 uses price1); divan / leg / total-height / special surcharges are left out so the server derives them. The server then applies `resolveSoBasePriceSen` and the sofa combo pass as usual. Never mixes sofa and bedframe; sofa qty 1; every line gets a fabric. Sofa legs are not sent, because an omitted leg price is derived from the bedframe leg list.
+- Tag: `reference` = `[TEST yyyy-mm-dd by <userId>]` (the paginated list search covers `reference`). `sales_orders` has no creator column, so "created by me" is the user id in that tag, self-asserted.
+- Cleanup: list search on the tag, then only rows whose `reference` holds the exact tag AND whose `createdAt` is today (MY time). Each one's detail is read and any SO with a live DO or invoice is skipped and logged. The confirm dialog lists what will be cancelled and what is left alone. Cancel is `PUT /api/sales-orders/:id {status: CANCELLED}`; never DELETE.
+- Email: SO create sends none. Confirm (not done by this tool) enqueues a PO emission whose inline fallback only logs.
+- Test: `tests/staging-test-order-factory.test.mjs` (12 pass, stubbed fetch). tsc strict exit 0.
+- UNMEASURED: not tried in a browser (local dev proxies to prod, and the host check hides the tool there). Check on staging after merge.
+
 ## 2026-09-30 — 🔵 Sync `staging` from `main` (branch `chore/sync-staging-from-main-0930` → `staging`)
 
 96 `main` commits merged into `staging` (171 staging-only). Conflicts: 8 docs, no code.

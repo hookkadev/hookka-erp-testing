@@ -20,6 +20,7 @@ import { Plus, ShoppingCart, Download, Filter, X, Eye, Pencil, Printer, Truck, F
 // Note: generateSOPdf is dynamic-imported at the click handler so the
 // 1MB jspdf vendor chunk only ships when the user actually prints a SO.
 import { ScanPOModal } from "@/components/scan-po-modal";
+import { StagingTestOrderFactory } from "@/components/staging-test-order-factory";
 import { useCachedJson, invalidateCachePrefix } from "@/lib/cached-fetch";
 import {
   OUTSTANDING_STATUSES,
@@ -1259,6 +1260,7 @@ export default function SalesPage() {
           </Button>
         </div>
       </div>
+      {!isServiceOrderMode && <StagingTestOrderFactory basePath={basePath} />}
 
       <div className="grid gap-4 grid-cols-1 sm:grid-cols-5 max-[360px]:grid-cols-1">
         {isServiceOrderMode ? (
