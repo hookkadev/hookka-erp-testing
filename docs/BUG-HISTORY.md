@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-244 (branch `fix/worker-history-snapshot-stale`; ids 240 and 242 are on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-242 (branch `fix/worker-login-signin-text`, to staging then main); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-243 (branch `fix/worker-today-hours-utc`; ids 240 and 242 are on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-241 (branch `fix/dev08-accessory-so-ready`, DEV-08); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
@@ -56,6 +57,26 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-10-01-244 — Worker My Pay and home kept the clock-in state after clock-out `worker-portal` `attendance` 🟢
+
+🟢 **Fixed** (branch `fix/worker-history-snapshot-stale` → `main`; not yet deployed) · Measured on staging 2026-10-01 with TEST-001.
+
+**What happened.** The worker clocked in at 16:14 and out at 16:14; the broken-punch rule wrote a 9h PACKING `working_hour_entries` row. `GET /api/worker/today` showed the clock-out and the 9h row. `GET /api/worker/history?from=2026-10-01&to=2026-10-01` still returned the day with `clockOut` null, `workingMinutes` 0 and empty `daily[].deptHours`. Home showed WORKING HOURS 0.0; My Pay > Daily Attendance had no department rows.
+
+**Root cause (inferred from the code, not reproduced: this session had no staging login or DB access).** `/history` and `/payslips` are served by `withWorkerSnapshot` (`src/api/lib/worker-perf.ts`). Its freshness signature is MAX(`updated_at`) plus COUNT(*) over the source tables.
+1. The insert of the 9h row moved COUNT(*), so a correct probe would have rebuilt. Missing `updated_at` does not explain this case. What does: the probe is the same parameterless SELECT on every call, and Hyperdrive caches plain SELECTs without invalidating on writes (measured on staging today in BUG-2026-10-01-236). A cached probe hides the write. Worse, once the probe does see it, the rebuild's own reads (`SELECT * FROM attendance_records WHERE employeeId = ? AND date >= ? ...`) can still come from the cache, and the pre-write rows get stored under the post-write signature. That snapshot then counts as fresh until some other write touches a source table. Staging has few writes, so it stayed wrong for hours.
+2. The defect named in the report is real but secondary: the six `UPDATE attendance_records` in `src/api/routes/worker.ts` (clock-in, clock-out, punch geo, punch photo, forgotten-punch auto-close) never set `updated_at`. `attendance.ts` and the Working Hours grid do; no trigger exists (the column default only fires on INSERT). A punch-out that adds no `working_hour_entries` row (office rows already keyed, or 0 payable hours) moved nothing the probe reads. `autofillWorkingHoursFromPunch` needs no change: its INSERT gets the column default and moves the count.
+
+**Fix.** `withWorkerSnapshot` now reads the probe, the stored snapshot and the whole rebuild through `freshReads(db)`, which sends each SELECT through `db.batch` (a transaction, which Hyperdrive does not cache; same mechanism as `freshAll` in `worker-penalties.ts`). The `/history` and `/payslips` callbacks take that `db` instead of `c.var.DB`. The six UPDATEs set `updated_at` with the same ISO text as the column default (`BUMP_UPDATED_AT`). The cost is a transaction per read, only on a rebuild.
+
+**Not changed.** `lib/snapshot.ts` and the other snapshot helpers have the same cached-rebuild exposure (class C29); fixing only their probe would make it worse, because a fresh probe rebuilds inside the read cache window. `memoizedMonthlyEfficiency` keeps its 5 s memo. The real fix is infra and the owner's call: `wrangler hyperdrive update <id> --caching-disabled` on both configs, as `bom.ts` already suggests.
+
+**Regression.** `tests/worker-history-snapshot-fresh.test.mjs`: a stub where plain reads return the pre-write rows and `batch` returns the live ones; the snapshot must rebuild and store the clock-out (fails on the old code). Plus a scan of `src/api` that fails on any `UPDATE attendance_records` / `UPDATE working_hour_entries` not setting `updated_at`.
+
+**Verify.** Not driven on staging (worker login is the user's). After deploy: clock in, open My Pay, clock out, open My Pay within a minute; the day must show the clock-out and its department hours.
 
 ---
 
