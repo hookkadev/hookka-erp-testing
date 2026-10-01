@@ -19,6 +19,7 @@ import {
   Ban,
 } from "lucide-react";
 import type { EInvoice } from "@/types";
+import { useResizableTables } from "@/lib/use-resizable-tables";
 
 type Invoice = {
   id: string;
@@ -236,6 +237,10 @@ export default function EInvoicePage() {
     overscan: 10,
   });
 
+  // Finance tables (owner 2026-10-01): no wrapping; drag a column edge to
+  // resize — widths remembered (src/lib/use-resizable-tables.ts).
+  const tablesRef = useResizableTables("e-invoice");
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64 text-[#6B7280]">
@@ -245,7 +250,7 @@ export default function EInvoicePage() {
   }
 
   return (
-    <div className="space-y-6 max-md:space-y-4">
+    <div ref={tablesRef} data-fin-tables className="space-y-6 max-md:space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>

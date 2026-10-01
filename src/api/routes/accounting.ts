@@ -8711,7 +8711,9 @@ async function buildDrillLines(
 // document (Ref. 1), the related document (Ref. 2: an invoice's SO, a PI's
 // supplier invoice no., a bill's reference, a voucher's payee) and the
 // accounts on the other side of its entry. Read-only; lines at full value
-// (the Sofa / Bedframe views carry a share of them).
+// (the Sofa / Bedframe views carry a share of them). `from` + `to` (YYYY-MM)
+// ask for a run of months instead of `period` — the Monthly P&L lists one
+// row's lines under it across its financial year (owner 2026-10-01).
 app.get("/pl-drill", async (c) => {
   const denied = await requirePermission(c, "accounting", "read");
   if (denied) return denied;
@@ -8723,14 +8725,18 @@ app.get("/pl-drill", async (c) => {
   const orgId = getOrgId(c);
   const resolve = await loadAccountResolver(db);
   const account = resolve(accountParam);
-  const startYm = periodStartYm(period);
-  const endYm = periodEndYm(period);
+  const ymRe = /^\d{4}-(0[1-9]|1[0-2])$/;
+  const fromQ = c.req.query("from") ?? "";
+  const toQ = c.req.query("to") ?? "";
+  const ranged = ymRe.test(fromQ) && ymRe.test(toQ) && fromQ <= toQ;
+  const startYm = ranged ? fromQ : periodStartYm(period);
+  const endYm = ranged ? toQ : periodEndYm(period);
   // A single month keyed from the old books has no ledger lines behind it.
   const [historical, openingDateRaw] = await Promise.all([loadHistoricalPnl(db, orgId), getOpeningDate(db)]);
   const openingMonth = openingDateRaw ? openingDateRaw.slice(0, 7) : null;
   if (startYm && startYm === endYm && selectHistoricalWindow(historical, openingMonth, startYm, "all")) {
     const a = await db.prepare("SELECT name FROM chart_of_accounts WHERE code = ?").bind(account).first<{ name: string }>();
-    return c.json({ success: true, data: { period, account: { code: account, name: a?.name ?? "" }, historical: true, lines: [], extra: [], debitSen: 0, creditSen: 0, netSen: 0, tied: true } });
+    return c.json({ success: true, data: { period, account: { code: account, name: a?.name ?? "" }, historical: true, openingMonth, lines: [], extra: [], debitSen: 0, creditSen: 0, netSen: 0, tied: true } });
   }
   const dc = await loadDocDateResolver(db);
   const trace: PnlTrace = { account, legs: [], entryLegs: new Map(), extra: [] };
@@ -8748,6 +8754,8 @@ app.get("/pl-drill", async (c) => {
       period,
       account: { code: account, name: coa.get(account)?.name ?? "", type: coa.get(account)?.type ?? null },
       historical: false,
+      // Months before it were keyed from the old books — no ledger lines.
+      openingMonth,
       lines,
       extra: trace.extra,
       debitSen,
