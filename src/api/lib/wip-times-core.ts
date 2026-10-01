@@ -179,14 +179,15 @@ export async function loadActiveBomRows(
     bindings.push(orgId);
   }
   if (category) {
-    where.push("UPPER(bt.category) = ?");
+    // Product row wins: bom_templates.category cannot hold ACCESSORY.
+    where.push("UPPER(COALESCE(p.category, bt.category)) = ?");
     bindings.push(category);
   }
   const sql = `
     SELECT
       bt.productCode      AS "productCode",
       bt.baseModel        AS "baseModel",
-      bt.category         AS "category",
+      COALESCE(p.category, bt.category) AS "category",
       bt.wipComponents    AS "wipComponents",
       p.defaultVariants   AS "defaultVariants",
       p.sizeCode          AS "sizeCode",
