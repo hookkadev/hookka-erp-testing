@@ -1,6 +1,13 @@
 # Bug History
 
+> **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-239 (branch `fix/worker-login-keypad-capture`, to staging then main); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
+> **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-236 (branch `fix/dev22-penalty-fresh-reads` → `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-10-01**: BUG-2026-10-01-234 measured and fixed on branch `fix/staging-mail-bare-raw` (STAGING ONLY): MailSlurp's raw is bare HTML; a log, so "verified" means the entry matches the code.
+> **Last verified: 2026-10-01**: BUG-2026-10-01-234 still open after #635; diagnostics branch `fix/staging-mail-source-diagnostics` (STAGING ONLY) noted in the entry; a log, so "verified" means the entry matches the code.
+> **Last verified: 2026-10-01**: BUG-2026-10-01-234 corrected (measured cause: MailSlurp's sent record holds only the first line; branch `fix/staging-mail-raw-body`, STAGING ONLY); a log, so "verified" means the entry matches the code.
+> **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-235 (branch `perf/production-qr-speed-staging` → `staging`; -234 is the staging mail entry); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-234 (branch `fix/staging-mail-empty-body`, STAGING ONLY; ids up to 233 are taken on `main` / `staging`); a log, so "verified" means the newest entry matches the code.
+> **Last verified: 2026-10-01**: entry BUG-2026-10-01-232 added (branch `fix/grn-number-collision`, to staging); its text matches the code on that branch.
 > **Last verified: 2026-09-30** (branch `chore/sync-staging-from-main-0930`, staging<-main merge): both logs merged. Numbering follows `main`: staging's report-emails entry BUG-2026-09-29-222 is renumbered to -232 (main's -222 is the storage not-found bug) and staging's customer-credit entry BUG-2026-09-28-218 to -233 (main's -218 is the PR label workflow). The one BUG-2026-09-29-214 entry kept is main's copy. Newest entry is BUG-2026-09-28-233.
 > **Last verified: 2026-09-30**: newest entry BUG-2026-09-30-231 (branch `fix/pillow-fab-sew-sticker`, DEV-26); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-30**: newest entries BUG-2026-09-30-229 / -230 (branch `fix/selfcheck-recon-and-opening-seeds`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
@@ -69,23 +76,125 @@ Entries themselves stay newest-first.
 
 ---
 
+## BUG-2026-10-01-239 — Worker login: typing the Employee No. also typed into the PIN `worker-portal` `ui-frontend` 🟢
+
+🟢 **Fixed** (branch `fix/worker-login-keypad-capture` → `staging`, then `main`; not yet deployed) · Owner report: on the worker login page, typing the employee number also fills the PIN keypad.
+
+**Root cause.** The PIN keypad in `src/pages/worker/login.tsx` listens for keys on the whole window so a hardware keyboard works. It stood down for **Backspace** when a text box had focus, but not for **digits**. So every digit of the employee number was read twice: once by the box, once by the keypad. The 6th digit auto-submits, so an employee number with six digits sent a login with that accidental PIN, each one counting toward the 10-per-15-minute lock.
+
+**Fix.** One guard at the top of the listener, before any key is read: `isTypingTarget(document.activeElement)` (`src/lib/typing-target.ts`: input, textarea, select, contenteditable). The digit test is now `/^[0-9]$/`.
+
+**Sweep.** 34 window/document key listeners in `src`; this is the only one that reads printable keys. No second instance.
+
+**Regression.** `tests/worker-login-keypad-focus.test.mjs`: the helper, and that the guard runs before the digit branch (fails on the old page).
+
+**Verify.** Not driven in a browser locally (local dev needs the owner's DB string). To check on staging: type an employee number containing digits; the PIN bars must stay empty.
+
+---
+
+## BUG-2026-10-01-236 — Worker Penalty status and payroll reads could be served from Hyperdrive's cache `employees` `payroll` 🟡
+
+🟡 **Fix in progress** (branch `fix/dev22-penalty-fresh-reads` → `staging`) · Found while driving DEV-22 on staging.
+
+**What happened.** Measured on staging 2026-10-01: October payroll was approved (both test penalties POSTED), then put
+back to DRAFT through `PUT /api/payslips`. The database rows went back to APPROVED. A fresh query combination showed
+APPROVED, but `GET /api/worker-penalties` with the same URL kept returning POSTED for minutes, with
+`Cache-Control: no-store` on the response. So the stale copy came from Hyperdrive caching the identical
+SELECT at the proxy, the same class as the `/bulk-patch` PIC readback entry. The display was wrong. Worse, the money
+paths read the same way. A penalty approved, and its month generated and approved, inside the cache window could be
+missed by `loadPeriodPenaltyLines`. The drift guard read the same stale rows, so it would have agreed; the penalty would
+have stayed APPROVED in a locked month and never been deducted. `loadLockedPayrollPeriods` could also hand out a month
+that had just been approved.
+
+**Fix.** `freshAll` / `freshFirst` in `src/api/lib/worker-penalties.ts` read through `DB.batch` (a transaction, which
+Hyperdrive does not cache). Used by every read a payroll figure or a status guard depends on: the period's lines (generate,
+projected, drift, posting), locked months, the payslips read by drift and posting, the header recount, `loadOne` (every
+status guard), the next penalty number, the list and its counts, and the worker app's `GET /api/worker/penalties`. The
+production-order lookup and the worker / display-name reads stay on the cached path.
+
+**Regression.** `tests/worker-penalties.test.mjs`: with a DB that has `batch`, `loadLockedPayrollPeriods` uses the batch
+result and issues no plain read; a stub without `batch` falls back.
+
+**Lesson.** On this stack a SELECT right after a write is not a read of the write. Anything that decides money or a
+state transition reads through a transaction.
+
+## BUG-2026-10-01-235 — Production Show QR / Print were slow, and a big FG print could fire before its QRs were drawn `production-orders` `ui-frontend` 🟡
+
+🟡 **Fix in progress** (branch `perf/production-qr-speed-staging` → `staging`) · Reported by the owner: loading the Production QRs,
+showing them and printing take very long and hold up the people printing.
+
+**What happened.** Every QR on the Production page (screen tiles and the hidden print containers) was a PNG drawn on a
+canvas: 600 px for job-card prints, 72-104 px for FG prints. Measured in Chromium 2026-10-01 (qrcode 1.5.4): 200 codes at
+600 px took 4.7 s of main-thread time before the print dialog could open (1.4 s at 104 px). Nothing was cached: `qr-img.tsx` claimed
+`qrcode` memoises, it does not, so Show / hide / Print paid again each time. The FG and Foam packing prints waited a fixed
+1500 ms for the QRs, sized for ~100 PNGs: a larger batch printed grey placeholders, a small one sat idle. The FG prints
+also used the 72-104 px bitmap, which is soft at 34 mm.
+
+**Fix.** `getQRCodeSvgDataURL` in `src/lib/qr-utils.ts`: the same code (level Q, 2-module quiet zone) as an SVG data
+URL, 200 codes in 0.5-0.8 s in the same Chromium, half the bytes, vector at any print size, memoised for the session so a
+QR already shown costs nothing on Print. `<QRImg>` and both
+job-card print builders use it. The PNG function stays for jsPDF callers. The FG / Foam print timers now fire at 300 ms
+and wait on `whenQrsReady` (no `(loading)` placeholder or undecoded `<img>` left in `#batch-fg-print`, 10 s cap) instead
+of 1500 ms.
+
+**Not fixed here.** Building FG stickers sends 2 requests per PO plus one full sales-order read per SO. That fan-out is the
+likely bulk of the Packing Show QR wait, but the prod split between network and QR time is UNMEASURED; it needs a Network
+waterfall before a batch endpoint is built.
+
+**Regression.** `tests/qr-utils.test.mjs`: the SVG is a data URL whose viewBox equals the level-Q module count plus the
+quiet zone, and a second call returns the memoised string. Checked in Chromium: the SVG at 104 px and at 34 mm decodes
+back to the exact sticker URL (jsQR).
+
+**Lesson.** A comment that says a library caches is a claim; check it before relying on it.
 ## BUG-2026-10-01-234 — Mail Outbox showed an empty frame when a sent email was opened `ui-frontend` 🟡
 
-🟡 **Fix in progress** (branch `fix/staging-mail-empty-body` → `staging`, STAGING ONLY) · Found by the owner on the first
-use of `/staging-mail` after the MailSlurp secrets were added to the Pages Preview environment.
+🟡 **Fix in progress** (branch `fix/staging-mail-raw-body` → `staging`, STAGING ONLY; earlier rounds #629 and #633) · Found
+by the owner on the first use of `/staging-mail` after the MailSlurp secrets were added to the Pages Preview environment.
 
-**What happened.** The list of sent mail loaded, and clicking a row showed an empty body.
+**What happened.** The list of sent mail loaded, and clicking a row showed an empty white frame.
 
-**Likely cause.** `getSentMail` (`src/api/lib/staging-mail.ts`) took the body only from `GET /sent/{id}`. In MailSlurp's
-own client `SentEmailDto.body` is nullable, and the client has a separate `GET /sent/{id}/html` for the content. An empty
-`body` matches what was seen. The actual MailSlurp response is UNMEASURED: the API key is a staging secret this session
-does not hold.
+**Cause (measured 2026-10-01).** MailSlurp's sent record (`GET /sent/{id}`) held a `body` of 121 characters for the
+Production Morning Brief: exactly its first line (`renderBriefHtml` in `src/api/lib/production-brief.ts`, which has a line
+break after the viewport meta). A page cut there has no `<body>`, so it renders blank. The send path posts the full HTML
+(`sendEmailViaMailSlurp`), and the copy delivered to the receiving MailSlurp inbox is complete (owner checked it in the
+MailSlurp dashboard). So only the stored sent record is short; delivery is fine.
 
-**Fix.** When the sent record has no body, read `/sent/{id}/html` (a 404 there stays empty). If the body is still empty, the
-page now says "MailSlurp returned no body for this email." instead of an empty frame, so a different cause shows itself.
+**Wrong first guess (#629).** It assumed `body` came back empty and added a `/sent/{id}/html` fallback only for an empty
+body, so the fallback never ran. #633 added "Show source" and the body length, which is what showed the 121 characters.
 
-**Test.** `tests/staging-mail.test.mjs`: the fallback is used when `body` is null, a 404 stays empty, and a full record never
-calls `/html`. Fails before the fix, passes after.
+**Fix.** `getSentMail` also reads `GET /sent/{id}/html` and the raw SMTP message (`GET /sent/{id}/raw`, decoded by
+`htmlFromRawMime`: multipart, base64, quoted-printable) and shows the longest. A failing fallback keeps the record's body.
+
+**Test.** `tests/staging-mail.test.mjs`: a record cut at the first line plus a multipart quoted-printable raw message gives
+the full HTML; base64 raw decodes as utf-8; `/html` wins when it is longest; `/html` and `/raw` failing keep the body. Two
+cases fail on the previous reader. UNMEASURED: whether `/html` or `/raw` holds the full body on MailSlurp's side; check by
+opening the brief on `/staging-mail` (the length should be thousands of characters).
+
+**#635 did not fix it (2026-10-01).** The owner still sees 121 characters after the deploy, so `/html` and `/raw` either came
+back short or failed, and #635 swallowed failures, so the page could not say which. Branch `fix/staging-mail-source-diagnostics`
+measures instead of fixing: the detail response lists each source (record, `/html`, `/raw`, `/raw/json`) with its HTTP status,
+length and decoded length, failures are reported instead of swallowed, `/raw/json` is added as a fourth source, and a "Show raw"
+view prints the raw message. A sender change (sending the HTML on one line) is held back until the raw message is measured: delivery
+works today, and every staging email would go through it.
+
+**Measured and fixed (2026-10-01, branch `fix/staging-mail-bare-raw`).** The sources line read `record 121 · html 121 · raw
+31,976 -> 0 decoded · raw/json 31,976 -> 0 decoded`, and "Show raw" showed the full brief as bare HTML with no MIME headers.
+So `/raw` holds the whole email; `htmlFromRawMime` took the HTML's first lines for headers (the brief has blank lines in it),
+found no `Content-Type` and returned nothing. It now returns text that already starts with a tag as the HTML. Old emails are
+covered too, since the fix is on the read side. Test: `tests/staging-mail.test.mjs` uses that bare-HTML shape (fails before,
+passes after). No sender change was needed.
+
+---
+
+## BUG-2026-10-01-232 — Two GRNs created in the same instant: the second failed with a raw database error `grn` `purchasing` 🟡
+
+**Symptom:** Measured on staging 2026-09-30 while testing T-006 R2. Two GRN creates fired together for the same PO: in two of three rounds the second answered `500 duplicate key value violates unique constraint "ux_grns_grn_number"`. No duplicate GRN was written (the unique index held), but the person saw a database error instead of a retry.
+
+**Root cause:** `generateGrnNumber` reads the last GRN number of the month and adds one. Two requests in the same instant read the same last number, so the second INSERT collides on `ux_grns_grn_number`. Nothing caught it. The PO number had the same race and was fixed long ago with a retry (`purchase-orders.ts` 5.3); GRN never got it.
+
+**Fix:** `POST /api/grn` builds and runs its batch in a loop. On a GRN number collision (`isGrnNumberCollision`) the batch has already rolled back, so it reads the next number, rebuilds the statements (the number is in the header and in the stock notes) and tries again, up to 5 times. After that it answers 409 "Another GRN was being saved at the same moment and took this GRN number. Please try again."
+
+**Test:** `tests/purchasing-convert-flow.test.mjs` "GRN number collision" (2 cases). The mock has no unique index, so the collision is injected as the Postgres error; both cases failed on the old code with a 500.
 
 ---
 

@@ -11,7 +11,7 @@ import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Plus, Lock, ExternalLink, Filter, ChevronDown } from "lucide-react";
 import { DataGrid } from "@/components/ui/data-grid";
 import type { Column, ContextMenuItem } from "@/components/ui/data-grid";
-import { getQRCodeDataURL, generateStickerData, generateCompartmentStickerData } from "@/lib/qr-utils";
+import { getQRCodeSvgDataURL, whenQrsReady, generateStickerData, generateCompartmentStickerData } from "@/lib/qr-utils";
 import { appOrigin } from "@/lib/app-origin";
 import { todayYmdMY } from "@/lib/utils";
 import { todayYmdMYForReads } from "@/lib/staging-today";
@@ -126,7 +126,7 @@ type OverviewSort = { key: OverviewSortKey; dir: "asc" | "desc" } | null;
 // too-wide complaint was a long id). The ENCODED VALUE is unchanged
 // (deriveBarcodeToken), so the scanner's parseJobCardBarcode + the worker.ts /
 // public-rack-qr.ts dept-scoped re-derivation resolve it with zero change, and
-// the sticker QR flows (getQRCodeDataURL) are untouched — only the schedule's 1D
+// the sticker QR flows (qr-utils) are untouched — only the schedule's 1D
 // column reverts.
 //
 // JsBarcode draws synchronously to the canvas, so there is no await before
@@ -4486,11 +4486,10 @@ export default function ProductionPage({
   // Job Card sticker flow, so their cards must NEVER appear in the Job Card
   // tile grid (one dept never carries both sticker types).
   //
-  // The preview uses the external qrserver.com URL (only a handful of tiles
-  // are visible at once, so rate-limits are not a concern). The batch-print
-  // path in `handlePrintJobCardStickers` regenerates every QR locally via
-  // `getQRCodeDataURL` so the print preview does NOT depend on hundreds of
-  // external HTTP calls completing in time.
+  // The preview tiles render through <QRImg> (local SVG, lazy per tile). The
+  // batch-print path in `handlePrintJobCardStickers` builds every QR up front
+  // via `getQRCodeSvgDataURL` (memoised, so a QR already shown is free) before
+  // the print timer fires.
   // When a dept sub-tab is active, the Production Sheet DataGrid does its
   // own in-component filtering (search + per-column value/text filters).
   // Mirror that set of visible row ids so the on-screen QR tile row and the
@@ -4972,7 +4971,7 @@ export default function ProductionPage({
       const batch: JobCardSticker[] = await Promise.all(
         onScreenStickers.map(async (s) => ({
           ...s,
-          qrDataUrl: await getQRCodeDataURL(s.qrPayload, 600),
+          qrDataUrl: await getQRCodeSvgDataURL(s.qrPayload),
         })),
       );
       setFgStickers([]); // never mix modes in one print job
@@ -5029,7 +5028,7 @@ export default function ProductionPage({
       const batch: JobCardSticker[] = await Promise.all(
         source.map(async (s) => ({
           ...s,
-          qrDataUrl: await getQRCodeDataURL(s.qrPayload, 600),
+          qrDataUrl: await getQRCodeSvgDataURL(s.qrPayload),
         })),
       );
       setFgStickers([]); // never mix modes in one print job
@@ -6133,8 +6132,8 @@ export default function ProductionPage({
   /* eslint-enable react-hooks/set-state-in-effect */
 
   // Once the batch container is rendered, fire the print dialog. Small
-  // timeout lets React paint the hidden container first; QR images are
-  // external URLs but that's OK — the dialog waits for them to load.
+  // timeout lets React paint the hidden container first; the job-card QRs
+  // are already built as data URLs by handlePrintJobCardStickers.
   // P4.3 final: replaced raw setTimeout-in-effect with useTimeout, which
   // pauses on document.hidden and auto-clears on unmount. The inner
   // post-print cleanup is intentionally still raw — it fires from inside
@@ -6160,26 +6159,25 @@ export default function ProductionPage({
         setFgPrintRequested(false);
         return;
       }
-      window.print();
-      // Don't clear fgStickers here anymore — the on-screen preview on UPH/
-      // PACK tabs depends on that state. Reset just the print-requested flag.
-      // eslint-disable-next-line no-restricted-syntax -- one-shot post-print state cleanup, fires from print callback
-      setTimeout(() => setFgPrintRequested(false), 500);
+      whenQrsReady(document.getElementById("batch-fg-print"), () => {
+        window.print();
+        // Don't clear fgStickers here anymore — the on-screen preview on UPH/
+        // PACK tabs depends on that state. Reset just the print-requested flag.
+        // eslint-disable-next-line no-restricted-syntax -- one-shot post-print state cleanup, fires from print callback
+        setTimeout(() => setFgPrintRequested(false), 500);
+      });
     },
-    // 1500ms — gives the eager <QRImg> tree time to generate all QR data
-    // URLs before window.print() fires. Pre-2026-05-12 this was 300ms
-    // under the (incorrect) assumption that mounting the tree inside the
-    // hidden print container would let IntersectionObserver kick off QR
-    // generation. The observer never fires for `display: none` parents,
-    // so the QRs would stay as gray placeholders → operator-reported
-    // blank/broken FG sticker prints. The `eager` flag on the print-only
-    // <QRImg> instances below skips the observer; this bumped delay
-    // accommodates ~100 sequential 500px QR generations (~10-30ms each).
-    fgPrintRequested ? 1500 : null,
+    // The print-only <QRImg> instances are `eager` (an IntersectionObserver
+    // never fires inside a `display: none` parent, BUG 2026-05-12 blank FG
+    // prints). This used to be a fixed 1500 ms guess at how long ~100 PNG
+    // QRs took; a bigger batch printed grey placeholders and a small one sat
+    // idle. Now 300 ms for React to mount the tree, then whenQrsReady waits
+    // until the last QR is drawn (SVG, ~1 ms each).
+    fgPrintRequested ? 300 : null,
   );
 
   // Foam-tab print timer — mirror of the PACKING-tab timer above. Same
-  // 1500ms QR-settle delay; clears `foamPrintStickers` after the dialog
+  // mount delay + QR-ready wait; clears `foamPrintStickers` after the dialog
   // closes (the foam state is single-use per click, unlike `fgStickers`
   // which keeps the PACKING preview tiles alive between prints).
   useTimeout(
@@ -6188,14 +6186,16 @@ export default function ProductionPage({
         setFoamPrintRequested(false);
         return;
       }
-      window.print();
-      // eslint-disable-next-line no-restricted-syntax -- one-shot post-print cleanup, fires from print callback
-      setTimeout(() => {
-        setFoamPrintRequested(false);
-        setFoamPrintStickers([]);
-      }, 500);
+      whenQrsReady(document.getElementById("batch-fg-print"), () => {
+        window.print();
+        // eslint-disable-next-line no-restricted-syntax -- one-shot post-print cleanup, fires from print callback
+        setTimeout(() => {
+          setFoamPrintRequested(false);
+          setFoamPrintStickers([]);
+        }, 500);
+      });
     },
-    foamPrintRequested ? 1500 : null,
+    foamPrintRequested ? 300 : null,
   );
 
   // Print the current filtered schedule as an A4 landscape listing. Opens
@@ -9719,10 +9719,9 @@ export default function ProductionPage({
               the React reconciliation of ~1000 siblings made tab entry
               feel like the QR grid was opening (Wei Siang 2026-05-10:
               "一打开就直接 show 出来会很卡"). The handlePrintFgStickers
-              path flips fgPrintRequested true, the useTimeout below
-              fires window.print() at ~1500ms — enough time for the
-              `eager` <QRImg> instances inside this hidden container to
-              generate all their data URLs synchronously on mount. The
+              path flips fgPrintRequested true, and the useTimeout above
+              fires window.print() once whenQrsReady sees every `eager`
+              <QRImg> inside this hidden container drawn. The
               eager flag is required: IntersectionObserver never fires
               inside a `display: none` parent (operator-reported blank
               FG sticker bug 2026-05-12), so the on-screen lazy gate
@@ -9732,7 +9731,7 @@ export default function ProductionPage({
             {(() => {
               // Pick the active source. Mutually exclusive — both print
               // paths flip their flag and the useTimeout fires
-              // window.print() within 1500ms; the operator can't click
+              // window.print() once the QRs are drawn; the operator can't click
               // the second button in between because the first click
               // grabs focus into the OS print dialog.
               if (!fgPrintRequested && !foamPrintRequested) return null;

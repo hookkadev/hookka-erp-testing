@@ -25,7 +25,15 @@ type Detail = Row & {
   body: string;
   isHtml: boolean;
   attachments: { id: string; name: string; contentType: string; size: number }[];
+  sources?: { name: string; status: number; length: number; decoded?: number; error?: string }[];
+  raw?: string;
 };
+
+// "html 200, 121" / "raw 200, 5,300 -> 4,800 decoded" / "raw/json 403".
+const describeSource = (s: NonNullable<Detail["sources"]>[number]) =>
+  s.status !== 200
+    ? `${s.name} ${s.status === 0 ? `failed${s.error ? ` (${s.error})` : ""}` : s.status}`
+    : `${s.name} ${s.length.toLocaleString()}${s.decoded !== undefined ? ` -> ${s.decoded.toLocaleString()} decoded` : ""}${s.error ? ` (${s.error})` : ""}`;
 
 const escapeHtml = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -45,6 +53,7 @@ export default function StagingMail() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [detailError, setDetailError] = useState("");
+  const [view, setView] = useState<"rendered" | "source" | "raw">("rendered");
 
   useEffect(() => {
     if (!onStaging) return;
@@ -59,6 +68,7 @@ export default function StagingMail() {
   const toggle = (id: string) => {
     setDetail(null);
     setDetailError("");
+    setView("rendered");
     setOpenId(openId === id ? null : id);
   };
 
@@ -155,7 +165,33 @@ export default function StagingMail() {
                                 ))}
                               </ul>
                             )}
-                            {detail.body.trim() ? (
+                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[#6B7280]">
+                              <span>
+                                {detail.isHtml ? "HTML" : "Text"}, {detail.body.length.toLocaleString()} characters
+                              </span>
+                              {(["rendered", "source", "raw"] as const)
+                                .filter((v) => v !== view && (v !== "raw" || detail.raw))
+                                .map((v) => (
+                                  <button
+                                    key={v}
+                                    type="button"
+                                    onClick={() => setView(v)}
+                                    className="text-[#6B5C32] hover:underline"
+                                  >
+                                    Show {v}
+                                  </button>
+                                ))}
+                            </div>
+                            {detail.sources && (
+                              <p className="font-mono text-[11px] text-[#9CA3AF]">
+                                Sources: {detail.sources.map(describeSource).join(" · ")}
+                              </p>
+                            )}
+                            {view !== "rendered" ? (
+                              <pre className="max-h-[600px] overflow-auto whitespace-pre-wrap break-all rounded border border-[#E5E1DC] bg-[#FAF9F7] p-3 text-xs">
+                                {view === "raw" ? detail.raw : detail.body}
+                              </pre>
+                            ) : detail.body.trim() ? (
                               <iframe
                                 title={`Body of ${detail.subject}`}
                                 sandbox=""

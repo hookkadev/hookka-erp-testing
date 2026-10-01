@@ -1,10 +1,19 @@
 # Hookka ERP — Work Tracker
 
 > **Last verified: 2026-10-01**: branch `feat/dev08-pillow-follows-sofa` (DEV-08 rule B) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: branch `feat/email-report-multi-times` (to `staging`) added items 7, 8 and 9 under BUG-36 (2026-09-29 entry).
+> **Last verified: 2026-10-01**: branch `fix/staging-topbar-patch-notes-hidden` (to `staging`, STAGING ONLY) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: branch `feat/staging-view-as-user` (to `staging`, STAGING ONLY) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: branch `feat/staging-role-switcher` (to `staging`, STAGING ONLY) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: branch `fix/staging-mail-bare-raw` (to `staging`, STAGING ONLY) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: branch `fix/staging-mail-source-diagnostics` (to `staging`, STAGING ONLY) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: branch `fix/staging-mail-raw-body` (to `staging`, STAGING ONLY) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: branch `fix/staging-mail-show-source` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `fix/staging-sticky-topbar` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `feat/dev22-worker-penalty` (to `staging`) added below (in progress, its entry is the newest).
 > **Last verified: 2026-10-01**: branch `feat/staging-api-log-in-topbar` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `fix/staging-mail-empty-body` (to `staging`, STAGING ONLY) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: branch `fix/grn-number-collision` added below.
 > **Last verified: 2026-10-01**: corrected two staging-tool claims below: the today-override cache rows are not wiped nightly, and the delivery-skip notices go to sanitised `@staging.invalid` addresses in code (live UNMEASURED).
 > **Last verified: 2026-10-01**: branch `feat/staging-today-override` (staging-only today override) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `feat/staging-mail-outbox` (to `staging`, STAGING ONLY) added below (its entry is the newest).
@@ -99,7 +108,7 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ## 2026-10-01 — 🔵 DEV-08 Pillows scheduled with their sofa, rule B (Violet, High) (branch `feat/dev08-pillow-follows-sofa` → `staging`)
 
-Violet chose rule B (WhatsApp 2026-10-01): a pillow is guaranteed finished before its sofa is packed, so the full set is packed and shipped together. The SO-status half of DEV-08 is on `fix/dev08-accessory-so-ready` → `main` (BUG-2026-10-01-234).
+Violet chose rule B (WhatsApp 2026-10-01): a pillow is guaranteed finished before its sofa is packed, so the full set is packed and shipped together. The SO-status half of DEV-08 is on `fix/dev08-accessory-so-ready` → `main` (BUG-2026-10-01-241).
 
 1. 🔵 Sewing (`runSewing`, `src/api/lib/planning-chain.ts`): a pillow group whose SO has a sofa group is due no later than the sofa group's last sew day, so it never pushes the SO's Wood Cut floor (= whole-SO sew end + 2). Pillow-only SOs unchanged. Main item already past sewing or done → pillow due now; `soIdsWithMainItem` (new query in `loadChainInputs`, falls back to WAITING cards on error) tells "sofa done" from "no sofa"; a held (ON_HOLD) main item does not pull its pillows forward.
 2. 🔵 Packing (`runFraming` packing block): ACCESSORY PACKING cards ride their SO's sofa / bedframe pack day and show in the same SO group on the Packing schedule. Today they are dropped (`lane !== BEDFRAME && !== SOFA → continue`). Held as `PackUnit.acc` so they add minutes and rows but never pin or re-key the sofa unit. Side effect: the Phase-2 collector now emits PACKING assignments for those pillow cards, so Proposals can suggest their due date (= the sofa's pack day). Pillow-only SOs still not on Packing.
@@ -107,6 +116,64 @@ Violet chose rule B (WhatsApp 2026-10-01): a pillow is guaranteed finished befor
 4. ⚪ Before/after on staging data: list SOs whose sew / pack day moves, and run the new `soIdsWithMainItem` SQL for real (UNMEASURED: only exercised by the engine tests, never against a DB). MEASURED on staging (hookka-erp-staging-sg) 2026-10-01, one READ ONLY transaction, old vs new engine over the same data: 5069 assignments identical, 178 new = PACKING/ACCESSORY rows, 24 SOs, every one on its sofa's pack day. Sewing change moved NOTHING: ACCESSORY sew capacity is never the limit, the cut floor is. 5 of 21 SOs still sew pillows on/after the sofa's pack day (e.g. SO-2609-021: sofa packs 10-10, pillow cut 10-22..24, sewn 10-28 = its customer DD). Cause: cutting is JIT, accessory floor = DD - chunkLeadDays (3) vs sofa modelLeadDays (6), and the sofa then runs ahead on free capacity. Rule B needs a cutting change; decision pending. `soIdsWithMainItem` SQL ran fine (31 SOs, key `mainSoId`). Packing page not yet checked in a browser (Pack Calendar rows checked via computeDeptSchedule).
 6. 🔵 Cutting, Violet chose A (WhatsApp 2026-10-01 15:35, "we always missed out the pillow, after delivery only found out this order got pillows"): a pillow on an SO with a sofa/bedframe is cut with it. Main item still waiting to be cut → pillow uses the main item's lead (`modelLeadDays`) instead of `chunkLeadDays`; main item already cut → pillow cut as soon as possible. Pillow-only SOs unchanged. Same rule on the standalone Fabric Cutting sheet. Done (`CutCard.mainItem`, `tagPillowCuts`). MEASURED on staging (read-only, old vs new engine incl. cutting): pillow cuts 87 earlier / 20 later (pillow-only orders displaced in the ACCESSORY pool, at most +7d), pillow sewing 62 cards earlier (up to 18d), 0 later; SO-2609-021 pillow sew 10-28 → 10-10 (= sofa pack day), SO-2609-198 10-23 → 10-10. Side effect: sofa wood→pack reshuffles within slack (17 SOs pack later, up to +11d; 13 earlier) because SOs no longer held by their pillows join Wood Cut sooner; SOs packed after customer DD: 117 before, 117 after, 0 newly late. Still after the sofa's pack day: SO-2609-093 / -198 / -223, all cut on day 1 and waiting on ACCESSORY sew capacity (175 pillow sew cards, near days full) — a capacity/OT call, not code.
 5. Not changed: Wood Cut waits for the whole SO's sewing (owner-confirmed Python port, Wei Siang 2026-06).
+## 2026-10-01: 🔵 Staging top bar: Patch notes pill hidden under the search box (branch `fix/staging-topbar-patch-notes-hidden` to `staging`, STAGING ONLY, never PR into main)
+
+- Asked: after #641 the Patch notes pill was gone, covered by the search box.
+- Cause: the staging tool row had `min-w-0`, so it shrank below its own pills and the last one (Patch notes) spilled under the search box. The View as select was also as wide as the longest account name (271px showing "Me").
+- Fix: the row no longer shrinks (no `min-w-0`); the search box gets `min-w-0` and is the one that narrows. View as shows the picked name in a span sized to it, with the native select invisible over the whole pill. Patch notes label shows from xl.
+- Measured on staging in the browser pane with the sidebar open, classes applied in place: at 1360px Patch notes ended at 865px with the search starting at 765px (overlap); after the fix 773 vs 785, and at 1280px still 773 vs 785 with the search at 124px wide. View as 271px to 111px.
+
+## 2026-10-01: 🔵 Staging: "View as" picks a user, not a role; topbar tidied (branch `feat/staging-view-as-user` to `staging`, STAGING ONLY, never PR into main)
+
+- Asked: switch by user instead of by role, so what you see follows that account in User Management > Permissions; and fix the cramped top bar when the sidebar is open (labels wrapping onto two lines), make it scale and easy to click.
+- View as: the picker lists active accounts from `/api/users`. The pick's id goes out as `X-Staging-View-As`; `auth-middleware.ts` swaps in that user's id, role and org when `stagingViewAsUser` agrees (staging request, real SUPER_ADMIN, active user). So the gate and `/me/permissions` use the account's own Permissions-tab list with no special case, and customer scope and "my own" screens show that account's data. Non-GET calls under `/api/auth/` (password, 2FA, logout) are never impersonated. Writes are saved as the viewed account; the audit journal records the real account (`stagingRealUserId` / `stagingRealRole`). Replaces the role switcher from #640 (its rbac.ts and auth.ts hunks are reverted, no longer needed).
+- Top bar: all staging tools (API, View as, fake date, patch notes) sit in one row on the left as same-height (h-9) pills that never wrap; labels drop to icons below xl / 2xl. The search box narrows to w-56 below 2xl, and the user name / role block hides below xl (avatar stays).
+- Sign-out (`clearAuth`) clears the pick. Limits: the client keeps your user id (only the role follows the pick), so a screen comparing "my id" to an owner id can disagree while viewing; a failed user lookup silently falls back to you; `/api/users` is not org-filtered, so picking an account in another org swaps the tenant too.
+- Test: `tests/staging-view-as.test.mjs` (parse, per-tab read, server gate incl. ADMIN refused, inactive user, /api/auth writes, DB error, sign-out clears). UNMEASURED: not tried in a browser; check on staging after deploy.
+
+## 2026-10-01: 🔵 Staging: "View as" role switcher next to the API button (branch `feat/staging-role-switcher` to `staging`, STAGING ONLY, never PR into main)
+
+- Asked: a staging tool beside the API button, top left, to swap between roles and use the app as that role.
+- `src/components/staging-role-switch.tsx`: a "View as" picker in the topbar after `StagingApiLog`, listing `ROLE_OPTIONS`. Per tab (sessionStorage), off by default, shown only to a real SUPER_ADMIN on a `staging.` host. Picking wipes the `hookka-cache:` API cache and reloads; the pill turns red while a role is active.
+- The pick is sent as `X-Staging-Role` from the `api-client.ts` fetch patch. `auth-middleware.ts` stamps it as `userRole` only when `stagingRoleFromRequest` (`src/api/lib/staging-role.ts`) agrees: staging request (`isStagingRequest`), real role SUPER_ADMIN, known role. ADMIN is refused so it cannot pick SUPER_ADMIN. So the API gate, `/api/auth/me/permissions` (menu, nav hiding, home page) and the client role checks (`getCurrentUser()` in `auth.ts`) all act as the picked role.
+- While viewing as a role the account's own permission list is skipped (rbac.ts and /me/permissions), and the audit journal records the real role (`stagingRealRole`).
+- Limits: it is a role view, not a user view. `userId` stays yours, so "my own" data (attendance, payslip, KPI card) is still yours. Staging admin pages (Mail Outbox, Schema Check) 403 under a non-admin role, as they should.
+- Test: `tests/staging-role.test.mjs` (parse, per-tab read, server gate incl. ADMIN refused, prod and canary refused). UNMEASURED: not tried in a browser; check on staging after deploy.
+
+## 2026-10-01: 🔵 Mail Outbox shows the whole email, measured cause (branch `fix/staging-mail-bare-raw` to `staging`, STAGING ONLY)
+
+- The #636 sources line: `record 121 · html 121 · raw 31,976 -> 0 decoded · raw/json 31,976 -> 0 decoded`. "Show raw" was the full brief as bare HTML, no MIME headers.
+- `htmlFromRawMime` now returns text that already starts with a tag as the HTML. Read-side fix, so old emails show too. BUG-2026-10-01-234.
+- Test: `tests/staging-mail.test.mjs` (13 pass; the bare-HTML case fails before). UNMEASURED until opened on staging: the brief should show about 31,976 characters and render.
+
+## 2026-10-01: 🟡 Mail Outbox: measure every body source (branch `fix/staging-mail-source-diagnostics` to `staging`, STAGING ONLY)
+
+- #635 did not work: the brief still shows 121 characters. Its fallbacks swallowed failures, so the page could not say why.
+- Each opened email now shows "Sources: record N · html N · raw N -> N decoded · raw/json N" (or the HTTP status / error), and a "Show raw" view. `/raw/json` added as a fourth source; longest still wins.
+- Not a fix. Next: read the sources line and the raw message's `Content-Type` / `Content-Transfer-Encoding`, then fix the call, the decoder, or (only if raw is also short) the sender. BUG-2026-10-01-234 stays open.
+- Test: `tests/staging-mail.test.mjs` (12 pass).
+
+## 2026-10-01: 🔵 Mail Outbox shows the whole email (branch `fix/staging-mail-raw-body` to `staging`, STAGING ONLY)
+
+- "Show source" (#633) showed the brief's body as 121 characters: its first line only. The owner opened the delivered copy in the MailSlurp dashboard and it is complete. So MailSlurp's stored sent record is short; delivery is fine. BUG-2026-10-01-234 corrected (the #629 "empty body" guess was wrong).
+- `getSentMail` now also reads `GET /sent/{id}/html` and the raw SMTP message (`GET /sent/{id}/raw`, decoded by `htmlFromRawMime`) and shows the longest.
+- Test: `tests/staging-mail.test.mjs` (11 pass; 2 fail on the old reader). UNMEASURED: which of `/html` or `/raw` is whole on MailSlurp's side; check on `/staging-mail` after deploy (length should be in the thousands).
+
+## 2026-10-01 — 🔵 Production QR show / print load time (branch `perf/production-qr-speed-staging` → `staging`, BUG-2026-10-01-235)
+
+Ask: Production pages load slowly, worst on Show QR and Print; make it faster, or cache it so a click or refresh does not pay again.
+
+1. 🔵 QR generation: SVG instead of 600 px PNG (Chromium, 200 codes: 0.5-0.8 s vs 4.7 s), memoised per session. Covers on-screen tiles and every sticker print on the Production page.
+2. 🔵 FG / Foam packing print waited a fixed 1.5 s for QRs, which is too short for a large batch (blank QRs) and wasted time on a small one. Pre-build the QRs, then print.
+3. ⚪ FG sticker load fans out 2 requests per PO plus one full SO read per SO. A single batch endpoint is the real cold-load fix; needs a prod / staging Network waterfall first to confirm the request fan-out dominates. Prod split UNMEASURED.
+
+
+## 2026-10-01: 🟡 Mail Outbox: opened email still showed an empty white box (branch `fix/staging-mail-show-source` to `staging`, STAGING ONLY)
+
+- Reported after #629: clicking an email shows an empty white frame, not the "no body" message, so the server does return a body and it renders blank. Follow-up to BUG-2026-10-01-234.
+- Cause UNMEASURED: no enforced CSP on the page (checked the response headers and `index.html`), and our email HTML hides nothing. Could not read the live response: Claude in Chrome was not connected.
+- Added a "Show source" toggle and the body's type and length on each opened email. The source is printed as escaped text, so the content is readable whatever it is, and the length tells "empty" from "renders blank".
+- Next: open an email, click "Show source", and read what MailSlurp returns; fix the renderer from that.
 
 ## 2026-10-01: 🔵 Staging: the topbar stays on screen when scrolling (branch `fix/staging-sticky-topbar` to `staging`, STAGING ONLY)
 
@@ -140,6 +207,14 @@ Ask (ticket DEV-22, High): a Worker Penalty module for confirmed order / product
 6. 🔵 Worker app My Pay: penalty card (date, PO No., reason, amount, payroll month, status).
 7. ✅ Tests + docs: `tests/worker-penalties.test.mjs` (9), employees module guide, CODEBASE-MAP, API.md regenerated.
 8. 🟡 Items 5 and 6 are typecheck / lint / unit clean but NOT yet driven in a browser. The local `.dev.vars` points at PRODUCTION (checked 2026-10-01 by project ref only), so no local run; owner chose to verify on staging after the PR merges.
+9. ✅ #628 merged and deployed to staging. Driven on staging 2026-10-01: tab renders, order lookup CO-2608-006-01 pulls product / qty / customer and per-department PICs, two suggested workers added (RM 50.00 + RM 25.50), WP-2610-001 submitted, self-approval refused, Payroll tab shows the Penalty column.
+10. 🔵 Owner 2026-10-01 (no second approver account): a SUPER_ADMIN may approve a penalty they raised; every other role still needs a second person (`selfApprovalBlocked`, branch `feat/dev22-superadmin-self-approve`). Then finish on staging: approve, payroll estimate, generate + approve Oct payroll, POSTED, drift banner.
+
+## 2026-10-01 — 🔵 GRN number collision returns a retry, not a 500 (branch `fix/grn-number-collision` → `staging`)
+
+- Asked: fix #5 from the T-006 test findings. Two GRNs created in the same instant: the second failed with `500 duplicate key ... ux_grns_grn_number` (measured on staging 2026-09-30).
+- `POST /api/grn` now retries with the next number on a collision (up to 5), then answers 409 with a plain message. BUG-2026-10-01-232, C27 row 5.
+- Not yet verified on staging. After deploy: 5 rounds, each a fresh 10-unit PO with two GRN creates of 4 fired at once (both fit, so only the number can collide). Pass = every response 201 with two different consecutive GRN numbers, no 500 and no "took this GRN number" 409.
 
 ## 2026-10-01: 🔵 Staging test tool, today override (branch `feat/staging-today-override` to `staging`, STAGING ONLY, never PR to main)
 
@@ -298,6 +373,9 @@ Verified: `tsc -p tsconfig.app.json` clean; `npm test` full suite green (5098 pa
 - 5. ✅ #582 merged to staging (branch `fix/overdue-email-mobile`, BUG-2026-09-29-221) Overdue email reads on a phone: below 900px each SO becomes a card (labelled Items / Units / Customer DD / Our target / Overdue), summary boxes two per row; `screen`-only so the A4 print is unchanged. Status shows `IN PRODUCTION` (was clipped as `IN_PRODUCTION`). Email copy has no Print button (the in-app page keeps it). Verified: `tests/overdue-email-mobile.test.mjs`, tsc strict, sample render at 375px / 720px / 1200px in the browser; not sent through a real mail client.
 - 6. 🔵 (branch `fix/report-emails-mobile` to `staging`, BUG-2026-09-29-232) Same for the other emails: Schedule reuses the Overdue phone CSS (cards below 900px, status with spaces); Efficiency gets summary boxes two per row and employee cards below 640px; the Morning Brief gets a viewport tag, tighter padding, and its one Chinese line (schedule proposals notice) in English. Schedule + Efficiency emails drop the Print button. Verified: `tests/report-emails-mobile.test.mjs`, tsc strict, sample renders at 375px and 1200px in the browser; not sent through a real mail client.
 - 3. ❓ Open for Lim: overdue scope (production-late only vs any order late to the customer); carry slipped job cards into today's production list.
+- 7. ✅ (branch `feat/email-report-multi-times` to `staging`) Ask: "send only allowed 1 time frame, add a option allowed us to add / remove multiple timeframe". Each report now has a list of send times (`times[]`, 1 to 8, sorted) instead of one `time`; the card shows them as chips with an Add time picker and a remove x (the last one cannot be removed). `isDue` became `dueSlot`, which returns the latest passed slot of the day ("YYYY-MM-DD HH:MM"); the due-trigger stores that slot in `kv_config['daily_report_last_sent']`, so each time sends once and two missed slots send once. Old rows still load: a saved `time` is read as `[time]`, and an old day-only last-sent stamp counts as the whole day sent. Verified: `tests/report-settings.test.mjs`, tsc strict, full `npm test` green. UI not rendered in a browser; not driven against a live DB. A brief with two times runs its AI paragraph twice (inside the existing monthly budget); config proposals already de-duplicate.
+- 9. ✅ (same branch) Ask: redesign the Email Reports card for clarity and accessibility. Each card now has two panels, Schedule (frequency, day, send-time chips shown as 12-hour "08:00 AM", "+ Add time" picker, Enter adds) and Recipients ("Add recipient" replaces "Add PIC", chips truncate long addresses with the full one on hover, Enter or Add button). Keyboard focus rings on every control and remove button; Save / Send test sit under both panels. Stored times stay 24-hour "HH:MM", so the API is unchanged. Verified: tsc strict; page mounted in a stubbed-fetch harness (no network) at desktop and 375px: add time, remove time, add recipient by Enter, Save sends `times: ["08:00","12:15"]` and the lowercased new recipient; no horizontal scroll, no console errors.
+- 8. 🔵 Ask: "create another check for today production orders because its not working". Owner: no email arrives. Measured 2026-10-01 from the `daily-reports.yml` run logs: on PRODUCTION the schedule email went out at 08:07 MYT on 29 Sep, 30 Sep and 1 Oct, each `{"ok":true,"sent":3,"failed":0}` (to the legacy recipient chain, since prod has no Email Reports page). The Settings > Email Reports page exists only on staging, and nothing fires scheduled sends there (the cron runs from `main` and targets erp.hookka.com), so PICs and times saved on staging never trigger a send; only "Send test now" does. Not yet measured: who the 3 prod recipients are, and whether the date match (`jc.dueDate = ?`, where other queries use `substr(jc.dueDate::text,1,10)`) drops rows. Owner 2026-10-01: Email Reports stays on staging (no `main` PR), so on staging the page only sends through "Send test now" and production keeps its fixed-time cron and legacy recipients.
 
 ## 2026-09-28 — 🔵 BUG-34 Customer credit control: quota + overdue-term DO block, admin override (branch `feat/customer-credit-control` → `staging`, BUG-2026-09-28-233)
 

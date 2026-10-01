@@ -1,10 +1,10 @@
 // ---------------------------------------------------------------------------
 // Email reports: per-report on/off + PIC list (BUG-36) + schedule
-// (daily / weekly / monthly at a set SGT time).
+// (daily / weekly / monthly at one or more SGT times).
 //
 // Stored as ONE kv_config row, key 'daily_report_settings':
 //   { "overdue": { "enabled": true, "recipients": ["a@x.com", ...],
-//                  "frequency": "weekly", "time": "08:00", "weekday": 1,
+//                  "frequency": "weekly", "times": ["08:00", "17:00"], "weekday": 1,
 //                  "monthDay": 1 }, ... }
 //
 // A report with no entry here is "unconfigured" and keeps the legacy recipient
@@ -27,8 +27,8 @@ export interface ReportSetting {
   enabled: boolean;
   recipients: string[];
   frequency: Frequency;
-  /** "HH:MM" in SGT. */
-  time: string;
+  /** "HH:MM" in SGT, sorted, at least one. Each one sends the report. */
+  times: string[];
   /** weekly: 1 (Mon) .. 6 (Sat). Sundays never send. */
   weekday: number;
   /** monthly: 1 .. 28, so every month has the day. */
@@ -45,6 +45,20 @@ export const DEFAULT_TIMES: Record<ReportKind, string> = {
 };
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+export const MAX_TIMES = 8;
+
+/**
+ * Valid, de-duplicated, sorted "HH:MM" list. Reads the old single `time`
+ * field when there is no `times`, so rows saved before this keep their time.
+ */
+function cleanTimes(s: Record<string, unknown>, kind: ReportKind): string[] {
+  const raw = Array.isArray(s.times) ? s.times : [s.time];
+  const out = [...new Set(raw.filter((t): t is string => typeof t === "string" && TIME_RE.test(t)))]
+    .sort()
+    .slice(0, MAX_TIMES);
+  return out.length > 0 ? out : [DEFAULT_TIMES[kind]];
+}
 
 function intIn(v: unknown, lo: number, hi: number, dflt: number): number {
   const n = Number(v);
@@ -91,7 +105,7 @@ export function normalizeReportSettings(raw: unknown): ReportSettings {
       enabled: s.enabled !== false,
       recipients: cleanEmails(s.recipients),
       frequency: FREQUENCIES.includes(s.frequency as Frequency) ? (s.frequency as Frequency) : "daily",
-      time: typeof s.time === "string" && TIME_RE.test(s.time) ? s.time : DEFAULT_TIMES[kind],
+      times: cleanTimes(s, kind),
       weekday: intIn(s.weekday, 1, 6, 1),
       monthDay: intIn(s.monthDay, 1, 28, 1),
     };
@@ -115,26 +129,32 @@ export function invalidEmailsIn(raw: unknown): string[] {
 }
 
 /**
- * Is `kind` due at `now`? Due = today (SGT) is the configured day, the
- * configured time has passed, and it has not gone out today. Checking
- * "passed + not sent yet" instead of "exactly now" means a late or dropped
- * cron run still sends, just late. An unconfigured report keeps its old
- * daily time. Sunday / public-holiday skipping is the caller's job.
+ * Which send slot of `kind` is due at `now`, as "YYYY-MM-DD HH:MM" (SGT), or
+ * null. Due = today (SGT) is the configured day, and the latest of today's
+ * times that has passed has not gone out yet. Checking "passed + not sent
+ * yet" instead of "exactly now" means a late or dropped cron run still sends,
+ * just late; two missed slots send once, not twice. An unconfigured report
+ * keeps its old daily time. Sunday / public-holiday skipping is the caller's
+ * job. The caller stores the returned slot as the report's lastSent.
  */
-export function isDue(
+export function dueSlot(
   kind: ReportKind,
   setting: ReportSetting | undefined,
   now: Date,
   lastSent: string | undefined,
-): boolean {
+): string | null {
   const sgt = new Date(now.getTime() + 8 * 60 * 60 * 1000).toISOString();
   const today = sgt.slice(0, 10);
-  if (lastSent === today) return false;
-  if (sgt.slice(11, 16) < (setting?.time ?? DEFAULT_TIMES[kind])) return false;
   const d = new Date(today + "T00:00:00Z");
-  if (setting?.frequency === "weekly") return d.getUTCDay() === setting.weekday;
-  if (setting?.frequency === "monthly") return d.getUTCDate() === setting.monthDay;
-  return true;
+  if (setting?.frequency === "weekly" && d.getUTCDay() !== setting.weekday) return null;
+  if (setting?.frequency === "monthly" && d.getUTCDate() !== setting.monthDay) return null;
+  const passed = (setting?.times ?? [DEFAULT_TIMES[kind]]).filter((t) => t <= sgt.slice(11, 16));
+  if (passed.length === 0) return null;
+  const slot = `${today} ${passed[passed.length - 1]}`;
+  // A bare "YYYY-MM-DD" is the pre-multi-time format (one send a day): treat
+  // it as the whole day sent, so the switch-over day never sends twice.
+  const last = lastSent && lastSent.length === 10 ? `${lastSent} 23:59` : lastSent;
+  return last && last >= slot ? null : slot;
 }
 
 type Db = {
@@ -151,8 +171,9 @@ export async function saveReportSettings(db: Db, settings: ReportSettings): Prom
   await saveKv(db, REPORT_SETTINGS_KEY, settings);
 }
 
-// { brief: "2026-09-29", ... } — the SGT day each report last went out on its
-// schedule. Its own key so a settings save never clobbers it.
+// { brief: "2026-09-29 07:00", ... } — the SGT slot each report last went out
+// on its schedule (older rows hold just the day). Its own key so a settings
+// save never clobbers it.
 const LAST_SENT_KEY = "daily_report_last_sent";
 
 export async function loadLastSent(db: Db): Promise<Partial<Record<ReportKind, string>>> {

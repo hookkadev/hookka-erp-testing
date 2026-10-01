@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { getSentAttachment, getSentMail, listSentMail } from "../src/api/lib/staging-mail.ts";
+import { getSentAttachment, getSentMail, htmlFromRawMime, listSentMail } from "../src/api/lib/staging-mail.ts";
 import { isStagingRequest } from "../src/api/lib/staging-gate.ts";
 
 const INBOX = "11111111-1111-4111-8111-111111111111";
@@ -71,24 +71,86 @@ test("detail returns body and attachment names for our inbox", async () => {
   assert.equal("inboxId" in d, false);
 });
 
-// BUG-2026-10-01-234: staging's sent records came back with no body, so the
-// page showed an empty frame. The HTML endpoint fills it in.
-test("detail falls back to the HTML endpoint when the sent record has no body", async () => {
-  const { f, calls } = stub({
+// BUG-2026-10-01-234: the sent record's body stops at the first line break
+// (121 chars of the Production Morning Brief) while the delivered email is
+// whole. The page takes the longest of body, /html and the raw message.
+const BRIEF =
+  '<!doctype html><html><head><meta charset="utf-8" />\n<style>p{color:red}</style></head><body><p>Today’s plan</p></body></html>';
+const FIRST_LINE = BRIEF.split("\n")[0];
+
+test("detail uses the raw message when the sent record's body is cut at the first line", async () => {
+  // Quoted-printable: "=" escaped, the curly quote as utf-8 bytes, one soft line break.
+  const qp = BRIEF.replace(/=/g, "=3D").replace("’", "=E2=80=99").replace("<style>", "=\r\n<style>");
+  const raw = [
+    "Subject: brief",
+    "Content-Type: multipart/alternative;",
+    ' boundary="b1"',
+    "",
+    "--b1",
+    "Content-Type: text/plain; charset=UTF-8",
+    "",
+    "plain version",
+    "--b1",
+    "Content-Type: text/html; charset=UTF-8",
+    "Content-Transfer-Encoding: quoted-printable",
+    "",
+    qp,
+    "--b1--",
+    "",
+  ].join("\r\n");
+  const { f } = stub({
+    [`/sent/${SENT}`]: { ...sentDto(INBOX), body: FIRST_LINE, attachments: [] },
+    [`/sent/${SENT}/raw`]: raw,
+  });
+  const d = await getSentMail(f, "KEY", INBOX, SENT);
+  assert.equal(d.body, BRIEF);
+  assert.equal(d.isHtml, true);
+});
+
+// Measured on staging 2026-10-01: MailSlurp's /sent/{id}/raw (and the content
+// of /raw/json) for the brief was the bare HTML, 31,976 chars, no MIME
+// headers, with blank lines inside it. The MIME parser read the first HTML
+// lines as headers and decoded 0 chars.
+test("a raw message that is already bare HTML is used as is", async () => {
+  const bare = `${FIRST_LINE}\n<style>p{}</style>\n</head><body>\n\n\n<h2>1 · Today's Plan</h2>\n</body></html>\n`;
+  assert.equal(htmlFromRawMime(bare), bare.trim());
+  assert.equal(htmlFromRawMime(`  \r\n${bare}`), bare.trim());
+  const { f } = stub({
+    [`/sent/${SENT}`]: { ...sentDto(INBOX), body: FIRST_LINE, attachments: [] },
+    [`/sent/${SENT}/html`]: FIRST_LINE,
+    [`/sent/${SENT}/raw`]: bare,
+    [`/sent/${SENT}/raw/json`]: { content: bare },
+  });
+  const d = await getSentMail(f, "KEY", INBOX, SENT);
+  assert.equal(d.body, bare.trim());
+  assert.equal(d.isHtml, true);
+  assert.equal(d.sources[2].decoded, bare.trim().length);
+});
+
+test("raw base64 html is decoded as utf-8; no html part gives empty", () => {
+  const b64 = Buffer.from(BRIEF, "utf8").toString("base64").replace(/(.{76})/g, "$1\r\n");
+  const raw = `Content-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n${b64}\r\n`;
+  assert.equal(htmlFromRawMime(raw), BRIEF);
+  assert.equal(htmlFromRawMime("Content-Type: text/plain\r\n\r\nhello"), "");
+  assert.equal(htmlFromRawMime(""), "");
+});
+
+test("detail falls back to /html when that is longest, and failing fallbacks keep the body", async () => {
+  const viaHtml = stub({
     [`/sent/${SENT}`]: { ...sentDto(INBOX), body: null, isHTML: null, attachments: [] },
     [`/sent/${SENT}/html`]: "<p>from html</p>",
   });
-  const d = await getSentMail(f, "KEY", INBOX, SENT);
+  const d = await getSentMail(viaHtml.f, "KEY", INBOX, SENT);
   assert.equal(d.body, "<p>from html</p>");
   assert.equal(d.isHtml, true);
-  assert.ok(calls.some((c) => c.url.endsWith(`/sent/${SENT}/html`)));
 
-  const none = stub({ [`/sent/${SENT}`]: { ...sentDto(INBOX), body: "", attachments: [] } });
-  assert.equal((await getSentMail(none.f, "KEY", INBOX, SENT)).body, ""); // 404 on /html stays empty
-
-  const full = stub({ [`/sent/${SENT}`]: { ...sentDto(INBOX), attachments: [] } });
-  await getSentMail(full.f, "KEY", INBOX, SENT);
-  assert.equal(full.calls.some((c) => c.url.endsWith("/html")), false); // only when needed
+  // /html and both raw forms 500: the record's own body still shows.
+  const ok = stub({ [`/sent/${SENT}`]: { ...sentDto(INBOX), attachments: [] } });
+  const f = async (url, init) =>
+    /\/(html|raw|raw\/json)$/.test(String(url)) ? new Response("boom", { status: 500 }) : ok.f(url, init);
+  const d500 = await getSentMail(f, "KEY", INBOX, SENT);
+  assert.equal(d500.body, "<p>hi</p>");
+  assert.deepEqual(d500.sources.map((s) => s.status), [200, 500, 500, 500]);
 });
 
 test("detail hides mail from another inbox, unknown ids and non-uuids", async () => {
@@ -137,4 +199,39 @@ test("every route sits behind the staging gate and an admin role check", () => {
   assert.match(mw, /role !== "SUPER_ADMIN" && role !== "ADMIN"/);
   assert.ok(src.indexOf('app.use("*"') < src.indexOf("app.get("));
   assert.doesNotMatch(readFileSync("src/pages/staging-mail.tsx", "utf8"), /MAILSLURP|x-api-key/);
+});
+
+test("an opened email can be shown as source or raw text, so a body that renders blank is still readable", () => {
+  const page = readFileSync("src/pages/staging-mail.tsx", "utf8");
+  assert.match(page, /\["rendered", "source", "raw"\]/);
+  assert.match(page, /Show \{v\}/);
+  assert.match(page, /characters/); // the length is shown, so "empty" and "renders blank" can be told apart
+  assert.match(page, /Sources: \{detail\.sources\.map\(describeSource\)/);
+  // Source and raw are printed as a React text child (escaped), never as HTML.
+  assert.match(page, /<pre[^>]*>\s*\{view === "raw" \? detail\.raw : detail\.body\}\s*<\/pre>/);
+  assert.doesNotMatch(page, /dangerouslySetInnerHTML/);
+});
+
+test("detail reports each body source, and raw/json is decoded and used when it is longest", async () => {
+  const raw = `Content-Type: text/html; charset=utf-8\r\n\r\n${BRIEF}\r\n`;
+  const { f } = stub({
+    [`/sent/${SENT}`]: { ...sentDto(INBOX), body: FIRST_LINE, attachments: [] },
+    [`/sent/${SENT}/html`]: FIRST_LINE,
+    [`/sent/${SENT}/raw/json`]: { content: raw },
+  });
+  const d = await getSentMail(f, "KEY", INBOX, SENT);
+  assert.equal(d.body, BRIEF);
+  assert.equal(d.raw, raw);
+  assert.deepEqual(d.sources, [
+    { name: "record", status: 200, length: FIRST_LINE.length },
+    { name: "html", status: 200, length: FIRST_LINE.length },
+    { name: "raw", status: 404, length: 0, decoded: 0 },
+    { name: "raw/json", status: 200, length: raw.length, decoded: BRIEF.length },
+  ]);
+
+  // A network failure is reported, not swallowed.
+  const down = async (url, init) =>
+    String(url).endsWith("/html") ? Promise.reject(new Error("socket hang up")) : f(url, init);
+  const e = await getSentMail(down, "KEY", INBOX, SENT);
+  assert.deepEqual(e.sources[1], { name: "html", status: 0, length: 0, error: "socket hang up" });
 });

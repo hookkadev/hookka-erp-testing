@@ -14,7 +14,8 @@
 //   POST   /api/worker-penalties/:id/revoke              — APPROVED -> DRAFT (nothing posted yet)
 //
 // Gated on its own resource, `worker-penalties`, with `approve` as a separate
-// right. The order lookup lives HERE rather than reusing /api/production-orders
+// right; the raiser cannot approve their own unless they are a Super Admin.
+// The order lookup lives HERE rather than reusing /api/production-orders
 // because HR, who raises penalties, holds no production-orders right — and
 // should not be handed the whole production board just to pick an order.
 //
@@ -32,6 +33,9 @@ import {
   loadLockedPayrollPeriods,
   payrollPeriodForApproval,
   todayYmdMalaysia,
+  selfApprovalBlocked,
+  freshAll,
+  freshFirst,
   PENALTY_HEADER_COLS,
   PENALTY_DRAFT,
   PENALTY_PENDING,
@@ -82,9 +86,12 @@ async function userDisplayName(c: Context<Env>, userId: string): Promise<string>
 }
 
 async function loadOne(c: Context<Env>, id: string): Promise<PenaltyRecord | null> {
-  const row = await c.var.DB.prepare(`SELECT ${PENALTY_HEADER_COLS} FROM worker_penalties WHERE id = ?`)
-    .bind(id)
-    .first<PenaltyRow>();
+  // Fresh: every status guard (submit / approve / revoke / edit) reads through
+  // here right after another request may have written the row.
+  const row = await freshFirst<PenaltyRow>(
+    c.var.DB,
+    c.var.DB.prepare(`SELECT ${PENALTY_HEADER_COLS} FROM worker_penalties WHERE id = ?`).bind(id),
+  );
   if (!row) return null;
   const [rec] = await loadPenaltiesWithLines(c.var.DB, [row]);
   return rec;
@@ -94,11 +101,14 @@ async function loadOne(c: Context<Env>, id: string): Promise<PenaltyRecord | nul
 async function nextPenaltyNo(c: Context<Env>): Promise<string> {
   const ymd = todayYmdMalaysia();
   const prefix = `WP-${ymd.slice(2, 4)}${ymd.slice(5, 7)}-`;
-  const row = await c.var.DB.prepare(
-    "SELECT penalty_no FROM worker_penalties WHERE penalty_no LIKE ? ORDER BY penalty_no DESC LIMIT 1",
-  )
-    .bind(`${prefix}%`)
-    .first<{ penaltyNo?: string; penalty_no?: string }>();
+  // Fresh: a cached read would hand out the number just taken, and the
+  // unique-index retry would read the same stale row again.
+  const row = await freshFirst<{ penaltyNo?: string; penalty_no?: string }>(
+    c.var.DB,
+    c.var.DB.prepare(
+      "SELECT penalty_no FROM worker_penalties WHERE penalty_no LIKE ? ORDER BY penalty_no DESC LIMIT 1",
+    ).bind(`${prefix}%`),
+  );
   const last = (row?.penaltyNo ?? row?.penalty_no ?? "").slice(prefix.length);
   const n = (Number.parseInt(last, 10) || 0) + 1;
   return `${prefix}${String(n).padStart(3, "0")}`;
@@ -273,20 +283,23 @@ app.get("/", async (c) => {
     binds.push(like, like, like, like, like, like);
   }
   const where = clauses.length ? ` WHERE ${clauses.join(" AND ")}` : "";
-  const res = await c.var.DB.prepare(
-    `SELECT ${PENALTY_HEADER_COLS} FROM worker_penalties${where}
-      ORDER BY penalty_date DESC, penalty_no DESC LIMIT 500`,
-  )
-    .bind(...binds)
-    .all<PenaltyRow>();
-  const data = await loadPenaltiesWithLines(c.var.DB, res.results ?? []);
+  // Fresh: the list is what the operator re-reads right after an action.
+  const headerRows = await freshAll<PenaltyRow>(
+    c.var.DB,
+    c.var.DB.prepare(
+      `SELECT ${PENALTY_HEADER_COLS} FROM worker_penalties${where}
+        ORDER BY penalty_date DESC, penalty_no DESC LIMIT 500`,
+    ).bind(...binds),
+  );
+  const data = await loadPenaltiesWithLines(c.var.DB, headerRows);
 
   // Status counts over the whole table, so the filter chips can show them.
-  const countRes = await c.var.DB.prepare(
-    "SELECT status, COUNT(*) AS n FROM worker_penalties GROUP BY status",
-  ).all<{ status: string; n: number | string }>();
+  const countRows = await freshAll<{ status: string; n: number | string }>(
+    c.var.DB,
+    c.var.DB.prepare("SELECT status, COUNT(*) AS n FROM worker_penalties GROUP BY status"),
+  );
   const counts: Record<string, number> = {};
-  for (const r of countRes.results ?? []) counts[r.status] = Number(r.n) || 0;
+  for (const r of countRows) counts[r.status] = Number(r.n) || 0;
 
   return c.json({ success: true, data, total: data.length, counts });
 });
@@ -578,9 +591,9 @@ app.post("/:id/approve", async (c) => {
   if (!before) return c.json({ success: false, error: "Not found" }, 404);
   if (before.status !== PENALTY_PENDING) return conflict(c, "Only a penalty pending approval can be approved.");
   const userId = ctxGet(c, "userId");
-  if (userId && before.createdBy && userId === before.createdBy) {
+  if (selfApprovalBlocked(userId, before.createdBy, ctxGet(c, "userRole"))) {
     return c.json(
-      { success: false, error: "You raised this penalty, so someone else has to approve it." },
+      { success: false, error: "You raised this penalty, so someone else (or a Super Admin) has to approve it." },
       403,
     );
   }

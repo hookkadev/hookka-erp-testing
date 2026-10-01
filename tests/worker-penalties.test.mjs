@@ -52,6 +52,15 @@ test("the approval month is Malaysia's date, not UTC's", () => {
   assert.equal(lib.todayYmdMalaysia(new Date("2026-09-30T15:59:00Z")), "2026-09-30");
 });
 
+test("the raiser cannot approve their own penalty, unless they are a Super Admin", () => {
+  assert.equal(lib.selfApprovalBlocked("u1", "u1", "HR"), true);
+  assert.equal(lib.selfApprovalBlocked("u1", "u1", "OFFICE"), true);
+  assert.equal(lib.selfApprovalBlocked("u1", "u1", "ADMIN"), true);
+  assert.equal(lib.selfApprovalBlocked("u1", "u1", "SUPER_ADMIN"), false);
+  assert.equal(lib.selfApprovalBlocked("u1", "u1", "super_admin"), false);
+  assert.equal(lib.selfApprovalBlocked("u2", "u1", "HR"), false, "a second person is always fine");
+});
+
 // ---- 2. the deduction ------------------------------------------------------
 test("a penalty comes off after statutory, with the advance, and is not clamped", () => {
   // gross 2,000.00, statutory 250.00, advance 300.00, penalty 150.00
@@ -107,6 +116,10 @@ function makeDb({ headers, lines, payslips }) {
       }
       if (/SELECT id, employeeId FROM payslips WHERE period = \?/.test(sql)) {
         return { results: payslips.filter((p) => p.period === args[0]) };
+      }
+      if (/COUNT\(\*\) AS total, COUNT\(posted_at\) AS posted/.test(sql)) {
+        const mine = [...L.values()].filter((l) => l.penalty_id === args[0]);
+        return { results: [{ total: mine.length, posted: mine.filter((l) => l.posted_at).length }] };
       }
       throw new Error(`unexpected all(): ${sql}`);
     },
@@ -188,6 +201,28 @@ test("a month with no penalties posts nothing and touches nothing", async () => 
   const db = makeDb({ headers: [], lines: [], payslips: [] });
   assert.deepEqual(await lib.postPenaltiesForPeriod(db, "2026-10", true), { posted: 0, rolled: 0 });
   assert.deepEqual(await lib.postPenaltiesForPeriod(db, "bad", true), { posted: 0, rolled: 0 });
+});
+
+// ---- 4b. fresh reads ---------------------------------------------------------
+test("payroll reads go through batch (uncached by Hyperdrive) when the DB has it", async () => {
+  const calls = [];
+  const stmt = {
+    async all() { calls.push("all"); return { results: [{ period: "2026-09" }] }; },
+    async first() { return null; },
+    async run() { return {}; },
+  };
+  const withBatch = {
+    prepare: () => ({ ...stmt, bind: () => stmt }),
+    async batch(stmts) { calls.push(`batch:${stmts.length}`); return [{ results: [{ period: "2026-10" }] }]; },
+  };
+  const locked = await lib.loadLockedPayrollPeriods(withBatch);
+  assert.deepEqual([...locked], ["2026-10"], "the batch (fresh) result is used");
+  assert.deepEqual(calls, ["batch:1"], "no plain cached read was issued");
+
+  const noBatch = { prepare: () => ({ ...stmt, bind: () => stmt }) };
+  calls.length = 0;
+  assert.deepEqual([...(await lib.loadLockedPayrollPeriods(noBatch))], ["2026-09"]);
+  assert.deepEqual(calls, ["all"], "a stub without batch falls back to a plain read");
 });
 
 // ---- 5. rights -------------------------------------------------------------

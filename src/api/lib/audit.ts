@@ -90,8 +90,9 @@ export async function buildAuditStatement(
 ): Promise<D1PreparedStatement | null> {
   try {
     const get = (c as unknown as { get: (k: string) => string | undefined }).get;
-    const actorUserId = get.call(c, "userId") ?? null;
-    const actorRole = get.call(c, "userRole") ?? null;
+    // Staging "view as" (never PR into main): the journal keeps the real account.
+    const actorUserId = get.call(c, "stagingRealUserId") ?? get.call(c, "userId") ?? null;
+    const actorRole = get.call(c, "stagingRealRole") ?? get.call(c, "userRole") ?? null;
 
     const ip =
       c.req.header("cf-connecting-ip") ??
@@ -157,8 +158,9 @@ export async function emitAudit(
 ): Promise<void> {
   try {
     const get = (c as unknown as { get: (k: string) => string | undefined }).get;
-    const actorUserId = get.call(c, "userId") ?? null;
-    const actorRole = get.call(c, "userRole") ?? null;
+    // Staging "view as" (never PR into main): the journal keeps the real account.
+    const actorUserId = get.call(c, "stagingRealUserId") ?? get.call(c, "userId") ?? null;
+    const actorRole = get.call(c, "stagingRealRole") ?? get.call(c, "userRole") ?? null;
 
     // Best-effort displayName lookup. We snapshot it so the journal still
     // renders if the user is later deleted.

@@ -10,8 +10,8 @@
 //
 // Kept out of employees.tsx on purpose — that file is past 11k lines.
 // ---------------------------------------------------------------------------
-import { useCallback, useMemo, useState } from "react";
-import { AlertTriangle, Plus, Search, X, Pencil, Trash2, Send, Check, Undo2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, Plus, Search, X, Pencil, Trash2, Send, Check, Undo2, ImagePlus } from "lucide-react";
 import { useCachedJson, invalidateCachePrefix } from "@/lib/cached-fetch";
 import { usePermissions } from "@/lib/use-permission";
 import { useToast } from "@/components/ui/toast";
@@ -487,7 +487,8 @@ function PenaltyDetail({
       footer={footer}
     >
       {confirmDialog}
-      <div className="space-y-5">
+      {/* Same body padding as the Delivery Order drawer. */}
+      <div className="px-6 py-5 space-y-5 max-md:px-4 max-sm:px-3">
         {p.rejectedReason && isDraft && (
           <div className="rounded-md border border-[#E8C9C3] bg-[#FBEFEC] px-3 py-2 text-xs text-[#9A3A2D]">
             <span className="font-semibold">Rejected:</span> {p.rejectedReason}
@@ -580,6 +581,30 @@ function Field({ label, value, wide, full }: { label: string; value: string; wid
 // ===========================================================================
 type DraftLine = { workerId: string; amountRM: number | null };
 
+/**
+ * Upload photos picked before the penalty existed, now that it has an id.
+ * Same /api/files store and PHOTO__ prefix ResourceDocuments uses, so they
+ * show up in the detail drawer exactly like ones uploaded there. Returns the
+ * names that failed, with the reason.
+ */
+async function uploadPenaltyPhotos(penaltyId: string, files: File[]): Promise<string[]> {
+  const failed: string[] = [];
+  for (const file of files) {
+    const fd = new FormData();
+    fd.append("file", new File([file], `PHOTO__${file.name}`, { type: file.type }));
+    fd.append("resourceType", "worker-penalty");
+    fd.append("resourceId", penaltyId);
+    try {
+      const res = await fetch("/api/files", { method: "POST", body: fd });
+      const j = (await res.json().catch(() => null)) as { success?: boolean; error?: string } | null;
+      if (!res.ok || !j?.success) failed.push(`${file.name}: ${j?.error || `HTTP ${res.status}`}`);
+    } catch {
+      failed.push(`${file.name}: network error`);
+    }
+  }
+  return failed;
+}
+
 function PenaltyEditor({
   initial,
   workers,
@@ -634,6 +659,20 @@ function PenaltyEditor({
 
   const totalSen = lines.reduce((s, l) => s + (l.amountRM === null ? 0 : roundSen(l.amountRM * 100)), 0);
 
+  // ---- photos picked on a NEW penalty (uploaded once it has an id) ---------
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const [pendingPhotos, setPendingPhotos] = useState<File[]>([]);
+  const previews = useMemo(
+    () => pendingPhotos.map((file) => ({ file, url: URL.createObjectURL(file) })),
+    [pendingPhotos],
+  );
+  useEffect(() => () => previews.forEach((p) => URL.revokeObjectURL(p.url)), [previews]);
+  const pickPhotos = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const picked = Array.from(e.target.files ?? []).filter((f) => f.type.startsWith("image/"));
+    if (photoInputRef.current) photoInputRef.current.value = "";
+    if (picked.length) setPendingPhotos((prev) => [...prev, ...picked]);
+  };
+
   const save = async (submit: boolean) => {
     const payloadLines = lines.map((l) => ({
       workerId: l.workerId,
@@ -660,13 +699,19 @@ function PenaltyEditor({
     if (result.ok && initial && submit) {
       result = await sendJson(`/api/worker-penalties/${initial.id}/submit`, "POST");
     }
-    setSaving(false);
     if (!result.ok || !result.data.data) {
+      setSaving(false);
       toast.error(result.data.error || "Could not save the penalty.");
       return;
     }
+    const saved = result.data.data;
+    // The penalty is saved either way; a photo that fails is reported by name
+    // and can be re-uploaded from the detail drawer.
+    const failedPhotos = pendingPhotos.length ? await uploadPenaltyPhotos(saved.id, pendingPhotos) : [];
+    setSaving(false);
     toast.success(submit ? "Penalty submitted for approval." : "Draft saved.");
-    onSaved(result.data.data);
+    for (const f of failedPhotos) toast.error(`Photo not uploaded: ${f}`);
+    onSaved(saved);
   };
 
   return (
@@ -690,7 +735,7 @@ function PenaltyEditor({
         </div>
       }
     >
-      <div className="space-y-6">
+      <div className="px-6 py-5 space-y-6 max-md:px-4 max-sm:px-3">
         {/* 1. The order */}
         <section>
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[#6B5C32]">1. Production Order</h3>
@@ -909,9 +954,49 @@ function PenaltyEditor({
           )}
         </section>
 
-        <p className="text-[11px] text-[#9CA3AF]">
-          Photos can be attached once the penalty is saved — open it from the list.
-        </p>
+        {/* 4. Evidence */}
+        {initial ? (
+          <ResourceDocuments
+            resourceType="worker-penalty"
+            resourceId={initial.id}
+            title="4. Photos"
+            hint="Evidence of the mistake — the damaged piece, the wrong label, the QC finding."
+            photosOnly
+            emptyText="No photos yet."
+          />
+        ) : (
+          <section className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-[#6B5C32]">4. Photos</h3>
+                <p className="text-[11px] text-[#9CA3AF]">Uploaded when you save. The damaged piece, the wrong label, the QC finding.</p>
+              </div>
+              <input ref={photoInputRef} type="file" accept="image/*" multiple className="hidden" onChange={pickPhotos} />
+              <Button type="button" variant="outline" onClick={() => photoInputRef.current?.click()} disabled={saving}>
+                <ImagePlus className="h-4 w-4" /> Add Photos
+              </Button>
+            </div>
+            {previews.length === 0 ? (
+              <p className="rounded-md border border-dashed border-[#E2DDD8] py-4 text-center text-sm text-[#9CA3AF]">No photos yet.</p>
+            ) : (
+              <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-6">
+                {previews.map((p, i) => (
+                  <div key={p.url} className="group relative">
+                    <img src={p.url} alt={p.file.name} title={p.file.name} className="h-24 w-full rounded border border-[#E2DDD8] object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => setPendingPhotos((prev) => prev.filter((_, j) => j !== i))}
+                      title="Remove"
+                      className="absolute right-1 top-1 rounded bg-white/90 p-1 text-[#9A3A2D]"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
       </div>
     </DocumentDetailDrawer>
   );

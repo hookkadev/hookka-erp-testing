@@ -1,5 +1,5 @@
 // Settings → Email Reports (BUG-36). One card per email report: on/off, when
-// it goes out (daily / weekly / monthly at an SGT time), the PICs who receive
+// it goes out (daily / weekly / monthly at one or more SGT times), who receives
 // it, and a test send. Backed by GET/PUT /api/reports/settings
 // (kv_config['daily_report_settings']). The 15-minute cron in
 // .github/workflows/daily-reports.yml sends whatever is due.
@@ -9,15 +9,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { useToast } from "@/components/ui/toast";
-import { X } from "lucide-react";
-import { DEFAULT_TIMES, type Frequency } from "@/api/lib/report-settings";
+import { Plus, X } from "lucide-react";
+import { DEFAULT_TIMES, MAX_TIMES, type Frequency } from "@/api/lib/report-settings";
 
 type Kind = "brief" | "schedule" | "overdue" | "efficiency";
 type Setting = {
   enabled: boolean;
   recipients: string[];
   frequency: Frequency;
-  time: string;
+  times: string[];
   weekday: number;
   monthDay: number;
 };
@@ -48,6 +48,22 @@ const REPORTS: { kind: Kind; title: string; description: string }[] = [
 ];
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const FOCUS =
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6B5C32] focus-visible:ring-offset-1";
+const CONTROL = `h-9 rounded-md border border-[#E2DDD8] bg-white px-2 text-sm text-[#1F1D1B] ${FOCUS}`;
+const PANEL = "min-w-0 space-y-3 rounded-lg border border-[#E2DDD8] bg-[#FAF8F6] p-4";
+const PANEL_TITLE = "text-sm font-semibold text-[#1F1D1B]";
+const FIELD = "flex flex-col gap-1 text-xs text-[#6B7280]";
+const CHIP =
+  "inline-flex max-w-full items-center gap-1 rounded-full border border-[#E2DDD8] bg-white px-3 py-1 text-sm text-[#1F1D1B]";
+const CHIP_X = `shrink-0 cursor-pointer rounded-full p-0.5 text-[#6B7280] hover:bg-[#F0ECE9] hover:text-[#9A3A2D] ${FOCUS}`;
+
+/** "17:30" (stored, SGT) → "05:30 PM" (shown). */
+function fmtTime(t: string): string {
+  const [h, m] = t.split(":").map(Number);
+  return `${String(h % 12 || 12).padStart(2, "0")}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
+}
 
 // Loose shape of every response this page reads (settings / users / send).
 type ApiResp = {
@@ -150,7 +166,8 @@ function ReportCard({
   const [enabled, setEnabled] = useState(saved?.enabled ?? true);
   const [pics, setPics] = useState<string[]>(saved?.recipients ?? fallback);
   const [frequency, setFrequency] = useState<Frequency>(saved?.frequency ?? "daily");
-  const [time, setTime] = useState(saved?.time ?? DEFAULT_TIMES[report.kind]);
+  const [times, setTimes] = useState<string[]>(saved?.times ?? [DEFAULT_TIMES[report.kind]]);
+  const [newTime, setNewTime] = useState("");
   const [weekday, setWeekday] = useState(saved?.weekday ?? 1);
   const [monthDay, setMonthDay] = useState(saved?.monthDay ?? 1);
   const [draft, setDraft] = useState("");
@@ -161,7 +178,7 @@ function ReportCard({
     saved.enabled !== enabled ||
     saved.recipients.join(",") !== pics.join(",") ||
     saved.frequency !== frequency ||
-    saved.time !== time ||
+    saved.times.join(",") !== times.join(",") ||
     saved.weekday !== weekday ||
     saved.monthDay !== monthDay;
 
@@ -178,6 +195,12 @@ function ReportCard({
     setDraft("");
   }
 
+  function addTime() {
+    if (!newTime || times.includes(newTime)) return;
+    setTimes([...times, newTime].sort());
+    setNewTime("");
+  }
+
   async function save() {
     setBusy("save");
     try {
@@ -185,7 +208,7 @@ function ReportCard({
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          [report.kind]: { enabled, recipients: pics, frequency, time, weekday, monthDay },
+          [report.kind]: { enabled, recipients: pics, frequency, times, weekday, monthDay },
         }),
       });
       const j = (await r.json().catch(() => ({}))) as ApiResp;
@@ -229,126 +252,186 @@ function ReportCard({
             <CardTitle>{report.title}</CardTitle>
             <CardDescription>{report.description}</CardDescription>
           </div>
-          <label className="flex shrink-0 cursor-pointer items-center gap-2 text-sm">
+          <label className="flex shrink-0 cursor-pointer items-center gap-2 text-sm text-[#1F1D1B]">
             <input
               type="checkbox"
+              role="switch"
               checked={enabled}
               onChange={(e) => setEnabled(e.target.checked)}
-              className="h-4 w-4 accent-[#6B5C32]"
+              className={`h-4 w-4 accent-[#6B5C32] ${FOCUS}`}
             />
             {enabled ? "On" : "Off"}
           </label>
         </div>
       </CardHeader>
-      <CardContent className="space-y-3">
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          <span className="text-[#6B7280]">Send</span>
-          <select
-            aria-label="How often"
-            value={frequency}
-            onChange={(e) => setFrequency(e.target.value as Frequency)}
-            className="h-9 rounded-md border border-[#E2DDD8] bg-white px-2 text-sm text-[#1F1D1B] focus:outline-none focus:ring-2 focus:ring-[#6B5C32]"
+      <CardContent className="space-y-4">
+        <div className="grid gap-4 md:grid-cols-2">
+          <section aria-labelledby={`${report.kind}-schedule`} className={PANEL}>
+            <h3 id={`${report.kind}-schedule`} className={PANEL_TITLE}>
+              Schedule
+            </h3>
+            <div className="flex flex-wrap items-end gap-3">
+              <label className={FIELD}>
+                Frequency
+                <select
+                  value={frequency}
+                  onChange={(e) => setFrequency(e.target.value as Frequency)}
+                  className={CONTROL}
+                >
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                  <option value="monthly">Monthly</option>
+                </select>
+              </label>
+              {frequency === "weekly" && (
+                <label className={FIELD}>
+                  Day
+                  <select
+                    value={weekday}
+                    onChange={(e) => setWeekday(Number(e.target.value))}
+                    className={CONTROL}
+                  >
+                    {WEEKDAYS.map((d, i) => (
+                      <option key={d} value={i + 1}>
+                        {d}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              {frequency === "monthly" && (
+                <label className={FIELD}>
+                  Day of month
+                  <select
+                    value={monthDay}
+                    onChange={(e) => setMonthDay(Number(e.target.value))}
+                    className={CONTROL}
+                  >
+                    {Array.from({ length: 28 }, (_, i) => i + 1).map((d) => (
+                      <option key={d} value={d}>
+                        {d}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+            </div>
+            <div className="space-y-2">
+              <p className="text-xs text-[#6B7280]">Send times (Malaysia time)</p>
+              <ul className="flex flex-wrap gap-2" aria-label="Send times">
+                {times.map((t) => (
+                  <li key={t} className={CHIP}>
+                    {fmtTime(t)}
+                    {times.length > 1 && (
+                      <button
+                        type="button"
+                        aria-label={`Remove ${fmtTime(t)}`}
+                        onClick={() => setTimes(times.filter((x) => x !== t))}
+                        className={CHIP_X}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              {times.length < MAX_TIMES ? (
+                <div className="flex flex-wrap gap-2">
+                  <input
+                    type="time"
+                    aria-label="New send time"
+                    step={900}
+                    value={newTime}
+                    onChange={(e) => setNewTime(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        addTime();
+                      }
+                    }}
+                    className={CONTROL}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={!newTime || times.includes(newTime)}
+                    onClick={addTime}
+                  >
+                    <Plus className="h-4 w-4" aria-hidden="true" />
+                    Add time
+                  </Button>
+                </div>
+              ) : (
+                <p className="text-xs text-[#6B7280]">Up to {MAX_TIMES} times.</p>
+              )}
+            </div>
+          </section>
+
+          <section aria-labelledby={`${report.kind}-recipients`} className={PANEL}>
+            <h3 id={`${report.kind}-recipients`} className={PANEL_TITLE}>
+              Recipients
+            </h3>
+            {!saved && (
+              <p className="text-xs text-[#6B7280]">
+                Not set up yet. These are the people it goes to today. Save to keep this list.
+              </p>
+            )}
+            {pics.length === 0 ? (
+              <p className="text-sm text-[#9A3A2D]">No recipients. This report will not be sent.</p>
+            ) : (
+              <ul className="flex flex-wrap gap-2" aria-label="Recipients">
+                {pics.map((e) => {
+                  const label = nameOf(e) ? `${nameOf(e)} · ${e}` : e;
+                  return (
+                    <li key={e} className={CHIP} title={label}>
+                      <span className="min-w-0 max-w-[16rem] truncate">{label}</span>
+                      <button
+                        type="button"
+                        aria-label={`Remove ${e}`}
+                        onClick={() => setPics(pics.filter((x) => x !== e))}
+                        className={CHIP_X}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            <div className="flex gap-2">
+              <Input
+                list="report-pic-users"
+                aria-label="Add recipient"
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    add();
+                  }
+                }}
+                placeholder="Add recipient: pick a user or type an email"
+                className="min-w-0 flex-1"
+              />
+              <Button type="button" variant="outline" disabled={!draft.trim()} onClick={add}>
+                Add
+              </Button>
+            </div>
+          </section>
+        </div>
+
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            disabled={busy !== null || pics.length === 0}
+            onClick={sendTest}
           >
-            <option value="daily">Daily</option>
-            <option value="weekly">Weekly</option>
-            <option value="monthly">Monthly</option>
-          </select>
-          {frequency === "weekly" && (
-            <select
-              aria-label="Day of the week"
-              value={weekday}
-              onChange={(e) => setWeekday(Number(e.target.value))}
-              className="h-9 rounded-md border border-[#E2DDD8] bg-white px-2 text-sm text-[#1F1D1B] focus:outline-none focus:ring-2 focus:ring-[#6B5C32]"
-            >
-              {WEEKDAYS.map((d, i) => (
-                <option key={d} value={i + 1}>
-                  on {d}
-                </option>
-              ))}
-            </select>
-          )}
-          {frequency === "monthly" && (
-            <select
-              aria-label="Day of the month"
-              value={monthDay}
-              onChange={(e) => setMonthDay(Number(e.target.value))}
-              className="h-9 rounded-md border border-[#E2DDD8] bg-white px-2 text-sm text-[#1F1D1B] focus:outline-none focus:ring-2 focus:ring-[#6B5C32]"
-            >
-              {Array.from({ length: 28 }, (_, i) => i + 1).map((d) => (
-                <option key={d} value={d}>
-                  on day {d}
-                </option>
-              ))}
-            </select>
-          )}
-          <span className="text-[#6B7280]">at</span>
-          <input
-            type="time"
-            aria-label="Time"
-            required
-            step={900}
-            value={time}
-            onChange={(e) => e.target.value && setTime(e.target.value)}
-            className="h-9 rounded-md border border-[#E2DDD8] bg-white px-2 text-sm text-[#1F1D1B] focus:outline-none focus:ring-2 focus:ring-[#6B5C32]"
-          />
-        </div>
-        {!saved && (
-          <p className="text-xs text-[#8A7F73]">
-            Not set up yet. It currently goes to the people listed below. Save to make this list
-            its own.
-          </p>
-        )}
-        <div className="flex flex-wrap gap-2">
-          {pics.length === 0 && (
-            <span className="text-sm text-[#9A3A2D]">No PIC. This report will not be sent.</span>
-          )}
-          {pics.map((e) => (
-            <span
-              key={e}
-              className="inline-flex items-center gap-1 rounded-full bg-[#F0ECE9] px-3 py-1 text-xs text-[#1F1D1B]"
-            >
-              {nameOf(e) ? `${nameOf(e)} · ${e}` : e}
-              <button
-                type="button"
-                aria-label={`Remove ${e}`}
-                onClick={() => setPics(pics.filter((x) => x !== e))}
-                className="cursor-pointer text-[#6B7280] hover:text-[#9A3A2D]"
-              >
-                <X className="h-3 w-3" />
-              </button>
-            </span>
-          ))}
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Input
-            list="report-pic-users"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                add();
-              }
-            }}
-            placeholder="Add PIC: pick a user or type an email"
-            className="max-w-sm"
-          />
-          <Button type="button" variant="outline" onClick={add}>
-            Add
+            {busy === "test" ? "Sending…" : "Send test now"}
           </Button>
-          <div className="ml-auto flex gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              disabled={busy !== null || pics.length === 0}
-              onClick={sendTest}
-            >
-              {busy === "test" ? "Sending…" : "Send test now"}
-            </Button>
-            <Button type="button" variant="primary" disabled={busy !== null || !dirty} onClick={save}>
-              {busy === "save" ? "Saving…" : "Save"}
-            </Button>
-          </div>
+          <Button type="button" variant="primary" disabled={busy !== null || !dirty} onClick={save}>
+            {busy === "save" ? "Saving…" : "Save"}
+          </Button>
         </div>
       </CardContent>
     </Card>

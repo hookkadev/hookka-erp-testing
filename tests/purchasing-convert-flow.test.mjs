@@ -1417,3 +1417,80 @@ test("R2 race — posting a DRAFT goes through the same guard and rolls back who
   );
   assert.equal(db.tables.rm_batches.length, stockAfterFirst, "no stock posted for the refused GRN");
 });
+
+// ---------------------------------------------------------------------------
+// GRN number collision. generateGrnNumber reads the last number and adds one,
+// so two GRNs created in the same instant pick the same number and the second
+// INSERT hits ux_grns_grn_number. Seen live on staging 2026-09-30 as a raw 500
+// "duplicate key value violates unique constraint". The route now reads the
+// next number and retries. The mock has no unique index, so the collision is
+// injected: the batch fails the way Postgres does, as if another GRN had just
+// committed the number this request picked.
+// ---------------------------------------------------------------------------
+function collideOnGrnNumber(db, times) {
+  const d = new Date();
+  const prefix = `GRN-${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}-`;
+  let taken = 0;
+  let left = times;
+  const realPrepare = db.prepare;
+  db.prepare = (rawSql) => {
+    const stmt = realPrepare(rawSql);
+    if (/FROM grns WHERE grnNumber LIKE/i.test(stmt.sql)) {
+      stmt.first = async () => (taken ? { grnNumber: prefix + String(taken).padStart(3, "0") } : null);
+    }
+    return stmt;
+  };
+  const realBatch = db.batch;
+  db.batch = async (stmts) => {
+    if (left > 0 && stmts.some((s) => /^INSERT INTO grns /i.test(s.sql))) {
+      left -= 1;
+      taken += 1; // the other GRN now owns the number this request picked
+      throw new Error('duplicate key value violates unique constraint "ux_grns_grn_number"');
+    }
+    return realBatch(stmts);
+  };
+  return prefix;
+}
+
+const createFoamReceipt = (db) =>
+  mount(grnApp, db).request("/", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      poId: "po-9",
+      receivedBy: "Ahmad",
+      arrival_state: "ARRIVED",
+      items: [
+        { poItemIndex: 0, materialCode: "FOAM-9", materialName: "FOAM-9 - Foam block", receivedQty: 5, acceptedQty: 5, rejectedQty: 0, unitPrice: 10000 },
+      ],
+    }),
+  });
+
+test("GRN number collision: the create retries with the next number instead of a 500", async () => {
+  const db = makeDb();
+  seedOpenPo(db);
+  db.tables.raw_materials.push({ id: "rm-9", itemCode: "FOAM-9", description: "Foam block", balanceQty: 0 });
+  const prefix = collideOnGrnNumber(db, 1);
+
+  const res = await createFoamReceipt(db);
+  assert.equal(res.status, 201, "a number collision must be retried, not surface as a 500");
+  assert.equal(db.tables.grns.length, 1, "exactly one GRN written");
+  assert.equal(db.tables.grns[0].grnNumber, prefix + "002", "the retry takes the next number");
+  const poi = db.tables.purchase_order_items.find((r) => r.id === "poi-9");
+  assert.equal(Number(poi.receivedQty), 5, "the failed attempt rolled back, so the PO line counts the receipt once");
+  assert.equal(db.tables.rm_batches.length, 1, "stock posted once");
+});
+
+test("GRN number collision: after the retries run out the answer is a clear 409 and nothing is written", async () => {
+  const db = makeDb();
+  seedOpenPo(db);
+  db.tables.raw_materials.push({ id: "rm-9", itemCode: "FOAM-9", description: "Foam block", balanceQty: 0 });
+  collideOnGrnNumber(db, 99);
+
+  const res = await createFoamReceipt(db);
+  assert.equal(res.status, 409);
+  assert.match((await res.json()).error, /took this GRN number\. Please try again/);
+  assert.equal(db.tables.grns.length, 0);
+  assert.equal(Number(db.tables.purchase_order_items.find((r) => r.id === "poi-9").receivedQty), 0);
+  assert.equal(db.tables.rm_batches.length, 0);
+});

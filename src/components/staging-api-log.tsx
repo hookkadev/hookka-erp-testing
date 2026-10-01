@@ -43,14 +43,14 @@ function ApiLogDrawer() {
   };
 
   return (
-    <div className="relative print:hidden">
+    <div className="relative shrink-0 print:hidden">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-label={open ? "Close API log" : "Open API log"}
         aria-expanded={open}
         title="API log (staging)"
-        className="flex h-8 items-center gap-1.5 rounded-full bg-amber-500 px-3 text-xs font-semibold text-white hover:bg-amber-600"
+        className="flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-amber-500 px-3 text-xs font-semibold text-white hover:bg-amber-600"
       >
         <Activity className="h-4 w-4" />
         API{failures > 0 && <span className="rounded-full bg-red-600 px-1.5">{failures}</span>}

@@ -475,6 +475,19 @@ async function generateGrnNumber(db: D1Database): Promise<string> {
   return `${prefix}${String(seq).padStart(3, "0")}`;
 }
 
+// Two GRNs created in the same instant both read the same last number above
+// and the second INSERT hits ux_grns_grn_number. Same answer as the PO number
+// (purchase-orders.ts 5.3): the create route catches the collision, reads the
+// next number and retries.
+const GRN_NUMBER_RETRY_LIMIT = 5;
+const GRN_NUMBER_BUSY_ERROR =
+  "Another GRN was being saved at the same moment and took this GRN number. Please try again.";
+
+function isGrnNumberCollision(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : String(e);
+  return /grn_?number/i.test(msg) && /duplicate key|23505|UNIQUE constraint failed/i.test(msg);
+}
+
 async function fetchGRN(db: D1Database, id: string) {
   const [grn, itemsRes] = await Promise.all([
     db.prepare("SELECT * FROM grns WHERE id = ?").bind(id).first<GRNRow>(),
@@ -1565,7 +1578,7 @@ app.post("/", async (c) => {
     }
 
     const grnId = genGrnId();
-    const grnNumber = await generateGrnNumber(c.var.DB);
+    let grnNumber = await generateGrnNumber(c.var.DB);
     const receiveDate =
       body.receiveDate || new Date().toISOString().split("T")[0];
     const finalQcStatus = (qcStatus as string) || "PENDING";
@@ -1851,129 +1864,142 @@ app.post("/", async (c) => {
     }
     if (!purchaseOrgCode) purchaseOrgCode = "HOOKKA";
 
-    const statements: D1PreparedStatement[] = [
-      c.var.DB.prepare(
-        `INSERT INTO grns (id, grnNumber, poId, poNumber, supplierId,
-           supplierName, receiveDate, receivedBy, totalAmount, qcStatus,
-           status, notes,
-           arrival_state, shipping_method, carrier_name, tracking_number,
-           container_number, expected_arrival, shipped_date, actual_arrival,
-           customs_status, customs_clearance_date,
-           shipping_cost_sen, customs_duty_sen, exchange_rate, currency,
-           landed_cost_sen, supplier_do_no, purchase_org_code)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).bind(
-        grnId,
-        grnNumber,
-        grnPoId,
-        grnPoNumber,
-        grnSupplierId,
-        grnSupplierName,
-        receiveDate,
-        receivedBy || "",
-        totalAmount,
-        finalQcStatus,
-        initialStatus,
-        notes || "",
-        // arrival pipeline
-        initialArrivalState,
-        body.shipping_method ?? null,
-        body.carrier_name ?? null,
-        body.tracking_number ?? null,
-        body.container_number ?? null,
-        body.expected_arrival ?? null,
-        body.shipped_date ?? null,
-        body.actual_arrival ?? null,
-        body.customs_status ?? null,
-        body.customs_clearance_date ?? null,
-        body.shipping_cost_sen ?? 0,
-        body.customs_duty_sen ?? 0,
-        body.exchange_rate ?? null,
-        body.currency ?? null,
-        body.landed_cost_sen ?? 0,
-        body.supplier_do_no ?? null,
-        purchaseOrgCode,
-      ),
-      ...grnItems.map((item) =>
-        c.var.DB.prepare(
-          `INSERT INTO grn_items (grnId, poItemIndex, po_id, po_item_id, materialCode, materialName,
-             orderedQty, receivedQty, acceptedQty, rejectedQty,
-             rejectionReason, unitPrice)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ).bind(
-          grnId,
-          item.poItemIndex,
-          item.poId ?? null,
-          item.poItemId ?? null,
-          item.materialCode,
-          item.materialName,
-          item.orderedQty,
-          item.receivedQty,
-          item.acceptedQty,
-          item.rejectedQty,
-          item.rejectionReason,
-          item.unitPrice,
-        ),
-      ),
-    ];
-
-    // T-006 R3 — a born-POSTED GRN's stock postings and PO-counter updates
-    // join the SAME batch as the header+lines insert, instead of three
-    // separate db.batch() calls where a failure between them left a posted
-    // GRN with no stock or no PO draw-down and no way to retry. Built from
-    // the in-memory grnItems (not yet inserted) rather than re-querying —
-    // see buildGRNStockStatements/buildPOCounterStatements.
     let postSummary:
       | { batchesCreated: number; ledgerEntries: number; unresolvedLines: unknown[] }
       | undefined;
     let poIdsToRecompute: string[] = [];
-    if (initialStatus === "POSTED") {
-      const stockBuilt = await buildGRNStockStatements(c.var.DB, {
-        grnId,
-        grnNumber,
-        receiveDate,
-        items: grnItems.map((i) => ({
-          acceptedQty: i.acceptedQty,
-          materialCode: i.materialCode,
-          materialName: i.materialName,
-          unitPrice: i.unitPrice,
-          poItemId: i.poItemId,
-        })),
-      });
-      statements.push(...stockBuilt.statements);
-      postSummary = {
-        batchesCreated: stockBuilt.batchesCreated,
-        ledgerEntries: stockBuilt.ledgerEntries,
-        unresolvedLines: stockBuilt.unresolvedLines,
-      };
+    for (let attempt = 1; ; attempt++) {
+      const statements: D1PreparedStatement[] = [
+        c.var.DB.prepare(
+          `INSERT INTO grns (id, grnNumber, poId, poNumber, supplierId,
+             supplierName, receiveDate, receivedBy, totalAmount, qcStatus,
+             status, notes,
+             arrival_state, shipping_method, carrier_name, tracking_number,
+             container_number, expected_arrival, shipped_date, actual_arrival,
+             customs_status, customs_clearance_date,
+             shipping_cost_sen, customs_duty_sen, exchange_rate, currency,
+             landed_cost_sen, supplier_do_no, purchase_org_code)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                   ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).bind(
+          grnId,
+          grnNumber,
+          grnPoId,
+          grnPoNumber,
+          grnSupplierId,
+          grnSupplierName,
+          receiveDate,
+          receivedBy || "",
+          totalAmount,
+          finalQcStatus,
+          initialStatus,
+          notes || "",
+          // arrival pipeline
+          initialArrivalState,
+          body.shipping_method ?? null,
+          body.carrier_name ?? null,
+          body.tracking_number ?? null,
+          body.container_number ?? null,
+          body.expected_arrival ?? null,
+          body.shipped_date ?? null,
+          body.actual_arrival ?? null,
+          body.customs_status ?? null,
+          body.customs_clearance_date ?? null,
+          body.shipping_cost_sen ?? 0,
+          body.customs_duty_sen ?? 0,
+          body.exchange_rate ?? null,
+          body.currency ?? null,
+          body.landed_cost_sen ?? 0,
+          body.supplier_do_no ?? null,
+          purchaseOrgCode,
+        ),
+        ...grnItems.map((item) =>
+          c.var.DB.prepare(
+            `INSERT INTO grn_items (grnId, poItemIndex, po_id, po_item_id, materialCode, materialName,
+               orderedQty, receivedQty, acceptedQty, rejectedQty,
+               rejectionReason, unitPrice)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          ).bind(
+            grnId,
+            item.poItemIndex,
+            item.poId ?? null,
+            item.poItemId ?? null,
+            item.materialCode,
+            item.materialName,
+            item.orderedQty,
+            item.receivedQty,
+            item.acceptedQty,
+            item.rejectedQty,
+            item.rejectionReason,
+            item.unitPrice,
+          ),
+        ),
+      ];
 
-      const counterBuilt = await buildPOCounterStatements(
-        c.var.DB,
-        grnId,
-        grnPoId,
-        grnItems.map((i) => ({
-          poItemIndex: i.poItemIndex,
-          acceptedQty: i.acceptedQty,
-          receivedQty: i.receivedQty,
-          poId: i.poId,
-          poItemId: i.poItemId,
-        })),
-      );
-      statements.push(...counterBuilt.statements);
-      poIdsToRecompute = counterBuilt.affectedPoIds;
-    }
+      // T-006 R3 — a born-POSTED GRN's stock postings and PO-counter updates
+      // join the SAME batch as the header+lines insert, instead of three
+      // separate db.batch() calls where a failure between them left a posted
+      // GRN with no stock or no PO draw-down and no way to retry. Built from
+      // the in-memory grnItems (not yet inserted) rather than re-querying —
+      // see buildGRNStockStatements/buildPOCounterStatements.
+      if (initialStatus === "POSTED") {
+        const stockBuilt = await buildGRNStockStatements(c.var.DB, {
+          grnId,
+          grnNumber,
+          receiveDate,
+          items: grnItems.map((i) => ({
+            acceptedQty: i.acceptedQty,
+            materialCode: i.materialCode,
+            materialName: i.materialName,
+            unitPrice: i.unitPrice,
+            poItemId: i.poItemId,
+          })),
+        });
+        statements.push(...stockBuilt.statements);
+        postSummary = {
+          batchesCreated: stockBuilt.batchesCreated,
+          ledgerEntries: stockBuilt.ledgerEntries,
+          unresolvedLines: stockBuilt.unresolvedLines,
+        };
 
-    try {
-      await c.var.DB.batch(statements);
-    } catch (e) {
-      // T-006 R2 — the guarded counter statement raised: another receipt took
-      // the PO line between the over-receipt check above and this batch. The
-      // transaction rolled back, so nothing of this GRN was written.
-      if (isPoOverReceiptRace(e)) {
-        return c.json({ success: false, error: PO_OVER_RECEIPT_RACE_ERROR }, 409);
+        const counterBuilt = await buildPOCounterStatements(
+          c.var.DB,
+          grnId,
+          grnPoId,
+          grnItems.map((i) => ({
+            poItemIndex: i.poItemIndex,
+            acceptedQty: i.acceptedQty,
+            receivedQty: i.receivedQty,
+            poId: i.poId,
+            poItemId: i.poItemId,
+          })),
+        );
+        statements.push(...counterBuilt.statements);
+        poIdsToRecompute = counterBuilt.affectedPoIds;
       }
-      throw e;
+
+      try {
+        await c.var.DB.batch(statements);
+        break;
+      } catch (e) {
+        // T-006 R2 — the guarded counter statement raised: another receipt took
+        // the PO line between the over-receipt check above and this batch. The
+        // transaction rolled back, so nothing of this GRN was written.
+        if (isPoOverReceiptRace(e)) {
+          return c.json({ success: false, error: PO_OVER_RECEIPT_RACE_ERROR }, 409);
+        }
+        // Another GRN created in the same instant took this number (both read
+        // the same last number). The batch rolled back, so read the next
+        // number and rebuild: the number is in the header and the stock notes.
+        if (isGrnNumberCollision(e)) {
+          if (attempt < GRN_NUMBER_RETRY_LIMIT) {
+            grnNumber = await generateGrnNumber(c.var.DB);
+            continue;
+          }
+          return c.json({ success: false, error: GRN_NUMBER_BUSY_ERROR }, 409);
+        }
+        throw e;
+      }
     }
 
     // Status recompute reads the receivedQty the batch above just committed —
