@@ -6,7 +6,7 @@
 // from anyone else). While active the pill turns red. Picking wipes the API
 // cache and reloads so every screen re-reads.
 import { useEffect, useState } from "react";
-import { Eye } from "lucide-react";
+import { ChevronDown, Eye } from "lucide-react";
 import { getCurrentUser, wipeApiCache } from "@/lib/auth";
 import { roleShort } from "@/lib/role-labels";
 import { readStagingViewAs, STAGING_VIEW_AS_HEADER, writeStagingViewAs, type ViewAs } from "@/lib/staging-view-as";
@@ -49,12 +49,18 @@ function Picker({ active }: { active: ViewAs | null }) {
   return (
     <label
       title={TIP}
-      className={`flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-3 text-xs font-semibold print:hidden ${
+      className={`relative flex h-9 shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full px-3 text-xs font-semibold print:hidden ${
         active ? "bg-red-600 text-white" : "bg-amber-100 text-amber-800"
       }`}
     >
       <Eye className="h-4 w-4 shrink-0" />
       <span className="hidden xl:inline">{active ? "Viewing as" : "View as"}</span>
+      <span className="max-w-[8rem] truncate xl:max-w-[12rem]">
+        {active ? `${active.name} · ${roleShort(active.role)}` : "Me"}
+      </span>
+      <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+      {/* Native select over the whole pill, invisible: the pill sizes to the
+          picked name above, not to the longest name in the list. */}
       <select
         value={active?.id ?? ""}
         onChange={(e) => {
@@ -62,7 +68,7 @@ function Picker({ active }: { active: ViewAs | null }) {
           apply(u ? { id: u.id, role: u.role, name: u.displayName || u.email } : null);
         }}
         aria-label="View as user"
-        className="max-w-[9rem] cursor-pointer truncate bg-transparent font-semibold outline-none xl:max-w-[14rem] [&>option]:text-stone-900"
+        className="absolute inset-0 cursor-pointer opacity-0"
       >
         <option value="">Me</option>
         {active && !users.some((u) => u.id === active.id) && (
