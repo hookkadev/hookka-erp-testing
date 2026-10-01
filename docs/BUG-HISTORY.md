@@ -63,6 +63,22 @@ Entries themselves stay newest-first.
 
 ---
 
+## BUG-2026-10-01-247 — Edit BOM's WIP tree lost its layers: every row read "{DIVAN_HEIGHT} Divan- {SI…" `bom` `ui-frontend` 🟢
+
+🟢 **Fixed** (branch `fix/bom-editor-layered` → `main`) · Reported by the owner, 2026-10-01.
+
+**What happened.** The Edit BOM WIP tab showed the tree as a flat list with a 3px colour bar. Every row was the raw code template, truncated ("{DIVAN_HEIGHT} Divan- {SI…"), so Divan / Foam / Frame / WD could not be told apart, and the layered look of the BOM Structure view was gone. The owner thought the BOM itself had changed.
+
+**Root cause.** The two-pane redesign (commit `d60835af1`, 2026-08-04) shipped inside an unrelated planning commit, so nobody saw it in a changelog. It fixed a real problem (nested inline editing clipped inputs at level 3) but drew the tree with `node.wipCode` (the template) and dropped the level colours.
+
+**Fix.** `src/pages/bom.tsx`: new `WipTreeCard` draws the left tree as nested gradient cards in the BOM Structure palette (`WIP_LEVEL_HEX`), with L-badge, the name resolved by `buildWipCodeDisplay` (`wipDisplayName`), qty, minutes and process pills. Editing stays in the full-width right pane, whose header now carries the node's level colour. Selection resolves against the full tree, so collapsing a parent no longer jumps the right pane to another node. Dialog widened to 1360px; the panes stack below `md`.
+
+**Regression.** UI-only; verified by eye (see Verify).
+
+**Verify.** Prod: Edit BOM on 1003(A)(HF)(W)-(K) → WIP Components: nested coloured cards with real names; click a card → right pane edits that node; desktop and phone width.
+
+---
+
 ## BUG-2026-10-01-246 — A pinned finance column cut its last letter ("2026-10-…") `accounting` `ui-frontend` 🟢
 
 🟢 **Fixed** (branch `fix/fin-tables-ceil` → `main`) · Found in the prod check of #665 (finance plan batch 4), 2026-10-01.
