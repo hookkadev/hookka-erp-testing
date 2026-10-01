@@ -97,6 +97,8 @@
 
 > **Restamped 2026-09-25 on branch `feat/service-dashboard-rework`:** the dashboard Service row (`ServiceView.tsx`): Report list category column + category picker (desktop and `/m`); Top issues Root cause card redrawn as a root cause × day heatmap; unit / prevention / Top 3 cards removed; products card shows per-product root causes; `causeLabel` now uses the case page's root-cause wording ("Transport / 3PL", "Customer (not our fault)", ...).
 
+> **Restamped 2026-10-01 on branch `feat/staging-delivery-skip` (STAGING ONLY):** Sales row: `sales/detail.tsx` line count re-measured (2,050) and the staging-only delivery and billing skip card noted. Nothing else re-checked.
+>
 > **Restamped 2026-09-30 on branch `feat/staging-stage-skip` (STAGING ONLY):** Sales row — `sales/detail.tsx` line
 > count re-measured (2,048) and the staging-only stage-skip card noted. Nothing else re-checked.
 
@@ -284,7 +286,7 @@ authoritative current detail.** New here? Start with [ONBOARDING-PATH.md](ONBOAR
 |---|---|---|---|
 | `src/pages/sales/index.tsx` — SO list (2181), dual-mode SO vs service-order | `src/api/routes/sales-orders.ts` — 5,865 lines (re-measured 2026-09-23; create POST now WARNS, not 409s, on a repeated customer PO/SO ref — BUG-2026-09-23-185) (+ `sales-orders/_helpers.ts`, 1,462); SO CRUD + status cascades + snapshot | `sales_orders` / `sales_order_items` / `so_status_changes` | `tests/sofa-combo.test.mjs` |
 | `src/pages/sales/create.tsx` — Create SO (3760, re-measured 2026-09-23); OCR/scan-PO lands here | `src/api/routes/consignment-orders.ts` — CO CRUD + co_status_changes (2815) | `consignment_orders` / `consignment_order_items` / `co_status_changes` | `tests/so-category.test.mjs` |
-| `src/pages/sales/detail.tsx` — SO detail (2048); linked POs/JCs/DOs/invoices; Customer PO number opens the original PO inline; staging host only: `StagingStageSkipCard` (`src/components/staging-stage-skip.tsx`, planner `src/lib/staging-stage-skip.ts`) completes job cards up to a stage or resets them, via `bulk-patch` | `src/api/routes/consignment-notes.ts` — CN (DO-equiv) dispatch/delivered (2152) | `consignment_notes` / `consignment_items` | |
+| `src/pages/sales/detail.tsx` — SO detail (2050); linked POs/JCs/DOs/invoices; Customer PO number opens the original PO inline; staging host only: `StagingStageSkipCard` (`src/components/staging-stage-skip.tsx`, planner `src/lib/staging-stage-skip.ts`) completes job cards up to a stage or resets them, via `bulk-patch`; `StagingDeliverySkipCard` (`src/components/staging-delivery-skip.tsx`, runner `src/lib/staging-delivery-skip.ts`) creates the DO, delivers, invoices and pays through the operator endpoints | `src/api/routes/consignment-notes.ts` — CN (DO-equiv) dispatch/delivered (2152) | `consignment_notes` / `consignment_items` | |
 | `src/pages/sales/edit.tsx` — Edit SO (1634); re-runs sofa-combo on save; unit price + build-up via `@/lib/pricing` | `src/api/routes/consignments.ts` — legacy/shared reads (536) | `sofa_combo_rules` / `customer_products` / `price_overrides` | |
 | `src/pages/consignment/index.tsx` — CO list (1197) | `src/api/routes/sofa-combos.ts` — sofa_combo_rules CRUD (650) | `cost_ledger` / `production_orders` / `job_cards` / `fg_units` | |
 | `src/pages/consignment/create.tsx` — Create CO (1782) | `src/api/routes/historical-sales.ts` — read-only history (128) | `delivery_orders` / `delivery_order_items` / `invoices` / `invoice_items` | |
