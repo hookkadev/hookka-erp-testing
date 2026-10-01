@@ -781,7 +781,7 @@ async function authCron(c: {
 // Exported for the Agent Console's "Run now" (routes/agent-console.ts) — the
 // console triggers the SAME send path the cron uses, wrapped in an agent run.
 export async function dispatchReport(
-  c: { env: Env["Bindings"]; var: Env["Variables"]; req: { json(): Promise<unknown> } },
+  c: { env: Env["Bindings"]; var: Env["Variables"]; req: { json(): Promise<unknown>; url?: string } },
   kind: ReportKind,
   usageSink?: { tokensIn: number; tokensOut: number },
 ): Promise<{
@@ -818,7 +818,10 @@ export async function dispatchReport(
     console.warn(`[reports/${kind}-trigger] no recipients — skipping send`);
     return { ok: false, date, sent: 0, failed: 0, errors: ["no recipients"] };
   }
-  return runAndSendReport(c, kind, date, recipients, usageSink);
+  // Links in the email point back at the site that sent it (cron → prod,
+  // a staging test send → staging).
+  const origin = c.req.url ? new URL(c.req.url).origin : undefined;
+  return runAndSendReport(c, kind, date, recipients, usageSink, origin);
 }
 
 // Crons skip on Sundays + declared public holidays (kv_config['public_holidays']).
@@ -984,6 +987,7 @@ async function runAndSendReport(
   date: string,
   recipients: string[],
   usageSink?: { tokensIn: number; tokensOut: number },
+  origin?: string,
 ): Promise<{
   ok: boolean;
   date: string;
@@ -1043,7 +1047,10 @@ async function runAndSendReport(
     subject = `[Hookka] Production Efficiency & Revenue — ${date} (${data.totals.efficiencyPct}% overall${rev})`;
   } else if (kind === "schedule") {
     const data = await collectScheduleData(c.var.DB, date);
-    html = renderScheduleHtml(data, { email: true });
+    html = renderScheduleHtml(data, {
+      email: true,
+      fullListUrl: origin ? `${origin}/api/reports/schedule?date=${date}` : undefined,
+    });
     text = renderScheduleEmailText(data);
     subject = `[Hookka] Production Schedule — ${date} (${data.totals.jobCards} JC · ${data.totals.quantity} units)`;
   } else {

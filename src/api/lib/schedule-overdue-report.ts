@@ -461,6 +461,7 @@ const PAGE_CSS = `
   .print-bar { position: sticky; top: 0; background: #F4EFE3; padding: 8px 12px; border-bottom: 1px solid #E5E1DC; text-align: right; z-index: 10; }
   .print-bar button { padding: 6px 14px; font-size: 10pt; border: 1px solid #1F1D1B; background: #1F1D1B; color: #fff; cursor: pointer; border-radius: 4px; }
   .secondary { color: #6B7280; font-size: 8pt; }
+  .more { margin: 6px 0 0; font-size: 9pt; color: #6B5C32; }
   .num { font-variant-numeric: tabular-nums; }
 `;
 
@@ -491,12 +492,27 @@ const PHONE_CSS = `
   }
 `;
 
+// Row markup allowed in the EMAIL, split evenly across departments. A full
+// day (256 cards on 2026-10-01) rendered ~199 KB: MailSlurp (staging) rejects
+// a body over 100,000 bytes and Gmail clips past ~102 KB. Department totals
+// always show; rows past a department's share become "N more" + a link to
+// the full in-app list. The in-app page (opts.email unset) is never capped.
+// ponytail: an unused share is not handed to busier departments; pool it if
+// a big department keeps getting cut while small ones leave room.
+export const EMAIL_ROWS_BUDGET = 80_000;
+const utf8 = new TextEncoder();
+
 export function renderScheduleHtml(
   data: ScheduleReport,
-  opts: { email?: boolean } = {},
+  opts: { email?: boolean; fullListUrl?: string } = {},
 ): string {
   const { date, totals, byDepartment } = data;
   const longDate = formatDateLong(date);
+  const share = opts.email ? Math.floor(EMAIL_ROWS_BUDGET / Math.max(byDepartment.length, 1)) : Infinity;
+  const fullLink = opts.fullListUrl
+    ? `<a href="${escapeHtml(opts.fullListUrl)}">open the full list</a>`
+    : "open Reports in the ERP for the full list";
+  let shownCards = 0;
 
   const colWidths = `
     <colgroup>
@@ -513,7 +529,7 @@ export function renderScheduleHtml(
 
   const deptSections = byDepartment
     .map((d) => {
-      const rows = d.rows
+      const rowHtml = d.rows
         .map((r) => {
           const status = `<span style="color:${statusColor(r.status)};font-weight:600;">${escapeHtml(r.status.replace(/_/g, " "))}</span>`;
           const pic = [r.pic1Name, r.pic2Name].filter(Boolean).join(", ");
@@ -527,9 +543,21 @@ export function renderScheduleHtml(
             <td class="num m-inline" style="text-align:right;"><span class="m-lbl">Mins </span>${formatMinutes(r.prodMinutes)}</td>
             <td class="m-inline">${status}</td>
             <td class="m-inline"><span class="m-lbl">PIC </span>${escapeHtml(pic || "—")}</td>
-          </tr>`;
-        })
-        .join("");
+          </tr>`.replace(/>\s+</g, "><"); // indentation is ~15% of a row
+        });
+      let used = 0;
+      let shown = 0;
+      for (const html of rowHtml) {
+        used += utf8.encode(html).length;
+        if (used > share) break;
+        shown++;
+      }
+      shownCards += shown;
+      const rows = rowHtml.slice(0, shown).join("");
+      const hidden = rowHtml.length - shown;
+      const more = hidden > 0
+        ? `<p class="more">${hidden} more job card${hidden === 1 ? "" : "s"} in ${escapeHtml(d.name)} not shown in this email: ${fullLink}.</p>`
+        : "";
       return `<div class="dept-card">
         <div class="dept-head">
           <span>${escapeHtml(d.name)}</span>
@@ -550,6 +578,7 @@ export function renderScheduleHtml(
           </tr></thead>
           <tbody>${rows}</tbody>
         </table>
+        ${more}
       </div>`;
     })
     .join("\n");
@@ -573,6 +602,7 @@ ${opts.email ? "" : `<div class="print-bar no-print"><button onclick="window.pri
     <div class="cell"><div class="lbl">Planned Time</div><div class="val num">${formatMinutes(totals.prodMinutes)}</div><div class="sub">sum of estimates</div></div>
     <div class="cell"><div class="lbl">Departments</div><div class="val num">${totals.departments}</div><div class="sub">with work scheduled</div></div>
   </div>
+  ${shownCards < totals.jobCards ? `<p class="more">This email lists ${shownCards} of ${totals.jobCards} job cards; ${fullLink}.</p>` : ""}
   ${deptSections || `<p style="text-align:center;padding:30px;color:#9CA3AF;">No job cards scheduled for this date.</p>`}
   <div class="footer">Generated ${escapeHtml(new Date(data.generatedAtIso).toLocaleString("en-GB", { timeZone: "Asia/Singapore" }))} SGT</div>
 </div>

@@ -92,6 +92,12 @@ const dict: Dict = {
     zh: '首次登录',
     my: 'ပထမဆုံးအကြိမ် ပြင်ဆင်ခြင်း',
   },
+  'login.signInDesc': {
+    en: 'Enter your employee number and your 6-digit PIN.',
+    ms: 'Masukkan nombor pekerja dan PIN 6 digit anda.',
+    zh: '请输入您的工号和 6 位 PIN 密码。',
+    my: 'သင့်ဝန်ထမ်းနံပါတ်နှင့် ၆လုံးပါ PIN ကို ထည့်ပါ။',
+  },
   'login.setupDesc': {
     en: 'Create a 6-digit PIN for this employee number. You\'ll use it every time.',
     ms: 'Buat PIN 6 digit untuk nombor pekerja ini. Anda akan gunakannya setiap kali.',
@@ -362,6 +368,60 @@ const dict: Dict = {
     ms: 'Jam kerja anda dikira di sini mulai sekarang. Imbas semula bila bertukar barisan atau jabatan; daftar keluar menamatkannya.',
     zh: '从现在起你的工时算在这里。换线或换部门时再扫一次；打卡下班自动结束。',
     my: 'ယခုမှစ၍ သင့်အလုပ်ချိန်ကို ဤနေရာသို့ တွက်သည်။ လိုင်း သို့ ဌာနပြောင်းလျှင် ထပ်စကင်န်ပါ၊ အလုပ်ထွက်ကတ်နှိပ်လျှင် ပြီးဆုံးသည်။',
+  },
+  'dept.todayTitle': {
+    en: "Today's departments",
+    ms: 'Jabatan hari ini',
+    zh: '今日部门',
+    my: 'ယနေ့ ဌာနများ',
+  },
+  'dept.youAreIn': {
+    en: 'You are in',
+    ms: 'Anda di',
+    zh: '你现在在',
+    my: 'သင်ရှိနေသည့်ဌာန',
+  },
+  'dept.since': {
+    en: 'since',
+    ms: 'sejak',
+    zh: '开始于',
+    my: 'စတင်ချိန်',
+  },
+  'dept.scanned': {
+    en: 'scanned',
+    ms: 'diimbas',
+    zh: '已扫码',
+    my: 'စကင်န်ပြီး',
+  },
+  'dept.homeDefault': {
+    en: 'your home department',
+    ms: 'jabatan asal anda',
+    zh: '你的原部门',
+    my: 'သင့်မူလဌာန',
+  },
+  'dept.soFar': {
+    en: 'Today so far',
+    ms: 'Setakat ini hari ini',
+    zh: '今日至今',
+    my: 'ယနေ့ ယခုထိ',
+  },
+  'dept.liveNote': {
+    en: 'Your hours are saved by department when you punch out.',
+    ms: 'Jam anda disimpan mengikut jabatan bila anda daftar keluar.',
+    zh: '打卡下班时，工时会按部门保存。',
+    my: 'အလုပ်ထွက်ကတ်နှိပ်သောအခါ သင့်နာရီများကို ဌာနအလိုက် သိမ်းမည်။',
+  },
+  'dept.savedTitle': {
+    en: 'Hours by department (saved)',
+    ms: 'Jam mengikut jabatan (disimpan)',
+    zh: '各部门工时（已保存）',
+    my: 'ဌာနအလိုက် နာရီ (သိမ်းပြီး)',
+  },
+  'dept.scanHint': {
+    en: 'Scan the department QR when you start work there.',
+    ms: 'Imbas kod QR jabatan bila anda mula bekerja di sana.',
+    zh: '到新部门开工时，请扫该部门的二维码。',
+    my: 'ဌာနတစ်ခုတွင် အလုပ်စလုပ်သောအခါ ထိုဌာန၏ QR ကို စကင်န်ပါ။',
   },
   'scan.deptNeedPunchIn': {
     en: 'Please punch in first, then scan the department code.',

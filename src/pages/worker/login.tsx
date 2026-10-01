@@ -756,7 +756,7 @@ export default function WorkerLoginPage() {
             }}
           >
             {mode === "login"
-              ? t("login.setupDesc")
+              ? t("login.signInDesc")
               : mode === "setup"
                 ? t("login.setupDesc")
                 : t("login.phoneLast4")}
