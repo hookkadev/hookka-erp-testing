@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-241 (branch `fix/dev08-accessory-so-ready`, DEV-08); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-239 (branch `fix/worker-login-keypad-capture`, to staging then main); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-238 (branch `fix/cn-duplicate-po`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-237 (branch `fix/bom-accessory-category`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
@@ -56,6 +57,29 @@ Entries themselves stay newest-first.
 
 ---
 
+## BUG-2026-10-01-241 — An SO went Ready to Ship on the sofa's upholstery while its pillows were still on Fab Sew `production-orders` `sales-orders` 🟡
+
+🟡 **Fix in progress** (branch `fix/dev08-accessory-so-ready` → `main`, DEV-08) · Reported by Violet: the sofa is done but the
+pillow is not, so the order is incomplete and delivery planning goes wrong.
+
+**What happened.** An SO with a sofa line and pillow lines flipped to READY_TO_SHIP (Pending Delivery) as soon as the sofa's
+UPHOLSTERY cards were completed, even with the pillow PO still IN_PROGRESS on Fab Sew. Affected SOs on staging / prod are
+UNMEASURED (query in the DEV-08 WORK-TRACKER entry).
+
+**Root cause.** `cascadeUpholsteryToSO` (and its CO twin and `cascadeUpholsteryRollbackToSO`) decide "the whole order is made"
+by checking every sibling PO's UPHOLSTERY cards. A pillow (FAB_CUT → FAB_SEW → PACKING, mig 0032) has none, and an empty set
+was read as done: `if (mine.length === 0) return true`. Third instance of class C28.
+
+**Fix.** One predicate, `siblingUphGateDone` (`src/api/routes/production-orders/_helpers.ts`), used by all three cascades: a
+sibling with no UPHOLSTERY card counts only when the PO itself is COMPLETED (or CANCELLED). No new trigger needed: the
+cascade already re-runs after every job-card update, so the pillow's last card completing its PO flips the SO then. An SO
+already wrongly at READY_TO_SHIP drops back to IN_PRODUCTION the next time any card on it is updated.
+
+**Regression.** `tests/so-ready-accessory-gate.test.mjs` runs the real cascades on an in-memory DB: sofa done + pillow in
+progress stays IN_PRODUCTION; pillow COMPLETED or CANCELLED flips it; rollback and the CO twin agree; plus a C28 class guard.
+7 of its 9 cases fail on the old code.
+
+**Lesson.** "No card of type X" is not "type X is done". Ask what the item's own route is.
 ## BUG-2026-10-01-239 — Worker login: typing the Employee No. also typed into the PIN `worker-portal` `ui-frontend` 🟢
 
 🟢 **Fixed** (branch `fix/worker-login-keypad-capture` → `staging`, then `main`; not yet deployed) · Owner report: on the worker login page, typing the employee number also fills the PIN keypad.
