@@ -1,7 +1,7 @@
 # API — generated reference
 
 > **GENERATED FILE — do not hand-edit.** Regenerate with `node scripts/gen-api-docs.mjs`.
-> **Last generated: 2026-09-30** from `src/api/worker.ts` + `src/api/routes/*.ts`.
+> **Last generated: 2026-10-01** from `src/api/worker.ts` + `src/api/routes/*.ts`.
 
 The backend is a single [Hono](https://hono.dev) app in `src/api/worker.ts`, served
 as a Cloudflare Pages Function via `functions/api/[[route]].ts`. There is no
@@ -146,7 +146,7 @@ offsets pointing past the end of their own file.
 | `/api/employee-advances` | `src/api/routes/employee-advances.ts` | `GET /` <sub>:67</sub><br>`GET /payout-listing` <sub>:105</sub><br>`POST /` <sub>:176</sub><br>`PUT /:id` <sub>:244</sub><br>`DELETE /:id` <sub>:305</sub> | gated |
 | `/api/cash-flow` | `src/api/routes/cash-flow.ts` | `GET /` <sub>:153</sub><br>`POST /` <sub>:251</sub> | gated |
 | `/api/consignments` | `src/api/routes/consignments.ts` | `GET /` <sub>:40</sub><br>`POST /` <sub>:100</sub><br>`GET /:id` <sub>:328</sub><br>`PUT /:id` <sub>:356</sub><br>`DELETE /:id` <sub>:508</sub> | gated |
-| `/api/consignment-notes` | `src/api/routes/consignment-notes.ts` | `GET /` <sub>:74</sub><br>`GET /linked-po-ids` <sub>:196</sub><br>`GET /ready-planning` <sub>:235</sub><br>`GET /stats` <sub>:472</sub><br>`GET /:id/print-extras` <sub>:564</sub><br>`POST /` <sub>:798</sub><br>`POST /:id/return` <sub>:1073</sub><br>`POST /:id/convert-to-invoice` <sub>:1419</sub><br>`POST /:id/notify-customer` <sub>:1771</sub><br>`PATCH /` <sub>:2053</sub><br>`PUT /:id` <sub>:2109</sub> | gated |
+| `/api/consignment-notes` | `src/api/routes/consignment-notes.ts` | `GET /` <sub>:74</sub><br>`GET /linked-po-ids` <sub>:196</sub><br>`GET /ready-planning` <sub>:235</sub><br>`GET /stats` <sub>:472</sub><br>`GET /:id/print-extras` <sub>:564</sub><br>`POST /` <sub>:806</sub><br>`POST /:id/return` <sub>:1081</sub><br>`POST /:id/convert-to-invoice` <sub>:1427</sub><br>`POST /:id/notify-customer` <sub>:1779</sub><br>`PATCH /` <sub>:2061</sub><br>`PUT /:id` <sub>:2117</sub> | gated |
 | `/api/cn-packing-lists` | `src/api/routes/cn-packing-lists.ts` | `GET /` <sub>:382</sub><br>`GET /:id` <sub>:426</sub><br>`POST /` <sub>:663</sub><br>`DELETE /:id` <sub>:696</sub> | gated |
 | `/api/consignment-orders` | `src/api/routes/consignment-orders.ts` | `GET /` <sub>:544</sub><br>`POST /` <sub>:653</sub><br>`GET /stats` <sub>:1046</sub><br>`GET /status-changes` <sub>:1136</sub><br>`GET /:id/edit-eligibility` <sub>:1210</sub><br>`POST /:id/override-edit-lock` <sub>:1334</sub><br>`GET /:id` <sub>:1505</sub><br>`POST /:id/confirm` <sub>:1703</sub><br>`PUT /:id` <sub>:1820</sub><br>`POST /:id/cancel` <sub>:2493</sub><br>`PATCH /:id/hub` <sub>:2636</sub><br>`DELETE /:id` <sub>:2971</sub> | gated |
 | `/api/stock-adjustments` | `src/api/routes/stock-adjustments.ts` | `GET /` <sub>:152</sub><br>`POST /` <sub>:209</sub> | gated |

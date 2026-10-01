@@ -78,7 +78,10 @@ type CnPrintExtraItem = Pick<
   | "legHeightInches"
   | "totalHeightInches"
   | "componentRacks"
->;
+> & {
+  // The CO line's size (e.g. "28"); lands on CNPdfItem.coSizeLabel.
+  sizeLabel?: string | null;
+};
 
 // ---------------------------------------------------------------------------
 // Types
@@ -1415,6 +1418,9 @@ export default function ConsignmentNotePage() {
             legHeightInches: ex?.legHeightInches ?? null,
             totalHeightInches: ex?.totalHeightInches ?? null,
             componentRacks: ex?.componentRacks,
+            // Renamed so it can't clobber the product-master sizeLabel that
+            // feeds the Description.
+            coSizeLabel: ex?.sizeLabel ?? null,
           };
         }),
       };
