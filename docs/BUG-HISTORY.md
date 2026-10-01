@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-242 (branch `fix/worker-login-signin-text`, to staging then main); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-243 (branch `fix/worker-today-hours-utc`; ids 240 and 242 are on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-241 (branch `fix/dev08-accessory-so-ready`, DEV-08); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-239 (branch `fix/worker-login-keypad-capture`, to staging then main); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
@@ -55,6 +56,18 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-10-01-242 — Worker login told returning workers to "Create a 6-digit PIN" `worker-portal` `ui-frontend` 🟢
+
+🟢 **Fixed** (branch `fix/worker-login-signin-text` → `staging`, then `main`; not yet deployed) · Found scanning the worker pages; seen live on the staging login page.
+
+**Root cause.** `src/pages/worker/login.tsx` picked the sentence under the title with a three-way switch whose `login` and `setup` branches both returned `login.setupDesc`. So the normal sign-in screen showed the first-time setup sentence.
+
+**Fix.** New `login.signInDesc` (en / ms / zh / my) for sign-in mode; setup mode keeps `login.setupDesc`. The Burmese line was drafted, not reviewed by a native reader.
+
+**Regression.** `tests/worker-login-signin-text.test.mjs`.
 
 ---
 

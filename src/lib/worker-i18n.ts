@@ -92,6 +92,12 @@ const dict: Dict = {
     zh: '首次登录',
     my: 'ပထမဆုံးအကြိမ် ပြင်ဆင်ခြင်း',
   },
+  'login.signInDesc': {
+    en: 'Enter your employee number and your 6-digit PIN.',
+    ms: 'Masukkan nombor pekerja dan PIN 6 digit anda.',
+    zh: '请输入您的工号和 6 位 PIN 密码。',
+    my: 'သင့်ဝန်ထမ်းနံပါတ်နှင့် ၆လုံးပါ PIN ကို ထည့်ပါ။',
+  },
   'login.setupDesc': {
     en: 'Create a 6-digit PIN for this employee number. You\'ll use it every time.',
     ms: 'Buat PIN 6 digit untuk nombor pekerja ini. Anda akan gunakannya setiap kali.',
