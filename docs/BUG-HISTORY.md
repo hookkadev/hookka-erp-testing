@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-232 (branch `fix/bom-accessory-category`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-30**: newest entry BUG-2026-09-30-231 (branch `fix/pillow-fab-sew-sticker`, DEV-26); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-30**: newest entries BUG-2026-09-30-229 / -230 (branch `fix/selfcheck-recon-and-opening-seeds`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-30**: newest entry BUG-2026-09-30-228 (branch `fix/drill-receipt-description`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
@@ -49,6 +50,31 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-10-01-232: Accessory BOMs showed "Category: BEDFRAME" `bom` `ui-frontend` 🟡
+
+🟡 **Fix in progress** (branch `fix/bom-accessory-category` → `main`). Reported from the BOM page: BC04 (Back Cushion 04),
+an ACCESSORY product, showed `Category: BEDFRAME` in its BOM Structure card.
+
+**Root cause.** `bom_templates.category` only allows `BEDFRAME` / `SOFA` (CHECK in `0001_init.sql`), and every write in
+`src/api/routes/bom.ts` (POST, bulk PUT, PUT `:id` insert default) and both readers (`rowToTemplate`, `rowToTemplateListItem`)
+coerce anything else to `BEDFRAME`. So an accessory BOM is stored and read back as a bedframe. The BOM page printed that
+stored value (tree card, print sheet) and used it for the "Copy from existing BOM" filter, which therefore never listed
+other accessory BOMs. `/api/wip-times` filtered and grouped by the same column, so `?category=ACCESSORY` returned nothing
+and accessory routing counted under BEDFRAME.
+
+**Fix.** The product row is the source of truth for category (the rule `routes/bom.ts` already uses for root checks:
+`productCategory ?? templateCategory`). `withProductCategory` (`src/pages/bom-category.ts`) overlays the product's
+category on every template the BOM page holds, through one `useMemo` over the template state so every setter path is
+covered. `loadActiveBomRows` (`src/api/lib/wip-times-core.ts`) now filters and selects `COALESCE(p.category, bt.category)`.
+The Edit BOM dialog's "Load Default" picker also narrowed an accessory to BEDFRAME before
+`loadAllMasterTemplates`, so it offered bedframe masters; it now passes ACCESSORY. The `/api/wip-times` PUT handlers select
+`bt.category` too but never read it, so they are unchanged. The stored column is unchanged; widening it needs a constraint change and is not needed by any reader today.
+How many prod templates belong to accessory products is UNMEASURED.
+
+**Test.** `tests/bom-accessory-category.test.mjs`.
 
 ---
 

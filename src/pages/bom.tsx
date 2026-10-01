@@ -6,6 +6,7 @@ import { useToast } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { getVariantsConfigSync } from "@/lib/kv-config";
 import { resolveWipTokens, type BomVariantContext } from "@/api/lib/bom-wip-breakdown";
+import { withProductCategory } from "./bom-category";
 import type {
   MaterialScaling,
   MaterialScalingDimension,
@@ -3107,9 +3108,10 @@ function EditBOMDialog({
   /* eslint-disable react-hooks/set-state-in-effect -- mirror master-template cache into local state when dialog opens */
   useEffect(() => {
     if (!open) return;
-    const cat = (product.category === "SOFA" ? "SOFA" : "BEDFRAME") as
-      | "BEDFRAME"
-      | "SOFA";
+    const cat: BOMCategory =
+      product.category === "SOFA" ? "SOFA"
+      : product.category === "ACCESSORY" ? "ACCESSORY"
+      : "BEDFRAME";
     setMasterTemplates(loadAllMasterTemplates(cat));
     // When D1 hydration finishes after the dialog is already open, re-pull
     // from the (now-populated) cache so the Load Default picker isn't stuck
@@ -6245,7 +6247,10 @@ function BatchEditMaterialsDialog({
 export default function BOMManagementPage() {
   const { toast } = useToast();
   const [products, setProducts] = useState<Product[]>([]);
-  const [templates, setTemplates] = useState<BOMTemplate[]>([]);
+  const [rawTemplates, setTemplates] = useState<BOMTemplate[]>([]);
+  // Every setTemplates path (load, save rollback, batch edit, create) lands
+  // here, so ACCESSORY is fixed in one place. See bom-category.ts.
+  const templates = useMemo(() => withProductCategory(rawTemplates, products), [rawTemplates, products]);
   const [rawMaterials, setRawMaterials] = useState<RawMaterialOption[]>([]);
   const [fabricOptions, setFabricOptions] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
