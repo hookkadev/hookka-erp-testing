@@ -27,6 +27,7 @@ import { requirePermission } from "../lib/rbac";
 import {
   breakBomIntoJobCardWips,
   deriveJobCardId,
+  l1ProcessesWithoutWipDupes,
   type BomVariantContext,
 } from "../lib/bom-wip-breakdown";
 
@@ -110,12 +111,13 @@ function computeExpectedJcs(
     legHeightInches: po.legHeightInches ?? null,
     gapInches: po.gapInches ?? null,
   };
-  // Same rule as the SO-confirm builder: an L1-only BOM gets no WIP cards
-  // (BUG-2026-10-01-244).
-  const l1Procs = parseL1Processes(bomRow?.l1Processes ?? null);
+  // Same rules as the SO-confirm builder: an L1-only BOM gets an
+  // auto-generated chain of its L1 steps, and an L1 step a WIP card already
+  // covers gets no FG card (BUG-2026-10-01-244).
+  const l1ProcsAll = parseL1Processes(bomRow?.l1Processes ?? null);
   const wips = breakBomIntoJobCardWips(
     bomRow?.wipComponents ?? null,
-    l1Procs.length,
+    l1ProcsAll,
     productCode,
     variants,
   );
@@ -143,7 +145,7 @@ function computeExpectedJcs(
     }
   }
   // FG-level l1Processes — single JC per process, wipKey="FG".
-  for (const l1p of l1Procs) {
+  for (const l1p of l1ProcessesWithoutWipDupes(l1ProcsAll, wips)) {
     expected.push({
       wipKey: "FG",
       wipCode: productCode,

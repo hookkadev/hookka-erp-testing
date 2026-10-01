@@ -1,6 +1,7 @@
 # Bug History
 
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-246 (branch `fix/fin-tables-ceil`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
+> **Last verified: 2026-10-01**: BUG-2026-10-01-244 got a follow-up section (the (FC) Fab Cut card, branch `claude/main-accessories-duplicate-cards-fdxaik`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-245 (branch `fix/worker-history-snapshot-stale`; ids 240 and 242 are on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-244 (branch `fix/accessory-l1-only-job-cards-main`; merged to staging as 241 in #656, renumbered because DEV-08 holds 241 on main); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-242 (branch `fix/worker-login-signin-text`, to staging then main); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
@@ -112,6 +113,8 @@ Entries themselves stay newest-first.
 **Regression.** `tests/bom-explosion.test.mjs`: the three BOM shapes, and that both card creators call `breakBomIntoJobCardWips` (fails on the old code).
 
 **Verified on staging (2026-10-01, after #656 deployed).** Test order SO-2610-002 (BC05-MF, qty 1) got 3 cards: FAB_CUT, FAB_SEW, PACKING, all `wipKey` FG. Control SO-2610-003 (SQUARE PILLOW, tree BOM) got its usual 4: merged FC, FAB_SEW, FOAM, PACKING FG, matching a pre-fix order card for card. Both under TEST COMPANY.
+
+**Follow-up: #660 kept the wrong Fab Cut card (branch `claude/main-accessories-duplicate-cards-fdxaik` → `main`).** Of the two Fab Cut rows, #660 dropped the auto-generated `BC05-MF | FABRIC | (FC)` one and kept the L1 one, labelled with the bare product code. The (FC) card is the right one: its label carries the fabric and matches the WIP inventory format, and the IT team confirmed a BOM without WIP components is incomplete setup, not the SOP shape. New rule, in `breakBomIntoJobCardWips` + `l1ProcessesWithoutWipDupes`: auto-generated cards first; an L1 step is skipped when its dept already has a WIP card. An L1-only BOM now gets an auto-generated `FG_MAIN` chain of its own L1 steps only (no Wood Cut / Foam / Framing / Webbing / Upholstery), so its Fab Cut goes through the (FC) merge. BC05-MF qty 1 → merged `(FC)` Fab Cut + Fab Sew + Packing, the last two on `wipKey` `BC05-MF::FG_MAIN` (the same key the pre-#660 fallback cards used). Packing is now the end of that chain, not an FG-level card. The skip also covers a tree BOM that repeats a dept on its L1 tab; how many prod BOMs have that overlap is UNMEASURED (no DB access in this session). Builder and jobcard-sync both. Regression: `tests/bom-explosion.test.mjs` (6 new tests fail on the #660 code).
 
 ## BUG-2026-10-01-242 — Worker login told returning workers to "Create a 6-digit PIN" `worker-portal` `ui-frontend` 🟢
 
