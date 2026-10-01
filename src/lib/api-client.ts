@@ -29,6 +29,7 @@
 import { clearAuth } from "./auth";
 import { readCsrfCookie, CSRF_HEADER_NAME } from "./csrf";
 import { reportApiCall } from "./fe-rum";
+import { readStagingToday, STAGING_TODAY_HEADER } from "./staging-today"; // staging-only
 import { recordApiCall } from "./staging-api-log"; // staging-only API log drawer, never PR into main
 
 const originalFetch = window.fetch.bind(window);
@@ -98,6 +99,8 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const csrf = readCsrfCookie();
       if (csrf) headers.set(CSRF_HEADER_NAME, csrf);
     }
+    const fakeToday = readStagingToday(); // staging-only today override, off unless set in this tab
+    if (fakeToday) headers.set(STAGING_TODAY_HEADER, fakeToday);
     const controller = new AbortController();
     timeoutId = setTimeout(() => {
       aborted = true;

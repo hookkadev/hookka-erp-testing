@@ -15,7 +15,8 @@ import { DataGrid, type Column, type ContextMenuItem } from "@/components/ui/dat
 import { MoneyInput } from "@/components/ui/money-input";
 import { useVirtualRows } from "@/components/ui/virtual-rows";
 import { DeferredBlock } from "@/components/ui/deferred-block";
-import { formatCurrency, formatDateDMY, formatRM, roundSen, todayYmdMY } from "@/lib/utils";
+import { formatCurrency, formatDateDMY, formatRM, roundSen } from "@/lib/utils";
+import { todayYmdMYForReads } from "@/lib/staging-today";
 import { monthLabel as drillMonthLabel, shortBankName } from "@/lib/ledger-drill";
 // Every money field on this page is `type="text" inputMode="decimal"` — the
 // browser lets a comma through, and `parseFloat("12,000")` is 12. One parser,
@@ -2332,7 +2333,7 @@ function OverviewTab({
   // /reports (BUG-2026-08-13-009): read GET /accounting/pl, which nets the
   // posted ledger per account and classifies by the account's own COA type,
   // and publish "—" — never RM 0.00 — for a category no account has posted to.
-  const ym = todayYmdMY().slice(0, 7);
+  const ym = todayYmdMYForReads().slice(0, 7); // staging-only today override (reads only)
   const { data: plResp } = useCachedJson<{ success?: boolean; data?: OverviewPl }>(
     `/api/accounting/pl?period=${ym}`,
   );

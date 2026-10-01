@@ -1,5 +1,7 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-01**: corrected two staging-tool claims below: the today-override cache rows are not wiped nightly, and the delivery-skip notices go to sanitised `@staging.invalid` addresses in code (live UNMEASURED).
+> **Last verified: 2026-10-01**: branch `feat/staging-today-override` (staging-only today override) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `feat/staging-mail-outbox` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `feat/staging-schema-check` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `feat/staging-api-log` (to `staging`, STAGING ONLY) added below (its entry is the newest).
@@ -90,6 +92,38 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
+## 2026-10-01: 🔵 Staging test tool, today override (branch `feat/staging-today-override` to `staging`, STAGING ONLY, never PR to main)
+
+- Asked: a staging-only fake "today" so month-end, overdue, aging, leave and payroll-month screens can be tested without waiting for the calendar. Scoped to named date helpers only.
+- Done: topbar control next to the patch-notes badge (staging hosts only). Sets a fake date per tab in sessionStorage, off by default; a red "Fake date: yyyy-mm-dd" pill shows while it is on, and set/clear reloads the page. `api-client.ts` sends it as `X-Staging-Today` on `/api/*` calls only while set. The server reads it only when `isStagingRequest(c)` is true (`src/api/lib/staging-gate.ts`) and the value is a real yyyy-mm-dd date; anywhere else it is ignored.
+- Persisted dates: the override affects READS only. `todayYmdMY()` is unchanged, because almost all of its callers write a date into a document (completed date, effective-from, R&D created/issued/work dates, service-case dates, stage-skip). Reads use a new wrapper, `todayYmdMYForReads()`. One write side effect: the production overdue snapshot cache is keyed by date, so a fake-date request writes a cache row under the fake date on the staging DB. Real-date requests never read it. Nothing clears it: the nightly staging wipe was removed on 2026-09-29 (`fix/staging-no-nightly-wipe`), so these rows stay until someone deletes them. They are harmless, because only a request carrying the same fake date reads them.
+- Honours the override:
+
+  | Helper | Caller | Screen |
+  |---|---|---|
+  | `todayYmdMYForReads()` (client) | `src/pages/accounting/index.tsx` overview | P&L month default |
+  | `todayYmdMYForReads()` (client) | `src/pages/production/index.tsx` baserows `today` | production grid overdue marks |
+  | `overdueTodayUtc(c)` (server) | `computeOverdueCounts` in `production-orders.ts` | production overdue counts |
+
+- Does NOT honour it (known date reads, real date still used):
+
+  | Where | What |
+  |---|---|
+  | `todayYmdMY()` callers (production completedDate, employees effectiveFrom, rd/detail, service-cases, stage-skip) | document dates written, on purpose |
+  | `src/pages/employees.tsx` future effective-from badge | read, left out of scope |
+  | `src/pages/worker/scan.tsx` today history | read, left out: the worker portal mounts `WorkerLayout` (`src/router.tsx`), not the topbar, so it would show no banner |
+  | `src/pages/production/utils.ts` `todayISO` | production page cold-start date filter (from = to = real today) |
+  | `src/lib/delivery-list-filters.ts` `startOfMonthMYT` | delivery list default month |
+  | `accounting.ts` inline `new Date()` (AP/AR aging, trial-balance `asOf` default and about ten more) | aging and period defaults |
+  | `invoices.ts`, `dashboard-prototype.ts` inline `new Date()` | overdue on invoices and dashboard |
+  | `customer-credit.ts` `decideCredit(..., todayYmdMY())` | credit block on DO create (a write gate, no request context) |
+  | `leave-entitlement.ts` `currentLeaveYear()`, `payslips.ts` inline `new Date()` | leave year, payroll month |
+  | `reports.ts` cron date helpers, `agent-learning.ts` `ymdInSgt` (planning), `fabric-usage.ts` `FABRIC_METRICS_TODAY` | crons and planners, no request context |
+
+- Server gap: the aging, leave and payroll reads are inline `new Date()` in route handlers, not helpers, so they were left alone rather than threading the override through dozens of sites.
+- Tests: `tests/staging-today.test.mjs` (5: parsing, off by default, prod host and invalid values ignored, gate refuses prod/canary/custom domain/unbound DB, `overdueTodayUtc` unchanged off staging) and `tests/warm-overdue-counts.test.mjs` (6) pass. `tsc -p tsconfig.app.json` exit 0; eslint 0 errors on touched files.
+- UNMEASURED: not checked on staging. After merge, set a fake date on staging and confirm the red pill, the `X-Staging-Today` header on `/api/*` calls, and that production overdue counts move; on the prod host the control must not appear.
+
 ## 2026-10-01: 🔵 Staging test tool, test order factory (branch `feat/staging-test-order-factory` to `staging`, STAGING ONLY, never PR to main)
 
 - Asked: on the Sales Orders list, staging only, a one-click "New test SO" (customer + number of lines, products random or chosen) that creates the SO through the normal create API and opens it, plus a "Void my test docs from today" cleanup.
@@ -131,7 +165,7 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 - Asked: carry the stage-skip tool past production. For an SO whose production is done, one click creates the DO, delivers it, raises the invoice and records a full payment, each step optional through a "go up to" selector (DO / Delivered / Invoiced / Paid), with a step log.
 - SO detail page gains `StagingDeliverySkipCard` (`src/components/staging-delivery-skip.tsx`, planner and runner `src/lib/staging-delivery-skip.ts`), rendered only when the host starts with `staging.`. Writes go through the operator endpoints only: `POST /api/delivery-orders` (finished POs no live DO holds), `PUT /api/delivery-orders/:id` to LOADED then DELIVERED with a proof of delivery, `POST /api/invoices` when a DO is still DELIVERED, `POST /api/payments` for each live invoice's balance. The runner re-reads `GET /api/sales-orders/:id` between writes, stops at the first refused write, and stops if a write did not move the order. No new endpoint, no schema change.
-- Email: there is no opt-out. `applyDeliveryOrderUpdate` queues the dispatch notice on the move to LOADED and the invoice notice on the move to DELIVERED (`fireCustomerNoticeBestEffort`), and `POST /api/invoices` queues the invoice notice too. The only skips are "already sent" and no hub/customer email on file. MailSlurp sends to the real recipient, and staging holds real customer addresses. The card says so in its confirm text; the "DO" target sends nothing. Open question for the owner: a recipient redirect in the MailSlurp branch of `src/api/lib/email.ts`.
+- Email: there is no opt-out. `applyDeliveryOrderUpdate` queues the dispatch notice on the move to LOADED and the invoice notice on the move to DELIVERED (`fireCustomerNoticeBestEffort`), and `POST /api/invoices` queues the invoice notice too. The only skips are "already sent" and no hub/customer email on file. MailSlurp sends to the address on file. Corrected 2026-10-01: the notice reads `customers.email` and `delivery_hubs.email`, and `scripts/sanitize-staging.mjs` (step 4, contact details) rewrites both to `<table>-<id>@staging.invalid`, an unroutable domain, and the sync workflow runs it after every merge. So in code these notices cannot reach a real customer. Live staging is UNMEASURED: nobody has queried whether every row is sanitised. The card says so in its confirm text; the "DO" target sends nothing. Open question for the owner: a recipient redirect in the MailSlurp branch of `src/api/lib/email.ts`.
 - "Finished" means PO status COMPLETED (the job-card rollup); `createDeliveryOrderForPOs` does not check readiness itself.
 - Test: `tests/staging-delivery-skip.test.mjs` (planner, runner against a stubbed fetch, source pins). UNMEASURED: not run on staging yet; check after merge, including that the staging user has the delivery-orders, invoices and payments permissions.
 

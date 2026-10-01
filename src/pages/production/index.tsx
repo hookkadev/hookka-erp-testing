@@ -14,6 +14,7 @@ import type { Column, ContextMenuItem } from "@/components/ui/data-grid";
 import { getQRCodeDataURL, generateStickerData, generateCompartmentStickerData } from "@/lib/qr-utils";
 import { appOrigin } from "@/lib/app-origin";
 import { todayYmdMY } from "@/lib/utils";
+import { todayYmdMYForReads } from "@/lib/staging-today";
 import { deriveBarcodeToken } from "@/lib/job-card-id";
 import { packingRackScanUrl } from "@/api/lib/jobcard-qr-token";
 // Static import (not dynamic) so the schedule code is generated SYNCHRONOUSLY
@@ -3601,7 +3602,7 @@ export default function ProductionPage({
   useEffect(() => {
     const worker = baserowsWorkerRef.current;
     if (!worker) return;
-    const today = todayYmdMY();
+    const today = todayYmdMYForReads(); // staging-only today override (reads only)
     const reqId = ++baserowsReqRef.current;
     setBaserowsPending(true);
     // Drain the accumulated dirty-PO set — this post takes ownership of
