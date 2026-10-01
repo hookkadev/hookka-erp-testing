@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-01**: branch `feat/staging-schema-check` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `feat/staging-api-log` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `feat/staging-delivery-skip` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-09-30**: branch `chore/sync-staging-from-main-0930`, staging<-main merge added below (its entry is the newest).
@@ -87,6 +88,15 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-01: 🔵 Staging test tool, schema check page (branch `feat/staging-schema-check` to `staging`, STAGING ONLY, never PR to main)
+
+- Asked: a staging-only page that lists missing tables, missing columns and type mismatches between what the code expects and what the staging DB has, since migrations do not auto-apply.
+- Expected = `tests/db-schema.json` (with `tests/db-boolean-columns.json` for types). It is the only complete column-level source: a prod `information_schema` snapshot that `tests/sql-columns-exist.test.mjs` holds route SQL to, and that self-apply PRs extend by hand. `check-schema-applied.mjs` knows tables only; migrations are inert here; self-apply statements are scattered and partial.
+- `/staging-schema` page plus `GET /api/staging-schema`: 404 unless `isStagingRequest`, then `requireSuperAdmin`; one SELECT on `information_schema.columns`, no DDL. Diff in `src/api/lib/staging-schema-diff.ts`.
+- Blind spots, shown on the page: names only (types checked for real booleans only); a prod snapshot, so a self-applied column missing on staging may just mean its write path has not run there yet; only as fresh as its last refresh.
+- Test: `tests/staging-schema-diff.test.mjs` (5, fixtures only).
+- UNMEASURED: never run against a live DB. Open the page on staging after merge.
 
 ## 2026-10-01: 🔵 Staging test tool: API log drawer (branch `feat/staging-api-log` to `staging`, STAGING ONLY, never PR to main)
 

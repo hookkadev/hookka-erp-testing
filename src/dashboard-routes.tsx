@@ -157,6 +157,7 @@ const MailCenter = lazy(() => import('./pages/mail-center'))
 // Staging patch notes — latest PRs merged into staging. STAGING ONLY, never
 // PR'd into main; data only exists on staging builds (gen-staging-notes.mjs).
 const StagingNotes = lazy(() => import('./pages/staging-notes'))
+const StagingSchema = lazy(() => import('./pages/staging-schema')) // STAGING ONLY, never PR into main
 const MailCenterDetail = lazy(() => import('./pages/mail-center/detail'))
 const Maintenance = lazy(() => import('./pages/maintenance'))
 const MaintenanceSofaCombos = lazy(() => import('./pages/maintenance/sofa-combos'))
@@ -498,6 +499,7 @@ export const DASHBOARD_ROUTES: RouteObject[] = [
   { path: '/announcements', element: <S><Announcements /></S> },
   { path: '/mail-center', element: <S><MailCenter /></S> },
   { path: '/staging-notes', element: <S><StagingNotes /></S> },
+  { path: '/staging-schema', element: <S><StagingSchema /></S> },
   { path: '/mail-center/:id', element: <S><MailCenterDetail /></S> },
   { path: '/maintenance', element: <S><Maintenance /></S> },
   { path: '/maintenance/sofa-combos', element: <S><MaintenanceSofaCombos /></S> },
