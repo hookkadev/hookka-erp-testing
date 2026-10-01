@@ -1,10 +1,7 @@
 # Hookka ERP — Codebase Map (the single authoritative map)
 
-<<<<<<< HEAD
 > **Restamped 2026-10-01 on branch `claude/main-accessories-duplicate-cards-fdxaik`:** Production & BOM gotcha on job-card breakdown (L1-only BOM → auto chain of its L1 steps; L1 duplicates skipped). Nothing else re-checked. Last verified: 2026-10-01.
-=======
 > **Restamped 2026-10-01 on branch `feat/finance-tables-drills`:** Accounting row, finance tables + monthly drills (`src/lib/use-resizable-tables.ts`, `PlMonthlyDrillRows`, `CfMonthlyDrillRows`). Nothing else re-checked. Last verified: 2026-10-01.
->>>>>>> bfcc327673ad881de87337d79a49d21b7a5287b8
 > **Restamped 2026-10-01 on branch `feat/finance-scan-learn`:** Accounting row, finance scans (`loadScanMemory`, `ScanBillsBatch` review table, `src/lib/scan-account-learn.ts`). Nothing else re-checked. Last verified: 2026-10-01.
 > **Restamped 2026-10-01 on branch `fix/worker-history-snapshot-stale`:** Worker Portal row, `/history` + `/payslips` snapshot (`src/api/lib/worker-perf.ts`, `withWorkerSnapshot` reads through `freshReads`) and `tests/worker-history-snapshot-fresh.test.mjs`. Nothing else re-checked. Last verified: 2026-10-01.
 > **Restamped 2026-10-01 on branch `fix/accessory-l1-only-job-cards-main`:** Production & BOM gotcha on which breakdown creates job cards (`breakBomIntoJobCardWips`). Nothing else re-checked. Last verified: 2026-10-01.
