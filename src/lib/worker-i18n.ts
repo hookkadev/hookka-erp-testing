@@ -721,6 +721,15 @@ const dict: Dict = {
     zh: '加班',
     my: 'OT နာရီ',
   },
+  // DEV-22 worker penalties on My Pay.
+  'pay.penalties': { en: 'Penalties', ms: 'Penalti', zh: '罚款', my: 'ဒဏ်ကြေး' },
+  'pay.penaltyOrder': { en: 'Order', ms: 'Pesanan', zh: '订单', my: 'အော်ဒါ' },
+  'pay.penaltyReason': { en: 'Reason', ms: 'Sebab', zh: '原因', my: 'အကြောင်းရင်း' },
+  'pay.penaltyAmount': { en: 'Penalty', ms: 'Penalti', zh: '罚款金额', my: 'ဒဏ်ကြေးငွေ' },
+  'pay.penaltyPayrollMonth': { en: 'Payroll month', ms: 'Bulan gaji', zh: '扣薪月份', my: 'လစာလ' },
+  'pay.penaltyDeducted': { en: 'Deducted', ms: 'Dipotong', zh: '已扣除', my: 'နုတ်ပြီး' },
+  'pay.penaltyApproved': { en: 'Approved · to be deducted', ms: 'Diluluskan · akan dipotong', zh: '已批准 · 待扣除', my: 'အတည်ပြုပြီး · နုတ်ရန်' },
+  'pay.penaltyNone': { en: 'No penalty this month.', ms: 'Tiada penalti bulan ini.', zh: '本月没有罚款。', my: 'ဤလတွင် ဒဏ်ကြေးမရှိပါ။' },
 
   // ---- Home (Employee Detail Dashboard) ----
   'home.dashboardTitle': {
