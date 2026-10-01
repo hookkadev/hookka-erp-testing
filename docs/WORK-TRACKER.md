@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-01**: branch `feat/staging-mail-outbox` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `feat/staging-schema-check` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `feat/staging-api-log` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `feat/staging-delivery-skip` (to `staging`, STAGING ONLY) added below (its entry is the newest).
@@ -88,6 +89,16 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-01: 🔵 Staging test tool, mail outbox page (branch `feat/staging-mail-outbox` to `staging`, STAGING ONLY, never PR to main)
+
+- Asked: a staging page listing the mail staging has sent (time, to, subject, status/error, body, attachments), so report and PO emails can be checked without opening MailSlurp.
+- Source: staging sends every email through one MailSlurp inbox, and MailSlurp keeps each sent message with its body and attachments. `outbox_emails` only holds the `enqueueEmail` path; the report emails (`reports.ts` `sendMail`) never touch it. So sent mail is read from the MailSlurp API (`GET /sent`, `GET /sent/{id}`, attachment metadata and bytes), proxied by the worker. No new storage.
+- `/staging-mail` (sidebar group PATCH NOTES): sent mail newest first, 50 a page; a click opens the body in a sandboxed iframe (scripts off) and lists attachments as download links. A "Queued, not sent" card shows `outbox_emails` rows that are not SENT, with status, tries and last error.
+- `/api/staging-mail`: read-only, 404 unless `isStagingRequest`, then SUPER_ADMIN / ADMIN only. The MailSlurp key never leaves the worker. Detail and download refuse a sent email from another inbox, and a download only serves an attachment of that email.
+- Gaps: a send MailSlurp refused is not stored there, and direct `sendMail` failures (reports, mail center, CRM, auth, users) are only logged, so neither shows. The page only fills while MailSlurp is the active provider (`sendMail` prefers Brevo, then Resend).
+- Test: `tests/staging-mail.test.mjs` (7, stubbed fetch, no network).
+- UNMEASURED: nothing was run against MailSlurp or staging. After merge, open `/staging-mail` on staging as an admin and open a report email; check a non-admin gets 403.
 
 ## 2026-10-01: 🔵 Staging test tool, schema check page (branch `feat/staging-schema-check` to `staging`, STAGING ONLY, never PR to main)
 
