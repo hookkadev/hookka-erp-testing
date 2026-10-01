@@ -103,3 +103,10 @@ test("on staging the API button sits in the topbar in place of the tab strip", (
   assert.doesNotMatch(layout, /StagingApiLog/); // no second, floating copy
   assert.doesNotMatch(ui, /\bfixed\b/); // the button and drawer hang off the topbar now
 });
+
+test("the topbar block stays on screen when the page scrolls", () => {
+  const layout = readFileSync(new URL("../src/layouts/DashboardLayout.tsx", import.meta.url), "utf8");
+  // The sticky has to be on the wrapper: a sticky child cannot leave a parent
+  // that is only as tall as itself, so the API button scrolled away.
+  assert.match(layout, /<div className="sticky top-0 z-30 print:hidden">\s*<Topbar \/>\s*<Breadcrumbs \/>/);
+});

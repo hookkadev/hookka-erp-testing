@@ -1115,6 +1115,7 @@ import attendance from "./routes/attendance";
 import workingHourEntries from "./routes/working-hour-entries";
 import payrollHourDeductions from "./routes/payroll-hour-deductions";
 import employeeAdvances from "./routes/employee-advances";
+import workerPenalties from "./routes/worker-penalties";
 import cashFlow from "./routes/cash-flow";
 import consignments from "./routes/consignments";
 import consignmentNotes from "./routes/consignment-notes";
@@ -1359,6 +1360,9 @@ app.route("/api/payroll-hour-deductions", payrollHourDeductions);
 // Salary advances (cash handed to a worker mid-month). Recovered from that
 // month's net pay — see src/api/lib/employee-advances.ts.
 app.route("/api/employee-advances", employeeAdvances);
+// DEV-22 worker penalties — approved ones come off net pay in their payroll
+// month; see src/api/lib/worker-penalties.ts.
+app.route("/api/worker-penalties", workerPenalties);
 app.route("/api/cash-flow", cashFlow);
 app.route("/api/consignments", consignments);
 app.route("/api/consignment-notes", consignmentNotes);

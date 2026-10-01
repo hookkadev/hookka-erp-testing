@@ -43,6 +43,8 @@
 
 > **Restamped 2026-09-29 on branch `perf/cashflow-statement-batching`:** Cash Flow tab — statement reads batched (was ~415 serial queries). Nothing else re-checked.
 
+> **Last verified: 2026-10-01** on branch `feat/dev22-worker-penalty` — the Employees & Payroll row for Worker Penalty (DEV-22: new route / lib / tab / table). Nothing else re-checked.
+
 > **Last verified: 2026-09-30** on branch `fix/staging-so-detail-live-do` (to staging): the invoice-to-SO-line entry's `routes/sales-orders.ts` ref for the SO line `lineNo: idx + 1` moved from :4104 to :4088 (BUG-2026-09-30-225 shifted the file). Nothing else re-checked.
 
 > **Restamped 2026-09-29 on branch `feat/rm-uom-options-main`:** Inventory row — DEV-20 RM UOM options and whole-number units brought to `main`; RM tab / RM Settings / BatchEditRMDialog line ranges re-measured on main. Nothing else re-checked.
@@ -836,6 +838,7 @@ authoritative current detail.** New here? Start with [ONBOARDING-PATH.md](ONBOAR
 | `src/pages/worker/issue.tsx` — issue submission | `src/api/routes/payroll.ts` — run generation (308) | `public_holidays` (via kv_config['public_holidays']) | |
 | `src/pages/worker/login.tsx` — PIN login | `src/api/routes/payroll-hour-deductions.ts` — short-hour dock (418) | `employee_advances` (salary advances) | `tests/employee-advances.test.mjs` |
 | | `src/api/routes/employee-advances.ts` — advance CRUD + HR payout listing; maths + runtime self-apply in `src/api/lib/employee-advances.ts` | `payslips.advance_deduction_sen` (mig 0211, runtime ALTER) | |
+| `src/components/worker-penalty-tab.tsx` — Employees > Worker Penalty tab (DEV-22) | `src/api/routes/worker-penalties.ts` — penalty CRUD, submit / approve / reject / revoke, production-order lookup with job-card PICs; maths, payroll posting + runtime self-apply in `src/api/lib/worker-penalties.ts`; worker app `GET /api/worker/penalties` in `worker.ts` | `worker_penalties` / `worker_penalty_lines` / `payslips.penalty_deduction_sen` (runtime DDL only, no migration file) | `tests/worker-penalties.test.mjs` |
 | | `src/api/routes/department-performance.ts` — read-only aggregate (807) | | |
 | | `src/api/routes/leaves.ts` — leave CRUD + `GET /balances` (server-computed) | `workers.annual_leave_entitlement_days` / `.medical_leave_entitlement_days` (mig 0229, runtime ALTER via `src/api/lib/ensure-leave-columns.ts`) | `tests/leave-entitlement.test.mjs` |
 | | `src/lib/leave-entitlement.ts` — **the ONE leave policy module** (entitlement, leave year, holiday exclusion); called by `leaves.ts`, `worker.ts` and `employees.tsx` | | |

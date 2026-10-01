@@ -1,5 +1,7 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-01**: branch `fix/staging-sticky-topbar` (to `staging`, STAGING ONLY) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: branch `feat/dev22-worker-penalty` (to `staging`) added below (in progress, its entry is the newest).
 > **Last verified: 2026-10-01**: branch `feat/staging-api-log-in-topbar` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `fix/staging-mail-empty-body` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: corrected two staging-tool claims below: the today-override cache rows are not wiped nightly, and the delivery-skip notices go to sanitised `@staging.invalid` addresses in code (live UNMEASURED).
@@ -103,6 +105,13 @@ Ask: Production pages load slowly, worst on Show QR and Print; make it faster, o
 3. ⚪ FG sticker load fans out 2 requests per PO plus one full SO read per SO. A single batch endpoint is the real cold-load fix; needs a prod / staging Network waterfall first to confirm the request fan-out dominates. Prod split UNMEASURED.
 
 
+## 2026-10-01: 🔵 Staging: the topbar stays on screen when scrolling (branch `fix/staging-sticky-topbar` to `staging`, STAGING ONLY)
+
+- Asked: keep the top part fixed so the API log button is reachable without scrolling back up.
+- Cause: `topbar.tsx` has `sticky top-0`, but `DashboardLayout.tsx` wraps Topbar + Breadcrumbs in a div only as tall as they are, and a sticky child cannot leave its parent, so the whole block scrolled away. The wrapper is now `sticky top-0 z-30`.
+- `main` has the same wrapper, so prod's header scrolls away too. Not changed there: this branch is staging only.
+- Test: `tests/staging-api-log.test.mjs` pins the sticky wrapper. UNMEASURED: not looked at in a browser; check on staging after deploy.
+
 ## 2026-10-01: 🔵 Staging: API log button moves into the topbar, tab strip hidden (branch `feat/staging-api-log-in-topbar` to `staging`, STAGING ONLY, never PR into main)
 
 - Asked: remove the workspace tab strip at the top on staging and put the API log button there. The floating bottom-left button sat over the sidebar.
@@ -116,6 +125,18 @@ Ask: Production pages load slowly, worst on Show QR and Print; make it faster, o
 - `getSentMail` now falls back to MailSlurp `GET /sent/{id}/html` when the sent record's `body` is empty; the page shows "MailSlurp returned no body for this email." if it is still empty.
 - Setup done the same day: `MAILSLURP_API_KEY` and `MAILSLURP_INBOX_ID` added as secrets on the Pages Preview environment (names checked, values not seen); a stray copy on Production removed by the owner; staging redeployed.
 - Test: `tests/staging-mail.test.mjs` (8 pass). UNMEASURED: the real MailSlurp response; check by opening an email on `/staging-mail` after deploy.
+
+## 2026-09-30 — 🔵 DEV-22 Worker Penalty + payroll deduction (branch `feat/dev22-worker-penalty` → `staging`)
+
+Ask (ticket DEV-22, High): a Worker Penalty module for confirmed order / production mistakes, with approval, a payroll deduction, and the worker seeing it in the app. Owner's answers: approval gated on a new `worker-penalties:approve` right and the creator may not approve their own penalty; the deduction lands in the payroll month of the APPROVAL date, rolling to the next month when that month's payroll is already approved; net pay is not clamped (same rule as advances).
+1. ✅ Backend lib + tables (`worker_penalties`, `worker_penalty_lines`, `payslips.penalty_deduction_sen`), runtime self-applied.
+2. ✅ API `/api/worker-penalties`: CRUD, submit / approve / reject / revoke, production-order lookup with the job-card PICs as suggested workers.
+3. ✅ Payroll: generate + projected subtract the period's approved penalties after statutory; payroll approval posts them (and refuses while the stored slips disagree with the approved penalties); back to DRAFT un-posts.
+4. ✅ RBAC: `worker-penalties` resource (HR + Office via allExcept), `approve` in the Permissions catalog.
+5. 🔵 Employees > Worker Penalty tab (list, create from a production order, multi-worker amounts, photos, approval actions) + Payroll tab Penalty column.
+6. 🔵 Worker app My Pay: penalty card (date, PO No., reason, amount, payroll month, status).
+7. ✅ Tests + docs: `tests/worker-penalties.test.mjs` (9), employees module guide, CODEBASE-MAP, API.md regenerated.
+8. 🟡 Items 5 and 6 are typecheck / lint / unit clean but NOT yet driven in a browser. The local `.dev.vars` points at PRODUCTION (checked 2026-10-01 by project ref only), so no local run; owner chose to verify on staging after the PR merges.
 
 ## 2026-10-01: 🔵 Staging test tool, today override (branch `feat/staging-today-override` to `staging`, STAGING ONLY, never PR to main)
 

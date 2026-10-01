@@ -182,7 +182,9 @@ export default function DashboardLayout() {
         {/* Full-width on phones (no rail); rail-padded at md+. Print drops the
             rail offset so content starts at the page edge. */}
         <div className={`pl-0 ${sidebarCollapsed ? "md:pl-14" : "md:pl-60"} transition-all duration-300 print:!pl-0`}>
-          <div className="print:hidden">
+          {/* Sticky as one block: a sticky child cannot leave its parent, so
+              the header's own sticky did nothing while this wrapper scrolled. */}
+          <div className="sticky top-0 z-30 print:hidden">
             <Topbar />
             <Breadcrumbs />
           </div>
