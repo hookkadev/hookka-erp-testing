@@ -93,3 +93,13 @@ test("recorder rides the one fetch patch, staging host only; drawer is staging o
   assert.match(ui, /if \(!window\.location\.hostname\.startsWith\("staging\."\)\) return null;/);
   assert.doesNotMatch(ui + readFileSync(new URL("../src/lib/staging-api-log.ts", import.meta.url), "utf8"), /localStorage|sessionStorage|fetch\(/);
 });
+
+test("on staging the API button sits in the topbar in place of the tab strip", () => {
+  const topbar = readFileSync(new URL("../src/components/layout/topbar.tsx", import.meta.url), "utf8");
+  const layout = readFileSync(new URL("../src/layouts/DashboardLayout.tsx", import.meta.url), "utf8");
+  const ui = readFileSync(new URL("../src/components/staging-api-log.tsx", import.meta.url), "utf8");
+  // Staging host shows the button, every other host keeps the workspace tabs.
+  assert.match(topbar, /hostname\.startsWith\("staging\."\) \? \([\s\S]*?<StagingApiLog \/>[\s\S]*?\) : \([\s\S]*?<WorkspaceTabs \/>/);
+  assert.doesNotMatch(layout, /StagingApiLog/); // no second, floating copy
+  assert.doesNotMatch(ui, /\bfixed\b/); // the button and drawer hang off the topbar now
+});

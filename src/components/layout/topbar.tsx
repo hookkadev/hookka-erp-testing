@@ -7,6 +7,7 @@ import { NotificationBell } from "./notification-bell";
 import { WorkspaceTabs } from "./workspace-tabs";
 import { clearAuth, getCurrentUser } from "@/lib/auth";
 import { StagingTodayControl } from "@/components/staging-today-control"; // staging-only
+import { StagingApiLog } from "@/components/staging-api-log"; // staging-only, never PR into main
 
 interface TopbarProps {
   user?: {
@@ -60,7 +61,14 @@ export function Topbar({ user }: TopbarProps) {
     <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b border-[#E2DDD8] bg-white px-6">
       {/* Workspace tab strip (open pages persist as browser-style tabs).
           Renders a plain flex spacer until a 2nd tab exists. */}
-      <WorkspaceTabs />
+      {/* Staging only (never PR'd into main): the API log button takes the tab strip's place. */}
+      {window.location.hostname.startsWith("staging.") ? (
+        <div className="flex flex-1 items-center">
+          <StagingApiLog />
+        </div>
+      ) : (
+        <WorkspaceTabs />
+      )}
 
       {/* Global Search (command palette) */}
       <GlobalSearch />
