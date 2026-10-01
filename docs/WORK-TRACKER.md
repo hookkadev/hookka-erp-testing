@@ -1,6 +1,7 @@
 # Hookka ERP — Work Tracker
 
 > **Last verified: 2026-10-01**: branch `feat/dev22-worker-penalty` (to `staging`) added below (in progress, its entry is the newest).
+> **Last verified: 2026-10-01**: branch `fix/staging-mail-empty-body` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: corrected two staging-tool claims below: the today-override cache rows are not wiped nightly, and the delivery-skip notices go to sanitised `@staging.invalid` addresses in code (live UNMEASURED).
 > **Last verified: 2026-10-01**: branch `feat/staging-today-override` (staging-only today override) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `feat/staging-mail-outbox` (to `staging`, STAGING ONLY) added below (its entry is the newest).
@@ -93,6 +94,13 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
+## 2026-10-01: 🔵 Mail Outbox opened an email to an empty frame (branch `fix/staging-mail-empty-body` to `staging`, STAGING ONLY, never PR into main)
+
+- Asked: the Mail Outbox list loaded but clicking an email showed nothing. BUG-2026-10-01-234.
+- `getSentMail` now falls back to MailSlurp `GET /sent/{id}/html` when the sent record's `body` is empty; the page shows "MailSlurp returned no body for this email." if it is still empty.
+- Setup done the same day: `MAILSLURP_API_KEY` and `MAILSLURP_INBOX_ID` added as secrets on the Pages Preview environment (names checked, values not seen); a stray copy on Production removed by the owner; staging redeployed.
+- Test: `tests/staging-mail.test.mjs` (8 pass). UNMEASURED: the real MailSlurp response; check by opening an email on `/staging-mail` after deploy.
+
 ## 2026-09-30 — 🔵 DEV-22 Worker Penalty + payroll deduction (branch `feat/dev22-worker-penalty` → `staging`)
 
 Ask (ticket DEV-22, High): a Worker Penalty module for confirmed order / production mistakes, with approval, a payroll deduction, and the worker seeing it in the app. Owner's answers: approval gated on a new `worker-penalties:approve` right and the creator may not approve their own penalty; the deduction lands in the payroll month of the APPROVAL date, rolling to the next month when that month's payroll is already approved; net pay is not clamped (same rule as advances).
@@ -104,6 +112,7 @@ Ask (ticket DEV-22, High): a Worker Penalty module for confirmed order / product
 6. 🔵 Worker app My Pay: penalty card (date, PO No., reason, amount, payroll month, status).
 7. ✅ Tests + docs: `tests/worker-penalties.test.mjs` (9), employees module guide, CODEBASE-MAP, API.md regenerated.
 8. 🟡 Items 5 and 6 are typecheck / lint / unit clean but NOT yet driven in a browser. The local `.dev.vars` points at PRODUCTION (checked 2026-10-01 by project ref only), so no local run; owner chose to verify on staging after the PR merges.
+
 ## 2026-10-01: 🔵 Staging test tool, today override (branch `feat/staging-today-override` to `staging`, STAGING ONLY, never PR to main)
 
 - Asked: a staging-only fake "today" so month-end, overdue, aging, leave and payroll-month screens can be tested without waiting for the calendar. Scoped to named date helpers only.
