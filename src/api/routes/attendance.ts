@@ -420,11 +420,11 @@ app.post("/", async (c) => {
       return c.json({ success: false, error: "Worker not found" }, 400);
     }
 
-    const date = body.date || new Date().toISOString().split("T")[0];
-    const now = new Date();
-    const time =
-      body.time ||
-      `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+    // Defaults on the Malaysia clock (UTC+8), not the UTC Workers runtime;
+    // same shift as worker.ts malaysiaNow() (BUG-2026-10-01-243).
+    const my = new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString();
+    const date = body.date || my.slice(0, 10);
+    const time = body.time || my.slice(11, 16);
 
     const existing = await c.var.DB.prepare(
       "SELECT * FROM attendance_records WHERE employeeId = ? AND date = ?",

@@ -252,6 +252,16 @@ function malaysiaNow(): Date {
 function todayYmd(): string {
   return malaysiaNow().toISOString().slice(0, 10);
 }
+// Minutes since an open punch's clockIn ("HH:MM", Malaysia wall clock), read
+// against the Malaysia clock too. Raw elapsed, no lunch deduction, because that
+// is what punch-out stores in workingMinutes, so the card doesn't jump when the
+// worker punches out. BUG-2026-10-01-243: this used UTC getHours(), 8h behind,
+// so the figure clamped to 0 most of the day and the card hid it.
+export function liveWorkingMinutes(clockIn: string, nowMs = Date.now()): number {
+  const [h, m] = clockIn.split(":").map(Number);
+  const my = new Date(nowMs + 8 * 60 * 60 * 1000);
+  return Math.max(0, my.getUTCHours() * 60 + my.getUTCMinutes() - (h * 60 + m));
+}
 
 // ----- types for joined queries -----
 type AttendanceRow = {
@@ -501,17 +511,11 @@ app.get("/today", async (c) => {
             clockOut: attendance.clockOut,
             // Live computation: when worker is clocked IN but not OUT yet,
             // workingMinutes = 0 in DB until clockOut runs. Show ticking
-            // working time on the home page instead of a static 0.
-            workingMinutes: (() => {
-              if (attendance.workingMinutes > 0) return attendance.workingMinutes;
-              if (!attendance.clockIn || attendance.clockOut) {
-                return attendance.workingMinutes;
-              }
-              const [h, m] = attendance.clockIn.split(":").map(Number);
-              const now = new Date();
-              const total = now.getHours() * 60 + now.getMinutes() - (h * 60 + m);
-              return Math.max(0, total);
-            })(),
+            // working time (Malaysia clock) on the home page instead of a 0.
+            workingMinutes:
+              attendance.workingMinutes > 0 || !attendance.clockIn || attendance.clockOut
+                ? attendance.workingMinutes
+                : liveWorkingMinutes(attendance.clockIn),
             status: attendance.status,
           }
         : null,
