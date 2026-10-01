@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-01**: branch `fix/dev08-accessory-so-ready` (DEV-08) added below (its entry is the newest).
 > **Last verified: 2026-09-30**: #617 entry item 4 — owner re-posted the opening; creditor Self-check card green (measured).
 > **Last verified: 2026-09-30**: #617 (BUG-2026-09-30-229/-230, Self-check reconciliations + cancelled opening seeds) closed ✅ below with its prod check.
 > **Last verified: 2026-09-30**: branch `fix/pillow-fab-sew-sticker` (DEV-26) added below (its entry is the newest).
@@ -63,6 +64,17 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+
+## 2026-10-01 — 🔵 DEV-08 Sofa + accessories as one order (Violet, High) (branch `fix/dev08-accessory-so-ready` → `main`)
+
+Ask (DEV-08): sofa and its accessories (pillow) must be scheduled together, show per-item + overall status, and the order is only Completed / Ready for Delivery when every item is done.
+
+1. 🔵 Bug: `cascadeUpholsteryToSO` (and its CO twin) flips the SO to READY_TO_SHIP once the sofa's UPHOLSTERY cards are done. A pillow PO has no UPHOLSTERY card, so it counts as done while still at FAB_SEW. Fix: a sibling with no UPHOLSTERY card counts only once the PO itself is COMPLETED (or CANCELLED); one `siblingUphGateDone` shared by all three cascades (BUG-2026-10-01-234, class C26). Verified locally: tsc strict exit 0, `npm test` 0 fail, new test fails 7 of 9 on the old code. PR to `main`, not deployed.
+2. 🔵 MEASURED on staging 2026-10-01 (read-only): 9 SOs at READY_TO_SHIP with unfinished pillow POs (24 PO rows incl. SO-2609-199's 3 SERVICE CHARGE lines, which have no UPH sibling so this fix does not touch them). 7 of them already shipped/invoiced the sofa (e.g. SO-2605-104 on DO-2606-034, pillows pending 4 months). Safety: on shipped SOs, accessory POs are COMPLETED 267 vs PENDING 2, so the floor does close pillow POs and the fix will not wedge normal orders. Prod still UNMEASURED. Query: `SELECT so.id, po.po_no, po.status FROM sales_orders so JOIN production_orders po ON po.sales_order_id = so.id WHERE so.status = 'READY_TO_SHIP' AND po.item_category = 'ACCESSORY' AND po.status NOT IN ('COMPLETED','CANCELLED')`. Prod impact UNMEASURED.
+3. 🟡 Parked, needs reporter: align SOFA + ACCESSORY sewing days for the same SO (`runSewing` schedules each lane independently). Violet has not answered which schedule screen she means.
+4. 🟡 Parked: per-SO sibling status on Production / Planning rows. The SO detail "Linked Production Orders" table already shows per-PO status.
+5. Not a gap: armrest is a sofa WIP (`SOFA_ARMREST`, mig 0027), not a separate SKU, so it already rides on the sofa PO.
 
 
 ## 2026-09-30 — 🔵 DEV-26 Pillow sticker for Fab Sew (Siti, High) (branch `fix/pillow-fab-sew-sticker` → `main`, BUG-2026-09-30-231)

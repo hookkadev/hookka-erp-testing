@@ -3615,6 +3615,23 @@ export async function applyWipInventoryChange(
   }
 }
 
+// The READY_TO_SHIP gate for one sibling PO, shared by the SO / CO forward
+// cascades and the SO rollback so the two directions can never disagree.
+// A PO with no UPHOLSTERY card (pillow / cushion: FAB_CUT → FAB_SEW → PACKING)
+// has no card here to prove it is made, so it counts only once the PO itself
+// is COMPLETED (or CANCELLED, which never ships). It used to count as done
+// outright, so a sofa's upholstery flipped the SO to READY_TO_SHIP while its
+// pillows were still on Fab Sew (DEV-08).
+export function siblingUphGateDone(
+  po: { status?: string | null } | undefined,
+  uphJcs: { status: string }[],
+): boolean {
+  if (uphJcs.length === 0) {
+    return po?.status === "COMPLETED" || po?.status === "CANCELLED";
+  }
+  return uphJcs.every((j) => j.status === "COMPLETED" || j.status === "TRANSFERRED");
+}
+
 // ---------------------------------------------------------------------------
 // Cascade Upholstery completion → SO READY_TO_SHIP + stockedIn flags.
 // Mirrors the in-memory cascadeUpholsteryToSO().
@@ -3662,11 +3679,9 @@ export async function cascadeUpholsteryToSO(
     return filterJcsForCompletionGate(poById.get(poId), mine);
   };
 
-  const everyUphDone = siblingPOs.every((p) => {
-    const mine = filteredUphFor(p.id);
-    if (mine.length === 0) return true;
-    return mine.every((j) => j.status === "COMPLETED" || j.status === "TRANSFERRED");
-  });
+  const everyUphDone = siblingPOs.every((p) =>
+    siblingUphGateDone(p, filteredUphFor(p.id)),
+  );
 
   const now = new Date().toISOString();
   if (everyUphDone) {
@@ -3763,11 +3778,9 @@ export async function cascadeUpholsteryToCO(
     return filterJcsForCompletionGate(poById.get(poId), mine);
   };
 
-  const everyUphDone = siblingPOs.every((p) => {
-    const mine = filteredUphFor(p.id);
-    if (mine.length === 0) return true;
-    return mine.every((j) => j.status === "COMPLETED" || j.status === "TRANSFERRED");
-  });
+  const everyUphDone = siblingPOs.every((p) =>
+    siblingUphGateDone(p, filteredUphFor(p.id)),
+  );
 
   const now = new Date().toISOString();
   if (everyUphDone) {
@@ -3916,10 +3929,15 @@ export async function cascadeUpholsteryRollbackToSO(
 
   const siblings = await db
     .prepare(
-      "SELECT id, itemCategory, specialOrder FROM production_orders WHERE salesOrderId = ?",
+      "SELECT id, status, itemCategory, specialOrder FROM production_orders WHERE salesOrderId = ?",
     )
     .bind(so.id)
-    .all<{ id: string; itemCategory: string | null; specialOrder: string | null }>();
+    .all<{
+      id: string;
+      status: string | null;
+      itemCategory: string | null;
+      specialOrder: string | null;
+    }>();
   const siblingPOs = siblings.results ?? [];
   if (siblingPOs.length === 0) return;
 
@@ -3936,17 +3954,14 @@ export async function cascadeUpholsteryRollbackToSO(
 
   // Mirror the forward path: every sibling PO must have all its UPH JCs in
   // COMPLETED/TRANSFERRED for the SO to remain READY_TO_SHIP. POs with no
-  // UPH JCs at all are treated as vacuous-true (matches the forward path).
+  // UPH JCs at all need the PO itself COMPLETED (same siblingUphGateDone as
+  // the forward path).
   // HB-only sibling POs: drop their DIVAN UPH JCs so the rollback decision
   // stays in sync with the forward cascade (which also ignores them).
   const poById = new Map(siblingPOs.map((p) => [p.id, p]));
   const everyUphDone = siblingPOs.every((p) => {
     const minePre = uphJcs.filter((j) => j.productionOrderId === p.id);
-    const mine = filterJcsForCompletionGate(poById.get(p.id), minePre);
-    if (mine.length === 0) return true;
-    return mine.every(
-      (j) => j.status === "COMPLETED" || j.status === "TRANSFERRED",
-    );
+    return siblingUphGateDone(p, filterJcsForCompletionGate(poById.get(p.id), minePre));
   });
   if (everyUphDone) return; // Forward condition still holds — nothing to undo.
 

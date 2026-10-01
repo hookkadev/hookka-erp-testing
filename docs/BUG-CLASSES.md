@@ -1,5 +1,6 @@
 # Recurring bug classes — the index that makes P5 executable
 
+> **Last verified: 2026-10-01**: branch `fix/dev08-accessory-so-ready` **adds C26 — UPHOLSTERY cards as the proxy for "made"** (BUG-2026-10-01-234, DEV-08). Nothing else re-checked.
 > **Last verified: 2026-09-25**: restamped on branch `feat/dashboard-kpi-no-icons` (PR #524): C15 gains row 5, the Worker Efficiency card that printed worker ids after a refused `/api/workers` read (BUG-2026-09-25-194). Nothing else re-checked.
 > **Last verified: 2026-09-25** — restamped on branch `feat/ocr-dashboard-tab`: C23 gains the OCR-tab row (BUG-2026-09-25-192, `readQueueRow` dual-key fix); no other class re-checked.
 > **Last verified: 2026-09-23** — branch `fix/invoice-line-so-ref` adds **C16 row 8** (invoice PDF read the DO field names for per-line SO/REF/CO SO). Nothing else re-checked.
@@ -1712,4 +1713,31 @@ re-queues; it never re-kicks under waitUntil.
 | 3 | every other `waitUntil(` in `src/api` | ⬜ not audited for duration; grep and check the slowest |
 
 Test: `tests/scan-queue-client-driven.test.mjs` (no `waitUntil(` in scan-queue.ts).
+
+## C26 — UPHOLSTERY cards as the proxy for "made", and an accessory has none
+
+**Shape.** A gate decides "this PO / order is finished" by checking that every UPHOLSTERY job
+card is COMPLETED/TRANSFERRED. Accessories (pillow, cushion: FAB_CUT → FAB_SEW → PACKING, mig
+0032) have no UPHOLSTERY card at all, so the gate sees an empty set and either reads it as
+done (vacuous true: the order ships early) or as never-done (the item is stuck forever).
+
+**Why it keeps happening.** Sofas and bedframes, the bulk of the volume, always have
+UPHOLSTERY cards, so the proxy is right for almost every row a tester looks at. Each gate was
+written separately and each fix repaired only the gate in front of its author.
+
+**The rule.** An empty UPHOLSTERY set never decides on its own. Fall back to the PO's own
+status (`COMPLETED`, which the backend only sets once every relevant dept is done). For the
+order-level cascades use `siblingUphGateDone` in `production-orders/_helpers.ts`.
+
+**Instances**
+
+| # | where | state |
+|---|---|---|
+| 1 | `poReadyForDelivery` (`src/lib/delivery-pipeline.ts`) — completed pillows never reached Pending Delivery | ✅ 2026-06-20 (BUG-2026-06-20-001) |
+| 2 | Consignment "ready to ship" list — completed pillows missing | ✅ 2026-07-01 (BUG-2026-07-01-004) |
+| 3 | `cascadeUpholsteryToSO` / `ToCO` / `cascadeUpholsteryRollbackToSO` — SO flipped to READY_TO_SHIP on the sofa's upholstery while its pillows were on Fab Sew | ✅ 2026-10-01 on branch `fix/dev08-accessory-so-ready` (BUG-2026-10-01-234), not deployed |
+| 4 | `poInPlanning` (`src/lib/delivery-pipeline.ts`) — an in-production pillow does not preview in the Delivery Planning tab | ⬜ left by BUG-2026-06-20-001 as lower impact; changes what the Delivery page lists, so it needs the owner's call |
+
+Test: `tests/so-ready-accessory-gate.test.mjs` (no `mine.length === 0) return true` left in
+`_helpers.ts`; every cascade goes through `siblingUphGateDone`).
 
