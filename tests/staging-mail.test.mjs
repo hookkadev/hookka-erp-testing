@@ -20,7 +20,7 @@ function stub(routes) {
     const hit = Object.entries(routes).find(([p]) => path === p || path.startsWith(p + "?"));
     if (!hit) return new Response("nope", { status: 404 });
     const v = hit[1];
-    return v instanceof Uint8Array
+    return v instanceof Uint8Array || typeof v === "string"
       ? new Response(v, { status: 200 })
       : new Response(JSON.stringify(v), { status: 200 });
   };
@@ -69,6 +69,26 @@ test("detail returns body and attachment names for our inbox", async () => {
   assert.equal(d.isHtml, true);
   assert.deepEqual(d.attachments, [{ id: ATT, name: "overdue.pdf", contentType: "application/pdf", size: 2048 }]);
   assert.equal("inboxId" in d, false);
+});
+
+// BUG-2026-10-01-234: staging's sent records came back with no body, so the
+// page showed an empty frame. The HTML endpoint fills it in.
+test("detail falls back to the HTML endpoint when the sent record has no body", async () => {
+  const { f, calls } = stub({
+    [`/sent/${SENT}`]: { ...sentDto(INBOX), body: null, isHTML: null, attachments: [] },
+    [`/sent/${SENT}/html`]: "<p>from html</p>",
+  });
+  const d = await getSentMail(f, "KEY", INBOX, SENT);
+  assert.equal(d.body, "<p>from html</p>");
+  assert.equal(d.isHtml, true);
+  assert.ok(calls.some((c) => c.url.endsWith(`/sent/${SENT}/html`)));
+
+  const none = stub({ [`/sent/${SENT}`]: { ...sentDto(INBOX), body: "", attachments: [] } });
+  assert.equal((await getSentMail(none.f, "KEY", INBOX, SENT)).body, ""); // 404 on /html stays empty
+
+  const full = stub({ [`/sent/${SENT}`]: { ...sentDto(INBOX), attachments: [] } });
+  await getSentMail(full.f, "KEY", INBOX, SENT);
+  assert.equal(full.calls.some((c) => c.url.endsWith("/html")), false); // only when needed
 });
 
 test("detail hides mail from another inbox, unknown ids and non-uuids", async () => {

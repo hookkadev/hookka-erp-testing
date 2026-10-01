@@ -155,13 +155,17 @@ export default function StagingMail() {
                                 ))}
                               </ul>
                             )}
-                            <iframe
-                              title={`Body of ${detail.subject}`}
-                              sandbox=""
-                              referrerPolicy="no-referrer"
-                              srcDoc={detail.isHtml ? detail.body : `<pre>${escapeHtml(detail.body)}</pre>`}
-                              className="h-[600px] w-full rounded border border-[#E5E1DC] bg-white"
-                            />
+                            {detail.body.trim() ? (
+                              <iframe
+                                title={`Body of ${detail.subject}`}
+                                sandbox=""
+                                referrerPolicy="no-referrer"
+                                srcDoc={detail.isHtml ? detail.body : `<pre>${escapeHtml(detail.body)}</pre>`}
+                                className="h-[600px] w-full rounded border border-[#E5E1DC] bg-white"
+                              />
+                            ) : (
+                              <p className="text-xs text-[#9CA3AF]">MailSlurp returned no body for this email.</p>
+                            )}
                           </>
                         )}
                       </div>
