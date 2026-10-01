@@ -5,7 +5,7 @@
 //
 //   1. Idempotency guard — return existing POs if the order already
 //      cascaded.
-//   2. BOM lookup → WIP breakdown via breakBomIntoWips().
+//   2. BOM lookup → WIP breakdown via breakBomIntoJobCardWips().
 //   3. Reverse-schedule per-dept dueDates from the delivery anchor.
 //   4. INSERT one production_orders row per piece (BF/ACC) or per SO line
 //      (SOFA stays as one PO with the full set quantity).
@@ -36,7 +36,7 @@ import {
   loadLeadTimeSettings,
 } from "../../lib/lead-times";
 import {
-  breakBomIntoWips,
+  breakBomIntoJobCardWips,
   deriveJobCardId,
   type BomVariantContext,
 } from "../../lib/bom-wip-breakdown";
@@ -575,8 +575,12 @@ export async function createProductionOrdersForOrder(
         legHeightInches: item.legHeightInches ?? null,
         gapInches: item.gapInches ?? null,
       };
-      let wips = breakBomIntoWips(
+      // An L1-only BOM (empty tree, steps on the L1 tab) gets no WIP cards,
+      // only the FG-level ones below (BUG-2026-10-01-241).
+      const l1ProcsAll = parseL1Processes(bomRow?.l1Processes ?? null);
+      let wips = breakBomIntoJobCardWips(
         bomRow?.wipComponents ?? null,
+        l1ProcsAll.length,
         productCode,
         variants,
       );
@@ -740,11 +744,13 @@ export async function createProductionOrdersForOrder(
           startDate,
         );
 
-      // PO.currentDepartment = first-in-DEPT_ORDER dept across all WIP chains.
+      // PO.currentDepartment = first-in-DEPT_ORDER dept across all WIP chains
+      // (the L1 steps, for an L1-only BOM).
       let currentDept = "FAB_CUT";
-      if (planned.length > 0) {
+      const firstDeptFrom = planned.length > 0 ? planned : l1ProcsAll;
+      if (firstDeptFrom.length > 0) {
         let minIdx = 999;
-        for (const p of planned) {
+        for (const p of firstDeptFrom) {
           const idx = DEPT_ORDER.indexOf(
             p.deptCode as (typeof DEPT_ORDER)[number],
           );
@@ -902,7 +908,6 @@ export async function createProductionOrdersForOrder(
       // Repair Scope also filters FG-level processes: a PACKING L1 card
       // survives only when PACKING is in scope (it is, in every owner
       // preset — only a CUSTOM scope can drop it).
-      const l1ProcsAll = parseL1Processes(bomRow?.l1Processes ?? null);
       const l1Procs = repairScope
         ? l1ProcsAll.filter((p) =>
             (repairScope.depts as readonly string[]).includes(p.deptCode),

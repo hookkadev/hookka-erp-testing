@@ -1,6 +1,7 @@
 # Hookka ERP — Work Tracker
 
 > **Last verified: 2026-10-01**: branch `feat/dev08-pillow-follows-sofa` (DEV-08 rule B) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: branch `fix/accessory-l1-only-job-cards` (to `staging`, BUG-2026-10-01-241) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `fix/schedule-email-size` (to `staging`) added item 10 under BUG-36 (2026-09-29 entry).
 > **Last verified: 2026-10-01**: branch `feat/dev31-worker-dept-hours` (to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `feat/email-report-multi-times` (to `staging`) added items 7, 8 and 9 under BUG-36 (2026-09-29 entry).
@@ -118,6 +119,18 @@ Violet chose rule B (WhatsApp 2026-10-01): a pillow is guaranteed finished befor
 4. ⚪ Before/after on staging data: list SOs whose sew / pack day moves, and run the new `soIdsWithMainItem` SQL for real (UNMEASURED: only exercised by the engine tests, never against a DB). MEASURED on staging (hookka-erp-staging-sg) 2026-10-01, one READ ONLY transaction, old vs new engine over the same data: 5069 assignments identical, 178 new = PACKING/ACCESSORY rows, 24 SOs, every one on its sofa's pack day. Sewing change moved NOTHING: ACCESSORY sew capacity is never the limit, the cut floor is. 5 of 21 SOs still sew pillows on/after the sofa's pack day (e.g. SO-2609-021: sofa packs 10-10, pillow cut 10-22..24, sewn 10-28 = its customer DD). Cause: cutting is JIT, accessory floor = DD - chunkLeadDays (3) vs sofa modelLeadDays (6), and the sofa then runs ahead on free capacity. Rule B needs a cutting change; decision pending. `soIdsWithMainItem` SQL ran fine (31 SOs, key `mainSoId`). Packing page not yet checked in a browser (Pack Calendar rows checked via computeDeptSchedule).
 6. 🔵 Cutting, Violet chose A (WhatsApp 2026-10-01 15:35, "we always missed out the pillow, after delivery only found out this order got pillows"): a pillow on an SO with a sofa/bedframe is cut with it. Main item still waiting to be cut → pillow uses the main item's lead (`modelLeadDays`) instead of `chunkLeadDays`; main item already cut → pillow cut as soon as possible. Pillow-only SOs unchanged. Same rule on the standalone Fabric Cutting sheet. Done (`CutCard.mainItem`, `tagPillowCuts`). MEASURED on staging (read-only, old vs new engine incl. cutting): pillow cuts 87 earlier / 20 later (pillow-only orders displaced in the ACCESSORY pool, at most +7d), pillow sewing 62 cards earlier (up to 18d), 0 later; SO-2609-021 pillow sew 10-28 → 10-10 (= sofa pack day), SO-2609-198 10-23 → 10-10. Side effect: sofa wood→pack reshuffles within slack (17 SOs pack later, up to +11d; 13 earlier) because SOs no longer held by their pillows join Wood Cut sooner; SOs packed after customer DD: 117 before, 117 after, 0 newly late. Still after the sofa's pack day: SO-2609-093 / -198 / -223, all cut on day 1 and waiting on ACCESSORY sew capacity (175 pillow sew cards, near days full) — a capacity/OT call, not code.
 5. Not changed: Wood Cut waits for the whole SO's sewing (owner-confirmed Python port, Wei Siang 2026-06).
+## 2026-10-01 — 🔵 Accessories doubled on Fab Cut (Violet) (branch `fix/accessory-l1-only-job-cards` → `staging`, BUG-2026-10-01-241)
+
+Ask: on Fabric Cutting every accessory line shows twice, though the quantity is 1. Owner confirmed accessory BOMs are meant to be L1-only.
+
+1. 🔵 Cause: an accessory BOM has an empty WIP tree and its steps on the L1 tab. The builder answered the empty tree with the FG_MAIN fallback (all 9 depts) and then added the L1 cards too. BC05-MF qty 1 had 12 cards. Fixed in the builder and jobcard-sync through one helper, `breakBomIntoJobCardWips`. Tests in `tests/bom-explosion.test.mjs`.
+2. ⚪ Deploy blocker for the owner: Foam is only on these orders because of the fallback (prod: 16 fallback Foam cards worked by a real person, on A01, A02, BC05-MF, SB02, square pillows). Add Foam to the L1 tab of every accessory that goes through Foam before this ships, or new orders lose their Foam card.
+3. ⚪ A01's active BOM on prod is fully empty (no tree, no L1). It keeps the fallback chain until someone fills it in.
+4. ⚪ Not in this change: the 463 cards already created on prod (53 pending orders; 81 of the cards already COMPLETED). Cleanup needs a reviewed script and an owner decision on the completed ones.
+5. ⚪ Not in this change: FG-level Fab Cut / Fab Sew cards add to a `wip_items` row named after the product and Packing never takes it off (prod: `BC05-MF` 8, `SB02` 9, `A02` 2). Older than this bug.
+
+Prod measured 2026-10-01 with read-only queries (counts above). Staging gave the same picture.
+
 ## 2026-10-01: 🔵 DEV-31 worker sees their department and hours there today (branch `feat/dev31-worker-dept-hours` to `staging`)
 
 - Asked (ticket DEV-31, High, VIOLET): after scanning a department QR the worker should see which department they are in and how many hours they work there that day. Photo 1 is the office Working Hours grid with a punch-out split (Fabric Sewing · Bedframe 4.34h + R&D 3.19h), so "hours" = hours worked per department, not a planned target.
