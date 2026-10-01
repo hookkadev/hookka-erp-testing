@@ -63,10 +63,11 @@ export function Topbar({ user }: TopbarProps) {
       {/* Workspace tab strip (open pages persist as browser-style tabs).
           Renders a plain flex spacer until a 2nd tab exists. */}
       {/* Staging only (never PR'd into main): the staging tools take the tab strip's
-          place, all in one row on the left. Labels drop to icons as the bar narrows
-          (sidebar open) instead of wrapping. */}
+          place, all in one row on the left. Labels drop to icons below xl instead of
+          wrapping. The row never shrinks below its pills (no min-w-0): the search box
+          is the one that gives, otherwise it covered the last pill. */}
       {window.location.hostname.startsWith("staging.") ? (
-        <div className="flex min-w-0 flex-1 items-center gap-2">
+        <div className="flex flex-1 items-center gap-2">
           <StagingApiLog />
           <StagingViewAs />
           <StagingTodayControl />
@@ -76,7 +77,7 @@ export function Topbar({ user }: TopbarProps) {
             className="flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-amber-100 px-3 text-xs font-semibold text-amber-800 hover:bg-amber-200"
           >
             <ScrollText className="h-4 w-4" />
-            <span className="hidden 2xl:inline">Patch notes</span>
+            <span className="hidden xl:inline">Patch notes</span>
           </Link>
         </div>
       ) : (

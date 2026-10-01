@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-01**: branch `fix/staging-topbar-patch-notes-hidden` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `feat/staging-view-as-user` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `feat/staging-role-switcher` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `fix/staging-mail-bare-raw` (to `staging`, STAGING ONLY) added below (its entry is the newest).
@@ -102,6 +103,13 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-01: 🔵 Staging top bar: Patch notes pill hidden under the search box (branch `fix/staging-topbar-patch-notes-hidden` to `staging`, STAGING ONLY, never PR into main)
+
+- Asked: after #641 the Patch notes pill was gone, covered by the search box.
+- Cause: the staging tool row had `min-w-0`, so it shrank below its own pills and the last one (Patch notes) spilled under the search box. The View as select was also as wide as the longest account name (271px showing "Me").
+- Fix: the row no longer shrinks (no `min-w-0`); the search box gets `min-w-0` and is the one that narrows. View as shows the picked name in a span sized to it, with the native select invisible over the whole pill. Patch notes label shows from xl.
+- Measured on staging in the browser pane with the sidebar open, classes applied in place: at 1360px Patch notes ended at 865px with the search starting at 765px (overlap); after the fix 773 vs 785, and at 1280px still 773 vs 785 with the search at 124px wide. View as 271px to 111px.
 
 ## 2026-10-01: 🔵 Staging: "View as" picks a user, not a role; topbar tidied (branch `feat/staging-view-as-user` to `staging`, STAGING ONLY, never PR into main)
 
