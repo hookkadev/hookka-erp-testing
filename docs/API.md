@@ -186,7 +186,7 @@ offsets pointing past the end of their own file.
 | `/api/scan-po` | `src/api/routes/scan-po.ts` | `GET /catalog` <sub>:486</sub><br>`POST /extract` <sub>:525</sub><br>`POST /samples/:id/confirm` <sub>:712</sub><br>`GET /samples/by-po/:poIdentifier` <sub>:847</sub><br>`PATCH /samples/by-po/:poIdentifier` <sub>:904</sub><br>`GET /customer-rules/:customerId` <sub>:946</sub><br>`PUT /customer-rules/:customerId` <sub>:977</sub><br>`POST /customer-rules/:customerId/distill` <sub>:1033</sub> | gated |
 | `/api/scan-supplier` | `src/api/routes/scan-supplier.ts` | `POST /extract` <sub>:36</sub><br>`POST /samples/:id/confirm` <sub>:127</sub> | gated |
 | `/api/party-aliases` | `src/api/routes/party-aliases.ts` | `GET /` <sub>:50</sub><br>`GET /list` <sub>:69</sub><br>`POST /` <sub>:93</sub><br>`DELETE /` <sub>:134</sub> | gated |
-| `/api/scan-finance` | `src/api/routes/scan-finance.ts` | `POST /extract` <sub>:54</sub> | gated |
+| `/api/scan-finance` | `src/api/routes/scan-finance.ts` | `POST /extract` <sub>:57</sub> | gated |
 | `/api/scan-queue` | `src/api/routes/scan-queue.ts` | `POST /upload` <sub>:719</sub><br>`POST /batch/:batchId/work` <sub>:900</sub><br>`GET /batch/:batchId` <sub>:957</sub><br>`GET /pending` <sub>:1037</sub><br>`GET /:id` <sub>:1162</sub><br>`GET /:id/bytes` <sub>:1222</sub><br>`POST /:id/retry` <sub>:1282</sub><br>`POST /:id/consume` <sub>:1354</sub> | gated |
 | `/api/import` | `src/api/routes/import-completion.ts` | _(none found by static scan — read the file)_ | gated |
 | `/api/service-cases` | `src/api/routes/service-cases.ts` | `GET /` <sub>:525</sub><br>`GET /:id` <sub>:603</sub><br>`POST /` <sub>:650</sub><br>`PUT /:id` <sub>:793</sub><br>`PUT /:id/status` <sub>:967</sub><br>`DELETE /:id` <sub>:1043</sub> | gated |
