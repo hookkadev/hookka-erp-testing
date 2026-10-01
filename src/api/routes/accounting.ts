@@ -3340,6 +3340,16 @@ app.get("/ar-reconciliation", async (c) => {
     { legs400: legs300, pis: invoices, paymentRows: receiptRows, pcnPostedSen: 0, cnAllocCtlSen: 0 },
     AR_RECON_CFG,
   );
+  // The ledger keys a receipt by its record id; the owner reads receipt
+  // numbers (2026-10-01). A GL leg with no record keeps its id.
+  const receiptNoById = new Map<string, string>();
+  for (const r of recRes.results ?? []) {
+    const no = String(r.receiptNumber ?? r.receipt_number ?? "").trim();
+    if (no) receiptNoById.set(String(r.id), no);
+  }
+  for (const it of report.items) {
+    if (it.kind === "payment_gl_mismatch" || it.kind === "void_payment_gl_leak") it.ref = receiptNoById.get(it.ref) ?? it.ref;
+  }
 
   const coaRes = await c.var.DB.prepare(
     "SELECT code, name FROM chart_of_accounts WHERE specialAccountType = 'SDC'",

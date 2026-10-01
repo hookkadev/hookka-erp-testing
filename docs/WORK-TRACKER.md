@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-01**: owner said start — batch 1 of the finance plan in progress (branch `feat/finance-sidebar-accordion-selfcheck-wording`).
 > **Last verified: 2026-10-01**: branch `fix/worker-history-snapshot-stale` (BUG-2026-10-01-245) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `fix/accessory-l1-only-job-cards-main` (BUG-2026-10-01-244, staging #656) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: finance improvement plan logged below as ⚪ queued (owner confirmed every point; start on his word).
@@ -178,11 +179,12 @@ Verified: `tsc -p tsconfig.app.json` exit 0; `npm test` all pass. NOT verified o
 tsc strict 0; `npm test` 5047 pass / 0 fail.
 ---
 
-## 2026-10-01 — ⚪ Finance improvements, confirmed point by point with the owner — queued until he says start
+## 2026-10-01 — 🔵 Finance improvements, confirmed point by point with the owner (owner「做」2026-10-01)
 
 Four batches, each shipped and prod-verified before the next:
-1. ⚪ FINANCE sidebar: opening one group closes the others (finance section only). Self-check debtor item shows the receipt
-   number and debtor wording.
+1. 🔵 FINANCE sidebar: opening one group closes the others (finance section only). Self-check debtor item shows the receipt
+   number and debtor wording (`ReconCfg.words` + `kindLabel`; the creditor side keeps its words). Branch
+   `feat/finance-sidebar-accordion-selfcheck-wording`, guard `tests/finance-batch1-sidebar-selfcheck.test.mjs`.
 2. ⚪ Payment voucher form as a popup in the layout the owner showed (Payment / Transfer switch; payee, number on save, date,
    paid from, printed description + internal notes, supplier bill no. + bill date, MYR only, line cards, scan inside the
    form, accrue / draft / post kept; no event, no product line — measured unused). Transfer = an ordinary voucher (own

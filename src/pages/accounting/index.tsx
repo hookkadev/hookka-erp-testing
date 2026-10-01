@@ -6603,7 +6603,7 @@ function SelfCheckTab() {
     const g = async <T,>(p: string): Promise<T | null> => {
       try { const r = await fetch(p, { cache: "no-store" }); const j = await r.json() as { success?: boolean; data?: T }; return j?.success && j.data ? j.data : null; } catch { return null; }
     };
-    type Recon = { driftSen: number; items: { kind: string; ref: string; supplierName?: string; customerName?: string; contributionSen: number; note?: string }[]; unexplainedResidualSen: number };
+    type Recon = { driftSen: number; items: { kind: string; kindLabel?: string; ref: string; supplierName?: string; customerName?: string; contributionSen: number; note?: string }[]; unexplainedResidualSen: number };
     type Ctrl = { driftControlVsPiSen?: number; driftControlVsInvoicesSen?: number; tradeControlSen: number; netOutstandingSen: number };
     type Tb = { totalDr: number; totalCr: number; balanced: boolean };
     type Pv = { id: string; pvNo: string; date: string; totalSen: number; status: string; approvalState?: string | null; approval_state?: string | null; accrued: number; settledAt: string | null; payee: string | null }[];
@@ -6626,7 +6626,7 @@ function SelfCheckTab() {
         ok: d === null ? null : d === 0,
         headline: d === null ? "Could not load" : d === 0 ? "Control account = subledger to the sen" : `Off by ${formatCurrency(Math.abs(d))} — control ${d > 0 ? "above" : "below"} subledger`,
         detail: r && r.items.length ? `${r.items.length} item${r.items.length === 1 ? "" : "s"} explain it${r.unexplainedResidualSen !== 0 ? ` · unexplained residual ${formatCurrency(Math.abs(r.unexplainedResidualSen))}` : ""}` : undefined,
-        items: r?.items.slice(0, 12).map((i) => ({ label: `${i.kind.replace(/_/g, " ")} · ${i.ref}${i.supplierName ? ` · ${i.supplierName}` : ""}${i.customerName ? ` · ${i.customerName}` : ""}`, amount: i.contributionSen, note: i.note })),
+        items: r?.items.slice(0, 12).map((i) => ({ label: `${i.kindLabel ?? i.kind.replace(/_/g, " ")} · ${i.ref}${i.supplierName ? ` · ${i.supplierName}` : ""}${i.customerName ? ` · ${i.customerName}` : ""}`, amount: i.contributionSen, note: i.note })),
         fixHref: href, fixLabel: "Open the aging / reconciliation",
       });
     };
