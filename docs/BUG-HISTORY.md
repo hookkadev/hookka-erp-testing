@@ -87,6 +87,10 @@ page now says "MailSlurp returned no body for this email." instead of an empty f
 **Test.** `tests/staging-mail.test.mjs`: the fallback is used when `body` is null, a 404 stays empty, and a full record never
 calls `/html`. Fails before the fix, passes after.
 
+**Not fixed yet (2026-10-01, after #629).** The owner still sees an empty white frame, not the "no body" message, so a body
+arrives and renders blank. Cause UNMEASURED. Branch `fix/staging-mail-show-source` adds a "Show source" toggle and the body length
+so the next look shows what MailSlurp returns.
+
 ---
 
 ## BUG-2026-09-30-231 — Pillows had a Fab Cut QR sticker and no Fab Sew one `production-orders` `ui-frontend` 🟡

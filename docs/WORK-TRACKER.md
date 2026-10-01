@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-01**: branch `fix/staging-mail-show-source` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `fix/staging-sticky-topbar` (to `staging`, STAGING ONLY) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `feat/dev22-worker-penalty` (to `staging`) added below (in progress, its entry is the newest).
 > **Last verified: 2026-10-01**: branch `feat/staging-api-log-in-topbar` (to `staging`, STAGING ONLY) added below (its entry is the newest).
@@ -95,6 +96,13 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-01: 🟡 Mail Outbox: opened email still showed an empty white box (branch `fix/staging-mail-show-source` to `staging`, STAGING ONLY)
+
+- Reported after #629: clicking an email shows an empty white frame, not the "no body" message, so the server does return a body and it renders blank. Follow-up to BUG-2026-10-01-234.
+- Cause UNMEASURED: no enforced CSP on the page (checked the response headers and `index.html`), and our email HTML hides nothing. Could not read the live response: Claude in Chrome was not connected.
+- Added a "Show source" toggle and the body's type and length on each opened email. The source is printed as escaped text, so the content is readable whatever it is, and the length tells "empty" from "renders blank".
+- Next: open an email, click "Show source", and read what MailSlurp returns; fix the renderer from that.
 
 ## 2026-10-01: 🔵 Staging: the topbar stays on screen when scrolling (branch `fix/staging-sticky-topbar` to `staging`, STAGING ONLY)
 
