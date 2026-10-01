@@ -1256,7 +1256,7 @@ export default function ConsignmentNotePage() {
 
       let okCount = 0;
       // Server's own reason for a refused CN (e.g. "already on a consignment
-      // note", BUG-2026-10-01-237) — shown instead of a generic failure.
+      // note", BUG-2026-10-01-238) — shown instead of a generic failure.
       const errors: string[] = [];
       for (const [, group] of byCustomer.entries()) {
         const first = group[0];

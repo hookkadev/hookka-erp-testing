@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // cn-po-once.test.mjs — a production order can only be on ONE live consignment
-// note (BUG-2026-10-01-237).
+// note (BUG-2026-10-01-238).
 //
 // Staging carried the same 23 POs on four Houzs CNs and the same 5 on four
 // Carress CNs: the CN write paths checked a PO against delivery orders only,

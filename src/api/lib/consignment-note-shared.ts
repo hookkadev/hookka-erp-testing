@@ -473,7 +473,7 @@ export type UpdateCNResult =
 // from the DO POST/PUT items-replace path.
 //
 // CN side also rejects a PO that is already on another non-cancelled CN
-// (BUG-2026-10-01-237), the mirror of the DO rule "a PO can only be delivered
+// (BUG-2026-10-01-238), the mirror of the DO rule "a PO can only be delivered
 // once" in delivery-orders/_helpers.ts. Same predicate as the Pending CN
 // dedup in /ready-planning (`status <> 'CANCELLED'`), so a PO hidden from that
 // list is exactly a PO this refuses. `excludeCnId` = the CN being edited.
@@ -650,7 +650,7 @@ export async function updateConsignmentNoteById(
   }
 
   // Items replace may add a PO that is already on a DO or another CN
-  // (BUG-2026-10-01-237). Checked before any write; this CN's own lines are
+  // (BUG-2026-10-01-238). Checked before any write; this CN's own lines are
   // excluded so re-saving an unchanged list passes.
   if (Array.isArray(body.items)) {
     const poIds = (body.items as Array<Record<string, unknown>>)

@@ -390,7 +390,7 @@ app.put("/:id", async (c) => {
     }
 
     // Same pre-flight for a PO already on a DO or another CN
-    // (BUG-2026-10-01-237): this route deletes the items before the helper
+    // (BUG-2026-10-01-238): this route deletes the items before the helper
     // runs, so the helper's own check would come too late.
     if (Array.isArray(body.items)) {
       const poIds = (body.items as Array<Record<string, unknown>>)

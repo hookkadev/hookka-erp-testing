@@ -2003,7 +2003,7 @@ app.post("/:id/notify-customer", async (c) => {
 //   - not_found            → 404
 //   - invalid_transition   → 400 with descriptive message (gap 5)
 //   - items_locked         → 403 with descriptive message (latent gap 3)
-//   - po_conflict          → 409, PO already on a DO or another CN (BUG-2026-10-01-237)
+//   - po_conflict          → 409, PO already on a DO or another CN (BUG-2026-10-01-238)
 // ----------------------------------------------------------------------------
 function mapUpdateCNError(
   res: Extract<
