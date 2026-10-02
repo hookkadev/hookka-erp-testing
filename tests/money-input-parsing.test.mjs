@@ -249,6 +249,7 @@ const REFUSALS = [
   ["src/pages/accounting/index.tsx", "if (billMoneyError)", "Other-party bill lines + tax", 1],
   ["src/pages/accounting/index.tsx", "if (allocMoneyError)", "Other-party payment allocation", 1],
   ["src/pages/accounting/index.tsx", "if (pvMoneyError)", "Payment voucher lines", 1],
+  ["src/pages/accounting/index.tsx", "if (transferMoneyError)", "Payment voucher › Transfer amount (2026-10-01)", 1],
   ["src/pages/accounting/index.tsx", "if (orMoneyError)", "Official receipt lines", 1],
   ["src/pages/accounting/index.tsx", "if (ftMoneyError)", "Fund transfer amount", 1],
   ["src/pages/accounting/index.tsx", "if (faMoneyError)", "FIXED ASSET cost / residual / opening accum — the reported instance", 1],

@@ -73,7 +73,7 @@ test("punch route adds geo columns at runtime + stamps the punch location", () =
   );
   assert.ok(
     WORKER_API.includes("stampPunchGeo(") &&
-      /UPDATE attendance_records SET \$\{cols\} WHERE id = \?/.test(WORKER_API),
+      /UPDATE attendance_records SET \$\{cols\}, \$\{BUMP_UPDATED_AT\} WHERE id = \?/.test(WORKER_API),
     "the punch must stamp the captured lat/lng onto the record",
   );
 });

@@ -8,6 +8,9 @@ import './index.css'
 // Authorization header and handles 401 redirects. Must run before any
 // component mounts, so it sits at the top of the entry point.
 import './lib/api-client'
+// Side-effect import: catches the browser's one-time install offer
+// (beforeinstallprompt) at page load, before any "Install app" button mounts.
+import './lib/pwa-install'
 // Optional error reporting. No-ops when VITE_SENTRY_DSN is unset, so
 // OSS / self-host installs ship zero monitoring bytes. When the DSN is
 // present, the actual Sentry SDK is dynamic-imported off the critical path.

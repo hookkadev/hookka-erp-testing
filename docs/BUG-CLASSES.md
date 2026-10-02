@@ -7,6 +7,8 @@
 
 > **Last verified: 2026-09-29**: restamped on branch `fix/staging-notes-history` (staging only): C15 gains row 6, the staging patch notes that read a depth-1 clone and printed "0 PRs" (BUG-2026-09-29-215). Nothing else re-checked.
 
+> **Last verified: 2026-10-01**: branch `fix/worker-history-snapshot-stale` **adds C29 — a read right after a write, served from Hyperdrive's cache** (BUG-2026-10-01-245). Nothing else re-checked.
+> **Last verified: 2026-10-01**: branch `fix/dev08-accessory-so-ready` **adds C28 — UPHOLSTERY cards as the proxy for "made"** (BUG-2026-10-01-241, DEV-08). Nothing else re-checked.
 > **Last verified: 2026-09-25**: restamped on branch `feat/dashboard-kpi-no-icons` (PR #524): C15 gains row 5, the Worker Efficiency card that printed worker ids after a refused `/api/workers` read (BUG-2026-09-25-194). Nothing else re-checked.
 > **Last verified: 2026-09-25** — restamped on branch `feat/ocr-dashboard-tab`: C23 gains the OCR-tab row (BUG-2026-09-25-192, `readQueueRow` dual-key fix); no other class re-checked.
 > **Last verified: 2026-09-23** — branch `fix/invoice-line-so-ref` adds **C16 row 8** (invoice PDF read the DO field names for per-line SO/REF/CO SO). Nothing else re-checked.
@@ -1800,3 +1802,51 @@ raise has nothing to roll back. Map the error to a 409.
 
 Test: `tests/purchasing-convert-flow.test.mjs` ("R2 race"), `tests/purchase-edit-cascade.test.mjs`.
 A fake DB cannot show locking. It can show that a stale read ends with nothing written.
+## C28 — UPHOLSTERY cards as the proxy for "made", and an accessory has none
+
+**Shape.** A gate decides "this PO / order is finished" by checking that every UPHOLSTERY job
+card is COMPLETED/TRANSFERRED. Accessories (pillow, cushion: FAB_CUT → FAB_SEW → PACKING, mig
+0032) have no UPHOLSTERY card at all, so the gate sees an empty set and either reads it as
+done (vacuous true: the order ships early) or as never-done (the item is stuck forever).
+
+**Why it keeps happening.** Sofas and bedframes, the bulk of the volume, always have
+UPHOLSTERY cards, so the proxy is right for almost every row a tester looks at. Each gate was
+written separately and each fix repaired only the gate in front of its author.
+
+**The rule.** An empty UPHOLSTERY set never decides on its own. Fall back to the PO's own
+status (`COMPLETED`, which the backend only sets once every relevant dept is done). For the
+order-level cascades use `siblingUphGateDone` in `production-orders/_helpers.ts`.
+
+**Instances**
+
+| # | where | state |
+|---|---|---|
+| 1 | `poReadyForDelivery` (`src/lib/delivery-pipeline.ts`) — completed pillows never reached Pending Delivery | ✅ 2026-06-20 (BUG-2026-06-20-001) |
+| 2 | Consignment "ready to ship" list — completed pillows missing | ✅ 2026-07-01 (BUG-2026-07-01-004) |
+| 3 | `cascadeUpholsteryToSO` / `ToCO` / `cascadeUpholsteryRollbackToSO` — SO flipped to READY_TO_SHIP on the sofa's upholstery while its pillows were on Fab Sew | ✅ 2026-10-01 on branch `fix/dev08-accessory-so-ready` (BUG-2026-10-01-241), not deployed |
+| 4 | `poInPlanning` (`src/lib/delivery-pipeline.ts`) — an in-production pillow does not preview in the Delivery Planning tab | ⬜ left by BUG-2026-06-20-001 as lower impact; changes what the Delivery page lists, so it needs the owner's call |
+
+Test: `tests/so-ready-accessory-gate.test.mjs` (no `mine.length === 0) return true` left in
+`_helpers.ts`; every cascade goes through `siblingUphGateDone`).
+
+---
+
+## C29 — a read right after a write, served from Hyperdrive's cache
+
+**Shape.** A plain SELECT that runs soon after a write returns the pre-write rows. Hyperdrive caches non-mutating queries at the proxy (60 s by default) and never invalidates them on a write. Reads inside a transaction, or that call `NOW()`, are not cached.
+
+**Why it keeps happening.** Local dev and tests have no Hyperdrive, so the code is right everywhere it is tested. On prod a busy table hides it, because the next write moves things along. On staging, with few writes, it sticks.
+
+**The rule.** A read that decides money, a state change, or what a cache stores reads through a transaction: `freshAll` / `freshFirst` (`worker-penalties.ts`) or `freshReads` (`worker-perf.ts`). For a snapshot, the probe AND the rebuild must both be fresh: a fresh probe with cached rebuild reads stores old rows under a new signature. The cheaper fix for everything at once is `--caching-disabled` on the Hyperdrive configs, which is the owner's decision.
+
+**Instances**
+
+| # | where | state |
+|---|---|---|
+| 1 | `/bulk-patch` PIC readback (`production-orders.ts`) | ✅ 2026-06-26 (BUG-2026-06-26-001), batch re-read |
+| 2 | BOM list after a save (`bom.ts`) | ✅ `NOW()` CTE |
+| 3 | worker penalties + payroll status reads | ✅ on `staging` (BUG-2026-10-01-236), `freshAll` |
+| 4 | worker `/history` + `/payslips` snapshot (`withWorkerSnapshot`) | ✅ 2026-10-01 on branch `fix/worker-history-snapshot-stale` (BUG-2026-10-01-245), not deployed |
+| 5 | `lib/snapshot.ts`, dashboard / delivery / invoice snapshots: probe and rebuild are plain reads | ⬜ open; needs `freshReads` on both, or the infra switch |
+
+Test: `tests/worker-history-snapshot-fresh.test.mjs` (row 4).

@@ -233,7 +233,9 @@ const navigationGroups: NavGroup[] = [
         name: "Daily", href: "/accounting?tab=payments", icon: Wallet, children: [
           { name: "Payment Vouchers", href: "/accounting?tab=payments", icon: Wallet },
           { name: "Receipts", href: "/accounting?tab=receipts", icon: Receipt },
-          { name: "Fund Transfer", href: "/accounting?tab=transfer", icon: Wallet },
+          // Fund Transfer left the menu 2026-10-01: a transfer is now a voucher
+          // (Payment Vouchers → New Payment Voucher → Transfer); ?tab=transfer
+          // still opens the old page and its entries are listed on the hub.
           { name: "Cash Position", href: "/accounting?tab=dailycash", icon: Wallet },
         ],
       },
@@ -792,15 +794,27 @@ export function Sidebar({
                           // production"). Open the full sidebar and expand this
                           // menu so the departments become tappable, same as
                           // desktop.
+                          // FINANCE opens one group at a time (owner 2026-10-01
+                          // 「我点 daily，report 就收起来」); every other section
+                          // keeps its menus independent.
+                          const openOnly = (prev: Set<string>) => {
+                            const next = new Set(prev);
+                            if (group.label === "FINANCE") {
+                              for (const other of group.items) if (other.name !== item.name) next.delete(other.name);
+                            }
+                            next.add(item.name);
+                            return next;
+                          };
                           if (collapsed) {
                             onToggleCollapsed();
-                            setExpandedMenus((prev) => new Set(prev).add(item.name));
+                            setExpandedMenus((prev) => openOnly(prev));
                             return;
                           }
-                          const next = new Set(expandedMenus);
-                          if (isExpanded) next.delete(item.name);
-                          else next.add(item.name);
-                          setExpandedMenus(next);
+                          if (isExpanded) {
+                            const next = new Set(expandedMenus);
+                            next.delete(item.name);
+                            setExpandedMenus(next);
+                          } else setExpandedMenus(openOnly(expandedMenus));
                         }}
                         className={cn(
                           "w-full group relative flex items-center gap-3 rounded-md text-sm font-medium transition-colors",

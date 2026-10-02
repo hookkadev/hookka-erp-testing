@@ -1,10 +1,14 @@
 # Bug History
 
+> **Last verified: 2026-10-02** (branch `chore/sync-staging-from-main-1002`, staging<-main merge): both logs merged, one copy of each entry. Numbering follows `main`: staging's BUG-2026-10-01-241 (accessories got every job card twice) is the same bug as main's BUG-2026-10-01-244, so staging's entry is dropped for main's (which has the (FC) follow-up), and 241 now means main's DEV-08 entry. Main-only entries 238, 237, 241, 243 to 247 and 250 added.
 > **Last verified: 2026-10-02**: BUG-2026-10-01-240 got a second follow-up (the email is now summary only; branch `feat/schedule-dept-share-table`, to staging); a log, so "verified" means the entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-02**: BUG-2026-10-01-240 got a follow-up paragraph (the "Show full list" row, branch `fix/schedule-email-full-list-row`, to staging); a log, so "verified" means the entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-02**: newest entry BUG-2026-10-02-248 (branch `fix/efficiency-email-dept-table`, to staging); a log, so "verified" means the entry matches the code on its branch, not that every older entry is still true.
+> **Last verified: 2026-10-02**: newest entry BUG-2026-10-02-250 (branch `feat/m-install-and-desktop-switch`, to main); a log, so "verified" means the entry matches the code on its branch, not that every older entry is still true.
+> **Last verified: 2026-10-02**: BUG-2026-10-01-240 got a follow-up (the Schedule email is now summary only; branch `feat/schedule-summary-email-to-main`, to main); a log, so "verified" means the entry matches the code on its branch, not that every older entry is still true.
+> **Last verified: 2026-10-02**: newest entry BUG-2026-10-02-248 (branch `feat/email-reports-to-main`, to main); entries -221, -232, -240 and -248 are the Email Reports phone and size fixes brought over from staging; a log, so "verified" means the entries match the code on this branch, not that every older entry is still true.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-242 (branch `fix/worker-login-signin-text`, to staging then main); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
-> **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-241 (branch `fix/accessory-l1-only-job-cards`, to staging); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-241 (branch `fix/accessory-l1-only-job-cards`, to staging; now BUG-2026-10-01-244, main's number, since the 2026-10-02 sync); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-240 (branch `fix/schedule-email-size`, to staging); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-239 (branch `fix/worker-login-keypad-capture`, to staging then main); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-236 (branch `fix/dev22-penalty-fresh-reads` → `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
@@ -14,6 +18,15 @@
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-235 (branch `perf/production-qr-speed-staging` → `staging`; -234 is the staging mail entry); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-234 (branch `fix/staging-mail-empty-body`, STAGING ONLY; ids up to 233 are taken on `main` / `staging`); a log, so "verified" means the newest entry matches the code.
 > **Last verified: 2026-10-01**: entry BUG-2026-10-01-232 added (branch `fix/grn-number-collision`, to staging); its text matches the code on that branch.
+> **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-246 (branch `fix/fin-tables-ceil`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
+> **Last verified: 2026-10-01**: BUG-2026-10-01-244 got a follow-up section (the (FC) Fab Cut card, branch `claude/main-accessories-duplicate-cards-fdxaik`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-245 (branch `fix/worker-history-snapshot-stale`; ids 240 and 242 are on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
+> **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-244 (branch `fix/accessory-l1-only-job-cards-main`; merged to staging as 241 in #656, renumbered because DEV-08 holds 241 on main); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-243 (branch `fix/worker-today-hours-utc`; ids 240 and 242 are on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
+> **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-241 (branch `fix/dev08-accessory-so-ready`, DEV-08); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-238 (branch `fix/cn-duplicate-po`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-237 (branch `fix/bom-accessory-category`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
+> **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-236 (staging id, brought to `main` on branch `feat/dev22-worker-penalty-main`; ids 232-235 are on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-30** (branch `chore/sync-staging-from-main-0930`, staging<-main merge): both logs merged. Numbering follows `main`: staging's report-emails entry BUG-2026-09-29-222 is renumbered to -232 (main's -222 is the storage not-found bug) and staging's customer-credit entry BUG-2026-09-28-218 to -233 (main's -218 is the PR label workflow). The one BUG-2026-09-29-214 entry kept is main's copy. Newest entry is BUG-2026-09-28-233.
 > **Last verified: 2026-09-30**: newest entry BUG-2026-09-30-231 (branch `fix/pillow-fab-sew-sticker`, DEV-26); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-09-30**: newest entries BUG-2026-09-30-229 / -230 (branch `fix/selfcheck-recon-and-opening-seeds`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
@@ -82,6 +95,20 @@ Entries themselves stay newest-first.
 
 ---
 
+## BUG-2026-10-02-250 — "Open the full desktop app" in /m sent a phone straight back to /m `ui-frontend` 🟢
+
+🟢 Fixed on `feat/m-install-and-desktop-switch` (to `main`).
+
+Found by the owner: on a phone, the link at the bottom of `/m` More never left `/m`.
+
+Cause (read from the code): the link goes to `/dashboard`, and the desktop shell (`src/layouts/DashboardLayout.tsx`) sends every phone-class user agent to `/m` before rendering anything. Nothing recorded that the person had chosen the desktop site, so the link could not work on any phone.
+
+Fix: the link sets `hookka.preferDesktop` in sessionStorage (`src/lib/prefer-desktop.ts`); the redirect is now `shouldRedirectToMobile(ua, prefersDesktop())`. A phone on the desktop site sees a "Back to mobile app" bar that clears the flag. The choice lasts until the tab or installed app is closed (owner's pick).
+
+Not checked yet: a real phone on the deployed site.
+
+Regression test: `tests/prefer-desktop.test.mjs` (fails on the old always-redirect rule).
+
 ## BUG-2026-10-02-249 — Staging mail: a link in an opened email showed "refused to connect" `ui-frontend` 🟢
 
 🟢 Fixed on `fix/staging-mail-links-new-tab` (to `staging`, STAGING ONLY).
@@ -140,19 +167,119 @@ Regression test: `tests/report-emails-mobile.test.mjs` (efficiency case).
 
 ---
 
-## BUG-2026-10-01-241 — Accessories got every job card twice, plus one in every dept `production-orders` `bom` 🟢
+## BUG-2026-10-01-247 — Edit BOM's WIP tree lost its layers: every row read "{DIVAN_HEIGHT} Divan- {SI…" `bom` `ui-frontend` 🟢
 
-🟢 **Fixed** (branch `fix/accessory-l1-only-job-cards` → `staging`; not yet deployed) · Report: on Fabric Cutting every accessory line shows twice although its quantity is 1.
+🟢 **Fixed** (branch `fix/bom-editor-layered` → `main`) · Reported by the owner, 2026-10-01.
+
+**What happened.** The Edit BOM WIP tab showed the tree as a flat list with a 3px colour bar. Every row was the raw code template, truncated ("{DIVAN_HEIGHT} Divan- {SI…"), so Divan / Foam / Frame / WD could not be told apart, and the layered look of the BOM Structure view was gone. The owner thought the BOM itself had changed.
+
+**Root cause.** The two-pane redesign (commit `d60835af1`, 2026-08-04) shipped inside an unrelated planning commit, so nobody saw it in a changelog. It fixed a real problem (nested inline editing clipped inputs at level 3) but drew the tree with `node.wipCode` (the template) and dropped the level colours.
+
+**Fix.** `src/pages/bom.tsx`: new `WipTreeCard` draws the left tree as nested gradient cards in the BOM Structure palette (`WIP_LEVEL_HEX`), with L-badge, the name resolved by `buildWipCodeDisplay` (`wipDisplayName`), qty, minutes and process pills. Editing stays in the full-width right pane, whose header now carries the node's level colour. Selection resolves against the full tree, so collapsing a parent no longer jumps the right pane to another node. Dialog widened to 1360px; the panes stack below `md`.
+
+**Follow-up (#669 on prod, owner「这里不能scroll」).** Neither pane scrolled: the dialog had only `max-h-[90vh]`, so the body grew to its content and `overflow-hidden` clipped it. On the WIP tab the dialog now has a definite `h-[90vh]` and the grid rows are `minmax(0,1fr)`. Measured in a static repro of the same classes: old left pane clientHeight = scrollHeight = 2460 (clipped, no scroll); new 441 of 2460 at 1280×720, 280 of 2460 at 375×812 (right pane 486/2200 and 244/2200).
+
+**Regression.** UI-only; verified by eye (see Verify).
+
+**Verify.** Prod: Edit BOM on 1003(A)(HF)(W)-(K) → WIP Components: nested coloured cards with real names; click a card → right pane edits that node; desktop and phone width.
+
+---
+
+## BUG-2026-10-01-246 — A pinned finance column cut its last letter ("2026-10-…") `accounting` `ui-frontend` 🟢
+
+🟢 **Fixed** (branch `fix/fin-tables-ceil` → `main`) · Found in the prod check of #665 (finance plan batch 4), 2026-10-01.
+
+**What happened.** On Payment Vouchers, dragging one column edge pinned every column at its measured width. The Date column then showed "2026-10-…" instead of the date, though nothing about it had changed.
+
+**Root cause.** Measured widths are fractional (85.3px). `src/lib/use-resizable-tables.ts` rounded them with `Math.round` when pinning, so a column whose text fitted exactly lost a fraction of a pixel and the cut-off rule ("…") kicked in. Same class as any measure-then-pin code: rounding must never go below the measured size.
+
+**Fix.** Pinned widths, the stored widths and the table's sum round UP (`Math.ceil`). Also: the enhancer schedules its pass with a short timeout instead of `requestAnimationFrame` — a tab opened in the background runs no frames, so its tables had no handles until looked at (found in the same check; no user-visible harm, but it blocked verification).
+
+**Regression.** `tests/finance-tables-drills.test.mjs`: `sumWidths([82.4, 100, 102.3])` is 286; the pin uses `Math.ceil`; no `requestAnimationFrame`.
+
+**Verify.** Prod: drag a Payment Vouchers column; every other column keeps its text whole (dates included); double-click resets.
+
+---
+
+## BUG-2026-10-01-245 — Worker My Pay and home kept the clock-in state after clock-out `worker-portal` `attendance` 🟢
+
+🟢 **Fixed** (branch `fix/worker-history-snapshot-stale` → `main`; not yet deployed) · Measured on staging 2026-10-01 with TEST-001.
+
+**What happened.** The worker clocked in at 16:14 and out at 16:14; the broken-punch rule wrote a 9h PACKING `working_hour_entries` row. `GET /api/worker/today` showed the clock-out and the 9h row. `GET /api/worker/history?from=2026-10-01&to=2026-10-01` still returned the day with `clockOut` null, `workingMinutes` 0 and empty `daily[].deptHours`. Home showed WORKING HOURS 0.0; My Pay > Daily Attendance had no department rows.
+
+**Root cause (inferred from the code, not reproduced: this session had no staging login or DB access).** `/history` and `/payslips` are served by `withWorkerSnapshot` (`src/api/lib/worker-perf.ts`). Its freshness signature is MAX(`updated_at`) plus COUNT(*) over the source tables.
+1. The insert of the 9h row moved COUNT(*), so a correct probe would have rebuilt. Missing `updated_at` does not explain this case. What does: the probe is the same parameterless SELECT on every call, and Hyperdrive caches plain SELECTs without invalidating on writes (measured on staging today in BUG-2026-10-01-236). A cached probe hides the write. Worse, once the probe does see it, the rebuild's own reads (`SELECT * FROM attendance_records WHERE employeeId = ? AND date >= ? ...`) can still come from the cache, and the pre-write rows get stored under the post-write signature. That snapshot then counts as fresh until some other write touches a source table. Staging has few writes, so it stayed wrong for hours.
+2. The defect named in the report is real but secondary: the six `UPDATE attendance_records` in `src/api/routes/worker.ts` (clock-in, clock-out, punch geo, punch photo, forgotten-punch auto-close) never set `updated_at`. `attendance.ts` and the Working Hours grid do; no trigger exists (the column default only fires on INSERT). A punch-out that adds no `working_hour_entries` row (office rows already keyed, or 0 payable hours) moved nothing the probe reads. `autofillWorkingHoursFromPunch` needs no change: its INSERT gets the column default and moves the count.
+
+**Fix.** `withWorkerSnapshot` now reads the probe, the stored snapshot and the whole rebuild through `freshReads(db)`, which sends each SELECT through `db.batch` (a transaction, which Hyperdrive does not cache; same mechanism as `freshAll` in `worker-penalties.ts`). The `/history` and `/payslips` callbacks take that `db` instead of `c.var.DB`. The six UPDATEs set `updated_at` with the same ISO text as the column default (`BUMP_UPDATED_AT`). The cost is a transaction per read, only on a rebuild.
+
+**Not changed.** `lib/snapshot.ts` and the other snapshot helpers have the same cached-rebuild exposure (class C29); fixing only their probe would make it worse, because a fresh probe rebuilds inside the read cache window. `memoizedMonthlyEfficiency` keeps its 5 s memo. The real fix is infra and the owner's call: `wrangler hyperdrive update <id> --caching-disabled` on both configs, as `bom.ts` already suggests.
+
+**Regression.** `tests/worker-history-snapshot-fresh.test.mjs`: a stub where plain reads return the pre-write rows and `batch` returns the live ones; the snapshot must rebuild and store the clock-out (fails on the old code). Plus a scan of `src/api` that fails on any `UPDATE attendance_records` / `UPDATE working_hour_entries` not setting `updated_at`.
+
+**Verify.** Not driven on staging (worker login is the user's). After deploy: clock in, open My Pay, clock out, open My Pay within a minute; the day must show the clock-out and its department hours.
+
+---
+
+## BUG-2026-10-01-244 — Accessories got every job card twice, plus one in every dept `production-orders` `bom` 🟢
+
+🟢 **Fixed** (staging #656, verified there; branch `fix/accessory-l1-only-job-cards-main` → `main`, not yet deployed) · Report: on Fabric Cutting every accessory line shows twice although its quantity is 1.
 
 **Root cause.** Accessory BOMs are L1-only on purpose: an empty WIP tree (`wipComponents = "[]"`) and Fab Cut / Fab Sew / Packing on the L1 tab. `breakBomIntoWips` answers an empty tree with the synthetic `FG_MAIN` WIP that walks all 9 depts, meant for a BOM with no steps at all. `production-builder.ts` used it and then also inserted one FG card per L1 step. So BC05-MF qty 1 got 12 cards: Fab Cut (the merged `| (FC)` one and the L1 one), Fab Sew and Packing twice, plus Wood Cut, Foam Cutting, Foam, Framing, Webbing and Upholstery. `jobcard-sync.ts` computed the same set, so "Sync Job Cards from BOM" would have put them back after any cleanup.
 
 **Fix.** `breakBomIntoJobCardWips` in `src/api/lib/bom-wip-breakdown.ts`: the same breakdown, but an empty tree with at least one L1 step gets no WIP cards. A BOM with no tree and no L1 keeps the fallback; a BOM with a tree (SQUARE PILLOW) is unchanged. The builder and jobcard-sync both call it. An L1-only PO now takes its `currentDepartment` from its L1 steps. Its L1 cards are due on the packing anchor; with no delivery date at all they would be due on the order date, but all 472 accessory POs on prod since 2026-08-01 have one (measured). Stickers are unchanged in kind: the L1 Fab Cut row (`wipType` FG) already got a `FG-FAB_CUT` sticker, so each accessory now prints one Fab Cut sticker instead of two. Its WIP label is the bare product code; the fabric code is no longer in it.
 
-**Measured on prod (read only, 2026-10-01).** 15 active accessory BOMs have this shape. 53 pending accessory orders (created 15 Sep to 1 Oct) plus 4 completed and 1 cancelled carry 463 fallback cards; 81 are COMPLETED. The fallback Foam card is real work (16 with a worker) that the L1 lists leave out, so Foam must be added to those BOMs before deploy. Existing cards are not touched by this fix.
+**Measured on prod (read only, 2026-10-01).** 15 active accessory BOMs have this shape. 53 pending accessory orders (created 15 Sep to 1 Oct) plus 4 completed and 1 cancelled carry 463 fallback cards; 81 are COMPLETED. 16 fallback Foam cards carry a worker; the L1 lists do not include Foam. Owner decision 2026-10-01: follow the BOM as it is and add no step, so after this fix those accessories get no Foam card unless someone adds Foam to their BOM. Existing cards are not touched by this fix.
 
 **Sweep.** Every `INSERT INTO job_cards`: only the builder and jobcard-sync create cards from a BOM. The stock-PO clone copies an existing PO's cards; the others are archive or aggregation writes. No bug class fits; noted here only.
 
 **Regression.** `tests/bom-explosion.test.mjs`: the three BOM shapes, and that both card creators call `breakBomIntoJobCardWips` (fails on the old code).
+
+**Verified on staging (2026-10-01, after #656 deployed).** Test order SO-2610-002 (BC05-MF, qty 1) got 3 cards: FAB_CUT, FAB_SEW, PACKING, all `wipKey` FG. Control SO-2610-003 (SQUARE PILLOW, tree BOM) got its usual 4: merged FC, FAB_SEW, FOAM, PACKING FG, matching a pre-fix order card for card. Both under TEST COMPANY.
+
+**Follow-up: #660 kept the wrong Fab Cut card (branch `claude/main-accessories-duplicate-cards-fdxaik` → `main`).** Of the two Fab Cut rows, #660 dropped the auto-generated `BC05-MF | FABRIC | (FC)` one and kept the L1 one, labelled with the bare product code. The (FC) card is the right one: its label carries the fabric and matches the WIP inventory format, and the IT team confirmed a BOM without WIP components is incomplete setup, not the SOP shape. New rule, in `breakBomIntoJobCardWips` + `l1ProcessesWithoutWipDupes`: auto-generated cards first; an L1 step is skipped when its dept already has a WIP card. An L1-only BOM now gets an auto-generated `FG_MAIN` chain of its own L1 steps only (no Wood Cut / Foam / Framing / Webbing / Upholstery), so its Fab Cut goes through the (FC) merge. BC05-MF qty 1 → merged `(FC)` Fab Cut + Fab Sew + Packing, the last two on `wipKey` `BC05-MF::FG_MAIN` (the same key the pre-#660 fallback cards used). Packing is now the end of that chain, not an FG-level card. The skip also covers a tree BOM that repeats a dept on its L1 tab; how many prod BOMs have that overlap is UNMEASURED (no DB access in this session). Builder and jobcard-sync both. Regression: `tests/bom-explosion.test.mjs` (6 new tests fail on the #660 code).
+
+## BUG-2026-10-01-243 — Worker home hid "Hours worked today" while punched in `worker-portal` `attendance` 🟢
+
+🟢 **Fixed** (branch `fix/worker-today-hours-utc` → `main`; not yet deployed) · Worker home clock card showed no hours for most of the working day.
+
+**Root cause.** `GET /api/worker/today` ticks `attendance.workingMinutes` for an open punch as "now minus clockIn". It read "now" with `new Date().getHours()`, which is UTC on Cloudflare Workers, while `clockIn` is Malaysia wall time (UTC+8). Punch in at 08:05, look at 10:30: the maths was 02:30 minus 08:05, negative, clamped to 0. The card renders only when the value is above 0 (`src/pages/worker/index.tsx`, `workingMinutes > 0 &&`), so it vanished until about 4pm.
+
+**Fix.** New `liveWorkingMinutes(clockIn, nowMs)` in `src/api/routes/worker.ts`, using the same +8h shift as `malaysiaNow()`.
+
+**Rules engine considered, not used.** The live figure stays raw elapsed (no lunch deduction) because punch-out stores raw `out - in` in `workingMinutes` and the card shows that stored value afterwards. A rules-engine live figure would sit an hour lower after lunch and then jump at punch-out. Known gap: DEV-31's `deptDay.hoursSoFar` on `staging` (`computeLiveDeptDay`) is rules-engine, so once this reaches staging the two cards differ by up to the lunch hour. Aligning them means changing what punch-out stores, which feeds payroll; that is an owner call, not this fix.
+
+**Sweep.** `.getHours()` / `.getMinutes()` in `src/api`: one more instance. `POST /api/attendance` (`src/api/routes/attendance.ts`) defaulted `date` and `time` from the UTC clock when the body omits them; now Malaysia-local. No other server-side reads.
+
+**Regression.** `tests/worker-today-live-hours.test.mjs`: 10:30 MY with an 08:05 punch gives 145 (old code gave 0), plus a guard that neither route reads `getHours()`.
+
+**Verify.** Not driven in a browser locally (local dev proxies to prod). To check on staging before 4pm MY: punch in on the worker app; "Hours worked today" must show and tick.
+
+---
+
+## BUG-2026-10-01-241 — An SO went Ready to Ship on the sofa's upholstery while its pillows were still on Fab Sew `production-orders` `sales-orders` 🟡
+
+🟡 **Fix in progress** (branch `fix/dev08-accessory-so-ready` → `main`, DEV-08) · Reported by Violet: the sofa is done but the
+pillow is not, so the order is incomplete and delivery planning goes wrong.
+
+**What happened.** An SO with a sofa line and pillow lines flipped to READY_TO_SHIP (Pending Delivery) as soon as the sofa's
+UPHOLSTERY cards were completed, even with the pillow PO still IN_PROGRESS on Fab Sew. Affected SOs on staging / prod are
+UNMEASURED (query in the DEV-08 WORK-TRACKER entry).
+
+**Root cause.** `cascadeUpholsteryToSO` (and its CO twin and `cascadeUpholsteryRollbackToSO`) decide "the whole order is made"
+by checking every sibling PO's UPHOLSTERY cards. A pillow (FAB_CUT → FAB_SEW → PACKING, mig 0032) has none, and an empty set
+was read as done: `if (mine.length === 0) return true`. Third instance of class C28.
+
+**Fix.** One predicate, `siblingUphGateDone` (`src/api/routes/production-orders/_helpers.ts`), used by all three cascades: a
+sibling with no UPHOLSTERY card counts only when the PO itself is COMPLETED (or CANCELLED). No new trigger needed: the
+cascade already re-runs after every job-card update, so the pillow's last card completing its PO flips the SO then. An SO
+already wrongly at READY_TO_SHIP drops back to IN_PRODUCTION the next time any card on it is updated.
+
+**Regression.** `tests/so-ready-accessory-gate.test.mjs` runs the real cascades on an in-memory DB: sofa done + pillow in
+progress stays IN_PRODUCTION; pillow COMPLETED or CANCELLED flips it; rollback and the CO twin agree; plus a C28 class guard.
+7 of its 9 cases fail on the old code.
+
+**Lesson.** "No card of type X" is not "type X is done". Ask what the item's own route is.
 
 ## BUG-2026-10-01-240 — Today's Production Orders email was too big to send on staging (and past Gmail's clip size) `reports` 🟢
 
@@ -202,6 +329,63 @@ uncapped, no link without an origin).
 **Regression.** `tests/worker-login-keypad-focus.test.mjs`: the helper, and that the guard runs before the digit branch (fails on the old page).
 
 **Verify.** Not driven in a browser locally (local dev needs the owner's DB string). To check on staging: type an employee number containing digits; the PIN bars must stay empty.
+
+---
+
+## BUG-2026-10-01-238 — One production order on several consignment notes `consignment` `do-cn-parity` 🟡
+
+🟡 **Fix in progress** (branch `fix/cn-duplicate-po` → `main`) · Found on staging 2026-10-01.
+
+**What happened.** Measured on staging (read-only): 35 production orders sat on more than one non-cancelled CN. The same
+23 POs were on CGN-2609-002/004/006/008 (Houzs), the same 5 on CGN-2609-003/005/007/009 (Carress), plus two older pairs
+(CGN-2607-003/004, CGN-2608-003/004). Each copy shows the full CO amount, and dispatching the second and later copies
+moves no `fg_units`, so stock and the CN list disagree. Production is UNMEASURED.
+
+**Root cause.** Two layers. (1) No CN write path refused a PO that was already on another CN: `validatePOMutex(…, "CN")`
+only looked at delivery orders, and the CN items-replace (CN PUT/PATCH and legacy `PUT /api/consignments/:id`) ran no PO
+check at all. The DO side has had the rule since 2026-05-16 ("a PO can only be delivered once", `delivery-orders/_helpers.ts`);
+the CN mirror never got it. (2) `GET /api/consignment-notes/ready-planning` is snapshot-cached with
+`staleWhileRevalidate`, so the refresh right after Create CN still listed the POs just used, and a second click made a
+second CN. The interleaved Houzs/Carress numbers match `confirmCreateCN` posting one CN per customer per click
+(inferred: `consignment_notes` has no created-at column). The 3 rows left on the Pending CN tab were correct: the other
+unit of each CO, never consigned.
+
+**Fix.** `validatePOMutex` CN branch also rejects a PO on another CN with `status <> 'CANCELLED'` (the same predicate as
+the Pending CN dedup), names the PO and the CN, takes `excludeCnId` for edits, and returns the 409 `message` every caller
+uses. Wired into all four paths: `POST /api/consignment-notes`, legacy `POST /api/consignments`, the shared
+`updateConsignmentNoteById` items-replace (new `po_conflict` result, 409 via `mapUpdateCNError`, checked before the
+DELETE), and the legacy PUT pre-flight (it deletes items before calling the helper). `confirmCreateCN` in
+`consignment/note.tsx` now shows the server's error instead of a generic toast. Existing duplicates are not touched.
+
+**Regression.** `tests/cn-po-once.test.mjs`: refused with PO and CN named, CANCELLED ignored, the edited CN excluded,
+the DO check still first, the edit refused before any write, and all four paths call the guard. 4 of its 6 tests fail
+on the old code.
+
+**Class.** No class row fits exactly. It is DO/CN mirror drift: CODEBASE-MAP already warns that CN is a DO-parity mirror
+and fixes usually belong in both; the DO duplicate guard was the fix that did not cross over.
+
+## BUG-2026-10-01-237: Accessory BOMs showed "Category: BEDFRAME" `bom` `ui-frontend` 🟡
+
+🟡 **Fix in progress** (branch `fix/bom-accessory-category` → `main`). Reported from the BOM page: BC04 (Back Cushion 04),
+an ACCESSORY product, showed `Category: BEDFRAME` in its BOM Structure card.
+
+**Root cause.** `bom_templates.category` only allows `BEDFRAME` / `SOFA` (CHECK in `0001_init.sql`), and every write in
+`src/api/routes/bom.ts` (POST, bulk PUT, PUT `:id` insert default) and both readers (`rowToTemplate`, `rowToTemplateListItem`)
+coerce anything else to `BEDFRAME`. So an accessory BOM is stored and read back as a bedframe. The BOM page printed that
+stored value (tree card, print sheet) and used it for the "Copy from existing BOM" filter, which therefore never listed
+other accessory BOMs. `/api/wip-times` filtered and grouped by the same column, so `?category=ACCESSORY` returned nothing
+and accessory routing counted under BEDFRAME.
+
+**Fix.** The product row is the source of truth for category (the rule `routes/bom.ts` already uses for root checks:
+`productCategory ?? templateCategory`). `withProductCategory` (`src/pages/bom-category.ts`) overlays the product's
+category on every template the BOM page holds, through one `useMemo` over the template state so every setter path is
+covered. `loadActiveBomRows` (`src/api/lib/wip-times-core.ts`) now filters and selects `COALESCE(p.category, bt.category)`.
+The Edit BOM dialog's "Load Default" picker also narrowed an accessory to BEDFRAME before
+`loadAllMasterTemplates`, so it offered bedframe masters; it now passes ACCESSORY. The `/api/wip-times` PUT handlers select
+`bt.category` too but never read it, so they are unchanged. The stored column is unchanged; widening it needs a constraint change and is not needed by any reader today.
+How many prod templates belong to accessory products is UNMEASURED.
+
+**Test.** `tests/bom-accessory-category.test.mjs`.
 
 ---
 
@@ -259,6 +443,7 @@ quiet zone, and a second call returns the memoised string. Checked in Chromium: 
 back to the exact sticker URL (jsQR).
 
 **Lesson.** A comment that says a library caches is a claim; check it before relying on it.
+
 ## BUG-2026-10-01-234 — Mail Outbox showed an empty frame when a sent email was opened `ui-frontend` 🟡
 
 🟡 **Fix in progress** (branch `fix/staging-mail-raw-body` → `staging`, STAGING ONLY; earlier rounds #629 and #633) · Found
@@ -344,6 +529,7 @@ sticker, the same row on a SOFA is still skipped, and both builders call the one
 
 **Lesson.** A `wipType` of `SOFA_*` says which BOM type was picked, not what the order is. A rule meant for one category
 has to check the category.
+
 ## BUG-2026-09-30-230 — The opening sum still counted CANCELLED supplier opening seeds `accounting` `opening-balance` 🟢
 
 🟢 **Fixed** (branch `fix/selfcheck-recon-and-opening-seeds` → `main`) · Found while the owner asked what the Self-check's
@@ -1014,6 +1200,7 @@ DELETE now pushes `buildInvoiceDeathCnReleaseStatements` into its batch (`invoic
 **Verified.** Live: convert 201 → void → CN `ACTIVE` → convert again 201 → delete the draft →
 CN `ACTIVE`. **Still open:** void/delete leave the CN's items `SOLD` and units `DELIVERED`;
 re-convert still works (it reads every item regardless of status).
+
 ## BUG-2026-09-25-194: Worker Efficiency showed raw worker ids ("worker-45109bfc") instead of names for PRODUCTION `dashboard` `employees` 🟡
 
 🟡 **Fix in progress** (PR #524, not verified in a browser).
@@ -1712,6 +1899,7 @@ number on a screen, never by a test.
 **Gap left open.** No test covers this route, and no test anywhere asserts that
 a money field in a payload is non-zero for a book that has sales. That single
 assertion would have caught all five instances of this class. Logged as C23 row 7.
+
 ## BUG-2026-09-21-181 — the Dashboard Prototype feed read every row by its SQL name, and the driver had renamed them all `dashboard` `api` 🟢
 
 🟢 Fixed on `staging` (the route is also on `main` — prod impact **UNMEASURED**, no prod
@@ -3327,6 +3515,7 @@ a query; the endpoint now computes it on every load, so the first real page view
 
 **Verified.** 6 assertions, each proved RED — including one that reintroduces
 `rowsObserved = !loading` and one that removes the unknown-first colour branch.
+
 ## BUG-2026-08-13-150 — the three-way match priced a receipt line against ANOTHER purchase order's line at the same position `procurement` `data-integrity` 🟢
 
 **Class:** [C21 — first-one-wins](BUG-CLASSES.md#c21--first-one-wins-taking-0-when-several-rows-could-answer),
@@ -3640,6 +3829,7 @@ snapshot key hot on every warm-lists cron run for a reader that no longer existe
 confusion, plus a sweep of `src/**` for any caller of the removed path. 4 mutations proved RED,
 including "the LIVE html brief is deleted by mistake" and "the delivery-agent brief.json is
 deleted by mistake".
+
 ## BUG-2026-08-13-130…133 — leave entitlement was a frontend constant, never reset, charged public holidays, and disagreed with the worker's phone `payroll` `data-integrity` 🟢
 
 **Symptom.** Four defects in one area, found while acting on the owner's request that
@@ -3709,6 +3899,7 @@ an OLD-vs-NEW fingerprint per worker and explains every difference as `year-rese
 `holiday`, `per-worker override` or `UNEXPLAINED`. Fixing -131 and -132 *does* raise
 balances for anyone who had old-year leave or holiday-overlapping leave — that is the
 requested fix, not a regression, but the owner should see the list first.
+
 ## BUG-2026-08-13-121 — PCB was never calculated, so net pay on every payslip was overstated by the tax that should have been withheld `payroll` `money` `C15` 🟢
 
 **Symptom.** None. That is the whole problem — the figure was silent by construction. Every
@@ -4180,6 +4371,7 @@ this very test failed against its own explanatory note. Asserts the identifiers 
 CODE, that `loading` is `workersLoading` alone, and — the other half — that
 `refreshAttendance` STILL invalidates the attendance prefix, so "clean up the dead code" can
 never take the live part with it. Red-proved (mutation M8).
+
 ## BUG-2026-08-13-107 — the Command Center printed a green `0` and "All clear" over a compliance read that had died `dashboard` `data-integrity` `ui-frontend` 🟢
 
 **Symptom.** The Daily Report tile on `/dashboard` — the first card under the KPI rail —
@@ -4289,6 +4481,7 @@ mutating.
 
 Full context for all four, plus the 40-odd findings this pass did **not** fix, is in
 [`docs/DASHBOARD-DATA-AUDIT.md`](DASHBOARD-DATA-AUDIT.md).
+
 ## BUG-2026-08-13-103 — "production time" and every efficiency built on it were `clocked × 0.85`; a punch has never measured production `data-integrity` `attendance` `reporting` 🟢
 
 **Symptom.** None — which is the point. Attendance carried a per-day "Production Time" and
@@ -4647,6 +4840,7 @@ all-clears here twice this week.
 > per-PIECE counter (`production-builder.ts:786`), while `sales_order_items.lineNo` is
 > per-LINE. They agree only when every line has quantity 1 — so a join on it attaches WRONG
 > links precisely on multi-quantity orders, and would look entirely reasonable in review.
+
 ## BUG-2026-08-13-098 — invoice_items gains `so_item_id`: the per-line link that makes an SO↔invoice audit possible at all `money` `invoices` `auditability` `data-integrity` `schema` 🟡 code done / 🔴 backfill NOT RUN, awaiting review
 
 > **STATUS: forward fill SHIPPED, backfill written but DELIBERATELY NOT EXECUTED.**
@@ -4886,6 +5080,7 @@ nobody has watched fail is not a guard.
 deploy and the live read/write check.
 
 ---
+
 ## BUG-2026-08-13-084 — five more source files still carried a raw NUL byte, so `grep` had never read them either `infrastructure` `data-integrity` 🟢
 
 **Symptom.** None visible to a user. The damage is to every audit anyone runs: GNU
@@ -5044,6 +5239,7 @@ was always right — only the printed statement was wrong.
 **Guard.** `tests/accounting-subledger-parity.test.mjs` asserts the closing balance, not
 the presence of a clause; the mock applies the exclusion **only when the SQL asks for
 it**, so deleting the predicate makes the balance move and the test go red.
+
 ## BUG-2026-08-13-090 — "Record Payment" on Debtor/Creditor Aging wrote to a dead table, and swallowed the failure `accounting` `money` `ui-frontend` `data-integrity` 🟢
 
 **Symptom.** On Accounting › Debtor Aging (and its Creditor twin), each row with a balance
@@ -5398,6 +5594,7 @@ survived. Proved by deleting the check (77 bytes) and watching it go red.
 stayed green. That looked like "the guard doesn't work" but was actually "the mutation
 didn't apply". Always assert the mutation changed the file before believing a red-or-green
 result — a mutation test that doesn't mutate is a false all-clear.
+
 ## BUG-2026-08-13-042 — every CO save with a Customer PO filled in reported "Save did NOT take effect" — on a save that had worked `consignment` `ui-frontend` `data-integrity` 🟢
 
 **Symptom.** Edit a consignment order with anything in **Customer PO No.**, press Save,
@@ -5584,6 +5781,7 @@ both halves of the combo recompute; against the pre-fix tree the class test fail
 unmeasured — run the `row 34` probe in `docs/AUDIT-LAYER-CONSISTENCY.md` §7 to count the
 eligible lines. Per the standing rule, existing orders are **not** repriced
 (「旧的 order 就算了」); this is fix-forward.
+
 ## BUG-2026-08-13-064 — R&D's whole page stated "All active projects are on track and within budget. ✓" over a dead request `rnd` `ui-frontend` `C15` 🟢
 
 **Symptom.** `/rd` reads `/api/rd-projects` once and every tab derives from it. When that
@@ -6094,6 +6292,7 @@ the database. `tests/sql-columns-exist.test.mjs` cannot see them because it pars
 flat `SELECT` lists — extending it to `INSERT INTO t (…)` and `UPDATE t SET …` catches
 this class mechanically, and is the top follow-up in
 `docs/AUDIT-LAYER-CONSISTENCY.md` §9.
+
 ## BUG-2026-08-13-026 — the /m Customer detail downloaded 1,342 sales orders (2.16 MB) to show one customer's last 20, behind a comment that had been false for a month `performance` `ui-frontend` `sales-orders` 🟢
 
 **Symptom.** Opening ONE customer on a phone (`/m/customers/:id`). `src/pages/m/config/modules.ts` `customerDetail.extraFetches` fetched the **bare `/api/sales-orders`** — the whole-org list, every SO field plus every 24-field line item — and the bare `/api/invoices`, then client-filtered to that customer and rendered at most **20 rows of five fields**.
@@ -6118,6 +6317,7 @@ This is the third time on this codebase that a **code comment described intent r
 **Numbers.** The 2.16 MB / 1,342 rows figure is **measured on prod** (BUG-2026-08-13-013, same list). The post-change size is **NOT measured** — this branch is not deployed and the prod API is behind login. The row count is unchanged by construction; only the per-row field count drops.
 
 ---
+
 ## BUG-2026-08-13-025 — the /m WIP list read `data.wip`, a key the endpoint never emitted `inventory-display` `ui-frontend` 🟢 *(superseded — fixed by #292 / BUG-2026-08-13-014)*
 
 **Kept as a cross-reference, not as a claim.** This branch found the defect
@@ -6139,6 +6339,7 @@ rows visible, it no longer drags the 365-row product catalogue and the
 raw-material list along to show them.
 
 ---
+
 ## BUG-2026-08-13-024 — the supplier SKU picker read `finishedGoods`; the endpoint emits `finishedProducts`, so finished goods never appeared `ui-frontend` `data-migration` 🟢
 
 **Symptom.** `/suppliers/:id` → **Add/Edit SKU mapping**. The Internal Code / Internal Description search boxes advertise *"Search by code or description (**FG / WIP / RM**)"* (`src/pages/procurement/sku-form-dialog.tsx:252`). Only RM has ever been searchable.
@@ -6155,6 +6356,7 @@ raw-material list along to show them.
 **Verified.** `tests/inventory-buckets-projection.test.mjs` asserts the endpoint never emits a `finishedGoods` key and that asking for one lands on the safe fallback rather than an empty picker.
 
 ---
+
 ## BUG-2026-08-13-023 — the Service Case detail pulled the whole customer master to resolve one foreign key `performance` `ui-frontend` 🟢
 
 **Symptom.** Opening any service case fetched the bare **`/api/customers`** — every customer and every delivery hub — and used it for exactly one thing: `custResp.data.find(c => c.id === caseDetail.customerId)` (`src/pages/service-cases/detail.tsx:236`), to render a name, a code, a phone and the default delivery hub on the printed report.
@@ -6170,6 +6372,7 @@ raw-material list along to show them.
 **Verified.** `tests/customer-detail-scoped-read.test.mjs` (4 tests) runs BOTH real handlers against one fixture and asserts the `/:id` body is `deepEqual` **and** `JSON.stringify`-equal to the row `.find()` produced — including the delivery-hub array's contents and ORDER, which the page's `hubs.find(h => h.isDefault) ?? hubs[0]` depends on — plus the no-hubs case and the 404 case.
 
 ---
+
 ## BUG-2026-08-13-022 — the Service Case stepper downloaded 1.07 MB of delivery orders to read five fields off a handful `performance` `delivery-orders` `ui-frontend` 🟢
 
 **Symptom.** `src/pages/service-cases/detail.tsx:260` fetched **bare `/api/delivery-orders`** — the whole org, ~393 DOs with every line item, **1.07 MB** (PERF-BACKLOG P6) — so the eight-step Case Pipeline stepper (and the Download-PDF handler that shares it) could read `{salesOrderId, status, createdAt, dispatchedAt, deliveredAt}` off at most a handful of rows.
@@ -6186,6 +6389,7 @@ raw-material list along to show them.
 **Verified.** `tests/service-case-do-scope-equivalence.test.mjs` (7 tests) runs the REAL `computeCasePipeline` over a whole-org fixture and over the server-scoped subset and asserts the pipelines are `deepEqual` — with the fixture deliberately containing foreign DOs whose `deliveredAt` is LATER than the case's, so a leak would move `deliveredEnteredAt` and fail. It also pins order-independence, the blank-`salesOrderId` case, and — as source-level locks — that the page no longer requests the bare URL, that an unscoped projection returns `[]`, and that the customer-scope clause is applied.
 
 ---
+
 ## BUG-2026-08-13-021 — twenty call sites downloaded a 1.16 MB three-bucket inventory payload; nineteen of them read exactly one bucket `performance` `inventory-display` `ui-frontend` 🟢
 
 **Symptom.** `GET /api/inventory` returns `products` (365 rows, 21 fields) + `wip_items` + `raw_materials` (279 rows) as three unfiltered `SELECT *`s — **1.16 MB** (PERF-BACKLOG P6).
@@ -6212,6 +6416,7 @@ Worse, on two of them the payload was fetched for something the operator was not
 **Numbers.** The 1.16 MB figure is **measured on prod** (PERF-BACKLOG P6), as is the 319,231 bytes / 365 rows for `/api/products` used to argue the product bucket is the bulk (BUG-2026-08-13-008). **The `wip_items` row count is unknown and was not measured**, so the saving per call site is stated structurally — two of three buckets removed, the largest of them always — not as a percentage. Nothing here was observed on prod: this branch is not deployed and the prod API is behind login.
 
 ---
+
 ## BUG-2026-08-13-020 — `/api/inventory` had no way to ask for less than everything `performance` `infrastructure` 🟢
 
 **Symptom.** The backend half of BUG-2026-08-13-021, recorded separately because it is the reusable piece: `GET /api/inventory` had exactly one shape — three unfiltered `SELECT *`s, always — so no caller could ask for less, however little it needed.
@@ -6221,6 +6426,7 @@ Worse, on two of them the payload was fetched for something the operator was not
 **Why a param and not a new endpoint.** `/api/raw-materials` already serves the RM bucket alone, but its `rowToApi` is a **wider** per-row shape than `inventory.ts`'s `rowToRawMaterial` (it adds `unit`, `status`, `notes`, timestamps, `uomCount`, `itemType`, `stockControl`, `mainSupplierCode`, sheet dims). Switching call sites to it would have been a **shape change requiring its own before/after measurement per page**, not a projection — audit finding D12 flagged exactly this. `?buckets=` keeps every row byte-identical, which is what made the nineteen conversions provable.
 
 ---
+
 ## BUG-2026-08-13-016 — a request killed at 30 s was reported to the operator as "Order not found" `ui-frontend` `data-integrity` `sales-orders` `performance` 🟢
 
 **Symptom.** Open a sales order on a slow link. Thirty seconds later the page
@@ -6330,6 +6536,7 @@ failed fetch. That is the identical conflation one level up, and it is
 enumerated as C15 row 2 in `BUG-CLASSES.md` rather than patched blind: each
 page owns its own empty caption, and it needs its own PR with its own
 before/after.
+
 ## BUG-2026-08-13-014 — the fabricated-figure sweep: seven more places where a number was invented, including random overtime written into payroll and a self-minted LHDN clearance `data-integrity` `money` `ui-frontend` `inventory` `payroll` 🟢
 
 **Why this is one entry.** BUG-2026-08-13-004 / -005 / -006 / -009 / -010 were five instances of a single class found in one day, and each was fixed where it stood. The owner asked for the whole app to be swept instead. This is that sweep. Every item below is the same shape — *a figure that reads as measured and is not* — so they share a class, a guard file, and one PR.
@@ -6466,6 +6673,7 @@ Measured on prod: **2.16 MB decoded, 1,342 rows, 278–477 ms warm, 4,108 ms on 
 **Verified.** `tests/sales-orders-orders-due.test.mjs` (10 tests) carries a **verbatim copy of the pre-change `Home.tsx` algorithm** and asserts the projection produces an identical id sequence and an identical rendered-content fingerprint over a fixture with tied dates, undated rows, all four terminal statuses, `ON_HOLD`/`SHIPPED`, and a missing status. Full suite green (**3,763 tests, 3,760 pass / 0 fail / 3 skipped**); `npx tsc -p tsconfig.app.json --noEmit` clean; `npx eslint` on the four changed files **0 errors** (1 pre-existing `setTimeout` warning at the unrelated `pdEnabled` idle fallback). **Payload after the fix is COMPUTED, not measured: ~1.35 KB / 6 rows** (a realistic six-row body, `JSON.stringify`d) versus the 2.16 MB / 1,342 rows measured on prod — ~1,600×. **Nothing here was observed on prod**: this branch is not deployed, the prod API returns 401 unauthenticated, and the DSN in the local `.dev.vars` fails password authentication. The main session owns deploy and live verification.
 
 ---
+
 ## BUG-2026-08-13-009 — Reports › Financial presented an invented P&L as accounts: COGS was `revenue × 0.65` and every operating expense was a constant `ui-frontend` `money` `data-integrity` 🟢
 
 **Symptom.** `/reports` → **Financial** → **Generate Financial Report** rendered a card headed *"Profit & Loss Statement (Simplified)"* with Revenue, Cost of Goods Sold, Gross Profit, four operating-expense lines and Net Profit / (Loss), all formatted as currency in the same typeface as the AR aging beside it. Only the Revenue line touched data, and even that was wrong.
@@ -6606,6 +6814,7 @@ Everything else in that payload was discarded. The desktop Command Center's equi
 **Verified.** `tests/pending-delivery-value.test.mjs` gains a source guard asserting the phone no longer names `/ready-planning`, does name `/pending-value`, still folds `DRAFT`/`LOADED`/`IN_TRANSIT`, and re-sums no row list. Full suite green (3,745 pass / 0 fail); `npx tsc -p tsconfig.app.json --noEmit` clean; `npx eslint src/pages/m/screens/Home.tsx` 0 errors (1 pre-existing `setTimeout` warning, unrelated, at the `pdEnabled` idle fallback); `npm run build` succeeds. **Not observed on prod** — this branch is not deployed, and the main session owns deploy + live verification. The before/after request comparison above is from reading the code and the endpoints, not from a live page load.
 
 ---
+
 ## BUG-2026-08-13-006 — Reports › Employee showed per-worker performance computed from a hash of the worker's id `ui-frontend` `data-integrity` `audit-logging` 🟢
 
 **Symptom.** The **Worker Efficiency** table on `/reports` → **Employee** listed every active worker with Hours Worked, Items Completed and Efficiency %. None of it was data. Beside it sat summary cards reading **"Attendance Rate 94.5%"** and **"Avg Hours/Day 8.7"**, and an Attendance Overview row **"Average OT Hours / Worker 12.5"**. The owner has been reading this.
@@ -6663,6 +6872,7 @@ Prod for 2026-06-14 → 2026-08-13 returns **38 workers spanning 28% – 186% ef
 **Verified.** Ground truth for the failing window was computed **against live prod** by pulling the same production orders through the paginated list API in the browser and running the page's own arithmetic over them (1,113 / 820 / 3 / 10.5 days / 8 dept rows / 38 overdue, above). `tests/production-report-summary.test.mjs` (8 tests) runs the endpoint's **own SQL against node:sqlite** through a D1-shaped shim and asserts numbers, not shape: the window is honoured on both sides, an unmeasured completed card counts as work but enters **neither** side of the ratio (had the fallback been present, both subtotals would read 200 — the estimate over itself), an explicit `actualMinutes = 0` is absence rather than speed, an IN_PROGRESS card is not work, a recording equal to its estimate is measured but **not distinct** (and a book of only those produces exactly 100%), an order due TODAY is not yet overdue — the old client's `new Date(target) < new Date()` called it 1 day late every afternoon — and a missing or malformed window is refused with 400 rather than scanned. `tests/cached-fetch-result.test.mjs` (6 tests) runs the real `cachedFetchJsonResult`: an empty list stays a success, a non-2xx and an abort are failures with operator-safe wording (the abort reads "took too long", never the AbortError's own "Aborted"), a **200 OK carrying the `_stub` envelope is a FAILURE** rather than an empty dataset, a clean backend sentence is preserved and a constraint string is translated before it can reach a screen. `tests/reports-failed-fetch-is-not-empty.test.mjs` (4 tests) forbids `cachedFetchJson` on this page, forbids a `catch { set…([]) }` in **any** of the five tabs, requires each to branch on `ok` and render `<ReportError>`, forbids a bare `/api/production-orders` read or `include=jobCards` in the Production tab, and pins the endpoint's 400 on a missing window plus its registration before `/:id`. `tests/no-fabricated-efficiency.test.mjs` keeps its -004 guards and gains one that **follows the paired accumulation into the SQL** (all four measured subtotals gated on the same `COALESCE(jc.actualMinutes, 0) > 0`, no `COALESCE(actual, est)` fallback) rather than pinning a client loop that no longer exists. Both guards were **proved by putting the bug back**: reintroducing `COALESCE(jc.actualMinutes, jc.estMinutes, 0)` turns the two ratio tests and the SQL pin red, and restoring a `catch { setProducts([]) }` turns the page-wide pin red; both go green again on revert. `npx tsc -p tsconfig.app.json --noEmit` clean, `npm run build` clean, eslint clean, full suite green. **The new endpoint is NOT yet observed on prod** — this branch is not deployed; the deploying session must re-run the 2026-06-14 → 2026-08-13 report and check it against the figures above.
 
 **Still open (same class, not fixed here).** The Financial tab's P&L is largely invented in a different way: COGS is `revenue × 0.65` and Salaries / Utilities / Rent / Others are the hardcoded constants RM 50,000 / 8,000 / 15,000 / 5,000. It is labelled "(Simplified)" and only the COGS line names its rule; the four expense lines look sourced. Untouched here because replacing them needs a chart-of-accounts decision, not a fix.
+
 ## BUG-2026-08-13-007 — `/employees` built 46,137 DOM nodes for one screen of working hours, and a plain scroll froze the renderer for 45 s+ `ui-frontend` `performance` 🟢
 
 **Symptom.** The owner's "page unresponsive / do you want to close this site" on `/employees`. Reproduced twice on prod (erp.hookka.com, 2026-08-13): a plain scroll blocked the renderer long enough that a CDP `Runtime.evaluate` timed out with *"the renderer may be frozen or unresponsive"*.
@@ -6783,6 +6993,7 @@ Independently, the isolated joins were replayed against the same prod rows asser
 **Verified.** Replayed both pipelines against live prod rows: **957 POs and 13,418 attached job cards, output byte-identical** (`JSON.stringify` equal), join **6,865 ms → 8 ms**, fetch **30.77 MB → 10.76 MB**, ~**7.3 s** of server work removed. The `/delivery` variant benefits more — join **18,132 ms → 33 ms** — with its row count unchanged. The exact new SQL was run through the real `translateSql` compat layer and executed on prod: correct snake_case rewriting inside the nested sub-select, 13,418 rows, matching expectation; the `includeArchive` UNION form parses in both the existing and the new position. `tests/production-orders-jobcard-grouping.test.mjs` (6 tests) pins order-equivalence including the equal-`sequence` stable-sort tie, empty-bucket and orphan-card cases, non-mutation of the shared array, and the SQL shape. Full suite 3,690 pass / 0 fail; `npx tsc -p tsconfig.app.json --noEmit` exit 0. **Not yet observed on a running prod deploy** — Actions is billing-blocked, so the end-to-end cold-call timing is a projection from the measured server-side saving, not a measurement.
 
 **Prod DB note (corrects the entry below).** The local `.dev.vars` `DATABASE_URL` is indeed dead (`28P01`), but a **working** read-only DSN for live prod exists in the repo's own scripts (the prod host, used by ~65 `scripts/*.mjs`) — that is how the live figures above were read. The second DSN in `scripts/` (the old staging project) is a **stale copy**, last written 2026-08-10. Both are hardcoded credentials sitting in tracked files and belong on the rotation list.
+
 ## BUG-2026-08-13-004 — Department Efficiency let unmeasured job cards divide their own estimate by itself, burying the 4,289 real recordings at ~100% `ui-frontend` `production-orders` `data-integrity` 🟢
 
 **Symptom.** Reports › Production › **Department Efficiency** parked every department near **100%** whatever the date range, and the **Export CSV** button shipped that as a KPI. The dead Master Tracker page (`src/pages/production/tracker.tsx`, deleted in the same branch) carried the same expression in an "Actual Hours / Efficiency %" table.
@@ -7357,6 +7568,7 @@ normal-punch paths unchanged). Full attendance/payroll suite green.
 **Fix** (`src/lib/cached-fetch.ts`). Add a bounded automatic retry (2 attempts, jittered 200–550ms backoff) for transient statuses 502/503/504 inside `joinInflight`, before it throws. Every URL through this path is an idempotent GET (SWR reads — writes use raw `fetch()`), so a retry can never double-apply a mutation. The abort signal short-circuits the backoff so an unmount/url-change still cancels cleanly. Non-retriable statuses (4xx/500) still throw on the first try, preserving the blank-page guard that keeps last-known-good cached data.
 
 **Verified.** `npx tsc -p tsconfig.app.json --noEmit` clean; `npx eslint` clean; behavioral test `tests/cached-fetch-503-retry.test.mjs` (503×2→200 retries and resolves; persistent 503 stops after the cap; 404 not retried; 200 no retry); full pre-commit suite green. PR to follow. Deeper root cause (cold daily snapshot key + concurrent-load connection pressure) noted for a later server-side pass — the client retry makes the symptom invisible to users now.
+
 ## BUG-2026-07-27-003 — chat assistant refused every agent/scheduling command: SYSTEM_PROMPT predated the v1.9 agent tools `assistant` `agents` 🟡 (fix on PR canary, merges after supervisor's live test)
 
 **Symptom:** Production supervisor asked Hookka AI to re-arrange the framing schedule and
@@ -8288,6 +8500,7 @@ so one throwing section 500'd all 15 sections.
 **Fix (c09ed847 + 7d857ac4):** rename the `do` alias; wrap each section in its own
 guard so one bad query DEGRADES (returns partial) instead of 500-ing the report;
 self-apply `products.created_at` for the new-products reader. operations-report.ts.
+
 ## BUG-2026-07-14-007 — Mobile lag: /m shell warmed Home's heavy endpoints on EVERY landing (incl. /m/production) `performance` `mobile` `ui-frontend` 🟢
 **Symptom:** the phone app felt laggy the moment a factory worker opened straight to
 `/m/production` (their default screen). The production board itself is already slim
@@ -9600,6 +9813,7 @@ Both sticker loaders fetched every production order + job card (`?fields=minimal
 **Follow-up bug caught LIVE (same day):** the reason did NOT reach the production grid — `holdReason`/`heldBy`/`heldAt` were only a post-hoc mutation on the PO row in `attachCustomerSO`, NOT declared fields of the minimal projection, so the KV body cache + `production_orders_list_snapshot` serialize→deserialize silently dropped them (`customerSO` survived only because it is a declared own-property of `rowToMinimalPO`). Prod-verified: `/api/production-orders?fields=minimal` returned `customerSO` but no `holdReason` key on ANY row, even ON_HOLD ones. **Fix:** made the 3 fields declared own-properties (defaults `""`) of `rowToMinimalPO` / `rowToPO` / `rowsToPOsBatch` + the `MinimalPOOut` type, so they always ride the cache; `attachCustomerSO` still overwrites with the real SO/CO values. Added a RUNTIME behavioral test (round-trips the projected row through JSON, asserts `holdReason` survives) — the structural test + review had missed it. **Lesson:** an enrich that mutates a field onto a row served through a serialize/deserialize cache must DECLARE that field on the projection, or the cache drops it; verify-live on the actual payload caught what static review could not.
 
 ---
+
 ## BUG-2026-06-24-005 — Announcement "Got it" was a DEVICE-LOCAL acknowledgement only; the office had no way to see who had read a notice, and a fresh phone / cache-clear silently suppressed the must-tap popup (enhancement: server-recorded read-receipts + remind)
 
 🟢 **Fixed** · `ui-frontend` / `auth-rbac` (worker-token + admin permission) · enhancement build
@@ -9639,6 +9853,7 @@ Both sticker loaders fetched every production order + job card (`?fields=minimal
 **Regression test:** new `tests/session-cookie-remember-me.test.mjs` (registered in `package.json` test list) — asserts persistent mode carries `Max-Age=604800` + all security attributes, session-only mode has NO `Max-Age`/`Expires` but stays HttpOnly/Secure/SameSite=Strict, CSRF cookie persistence tracks the session cookie, and the two modes produce DIFFERENT headers (the explicit guard against re-hardcoding Max-Age). Full suite: 1096 pass / 1 skip / 0 fail. build:strict clean (only the 3 known jsbarcode/@zxing sandbox errors).
 
 **Verify live:** sign in with "Remember me" CHECKED → fully quit and reopen the browser → still logged in on the dashboard. Sign out, sign in with "Remember me" UNCHECKED → fully quit and reopen the browser → bounced to /login (session cookie was dropped on close). DevTools → Application → Cookies: checked shows `hookka_session` with an Expires/Max-Age value; unchecked shows it as "Session". **Lesson:** when the credential is a server-set cookie, a "Remember me" checkbox must travel to the server and toggle the cookie's `Max-Age` — client-side React state alone can't change cookie persistence.
+
 ## BUG-2026-06-24-003 — Customer DO/Invoice emails could not be RE-SENT, and a no-email customer's invoice was skipped with ZERO operator signal (remediation for BUG-2026-06-23-005's 128-DO backlog)
 
 🟢 **Fixed** · `delivery-orders` / `ui-frontend` · follow-up to BUG-2026-06-23-005 (backend choke-point trigger)
@@ -9655,6 +9870,7 @@ Both sticker loaders fetched every production order + job card (`?fields=minimal
 **Regression test:** extended `tests/customer-notify.test.mjs` — asserts the resend endpoint is admin-gated + validates kind, clears the stamp to NULL BEFORE re-firing `queueDoCustomerNotice` (no duplicate send path), reports sent/skipped-no-email/error, has NO bulk auto-blast route, and that the FE wires the Resend button (footer + row menu) and the no-email warning into all transition points. 45 pass / 0 fail. build:strict clean (only the 3 known jsbarcode/@zxing sandbox errors).
 
 **Verify live:** open a DELIVERED/INVOICED DO whose customer has an email → detail footer shows "Resend invoice email"; click → Confirm → toast "Invoice email re-sent to <email>"; check the outbox (`/api/internal/process-email-outbox` cron) for the queued mail. Open one whose customer has NO email → button reads "No email on file" + is disabled; Mark-Delivered/Generate-Invoice such a DO → warning toast fires, delivery still proceeds. For the Houzs 128 backlog: add the PIC Email on the customer, then Resend per-DO the ones that need it.
+
 ## BUG-2026-06-24-004 — Packing-sticker QR sent a storekeeper to the Worker-Portal LOGIN screen (gated rack assignment) instead of letting them set the rack without a PIN
 
 🟢 **Fixed** · `auth-rbac` / `production-orders` · feature build (public packing-sticker rack-scan)
@@ -19112,3 +19328,4 @@ Owner spotted it on the Creditor page 2026-08-05 (「还有漂吗？」). Verifi
 ## BUG-2026-08-05-001 — The SUPER ADMIN's own menu was cut down to a read-only one `auth` `rbac`
 
 🟢 Fixed. `/api/auth/me/permissions` resolved the role ONLY through `users.roleId → roles.name`, while the GATE (rbac.ts) reads the `users.role` TEXT and short-circuits SUPER_ADMIN/ADMIN. The owner's row carries role='SUPER_ADMIN' with a roleId the roles table doesn't resolve → the JOIN returned NULL → the handler's READ_ONLY fallback ran → hiddenNavPrefixes hid `/procurement/pi` and the whole HR group from him, while every one of those pages opened fine by URL (owner 2026-08-05: 「我就是 super admin 啊」). Two sources of truth for one fact. The endpoint now selects both and lets the legacy TEXT stand in (`roleName ?? legacyRole ?? READ_ONLY`), and treats ADMIN like SUPER_ADMIN as the gate does. Regression: `tests/me-permissions-role-source.test.mjs`. Lesson for the class: when a screen and its gate answer the same question, they must read the same column — a menu that disagrees with the gate looks like a missing feature, not a permission bug.
+

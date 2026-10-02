@@ -18,6 +18,7 @@ import { DeferredBlock } from "@/components/ui/deferred-block";
 import { formatCurrency, formatDateDMY, formatRM, roundSen } from "@/lib/utils";
 import { todayYmdMYForReads } from "@/lib/staging-today";
 import { monthLabel as drillMonthLabel, shortBankName } from "@/lib/ledger-drill";
+import { guessAccount, findDuplicate, linesWithTax, normPayee, normDocNo, type LearnedLine, type AccountGuess, type KnownDoc } from "@/lib/scan-account-learn";
 // Every money field on this page is `type="text" inputMode="decimal"` — the
 // browser lets a comma through, and `parseFloat("12,000")` is 12. One parser,
 // and a null the caller must refuse. See src/lib/parse-money.ts.
@@ -27,6 +28,7 @@ import { buildAgingExportAoa, agingRowKind } from "@/lib/aging-export";
 import { isCleanImportShape, detectRawShape, parseRawStockTakeRows, impliedYmFromFilename, type ParsedRawItem } from "@/lib/stock-take-import";
 import { printVoucher, printVouchers, type VoucherSpec, type VoucherLine } from "@/lib/print-voucher";
 import { useRowSelection } from "@/lib/use-row-selection";
+import { useResizableTables } from "@/lib/use-resizable-tables";
 import { BatchActionsBar } from "@/components/accounting/batch-actions-bar";
 import { amountInWords } from "@/lib/amount-in-words";
 import { COMPANY } from "@/lib/constants";
@@ -180,20 +182,26 @@ function buildPvVoucher(
   const dmy = (iso?: string | null) => (iso ? formatDateDMY(String(iso).slice(0, 10)) : undefined);
   const watermark = pv.status === "VOID" ? "CANCELLED" : st === "DRAFT" ? "DRAFT" : st !== "APPROVED" ? "NOT YET APPROVED" : undefined;
   const pvx = pv as PvRow & { preparedByName?: string | null; checkedByName?: string | null; approvedByName?: string | null; createdByName?: string | null };
+  // A transfer names the account that receives the money; a payment prints the
+  // supplier's bill no. / date with its description (notes stay internal).
+  const isTransfer = pv.pvKind === "TRANSFER";
+  const billNo = (pv.billNo ?? pv.bill_no) ?? "";
+  const billDate = String((pv.billDate ?? pv.bill_date) ?? "").slice(0, 10);
+  const billText = billNo ? `Bill no. ${billNo}${/^d{4}-d{2}-d{2}$/.test(billDate) ? ` dated ${formatDateDMY(billDate)}` : ""}` : "";
   return {
     // A voided voucher must never print as a clean/valid document.
     title: pv.status === "VOID" ? "PAYMENT VOUCHER — VOID" : "PAYMENT VOUCHER",
     company: VOUCHER_COMPANY,
     docNo: pv.pvNo,
     date: formatDateDMY(pv.date),
-    partyLabel: "Pay To",
-    partyName: pv.payee ?? "",
+    partyLabel: isTransfer ? "Transfer To" : "Pay To",
+    partyName: isTransfer ? (pv.lines[0] ? accountLabel(accounts, pv.lines[0].accountCode) : "") : pv.payee ?? "",
     columns: [{ label: "Account" }, { label: "Description" }, { label: "Amount", align: "right" }],
     lines,
     footerNote: paidFrom,
     totalCells: ["", "Total", formatCurrency(pv.totalSen)],
     amountWords: amountInWords(pv.totalSen),
-    remarks: pv.description ?? undefined,
+    remarks: [pv.description ?? "", billText].filter(Boolean).join(" · ") || undefined,
     signatures: [
       { label: "Prepared by", name: pvx.preparedByName ?? pvx.createdByName ?? undefined, on: dmy(pv.preparedAt ?? pv.prepared_at) ?? (pvx.preparedByName ? undefined : formatDateDMY(pv.date)) },
       { label: "Checked by", name: pvx.checkedByName ?? undefined, on: dmy(pv.checkedAt ?? pv.checked_at) },
@@ -593,8 +601,14 @@ export default function AccountingPage() {
     if (tab === "ar" || tab === "ap") refreshAging();
   }, [tab, refreshAging]);
 
+  // Finance tables (owner 2026-10-01 「我不想要 wrap text」+「letterhead 可以
+  // 左右拉」): no wrapping, and any column edge in a header can be dragged —
+  // only that column changes, the rest move with it; widths remembered per
+  // tab. Reports resize their description column only (data-col-resize).
+  const tablesRef = useResizableTables(`accounting:${tab}`);
+
   return (
-    <div className="space-y-6 max-md:space-y-4">
+    <div ref={tablesRef} data-fin-tables className="space-y-6 max-md:space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -5087,7 +5101,7 @@ function CostStructureTab() {
       <Card key={title}>
         <CardContent className="p-0 overflow-x-auto">
           <div className="px-3 py-2 bg-[#6B5C32] text-white text-sm font-semibold">{title} · {data.fyLabel} · all amounts RM</div>
-          <table className="text-[13px] whitespace-nowrap">
+          <table data-col-resize="first" className="text-[13px] whitespace-nowrap">
             <thead>
               <tr className="border-b border-[#E2DDD8] text-[11px] text-[#6B7280]">
                 <th className="px-3 py-2 text-left sticky left-0 bg-white">MONTH</th>
@@ -5236,7 +5250,7 @@ function CostExpenseClassesTab() {
       <Card>
         <CardContent className="p-0 overflow-x-auto">
           <div className="px-3 py-2 bg-[#6B5C32] text-white text-sm font-semibold">{title}</div>
-          <table className="text-[12px] whitespace-nowrap">
+          <table data-col-resize="first" className="text-[12px] whitespace-nowrap">
             <thead>
               <tr className="border-b border-[#E2DDD8] text-[11px] text-[#6B7280]">
                 <th className="px-3 py-2 text-left sticky left-0 bg-white">CLASS / ACCOUNT</th>
@@ -5391,7 +5405,7 @@ function MonthlyTrendTab() {
           {loading ? (
             <div className="py-12 text-center text-[#6B7280] text-sm">Loading…</div>
           ) : (
-            <table className="text-[12.5px] whitespace-nowrap">
+            <table data-col-resize="first" className="text-[12.5px] whitespace-nowrap">
               <thead>
                 <tr className="border-b border-[#E2DDD8] text-xs text-[#6B7280]">
                   <th className="px-3 py-2 text-left sticky left-0 bg-white">ITEM</th>
@@ -5415,7 +5429,7 @@ function MonthlyTrendTab() {
   );
 }
 
-type PlMatrixRow = { kind: "group" | "line" | "total" | "grandtotal" | "gap"; depth: number; label: string; groupId?: string; accountCode?: string; values: number[]; pctValues: number[] };
+type PlMatrixRow = { kind: "group" | "line" | "total" | "grandtotal" | "gap"; depth: number; label: string; groupId?: string; accountCode?: string; drillCode?: string; values: number[]; pctValues: number[] };
 type PlMonthlyData = { fyLabel: string; line: string; anchor: string; columns: { key: string; label: string; accum: boolean }[]; rows: PlMatrixRow[] };
 
 function MonthlyPlTab() {
@@ -5425,6 +5439,8 @@ function MonthlyPlTab() {
   const [data, setData] = useState<PlMonthlyData | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [level, setLevel] = useState<number | null>(null);
+  // Rows opened to their ledger lines (owner 2026-10-01), by account code.
+  const [drillOpen, setDrillOpen] = useState<Set<string>>(new Set());
 
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
@@ -5502,7 +5518,7 @@ function MonthlyPlTab() {
         {!data ? (
           <div className="py-12 text-center text-[#6B7280] text-sm">Loading…</div>
         ) : (
-          <table className="text-[13px] min-w-full">
+          <table data-col-resize="first" className="text-[13px]">
             <thead>
               <tr className="border-b border-[#E2DDD8] text-xs text-[#6B7280]">
                 <th rowSpan={2} className="px-3 py-2 text-left sticky left-0 bg-white align-bottom">Item</th>
@@ -5530,10 +5546,21 @@ function MonthlyPlTab() {
                 const rowBg = r.kind === "grandtotal" ? "bg-[#F7F5F2]" : r.kind === "total" ? "bg-[#FBFAF8]" : isGroup && r.depth === 0 ? "bg-[#F3F0EC]" : "bg-white";
                 const rowCls = r.kind === "grandtotal" ? "font-semibold border-t-2 border-[#C9C2BA]" : r.kind === "total" ? "font-medium border-t border-[#E2DDD8]" : isGroup && r.depth === 0 ? "font-semibold border-t border-[#E2DDD8]" : isGroup ? "font-medium" : "";
                 const deepLine = !isGroup && !isTot && r.depth >= 3;
+                const drillCode = r.kind === "line" ? (r.drillCode ?? r.accountCode) : undefined;
+                const drilled = !!drillCode && drillOpen.has(drillCode);
                 return (
-                  <tr key={i} className={`${rowBg} ${rowCls} ${isGroup ? "cursor-pointer" : ""}`} onClick={isGroup && r.groupId ? () => toggle(r.groupId!) : undefined}>
+                  <Fragment key={i}>
+                  <tr className={`${rowBg} ${rowCls} ${isGroup ? "cursor-pointer" : ""}`} onClick={isGroup && r.groupId ? () => toggle(r.groupId!) : undefined}>
                     {/* uppercase = display-only: unifies the COA's ALL-CAPS names with the owner-keyed Title Case historical labels */}
-                    <td className={`px-3 py-1.5 sticky left-0 ${rowBg} uppercase whitespace-nowrap ${deepLine ? "text-[12px] text-[#6B7280]" : ""} ${isGroup && r.depth === 0 ? "tracking-wide" : ""}`} style={{ paddingLeft: `${12 + r.depth * 16}px` }}>{isGroup ? (open ? "▾ " : "▸ ") : ""}{r.label}</td>
+                    <td className={`px-3 py-1.5 sticky left-0 ${rowBg} uppercase whitespace-nowrap ${deepLine ? "text-[12px] text-[#6B7280]" : ""} ${isGroup && r.depth === 0 ? "tracking-wide" : ""}`} style={{ paddingLeft: `${12 + r.depth * 16}px` }}>
+                      {isGroup ? (open ? "▾ " : "▸ ") : ""}
+                      {drillCode ? (
+                        <button type="button" className="uppercase text-left hover:underline decoration-dotted cursor-pointer" title="Show the ledger lines behind this row"
+                          onClick={() => setDrillOpen((prev) => { const n = new Set(prev); if (n.has(drillCode)) n.delete(drillCode); else n.add(drillCode); return n; })}>
+                          <span className="text-[10px] text-[#9CA3AF] mr-1">{drilled ? "▾" : "▸"}</span>{r.label}
+                        </button>
+                      ) : r.label}
+                    </td>
                     {r.values.map((v, j) => (
                       <React.Fragment key={j}>
                         <td className={`px-3 py-1.5 text-right tabular-nums border-l border-[#F0ECE9] ${deepLine ? "text-[12px]" : ""} ${v < 0 ? "text-[#9A3A2D]" : ""}`}>{fmt(v)}</td>
@@ -5541,6 +5568,8 @@ function MonthlyPlTab() {
                       </React.Fragment>
                     ))}
                   </tr>
+                  {drilled && drillCode && <PlMonthlyDrillRows account={drillCode} cols={cols} line={line} rowValues={r.values} depth={r.depth} />}
+                  </Fragment>
                 );
               })}
             </tbody>
@@ -5548,6 +5577,114 @@ function MonthlyPlTab() {
         )}
       </CardContent></Card>
     </div>
+  );
+}
+
+// Monthly P&L inline drill (owner 2026-10-01 「Monthly P&L 明细不能做到这样？」+
+// 「对方名字保留」): one row's ledger lines listed UNDER it — date · description
+// · who it is with — document no., the amount in its own month's column and in
+// Accumulated. The last row counts them, gives each month's subtotal (= the
+// row's figure for that month) and opens the General Ledger. Same pass as the
+// statement drill (/pl-drill over the financial year's months), so the lines
+// add up to the row; months keyed from the old books have no lines behind them.
+const glHref = (account: string, fromYm: string, toYm: string) => {
+  const [y, m] = toYm.split("-").map(Number);
+  const last = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+  return `/accounting?tab=gl&account=${encodeURIComponent(account)}&from=${fromYm}-01&to=${last}`;
+};
+const drillCellAmt = (sen: number) => (sen < 0 ? `(${plDrillAmt(-sen)})` : plDrillAmt(sen));
+function PlMonthlyDrillRows({ account, cols, line, rowValues, depth }: {
+  account: string;
+  cols: { key: string; label: string; accum: boolean }[];
+  line: "all" | "sofa" | "bedframe";
+  rowValues: number[];
+  depth: number;
+}) {
+  const months = cols.filter((c) => !c.accum).map((c) => c.key).sort();
+  const from = months[0] ?? "";
+  const to = months[months.length - 1] ?? "";
+  const [data, setData] = useState<(PlDrillData & { openingMonth?: string | null }) | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    if (!from || !to) return;
+    let dead = false;
+    fetch(`/api/accounting/pl-drill?account=${encodeURIComponent(account)}&from=${from}&to=${to}`)
+      .then((r) => r.json() as Promise<{ success?: boolean; data?: PlDrillData & { openingMonth?: string | null }; error?: string }>)
+      .then((j) => { if (dead) return; if (j?.success && j.data) setData(j.data); else setErr(j?.error || "Could not load the ledger lines"); })
+      .catch(() => { if (!dead) setErr("Could not load the ledger lines"); });
+    return () => { dead = true; };
+  }, [account, from, to]);
+  const pad = { paddingLeft: `${28 + depth * 16}px` };
+  const span = cols.length * 2;
+  const bg = "bg-[#FAF8F5]";
+  if (!data) {
+    return (
+      <tr className={bg}><td className={`px-3 py-1 sticky left-0 ${bg} text-[12px] ${err ? "text-[#9A3412]" : "text-[#9CA3AF]"}`} style={pad}>{err ?? "Loading the ledger lines…"}</td><td colSpan={span} /></tr>
+    );
+  }
+  // Income reads credit as positive, everything else debit — the row's own way.
+  const creditNormal = data.account?.type === "REVENUE";
+  const signed = (debitSen: number, creditSen: number) => (creditNormal ? creditSen - debitSen : debitSen - creditSen);
+  type Entry = { key: string; ym: string; text: string; title: string; sen: number; italic?: boolean };
+  const entries: Entry[] = data.lines.map((l) => ({
+    key: l.id || `${l.sourceType}:${l.sourceId}:${l.debitSen}:${l.creditSen}`,
+    ym: l.date.slice(0, 7),
+    text: `${l.date.slice(8, 10)}/${l.date.slice(5, 7)} · ${l.description || "—"}${l.ref2 ? ` · ${l.ref2}` : ""} — ${l.ref1}`,
+    title: [l.description, l.ref2, l.ref1, l.docs, l.otherSide.length ? `Other side: ${l.otherSide.map((o) => `${o.code} ${o.name}`).join(", ")}` : ""].filter(Boolean).join("\n"),
+    sen: signed(l.debitSen, l.creditSen),
+  }));
+  for (const e of data.extra) {
+    entries.push({
+      key: `${e.kind}:${e.ym}`, ym: e.ym, italic: true, sen: creditNormal ? -e.sen : e.sen,
+      text: e.kind === "payroll" ? `Payroll ${drillMonthLabel(e.ym)} from the payslips, not posted to the ledger yet` : `Opening balance: this month's share (${drillMonthLabel(e.ym)})`,
+      title: "",
+    });
+  }
+  entries.sort((a, b) => a.ym.localeCompare(b.ym));
+  const perMonth = new Map<string, number>();
+  for (const e of entries) perMonth.set(e.ym, (perMonth.get(e.ym) ?? 0) + e.sen);
+  const total = entries.reduce((sum, e) => sum + e.sen, 0);
+  const oldBooks = (ym: string) => !!data.openingMonth && ym < data.openingMonth;
+  // The lines must make the row, month by month (the All view only — the
+  // Sofa / Bedframe rows carry a share of each line).
+  const tied = line !== "all" || cols.every((c, j) => c.accum || oldBooks(c.key) || (perMonth.get(c.key) ?? 0) === (rowValues[j] ?? 0));
+  const amtCls = (sen: number) => `px-3 py-1 text-right tabular-nums border-l border-[#F0ECE9] ${sen < 0 ? "text-[#9A3A2D]" : ""}`;
+  return (
+    <>
+      {entries.map((e) => (
+        <tr key={e.key} className={`${bg} text-[12px] text-[#4B5563] ${e.italic ? "italic" : ""}`}>
+          <td className={`px-3 py-1 sticky left-0 ${bg}`} style={pad} title={e.title || e.text}>
+            <div className="truncate max-w-[34rem]">{e.text}</div>
+          </td>
+          {cols.map((c) => {
+            const on = c.accum || c.key === e.ym;
+            return (
+              <React.Fragment key={c.key}>
+                <td className={on ? amtCls(e.sen) : "border-l border-[#F0ECE9]"}>{on ? drillCellAmt(e.sen) : ""}</td>
+                <td />
+              </React.Fragment>
+            );
+          })}
+        </tr>
+      ))}
+      <tr className="bg-[#F7F4EF] text-[12px] font-semibold text-[#4B5563] border-t border-[#E2DDD8]">
+        <td className="px-3 py-1 sticky left-0 bg-[#F7F4EF]" style={pad}>
+          {entries.length} entr{entries.length === 1 ? "y" : "ies"} · <Link to={glHref(account, from, to)} className="underline decoration-dotted text-[#6B5C32]">open in GL</Link>
+          {line !== "all" && <span className="font-normal text-[#9CA3AF]"> · full amounts — this view carries a share</span>}
+          {!tied && <span className="font-normal text-[#9A3412]"> · these lines do not add up to the row — please report it</span>}
+        </td>
+        {cols.map((c) => {
+          const sen = c.accum ? total : (perMonth.get(c.key) ?? 0);
+          const old = !c.accum && oldBooks(c.key);
+          return (
+            <React.Fragment key={c.key}>
+              <td className={amtCls(sen)} title={old ? "Keyed from the old books — no ledger lines behind it" : undefined}>{old ? "old books" : drillCellAmt(sen)}</td>
+              <td />
+            </React.Fragment>
+          );
+        })}
+      </tr>
+    </>
   );
 }
 
@@ -5892,7 +6029,7 @@ function PLStatementTab() {
             <div className="py-12 text-center text-[#6B7280] text-sm">Loading…</div>
           ) : (
             <div className="overflow-x-auto">
-            <table className="w-full text-[13px]">
+            <table data-col-resize="first" className="w-full text-[13px]">
               <thead>
                 <tr className="text-[12px] text-[#6B7280]">
                   <td />
@@ -6309,7 +6446,7 @@ function OtherPartyAging({ side }: { side: "DEBTOR" | "CREDITOR" }) {
 // supplier-document AI extracts party / doc no / date / amount lines → the
 // caller PREFILLS its form for review. Nothing posts automatically — the
 // operator still picks the GL account(s) and saves through the normal flow.
-type ScanFinanceResult = {
+type ScanFinanceDoc = {
   partyName: string | null;
   docType: string | null;
   docNo: string | null;
@@ -6318,11 +6455,14 @@ type ScanFinanceResult = {
   subtotalSen: number | null;
   taxSen: number | null;
   totalSen: number | null;
-  extraDocs: number;
 };
+// The first bill at the top level; `docs` holds every bill the file carries
+// (one PDF can bundle several — owner 2026-10-01).
+type ScanFinanceResult = ScanFinanceDoc & { extraDocs: number; docs?: ScanFinanceDoc[] };
 // `onResult` also receives the scanned file so the caller can keep it as the
-// document's attachment once the form is saved.
-function ScanPrefillButton({ label, onResult }: { label: string; onResult: (d: ScanFinanceResult, file: File) => void | Promise<void> }) {
+// document's attachment once the form is saved. `allDocs`: the caller uses
+// every receipt in the file (a payment voucher), so there is nothing to warn.
+function ScanPrefillButton({ label, onResult, allDocs }: { label: string; onResult: (d: ScanFinanceResult, file: File) => void | Promise<void>; allDocs?: boolean }) {
   const { toast } = useToast();
   const [busy, setBusy] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -6337,8 +6477,8 @@ function ScanPrefillButton({ label, onResult }: { label: string; onResult: (d: S
       const j = (await res.json()) as { success?: boolean; error?: string; data?: ScanFinanceResult };
       if (j?.success && j.data) {
         await onResult(j.data, f);
-        if (j.data.extraDocs > 0) {
-          toast.success(`Heads up: the file contains ${j.data.extraDocs + 1} documents — only the first was used.`);
+        if (!allDocs && j.data.extraDocs > 0) {
+          toast.success(`Heads up: the file contains ${j.data.extraDocs + 1} documents — only the first was used. Scan Bills on Payment Vouchers opens one record per bill.`);
         }
       } else toast.error(j?.error || "Scan failed");
     } catch {
@@ -6398,7 +6538,7 @@ function ScanPrefillButton({ label, onResult }: { label: string; onResult: (d: S
                   {busy ? "Scanning… (~30–90s, keep this open)" : dragOver ? "Drop to scan" : "Drop a PDF or photo here"}
                 </p>
                 {!busy && (
-                  <p className="mt-1 text-xs text-[#6B7280]">or click to browse — one document, max 32MB</p>
+                  <p className="mt-1 text-xs text-[#6B7280]">{allDocs ? "or click to browse — one file (several receipts in it are fine), max 32MB" : "or click to browse — one document, max 32MB"}</p>
                 )}
               </div>
             </div>
@@ -6416,125 +6556,370 @@ function ScanPrefillButton({ label, onResult }: { label: string; onResult: (d: S
   );
 }
 
-// Scan Bills — a STACK of bills at once (Houzs adoption Phase 5, 2026-09-22).
-// Each file is scanned in turn and becomes ONE draft Payment Voucher on the
-// approval ladder (saveAs:"draft" — no number, no GL). The account prefills
-// from the same payee's latest voucher, exactly as the single-scan button
-// does; a bill the AI can't read or that has no usable amount is listed as
-// skipped with the reason, never guessed. The owner then walks the drafts
-// through Prepare → Check → Approve on the Payment Vouchers page.
-function ScanBillsBatch({ rows, bankCash, onDone }: {
-  rows: PvRow[];
+// What finance scans learn from (owner 2026-10-01, plan batch 3): approved /
+// posted payment vouchers and active other-creditor bills (the account each
+// line went to, by its description), the bill numbers already on our books
+// (vouchers, other-creditor bills, purchase invoices). Finance documents
+// only — nothing shared with the other scans.
+// Read once per page visit, on the first scan, and dropped after every save
+// so the next scan learns from it.
+type ScanMemory = { history: LearnedLine[]; known: KnownDoc[] };
+let scanMemoryPromise: Promise<ScanMemory> | null = null;
+function forgetScanMemory() { scanMemoryPromise = null; }
+function loadScanMemory(): Promise<ScanMemory> {
+  if (!scanMemoryPromise) {
+    scanMemoryPromise = (async () => {
+      const get = async <T,>(url: string): Promise<T[]> => {
+        try {
+          const r = await fetch(url, { cache: "no-store" });
+          const j = (await r.json()) as { success?: boolean; data?: T[] } | T[];
+          return Array.isArray(j) ? j : j?.success ? j.data ?? [] : [];
+        } catch { return []; }
+      };
+      const [pvs, bills, pis] = await Promise.all([
+        get<PvRow>("/api/accounting/payment-vouchers"),
+        get<OtherPartyBill>("/api/accounting/other-party-bills?type=CREDITOR"),
+        // A purchase invoice keyed from the same supplier bill is a duplicate
+        // too. Finance accounts without purchase-invoice access just skip it.
+        get<{ piNo?: string; supplierName?: string; supplierInvoiceNo?: string; status?: string }>("/api/purchase-invoices"),
+      ]);
+      const history: LearnedLine[] = [];
+      const known: KnownDoc[] = [];
+      for (const r of pvs) {
+        const approved = r.status === "POSTED" && ((r.approvalState ?? r.approval_state) ?? "APPROVED") === "APPROVED";
+        if (approved && r.pvKind !== "AP" && r.pvKind !== "TRANSFER") {
+          for (const l of r.lines ?? []) history.push({ payee: r.payee ?? "", description: l.description || r.description || "", accountCode: l.accountCode, date: String(r.date ?? "") });
+        }
+        // Several receipts on one voucher keep their numbers comma-separated.
+        if (r.status !== "VOID") {
+          for (const no of String((r.billNo ?? r.bill_no) ?? "").split(/[,;]/)) {
+            if (no.trim()) known.push({ docNo: no.trim(), payee: r.payee ?? "", ref: r.pvNo });
+          }
+        }
+      }
+      for (const b of bills) {
+        if ((b.lifecycleState ?? "ACTIVE") !== "ACTIVE" || b.status === "CANCELLED") continue;
+        for (const it of b.items ?? []) history.push({ payee: b.partyName, description: it.description || b.description || "", accountCode: it.counterAccount, date: String(b.billDate ?? "") });
+        if (b.referenceNo) known.push({ docNo: b.referenceNo, payee: b.partyName, ref: b.billNo });
+      }
+      for (const p of pis) {
+        if (p.status === "CANCELLED" || !p.supplierInvoiceNo) continue;
+        known.push({ docNo: p.supplierInvoiceNo, payee: p.supplierName ?? "", ref: p.piNo ?? "" });
+      }
+      return { history, known };
+    })();
+  }
+  return scanMemoryPromise;
+}
+// A draft voucher has no number yet — say what it is instead.
+function knownRefLabel(ref: string): string {
+  return ref.startsWith("DRAFT-") ? "a draft voucher" : ref;
+}
+// The guess's own words under a scanned line's account.
+type ScanHint = { kind: "learned" | "suggested" | "sst"; text: string };
+function scanGuessHint(g: AccountGuess): ScanHint | undefined {
+  if (!g) return undefined;
+  if (g.source === "suggested") return { kind: "suggested", text: `Suggested — like ${g.basis}` };
+  if (g.source === "payee-description") return { kind: "learned", text: `Learned — this payee's "${g.basis}"` };
+  return { kind: "learned", text: `Learned — this payee's usual account (${g.basis})` };
+}
+
+// Scan — the Payment Vouchers page's ONE OCR (owner 2026-10-01 「我在别的 erp
+// 做就是一个 ocr 罢了 … 多张 receipt 转一张 payment voucher, 支持一次性开多张
+// voucher with 不一样的 receipt」→ OCB left out →「做」). Drop one receipt or a
+// stack: every receipt the files hold (several in one PDF included) is listed,
+// each as its own voucher to start with. Tick receipts and Merge them into one
+// voucher, Split a merged one back, then Create — one DRAFT voucher each (on
+// the approval ladder), dated today, its receipts attached. Each line's
+// account is learned by its description (a new payee's marked "suggested"),
+// the SST is its own line, and a bill no. already on our books is flagged and
+// left unticked. "Open in form" takes the last voucher into the full form
+// (accrue, post now…). Other-creditor bills are scanned on their own page
+// (Scan Bill) and paid through New AP Payment.
+type ScanReviewLine = { description: string; amountSen: number; accountCode: string; guess: AccountGuess; isTax?: boolean };
+type ScanDoc = {
+  key: string; file: File; fileName: string; docIndex: number; docCount: number;
+  payee: string; docType: string; billNo: string; billDate: string;
+  lines: ScanReviewLine[]; totalSen: number; duplicateOf: string | null;
+};
+type ScanVoucher = {
+  key: string; docs: ScanDoc[]; ticked: boolean; payee: string; voucherDate: string;
+  state: "ready" | "creating" | "created" | "failed"; result?: string;
+};
+const scanVoucherTotal = (v: ScanVoucher) => v.docs.reduce((s, d) => s + d.totalSen, 0);
+// What the voucher says it is: one receipt by its type and number, several by count.
+const scanVoucherDescription = (v: ScanVoucher) =>
+  v.docs.length === 1
+    ? ([v.docs[0].docType, v.docs[0].billNo].filter(Boolean).join(" · ") || v.docs[0].fileName)
+    : `${v.docs.length} receipts`;
+function ScanVouchers({ accounts, bankCash, onDone, onOpenInForm }: {
+  accounts: ChartOfAccount[];
   bankCash: ChartOfAccount[];
   onDone: () => void;
+  onOpenInForm: (v: { payee: string; date: string; docs: ScanDoc[] }) => void;
 }) {
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
-  const [queue, setQueue] = useState<{ name: string; state: "queued" | "scanning" | "saved" | "skipped"; note?: string; pvNo?: string }[]>([]);
-  const [busy, setBusy] = useState(false);
+  const [phase, setPhase] = useState<"drop" | "scanning" | "review">("drop");
+  const [progress, setProgress] = useState<{ name: string; state: "queued" | "scanning" | "done" | "unreadable"; note?: string }[]>([]);
+  const [vouchers, setVouchers] = useState<ScanVoucher[]>([]);
+  const [creating, setCreating] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const normName = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const runRef = useRef(0);
+  const lineAccounts = accounts.filter((a) => a.isPostable !== false && a.specialAccountType !== "SDC" && a.specialAccountType !== "SBK" && a.specialAccountType !== "SCH");
+  const update = (key: string, patch: Partial<ScanVoucher>) => setVouchers((list) => list.map((v) => (v.key === key ? { ...v, ...patch } : v)));
+  const setLineAccount = (vKey: string, docKey: string, li: number, code: string) => setVouchers((list) => list.map((v) => (v.key !== vKey ? v : {
+    ...v,
+    docs: v.docs.map((d) => (d.key !== docKey ? d : { ...d, lines: d.lines.map((y, yi) => (yi === li ? { ...y, accountCode: code, guess: null } : y)) })),
+  })));
+
   const runFiles = async (files: File[]) => {
     if (!files.length) return;
-    setBusy(true);
-    setQueue(files.map((f) => ({ name: f.name, state: "queued" })));
-    const payFrom = defaultBankCode(bankCash);
-    let saved = 0;
+    const run = ++runRef.current;
+    setPhase("scanning");
+    setProgress(files.map((f) => ({ name: f.name, state: "queued" })));
+    const memory = await loadScanMemory();
+    const already = vouchers.flatMap((v) => v.docs);
+    const found: ScanVoucher[] = [];
     for (let i = 0; i < files.length; i++) {
-      setQueue((q) => q.map((x, j) => (j === i ? { ...x, state: "scanning" } : x)));
+      setProgress((q) => q.map((x, j) => (j === i ? { ...x, state: "scanning" } : x)));
       try {
         const fd = new FormData();
         fd.append("file", files[i]);
         const res = await fetch("/api/scan-finance/extract", { method: "POST", body: fd });
         const j = (await res.json()) as { success?: boolean; error?: string; data?: ScanFinanceResult };
         if (!j?.success || !j.data) throw new Error(j?.error || "scan failed");
-        const d = j.data;
-        const amtLines = d.lines.length ? d.lines : d.totalSen ? [{ description: d.docNo ?? files[i].name, amountSen: d.totalSen }] : [];
-        if (!amtLines.length) throw new Error("no amount read");
-        const prior = d.partyName
-          ? rows.filter((r) => r.status !== "VOID" && r.lines?.length && normName(r.payee ?? "") === normName(d.partyName ?? ""))
-              .sort((a, b) => (b.date || "").localeCompare(a.date || ""))[0]
-          : undefined;
-        const acct = prior?.lines?.[0]?.accountCode ?? "";
-        if (!acct) throw new Error(d.partyName ? `new payee "${d.partyName}" — no account to prefill; key it by hand` : "payee not read");
-        const body = {
-          date: d.docDate ?? new Date().toISOString().slice(0, 10),
-          payee: d.partyName ?? "",
-          description: [d.docType, d.docNo].filter(Boolean).join(" · ") || files[i].name,
-          accrued: false,
-          payFrom,
-          saveAs: "draft",
-          lines: amtLines.map((l) => ({ accountCode: acct, description: l.description, amountSen: l.amountSen })),
-        };
-        const r2 = await fetch("/api/accounting/payment-vouchers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-        const j2 = (await r2.json()) as { success?: boolean; error?: string; data?: { id: string; pvNo: string } };
-        if (!j2?.success) throw new Error(j2?.error || "save failed");
-        saved++;
-        // The scanned bill IS the voucher's evidence — attach it to the draft
-        // (Houzs: 「扫描页自动附在单据上」). A failed upload keeps the voucher
-        // and says so; the file can be added by hand on the row.
-        let attachNote = "";
-        if (j2.data?.id) {
-          try { await uploadPvAttachment(j2.data.id, files[i]); }
-          catch (e) { attachNote = ` · attachment failed: ${(e as Error).message}`; }
-        }
-        setQueue((q) => q.map((x, k) => (k === i ? { ...x, state: "saved", pvNo: j2.data?.pvNo, note: `${d.partyName ?? ""} · ${formatCurrency(amtLines.reduce((s, l) => s + l.amountSen, 0))}${attachNote}` } : x)));
+        const docs: ScanFinanceDoc[] = j.data.docs?.length ? j.data.docs : [j.data];
+        let unread = 0;
+        docs.forEach((d, k) => {
+          const printed = d.lines.length ? d.lines : d.totalSen ? [{ description: d.docNo ?? files[i].name, amountSen: d.totalSen }] : [];
+          if (!printed.length) { unread += 1; return; }
+          const payee = d.partyName ?? "";
+          const lines: ScanReviewLine[] = linesWithTax(printed, d.taxSen, d.totalSen).map((l) => {
+            if (l.isTax) return { description: l.description, amountSen: l.amountSen, accountCode: "706-0000", guess: null, isTax: true };
+            const guess = guessAccount(memory.history, payee, l.description);
+            return { description: l.description, amountSen: l.amountSen, accountCode: guess?.accountCode ?? "", guess };
+          });
+          // Already on the books, or the same receipt twice in this table.
+          const dup = findDuplicate(memory.known, d.docNo, payee)
+            ?? findDuplicate([...already, ...found.flatMap((v) => v.docs)].map((o) => ({ docNo: o.billNo, payee: o.payee, ref: `${o.fileName} (this scan)` })), d.docNo, payee);
+          const doc: ScanDoc = {
+            key: `${run}:${i}:${k}`, file: files[i], fileName: files[i].name, docIndex: k, docCount: docs.length,
+            payee, docType: d.docType ?? "", billNo: d.docNo ?? "", billDate: d.docDate ?? "",
+            lines, totalSen: lines.reduce((s, l) => s + l.amountSen, 0), duplicateOf: dup ? dup.ref : null,
+          };
+          found.push({ key: `v${run}:${i}:${k}`, docs: [doc], ticked: !dup, payee, voucherDate: new Date().toISOString().slice(0, 10), state: "ready" });
+        });
+        const readable = docs.length - unread;
+        if (!readable) throw new Error("no amount read");
+        setProgress((q) => q.map((x, jj) => (jj === i ? { ...x, state: "done", note: `${readable} receipt${readable === 1 ? "" : "s"}${unread ? ` · ${unread} unreadable` : ""}` } : x)));
       } catch (e) {
-        setQueue((q) => q.map((x, k) => (k === i ? { ...x, state: "skipped", note: (e as Error).message } : x)));
+        setProgress((q) => q.map((x, jj) => (jj === i ? { ...x, state: "unreadable", note: (e as Error).message } : x)));
       }
     }
-    setBusy(false);
-    if (saved) { toast.success(`${saved} draft voucher${saved === 1 ? "" : "s"} created — Prepare / Check / Approve them below`); onDone(); }
+    setVouchers((list) => [...list, ...found]);
+    setPhase("review");
   };
+
+  // Several receipts → one voucher (where the first ticked one stood); the
+  // payee and date are the first's, both editable.
+  const mergeTicked = () => {
+    const picked = vouchers.filter((v) => v.ticked && v.state !== "created");
+    if (picked.length < 2) return;
+    const merged: ScanVoucher = {
+      key: `m${++runRef.current}`, docs: picked.flatMap((v) => v.docs), ticked: true,
+      payee: picked[0].payee, voucherDate: picked[0].voucherDate, state: "ready",
+    };
+    const gone = new Set(picked.map((v) => v.key));
+    setVouchers((list) => {
+      const out: ScanVoucher[] = [];
+      for (const v of list) {
+        if (!gone.has(v.key)) out.push(v);
+        else if (v.key === picked[0].key) out.push(merged);
+      }
+      return out;
+    });
+  };
+  // A merged voucher back to one per receipt.
+  const split = (v: ScanVoucher) => setVouchers((list) => list.flatMap((x) => (x.key !== v.key ? [x] : x.docs.map((d, i) => ({
+    key: `${x.key}/${i}`, docs: [d], ticked: x.ticked, payee: d.payee || x.payee, voucherDate: x.voucherDate, state: "ready" as const,
+  })))));
+
+  const problemOf = (v: ScanVoucher): string | null => {
+    if (!v.payee.trim()) return "payee missing";
+    if (v.docs.some((d) => d.lines.some((l) => !l.accountCode))) return "pick an account for every line";
+    if (scanVoucherTotal(v) <= 0) return "no amount";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(v.voucherDate)) return "voucher date missing";
+    return null;
+  };
+  const createTicked = async () => {
+    const todo = vouchers.filter((v) => v.ticked && v.state !== "created");
+    const bad = todo.find((v) => problemOf(v));
+    if (bad) { toast.error(`${bad.payee || bad.docs[0]?.fileName}: ${problemOf(bad)}`); return; }
+    setCreating(true);
+    let made = 0;
+    for (const v of todo) {
+      update(v.key, { state: "creating" });
+      try {
+        const res = await fetch("/api/accounting/payment-vouchers", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            date: v.voucherDate, payee: v.payee.trim(), description: scanVoucherDescription(v),
+            billNo: v.docs.map((d) => d.billNo).filter(Boolean).join(", "), billDate: v.docs[0]?.billDate || undefined,
+            accrued: false, payFrom: defaultBankCode(bankCash), saveAs: "draft",
+            lines: v.docs.flatMap((d) => d.lines.map((l) => ({ accountCode: l.accountCode, description: l.description, amountSen: l.amountSen }))),
+          }),
+        });
+        const j = (await res.json()) as { success?: boolean; error?: string; data?: { id: string; pvNo: string } };
+        if (!j?.success || !j.data) throw new Error(j?.error || "save failed");
+        // Every receipt rides along — a PDF holding several is attached once.
+        let note = v.docs.length > 1 ? `draft voucher · ${v.docs.length} receipts` : "draft voucher";
+        for (const f of [...new Set(v.docs.map((d) => d.file))]) {
+          try { await uploadPvAttachment(j.data.id, f); } catch (e) { note += ` · ${f.name} not attached: ${(e as Error).message}`; }
+        }
+        update(v.key, { state: "created", result: note });
+        made += 1;
+      } catch (e) {
+        update(v.key, { state: "failed", result: (e as Error).message });
+      }
+    }
+    setCreating(false);
+    forgetScanMemory();
+    if (made) { toast.success(`${made} draft voucher${made === 1 ? "" : "s"} created — Prepare / Check / Approve them on the list`); onDone(); }
+  };
+
+  const reset = () => { setVouchers([]); setProgress([]); setPhase("drop"); };
+  const close = () => { if (!creating && phase !== "scanning") { setOpen(false); reset(); } };
+  const cell = "rounded border border-[#E2DDD8] bg-white px-1.5 py-1 text-xs";
+  const pending = vouchers.filter((v) => v.ticked && v.state !== "created");
+  const notCreated = vouchers.filter((v) => v.state !== "created");
   return (
     <>
-      <Button variant="outline" size="sm" onClick={() => { setQueue([]); setOpen(true); }} title="Drop a whole stack of bills — one draft voucher each">
-        <Upload className="h-4 w-4 mr-1.5" /> Scan Bills
+      <Button variant="outline" size="sm" onClick={() => { reset(); setOpen(true); }} title="Scan receipts / bills — one voucher each, or merge several into one voucher">
+        <Upload className="h-4 w-4 mr-1.5" /> Scan
       </Button>
       {open && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => { if (!busy) setOpen(false); }}>
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 bg-black/50 z-50 overflow-y-auto p-4" onClick={close}>
+          <div className={`bg-white rounded-lg shadow-xl w-full mx-auto my-6 ${phase === "drop" ? "max-w-2xl" : "max-w-6xl"}`} onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between p-5 border-b border-[#E2DDD8]">
               <div>
-                <h2 className="text-base font-semibold text-[#1F1D1B]">Scan Bills</h2>
-                <p className="text-xs text-[#6B7280] mt-0.5">Drop several bills at once. Each becomes a <b>draft</b> voucher (no number, nothing posted) with the account prefilled from that payee's last voucher. Unreadable ones are listed, not guessed.</p>
+                <h2 className="text-base font-semibold text-[#1F1D1B]">Scan</h2>
+                <p className="text-xs text-[#6B7280] mt-0.5">Drop one receipt or a stack — a PDF holding several gives one row each. Every receipt starts as its own voucher; tick several and <b>Merge</b> to make them one voucher. <b>Create</b> makes draft vouchers dated today with their receipts attached. Accounts are learned from what was saved before; a new payee's are marked <i>suggested</i>. Bills you owe and pay later: scan them on Other Creditor Bills, pay through New AP Payment.</p>
               </div>
-              <button onClick={() => { if (!busy) setOpen(false); }} className="text-[#9CA3AF] hover:text-[#6B7280] text-lg leading-none">✕</button>
+              <button onClick={close} className="text-[#9CA3AF] hover:text-[#6B7280] text-lg leading-none cursor-pointer" title={creating || phase === "scanning" ? "Busy — please wait" : "Close"}>✕</button>
             </div>
             <div className="p-5 space-y-3">
-              {queue.length === 0 && (
+              {phase === "drop" && (
                 <div
                   className="rounded-lg border-2 border-dashed border-[#E2DDD8] hover:bg-[#FAF8F6] px-6 py-12 text-center cursor-pointer"
                   onClick={() => inputRef.current?.click()}
                   onDragOver={(e) => e.preventDefault()}
-                  onDrop={(e) => { e.preventDefault(); void runFiles(Array.from(e.dataTransfer?.files ?? [])); }}
+                  onDrop={(e) => { e.preventDefault(); void runFiles(Array.from(e.dataTransfer?.files ?? []).slice(0, 20)); }}
                 >
                   <Upload className="h-8 w-8 mx-auto text-[#B4B2A9]" />
-                  <p className="mt-3 text-sm font-medium text-[#1F1D1B]">Drop PDFs / photos here</p>
+                  <p className="mt-3 text-sm font-medium text-[#1F1D1B]">Drop receipts / bills here (PDF or photo)</p>
                   <p className="mt-1 text-xs text-[#6B7280]">or click to browse — up to 20 files, each ~30–90s to scan</p>
                 </div>
               )}
-              {queue.length > 0 && (
-                <table className="w-full text-xs">
-                  <tbody>
-                    {queue.map((q, i) => (
-                      <tr key={i} className="border-t border-[#F0ECE9]">
-                        <td className="py-1.5 pr-3 w-full max-w-0"><div className="truncate">{q.name}</div>{q.note && <div className="text-[10px] text-[#6B7280] truncate">{q.note}</div>}</td>
-                        <td className="py-1.5 whitespace-nowrap text-right">
-                          {q.state === "queued" && <span className="text-[#9CA3AF]">waiting</span>}
-                          {q.state === "scanning" && <span className="text-[#7A5B12]">scanning…</span>}
-                          {q.state === "saved" && <span className="rounded-full bg-[#EAF3DE] text-[#27500A] px-2 py-0.5 font-semibold">draft {q.pvNo}</span>}
-                          {q.state === "skipped" && <span className="rounded-full bg-[#F7E5E1] text-[#9A3A2D] px-2 py-0.5 font-semibold">skipped</span>}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              {phase !== "drop" && progress.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 text-[11px]">
+                  {progress.map((p, i) => (
+                    <span key={i} title={p.note} className={`rounded-full px-2 py-0.5 ${p.state === "unreadable" ? "bg-[#F7E5E1] text-[#9A3A2D]" : p.state === "done" ? "bg-[#EAF3DE] text-[#27500A]" : p.state === "scanning" ? "bg-[#FBF3E4] text-[#7A5B12]" : "bg-[#F0ECE9] text-[#6B7280]"}`}>
+                      {p.name} · {p.state === "unreadable" ? `unreadable — ${p.note ?? ""}` : p.state === "done" ? p.note : p.state === "scanning" ? "scanning…" : "waiting"}
+                    </span>
+                  ))}
+                </div>
               )}
-              {queue.length > 0 && !busy && (
-                <div className="flex justify-end gap-2">
-                  <Button variant="outline" size="sm" onClick={() => setQueue([])}>Scan more</Button>
-                  <Button variant="primary" size="sm" onClick={() => setOpen(false)}>Done</Button>
+              {phase === "review" && vouchers.length === 0 && <div className="text-sm text-[#6B7280]">No readable receipt in these files.</div>}
+              {vouchers.length > 0 && (
+                // No overflow box here: the account picker drops down past the last row.
+                <div>
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-left text-[#6B7280] border-b border-[#E2DDD8]">
+                        <th className="py-1.5 pr-2 w-6" title="Ticked vouchers are merged / created" />
+                        <th className="py-1.5 pr-2">Voucher</th>
+                        <th className="py-1.5 pr-2">Payee · date</th>
+                        <th className="py-1.5 pr-2">Receipts</th>
+                        <th className="py-1.5 pr-2">Lines · account</th>
+                        <th className="py-1.5 pr-2 text-right">Amount</th>
+                        <th className="py-1.5">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {vouchers.map((v, vi) => {
+                        const done = v.state === "created";
+                        const locked = done || creating;
+                        const problem = v.ticked && !done ? problemOf(v) : null;
+                        const dups = v.docs.filter((d) => d.duplicateOf);
+                        return (
+                          <tr key={v.key} className={`border-b border-[#F0ECE9] align-top ${!v.ticked && !done ? "opacity-60" : ""} ${v.docs.length > 1 ? "bg-[#FAF8F5]" : ""}`}>
+                            <td className="py-1.5 pr-2"><input type="checkbox" disabled={locked} checked={v.ticked} onChange={(e) => update(v.key, { ticked: e.target.checked })} className="h-3.5 w-3.5 accent-[#6B5C32]" /></td>
+                            <td className="py-1.5 pr-2 whitespace-nowrap">
+                              <div className="font-semibold text-[#1F1D1B]">V{vi + 1}</div>
+                              {v.docs.length > 1 && <div className="text-[10px] text-[#6B5C32]">{v.docs.length} receipts merged</div>}
+                              {!locked && v.docs.length > 1 && <button type="button" onClick={() => split(v)} className="text-[10px] text-[#6B5C32] underline decoration-dotted cursor-pointer">split</button>}
+                              {!locked && notCreated.length === 1 && (
+                                <div><button type="button" onClick={() => { onOpenInForm({ payee: v.payee, date: v.voucherDate, docs: v.docs }); setOpen(false); reset(); }} className="text-[10px] text-[#6B5C32] underline decoration-dotted cursor-pointer" title="The full voucher form — accrue, post now, notes…">open in form</button></div>
+                              )}
+                            </td>
+                            <td className="py-1.5 pr-2 min-w-[12rem]">
+                              <input disabled={locked} value={v.payee} onChange={(e) => update(v.key, { payee: e.target.value })} className={`${cell} w-full`} />
+                              <input type="date" disabled={locked} value={v.voucherDate} onChange={(e) => update(v.key, { voucherDate: e.target.value })} className={`${cell} mt-1`} title="Voucher date" />
+                            </td>
+                            <td className="py-1.5 pr-2 min-w-[11rem]">
+                              {v.docs.map((d) => (
+                                <div key={d.key} className="mb-1">
+                                  <div className="truncate max-w-[14rem]" title={d.fileName}>{d.billNo || "—"}{d.billDate ? ` · ${d.billDate}` : ""}</div>
+                                  <div className="text-[10px] text-[#9CA3AF] truncate max-w-[14rem]" title={d.fileName}>{d.fileName}{d.docCount > 1 ? ` · ${d.docIndex + 1} of ${d.docCount}` : ""}{v.docs.length > 1 && d.payee && d.payee !== v.payee ? ` · ${d.payee}` : ""}</div>
+                                </div>
+                              ))}
+                            </td>
+                            <td className="py-1.5 pr-2 min-w-[18rem]">
+                              {v.docs.flatMap((d) => d.lines.map((l, li) => {
+                                const hint = scanGuessHint(l.guess);
+                                return (
+                                  <div key={`${d.key}:${li}`} className="mb-1.5">
+                                    <div className="flex justify-between gap-2 text-[11px] text-[#6B7280]"><span className="truncate" title={l.description}>{l.description || "—"}</span><span className="tabular-nums">{formatCurrency(l.amountSen)}</span></div>
+                                    {l.isTax ? (
+                                      <div className="text-[11px] text-[#1F1D1B]">706-0000 · SST, its own line</div>
+                                    ) : locked ? (
+                                      <div className="text-[11px] text-[#1F1D1B]">{l.accountCode}</div>
+                                    ) : (
+                                      <>
+                                        <AccountPicker accounts={lineAccounts} value={l.accountCode} onChange={(code) => setLineAccount(v.key, d.key, li, code)} placeholder="— pick account —" />
+                                        {hint && <div className={`text-[10px] mt-0.5 ${hint.kind === "suggested" ? "text-[#7A5B12] font-semibold" : "text-[#9CA3AF]"}`}>{hint.text}</div>}
+                                      </>
+                                    )}
+                                  </div>
+                                );
+                              }))}
+                            </td>
+                            <td className="py-1.5 pr-2 text-right tabular-nums whitespace-nowrap">{formatCurrency(scanVoucherTotal(v))}</td>
+                            <td className="py-1.5 min-w-[9rem]">
+                              {!done && dups.map((d) => <div key={d.key} className="text-[#9A3A2D] font-semibold">Already recorded: {d.billNo} → {knownRefLabel(d.duplicateOf ?? "")}</div>)}
+                              {v.state === "created" && <span className="rounded-full bg-[#EAF3DE] text-[#27500A] px-2 py-0.5 font-semibold">{v.result}</span>}
+                              {v.state === "creating" && <span className="text-[#7A5B12]">creating…</span>}
+                              {v.state === "failed" && <div className="text-[#9A3A2D]">failed — {v.result}</div>}
+                              {problem && <div className="text-[#7A5B12]">{problem}</div>}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {phase === "review" && (
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Button variant="outline" size="sm" disabled={creating} onClick={() => inputRef.current?.click()}>Scan more</Button>
+                  <Button variant="outline" size="sm" disabled={creating || pending.length < 2} onClick={mergeTicked} title="The ticked receipts become ONE voucher">
+                    Merge into one voucher{pending.length >= 2 ? ` (${pending.length})` : ""}
+                  </Button>
+                  <Button variant="outline" size="sm" disabled={creating} onClick={close}>Close</Button>
+                  <Button variant="primary" size="sm" disabled={creating || pending.length === 0} onClick={() => void createTicked()}>
+                    {creating ? "Creating…" : `Create ${pending.length} voucher${pending.length === 1 ? "" : "s"}`}
+                  </Button>
                 </div>
               )}
             </div>
@@ -6604,7 +6989,7 @@ function SelfCheckTab() {
     const g = async <T,>(p: string): Promise<T | null> => {
       try { const r = await fetch(p, { cache: "no-store" }); const j = await r.json() as { success?: boolean; data?: T }; return j?.success && j.data ? j.data : null; } catch { return null; }
     };
-    type Recon = { driftSen: number; items: { kind: string; ref: string; supplierName?: string; customerName?: string; contributionSen: number; note?: string }[]; unexplainedResidualSen: number };
+    type Recon = { driftSen: number; items: { kind: string; kindLabel?: string; ref: string; supplierName?: string; customerName?: string; contributionSen: number; note?: string }[]; unexplainedResidualSen: number };
     type Ctrl = { driftControlVsPiSen?: number; driftControlVsInvoicesSen?: number; tradeControlSen: number; netOutstandingSen: number };
     type Tb = { totalDr: number; totalCr: number; balanced: boolean };
     type Pv = { id: string; pvNo: string; date: string; totalSen: number; status: string; approvalState?: string | null; approval_state?: string | null; accrued: number; settledAt: string | null; payee: string | null }[];
@@ -6627,7 +7012,7 @@ function SelfCheckTab() {
         ok: d === null ? null : d === 0,
         headline: d === null ? "Could not load" : d === 0 ? "Control account = subledger to the sen" : `Off by ${formatCurrency(Math.abs(d))} — control ${d > 0 ? "above" : "below"} subledger`,
         detail: r && r.items.length ? `${r.items.length} item${r.items.length === 1 ? "" : "s"} explain it${r.unexplainedResidualSen !== 0 ? ` · unexplained residual ${formatCurrency(Math.abs(r.unexplainedResidualSen))}` : ""}` : undefined,
-        items: r?.items.slice(0, 12).map((i) => ({ label: `${i.kind.replace(/_/g, " ")} · ${i.ref}${i.supplierName ? ` · ${i.supplierName}` : ""}${i.customerName ? ` · ${i.customerName}` : ""}`, amount: i.contributionSen, note: i.note })),
+        items: r?.items.slice(0, 12).map((i) => ({ label: `${i.kindLabel ?? i.kind.replace(/_/g, " ")} · ${i.ref}${i.supplierName ? ` · ${i.supplierName}` : ""}${i.customerName ? ` · ${i.customerName}` : ""}`, amount: i.contributionSen, note: i.note })),
         fixHref: href, fixLabel: "Open the aging / reconciliation",
       });
     };
@@ -7018,6 +7403,9 @@ function ApInvoicesTab({ accounts }: { accounts: ChartOfAccount[] }) {
             wide
             actions={<>
               <Button variant="outline" size="sm" onClick={() => printVoucher(buildOtherPartyBillVoucher(b, accounts))}><Printer className="h-4 w-4" /> Print</Button>
+              {(b.attachmentCount ?? 0) > 0 && (
+                <Button variant="outline" size="sm" onClick={() => void printBillWithFiles(b, accounts).catch((e: Error) => toast.error(`Not printed — ${e.message}`))}><Printer className="h-4 w-4" /> Print + files</Button>
+              )}
               {!voided && <Button variant="outline" size="sm" onClick={() => { close(); setBillPopup({ mode: "edit", bill: b }); }}>Edit</Button>}
               <Button variant="outline" size="sm" onClick={() => { close(); setBillPopup({ mode: "copy", bill: b }); }}>Copy</Button>
               {!voided
@@ -7047,6 +7435,7 @@ function ApInvoicesTab({ accounts }: { accounts: ChartOfAccount[] }) {
                 </tbody>
               </table>
             </div>
+            <BillAttachmentsBlock bill={b} onChanged={() => setVer((v) => v + 1)} />
           </DocDetailModal>
         );
       })()}
@@ -7101,9 +7490,80 @@ function DocDetailModal({ title, badges, onClose, children, actions, wide }: {
 }
 function DetailField({ label, children, span }: { label: string; children: React.ReactNode; span?: number }) {
   return (
-    <div className={span === 2 ? "col-span-2" : span === 3 ? "col-span-3" : undefined}>
+    <div className={span === 2 ? "col-span-2" : span === 3 ? "col-span-3" : span === 4 ? "col-span-2 sm:col-span-4" : undefined}>
       <p className="text-[#9CA3AF] text-xs">{label}</p>
       <p className="font-medium">{children}</p>
+    </div>
+  );
+}
+
+// The ledger lines one money-out document posted, and whether its bank / cash
+// lines are on an imported bank statement — the popup's "Ledger entry" and
+// "Bank" blocks (owner 2026-10-01: double-click shows everything). Read-only,
+// from GET /api/accounting/doc-trail.
+type DocTrail = {
+  legs: { accountCode: string; accountName: string; debitSen: number; creditSen: number; description: string }[];
+  bank: { accountCode: string; accountName: string; sen: number; hasStatements: boolean; matched: boolean; statementDate: string | null; statementText: string | null }[];
+};
+const docSectionHead = "px-3 py-1.5 border-b border-[#E2DDD8] border-l-4 border-l-[#3E6570] text-[11px] font-bold uppercase tracking-wide text-[#3E6570]";
+function DocTrailBlock({ family, sourceId }: { family: "payment_voucher" | "supplier_payment" | "other_party_payment" | "fund_transfer"; sourceId: string }) {
+  const [data, setData] = useState<DocTrail | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    let dead = false;
+    fetch(`/api/accounting/doc-trail?family=${encodeURIComponent(family)}&sourceId=${encodeURIComponent(sourceId)}`, { cache: "no-store" })
+      .then((r) => r.json() as Promise<{ success?: boolean; error?: string; data?: DocTrail }>)
+      .then((j) => { if (dead) return; if (j?.success && j.data) setData(j.data); else setErr(j?.error || "Could not load the ledger entry"); })
+      .catch(() => { if (!dead) setErr("Could not load the ledger entry"); });
+    return () => { dead = true; };
+  }, [family, sourceId]);
+  if (err) return <div className="text-xs text-[#9A3A2D]">{err}</div>;
+  if (!data) return <div className="text-xs text-[#9CA3AF]">Loading the ledger entry…</div>;
+  const dr = data.legs.reduce((s, l) => s + l.debitSen, 0);
+  const cr = data.legs.reduce((s, l) => s + l.creditSen, 0);
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-5 gap-3">
+      <section className="rounded-md border border-[#E2DDD8] sm:col-span-3">
+        <div className={docSectionHead}>Ledger entry</div>
+        {data.legs.length === 0 ? (
+          <div className="px-3 py-2 text-xs text-[#9CA3AF]">Nothing posted yet — a voucher reaches the ledger when it is approved (or posted now).</div>
+        ) : (
+          <table className="w-full text-xs">
+            <thead><tr className="text-[#9CA3AF] text-left"><th className="px-3 py-1 font-medium">Account</th><th className="px-3 py-1 font-medium text-right">Debit</th><th className="px-3 py-1 font-medium text-right">Credit</th></tr></thead>
+            <tbody>
+              {data.legs.map((l, i) => (
+                <tr key={i} className="border-t border-[#F0ECE9]">
+                  <td className="px-3 py-1">{l.accountCode} · {l.accountName}</td>
+                  <td className="px-3 py-1 text-right tabular-nums">{l.debitSen ? formatCurrency(l.debitSen) : ""}</td>
+                  <td className="px-3 py-1 text-right tabular-nums">{l.creditSen ? formatCurrency(l.creditSen) : ""}</td>
+                </tr>
+              ))}
+              <tr className="border-t-2 border-[#1F1D1B] font-semibold">
+                <td className="px-3 py-1">Total</td>
+                <td className="px-3 py-1 text-right tabular-nums">{formatCurrency(dr)}</td>
+                <td className="px-3 py-1 text-right tabular-nums">{formatCurrency(cr)}</td>
+              </tr>
+            </tbody>
+          </table>
+        )}
+      </section>
+      <section className="rounded-md border border-[#E2DDD8] sm:col-span-2">
+        <div className={docSectionHead}>Bank</div>
+        <div className="px-3 py-2 space-y-1.5 text-xs">
+          {data.bank.length === 0 ? (
+            <div className="text-[#9CA3AF]">No bank / cash line on the ledger yet.</div>
+          ) : data.bank.map((b, i) => (
+            <div key={i}>
+              <div className="font-medium text-[#1F1D1B]">{shortBankName(b.accountName) || b.accountCode} · {b.sen < 0 ? "out" : "in"} {formatCurrency(Math.abs(b.sen))}</div>
+              {b.matched
+                ? <div className="text-[#27500A]">✓ On the bank statement {b.statementDate}{b.statementText ? ` — ${b.statementText}` : ""}</div>
+                : b.hasStatements
+                  ? <div className="text-[#7A5B12]">Not matched to the bank statement yet</div>
+                  : <div className="text-[#9CA3AF]">No bank statement imported for this account</div>}
+            </div>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }
@@ -7144,13 +7604,16 @@ function OtherPartyPaymentsTab({ accounts, side }: { accounts: ChartOfAccount[];
   return <OtherPartyPaymentsManager parties={useOtherPartiesList()} accounts={accounts} side={side} />;
 }
 
-type BillLineDraft = { counterAccount: string; amountStr: string; description: string };
+// `hint` says where a scanned line's account came from.
+type BillLineDraft = { counterAccount: string; amountStr: string; description: string; hint?: ScanHint };
+type BillFormState = { partyId: string; billDate: string; referenceNo: string; description: string; taxStr: string; lines: BillLineDraft[]; isOpening: boolean };
 type OtherPartyBill = {
   id: string; billNo: string; partyId: string; partyType: "DEBTOR" | "CREDITOR";
   partyName: string; billDate: string; referenceNo: string; description: string;
   subtotalSen: number; taxSen: number; totalSen: number; paidAmountSen: number;
   outstandingSen: number; status: string; isOpening?: boolean; lifecycleState?: string;
   items: { counterAccount: string; amountSen: number; description: string; lineNo: number }[];
+  attachmentCount?: number;
 };
 
 // The bill form opened on its own in a popup (owner 2026-09-29 「ap invoice 就
@@ -7186,7 +7649,7 @@ function OtherPartyBillsManager({ parties, accounts, side, formOnly }: { parties
   const [editingBillNo, setEditingBillNo] = useState<string | null>(formOnly?.mode === "edit" && formOnly.bill ? formOnly.bill.billNo : null);
   const today = new Date().toISOString().slice(0, 10);
   const blankLine = (): BillLineDraft => ({ counterAccount: "", amountStr: "", description: "" });
-  const [form, setForm] = useState(() =>
+  const [form, setForm] = useState<BillFormState>(() =>
     formOnly?.bill && formOnly.mode !== "new"
       ? billFormFrom(formOnly.bill, formOnly.mode, today)
       : { partyId: "", billDate: today, referenceNo: "", description: "", taxStr: "", lines: [blankLine()], isOpening: false });
@@ -7208,8 +7671,8 @@ function OtherPartyBillsManager({ parties, accounts, side, formOnly }: { parties
   // being told to fix.
   const toSen = (s: string) => moneyFieldToSen(s) ?? 0;
 
-  const updateLine = (idx: number, field: keyof BillLineDraft, value: string) =>
-    setForm((f) => ({ ...f, lines: f.lines.map((l, i) => (i === idx ? { ...l, [field]: value } : l)) }));
+  const updateLine = (idx: number, field: "counterAccount" | "amountStr" | "description", value: string) =>
+    setForm((f) => ({ ...f, lines: f.lines.map((l, i) => (i === idx ? { ...l, [field]: value, ...(field === "counterAccount" ? { hint: undefined } : {}) } : l)) }));
   const addLine = () => setForm((f) => ({ ...f, lines: [...f.lines, blankLine()] }));
   const removeLine = (idx: number) => setForm((f) => ({ ...f, lines: f.lines.length > 1 ? f.lines.filter((_, i) => i !== idx) : f.lines }));
 
@@ -7255,8 +7718,18 @@ function OtherPartyBillsManager({ parties, accounts, side, formOnly }: { parties
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
-    const j = asMutationResponse(await res.json());
+    const rawRes = (await res.json()) as { data?: { billNo?: string } };
+    const j = asMutationResponse(rawRes);
     if (j?.success) {
+      // The new bill takes the files held for it.
+      const newBillNo = !editingBillNo ? rawRes?.data?.billNo : undefined;
+      if (newBillNo && pendingBillFiles.length) {
+        for (const f of pendingBillFiles) {
+          try { await uploadBillAttachment(newBillNo, f); }
+          catch (e) { toast.error(`Saved, but ${f.name} could not be attached: ${(e as Error).message}`); }
+        }
+      }
+      setPendingBillFiles([]);
       // TEACH: if this bill came from a scan, the letterhead OCR read now maps
       // to the party the operator actually filed it under — right first time or
       // corrected by hand. Next scan of the same letterhead resolves directly.
@@ -7269,6 +7742,7 @@ function OtherPartyBillsManager({ parties, accounts, side, formOnly }: { parties
         });
       }
       setScannedPartyName(null);
+      forgetScanMemory();
       setShowForm(false);
       setEditingBillNo(null);
       setForm({ partyId: "", billDate: today, referenceNo: "", description: "", taxStr: "", lines: [blankLine()], isOpening: false });
@@ -7328,6 +7802,13 @@ function OtherPartyBillsManager({ parties, accounts, side, formOnly }: { parties
   // The letterhead OCR read for the bill currently in the form — null when the
   // operator keyed it by hand (nothing to learn from a manual entry).
   const [scannedPartyName, setScannedPartyName] = useState<string | null>(null);
+  // Finance scan memory (creditor side): what earlier bills / vouchers booked,
+  // and which bill numbers are already on our books.
+  const [scanMemory, setScanMemory] = useState<ScanMemory | null>(null);
+  // Files that go onto the NEW bill once it is saved — the scanned bill, plus
+  // any picked by hand (owner 2026-10-01 「OCB 附件要做」).
+  const [pendingBillFiles, setPendingBillFiles] = useState<File[]>([]);
+  const billFileRef = useRef<HTMLInputElement | null>(null);
   const allSideParties = [...sideParties, ...extraParties.filter((p) => p.type === side)];
   // Unknown scanned party → a small NEW-PARTY dialog: name prefilled from the
   // letterhead, every other field OPTIONAL and left to the operator (owner
@@ -7358,9 +7839,10 @@ function OtherPartyBillsManager({ parties, accounts, side, formOnly }: { parties
       setCreatingParty(false);
     }
   };
-  const applyScan = (d: ScanFinanceResult) => {
+  const applyScan = async (d: ScanFinanceResult, file: File) => {
     setEditingBillNo(null); // a scan always drafts a NEW bill, never overwrites an edit
     setScannedPartyName(d.partyName ?? null);
+    setPendingBillFiles([file]); // the scanned bill is the new bill's evidence
     const hit = scanNameMatch(allSideParties, d.partyName, partyAliases);
     // Last-used account for this party (latest bill's first line).
     const lastAcct = hit
@@ -7368,33 +7850,59 @@ function OtherPartyBillsManager({ parties, accounts, side, formOnly }: { parties
           .filter((b) => b.partyId === hit.id && b.items?.length)
           .sort((a, b) => (b.billDate || "").localeCompare(a.billDate || ""))[0]?.items[0]?.counterAccount ?? "")
       : "";
+    // A creditor bill learns each line's account by its description from
+    // earlier bills and vouchers (owner 2026-10-01, plan batch 3) — the
+    // register's name first, then the letterhead; the party's last account
+    // stays the fallback, and is all a debtor bill uses.
+    const memory = side === "CREDITOR" ? await loadScanMemory() : null;
+    if (memory) setScanMemory(memory);
+    const acctFor = (desc: string): { counterAccount: string; hint?: ScanHint } => {
+      if (!memory) return { counterAccount: lastAcct };
+      const own = hit ? guessAccount(memory.history, hit.name, desc) : null;
+      const g = own && own.source !== "suggested" ? own : guessAccount(memory.history, d.partyName, desc);
+      return g ? { counterAccount: g.accountCode, hint: scanGuessHint(g) } : { counterAccount: lastAcct };
+    };
+    // The SST stays in the bill's tax field — unless the printed lines already
+    // carry it, so it is never counted twice.
+    const withTax = linesWithTax(d.lines, d.taxSen, d.totalSen);
+    const taxSen = d.lines.length ? withTax.filter((l) => l.isTax).reduce((t, l) => t + l.amountSen, 0) : (d.taxSen ?? 0);
+    const scannedLines = d.lines.length
+      ? withTax.filter((l) => !l.isTax).map((l): BillLineDraft => ({ ...acctFor(l.description), amountStr: (l.amountSen / 100).toFixed(2), description: l.description }))
+      : d.totalSen
+        ? [{ ...acctFor(d.docType ?? ""), amountStr: ((d.totalSen - (d.taxSen ?? 0)) / 100).toFixed(2), description: d.docType ?? "" }]
+        : [];
     setForm((f) => ({
       ...f,
       partyId: hit?.id ?? "",
       billDate: d.docDate ?? f.billDate,
       referenceNo: d.docNo ?? f.referenceNo,
       description: d.partyName ? `${d.partyName}${d.docType ? ` · ${d.docType}` : ""}` : f.description,
-      taxStr: d.taxSen ? (d.taxSen / 100).toFixed(2) : f.taxStr,
-      lines: d.lines.length
-        ? d.lines.map((l) => ({ counterAccount: lastAcct, amountStr: (l.amountSen / 100).toFixed(2), description: l.description }))
-        : d.totalSen
-          ? [{ counterAccount: lastAcct, amountStr: ((d.totalSen - (d.taxSen ?? 0)) / 100).toFixed(2), description: d.docType ?? "" }]
-          : f.lines,
+      taxStr: taxSen ? (taxSen / 100).toFixed(2) : "",
+      lines: scannedLines.length ? scannedLines : f.lines,
       isOpening: false,
     }));
     setShowForm(true);
+    const dup = memory ? findDuplicate(memory.known, d.docNo, hit?.name ?? d.partyName) : null;
+    if (dup) toast.error(`Already recorded: ${dup.docNo} → ${knownRefLabel(dup.ref)} — check before saving.`);
     if (!hit && d.partyName) {
       setNewPartyDraft({ ...blankPartyDraft, name: d.partyName });
       return;
     }
+    const unset = scannedLines.filter((l) => !l.counterAccount).length;
     toast.success(
-      hit
-        ? lastAcct
-          ? "Scanned — account prefilled from this party's last bill; review before saving."
-          : "Scanned — review the lines and pick the account(s)."
+      scannedLines.length && !unset
+        ? "Scanned — accounts filled from earlier bills and vouchers; review before saving."
         : "Scanned — review the lines and pick the account(s).",
     );
   };
+  // A reference already on our books (creditor side) — said under the field.
+  const refDup = side === "CREDITOR" && scanMemory && form.referenceNo.trim()
+    ? findDuplicate(
+        scanMemory.known.filter((k) => k.ref !== editingBillNo),
+        form.referenceNo,
+        allSideParties.find((p) => p.id === form.partyId)?.name ?? scannedPartyName ?? "",
+      )
+    : null;
 
   return (
     <div className="space-y-3">
@@ -7491,7 +7999,9 @@ function OtherPartyBillsManager({ parties, accounts, side, formOnly }: { parties
             <div>
               <label className="text-xs font-medium text-[#6B7280] mb-1 block">Reference No</label>
               <input type="text" value={form.referenceNo} onChange={(e) => setForm({ ...form, referenceNo: e.target.value })}
+                onBlur={() => { if (side === "CREDITOR" && form.referenceNo.trim()) void loadScanMemory().then(setScanMemory); }}
                 placeholder="their invoice / DO no" className="w-full rounded-md border border-[#E2DDD8] px-3 py-2 text-sm" />
+              {refDup && <p className="text-[11px] text-[#9A3A2D] font-semibold mt-0.5">Already recorded: {knownRefLabel(refDup.ref)}</p>}
             </div>
             <div>
               <label className="text-xs font-medium text-[#6B7280] mb-1 block">&nbsp;</label>
@@ -7524,6 +8034,7 @@ function OtherPartyBillsManager({ parties, accounts, side, formOnly }: { parties
                 >
                   <td className="py-1 pr-2 w-1/3">
                     <AccountPicker accounts={accounts} value={l.counterAccount} onChange={(code) => updateLine(idx, "counterAccount", code)} placeholder="counter account" />
+                    {l.hint && <div className={`text-[10px] mt-0.5 ${l.hint.kind === "suggested" ? "text-[#7A5B12] font-semibold" : "text-[#9CA3AF]"}`}>{l.hint.text}</div>}
                   </td>
                   <td className="py-1 pr-2">
                     <input type="text" value={l.description} onChange={(e) => updateLine(idx, "description", e.target.value)}
@@ -7553,6 +8064,20 @@ function OtherPartyBillsManager({ parties, accounts, side, formOnly }: { parties
                 placeholder="0.00" className="w-full rounded-md border border-[#E2DDD8] px-3 py-2 text-sm text-right tabular-nums" />
               <p className="text-[10px] text-[#9CA3AF] mt-0.5">{side === "CREDITOR" ? "→ 706-0000 input SST" : "→ 350-0000 output SST"}</p>
             </div>
+            {!editingBillNo && (
+              <div className="sm:col-span-3 flex flex-wrap items-center gap-2 text-[11px] text-[#6B7280]">
+                <button type="button" onClick={() => billFileRef.current?.click()} className="text-[#6B5C32] hover:text-[#1F1D1B] underline decoration-dotted cursor-pointer">📎 Attach files</button>
+                <input ref={billFileRef} type="file" multiple accept=".pdf,image/*" className="sr-only" onChange={(e) => { const picked = Array.from(e.target.files ?? []); setPendingBillFiles((fs) => [...fs, ...picked]); e.target.value = ""; }} />
+                {pendingBillFiles.length > 0
+                  ? pendingBillFiles.map((f, i) => (
+                    <span key={`${f.name}:${i}`} className="inline-flex items-center gap-1 rounded-full bg-[#F0ECE9] px-2 py-0.5">
+                      {f.name}
+                      <button type="button" onClick={() => setPendingBillFiles((fs) => fs.filter((_, j) => j !== i))} title="Leave this file out" className="text-[#9CA3AF] hover:text-[#9A3A2D] cursor-pointer">✕</button>
+                    </span>
+                  ))
+                  : <span className="text-[#9CA3AF]">the bill / receipt is attached when the bill is saved</span>}
+              </div>
+            )}
             <div>
               <label className="text-xs font-medium text-[#6B7280] mb-1 block">Description</label>
               <input type="text" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })}
@@ -7628,6 +8153,7 @@ function OtherPartyBillsManager({ parties, accounts, side, formOnly }: { parties
                     </td>
                     <td className="px-4 py-1.5 font-mono text-xs">
                       <button onClick={() => setOpenBill(openBill === b.id ? null : b.id)} className="cursor-pointer hover:underline">{openBill === b.id ? "▾ " : "▸ "}{b.billNo}</button>
+                      {(b.attachmentCount ?? 0) > 0 && <span className="ml-1.5 text-[10px] text-[#6B7280] font-sans" title={`${b.attachmentCount} attachment${b.attachmentCount === 1 ? "" : "s"} — open the bill to see`}>📎{b.attachmentCount}</span>}
                     </td>
                     <td className="px-4 py-1.5">{b.partyName}</td>
                     <td className="px-4 py-1.5 text-xs text-[#6B7280] max-w-[16rem] truncate">{[b.referenceNo, b.description].filter(Boolean).join(" · ")}</td>
@@ -7641,6 +8167,9 @@ function OtherPartyBillsManager({ parties, accounts, side, formOnly }: { parties
                     </td>
                     <td className="px-4 py-1.5 text-right whitespace-nowrap">
                       <button onClick={() => printVoucher(buildOtherPartyBillVoucher(b, accounts))} title="Print bill voucher" className="inline-flex items-center gap-1 text-[#6B5C32] hover:text-[#1F1D1B] text-xs underline decoration-dotted cursor-pointer mr-3"><Printer className="h-3 w-3" />print</button>
+                      {(b.attachmentCount ?? 0) > 0 && (
+                        <button onClick={() => void printBillWithFiles(b, accounts).catch((e: Error) => toast.error(`Not printed — ${e.message}`))} title="The bill with its attached files behind it" className="inline-flex items-center gap-1 text-[#6B5C32] hover:text-[#1F1D1B] text-xs underline decoration-dotted cursor-pointer mr-3"><Printer className="h-3 w-3" />print + files</button>
+                      )}
                       {(b.lifecycleState ?? "ACTIVE") === "ACTIVE" && (
                         <button onClick={() => editBill(b)} className="text-[#6B5C32] hover:underline text-xs mr-3">Edit</button>
                       )}
@@ -7732,6 +8261,9 @@ function OtherPartyBillsManager({ parties, accounts, side, formOnly }: { parties
                                 <span className="tabular-nums">{formatCurrency(b.outstandingSen)}</span>
                               </div>
                             </div>
+                          </div>
+                          <div className="px-4 pb-3">
+                            <BillAttachmentsBlock bill={b} onChanged={load} />
                           </div>
                         </div>
                       </td>
@@ -8220,7 +8752,7 @@ function TrialBalanceTab() {
           {loadingTb || !tb ? (
             <div className="py-12 text-center text-[#6B7280] text-sm">Loading trial balance…</div>
           ) : (
-            <table className="w-full text-sm">
+            <table data-col-resize="first" className="w-full text-sm">
               <thead>
                 <tr className="border-b border-[#E2DDD8] text-xs text-[#6B7280]">
                   <th className="px-4 py-2 text-left">Account</th>
@@ -8465,10 +8997,11 @@ const GL_CARD_CHROME_PX = 128;
 function GeneralLedgerTab({ accounts }: { accounts: ChartOfAccount[] }) {
   // Multi-account review (owner): 0 picked = full ledger; 1 picked =
   // inquiry mode with running balance; 2+ picked = listing filtered to
-  // the picked set.
-  const [picked, setPicked] = useState<string[]>([]);
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
+  // the picked set. A report drill's "open in GL" lands here with
+  // ?account=&from=&to= already picked (owner 2026-10-01).
+  const [picked, setPicked] = useState<string[]>(() => { const a = new URLSearchParams(window.location.search).get("account"); return a ? [a] : []; });
+  const [from, setFrom] = useState(() => new URLSearchParams(window.location.search).get("from") ?? "");
+  const [to, setTo] = useState(() => new URLSearchParams(window.location.search).get("to") ?? "");
   const [all, setAll] = useState<{
     rows: GlAllRow[];
     totalRows: number;
@@ -9005,7 +9538,12 @@ type PvRow = {
   lines: { accountCode: string; description: string | null; amountSen: number }[];
   // AP Payment (Houzs adoption, 2026-09-22): pays a creditor's bills instead
   // of expense lines. EXPENSE / undefined = the classic voucher.
-  pvKind?: "AP" | "EXPENSE";
+  pvKind?: "AP" | "EXPENSE" | "TRANSFER";
+  // The voucher form's own fields (owner 2026-10-01): internal notes (never
+  // printed), the supplier's bill number and date.
+  notes?: string | null;
+  billNo?: string | null; bill_no?: string | null;
+  billDate?: string | null; bill_date?: string | null;
   partyKind?: "SUPPLIER" | "OTHER" | null;
   partyId?: string | null;
   advanceSen?: number;
@@ -9016,21 +9554,48 @@ type PvRow = {
   attachmentCount?: number;
 };
 type PvAllocOut = { docKind: "PI" | "AP"; docId: string; docNo: string; docRef: string; amountSen: number };
+// The voucher form (owner 2026-10-01, the layout he showed): Payment = expense
+// lines; Transfer = money between our own bank / cash accounts.
+type PvFormState = {
+  date: string; payee: string; description: string; accrued: boolean; payFrom: string; accrualAccount: string;
+  productLine: string; notes: string; billNo: string; billDate: string;
+  mode: "PAYMENT" | "TRANSFER"; transferTo: string; transferAmount: string;
+};
+function blankPvForm(): PvFormState {
+  return {
+    date: new Date().toISOString().slice(0, 10), payee: "", description: "", accrued: false, payFrom: "", accrualAccount: "",
+    productLine: "", notes: "", billNo: "", billDate: "", mode: "PAYMENT", transferTo: "", transferAmount: "",
+  };
+}
 type PvAttachment = { id: string; filename: string; contentType: string; sizeBytes: number; uploadedAt: string };
 type PvAttachmentList = { rows: PvAttachment[]; canAdd: boolean; canDelete: boolean };
 
-async function fetchPvAttachments(pvId: string): Promise<PvAttachmentList> {
-  const res = await fetch(`/api/accounting/payment-vouchers/${pvId}/attachments?x=${Date.now()}`, { cache: "no-store" });
+// One fetch / upload for any document's attachments — a voucher's or (since
+// 2026-10-01, owner 「OCB 附件要做」) an other-party bill's; each document's
+// routes keep its own rules.
+const pvAttachBase = (pvId: string) => `/api/accounting/payment-vouchers/${pvId}/attachments`;
+const billAttachBase = (billNo: string) => `/api/accounting/other-party-bills/${encodeURIComponent(billNo)}/attachments`;
+async function fetchAttachments(base: string): Promise<PvAttachmentList> {
+  const res = await fetch(`${base}?x=${Date.now()}`, { cache: "no-store" });
   const j = (await res.json()) as { success?: boolean; error?: string; data?: PvAttachmentList };
   if (!j?.success || !j.data) throw new Error(j?.error || "Could not load attachments");
   return j.data;
 }
-async function uploadPvAttachment(pvId: string, file: File): Promise<void> {
+async function uploadAttachment(base: string, file: File): Promise<void> {
   const fd = new FormData();
   fd.append("file", file);
-  const res = await fetch(`/api/accounting/payment-vouchers/${pvId}/attachments`, { method: "POST", body: fd });
+  const res = await fetch(base, { method: "POST", body: fd });
   const j = (await res.json()) as { success?: boolean; error?: string };
   if (!j?.success) throw new Error(j?.error || "Upload failed");
+}
+async function fetchPvAttachments(pvId: string): Promise<PvAttachmentList> {
+  return fetchAttachments(pvAttachBase(pvId));
+}
+async function uploadPvAttachment(pvId: string, file: File): Promise<void> {
+  return uploadAttachment(pvAttachBase(pvId), file);
+}
+async function uploadBillAttachment(billNo: string, file: File): Promise<void> {
+  return uploadAttachment(billAttachBase(billNo), file);
 }
 const fmtBytes = (n: number) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} B`);
 
@@ -9100,7 +9665,9 @@ const PV_STATUS_CHIPS: { key: PvStatusChip; label: string }[] = [
 // lists. The hub merges them READ-SIDE: no engine, no write path and no
 // recorded entry is touched, and each row still prints / voids through its own
 // document's endpoint (the money-out twin of the Receipts hub).
-type PayDoor = "PV" | "AP" | "SP" | "OCP";
+// TR = a transfer between our own accounts recorded as a voucher (owner
+// 2026-10-01); FT = one recorded on the old Fund Transfer page.
+type PayDoor = "PV" | "AP" | "TR" | "SP" | "OCP" | "FT";
 type PayRow = {
   door: PayDoor; key: string; no: string; date: string; payee: string; via: string; note: string;
   totalSen: number;
@@ -9108,16 +9675,18 @@ type PayRow = {
   // when it is saved — so it reads as Approved on the chips.
   state: string;
   advanceOpen: boolean;
-  pv?: PvRow; sp?: SupplierPaymentGroup; ocp?: PaymentGroup;
+  pv?: PvRow; sp?: SupplierPaymentGroup; ocp?: PaymentGroup; ft?: FtRow;
 };
 const PAY_DOOR_LABEL: Record<PayDoor, string> = {
-  PV: "Payment Voucher", AP: "AP Payment", SP: "Supplier Payment", OCP: "Other Creditor Payment",
+  PV: "Payment Voucher", AP: "AP Payment", TR: "Transfer", SP: "Supplier Payment", OCP: "Other Creditor Payment", FT: "Fund Transfer",
 };
 const PAY_DOOR_HINT: Record<PayDoor, string> = {
   PV: "Payment Voucher — pays an expense",
   AP: "AP Payment — pays creditor bills through the approval ladder",
   SP: "Supplier Payment — recorded on the Supplier Payment page (posts on save)",
   OCP: "Other Creditor Payment — recorded on the Other Creditor Payments page (posts on save)",
+  TR: "Transfer — moves money between our own bank / cash accounts, through the approval ladder",
+  FT: "Fund Transfer — recorded on the old Fund Transfer page (posted on save)",
 };
 const payDoorChip = (d: PayDoor) => (
   <span
@@ -9125,6 +9694,7 @@ const payDoorChip = (d: PayDoor) => (
       d === "PV" ? "bg-[#F6F1E7] text-[#6B5C32]"
       : d === "AP" ? "bg-[#EEF2FB] text-[#2C4170]"
       : d === "SP" ? "bg-[#EAF3DE] text-[#27500A]"
+      : d === "TR" || d === "FT" ? "bg-[#E8F1F3] text-[#3E6570]"
       : "bg-[#F7E5E1] text-[#9A3A2D]"}`}
     title={PAY_DOOR_HINT[d]}
   >{d}</span>
@@ -9135,13 +9705,13 @@ const payDoorChip = (d: PayDoor) => (
 const spAdvanceOpenSen = (g: SupplierPaymentGroup) =>
   g.lines.filter((l) => !l.purchaseInvoiceId && l.amountSen > 0).reduce((s, l) => s + l.amountSen, 0);
 
-function buildPayRows(pv: PvRow[] | null, sp: SupplierPaymentGroup[] | null, ocp: PaymentGroup[] | null): PayRow[] {
+function buildPayRows(pv: PvRow[] | null, sp: SupplierPaymentGroup[] | null, ocp: PaymentGroup[] | null, ft: FtRow[] | null = null): PayRow[] {
   // An AP voucher's settlement document carries the voucher's own number — it
   // is the same payment seen from the other side, so it is listed once, as the
   // voucher (which owns the ladder trail and the attachments).
   const pvNos = new Set((pv ?? []).map((r) => r.pvNo).filter(Boolean));
   const rows: PayRow[] = (pv ?? []).map((r) => ({
-    door: r.pvKind === "AP" ? "AP" : "PV",
+    door: r.pvKind === "AP" ? "AP" : r.pvKind === "TRANSFER" ? "TR" : "PV",
     key: `v:${r.id}`, no: r.pvNo, date: String(r.date ?? "").slice(0, 10),
     payee: r.payee ?? "", via: r.payFrom ?? "", note: r.description ?? "",
     totalSen: r.totalSen, state: r.status === "VOID" ? "VOID" : (r.lifecycleState ?? "ACTIVE"),
@@ -9168,6 +9738,16 @@ function buildPayRows(pv: PvRow[] | null, sp: SupplierPaymentGroup[] | null, ocp
       advanceOpen: false, ocp: g,
     });
   }
+  // Transfers recorded on the old Fund Transfer page (it left the menu on
+  // 2026-10-01; its entries stay as they are and are listed here).
+  for (const t of ft ?? []) {
+    rows.push({
+      door: "FT", key: `f:${t.no}`, no: t.no, date: String(t.date ?? "").slice(0, 10),
+      payee: `Transfer to ${t.toName || t.toAccount}`, via: t.fromAccount, note: t.description ?? "",
+      totalSen: t.amountSen, state: t.lifecycleState ?? "ACTIVE",
+      advanceOpen: false, ft: t,
+    });
+  }
   return rows.sort((a, b) => b.date.localeCompare(a.date) || b.no.localeCompare(a.no));
 }
 
@@ -9185,27 +9765,56 @@ function pvApPrintDetail(pv: PvRow): { supplierName: string; piNo: string | null
 // more (not on a cancelled voucher), delete (only while Draft / Prepared —
 // evidence is locked from Check on). The server enforces the same rules.
 function PvAttachmentsBlock({ pv, onChanged }: { pv: PvRow; onChanged: () => void }) {
+  return (
+    <DocAttachmentsBlock
+      base={pvAttachBase(pv.id)} docNo={pv.pvNo} voided={pv.status === "VOID"} onChanged={onChanged}
+      lockedNote="Evidence locked — a checked or approved voucher keeps its files."
+    />
+  );
+}
+// Other-party bill attachments (owner 2026-10-01 「OCB 附件要做」): add while the
+// bill is active; remove until money is paid against it.
+function BillAttachmentsBlock({ bill, onChanged }: { bill: OtherPartyBill; onChanged: () => void }) {
+  return (
+    <DocAttachmentsBlock
+      base={billAttachBase(bill.billNo)} docNo={bill.billNo} voided={(bill.lifecycleState ?? "ACTIVE") !== "ACTIVE"} onChanged={onChanged}
+      lockedNote="Evidence locked — money has been paid against this bill, so its files stay."
+    />
+  );
+}
+// A bill printed with its files behind it — the voucher's own bundle, same
+// refusal when any file cannot be rendered.
+async function printBillWithFiles(b: OtherPartyBill, accounts: ChartOfAccount[]): Promise<void> {
+  const list = await fetchAttachments(billAttachBase(b.billNo));
+  if (!list.rows.length) throw new Error("no attachments on this bill — use print");
+  const appendix: { title: string; pages: string[] }[] = [];
+  for (const a of list.rows) appendix.push({ title: a.filename, pages: await attachmentToPages(a) });
+  printVoucher({ ...buildOtherPartyBillVoucher(b, accounts), appendix });
+}
+function DocAttachmentsBlock({ base, docNo, voided, lockedNote, onChanged }: {
+  base: string; docNo: string; voided: boolean; lockedNote: string; onChanged: () => void;
+}) {
   const { toast } = useToast();
   const { confirm } = useConfirm();
   const [ver, setVer] = useState(0);
   const [list, setList] = useState<(PvAttachmentList & { key: string }) | null>(null);
   const [busy, setBusy] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const key = `${pv.id}|${ver}`;
+  const key = `${base}|${ver}`;
   useEffect(() => {
     let dead = false;
-    fetchPvAttachments(pv.id)
+    fetchAttachments(base)
       .then((d) => { if (!dead) setList({ key, ...d }); })
       .catch((e: Error) => { if (!dead) { setList({ key, rows: [], canAdd: false, canDelete: false }); toast.error(e.message); } });
     return () => { dead = true; };
-  }, [key, pv.id, toast]);
+  }, [key, base, toast]);
   const loading = list?.key !== key;
   const addFiles = async (files: File[]) => {
     if (!files.length) return;
     setBusy(true);
     let ok = 0;
     for (const f of files) {
-      try { await uploadPvAttachment(pv.id, f); ok++; }
+      try { await uploadAttachment(base, f); ok++; }
       catch (e) { toast.error(`${f.name}: ${(e as Error).message}`); }
     }
     setBusy(false);
@@ -9213,10 +9822,10 @@ function PvAttachmentsBlock({ pv, onChanged }: { pv: PvRow; onChanged: () => voi
     if (inputRef.current) inputRef.current.value = "";
   };
   const remove = async (a: PvAttachment) => {
-    if (!(await confirm({ title: "Remove attachment?", message: `${a.filename} will be deleted from ${pv.pvNo}.`, danger: true }))) return;
+    if (!(await confirm({ title: "Remove attachment?", message: `${a.filename} will be deleted from ${docNo}.`, danger: true }))) return;
     setBusy(true);
     try {
-      const res = await fetch(`/api/accounting/payment-vouchers/${pv.id}/attachments/${encodeURIComponent(a.id)}`, { method: "DELETE" });
+      const res = await fetch(`${base}/${encodeURIComponent(a.id)}`, { method: "DELETE" });
       const j = asMutationResponse(await res.json());
       if (j?.success) { toast.success("Attachment removed"); setVer((v) => v + 1); onChanged(); }
       else toast.error(j?.error || "Delete failed");
@@ -9248,8 +9857,8 @@ function PvAttachmentsBlock({ pv, onChanged }: { pv: PvRow; onChanged: () => voi
           ))}
         </ul>
       ) : null}
-      {list && !loading && !list.canDelete && list.rows.length > 0 && pv.status !== "VOID" && (
-        <div className="text-[10px] text-[#9CA3AF] mt-1">Evidence locked — a checked or approved voucher keeps its files.</div>
+      {list && !loading && !list.canDelete && list.rows.length > 0 && !voided && (
+        <div className="text-[10px] text-[#9CA3AF] mt-1">{lockedNote}</div>
       )}
     </div>
   );
@@ -9263,6 +9872,8 @@ function parsePayLink(raw: string | null): { docKind: "PI" | "AP"; docId: string
   return { docKind, docId, partyId };
 }
 
+// One line of the voucher form. `hint` says where a scanned line's account came from.
+type PvLineDraft = { accountCode: string; description: string; amount: string; hint?: ScanHint };
 function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
   const { toast } = useToast();
   const { confirm } = useConfirm();
@@ -9272,8 +9883,8 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
   // go to their own endpoints.
   const [spRows, setSpRows] = useState<SupplierPaymentGroup[] | null>(null);
   const [ocpRows, setOcpRows] = useState<PaymentGroup[] | null>(null);
+  const [ftRows, setFtRows] = useState<FtRow[] | null>(null);
   const [migrationMissing, setMigrationMissing] = useState(false);
-  const [expandedPv, setExpandedPv] = useState<Record<string, boolean>>({});
   // Double-click → the voucher's detail popup (resolved from `rows` by id so
   // it re-renders after a rung / void / attachment change).
   const [detailPvId, setDetailPvId] = useState<string | null>(null);
@@ -9283,16 +9894,8 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
   const initialPay = parsePayLink(new URLSearchParams(window.location.search).get("pay"));
   const [showForm, setShowForm] = useState(!!initialPay);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({
-    date: new Date().toISOString().slice(0, 10),
-    payee: "",
-    description: "",
-    accrued: false,
-    payFrom: "",
-    accrualAccount: "",
-    productLine: "",
-  });
-  const [lines, setLines] = useState<{ accountCode: string; description: string; amount: string }[]>([
+  const [form, setForm] = useState<PvFormState>(blankPvForm);
+  const [lines, setLines] = useState<PvLineDraft[]>([
     { accountCode: "", description: "", amount: "" },
   ]);
 
@@ -9315,9 +9918,13 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
   // or an other creditor (its bills). The ticked bills post at APPROVE through
   // the payment pages' own engines under this voucher's number.
   const [formKind, setFormKind] = useState<"EXPENSE" | "AP">(initialPay ? "AP" : "EXPENSE");
-  // The scanned receipt becomes the voucher's attachment once it is saved
-  // (draft or posted) — held here until then, dropped on Cancel.
-  const [pendingScanFile, setPendingScanFile] = useState<File | null>(null);
+  // The scanned receipts become the voucher's attachments once it is saved
+  // (draft or posted) — held here until then, dropped on Cancel. Several
+  // receipts can go into one voucher (owner 2026-10-01).
+  const [pendingScanFiles, setPendingScanFiles] = useState<File[]>([]);
+  // Finance scan memory: what earlier vouchers / bills booked, and the bill
+  // numbers already on our books (loaded on a scan or a typed bill no.).
+  const [scanMemory, setScanMemory] = useState<ScanMemory | null>(null);
   const [apForm, setApForm] = useState({
     date: new Date().toISOString().slice(0, 10),
     payFrom: "",
@@ -9414,6 +10021,10 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
       .then((r) => r.json() as Promise<{ success?: boolean; data?: PaymentGroup[] }>)
       .then((j) => setOcpRows(j?.success ? j.data ?? [] : []))
       .catch(() => setOcpRows([]));
+    fetch(`/api/accounting/fund-transfers?${bust}`, { cache: "no-store" })
+      .then((r) => r.json() as Promise<{ success?: boolean; data?: FtRow[] }>)
+      .then((j) => setFtRows(j?.success ? j.data ?? [] : []))
+      .catch(() => setFtRows([]));
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -9435,6 +10046,9 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
   const totalSen = postableLines.reduce((s, l) => s + toSen(l.amount), 0);
   const droppedLines = lines.filter((l) => !pvLineWillPost(l) && toSen(l.amount) > 0).length;
   const pvMoneyError = firstMoneyFieldError(lines.map((l, i) => ({ label: `Line ${i + 1} amount`, value: l.amount })));
+  // A transfer has one amount (same money parser).
+  const transferSen = toSen(form.transferAmount);
+  const transferMoneyError = form.transferAmount.trim() ? firstMoneyFieldError([{ label: "Amount", value: form.transferAmount }]) : null;
 
   // Ladder position (Houzs four tiers). Legacy rows carry no state → APPROVED.
   const apState = (r: PvRow): PvApprovalState => (r.approvalState ?? r.approval_state) ?? "APPROVED";
@@ -9447,8 +10061,8 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
   // Every money-out door in one list, newest first (owner 2026-09-28). A
   // foreign door has no ladder — it posts when it is saved — so it reads as
   // Approved on the chips, Cancelled once voided.
-  const payRows = useMemo(() => buildPayRows(rows, spRows, ocpRows), [rows, spRows, ocpRows]);
-  const payLoading = rows === null || spRows === null || ocpRows === null;
+  const payRows = useMemo(() => buildPayRows(rows, spRows, ocpRows, ftRows), [rows, spRows, ocpRows, ftRows]);
+  const payLoading = rows === null || spRows === null || ocpRows === null || ftRows === null;
   const matchesChip = (row: PayRow, chip: PvStatusChip) => {
     if (chip === "ALL") return true;
     if (chip === "ADVANCE_OPEN") return row.state === "ACTIVE" && row.advanceOpen && (!row.pv || isPosted(row.pv));
@@ -9484,8 +10098,8 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
     setShowForm(false);
     setEditingId(null);
     setFormKind("EXPENSE");
-    setPendingScanFile(null);
-    setForm({ date: new Date().toISOString().slice(0, 10), payee: "", description: "", accrued: false, payFrom: "", accrualAccount: "", productLine: "" });
+    setPendingScanFiles([]);
+    setForm(blankPvForm());
     setLines([{ accountCode: "", description: "", amount: "" }]);
     setApForm({ date: new Date().toISOString().slice(0, 10), payFrom: "", partyKind: "SUPPLIER", partyId: "", reference: "", advance: "" });
     setApAlloc({});
@@ -9547,23 +10161,35 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
   // mode: "draft" saves onto the four-tier ladder (no number, no GL yet);
   // "post" is the legacy one-click road — number + GL immediately.
   const handleSave = async (mode: "draft" | "post") => {
-    if (pvMoneyError) { toast.error(pvMoneyError); return; }
-    const body = {
-      date: form.date,
-      payee: form.payee,
-      description: form.description,
-      accrued: form.accrued,
-      payFrom: form.accrued ? undefined : (form.payFrom || defaultBankCode(bankCash)),
-      accrualAccount: form.accrued ? form.accrualAccount : undefined,
-      productLine: form.productLine || undefined,
-      saveAs: mode === "draft" && !editingId ? "draft" : undefined,
-      lines: postableLines
-        .map((l) => ({ accountCode: l.accountCode, description: l.description, amountSen: toSen(l.amount) })),
-    };
-    if (body.lines.length === 0) {
+    const isTransfer = form.mode === "TRANSFER";
+    if (isTransfer) {
+      if (transferMoneyError) { toast.error(transferMoneyError); return; }
+    } else if (pvMoneyError) { toast.error(pvMoneyError); return; }
+    if (!isTransfer && postableLines.length === 0) {
       toast.error("Add at least one line with an account and a positive amount");
       return;
     }
+    const common = {
+      date: form.date,
+      description: form.description,
+      notes: form.notes,
+      saveAs: mode === "draft" && !editingId ? "draft" : undefined,
+    };
+    // A transfer is an ordinary voucher whose one line is the receiving account
+    // (owner 2026-10-01); a payment carries its expense lines and the bill.
+    const body = isTransfer
+      ? { ...common, kind: "TRANSFER", payFrom: form.payFrom || defaultBankCode(bankCash), transferTo: form.transferTo, amountSen: transferSen }
+      : {
+          ...common,
+          payee: form.payee,
+          billNo: form.billNo,
+          billDate: form.billDate || undefined,
+          accrued: form.accrued,
+          payFrom: form.accrued ? undefined : (form.payFrom || defaultBankCode(bankCash)),
+          accrualAccount: form.accrued ? form.accrualAccount : undefined,
+          lines: postableLines
+            .map((l) => ({ accountCode: l.accountCode, description: l.description, amountSen: toSen(l.amount) })),
+        };
     setSaving(true);
     try {
       const url = editingId
@@ -9579,11 +10205,15 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
       if (j?.success) {
         // Scan Receipt → the scanned file rides along as the new voucher's evidence.
         const newId = !editingId ? raw?.data?.id : undefined;
-        if (newId && pendingScanFile) {
-          try { await uploadPvAttachment(newId, pendingScanFile); }
-          catch (e) { toast.error(`Saved, but the scan could not be attached: ${(e as Error).message}`); }
+        if (newId) {
+          for (const f of pendingScanFiles) {
+            try { await uploadPvAttachment(newId, f); }
+            catch (e) { toast.error(`Saved, but ${f.name} could not be attached: ${(e as Error).message}`); }
+          }
         }
-        toast.success(editingId ? "Voucher updated" : mode === "draft" ? "Draft saved — Prepare it when ready" : "Payment posted");
+        forgetScanMemory();
+        setScanMemory(null);
+        toast.success(editingId ? "Voucher updated" : mode === "draft" ? "Draft saved — Prepare it when ready" : isTransfer ? "Transfer posted" : "Payment posted");
         resetForm();
         load();
       } else toast.error(j?.error || (editingId ? "Update failed" : "Save failed"));
@@ -9691,6 +10321,7 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
   const payVoucherOf = (row: PayRow): VoucherSpec =>
     row.pv ? { ...buildPvVoucher(row.pv, accounts), footerText: printFooter }
     : row.sp ? buildSupplierPaymentVoucher(row.sp)
+    : row.ft ? buildFundTransferVoucher(row.ft, accounts)
     : buildOtherPartyPaymentVoucher(row.ocp!, accounts);
   // A foreign row voids / restores through its own document's endpoint — the
   // same call its own page makes (the Receipts hub does exactly this).
@@ -9704,7 +10335,9 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
     if (!(await confirm({ title: `${verb} ${PAY_DOOR_LABEL[row.door].toLowerCase()}?`, message: `${verb} ${row.no}?${extra}`, danger: true }))) return;
     const url = row.sp
       ? `/api/supplier-payments/${encodeURIComponent(row.no)}/lifecycle`
-      : `/api/accounting/other-party-payments/${encodeURIComponent(row.no)}/lifecycle`;
+      : row.ft
+        ? `/api/accounting/fund-transfers/${encodeURIComponent(row.no)}/lifecycle`
+        : `/api/accounting/other-party-payments/${encodeURIComponent(row.no)}/lifecycle`;
     const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action }) });
     const j = asMutationResponse(await res.json());
     if (j?.success) {
@@ -9714,9 +10347,16 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
     } else toast.error(j?.error || `${verb} failed`);
   };
   // Where a foreign row lives — its own page, for edit / knock-off / FX.
-  const foreignHref = (row: PayRow) => row.sp ? "/invoices/supplier-payments" : "/accounting?tab=ocreditorpay";
-  // What a foreign row settled — shown inline on expand and in the popup.
-  const foreignDetailTable = (row: PayRow) => (
+  const foreignHref = (row: PayRow) => row.sp ? "/invoices/supplier-payments" : row.ft ? "/accounting?tab=transfer" : "/accounting?tab=ocreditorpay";
+  // What a foreign row settled — shown in its popup.
+  const foreignDetailTable = (row: PayRow) => row.ft ? (
+    <table className="w-full text-xs">
+      <thead><tr className="text-[#9CA3AF] text-left"><th className="py-1 pr-4 font-medium">From</th><th className="py-1 pr-4 font-medium">To</th><th className="py-1 font-medium text-right">Amount</th></tr></thead>
+      <tbody>
+        <tr className="border-t border-[#F0ECE9]"><td className="py-1 pr-4">{accountLabel(accounts, row.ft.fromAccount)}</td><td className="py-1 pr-4">{accountLabel(accounts, row.ft.toAccount)}</td><td className="py-1 text-right tabular-nums">{formatCurrency(row.ft.amountSen)}</td></tr>
+      </tbody>
+    </table>
+  ) : (
     <table className="w-full text-xs">
       <thead>
         <tr className="text-[#9CA3AF] text-left">
@@ -9798,48 +10438,106 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
       return;
     }
     setFormKind("EXPENSE");
-    setForm({ date: r.date, payee: r.payee ?? "", description: r.description ?? "", accrued: r.accrued === 1, payFrom: r.payFrom ?? "", accrualAccount: r.accrualAccount ?? "", productLine: r.productLine ?? "" });
-    setLines(r.lines.length ? r.lines.map((l) => ({ accountCode: l.accountCode, description: l.description ?? "", amount: (l.amountSen / 100).toFixed(2) })) : [{ accountCode: "", description: "", amount: "" }]);
+    const isTransfer = r.pvKind === "TRANSFER";
+    setForm({
+      ...blankPvForm(),
+      date: r.date, payee: r.payee ?? "", description: r.description ?? "", accrued: r.accrued === 1,
+      payFrom: r.payFrom ?? "", accrualAccount: r.accrualAccount ?? "", productLine: r.productLine ?? "",
+      notes: r.notes ?? "", billNo: (r.billNo ?? r.bill_no) ?? "", billDate: String((r.billDate ?? r.bill_date) ?? "").slice(0, 10),
+      mode: isTransfer ? "TRANSFER" : "PAYMENT",
+      transferTo: isTransfer ? (r.lines[0]?.accountCode ?? "") : "",
+      transferAmount: isTransfer ? (r.totalSen / 100).toFixed(2) : "",
+    });
+    setLines(!isTransfer && r.lines.length ? r.lines.map((l) => ({ accountCode: l.accountCode, description: l.description ?? "", amount: (l.amountSen / 100).toFixed(2) })) : [{ accountCode: "", description: "", amount: "" }]);
     setShowForm(true);
   };
 
   const selCls = "rounded-md border border-[#E2DDD8] bg-white px-2 py-1.5 text-sm";
 
-  // OCR → prefill the voucher form (payee/date/lines). Receipts carry no GL
-  // account, so the account prefills from the SAME payee's latest voucher
-  // (same payee almost always books to the same expense account) — blank when
-  // the payee is new. Amount = the printed line amounts; single-total docs
-  // (petrol slip) prefill one line with the total.
-  const applyScan = (d: ScanFinanceResult, file: File) => {
-    setEditingId(null);
+  // OCR → the voucher form (owner 2026-10-01, plan batch 3). Every receipt in
+  // the file counts. Each line's account is learned by its description from
+  // approved vouchers and bills (a new payee gets "suggested" ones from other
+  // payees' similar lines), the SST is its own line, and a bill number already
+  // on our books is flagged. With the form already holding lines, the scan
+  // ADDS its receipt to this voucher — several receipts, one voucher.
+  // Scan → "open in form": the scanned voucher in the full form (accrue, post
+  // now, notes…), its receipts held to attach on save.
+  const openScanInForm = (v: { payee: string; date: string; docs: ScanDoc[] }) => {
+    resetForm();
     setFormKind("EXPENSE");
-    setPendingScanFile(file);
-    const normName = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, "");
-    const prior = d.partyName
-      ? (rows ?? [])
-          .filter((r) => r.status !== "VOID" && r.lines?.length && normName(r.payee ?? "") && normName(r.payee ?? "") === normName(d.partyName ?? ""))
-          .sort((a, b) => (b.date || "").localeCompare(a.date || ""))[0]
-      : undefined;
-    const lastAcct = prior?.lines?.[0]?.accountCode ?? "";
-    setForm((f) => ({
-      ...f,
-      date: d.docDate ?? new Date().toISOString().slice(0, 10),
-      payee: d.partyName ?? f.payee,
-      description: [d.docType, d.docNo].filter(Boolean).join(" · ") || f.description,
-      accrued: false,
-    }));
-    setLines(
-      d.lines.length
-        ? d.lines.map((l) => ({ accountCode: lastAcct, description: l.description, amount: (l.amountSen / 100).toFixed(2) }))
-        : d.totalSen
-          ? [{ accountCode: lastAcct, description: d.docNo ?? "", amount: (d.totalSen / 100).toFixed(2) }]
-          : [{ accountCode: "", description: "", amount: "" }],
-    );
+    const billNos = v.docs.map((d) => d.billNo).filter(Boolean);
+    setForm({
+      ...blankPvForm(),
+      mode: "PAYMENT",
+      date: v.date,
+      payee: v.payee,
+      billNo: billNos.join(", "),
+      billDate: v.docs[0]?.billDate ?? "",
+      description: v.docs.length === 1 ? ([v.docs[0].docType, v.docs[0].billNo].filter(Boolean).join(" · ") || v.docs[0].fileName) : `${v.docs.length} receipts`,
+    });
+    setLines(v.docs.flatMap((d) => d.lines.map((l): PvLineDraft => ({
+      accountCode: l.accountCode,
+      description: l.description,
+      amount: (l.amountSen / 100).toFixed(2),
+      hint: l.isTax ? { kind: "sst", text: "SST — its own line (706-0000)" } : scanGuessHint(l.guess),
+    }))));
+    setPendingScanFiles([...new Set(v.docs.map((d) => d.file))]);
     setShowForm(true);
+  };
+
+  const applyScan = async (d: ScanFinanceResult, file: File) => {
+    const memory = await loadScanMemory();
+    setScanMemory(memory);
+    const docs: ScanFinanceDoc[] = d.docs?.length ? d.docs : [d];
+    const scanned: PvLineDraft[] = docs.flatMap((doc) => {
+      const printed = doc.lines.length ? doc.lines : doc.totalSen ? [{ description: doc.docNo ?? file.name, amountSen: doc.totalSen }] : [];
+      return linesWithTax(printed, doc.taxSen, doc.totalSen).map((l): PvLineDraft => {
+        const amount = (l.amountSen / 100).toFixed(2);
+        if (l.isTax) return { accountCode: "706-0000", description: l.description, amount, hint: { kind: "sst", text: "SST — its own line (706-0000)" } };
+        const g = guessAccount(memory.history, doc.partyName ?? d.partyName, l.description);
+        return { accountCode: g?.accountCode ?? "", description: l.description, amount, hint: scanGuessHint(g) };
+      });
+    });
+    const docNos = docs.map((x) => x.docNo).filter((x): x is string => !!x);
+    const dups = docs.map((x) => findDuplicate(memory.known, x.docNo, x.partyName ?? d.partyName)).filter((x): x is KnownDoc => !!x);
+    const filled = lines.filter((l) => l.accountCode || l.description.trim() || l.amount.trim());
+    const adding = showForm && formKind === "EXPENSE" && !editingId && form.mode === "PAYMENT" && filled.length > 0;
+    // The same receipt twice on one voucher is a slip, not a second receipt.
+    const onThisVoucher = adding ? docNos.filter((no) => form.billNo.split(/[,;]/).some((b) => normDocNo(b) && normDocNo(b) === normDocNo(no))) : [];
+    if (onThisVoucher.length) {
+      toast.error(`${onThisVoucher.join(", ")} is already on this voucher — not added again.`);
+      return;
+    }
+    if (adding) {
+      setPendingScanFiles((fs) => [...fs, file]);
+      setLines([...filled, ...scanned]);
+      setForm((f) => ({ ...f, billNo: [f.billNo.trim(), ...docNos].filter(Boolean).join(", "), billDate: f.billDate || d.docDate || "" }));
+    } else {
+      setEditingId(null);
+      setFormKind("EXPENSE");
+      setPendingScanFiles([file]);
+      setForm((f) => ({
+        ...f,
+        mode: "PAYMENT",
+        // The voucher is dated the day it is keyed; the bill keeps its own number
+        // and date (owner 2026-10-01).
+        date: new Date().toISOString().slice(0, 10),
+        billNo: docNos.join(", ") || f.billNo,
+        billDate: d.docDate ?? f.billDate,
+        payee: d.partyName ?? f.payee,
+        description: [d.docType, docNos.join(", ")].filter(Boolean).join(" · ") || f.description,
+        accrued: false,
+      }));
+      setLines(scanned.length ? scanned : [{ accountCode: "", description: "", amount: "" }]);
+      setShowForm(true);
+    }
+    if (dups.length) toast.error(`Already recorded: ${dups.map((k) => `${k.docNo} → ${knownRefLabel(k.ref)}`).join(" · ")} — check before saving.`);
+    const otherPayee = adding && d.partyName && form.payee.trim() && normPayee(d.partyName) !== normPayee(form.payee);
+    const unset = scanned.filter((l) => !l.accountCode).length;
     toast.success(
-      lastAcct
-        ? "Scanned — account prefilled from this payee's last voucher; review before posting."
-        : "Scanned — review the lines and pick the expense account(s).",
+      (adding ? `Added ${docs.length === 1 ? "this receipt" : `${docs.length} receipts`} to the voucher` : docs.length > 1 ? `Scanned ${docs.length} receipts into one voucher` : "Scanned")
+      + (otherPayee ? ` — note: it is from ${d.partyName}` : "")
+      + (unset ? ` — pick the account on ${unset} line${unset === 1 ? "" : "s"}` : " — review before saving"),
     );
   };
 
@@ -9851,8 +10549,7 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
           <p className="text-[11px] text-[#9CA3AF]">Every payment out, one door. <b>AP Payment</b> pays a creditor's bills (purchase invoices / other-creditor bills); <b>Payment Voucher</b> pays an expense. Draft → Prepared → Checked → Approved (posted), or Post now. Foreign-currency PIs, advance knock-off and trade-finance repayment: <Link to="/invoices/supplier-payments" className="underline decoration-dotted text-[#6B5C32]">Supplier Payment page</Link>. Payments recorded there and on <Link to="/accounting?tab=ocreditorpay" className="underline decoration-dotted text-[#6B5C32]">Other Creditor Payments</Link> are listed below too (badges <b>SP</b> / <b>OCP</b>) — same HPV number series, one list.</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">
-          <ScanBillsBatch rows={rows ?? []} bankCash={bankCash} onDone={load} />
-          <ScanPrefillButton label="Scan Receipt" onResult={applyScan} />
+          <ScanVouchers accounts={accounts} bankCash={bankCash} onDone={load} onOpenInForm={openScanInForm} />
           <Button variant="primary" size="sm" onClick={() => (showForm && formKind === "AP" && !editingId ? resetForm() : openNew("AP"))} title="Pay a supplier's purchase invoices or an other creditor's bills">
             <Plus className="h-4 w-4" /> New AP Payment
           </Button>
@@ -9888,51 +10585,76 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
           : otherCreditors.map((p) => ({ value: p.id, label: p.name }));
         const setAmt = (id: string, v: string) => setApAlloc((m) => { const n = { ...m }; if (v === "") delete n[id]; else n[id] = v; return n; });
         const cannot = saving || apTotalSen <= 0 || !!apMoneyError || !!apOverAlloc || !apForm.partyId || !(apForm.payFrom || defaultBankCode(bankCash));
+        // The same popup as the voucher form (owner 2026-10-01 「new ap payment
+        // 的页面还是这样」): HEADER, then the bills to pay; fields and rules unchanged.
+        const editingRow = editingId ? (rows ?? []).find((x) => x.id === editingId) : undefined;
+        const pvNoText = !editingRow ? "(assigned on save)" : editingRow.pvNo.startsWith("DRAFT-") ? "(assigned at Check)" : editingRow.pvNo;
+        const fieldLabel = "text-[11px] font-semibold uppercase tracking-wide text-[#6B7280] mb-1 block";
+        const sectionHead = "px-4 py-2 border-b border-[#E2DDD8] border-l-4 border-l-[#3E6570] text-xs font-bold uppercase tracking-wide text-[#3E6570] flex items-center justify-between gap-3";
         return (
-          <Card>
-            <CardContent className="p-4 space-y-4">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <div className="text-sm font-semibold text-[#1F1D1B]">{editingId ? "Edit AP payment" : "New AP Payment"} <span className="text-[11px] font-normal text-[#9CA3AF]">DR creditor control · CR Pay from — posted when approved</span></div>
-                <div className="inline-flex rounded-md border border-[#E2DDD8] overflow-hidden text-xs">
-                  {(["SUPPLIER", "OTHER"] as const).map((k) => (
-                    <button key={k} type="button" disabled={!!editingId}
-                      onClick={() => { setApForm((f) => ({ ...f, partyKind: k, partyId: "" })); setApAlloc({}); setApBills(null); }}
-                      className={`px-3 py-1.5 ${apForm.partyKind === k ? "bg-[#6B5C32] text-white" : "bg-white text-[#6B7280] hover:bg-[#FAF8F5]"} ${editingId ? "cursor-not-allowed" : "cursor-pointer"}`}>
-                      {k === "SUPPLIER" ? "Supplier (purchase invoices)" : "Other creditor (bills)"}
-                    </button>
-                  ))}
-                </div>
+          <div className="fixed inset-0 z-40 bg-black/40 overflow-y-auto p-4" role="dialog" aria-modal="true">
+            <div className="mx-auto my-4 w-full max-w-5xl rounded-lg bg-[#F7F5F2] shadow-2xl">
+              <div className="flex items-center justify-between px-5 py-3 rounded-t-lg bg-white border-b border-[#E2DDD8]">
+                <h3 className="text-base font-semibold text-[#1F1D1B]">
+                  {editingRow ? `Edit AP payment ${editingRow.pvNo.startsWith("DRAFT-") ? "(draft)" : editingRow.pvNo}` : "New AP payment"}
+                  <span className="ml-2 text-[11px] font-normal text-[#9CA3AF]">DR creditor control · CR Paid from — posted when approved</span>
+                </h3>
+                <button onClick={resetForm} title="Close without saving" className="text-[#9CA3AF] hover:text-[#1F1D1B] text-lg leading-none cursor-pointer">✕</button>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="sm:col-span-2">
-                  <label className="text-xs font-medium text-[#6B7280] mb-1 block">{apForm.partyKind === "SUPPLIER" ? "Supplier" : "Other creditor"}</label>
-                  <SearchableSelect
-                    value={apForm.partyId}
-                    onChange={(v) => { setApForm((f) => ({ ...f, partyId: v })); setApAlloc({}); }}
-                    options={partyOpts}
-                    placeholder={apForm.partyKind === "SUPPLIER" ? "Type supplier code or name…" : "Type creditor name…"}
-                    allowClear
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-[#6B7280] mb-1 block">Date</label>
-                  <input type="date" value={apForm.date} onChange={(e) => setApForm({ ...apForm, date: e.target.value })} className={`${selCls} w-full`} />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-[#6B7280] mb-1 block">Pay from <span className="ml-1 text-[#B4B2A9] cursor-help" title="Bank / cash account credited (CR)">ⓘ</span></label>
-                  <select value={apForm.payFrom || defaultBankCode(bankCash)} onChange={(e) => setApForm({ ...apForm, payFrom: e.target.value })} className={`${selCls} w-full`}>
-                    <option value="">— pick bank/cash —</option>
-                    {bankCash.map((a) => <option key={a.code} value={a.code}>{a.code} {a.name}</option>)}
-                  </select>
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="text-xs font-medium text-[#6B7280] mb-1 block">Reference / remarks</label>
-                  <input type="text" placeholder="e.g. TT ref, cheque no" value={apForm.reference} onChange={(e) => setApForm({ ...apForm, reference: e.target.value })} className={`${selCls} w-full`} />
-                </div>
-              </div>
+              <div className="p-4 space-y-4">
+                <section className="rounded-md border border-[#E2DDD8] bg-white">
+                  <div className={sectionHead}><span>Header</span></div>
+                  <div className="p-4 space-y-3">
+                    <div className="inline-flex rounded-md border border-[#E2DDD8] overflow-hidden" title={editingId ? "The creditor is fixed once saved" : undefined}>
+                      {(["SUPPLIER", "OTHER"] as const).map((k) => (
+                        <button key={k} type="button" disabled={!!editingId}
+                          onClick={() => { setApForm((f) => ({ ...f, partyKind: k, partyId: "" })); setApAlloc({}); setApBills(null); }}
+                          className={`px-5 py-2 text-sm font-semibold ${apForm.partyKind === k ? "bg-[#3E6570] text-white" : "bg-white text-[#1F1D1B] hover:bg-[#FAF8F5]"} ${k === "OTHER" ? "border-l border-[#E2DDD8]" : ""} disabled:cursor-not-allowed`}>
+                          {k === "SUPPLIER" ? "Supplier (purchase invoices)" : "Other creditor (bills)"}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className={fieldLabel}>{apForm.partyKind === "SUPPLIER" ? "Supplier *" : "Other creditor *"}</label>
+                        <SearchableSelect
+                          value={apForm.partyId}
+                          onChange={(v) => { setApForm((f) => ({ ...f, partyId: v })); setApAlloc({}); }}
+                          options={partyOpts}
+                          placeholder={apForm.partyKind === "SUPPLIER" ? "Type supplier code or name…" : "Type creditor name…"}
+                          allowClear
+                        />
+                      </div>
+                      <div>
+                        <label className={fieldLabel}>PV #</label>
+                        <input type="text" readOnly value={pvNoText} className={`${selCls} w-full bg-[#FAF8F5] text-[#6B7280]`} />
+                      </div>
+                      <div>
+                        <label className={fieldLabel}>Payment date *</label>
+                        <input type="date" value={apForm.date} onChange={(e) => setApForm({ ...apForm, date: e.target.value })} className={`${selCls} w-full`} />
+                      </div>
+                      <div>
+                        <label className={fieldLabel}>Paid from (credit) *</label>
+                        <select value={apForm.payFrom || defaultBankCode(bankCash)} onChange={(e) => setApForm({ ...apForm, payFrom: e.target.value })} className={`${selCls} w-full`}>
+                          <option value="">— pick bank / cash —</option>
+                          {bankCash.map((a) => <option key={a.code} value={a.code}>{a.code} · {a.name}</option>)}
+                        </select>
+                      </div>
+                      <div className="sm:col-span-2">
+                        <label className={fieldLabel}>Reference / remarks</label>
+                        <input type="text" placeholder="e.g. TT ref, cheque no" value={apForm.reference} onChange={(e) => setApForm({ ...apForm, reference: e.target.value })} className={`${selCls} w-full`} />
+                      </div>
+                    </div>
+                  </div>
+                </section>
 
-              <div>
-                <label className="text-xs font-medium text-[#6B7280] mb-1 block">Bills to pay {apBills?.partyName ? <span className="text-[#1F1D1B] font-semibold">· {apBills.partyName}</span> : null}</label>
+                <section className="rounded-md border border-[#E2DDD8] bg-white">
+                  <div className={sectionHead}>
+                    <span>Bills to pay{apBills?.partyName ? ` · ${apBills.partyName}` : ""}</span>
+                    <span className="normal-case font-normal text-[#6B7280] tracking-normal">total {apMoneyError ? "—" : formatCurrency(apTotalSen)}</span>
+                  </div>
+                  <div className="p-4 space-y-3">
+                <div>
                 {!apForm.partyId ? (
                   <div className="text-xs text-[#9CA3AF] border border-dashed border-[#E2DDD8] rounded-md px-3 py-4">Pick the creditor first — its unpaid bills appear here.</div>
                 ) : apBillsLoading || apBills === null ? (
@@ -10003,8 +10725,10 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
                 ) : <div />}
                 <span className="text-sm text-[#6B7280]">Total <span className="text-lg font-semibold text-[#1F1D1B] tabular-nums">{apMoneyError ? "—" : formatCurrency(apTotalSen)}</span>{apAdvanceSen > 0 && <span className="ml-2 text-[11px] text-[#9CA3AF]">incl. advance {formatCurrency(apAdvanceSen)}</span>}</span>
               </div>
+                  </div>
+                </section>
 
-              <div className="flex flex-wrap gap-2 pt-3 border-t border-[#F0ECE9] items-center">
+              <div className="flex flex-wrap gap-2 items-center">
                 {editingId ? (
                   <Button variant="primary" size="sm" disabled={cannot} onClick={() => void handleSaveAp("post")}>{saving ? "Updating…" : "Save changes"}</Button>
                 ) : (
@@ -10015,102 +10739,182 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
                 )}
                 <Button variant="outline" size="sm" onClick={resetForm}>Cancel</Button>
               </div>
-            </CardContent>
-          </Card>
+              </div>
+            </div>
+          </div>
         );
       })()}
 
-      {showForm && formKind === "EXPENSE" && (
-        <Card>
-          <CardContent className="p-4 space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs font-medium text-[#6B7280] mb-1 block">Date</label>
-                <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} className={`${selCls} w-full`} />
+      {showForm && formKind === "EXPENSE" && (() => {
+        // The voucher form as a popup (owner 2026-10-01 「我开的 pv 我希望像图 3」
+        // + 「要 pop out」): HEADER, then LINES as cards; Payment or Transfer.
+        const isTransfer = form.mode === "TRANSFER";
+        const editingRow = editingId ? (rows ?? []).find((x) => x.id === editingId) : undefined;
+        const pvNoText = !editingRow ? "(assigned on save)" : editingRow.pvNo.startsWith("DRAFT-") ? "(assigned at Check)" : editingRow.pvNo;
+        const billDups = !isTransfer && scanMemory
+          ? form.billNo.split(/[,;]/).map((no) => findDuplicate(scanMemory.known.filter((k) => k.ref !== editingRow?.pvNo), no.trim(), form.payee)).filter((k): k is KnownDoc => !!k)
+          : [];
+        const payFromCode = form.payFrom || defaultBankCode(bankCash);
+        const cannot = saving || (isTransfer
+          ? !form.transferTo || transferSen <= 0 || !!transferMoneyError || payFromCode === form.transferTo
+          : totalSen <= 0 || !!pvMoneyError || (form.accrued ? !form.accrualAccount : !payFromCode));
+        const fieldLabel = "text-[11px] font-semibold uppercase tracking-wide text-[#6B7280] mb-1 block";
+        const sectionHead = "px-4 py-2 border-b border-[#E2DDD8] border-l-4 border-l-[#3E6570] text-xs font-bold uppercase tracking-wide text-[#3E6570] flex items-center justify-between gap-3";
+        return (
+          <div className="fixed inset-0 z-40 bg-black/40 overflow-y-auto p-4" role="dialog" aria-modal="true">
+            <div className="mx-auto my-4 w-full max-w-5xl rounded-lg bg-[#F7F5F2] shadow-2xl">
+              <div className="flex items-center justify-between px-5 py-3 rounded-t-lg bg-white border-b border-[#E2DDD8]">
+                <h3 className="text-base font-semibold text-[#1F1D1B]">
+                  {editingRow ? `Edit ${isTransfer ? "transfer" : "payment voucher"} ${editingRow.pvNo.startsWith("DRAFT-") ? "(draft)" : editingRow.pvNo}` : isTransfer ? "New transfer" : "New payment voucher"}
+                </h3>
+                <button onClick={resetForm} title="Close without saving" className="text-[#9CA3AF] hover:text-[#1F1D1B] text-lg leading-none cursor-pointer">✕</button>
               </div>
-              <div>
-                <label className="text-xs font-medium text-[#6B7280] mb-1 block">
-                  {form.accrued ? "Accrual account" : "Pay from"}
-                  <span className="ml-1 text-[#B4B2A9] cursor-help" title={form.accrued ? "Liability account credited (CR)" : "Bank / cash account credited (CR)"}>ⓘ</span>
-                </label>
-                {form.accrued ? (
-                  <select value={form.accrualAccount} onChange={(e) => setForm({ ...form, accrualAccount: e.target.value })} className={`${selCls} w-full`}>
-                    <option value="">— pick 410-x / 405-0000 —</option>
-                    {accrualOpts.map((a) => <option key={a.code} value={a.code}>{a.code} {a.name}</option>)}
-                  </select>
-                ) : (
-                  <select value={form.payFrom || defaultBankCode(bankCash)} onChange={(e) => setForm({ ...form, payFrom: e.target.value })} className={`${selCls} w-full`}>
-                    <option value="">— pick bank/cash —</option>
-                    {bankCash.map((a) => <option key={a.code} value={a.code}>{a.code} {a.name}</option>)}
-                  </select>
-                )}
-              </div>
-              <div>
-                <label className="text-xs font-medium text-[#6B7280] mb-1 block">Payee</label>
-                <input type="text" placeholder="Who was paid" value={form.payee} onChange={(e) => setForm({ ...form, payee: e.target.value })} className={`${selCls} w-full`} />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-[#6B7280] mb-1 block">Product line (optional)</label>
-                <select value={form.productLine} onChange={(e) => setForm({ ...form, productLine: e.target.value })} className={`${selCls} w-full`}>
-                  <option value="">(shared — allocate by sales ratio)</option>
-                  <option value="SOFA">Sofa</option>
-                  <option value="BEDFRAME">Bedframe</option>
-                </select>
-              </div>
-              <div className="sm:col-span-2">
-                <label className="text-xs font-medium text-[#6B7280] mb-1 block">Description</label>
-                <input type="text" placeholder="e.g. Factory rent June" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className={`${selCls} w-full`} />
-              </div>
-            </div>
-
-            <label className="flex items-center gap-2 text-sm text-[#1F1D1B] cursor-pointer">
-              <input type="checkbox" checked={form.accrued} onChange={(e) => setForm({ ...form, accrued: e.target.checked })} className="h-4 w-4 accent-[#6B5C32]" />
-              Accrue now, pay later
-            </label>
-
-            <div>
-              <label className="text-xs font-medium text-[#6B7280] mb-1 block">Expense lines (DR)</label>
-              <div className="border border-[#E2DDD8] rounded-md">
-                <div className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1.4fr)_7rem_2rem] bg-[#FAF8F5] text-[11px] font-medium text-[#9CA3AF]">
-                  <div className="px-2.5 py-1.5">Account</div>
-                  <div className="px-2.5 py-1.5">Description</div>
-                  <div className="px-2.5 py-1.5 text-right">Amount (RM)</div>
-                  <div />
-                </div>
-                {lines.map((l, i) => (
-                  <div
-                    key={i}
-                    className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1.4fr)_7rem_2rem] items-center border-t border-[#F0ECE9]"
-                    onKeyDown={(e) => { if (e.key === "Insert") { e.preventDefault(); setLines((prev) => [...prev.slice(0, i + 1), { accountCode: "", description: "", amount: "" }, ...prev.slice(i + 1)]); } }}
-                  >
-                    <div className="px-1 py-1">
-                      <AccountPicker accounts={lineAccounts} value={l.accountCode} onChange={(code) => setLines(lines.map((x, j) => (j === i ? { ...x, accountCode: code } : x)))} placeholder="Account…" />
+              <div className="p-4 space-y-4">
+                <section className="rounded-md border border-[#E2DDD8] bg-white">
+                  <div className={sectionHead}><span>Header</span></div>
+                  <div className="p-4 space-y-3">
+                    <div className="inline-flex rounded-md border border-[#E2DDD8] overflow-hidden" title={editingRow ? "The kind is fixed once saved" : undefined}>
+                      {(["PAYMENT", "TRANSFER"] as const).map((m) => (
+                        <button key={m} type="button" disabled={!!editingRow}
+                          onClick={() => setForm((f) => ({ ...f, mode: m, accrued: m === "TRANSFER" ? false : f.accrued }))}
+                          className={`px-5 py-2 text-sm font-semibold ${form.mode === m ? "bg-[#3E6570] text-white" : "bg-white text-[#1F1D1B] hover:bg-[#FAF8F5]"} ${m === "TRANSFER" ? "border-l border-[#E2DDD8]" : ""} disabled:cursor-not-allowed`}>
+                          {m === "PAYMENT" ? "Payment" : "Transfer"}
+                        </button>
+                      ))}
                     </div>
-                    <input type="text" placeholder="Line description" value={l.description} onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, description: e.target.value } : x)))} className="border-0 bg-transparent px-2.5 py-1.5 text-sm w-full focus:outline-none" />
-                    <input type="text" placeholder="0.00" value={l.amount} onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, amount: e.target.value } : x)))} className={`border-0 bg-transparent px-2.5 py-1.5 text-sm w-full text-right tabular-nums focus:outline-none ${isUnreadableMoney(l.amount) ? "text-[#9A3A2D] underline decoration-wavy" : ""}`} />
-                    <button onClick={() => setLines(lines.length > 1 ? lines.filter((_, j) => j !== i) : lines)} title="Remove line" className="text-[#B4B2A9] hover:text-[#9A3A2D] text-sm">✕</button>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {isTransfer ? (
+                        <div>
+                          <label className={fieldLabel}>Transfer to *</label>
+                          <select value={form.transferTo} onChange={(e) => setForm({ ...form, transferTo: e.target.value })} className={`${selCls} w-full`}>
+                            <option value="">— which of our accounts receives it —</option>
+                            {bankCash.filter((a) => a.code !== payFromCode).map((a) => <option key={a.code} value={a.code}>{a.code} · {a.name}</option>)}
+                          </select>
+                        </div>
+                      ) : (
+                        <div>
+                          <label className={fieldLabel}>Payee *</label>
+                          <input type="text" placeholder="Who are we paying?" value={form.payee} onChange={(e) => setForm({ ...form, payee: e.target.value })} className={`${selCls} w-full`} />
+                        </div>
+                      )}
+                      <div>
+                        <label className={fieldLabel}>PV #</label>
+                        <input type="text" readOnly value={pvNoText} className={`${selCls} w-full bg-[#FAF8F5] text-[#6B7280]`} />
+                      </div>
+                      <div>
+                        <label className={fieldLabel}>Voucher date *</label>
+                        <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} className={`${selCls} w-full`} />
+                      </div>
+                      <div>
+                        <label className={fieldLabel}>{form.accrued && !isTransfer ? "Accrual account (credit) *" : "Paid from (credit) *"}</label>
+                        {form.accrued && !isTransfer ? (
+                          <select value={form.accrualAccount} onChange={(e) => setForm({ ...form, accrualAccount: e.target.value })} className={`${selCls} w-full`}>
+                            <option value="">— pick 410-x —</option>
+                            {accrualOpts.map((a) => <option key={a.code} value={a.code}>{a.code} · {a.name}</option>)}
+                          </select>
+                        ) : (
+                          <select value={payFromCode} onChange={(e) => setForm({ ...form, payFrom: e.target.value })} className={`${selCls} w-full`}>
+                            <option value="">— pick bank / cash —</option>
+                            {bankCash.map((a) => <option key={a.code} value={a.code}>{a.code} · {a.name}</option>)}
+                          </select>
+                        )}
+                      </div>
+                      {isTransfer && (
+                        <div>
+                          <label className={fieldLabel}>Amount (MYR) *</label>
+                          <input type="text" placeholder="0.00" value={form.transferAmount} onChange={(e) => setForm({ ...form, transferAmount: e.target.value })} className={`${selCls} w-full text-right tabular-nums ${transferMoneyError ? "text-[#9A3A2D] underline decoration-wavy" : ""}`} />
+                        </div>
+                      )}
+                      <div>
+                        <label className={fieldLabel}>Description <span className="normal-case font-normal text-[#9CA3AF]">(printed on the voucher)</span></label>
+                        <input type="text" placeholder={isTransfer ? "e.g. Petty cash top-up" : "e.g. Factory rent June"} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className={`${selCls} w-full`} />
+                      </div>
+                      <div className={isTransfer ? "sm:col-span-2" : ""}>
+                        <label className={fieldLabel}>Notes <span className="normal-case font-normal text-[#9CA3AF]">(internal — not printed)</span></label>
+                        <textarea rows={2} placeholder="Internal notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} className={`${selCls} w-full`} />
+                      </div>
+                      {!isTransfer && (
+                        <>
+                          <div>
+                            <label className={fieldLabel}>Bill no. <span className="normal-case font-normal text-[#9CA3AF]">(the supplier's own)</span></label>
+                            <input type="text" placeholder="Filled when the bill is scanned" value={form.billNo} onChange={(e) => setForm({ ...form, billNo: e.target.value })} onBlur={() => { if (form.billNo.trim()) void loadScanMemory().then(setScanMemory); }} className={`${selCls} w-full`} />
+                            {billDups.length > 0 && <div className="text-[11px] text-[#9A3A2D] font-semibold mt-1">Already recorded: {billDups.map((k) => `${k.docNo} → ${knownRefLabel(k.ref)}`).join(" · ")}</div>}
+                          </div>
+                          <div>
+                            <label className={fieldLabel}>Bill date</label>
+                            <input type="date" value={form.billDate} onChange={(e) => setForm({ ...form, billDate: e.target.value })} className={`${selCls} w-full`} />
+                          </div>
+                        </>
+                      )}
+                    </div>
+                    {!isTransfer && (
+                      <label className="flex items-center gap-2 text-sm text-[#1F1D1B] cursor-pointer">
+                        <input type="checkbox" checked={form.accrued} onChange={(e) => setForm({ ...form, accrued: e.target.checked })} className="h-4 w-4 accent-[#6B5C32]" />
+                        Accrue now, pay later
+                      </label>
+                    )}
                   </div>
-                ))}
-              </div>
-              <div className="flex items-center justify-between mt-2">
-                <div className="flex items-center gap-3">
-                  <Button variant="outline" size="sm" onClick={() => setLines([...lines, { accountCode: "", description: "", amount: "" }])}>
-                    <Plus className="h-4 w-4" /> Add line
-                  </Button>
-                  <span className="text-[11px] text-[#B4B2A9]">press <span className="font-medium text-[#6B7280]">Insert</span> to add a line below</span>
-                </div>
-                <span className="text-sm text-[#6B7280]">Total <span className="text-lg font-semibold text-[#1F1D1B] tabular-nums">{pvMoneyError ? "—" : formatCurrency(totalSen)}</span></span>
-                {pvMoneyError && <span className="text-[11px] text-[#9A3A2D]">{pvMoneyError}</span>}
-                {droppedLines > 0 && (
-                  <span className="text-[11px] text-[#9A3A2D]">{droppedLines} line{droppedLines === 1 ? "" : "s"} with an amount but no account — not counted, and will not be posted.</span>
-                )}
-              </div>
-            </div>
+                </section>
 
-            {(() => {
-              const cannot = saving || totalSen <= 0 || !!pvMoneyError || (form.accrued ? !form.accrualAccount : !(form.payFrom || defaultBankCode(bankCash)));
-              return (
-                <div className="flex flex-wrap gap-2 pt-3 border-t border-[#F0ECE9] items-center">
+                {!isTransfer && (
+                  <section className="rounded-md border border-[#E2DDD8] bg-white">
+                    <div className={sectionHead}>
+                      <span>Lines</span>
+                      {!editingRow && <ScanPrefillButton label={pendingScanFiles.length ? "Add another receipt (OCR)" : "Scan bill (OCR)"} allDocs onResult={applyScan} />}
+                      <span className="normal-case font-normal text-[#6B7280] tracking-normal">{lines.length} line{lines.length === 1 ? "" : "s"} · total {pvMoneyError ? "—" : formatCurrency(totalSen)}</span>
+                    </div>
+                    <div className="p-4 space-y-3">
+                      {lines.map((l, i) => (
+                        <div
+                          key={i}
+                          className="rounded-lg border border-[#E2DDD8] bg-[#FAF8F5] p-3"
+                          onKeyDown={(e) => { if (e.key === "Insert") { e.preventDefault(); setLines((prev) => [...prev.slice(0, i + 1), { accountCode: "", description: "", amount: "" }, ...prev.slice(i + 1)]); } }}
+                        >
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-[11px] font-bold uppercase tracking-wide text-[#6B7280]">Line {i + 1}</span>
+                            <div className="flex items-center gap-3">
+                              <span className="text-sm font-semibold tabular-nums text-[#1F1D1B]">{formatCurrency(toSen(l.amount))}</span>
+                              <button onClick={() => setLines(lines.length > 1 ? lines.filter((_, j) => j !== i) : lines)} title="Remove line" className="text-[#B4B2A9] hover:text-[#9A3A2D] text-sm cursor-pointer">✕</button>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div>
+                              <label className={fieldLabel}>Account (debit) *</label>
+                              <AccountPicker accounts={lineAccounts} value={l.accountCode} onChange={(code) => setLines(lines.map((x, j) => (j === i ? { ...x, accountCode: code, hint: undefined } : x)))} placeholder="— Expense / charge account —" />
+                              {l.hint && <div className={`text-[10px] mt-0.5 ${l.hint.kind === "suggested" ? "text-[#7A5B12] font-semibold" : "text-[#9CA3AF]"}`}>{l.hint.text}</div>}
+                            </div>
+                            <div>
+                              <label className={fieldLabel}>Description</label>
+                              <input type="text" placeholder="Line description" value={l.description} onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, description: e.target.value } : x)))} className={`${selCls} w-full`} />
+                            </div>
+                            <div>
+                              <label className={fieldLabel}>Amount (MYR)</label>
+                              <input type="text" placeholder="0.00" value={l.amount} onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, amount: e.target.value } : x)))} className={`${selCls} w-full text-right tabular-nums ${isUnreadableMoney(l.amount) ? "text-[#9A3A2D] underline decoration-wavy" : ""}`} />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-3">
+                          <Button variant="outline" size="sm" onClick={() => setLines([...lines, { accountCode: "", description: "", amount: "" }])}>
+                            <Plus className="h-4 w-4" /> Add line
+                          </Button>
+                          <span className="text-[11px] text-[#B4B2A9]">press <span className="font-medium text-[#6B7280]">Insert</span> to add a line below</span>
+                        </div>
+                        <span className="text-sm text-[#6B7280]">Total <span className="text-lg font-semibold text-[#1F1D1B] tabular-nums">{pvMoneyError ? "—" : formatCurrency(totalSen)}</span></span>
+                      </div>
+                      {pvMoneyError && <div className="text-[11px] text-[#9A3A2D]">{pvMoneyError}</div>}
+                      {droppedLines > 0 && (
+                        <div className="text-[11px] text-[#9A3A2D]">{droppedLines} line{droppedLines === 1 ? "" : "s"} with an amount but no account — not counted, and will not be posted.</div>
+                      )}
+                    </div>
+                  </section>
+                )}
+                {isTransfer && payFromCode && payFromCode === form.transferTo && (
+                  <div className="text-[11px] text-[#9A3A2D]">Transfer to and Paid from must be different accounts.</div>
+                )}
+
+                <div className="flex flex-wrap gap-2 items-center">
                   {editingId ? (
                     <Button variant="primary" size="sm" disabled={cannot} onClick={() => handleSave("post")}>
                       {saving ? "Updating…" : editingPosted ? "Update posted voucher" : "Save changes"}
@@ -10121,22 +10925,22 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
                         {saving ? "Saving…" : "Save as draft"}
                       </Button>
                       <Button variant="outline" size="sm" disabled={cannot} onClick={() => handleSave("post")} title="One click: number issued and posted to the ledger now">
-                        {form.accrued ? "Post now (accrued)" : "Post now"}
+                        {form.accrued && !isTransfer ? "Post now (accrued)" : "Post now"}
                       </Button>
                     </>
                   )}
                   <Button variant="outline" size="sm" onClick={resetForm}>Cancel</Button>
-                  {pendingScanFile && !editingId && <span className="text-[11px] text-[#6B7280]">📎 {pendingScanFile.name} will be attached on save</span>}
+                  {pendingScanFiles.length > 0 && !editingId && <span className="text-[11px] text-[#6B7280]">📎 {pendingScanFiles.map((f) => f.name).join(", ")} will be attached on save</span>}
                 </div>
-              );
-            })()}
-          </CardContent>
-        </Card>
-      )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {!payLoading && (
         <div className="text-[11px] uppercase tracking-wide text-[#9CA3AF]" title="Every payment out, whichever page it was recorded on — all four share one HPV number series">
-          {payRows.length} payment{payRows.length === 1 ? "" : "s"} · {doorCount("PV")} voucher · {doorCount("AP")} AP · {doorCount("SP")} supplier · {doorCount("OCP")} other creditor
+          {payRows.length} payment{payRows.length === 1 ? "" : "s"} · {doorCount("PV")} voucher · {doorCount("AP")} AP · {doorCount("TR")} transfer · {doorCount("SP")} supplier · {doorCount("OCP")} other creditor · {doorCount("FT")} old fund transfer
         </div>
       )}
       <div className="inline-flex flex-wrap rounded-md border border-[#E2DDD8] bg-white overflow-hidden text-xs">
@@ -10162,7 +10966,7 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
         </select>
         <select value={doorFilter} onChange={(e) => setDoorFilter(e.target.value as "" | PayDoor)} className="rounded-md border border-[#E2DDD8] px-2 py-1.5 text-sm" title="Which page the payment was recorded on">
           <option value="">All doors</option>
-          {(["PV", "AP", "SP", "OCP"] as PayDoor[]).map((d) => <option key={d} value={d}>{PAY_DOOR_LABEL[d]}</option>)}
+          {(["PV", "AP", "TR", "SP", "OCP", "FT"] as PayDoor[]).map((d) => <option key={d} value={d}>{PAY_DOOR_LABEL[d]}</option>)}
         </select>
         {bankHiddenSp > 0 && (
           <span className="text-[11px] text-[#9A3A2D]">{bankHiddenSp} supplier payment{bankHiddenSp === 1 ? "" : "s"} hidden — no bank leg on their ledger posting (contra settlement); pick All banks to see them</span>
@@ -10200,6 +11004,10 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
               const head = ["Supplier Payment", row.no, row.date, row.payee, "", row.state, "", "", (row.totalSen / 100).toFixed(2)];
               return row.sp.lines.map((l) => [...head, "400-0000", accounts.find((a) => a.code === "400-0000")?.name ?? "", l.piNo || "Advance / unallocated", (l.amountSen / 100).toFixed(2)]);
             }
+            if (row.ft) {
+              const head = ["Fund Transfer", row.no, row.date, row.payee, accountLabel(accounts, row.ft.fromAccount), row.state, row.note, "", (row.totalSen / 100).toFixed(2)];
+              return [[...head, row.ft.toAccount, row.ft.toName, "Transfer", (row.totalSen / 100).toFixed(2)]];
+            }
             if (row.ocp) {
               const head = ["Other Creditor Payment", row.no, row.date, row.payee, row.via ? accountLabel(accounts, row.via) : "", row.state, row.ocp.reference ?? "", "", (row.totalSen / 100).toFixed(2)];
               return row.ocp.lines.map((l) => [...head, "405-0000", accounts.find((a) => a.code === "405-0000")?.name ?? "", l.billNo, (l.amountSen / 100).toFixed(2)]);
@@ -10207,7 +11015,7 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
             const r = row.pv!;
             const bank = r.payFrom || r.accrualAccount || "";
             const head = [
-              r.pvKind === "AP" ? "AP Payment" : "Payment Voucher",
+              r.pvKind === "AP" ? "AP Payment" : r.pvKind === "TRANSFER" ? "Transfer" : "Payment Voucher",
               r.pvNo ?? r.id,
               r.date ?? "",
               r.payee ?? "",
@@ -10258,30 +11066,32 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
               <tbody>
                 {visibleRows.map((row) => {
                   // A row from another door: read-only here apart from print /
-                  // void (its own endpoint) — expand shows what it settled,
-                  // double-click opens the popup, "open ↗" goes to its page.
+                  // void (its own endpoint) — double-click opens the popup with
+                  // everything, "open ↗" goes to its page. Single click does
+                  // nothing (owner 2026-10-01 「我不要点一次打开」).
                   if (!row.pv) {
                     const g = row;
                     return (
                       <React.Fragment key={g.key}>
                         <tr
                           className={`border-b border-[#F0ECE9] cursor-pointer hover:bg-[#FAF8F5] ${g.state !== "ACTIVE" ? "opacity-50" : g.advanceOpen ? "text-blue-600" : ""}`}
-                          onClick={() => setExpandedPv((m) => ({ ...m, [g.key]: !m[g.key] }))}
                           onDoubleClick={() => setDetailPayKey(g.key)}
-                          title="Click to expand · double-click to open"
+                          title="Double-click to open"
                         >
                           <td className="px-3 py-1.5 w-8" onClick={(e) => e.stopPropagation()}>
                             <input type="checkbox" checked={pvSel.isSelected(g.key)} onChange={() => pvSel.toggle(g.key)} className="h-3.5 w-3.5 accent-[#6B5C32]" />
                           </td>
                           <td className="px-3 py-1.5 tabular-nums text-xs whitespace-nowrap">
-                            <span className="inline-block w-3 text-[#9CA3AF]">{expandedPv[g.key] ? "▾" : "▸"}</span> {g.no}
+                            {g.no}
                             <span className="ml-2">{payDoorChip(g.door)}</span>
                           </td>
                           <td className="px-3 py-1.5 text-xs text-[#6B7280] whitespace-nowrap">{g.date}</td>
-                          <td className="px-3 py-1.5">{[g.payee, g.ocp?.reference].filter(Boolean).join(" · ")}</td>
+                          <td className="px-3 py-1.5">{[g.payee, g.ocp?.reference, g.ft?.description].filter(Boolean).join(" · ")}</td>
                           <td className="px-3 py-1.5 text-xs">{g.via || <span className="text-[#9CA3AF]" title="No bank leg on this payment's ledger posting (contra settlement)">—</span>}</td>
                           <td className="px-3 py-1.5 text-xs text-[#6B7280]">
-                            {g.sp
+                            {g.ft
+                              ? <span>→ {g.ft.toName || g.ft.toAccount}</span>
+                              : g.sp
                               ? <span title={g.sp.lines.map((l) => `${l.piNo || "Advance"} ${formatCurrency(l.amountSen)}`).join("\n")}>{g.sp.lines.filter((l) => l.purchaseInvoiceId).length} invoice{g.sp.lines.filter((l) => l.purchaseInvoiceId).length === 1 ? "" : "s"}{spAdvanceOpenSen(g.sp) > 0 ? " + advance" : ""}</span>
                               : <span title={(g.ocp?.lines ?? []).map((l) => `${l.billNo} ${formatCurrency(l.amountSen)}`).join("\n")}>{g.ocp?.lines.length ?? 0} bill{(g.ocp?.lines.length ?? 0) === 1 ? "" : "s"}</span>}
                           </td>
@@ -10304,11 +11114,6 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
                             />
                           </td>
                         </tr>
-                        {expandedPv[g.key] && (
-                          <tr className="bg-[#FAF8F5] border-b border-[#F0ECE9]">
-                            <td colSpan={9} className="px-8 py-2">{foreignDetailTable(g)}</td>
-                          </tr>
-                        )}
                       </React.Fragment>
                     );
                   }
@@ -10317,20 +11122,19 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
                   <React.Fragment key={r.id}>
                   <tr
                     className={`border-b border-[#F0ECE9] cursor-pointer hover:bg-[#FAF8F5] ${r.status === "VOID" ? "opacity-50" : ""}`}
-                    onClick={() => setExpandedPv((m) => ({ ...m, [r.id]: !m[r.id] }))}
                     onDoubleClick={() => setDetailPvId(r.id)}
-                    title="Click to expand · double-click to open"
+                    title="Double-click to open"
                   >
                     <td className="px-3 py-1.5 w-8" onClick={(e) => e.stopPropagation()}>
                       <input type="checkbox" checked={pvSel.isSelected(row.key)} onChange={() => pvSel.toggle(row.key)} className="h-3.5 w-3.5 accent-[#6B5C32]" />
                     </td>
                     <td className="px-3 py-1.5 tabular-nums text-xs whitespace-nowrap">
-                      <span className="inline-block w-3 text-[#9CA3AF]">{expandedPv[r.id] ? "▾" : "▸"}</span> {r.pvNo}
-                      <span className="ml-2">{payDoorChip(r.pvKind === "AP" ? "AP" : "PV")}</span>
-                      {(r.attachmentCount ?? 0) > 0 && <span className="ml-1.5 text-[10px] text-[#6B7280]" title={`${r.attachmentCount} attachment${r.attachmentCount === 1 ? "" : "s"} — expand to see`}>📎{r.attachmentCount}</span>}
+                      {r.pvNo}
+                      <span className="ml-2">{payDoorChip(row.door)}</span>
+                      {(r.attachmentCount ?? 0) > 0 && <span className="ml-1.5 text-[10px] text-[#6B7280]" title={`${r.attachmentCount} attachment${r.attachmentCount === 1 ? "" : "s"} — double-click to see`}>📎{r.attachmentCount}</span>}
                     </td>
                     <td className="px-3 py-1.5 text-xs text-[#6B7280] whitespace-nowrap">{r.date}</td>
-                    <td className="px-3 py-1.5">{[r.payee, r.description].filter(Boolean).join(" · ")}</td>
+                    <td className="px-3 py-1.5">{r.pvKind === "TRANSFER" ? [`Transfer to ${shortBankName(accounts.find((a) => a.code === r.lines[0]?.accountCode)?.name) || (r.lines[0]?.accountCode ?? "")}`, r.description].filter(Boolean).join(" · ") : [r.payee, r.description].filter(Boolean).join(" · ")}</td>
                     <td className="px-3 py-1.5 text-xs">
                       {r.accrued === 1 && !r.settledAt
                         ? <span className="text-[#9A3A2D]">accrued → {r.accrualAccount}</span>
@@ -10339,7 +11143,9 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
                     <td className="px-3 py-1.5 text-xs text-[#6B7280]">
                       {r.pvKind === "AP"
                         ? <span title={(r.allocs ?? []).map((a) => `${a.docNo} ${formatCurrency(a.amountSen)}`).join("\n")}>{(r.allocs ?? []).length} bill{(r.allocs ?? []).length === 1 ? "" : "s"}{(r.advanceSen ?? 0) > 0 ? " + advance" : ""}</span>
-                        : (r.productLine ?? "shared")}
+                        : r.pvKind === "TRANSFER"
+                          ? <span>→ {shortBankName(accounts.find((a) => a.code === r.lines[0]?.accountCode)?.name) || r.lines[0]?.accountCode}</span>
+                          : `${r.lines.length} line${r.lines.length === 1 ? "" : "s"}`}
                     </td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(r.totalSen)}</td>
                     <td className="px-3 py-1.5 text-xs">
@@ -10396,67 +11202,6 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
                       />
                     </td>
                   </tr>
-                  {expandedPv[r.id] && (
-                    <tr className="bg-[#FAF8F5] border-b border-[#F0ECE9]">
-                      <td colSpan={9} className="px-8 py-2">
-                        {r.pvKind === "AP" ? (
-                          <table className="w-full text-xs">
-                            <thead>
-                              <tr className="text-[#9CA3AF] text-left">
-                                <th className="py-1 pr-4 font-medium">Bill</th>
-                                <th className="py-1 pr-4 font-medium">Ref</th>
-                                <th className="py-1 font-medium text-right">Paid</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {(r.allocs ?? []).map((a, i) => (
-                                <tr key={i} className="border-t border-[#F0ECE9]">
-                                  <td className="py-1 pr-4 whitespace-nowrap tabular-nums">{a.docNo || a.docId} <span className="text-[10px] text-[#9CA3AF]">{a.docKind === "PI" ? "purchase invoice" : "other-creditor bill"}</span></td>
-                                  <td className="py-1 pr-4 text-[#6B7280]">{a.docRef}</td>
-                                  <td className="py-1 text-right tabular-nums">{formatCurrency(a.amountSen)}</td>
-                                </tr>
-                              ))}
-                              {(r.advanceSen ?? 0) > 0 && (
-                                <tr className="border-t border-[#F0ECE9]">
-                                  <td className="py-1 pr-4">Advance / unallocated{(r.advanceOpenSen ?? 0) > 0 && isPosted(r) ? <span className="ml-1 text-[10px] text-[#7A5B12]">· {formatCurrency(r.advanceOpenSen ?? 0)} still unapplied</span> : null}</td>
-                                  <td className="py-1 pr-4" />
-                                  <td className="py-1 text-right tabular-nums">{formatCurrency(r.advanceSen ?? 0)}</td>
-                                </tr>
-                              )}
-                              {(r.allocs ?? []).length === 0 && (r.advanceSen ?? 0) <= 0 && (
-                                <tr><td colSpan={3} className="py-1 text-[#9CA3AF]">No bills on this voucher.</td></tr>
-                              )}
-                            </tbody>
-                          </table>
-                        ) : r.lines.length === 0 ? (
-                          <div className="text-xs text-[#9CA3AF]">No line detail.</div>
-                        ) : (
-                          <table className="w-full text-xs">
-                            <thead>
-                              <tr className="text-[#9CA3AF] text-left">
-                                <th className="py-1 pr-4 font-medium">Account</th>
-                                <th className="py-1 pr-4 font-medium">Description</th>
-                                <th className="py-1 font-medium text-right">Amount</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {r.lines.map((l, i) => {
-                                const nm = accounts.find((a) => a.code === l.accountCode)?.name;
-                                return (
-                                  <tr key={i} className="border-t border-[#F0ECE9]">
-                                    <td className="py-1 pr-4 whitespace-nowrap">{l.accountCode}{nm ? ` · ${nm}` : ""}</td>
-                                    <td className="py-1 pr-4">{l.description ?? ""}</td>
-                                    <td className="py-1 text-right tabular-nums">{formatCurrency(l.amountSen)}</td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                        )}
-                        <PvAttachmentsBlock pv={r} onChanged={load} />
-                      </td>
-                    </tr>
-                  )}
                   </React.Fragment>
                   );
                 })}
@@ -10514,14 +11259,60 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
                   : null}
             </>}
           >
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <DetailField label="Date">{r.date}</DetailField>
-              <DetailField label={r.pvKind === "AP" ? (r.partyKind === "OTHER" ? "Other creditor" : "Supplier") : "Payee"} span={2}>{r.payee || "—"}</DetailField>
-              <DetailField label={r.accrued === 1 && !r.settledAt ? "Accrued to" : "Paid from"}>{r.accrued === 1 && !r.settledAt ? (r.accrualAccount ? accountLabel(accounts, r.accrualAccount) : "—") : (r.payFrom ? accountLabel(accounts, r.payFrom) : "—")}</DetailField>
-              <DetailField label={r.pvKind === "AP" ? "Reference" : "Description"} span={3}>{r.description || "—"}</DetailField>
-              <DetailField label="Total"><span className="tabular-nums">{formatCurrency(r.totalSen)}</span></DetailField>
-              {r.pvKind !== "AP" && <DetailField label="Product line">{r.productLine ?? "shared"}</DetailField>}
-            </div>
+            {/* The voucher as it was keyed (owner 2026-10-01: double-click shows
+                everything, in the form's own layout). */}
+            <section className="rounded-md border border-[#E2DDD8]">
+              <div className={docSectionHead}>Header</div>
+              <div className="p-3 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+                {r.pvKind === "TRANSFER"
+                  ? <DetailField label="Transfer to" span={2}>{r.lines[0] ? accountLabel(accounts, r.lines[0].accountCode) : "—"}</DetailField>
+                  : <DetailField label={r.pvKind === "AP" ? (r.partyKind === "OTHER" ? "Other creditor" : "Supplier") : "Payee"} span={2}>{r.payee || "—"}</DetailField>}
+                <DetailField label="PV #">{r.pvNo.startsWith("DRAFT-") ? "(assigned at Check)" : r.pvNo}</DetailField>
+                <DetailField label="Voucher date">{r.date}</DetailField>
+                <DetailField label={r.accrued === 1 && !r.settledAt ? "Accrued to" : "Paid from"} span={2}>{r.accrued === 1 && !r.settledAt ? (r.accrualAccount ? accountLabel(accounts, r.accrualAccount) : "—") : (r.payFrom ? accountLabel(accounts, r.payFrom) : "—")}</DetailField>
+                <DetailField label="Total"><span className="tabular-nums">{formatCurrency(r.totalSen)}</span></DetailField>
+                <DetailField label="Kind">{r.pvKind === "AP" ? "AP payment" : r.pvKind === "TRANSFER" ? "Transfer" : "Payment"}</DetailField>
+                <DetailField label={r.pvKind === "AP" ? "Reference" : "Description (printed)"} span={4}>{r.description || "—"}</DetailField>
+                {r.pvKind !== "AP" && r.pvKind !== "TRANSFER" && (
+                  <>
+                    <DetailField label="Bill no.">{(r.billNo ?? r.bill_no) || "—"}</DetailField>
+                    <DetailField label="Bill date">{String((r.billDate ?? r.bill_date) ?? "").slice(0, 10) || "—"}</DetailField>
+                  </>
+                )}
+                <DetailField label="Notes (internal)" span={r.pvKind !== "AP" && r.pvKind !== "TRANSFER" ? 2 : 4}>{r.notes || "—"}</DetailField>
+              </div>
+            </section>
+            <section className="rounded-md border border-[#E2DDD8]">
+              <div className={docSectionHead}>{r.pvKind === "AP" ? "Bills paid" : r.pvKind === "TRANSFER" ? "Transfer" : "Lines"}</div>
+              <div className="p-3">
+                <div className="border border-[#E2DDD8] rounded-md overflow-x-auto">
+                  {r.pvKind === "AP" ? (
+                    <table className="w-full text-sm">
+                      <thead className="bg-[#FAF8F5]"><tr className="text-xs text-[#6B7280]"><th className="text-left px-3 py-1.5 font-medium">Bill</th><th className="text-left px-3 py-1.5 font-medium">Ref</th><th className="text-right px-3 py-1.5 font-medium">Paid</th></tr></thead>
+                      <tbody>
+                        {(r.allocs ?? []).map((a, i) => (
+                          <tr key={i} className="border-t border-[#F0ECE9]"><td className="px-3 py-1.5 whitespace-nowrap tabular-nums">{a.docNo || a.docId} <span className="text-[10px] text-[#9CA3AF]">{a.docKind === "PI" ? "purchase invoice" : "other-creditor bill"}</span></td><td className="px-3 py-1.5 text-[#6B7280]">{a.docRef}</td><td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(a.amountSen)}</td></tr>
+                        ))}
+                        {(r.advanceSen ?? 0) > 0 && <tr className="border-t border-[#F0ECE9]"><td className="px-3 py-1.5">Advance / unallocated{(r.advanceOpenSen ?? 0) > 0 && isPosted(r) ? <span className="ml-1 text-[10px] text-[#7A5B12]">· {formatCurrency(r.advanceOpenSen ?? 0)} still unapplied</span> : null}</td><td /><td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(r.advanceSen ?? 0)}</td></tr>}
+                        <tr className="border-t-2 border-[#1F1D1B] font-semibold"><td className="px-3 py-1.5" colSpan={2}>Total</td><td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(r.totalSen)}</td></tr>
+                      </tbody>
+                    </table>
+                  ) : (
+                    <table className="w-full text-sm">
+                      <thead className="bg-[#FAF8F5]"><tr className="text-xs text-[#6B7280]"><th className="text-left px-3 py-1.5 font-medium">Account</th><th className="text-left px-3 py-1.5 font-medium">Description</th><th className="text-right px-3 py-1.5 font-medium">Amount</th></tr></thead>
+                      <tbody>
+                        {r.lines.map((l, i) => (
+                          <tr key={i} className="border-t border-[#F0ECE9]"><td className="px-3 py-1.5 whitespace-nowrap">{accountLabel(accounts, l.accountCode)}</td><td className="px-3 py-1.5 text-[#6B7280]">{l.description ?? ""}</td><td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(l.amountSen)}</td></tr>
+                        ))}
+                        {r.lines.length === 0 && <tr><td colSpan={3} className="px-3 py-2 text-xs text-[#9CA3AF]">No line detail.</td></tr>}
+                        <tr className="border-t-2 border-[#1F1D1B] font-semibold"><td className="px-3 py-1.5" colSpan={2}>Total</td><td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(r.totalSen)}</td></tr>
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </div>
+            </section>
+            <PvAttachmentsBlock pv={r} onChanged={load} />
             {/* Ladder trail — who did what, when. */}
             <div className="rounded-md bg-[#FAF8F5] border border-[#F0ECE9] px-3 py-2 text-xs grid grid-cols-2 sm:grid-cols-4 gap-2">
               <div><span className="text-[#9CA3AF]">Prepared</span><br />{rx.preparedByName ?? rx.createdByName ?? "—"} · {dmy(r.preparedAt ?? r.prepared_at)}</div>
@@ -10530,32 +11321,7 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
               <div><span className="text-[#9CA3AF]">Settled</span><br />{r.accrued === 1 ? dmy(r.settledAt) : "n/a"}</div>
               {(r.rejectReason ?? r.reject_reason) && st === "DRAFT" && r.status !== "VOID" && <div className="col-span-2 sm:col-span-4 text-[#9A3A2D]">↩ Rejected: {r.rejectReason ?? r.reject_reason}</div>}
             </div>
-            <div className="border border-[#E2DDD8] rounded-md overflow-x-auto">
-              {r.pvKind === "AP" ? (
-                <table className="w-full text-sm">
-                  <thead className="bg-[#FAF8F5]"><tr className="text-xs text-[#6B7280]"><th className="text-left px-3 py-1.5 font-medium">Bill</th><th className="text-left px-3 py-1.5 font-medium">Ref</th><th className="text-right px-3 py-1.5 font-medium">Paid</th></tr></thead>
-                  <tbody>
-                    {(r.allocs ?? []).map((a, i) => (
-                      <tr key={i} className="border-t border-[#F0ECE9]"><td className="px-3 py-1.5 whitespace-nowrap tabular-nums">{a.docNo || a.docId} <span className="text-[10px] text-[#9CA3AF]">{a.docKind === "PI" ? "purchase invoice" : "other-creditor bill"}</span></td><td className="px-3 py-1.5 text-[#6B7280]">{a.docRef}</td><td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(a.amountSen)}</td></tr>
-                    ))}
-                    {(r.advanceSen ?? 0) > 0 && <tr className="border-t border-[#F0ECE9]"><td className="px-3 py-1.5">Advance / unallocated{(r.advanceOpenSen ?? 0) > 0 && isPosted(r) ? <span className="ml-1 text-[10px] text-[#7A5B12]">· {formatCurrency(r.advanceOpenSen ?? 0)} still unapplied</span> : null}</td><td /><td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(r.advanceSen ?? 0)}</td></tr>}
-                    <tr className="border-t-2 border-[#1F1D1B] font-semibold"><td className="px-3 py-1.5" colSpan={2}>Total</td><td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(r.totalSen)}</td></tr>
-                  </tbody>
-                </table>
-              ) : (
-                <table className="w-full text-sm">
-                  <thead className="bg-[#FAF8F5]"><tr className="text-xs text-[#6B7280]"><th className="text-left px-3 py-1.5 font-medium">Account</th><th className="text-left px-3 py-1.5 font-medium">Description</th><th className="text-right px-3 py-1.5 font-medium">Amount</th></tr></thead>
-                  <tbody>
-                    {r.lines.map((l, i) => (
-                      <tr key={i} className="border-t border-[#F0ECE9]"><td className="px-3 py-1.5 whitespace-nowrap">{accountLabel(accounts, l.accountCode)}</td><td className="px-3 py-1.5 text-[#6B7280]">{l.description ?? ""}</td><td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(l.amountSen)}</td></tr>
-                    ))}
-                    {r.lines.length === 0 && <tr><td colSpan={3} className="px-3 py-2 text-xs text-[#9CA3AF]">No line detail.</td></tr>}
-                    <tr className="border-t-2 border-[#1F1D1B] font-semibold"><td className="px-3 py-1.5" colSpan={2}>Total</td><td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(r.totalSen)}</td></tr>
-                  </tbody>
-                </table>
-              )}
-            </div>
-            <PvAttachmentsBlock pv={r} onChanged={load} />
+            <DocTrailBlock family="payment_voucher" sourceId={r.id} />
           </DocDetailModal>
         );
       })()}
@@ -10586,13 +11352,14 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
           >
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <DetailField label="Date">{g.date}</DetailField>
-              <DetailField label={g.sp ? "Supplier" : "Other creditor"} span={2}>{g.payee || "—"}</DetailField>
+              <DetailField label={g.sp ? "Supplier" : g.ft ? "Transfer" : "Other creditor"} span={2}>{g.payee || "—"}</DetailField>
               <DetailField label="Paid from">{g.via ? accountLabel(accounts, g.via) : <span title="No bank leg on this payment's ledger posting (contra settlement)">—</span>}</DetailField>
-              <DetailField label="Reference" span={3}>{g.ocp?.reference || "—"}</DetailField>
+              <DetailField label={g.ft ? "Description" : "Reference"} span={3}>{(g.ft ? g.ft.description : g.ocp?.reference) || "—"}</DetailField>
               <DetailField label="Total"><span className="tabular-nums">{formatCurrency(g.totalSen)}</span></DetailField>
             </div>
             <div className="text-[11px] text-[#9CA3AF]">Recorded on the {PAY_DOOR_LABEL[g.door]} page — it posted when it was saved (no approval ladder). Edit, knock-off and FX live on that page.</div>
             <div className="border border-[#E2DDD8] rounded-md px-3 py-2">{foreignDetailTable(g)}</div>
+            <DocTrailBlock family={g.sp ? "supplier_payment" : g.ft ? "fund_transfer" : "other_party_payment"} sourceId={g.no} />
           </DocDetailModal>
         );
       })()}
@@ -15116,7 +15883,7 @@ function BalanceSheetTab() {
         </CardHeader>
         <CardContent>
           <div className="border border-[#E2DDD8] rounded-lg overflow-hidden overflow-x-auto">
-            <table className="w-full text-sm">
+            <table data-col-resize="first" className="w-full text-sm">
               <thead>
                 <tr className="bg-[#F0ECE9]">
                   <th className="text-left px-4 py-2 font-semibold text-[#1F1D1B] w-28">Code</th>
@@ -15203,10 +15970,22 @@ type CfDrillData = {
   key: string; label: string; section: string; found: boolean; tied: boolean;
   items: CfDrillItem[]; months: { ym: string; label: string; sen: number }[];
 };
-function CfDrillPanel({ period, lineKey }: { period: string; lineKey: string }) {
+// Owner 2026-10-01 「Monthly P&L 明细不能做到这样？」→「monthly cash flow 也是
+// 需要」: the payments listed UNDER the line, in the statement's own columns —
+// date · description · who it is with — document no., the amount in its
+// month's column and in Accumulated. A payment split across lines shows this
+// line's share; the whole payment, the bank and the documents it settled are
+// on hover. The last row counts them and gives each month's subtotal (= the
+// line's figure).
+function CfMonthlyDrillRows({ period, lineKey, cols, depth, accountCode }: {
+  period: string;
+  lineKey: string;
+  cols: { key: string; label: string; accum?: boolean }[];
+  depth: number;
+  accountCode?: string;
+}) {
   const [data, setData] = useState<CfDrillData | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [month, setMonth] = useState<string>(period); // a month key, or "ALL"
   useEffect(() => {
     let dead = false;
     fetch(`/api/accounting/cashflow-drill?period=${encodeURIComponent(period)}&key=${encodeURIComponent(lineKey)}`)
@@ -15215,90 +15994,52 @@ function CfDrillPanel({ period, lineKey }: { period: string; lineKey: string }) 
       .catch(() => { if (!dead) setErr("Could not load the payments"); });
     return () => { dead = true; };
   }, [period, lineKey]);
-  const shown = data ? data.items.filter((it) => month === "ALL" || it.ym === month) : [];
-  const sum = (items: CfDrillItem[]) => items.reduce((s, it) => s + it.sen, 0);
-  const total = sum(shown);
-  const chips = data ? data.months.filter((m) => m.sen !== 0 || m.ym === period) : [];
-  // Owner 2026-09-29 「有一点点乱」: the whole payment + this line's share get
-  // their own columns (only when something here is split); one Amount column,
-  // money out in brackets like the statement; "All months" in month blocks,
-  // each with its total (= that month's figure on the statement).
-  const anySplit = shown.some((it) => it.ofSen);
-  const colCount = anySplit ? 8 : 6;
+  const pad = { paddingLeft: `${24 + depth * 16}px` };
+  const bg = "bg-[#FAF8F5]";
+  if (!data || !data.found) {
+    const msg = err ?? (data ? "This line is not on the statement any more — reload the page." : "Loading the payments…");
+    return <tr className={bg}><td className={`py-1 text-[12px] ${err ? "text-[#9A3412]" : "text-[#9CA3AF]"}`} style={pad}>{msg}</td><td colSpan={cols.length} /></tr>;
+  }
+  const amtCls = (sen: number) => `text-right px-2 tabular-nums whitespace-nowrap ${sen < 0 ? "text-[#9A3A2D]" : ""}`;
   const amt = (sen: number) => (sen < 0 ? `(${plDrillAmt(-sen)})` : plDrillAmt(sen));
-  const amtCls = (sen: number) => `py-1 pl-3 text-right tabular-nums whitespace-nowrap ${sen < 0 ? "text-[#9A3A2D]" : ""}`;
-  const blocks: { ym: string; label: string; items: CfDrillItem[] }[] = month === "ALL"
-    ? [...new Set(shown.map((it) => it.ym))].sort().map((ym) => ({ ym, label: data?.months.find((m) => m.ym === ym)?.label ?? ym, items: shown.filter((it) => it.ym === ym) }))
-    : [{ ym: month, label: "", items: shown }];
-  const itemRow = (it: CfDrillItem) => (
-    <tr key={it.key} className="border-t border-[#F0ECE9] align-top text-[#374151]">
-      <td className="py-1 pr-3 whitespace-nowrap">{it.date.replace(/-/g, "/")}</td>
-      <td className="py-1 pr-3">{it.description || "—"}</td>
-      <td className="py-1 pr-3 whitespace-nowrap" title={it.otherSide.map((o) => `${o.code} ${o.name}`).join(", ")}>{it.otherSide.length ? it.otherSide.map((o) => shortBankName(o.name) || o.code).join(", ") : "—"}</td>
-      <td className="py-1 pr-3 whitespace-nowrap">{it.ref1}</td>
-      <td className="py-1 pr-3">
-        {it.docs
-          ? <span className="underline decoration-dotted cursor-help" title={it.docs}>{it.ref2 || "—"}</span>
-          : (it.ref2 ?? "")}
-      </td>
-      {anySplit && <td className="py-1 pl-3 text-right tabular-nums whitespace-nowrap text-[#6B7280]">{it.ofSen ? plDrillAmt(it.ofSen) : ""}</td>}
-      {anySplit && <td className="py-1 pl-3 text-right tabular-nums whitespace-nowrap text-[#6B7280]">{it.ofSen ? `${((Math.abs(it.sen) / it.ofSen) * 100).toFixed(1)}%` : ""}</td>}
-      <td className={amtCls(it.sen)}>{amt(it.sen)}</td>
-    </tr>
-  );
-  const th = "py-1 pr-3 font-medium text-left";
-  const thR = "py-1 pl-3 font-medium text-right";
-  const chip = (on: boolean) => `px-2 py-0.5 rounded-full border text-[11px] ${on ? "bg-[#6B5C32] border-[#6B5C32] text-white" : "border-[#E2DDD8] text-[#6B7280] hover:bg-white"}`;
+  const perMonth = new Map<string, number>();
+  for (const it of data.items) perMonth.set(it.ym, (perMonth.get(it.ym) ?? 0) + it.sen);
+  const total = data.items.reduce((sum, it) => sum + it.sen, 0);
+  const months = cols.filter((c) => !c.accum).map((c) => c.key).sort();
   return (
-    <div className="bg-[#FAF8F5] border-y border-dashed border-[#E2DDD8] px-4 py-2 whitespace-normal">
-      {!data && !err && <div className="text-xs text-[#9CA3AF] py-1">Loading the payments…</div>}
-      {err && <div className="text-xs text-[#9A3412] py-1">{err}</div>}
-      {data && !data.found && <div className="text-xs text-[#6B7280] py-1">This line is not on the statement any more — reload the page.</div>}
-      {data && data.found && (
-        <>
-          <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
-            {chips.map((m) => (
-              <button key={m.ym} type="button" className={chip(month === m.ym)} onClick={() => setMonth(m.ym)}>{m.label}</button>
-            ))}
-            <button type="button" className={chip(month === "ALL")} onClick={() => setMonth("ALL")}>All months</button>
-            {!data.tied && <span className="text-[11px] text-[#9A3412] ml-2">These rows do not add up to the line — please report it.</span>}
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-[12px]">
-              <thead>
-                <tr className="text-[11px] uppercase tracking-wide text-[#6B7280]">
-                  <th className={th}>Date</th><th className={th}>Description</th><th className={th}>Bank</th>
-                  <th className={th}>Ref. 1</th><th className={th}>Ref. 2</th>
-                  {anySplit && <th className={thR} title="The whole payment — this line got a share of it">Whole payment</th>}
-                  {anySplit && <th className={thR} title="This line's share of the whole payment">Share</th>}
-                  <th className={thR}>Amount</th>
-                </tr>
-              </thead>
-              <tbody>
-                {blocks.map((b) => (
-                  <Fragment key={b.ym}>
-                    {b.items.map(itemRow)}
-                    {month === "ALL" && (
-                      <tr className="border-t border-[#E2DDD8] font-semibold text-[#4B5563] bg-[#F7F4EF]">
-                        <td className="py-1" colSpan={colCount - 1}>{b.label} total</td>
-                        <td className={amtCls(sum(b.items))}>{amt(sum(b.items))}</td>
-                      </tr>
-                    )}
-                  </Fragment>
-                ))}
-                {shown.length === 0 && (
-                  <tr><td colSpan={colCount} className="py-1 text-[#9CA3AF]">No money moved on this line {month === "ALL" ? "this financial year" : "in this month"}.</td></tr>
-                )}
-                <tr className="border-t border-[#9CA3AF] font-semibold text-[#1F1D1B]">
-                  <td className="py-1" colSpan={colCount - 1}>Total</td>
-                  <td className={amtCls(total)}>{amt(total)}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
-    </div>
+    <>
+      {data.items.map((it) => {
+        const bank = it.otherSide.map((o) => shortBankName(o.name) || o.code).join(", ");
+        const hover = [
+          it.ofSen ? `This line's share of a payment of RM ${plDrillAmt(it.ofSen)} (${((Math.abs(it.sen) / it.ofSen) * 100).toFixed(1)}%)` : "",
+          bank ? `Bank: ${it.otherSide.map((o) => `${o.code} ${o.name}`).join(", ")}` : "",
+          it.docs ? `Settled: ${it.docs}` : "",
+        ].filter(Boolean).join("\n");
+        const text = `${it.date.slice(8, 10)}/${it.date.slice(5, 7)} · ${it.description || "—"}${it.ref2 ? ` · ${it.ref2}` : ""} — ${it.ref1}`;
+        return (
+          <tr key={it.key} className={`${bg} text-[12px] text-[#4B5563]`} title={hover || undefined}>
+            <td className="py-1" style={pad}>
+              <div className="truncate max-w-[34rem]">{text}{it.ofSen ? <span className="text-[#9CA3AF]"> · share</span> : null}</div>
+            </td>
+            {cols.map((c) => {
+              const on = c.accum || c.key === it.ym;
+              return <td key={c.key} className={`${on ? amtCls(it.sen) : ""} ${c.accum ? "bg-[#F6F1E7]" : ""}`}>{on ? amt(it.sen) : ""}</td>;
+            })}
+          </tr>
+        );
+      })}
+      <tr className="bg-[#F7F4EF] text-[12px] font-semibold text-[#4B5563] border-t border-[#E2DDD8]">
+        <td className="py-1" style={pad}>
+          {data.items.length} entr{data.items.length === 1 ? "y" : "ies"}
+          {accountCode && months.length > 0 && <> · <Link to={glHref(accountCode, months[0], months[months.length - 1])} className="underline decoration-dotted text-[#6B5C32]">open in GL</Link></>}
+          {!data.tied && <span className="font-normal text-[#9A3412]"> · these payments do not add up to the line — please report it</span>}
+        </td>
+        {cols.map((c) => {
+          const sen = c.accum ? total : (perMonth.get(c.key) ?? 0);
+          return <td key={c.key} className={`${amtCls(sen)} ${c.accum ? "bg-[#F6F1E7]" : ""}`}>{amt(sen)}</td>;
+        })}
+      </tr>
+    </>
   );
 }
 type CfApiData = { period: string; columns: { key: string; label: string; accum?: boolean }[]; rows: CfApiRow[] };
@@ -16011,7 +16752,7 @@ function CashFlowTab() {
                 <div className="text-[11px] text-[#6B7280]">Accumulated + trailing 12 months · view {period}</div>
               </div>
             </div>
-            <table className="text-[13px]" style={{ minWidth: 760 }}>
+            <table data-col-resize="first" className="text-[13px]">
               <thead>
                 {/* PERIOD row bold on top (house rule), Accumulated tinted so
                     the cumulative column never reads as a 13th month. */}
@@ -16071,9 +16812,7 @@ function CashFlowTab() {
                         <td key={j} className={`text-right px-2 tabular-nums whitespace-nowrap ${typeof v === "number" && v < 0 ? "text-[#9A3A2D]" : ""} ${v === 0 ? "text-[#C7C1BA]" : ""} ${strong ? "font-semibold" : ""} ${cols[j]?.accum ? "bg-[#F6F1E7]" : ""}`}>{fmt(v)}</td>
                       ))}
                     </tr>
-                    {drilled && r.lineKey && (
-                      <tr><td colSpan={cols.length + 1} className="p-0"><CfDrillPanel period={period} lineKey={r.lineKey} /></td></tr>
-                    )}
+                    {drilled && r.lineKey && <CfMonthlyDrillRows period={period} lineKey={r.lineKey} cols={cols} depth={r.depth} accountCode={r.accountCode} />}
                     </Fragment>
                   );
                 })}

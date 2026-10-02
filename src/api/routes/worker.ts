@@ -355,6 +355,16 @@ function malaysiaNow(): Date {
 function todayYmd(): string {
   return malaysiaNow().toISOString().slice(0, 10);
 }
+// Minutes since an open punch's clockIn ("HH:MM", Malaysia wall clock), read
+// against the Malaysia clock too. Raw elapsed, no lunch deduction, because that
+// is what punch-out stores in workingMinutes, so the card doesn't jump when the
+// worker punches out. BUG-2026-10-01-243: this used UTC getHours(), 8h behind,
+// so the figure clamped to 0 most of the day and the card hid it.
+export function liveWorkingMinutes(clockIn: string, nowMs = Date.now()): number {
+  const [h, m] = clockIn.split(":").map(Number);
+  const my = new Date(nowMs + 8 * 60 * 60 * 1000);
+  return Math.max(0, my.getUTCHours() * 60 + my.getUTCMinutes() - (h * 60 + m));
+}
 
 // ----- types for joined queries -----
 type AttendanceRow = {
@@ -604,17 +614,11 @@ app.get("/today", async (c) => {
             clockOut: attendance.clockOut,
             // Live computation: when worker is clocked IN but not OUT yet,
             // workingMinutes = 0 in DB until clockOut runs. Show ticking
-            // working time on the home page instead of a static 0.
-            workingMinutes: (() => {
-              if (attendance.workingMinutes > 0) return attendance.workingMinutes;
-              if (!attendance.clockIn || attendance.clockOut) {
-                return attendance.workingMinutes;
-              }
-              const [h, m] = attendance.clockIn.split(":").map(Number);
-              const now = new Date();
-              const total = now.getHours() * 60 + now.getMinutes() - (h * 60 + m);
-              return Math.max(0, total);
-            })(),
+            // working time (Malaysia clock) on the home page instead of a 0.
+            workingMinutes:
+              attendance.workingMinutes > 0 || !attendance.clockIn || attendance.clockOut
+                ? attendance.workingMinutes
+                : liveWorkingMinutes(attendance.clockIn),
             status: attendance.status,
           }
         : null,
@@ -1017,6 +1021,11 @@ function parseCoord(v: unknown): number | null {
     ? v
     : null;
 }
+// Every write to attendance_records bumps updated_at: it is half of the
+// /history snapshot's freshness probe, and a clock-out that adds no row moves
+// nothing else (BUG-2026-10-01-245). Same ISO text the column default and
+// attendance.ts write, so the per-table MAX stays comparable.
+const BUMP_UPDATED_AT = "updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')";
 async function stampPunchGeo(
   db: D1Database,
   recId: string,
@@ -1030,7 +1039,7 @@ async function stampPunchGeo(
       ? "clockInLat = ?, clockInLng = ?"
       : "clockOutLat = ?, clockOutLng = ?";
   await db
-    .prepare(`UPDATE attendance_records SET ${cols} WHERE id = ?`)
+    .prepare(`UPDATE attendance_records SET ${cols}, ${BUMP_UPDATED_AT} WHERE id = ?`)
     .bind(lat, lng, recId)
     .run();
 }
@@ -1047,7 +1056,7 @@ async function stampPunchPhoto(
   if (!photo || !photo.startsWith("data:image/") || photo.length > 600_000) return;
   const col = action === "CLOCK_IN" ? "clockInPhoto" : "clockOutPhoto";
   await db
-    .prepare(`UPDATE attendance_records SET ${col} = ? WHERE id = ?`)
+    .prepare(`UPDATE attendance_records SET ${col} = ?, ${BUMP_UPDATED_AT} WHERE id = ?`)
     .bind(photo, recId)
     .run();
 }
@@ -1092,7 +1101,7 @@ async function autoCloseForgottenPunch(
     .prepare(
       `UPDATE attendance_records
          SET clockOut = ?, workingMinutes = ?, ${clearMetrics}
-             overtimeMinutes = 0,
+             overtimeMinutes = 0, ${BUMP_UPDATED_AT},
              notes = CASE WHEN notes IS NULL OR notes = '' THEN ? ELSE notes END
        WHERE id = ? AND clockOut IS NULL`,
     )
@@ -1243,13 +1252,13 @@ app.post("/clock", async (c) => {
       // status is PRESENT.
       if (!existing.clockIn) {
         await c.var.DB.prepare(
-          "UPDATE attendance_records SET clockIn = ?, status = 'PRESENT' WHERE id = ?",
+          `UPDATE attendance_records SET clockIn = ?, status = 'PRESENT', ${BUMP_UPDATED_AT} WHERE id = ?`,
         )
           .bind(time, existing.id)
           .run();
       } else {
         await c.var.DB.prepare(
-          "UPDATE attendance_records SET status = 'PRESENT' WHERE id = ?",
+          `UPDATE attendance_records SET status = 'PRESENT', ${BUMP_UPDATED_AT} WHERE id = ?`,
         )
           .bind(existing.id)
           .run();
@@ -1329,7 +1338,7 @@ app.post("/clock", async (c) => {
   await c.var.DB.prepare(
     `UPDATE attendance_records
        SET clockOut = ?, workingMinutes = ?, ${clockOutClear}
-           overtimeMinutes = ?
+           overtimeMinutes = ?, ${BUMP_UPDATED_AT}
      WHERE id = ?`,
   )
     .bind(
@@ -1535,10 +1544,10 @@ app.get("/history", async (c) => {
       // v2: daily[] rows carry deptHours (DEV-31) — older snapshots lack it.
       cacheKey: `v2:${workerId}:${fromStr}:${toStr}`,
     },
-    async () => {
+    async (db) => {
 
   // ---- attendance ----
-  const attRes = await c.var.DB.prepare(
+  const attRes = await db.prepare(
     "SELECT * FROM attendance_records WHERE employeeId = ? AND date >= ? AND date <= ? ORDER BY date DESC",
   )
     .bind(workerId, fromStr, toStr)
@@ -1551,7 +1560,7 @@ app.get("/history", async (c) => {
   // is gated off until rollout (see commit a803ca9), so attendance.workingMinutes
   // is typically 0. Sum hours per date and let working_hour_entries take precedence
   // over attendance clock-time wherever both exist.
-  const wheRes = await c.var.DB.prepare(
+  const wheRes = await db.prepare(
     "SELECT date, hours, departmentCode, category FROM working_hour_entries WHERE workerId = ? AND date >= ? AND date <= ?",
   )
     .bind(workerId, fromStr, toStr)
@@ -1559,7 +1568,7 @@ app.get("/history", async (c) => {
   const wheMinutesByDate = new Map<string, number>();
   // DEV-31: the same rows per department, so the phone shows the split the
   // office sees on Working Hours (one total per day hid it).
-  const deptNames = await loadDeptNames(c.var.DB);
+  const deptNames = await loadDeptNames(db);
   const deptHoursByDate = new Map<
     string,
     Array<{ departmentCode: string; name: string; category: string | null; hours: number }>
@@ -1584,8 +1593,8 @@ app.get("/history", async (c) => {
   let addProdTotalMin = 0;
   const addProdMinByJobCard = new Map<string, number>();
   try {
-    await ensureNonprodRequests(c.var.DB);
-    const apRes = await c.var.DB.prepare(
+    await ensureNonprodRequests(db);
+    const apRes = await db.prepare(
       `SELECT COALESCE(approved_hours, hours) AS hours, job_card_id AS jobCardId
          FROM worker_nonprod_requests
         WHERE worker_id = ? AND kind = 'ADD_PROD' AND status = 'APPROVED'
@@ -1613,7 +1622,7 @@ app.get("/history", async (c) => {
   // everywhere else). Resilient: no versions table → defaults.
   let histPayRules: Awaited<ReturnType<typeof loadPayRuleVersions>> = [];
   try {
-    histPayRules = await loadPayRuleVersions(c.var.DB);
+    histPayRules = await loadPayRuleVersions(db);
   } catch {
     histPayRules = [];
   }
@@ -1668,7 +1677,7 @@ app.get("/history", async (c) => {
   // ---- completed job cards in range ----
   // First: every JC the worker touches that's COMPLETED/TRANSFERRED inside
   // [fromStr, toStr].  Two paths to "mine" (legacy + piecePics).
-  const myJcsLegacy = await c.var.DB.prepare(
+  const myJcsLegacy = await db.prepare(
     `SELECT * FROM job_cards
        WHERE (pic1Id = ? OR pic2Id = ?)
          AND status IN ('COMPLETED','TRANSFERRED')`,
@@ -1676,7 +1685,7 @@ app.get("/history", async (c) => {
     .bind(workerId, workerId)
     .all<JobCardRow>();
 
-  const myPicsRes = await c.var.DB.prepare(
+  const myPicsRes = await db.prepare(
     "SELECT * FROM piece_pics WHERE pic1Id = ? OR pic2Id = ?",
   )
     .bind(workerId, workerId)
@@ -1690,7 +1699,7 @@ app.get("/history", async (c) => {
   let extraJcs: JobCardRow[] = [];
   if (extraJcIds.length > 0) {
     const placeholders = extraJcIds.map(() => "?").join(",");
-    const r = await c.var.DB.prepare(
+    const r = await db.prepare(
       `SELECT * FROM job_cards WHERE id IN (${placeholders})
          AND status IN ('COMPLETED','TRANSFERRED')`,
     )
@@ -1712,7 +1721,7 @@ app.get("/history", async (c) => {
   if (inRangeJcs.length > 0) {
     const ids = inRangeJcs.map((j) => j.id);
     const placeholders = ids.map(() => "?").join(",");
-    const r = await c.var.DB.prepare(
+    const r = await db.prepare(
       `SELECT * FROM piece_pics WHERE jobCardId IN (${placeholders})`,
     )
       .bind(...ids)
@@ -1731,7 +1740,7 @@ app.get("/history", async (c) => {
   const posById = new Map<string, ProductionOrderRow>();
   if (poIds.length > 0) {
     const placeholders = poIds.map(() => "?").join(",");
-    const r = await c.var.DB.prepare(
+    const r = await db.prepare(
       `SELECT id, poNo, productCode, productName, itemCategory, sizeLabel FROM production_orders WHERE id IN (${placeholders})`,
     )
       .bind(...poIds)
@@ -1783,7 +1792,7 @@ app.get("/history", async (c) => {
   if (coPicIds.size > 0) {
     const ids = Array.from(coPicIds);
     const placeholders = ids.map(() => "?").join(",");
-    const r = await c.var.DB.prepare(
+    const r = await db.prepare(
       `SELECT id, name FROM workers WHERE id IN (${placeholders})`,
     )
       .bind(...ids)
@@ -1984,7 +1993,7 @@ app.get("/history", async (c) => {
   // number as before. Returned as a 1-decimal figure (matching the Overview's
   // toFixed(1)); the phone renders `${efficiencyPct}%` unchanged.
   const effByWorkerRange = await memoizedMonthlyEfficiency(
-    c.var.DB,
+    db,
     fromStr,
     toStr,
   );
@@ -2100,9 +2109,9 @@ app.get("/payslips", async (c) => {
       orgId: DEFAULT_ORG_ID,
       cacheKey: `${workerId}:${snapPeriod}`,
     },
-    async () => {
+    async (db) => {
 
-  const res = await c.var.DB.prepare(
+  const res = await db.prepare(
     // absentDays / absenceDeductionSen ride along so a FINISHED month can show
     // the same "why is it this number" breakdown the in-progress month already
     // showed. Without them the worker could see every late minute and absent
@@ -2128,17 +2137,17 @@ app.get("/payslips", async (c) => {
   const lateByPeriod = new Map<string, Array<{ date: string; hours: number }>>();
   const lateSenByPeriod = new Map<string, number>();
   try {
-    const dedRes = await c.var.DB.prepare(
+    const dedRes = await db.prepare(
       "SELECT date, hours FROM payroll_hour_deductions WHERE workerId = ? ORDER BY date",
     )
       .bind(workerId)
       .all<{ date: string; hours: number }>();
-    const wRow = await c.var.DB.prepare(
+    const wRow = await db.prepare(
       "SELECT basicSalarySen, workingDaysPerMonth, workingHoursPerDay FROM workers WHERE id = ?",
     )
       .bind(workerId)
       .first<{ basicSalarySen: number; workingDaysPerMonth: number; workingHoursPerDay: number }>();
-    const versions = await loadPayRuleVersions(c.var.DB);
+    const versions = await loadPayRuleVersions(db);
     for (const d of dedRes.results ?? []) {
       const h = Number(d.hours) || 0;
       if (h <= 0 || typeof d.date !== "string") continue;
@@ -2205,7 +2214,7 @@ app.get("/payslips", async (c) => {
   const monthPrefix = `${period}-`;
 
   // This worker's Working Hours rows for the current month.
-  const wheRes = await c.var.DB.prepare(
+  const wheRes = await db.prepare(
     `SELECT date, hours FROM working_hour_entries
       WHERE workerId = ? AND date LIKE ?`,
   )
@@ -2215,7 +2224,7 @@ app.get("/payslips", async (c) => {
   // Public holidays — kv_config['public_holidays'], a JSON array of
   // YYYY-MM-DD strings. A holiday is never charged to the worker as an
   // absence (the divisor still stays at workingDaysPerMonth).
-  const phRes = await c.var.DB.prepare(
+  const phRes = await db.prepare(
     "SELECT value FROM kv_config WHERE key = ?",
   )
     .bind("public_holidays")
@@ -2240,7 +2249,7 @@ app.get("/payslips", async (c) => {
   // mid-month raise. Resilient: no history table / no rows → current basic salary.
   let salaryHistory: Array<{ effectiveFrom: string; basicSalarySen: number }> = [];
   try {
-    const wsh = await c.var.DB.prepare(
+    const wsh = await db.prepare(
       "SELECT basicSalarySen, effectiveFrom FROM worker_salary_history WHERE workerId = ?",
     )
       .bind(workerId)
@@ -2268,7 +2277,7 @@ app.get("/payslips", async (c) => {
   // (2 working days back), so days that haven't happened yet AND the most
   // recent not-yet-keyed days aren't charged as absences. Matches payroll.
   // Effective-dated grace — same source the office payroll uses.
-  const workerPayRules = await loadPayRuleVersions(c.var.DB);
+  const workerPayRules = await loadPayRuleVersions(db);
   const absenceThroughDay = absenceCutoffDay(
     now.getFullYear(),
     now.getMonth() + 1,
@@ -2287,7 +2296,7 @@ app.get("/payslips", async (c) => {
   // to the specific days (date + hours docked), mirroring the Absent / OT chips.
   const lateDays: Array<{ date: string; hours: number; note: string }> = [];
   try {
-    const dedRes = await c.var.DB.prepare(
+    const dedRes = await db.prepare(
       "SELECT date, hours, note FROM payroll_hour_deductions WHERE workerId = ? AND date LIKE ? ORDER BY date",
     )
       .bind(workerId, `${monthPrefix}%`)
@@ -2340,11 +2349,11 @@ app.get("/payslips", async (c) => {
   // the to-date estimate (only elapsed cards + keyed hours exist yet).
   const { start: effStart, end: effEnd } = monthBounds(period);
   const effByWorker = await computeMonthlyEfficiencyByWorker(
-    c.var.DB,
+    db,
     effStart,
     effEnd,
   );
-  const effCfg = await c.var.DB.prepare(
+  const effCfg = await db.prepare(
     "SELECT efficiencyAllowanceSen, efficiencyThresholdPct, leadershipAllowanceSen FROM workers WHERE id = ?",
   )
     .bind(workerId)
@@ -2370,7 +2379,7 @@ app.get("/payslips", async (c) => {
   // DRAFT (or none) → the numbers above are an estimate.
   let payslipStatus: "NONE" | "DRAFT" | "APPROVED" | "PAID" = "NONE";
   try {
-    const ps = await c.var.DB.prepare(
+    const ps = await db.prepare(
       "SELECT status FROM payslips WHERE employeeId = ? AND period = ?",
     )
       .bind(workerId, period)

@@ -40,6 +40,10 @@ export interface PnlMatrixRow {
   label: string;
   groupId?: string;
   accountCode?: string;
+  // The account a computed line can be opened on (the Monthly P&L drill) —
+  // a group's PURCHASE = its purchase account, carriage, SST. Same codes as
+  // the statement's drillCode.
+  drillCode?: string;
   values: number[];
   pctValues: number[];
 }
@@ -63,12 +67,13 @@ export function buildPnlMatrix(cols: PnlMatrixCol[]): PnlMatrix {
     list.find((l) => keyOf(l) === key)?.amountSen ?? 0;
 
   let gid = 0;
-  const push = (kind: PnlMatrixRow["kind"], depth: number, label: string, ex: (w: PnlWindowLike) => number, opts: { groupId?: string; accountCode?: string } = {}) => {
+  const push = (kind: PnlMatrixRow["kind"], depth: number, label: string, ex: (w: PnlWindowLike) => number, opts: { groupId?: string; accountCode?: string; drillCode?: string } = {}) => {
     const values = windows.map(ex);
     rows.push({ kind, depth, label, values, pctValues: pctOf(values), ...opts });
   };
   const group = (label: string, depth: number, ex: (w: PnlWindowLike) => number) => { const id = `g${gid++}`; push("group", depth, label, ex, { groupId: id }); return id; };
-  const line = (label: string, depth: number, ex: (w: PnlWindowLike) => number, accountCode?: string) => push("line", depth, label, ex, { accountCode });
+  const line = (label: string, depth: number, ex: (w: PnlWindowLike) => number, accountCode?: string, drillCode?: string) =>
+    push("line", depth, label, ex, drillCode ? { accountCode, drillCode } : { accountCode });
   const tot = (label: string, depth: number, ex: (w: PnlWindowLike) => number) => push("total", depth, label, ex);
   const grand = (label: string, ex: (w: PnlWindowLike) => number) => push("grandtotal", 0, label, ex);
   const gap = () => rows.push({ kind: "gap", depth: 0, label: "", values: [], pctValues: [] });
@@ -86,11 +91,11 @@ export function buildPnlMatrix(cols: PnlMatrixCol[]): PnlMatrix {
     const find = (w: PnlWindowLike) => w.rmGroups.find((q) => q.group === rg.group);
     group(rg.description, 2, (w) => { const x = find(w); return x ? x.openingSen + x.purchasesSen - x.closingSen : 0; });
     line("OPENING STOCK", 3, (w) => find(w)?.openingSen ?? 0);
-    line("PURCHASE", 3, (w) => find(w)?.purchasesSen ?? 0);
+    line("PURCHASE", 3, (w) => find(w)?.purchasesSen ?? 0, undefined, rg.group);
     line("CLOSING STOCK", 3, (w) => -(find(w)?.closingSen ?? 0));
   }
-  line("CARRIAGE INWARDS", 1, (w) => w.carriageSen);
-  line("SST CHARGES", 1, (w) => w.sstSen);
+  line("CARRIAGE INWARDS", 1, (w) => w.carriageSen, undefined, "700-1015");
+  line("SST CHARGES", 1, (w) => w.sstSen, undefined, "706-0000");
   group("DIRECT LABOUR", 1, (w) => w.labourSen);
   for (const ll of spine.labourLines) line(ll.name, 2, (w) => byCode(w.labourLines, keyOf(ll)), ll.code);
   group("FACTORY OVERHEAD", 1, (w) => w.overheadSen);

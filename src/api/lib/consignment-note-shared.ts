@@ -597,7 +597,8 @@ export type UpdateCNResult =
       ok: false;
       reason: "items_locked";
       currentStatus: string | null;
-    };
+    }
+  | { ok: false; reason: "po_conflict"; message: string };
 
 // ----------------------------------------------------------------------------
 // validatePOMutex (latent gap 1, 2026-04-29).
@@ -616,12 +617,24 @@ export type UpdateCNResult =
 // Note: the symmetric DO-side guard is NOT added (per task spec — DO is
 // reference-only). When a future DO refactor lands, mirror this helper
 // from the DO POST/PUT items-replace path.
+//
+// CN side also rejects a PO that is already on another non-cancelled CN
+// (BUG-2026-10-01-238), the mirror of the DO rule "a PO can only be delivered
+// once" in delivery-orders/_helpers.ts. Same predicate as the Pending CN
+// dedup in /ready-planning (`status <> 'CANCELLED'`), so a PO hidden from that
+// list is exactly a PO this refuses. `excludeCnId` = the CN being edited.
+// `message` is the user-facing 409 text; every caller returns it verbatim.
 // ----------------------------------------------------------------------------
 export async function validatePOMutex(
   db: D1Database,
   poIds: string[],
   sourceType: "DO" | "CN",
-): Promise<{ ok: true } | { ok: false; conflicts: string[]; reason: "do_active" | "cn_active" }> {
+  excludeCnId: string | null = null,
+): Promise<
+  | { ok: true }
+  | { ok: false; conflicts: string[]; reason: "do_active" | "cn_active"; message: string }
+> {
+  poIds = [...new Set(poIds.filter((x) => x))];
   if (poIds.length === 0) return { ok: true };
   const ph = poIds.map(() => "?").join(",");
   // Active = anything that isn't a terminal/cancelled state. For DO that's
@@ -645,7 +658,34 @@ export async function validatePOMutex(
       .map((r) => r.poId)
       .filter((s): s is string => !!s);
     if (conflicts.length > 0) {
-      return { ok: false, conflicts, reason: "do_active" };
+      return {
+        ok: false,
+        conflicts,
+        reason: "do_active",
+        message: `Cannot create consignment note: ${conflicts.length} PO${conflicts.length === 1 ? "" : "s"} already on an active delivery order: ${conflicts.join(", ")}`,
+      };
+    }
+    // Same PO on another non-cancelled CN.
+    const cnRows = await db
+      .prepare(
+        `SELECT DISTINCT ci.productionOrderId AS poId, cn.noteNumber AS noteNumber, po.poNo AS poNo
+           FROM consignment_items ci
+           JOIN consignment_notes cn ON cn.id = ci.consignmentNoteId
+           LEFT JOIN production_orders po ON po.id = ci.productionOrderId
+          WHERE ci.productionOrderId IN (${ph})
+            AND cn.status <> 'CANCELLED'${excludeCnId ? " AND cn.id <> ?" : ""}`,
+      )
+      .bind(...poIds, ...(excludeCnId ? [excludeCnId] : []))
+      .all<{ poId: string; noteNumber: string | null; poNo: string | null }>();
+    const onCn = cnRows.results ?? [];
+    if (onCn.length > 0) {
+      const lines = onCn.map((r) => `${r.poNo || r.poId} on ${r.noteNumber || "another CN"}`);
+      return {
+        ok: false,
+        conflicts: [...new Set(onCn.map((r) => r.poId))],
+        reason: "cn_active",
+        message: `These production orders are already on a consignment note (a PO can only be consigned once): ${lines.join(", ")}. Remove them from the selection.`,
+      };
     }
     return { ok: true };
   }
@@ -665,7 +705,12 @@ export async function validatePOMutex(
     .map((r) => r.poId)
     .filter((s): s is string => !!s);
   if (conflicts.length > 0) {
-    return { ok: false, conflicts, reason: "cn_active" };
+    return {
+      ok: false,
+      conflicts,
+      reason: "cn_active",
+      message: `${conflicts.length} PO${conflicts.length === 1 ? "" : "s"} already on an active consignment note: ${conflicts.join(", ")}`,
+    };
   }
   return { ok: true };
 }
@@ -748,6 +793,17 @@ export async function updateConsignmentNoteById(
       reason: "items_locked",
       currentStatus: existing.status,
     };
+  }
+
+  // Items replace may add a PO that is already on a DO or another CN
+  // (BUG-2026-10-01-238). Checked before any write; this CN's own lines are
+  // excluded so re-saving an unchanged list passes.
+  if (Array.isArray(body.items)) {
+    const poIds = (body.items as Array<Record<string, unknown>>)
+      .map((it) => it.productionOrderId)
+      .filter((s): s is string => typeof s === "string" && s.length > 0);
+    const mutex = await validatePOMutex(db, poIds, "CN", id);
+    if (!mutex.ok) return { ok: false, reason: "po_conflict", message: mutex.message };
   }
 
   // Auto-stamp lifecycle timestamps (idempotent on forward transitions).
