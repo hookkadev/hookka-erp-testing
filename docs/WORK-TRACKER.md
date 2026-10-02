@@ -178,7 +178,8 @@ Ask: staging, TEST-001: after clock-out `/api/worker/today` had the punch-out an
 Ask: the Edit BOM WIP tab used to look layered like the BOM Structure view; since 2026-08-04 it is a flat list of identical "{DIVAN_HEIGHT} Divan- {SI…" rows and hard to read. Keep the two-pane editor (option A) but give it the colour / nesting / gradient look of the old one (option B).
 
 1. 🔵 Left tree = nested gradient cards in the BOM Structure palette (L2 blue, L3 purple, L4 orange, L5 green), L-badge, resolved name ("8" Divan- 6FT Foam"), qty, minutes, process pills. Right pane header in the selected node's level colour. Dialog widened to 1360px; stacks on phone width. tsc strict + eslint exit 0. Visual check on localhost (prod API) pending the owner's login.
-2. ⚪ PR → CI → merge → prod check: open Edit BOM on 1003(A)(HF)(W)-(K), WIP tab, desktop + phone width.
+2. 🔵 #669 merged (edc4c0cf), deployed; owner saw the new cards on prod.
+3. 🔵 Follow-up (branch `fix/bom-editor-scroll`): neither pane scrolled — dialog had no definite height on the WIP tab. Fixed; scroll measured in a static repro at desktop and phone width. Owner to confirm on prod.
 
 ## 2026-09-30 — 🔵 DEV-26 Pillow sticker for Fab Sew (Siti, High) (branch `fix/pillow-fab-sew-sticker` → `main`, BUG-2026-09-30-231)
 
