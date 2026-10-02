@@ -1,5 +1,7 @@
 # Reports & Analytics — Module Guide
 
+> **Last verified: 2026-10-02** (branch `feat/schedule-summary-email-to-main`): `schedule-overdue-report.ts` line count (804) and the Schedule email / full list page notes only. Nothing else re-checked.
+
 > **Last verified: 2026-10-02** (branch `feat/email-reports-to-main`): `reports.ts` and report-lib line counts and every `reports.ts` anchor in this file re-derived, plus the Email Reports settings / due-trigger / phone-layout notes. Nothing else re-checked.
 
 > **Last verified: 2026-08-14** (branch `docs/docs-vs-code-audit`) — corrected against the
@@ -29,7 +31,7 @@ Two unrelated report worlds share the name **Reports**:
   - `/api/forecasts` → `src/api/routes/forecasts.ts` (155) — mount `worker.ts:1346`
   - `/api/dashboard/overview` → `src/api/routes/dashboard-overview.ts` (2316) — mount `worker.ts:1304`
 - Report engines (logic lives here, not in the route)
-  - `src/api/lib/compliance-report.ts` (1519) · `efficiency-report.ts` (669) · `schedule-overdue-report.ts` (779) · `operations-report.ts` (1248) · `production-brief.ts` (742)
+  - `src/api/lib/compliance-report.ts` (1519) · `efficiency-report.ts` (669) · `schedule-overdue-report.ts` (804) · `operations-report.ts` (1248) · `production-brief.ts` (742)
 - Shared client engines: `src/lib/print-report.ts` (351, WYSIWYG print) · `src/lib/export-report.ts` (146, CSV/XLSX/PDF export)
 
 ## Data model
@@ -74,7 +76,7 @@ Two unrelated report worlds share the name **Reports**:
 
 ## Gotchas
 - **The Reports hub and `/api/reports/*` do NOT share data.** `reports.tsx` tabs fetch source-module list APIs and aggregate client-side; only `daily-report.tsx` consumes `/api/reports/compliance.json`. Don't expect matching shapes.
-- **Logic lives in `src/api/lib/*`, not the route.** `reports.ts` (1080) is a thin shim over `compliance-report.ts` (1519), `efficiency-report.ts` (669), `schedule-overdue-report.ts` (779), `operations-report.ts` (1248), `production-brief.ts` (742). Edit the lib, not the handler.
+- **Logic lives in `src/api/lib/*`, not the route.** `reports.ts` (1080) is a thin shim over `compliance-report.ts` (1519), `efficiency-report.ts` (669), `schedule-overdue-report.ts` (804), `operations-report.ts` (1248), `production-brief.ts` (742). Edit the lib, not the handler.
 - **`/send` endpoints touch the email/cron path** — they resolve recipients from `kv_config` + `users` and call `sendMail`; not a pure read. The cron `-trigger` variants add `authCron` (`x-cron-secret`) + `cronGate` (skip Sunday / public holidays).
 - **Daily Report is expensive → snapshot-cached.** `collectComplianceData` cold-computes ~6s across the whole order/delivery/invoice/procurement chain; `buildComplianceCached` (`reports.ts:672`) serves last-good instantly and refreshes in the background. Numbers are byte-identical.
 - **Production Brief is Agent-Console-gated.** A paused `PRODUCTION` agent (or global kill switch) silences the automatic brief; manual `/brief/send` still works. It also runs under `recordAgentRun` for token accounting.
@@ -88,7 +90,7 @@ Two unrelated report worlds share the name **Reports**:
 - **Add / change an emailed report** → add a collect+render pair in a `src/api/lib/*-report.ts`, wire a `ReportKind` into `dispatchReport` (`reports.ts:783`) + a `-trigger` on the `internal` Hono (`:762`) + a manual `/send`. Recipients via `resolveRecipients` (`:183`).
 - **Change report recipients / schedule** → `kv_config['daily_report_recipients']` (fallback SUPER_ADMINs); cron workflows drive the `-trigger` endpoints. Working-day skip logic is `cronGate`/`nonWorkingDayReason` (`reports.ts:836 / 154`).
 - **Email Reports (Settings → Email Reports, SUPER_ADMIN)** → `GET/PUT /api/reports/settings` (`reports.ts:950 / 960`) read and write `kv_config['daily_report_settings']` through `lib/report-settings.ts`. A report with a saved entry uses its OWN recipient list (an empty list sends to nobody, it never falls back to SUPER_ADMINs); a report with no entry keeps the old shared list and its old time. `daily-reports.yml` calls `due-trigger` (`reports.ts:912`) every 15 minutes; `dueSlot` decides what is due and `daily_report_last_sent` records what went out. `DEFAULT_TIMES` are the old fixed times (brief 07:00, schedule 08:00, efficiency 12:00, overdue 17:00 SGT); change them only on purpose. The first due-trigger run on a database calls `seedLastSent` so times already passed that day are marked handled, not re-sent.
-- **Every report email has a phone layout; keep it screen-only, and keep it presentation only.** The same template serves the email, the in-app page and the A4 print. Schedule + Overdue share `PHONE_CSS` in `schedule-overdue-report.ts` (below 900px rows become cards); Efficiency has its own block (below 640px, employee rows become cards and the department table's name column wraps so the Efficiency % column stays on screen, BUG-2026-10-02-248); the Brief only has a viewport tag and tighter padding. `render{Schedule,Overdue,Efficiency}Html(data, { email: true })` drops the Print button. The Schedule email caps its rows at `EMAIL_ROWS_BUDGET` (80,000 bytes) so Gmail does not clip it (totals always show). Put new phone rules inside `@media screen` so print is unchanged (BUG-2026-09-29-221 / -232, BUG-2026-10-01-240; tests `overdue-email-mobile`, `report-emails-mobile`, `schedule-email-size`, `report-settings`).
+- **Every report email has a phone layout; keep it screen-only, and keep it presentation only.** The same template serves the email, the in-app page and the A4 print. Schedule + Overdue share `PHONE_CSS` in `schedule-overdue-report.ts` (below 900px rows become cards); Efficiency has its own block (below 640px, employee rows become cards and the department table's name column wraps so the Efficiency % column stays on screen, BUG-2026-10-02-248); the Brief only has a viewport tag and tighter padding. `render{Schedule,Overdue,Efficiency}Html(data, { email: true })` drops the Print button. The Schedule email is the summary only: the four top boxes, a Departments table (job cards, planned time, % of planned time, % of job cards per department, heaviest first, built from the department totals `collectScheduleData` already returns) and one "Show full list" link, with no job rows, so it is about 8 KB on any day. The full list page (`GET /api/reports/schedule`) repeats that summary, then a department filter (plain links, `?dept=<code>`) and every job row. Put new phone rules inside `@media screen` so print is unchanged (BUG-2026-09-29-221 / -232, BUG-2026-10-01-240; tests `overdue-email-mobile`, `report-emails-mobile`, `schedule-email-size`, `schedule-department-share`, `report-settings`).
 - **Touch forecasts** → `forecasts.ts` CRUD (`:55 / :80`) over `forecast_entries`; the page composes it with historical-sales + promise-date.
 
 ## Related modules

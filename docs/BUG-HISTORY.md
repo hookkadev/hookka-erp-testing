@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-02**: BUG-2026-10-01-240 got a follow-up (the Schedule email is now summary only; branch `feat/schedule-summary-email-to-main`, to main); a log, so "verified" means the entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-02**: newest entry BUG-2026-10-02-248 (branch `feat/email-reports-to-main`, to main); entries -221, -232, -240 and -248 are the Email Reports phone and size fixes brought over from staging; a log, so "verified" means the entries match the code on this branch, not that every older entry is still true.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-246 (branch `fix/fin-tables-ceil`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-01**: BUG-2026-10-01-244 got a follow-up section (the (FC) Fab Cut card, branch `claude/main-accessories-duplicate-cards-fdxaik`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
@@ -107,6 +108,8 @@ triggered the send. Whitespace between row tags is stripped. A 100-card day is
 not capped at all, and the in-app page is never capped.
 
 Regression: `tests/schedule-email-size.test.mjs`.
+
+Follow-up 2026-10-02 (branch `feat/schedule-summary-email-to-main`): the email no longer carries job rows at all, only the four top boxes, a department table and one "Show full list" link, so the row cap (`EMAIL_ROWS_BUDGET`) is gone and the email is about 8 KB on any day. The full list page has every row plus a department filter (`?dept=<code>`).
 
 ## BUG-2026-09-29-232 — the Schedule, Efficiency and Morning Brief emails were unreadable on a phone `reports` `ui-frontend` 🟢
 
