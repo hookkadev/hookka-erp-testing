@@ -9937,6 +9937,8 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
   const [detailPvId, setDetailPvId] = useState<string | null>(null);
   // Same for a row from another door (keyed by PayRow.key).
   const [detailPayKey, setDetailPayKey] = useState<string | null>(null);
+  // A fund transfer's description being edited here (by transfer no).
+  const [editFtNo, setEditFtNo] = useState<string | null>(null);
   // A deep-link opens New AP Payment straight away (state seeded, no effect).
   const initialPay = parsePayLink(new URLSearchParams(window.location.search).get("pay"));
   const [showForm, setShowForm] = useState(!!initialPay);
@@ -10651,10 +10653,12 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
       }),
     ];
   };
-  // A row from another door: print, its own page, void through its own endpoint.
+  // A row from another door: print, its own page, void through its own endpoint
+  // (a fund transfer's description is edited right here).
   const payRowMenu = (g: PayRow): RowMenuGroups => [
     [{ label: "Open", action: () => setDetailPayKey(g.key) }],
     [
+      ...(g.ft && g.state === "ACTIVE" ? [{ label: "Edit description", action: () => setEditFtNo(g.no) }] : []),
       { label: "Print", action: () => printVoucher(payVoucherOf(g)) },
       { label: `Open on the ${PAY_DOOR_LABEL[g.door]} page ↗`, action: () => navigate(foreignHref(g)) },
     ],
@@ -11424,6 +11428,7 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
             actions={<>
               <Button variant="outline" size="sm" onClick={() => printVoucher(payVoucherOf(g))}><Printer className="h-4 w-4" /> Print</Button>
               <Link to={foreignHref(g)}><Button variant="outline" size="sm">Open on its page ↗</Button></Link>
+              {g.ft && g.state === "ACTIVE" && <Button variant="outline" size="sm" onClick={() => { close(); setEditFtNo(g.no); }}>Edit description</Button>}
               {g.state === "ACTIVE"
                 ? <Button variant="outline" size="sm" onClick={() => { close(); void handleForeignLifecycle(g, "void"); }}>Void</Button>
                 : g.state === "VOID"
@@ -11438,15 +11443,21 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
               <DetailField label={g.ft ? "Description" : "Reference"} span={3}>{(g.ft ? g.ft.description : g.ocp?.reference) || "—"}</DetailField>
               <DetailField label="Total"><span className="tabular-nums">{formatCurrency(g.totalSen)}</span></DetailField>
             </div>
-            {/* Per door (owner 2026-10-02 「FUND TRANSFER无法edit?」): the old Fund
-                Transfer page never had an edit — this line used to say it did. */}
+            {/* Per door (owner 2026-10-02 「FUND TRANSFER无法edit?」): this line used to
+                say every door edits on its page — the old Fund Transfer page never
+                could. A transfer's description is edited here (「我要可以edit」). */}
             <div className="text-[11px] text-[#9CA3AF]">Recorded on the {PAY_DOOR_LABEL[g.door]} page — it posted when it was saved (no approval ladder). {g.ft
-              ? "A fund transfer has no edit: void it and post it again. A transfer keyed as New Payment Voucher → Transfer can be edited."
+              ? "Its description can be edited here; to change the accounts, amount or date, void it and post it again."
               : g.sp ? "Edit, knock-off and FX live on that page." : "Edit lives on that page."}</div>
             <div className="border border-[#E2DDD8] rounded-md px-3 py-2">{foreignDetailTable(g)}</div>
             <DocTrailBlock family={g.sp ? "supplier_payment" : g.ft ? "fund_transfer" : "other_party_payment"} sourceId={g.no} />
           </DocDetailModal>
         );
+      })()}
+
+      {editFtNo && (() => {
+        const t = (ftRows ?? []).find((x) => x.no === editFtNo);
+        return t ? <FtDescriptionEditor ft={t} onClose={() => setEditFtNo(null)} onSaved={load} /> : null;
       })()}
     </div>
   );
@@ -11973,11 +11984,93 @@ type FtRow = {
   lifecycleState?: string;
 };
 
+// Edit a fund transfer's description (owner 2026-10-02 「我要可以edit, 因为我发现
+// description 少了」) — from the Fund Transfer page and from Payment Vouchers.
+// Only the text after "Transfer <no> ·" changes (PUT …/description rewrites the
+// two ledger legs' text); the accounts, amount and date stay as posted — to
+// change those, void and post again.
+const ftReferenceOf = (t: FtRow): string => {
+  const d = String(t.description ?? "");
+  const head = `Transfer ${t.no}`;
+  return d === head ? "" : d.startsWith(`${head} · `) ? d.slice(head.length + 3) : d;
+};
+function FtDescriptionEditor({ ft, onClose, onSaved }: { ft: FtRow; onClose: () => void; onSaved: () => void }) {
+  const { toast } = useToast();
+  const { confirm } = useConfirm();
+  const [text, setText] = useState(() => ftReferenceOf(ft));
+  const [saving, setSaving] = useState(false);
+  const changed = text.trim() !== ftReferenceOf(ft).trim();
+  const requestClose = async () => {
+    if (saving) return;
+    if (changed && !(await confirm({ title: "Close without saving?", message: "The new description will be lost.", confirmLabel: "Discard", cancelLabel: "Keep editing", danger: true }))) return;
+    onClose();
+  };
+  useEscapeClose(() => void requestClose());
+  const save = async () => {
+    if (!changed || saving) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/accounting/fund-transfers/${encodeURIComponent(ft.no)}/description`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reference: text }),
+      });
+      const j = asMutationResponse(await res.json());
+      if (j?.success) { toast.success(`${ft.no} description saved`); onSaved(); onClose(); }
+      else toast.error(j?.error || "Save failed");
+    } catch {
+      toast.error("Save failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => void requestClose()}>
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-lg" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-5 border-b border-[#E2DDD8]">
+          <h2 className="text-base font-semibold text-[#1F1D1B]">Edit description — Fund Transfer {ft.no}</h2>
+          <button onClick={() => void requestClose()} className="text-[#9CA3AF] hover:text-[#6B7280] text-lg leading-none" title="Close (Esc)">✕</button>
+        </div>
+        <div className="p-5 space-y-4 text-sm">
+          <div className="grid grid-cols-2 gap-3">
+            <DetailField label="Date">{ft.date}</DetailField>
+            <DetailField label="Amount"><span className="tabular-nums">{formatCurrency(ft.amountSen)}</span></DetailField>
+            <DetailField label="From" span={2}>{ft.fromAccount} · {ft.fromName}</DetailField>
+            <DetailField label="To" span={2}>{ft.toAccount} · {ft.toName}</DetailField>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-[#6B7280] mb-1 block">Description</label>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-[#9CA3AF] whitespace-nowrap">Transfer {ft.no} ·</span>
+              <input
+                autoFocus
+                value={text}
+                maxLength={200}
+                onChange={(e) => setText(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") void save(); }}
+                placeholder="e.g. Petty cash reimbursement"
+                className="w-full rounded-md border border-[#E2DDD8] bg-white px-2 py-1.5 text-sm"
+              />
+            </div>
+            <p className="text-[11px] text-[#9CA3AF] mt-1.5">Only the description changes — in the ledger, the bank reconciliation and the printed voucher. The accounts, amount and date stay as posted; to change those, void the transfer and post it again.</p>
+          </div>
+          <div className="flex justify-end gap-2 pt-3 border-t border-[#F0ECE9]">
+            <Button variant="outline" size="sm" onClick={() => void requestClose()}>Cancel</Button>
+            <Button variant="primary" size="sm" disabled={saving || !changed} onClick={() => void save()}>{saving ? "Saving…" : "Save"}</Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function FundTransferTab({ accounts }: { accounts: ChartOfAccount[] }) {
   const { toast } = useToast();
   const { confirm } = useConfirm();
   // Double-click → detail popup (resolved from `rows` by no).
   const [detailFt, setDetailFt] = useState<string | null>(null);
+  // The transfer whose description is being edited (by no).
+  const [editFt, setEditFt] = useState<string | null>(null);
   const banks = accounts.filter(
     (a) => a.specialAccountType === "SBK" || a.specialAccountType === "SCH",
   );
@@ -12062,13 +12155,16 @@ function FundTransferTab({ accounts }: { accounts: ChartOfAccount[] }) {
     } else toast.error(j?.error || `${verb} failed`);
   };
 
-  // Row actions on right-click or the row's ⋮ (owner 2026-10-02). A transfer
-  // has no edit — void it and post it again (owner 2026-10-02 「FUND TRANSFER
-  // 无法edit?」: none was ever built; the popup says so).
+  // Row actions on right-click or the row's ⋮ (owner 2026-10-02). A transfer's
+  // description can be edited (owner 「我要可以edit, 因为我发现description 少了」);
+  // its accounts, amount and date are voided and posted again.
   const rowMenu = useRowMenu();
   const ftRowMenu = (r: FtRow): RowMenuGroups => [
     [{ label: "Open", action: () => setDetailFt(r.no) }],
-    [{ label: "Print", action: () => printVoucher(buildFundTransferVoucher(r, accounts)) }],
+    [
+      ...((r.lifecycleState ?? "ACTIVE") === "ACTIVE" ? [{ label: "Edit description", action: () => setEditFt(r.no) }] : []),
+      { label: "Print", action: () => printVoucher(buildFundTransferVoucher(r, accounts)) },
+    ],
     lifecycleMenuItems(r.lifecycleState, {
       void: () => void handleLifecycle(r.no, "void"),
       delete: () => void handleLifecycle(r.no, "delete"),
@@ -12217,6 +12313,7 @@ function FundTransferTab({ accounts }: { accounts: ChartOfAccount[] }) {
             onClose={close}
             actions={<>
               <Button variant="outline" size="sm" onClick={() => printVoucher(buildFundTransferVoucher(r, accounts))}><Printer className="h-4 w-4" /> Print</Button>
+              {state === "ACTIVE" && <Button variant="outline" size="sm" onClick={() => { close(); setEditFt(r.no); }}>Edit description</Button>}
               {state === "ACTIVE" && <Button variant="outline" size="sm" onClick={() => { close(); void handleLifecycle(r.no, "void"); }}>Void</Button>}
               {state === "VOID" && <Button variant="outline" size="sm" onClick={() => { close(); void handleLifecycle(r.no, "unvoid"); }}>Unvoid</Button>}
             </>}
@@ -12228,9 +12325,14 @@ function FundTransferTab({ accounts }: { accounts: ChartOfAccount[] }) {
               <DetailField label="To" span={2}>{r.toAccount} · {r.toName}</DetailField>
               <DetailField label="Description" span={2}>{r.description || "—"}</DetailField>
             </div>
-            <div className="rounded-md bg-[#FAF8F5] border border-[#F0ECE9] px-3 py-2 text-xs text-[#6B7280]">Posted as DR {r.toAccount} / CR {r.fromAccount} — {formatCurrency(r.amountSen)}. A fund transfer has no edit: void it and post it again (a transfer keyed as New Payment Voucher → Transfer can be edited).</div>
+            <div className="rounded-md bg-[#FAF8F5] border border-[#F0ECE9] px-3 py-2 text-xs text-[#6B7280]">Posted as DR {r.toAccount} / CR {r.fromAccount} — {formatCurrency(r.amountSen)}. Its description can be edited; to change the accounts, amount or date, void it and post it again.</div>
           </DocDetailModal>
         );
+      })()}
+
+      {editFt && (() => {
+        const r = (rows ?? []).find((x) => x.no === editFt);
+        return r ? <FtDescriptionEditor ft={r} onClose={() => setEditFt(null)} onSaved={load} /> : null;
       })()}
     </div>
   );

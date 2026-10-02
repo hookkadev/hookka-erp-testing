@@ -89,10 +89,12 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ## 2026-10-02 — 🔵 Finance lists: row actions on right-click; Esc closes popups; Fund Transfer edit (owner「FUND TRANSFER无法edit?」+「这个显示太多了，能不能right click 才选我的东西」+「点开后无法用esc 关闭，create new pv 时也是这样」)(branch `feat/finance-row-menu-esc`)
 
-1. 🔵 Fund Transfer edit — answered: the old Fund Transfer page never had an edit (void / unvoid / delete only; there is
-   no `PUT /fund-transfers`). The Payment Vouchers popup told every outside door "Edit … live on that page" — wrong for a
-   fund transfer; now said per door. A transfer keyed as New Payment Voucher → Transfer is editable. Building an edit for
-   the old transfers is the owner's call (one matched on a bank statement would come unmatched).
+1. 🔵 Fund Transfer edit — the old Fund Transfer page never had an edit (void / unvoid / delete only). The Payment
+   Vouchers popup told every outside door "Edit … live on that page" — wrong for a fund transfer; now said per door.
+   Owner then「我要可以edit, 因为我发现description 少了」→ built **Edit description**: `PUT /fund-transfers/:no/description`
+   rewrites only the text of the transfer's two live ledger legs ("Transfer <no> · <text>"); accounts, amounts, date and a
+   bank match (held by leg id) stay; a voided transfer is refused. From the Fund Transfer page and from Payment Vouchers
+   (menu + popup). Changing the money is still void + post again.
 2. 🔵 Row actions on right-click (plus a ⋮ per row, as the data grid has): Payment Vouchers, Receipts, Fund Transfer,
    Other Party Bills / Payments, Supplier Payment — no action links in the rows; double-click still opens the popup.
 3. 🔵 Esc closes the popup on top: the document popups, the voucher / AP payment / AP bill forms (they ask first when

@@ -86,9 +86,9 @@ Owner 2026-10-02 「点开后无法用esc 关闭，create new pv 时也是这样
    list still open — an open list now sits on the stack itself.
 2. A row from another door, opened on Payment Vouchers, said "Edit, knock-off and FX live on that page"
    for every door. The old Fund Transfer page has no edit — void / unvoid / delete only, and the API has
-   no `PUT` / restate for transfers (checked, and pinned by the test). The line is now per door; the
-   Fund Transfer popup says a transfer is voided and posted again, and that one keyed as New Payment
-   Voucher → Transfer can be edited.
+   no `PUT` / restate for transfers (checked). The line is now per door. The owner then asked for an edit
+   (a description was missing): a transfer's description is now editable — only the text of its two live
+   ledger legs; accounts, amounts, date and any bank match stay; the money is still void + post again.
 
 Regression test: `tests/finance-row-menu-esc.test.mjs` (the stack is exercised for real: top only, a used
 key, IME, nothing open).

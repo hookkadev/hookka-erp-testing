@@ -160,13 +160,35 @@ test("the voucher menu holds every action the row used to show, with the same ga
   assert.match(ui, /\}, active && b\.paidAmountSen > 0 \? "paid against" : undefined\),/);
 });
 
-test("Fund Transfer: no edit, and the popup now says so instead of pointing at its page", () => {
+test("Fund Transfer: the popup no longer claims its page edits it; the description is editable", () => {
   assert.doesNotMatch(ui, /no approval ladder\)\. Edit, knock-off and FX live on that page\.<\/div>/, "the old one-size line is gone");
-  assert.match(ui, /\{g\.ft\n\s+\? "A fund transfer has no edit: void it and post it again\. A transfer keyed as New Payment Voucher → Transfer can be edited\."\n\s+: g\.sp \? "Edit, knock-off and FX live on that page\." : "Edit lives on that page\."\}/);
+  assert.match(ui, /\{g\.ft\n\s+\? "Its description can be edited here; to change the accounts, amount or date, void it and post it again\."\n\s+: g\.sp \? "Edit, knock-off and FX live on that page\." : "Edit lives on that page\."\}/);
   const ft = slice(ui, "function FundTransferTab(", "// =============== TAB: STOCK SUMMARY");
-  assert.match(ft, /A fund transfer has no edit: void it and post it again/);
-  // Nothing in the API edits a transfer — the answer above is measured, not assumed.
+  assert.match(ft, /Its description can be edited; to change the accounts, amount or date, void it and post it again\./);
+});
+
+test("Fund Transfer description edit (owner 「我要可以edit, 因为我发现description 少了」): text only, never the money", () => {
   const api = read("src/api/routes/accounting.ts");
-  assert.doesNotMatch(api, /app\.(put|patch)\("\/fund-transfers/);
-  assert.doesNotMatch(api, /app\.post\("\/fund-transfers\/:no\/restate"/);
+  // The only write route on a transfer besides create / lifecycle is this one.
+  assert.deepEqual((api.match(/app\.(put|patch|post|delete)\("\/fund-transfers[^"]*"/g) ?? []).sort(),
+    ['app.post("/fund-transfers"', 'app.post("/fund-transfers/:no/lifecycle"', 'app.put("/fund-transfers/:no/description"'].sort());
+  const r = slice(api, 'app.put("/fund-transfers/:no/description", async (c) => {', "\n});\n");
+  assert.match(r, /requirePermission\(c, "accounting", "update"\)/);
+  assert.match(r, /if \(\(await getDocState\(c\.var\.DB, orgId, "fund_transfer", no\)\) !== "ACTIVE"\) \{/, "a voided / deleted transfer is not edited");
+  assert.match(r, /const description = `Transfer \$\{no\}\$\{reference \? ` · \$\{reference\}` : ""\}`;/, "the same text shape as a new transfer");
+  assert.match(r, /"UPDATE ledger_journal_entries SET description = \? WHERE sourceType = 'fund_transfer' AND sourceId = \? AND orgId = \? AND hidden = 0",/);
+  assert.equal((r.match(/UPDATE ledger_journal_entries SET/g) ?? []).length, 1);
+  assert.doesNotMatch(r, /accountCode =|debitSen =|creditSen =|postedAt =|INSERT INTO|fund_transfers/, "accounts, amounts, date and legs untouched");
+  // UI: one editor, from the Fund Transfer page and from Payment Vouchers.
+  const ed = slice(ui, "function FtDescriptionEditor(", "function FundTransferTab(");
+  assert.match(ed, /fetch\(`\/api\/accounting\/fund-transfers\/\$\{encodeURIComponent\(ft\.no\)\}\/description`, \{\n\s+method: "PUT",/);
+  assert.match(ed, /useEscapeClose\(\(\) => void requestClose\(\)\);/);
+  assert.match(ed, /if \(changed && !\(await confirm\(\{ title: "Close without saving\?"/);
+  const ftTab = slice(ui, "function FundTransferTab(", "// =============== TAB: STOCK SUMMARY");
+  assert.match(ftTab, /\.\.\.\(\(r\.lifecycleState \?\? "ACTIVE"\) === "ACTIVE" \? \[\{ label: "Edit description", action: \(\) => setEditFt\(r\.no\) \}\] : \[\]\),/);
+  assert.match(ftTab, /<FtDescriptionEditor ft=\{r\} onClose=\{\(\) => setEditFt\(null\)\} onSaved=\{load\} \/>/);
+  const tab = slice(ui, "function PaymentsTab(", "// =============== TAB: OFFICIAL RECEIPT");
+  assert.match(tab, /\.\.\.\(g\.ft && g\.state === "ACTIVE" \? \[\{ label: "Edit description", action: \(\) => setEditFtNo\(g\.no\) \}\] : \[\]\),/);
+  assert.match(tab, /\{g\.ft && g\.state === "ACTIVE" && <Button variant="outline" size="sm" onClick=\{\(\) => \{ close\(\); setEditFtNo\(g\.no\); \}\}>Edit description<\/Button>\}/);
+  assert.match(tab, /<FtDescriptionEditor ft=\{t\} onClose=\{\(\) => setEditFtNo\(null\)\} onSaved=\{load\} \/>/);
 });
