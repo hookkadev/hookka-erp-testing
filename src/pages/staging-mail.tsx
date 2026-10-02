@@ -4,7 +4,9 @@
 // STAGING ONLY: lives on the `staging` branch, never PR this into main.
 // Reads /api/staging-mail (MailSlurp sent mail, proxied by the worker, plus
 // outbox rows that have not gone out). Admins only; the API 404s off staging.
-// Bodies render in a sandboxed iframe with scripts off.
+// Bodies render in a sandboxed iframe with scripts off. Links open in a new
+// tab: the app sends X-Frame-Options DENY, so following one inside the frame
+// shows "refused to connect".
 // ============================================================
 import { useEffect, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -35,6 +37,11 @@ const describeSource = (s: NonNullable<Detail["sources"]>[number]) =>
     ? `${s.name} ${s.status === 0 ? `failed${s.error ? ` (${s.error})` : ""}` : s.status}`
     : `${s.name} ${s.length.toLocaleString()}${s.decoded !== undefined ? ` -> ${s.decoded.toLocaleString()} decoded` : ""}${s.error ? ` (${s.error})` : ""}`;
 
+// Inside <head> when there is one, so a leading <!DOCTYPE> still counts.
+const linksInNewTab = (html: string) => {
+  const base = `<base target="_blank">`;
+  return /<head(\s[^>]*)?>/i.test(html) ? html.replace(/<head(\s[^>]*)?>/i, (m) => m + base) : base + html;
+};
 const escapeHtml = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -194,9 +201,9 @@ export default function StagingMail() {
                             ) : detail.body.trim() ? (
                               <iframe
                                 title={`Body of ${detail.subject}`}
-                                sandbox=""
+                                sandbox="allow-popups allow-popups-to-escape-sandbox"
                                 referrerPolicy="no-referrer"
-                                srcDoc={detail.isHtml ? detail.body : `<pre>${escapeHtml(detail.body)}</pre>`}
+                                srcDoc={linksInNewTab(detail.isHtml ? detail.body : `<pre>${escapeHtml(detail.body)}</pre>`)}
                                 className="h-[600px] w-full rounded border border-[#E5E1DC] bg-white"
                               />
                             ) : (

@@ -235,3 +235,17 @@ test("detail reports each body source, and raw/json is decoded and used when it 
   const e = await getSentMail(down, "KEY", INBOX, SENT);
   assert.deepEqual(e.sources[1], { name: "html", status: 0, length: 0, error: "socket hang up" });
 });
+
+test("links in an opened email open in a new tab, since the app refuses to load inside a frame", () => {
+  const page = readFileSync("src/pages/staging-mail.tsx", "utf8");
+  // BUG-2026-10-02-249: "View full list" navigated the frame itself and showed "refused to connect".
+  assert.match(page, /sandbox="allow-popups allow-popups-to-escape-sandbox"/);
+  assert.doesNotMatch(page, /allow-scripts|allow-same-origin/);
+  assert.match(page, /srcDoc=\{linksInNewTab\(/);
+  const body = page.match(/const linksInNewTab = \(html: string\) => \{([\s\S]*?)\n\};/)[1];
+  const linksInNewTab = new Function("html", body);
+  const base = '<base target="_blank">';
+  assert.equal(linksInNewTab("<!DOCTYPE html><html><head><title>x</title>"), `<!DOCTYPE html><html><head>${base}<title>x</title>`);
+  assert.equal(linksInNewTab('<HEAD lang="en"><p>'), `<HEAD lang="en">${base}<p>`);
+  assert.equal(linksInNewTab("<header>hi</header>"), `${base}<header>hi</header>`);
+});
