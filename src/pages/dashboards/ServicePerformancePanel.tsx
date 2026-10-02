@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, ReferenceLine } from "recharts";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import {
+  KPI_ROW,
   TAUPE, TEAL, MUTED, BORDER, GREEN, AMBER, RED, CHART_GOLD, fmtN,
   inPeriod, inFocus, periodLabel, previousPeriod, type Period,
 } from "./dashboard-shared-lib";
@@ -102,7 +103,7 @@ export function ServicePerformancePanel({
 
   return (
     <>
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+      <div className={KPI_ROW}>
         <Kpi label="Avg case closing" value={closeNow.avg === null ? "—" : `${closeNow.avg} d`} sub={`${fmtN(closeNow.n)} closed · ${dl ? dl.text : "no previous-period comparison"}`} valueColorClass={dl?.good == null ? undefined : dl.good ? "text-[#4F7C3A]" : "text-[#9A3A2D]"} />
         <Kpi label="Open cases now" value={fmtN(open.length)} sub={`${fmtN(open.filter((c) => c.daysOverdue > 0).length)} overdue (> ${threshold} d)`} valueColorClass="text-[#9C6F1E]" />
         <Kpi label="Opened in period" value={fmtN(openedInFocus.length)} sub={win} />

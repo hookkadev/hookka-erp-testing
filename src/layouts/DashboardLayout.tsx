@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Navigate, Routes, ScrollRestoration, useLocation } from "react-router-dom";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { prefetchRoutesWhenIdle } from "@/lib/prefetch-routes";
@@ -77,6 +77,20 @@ export default function DashboardLayout() {
   // sidebar full (not the icons-only rail) so the drawer is readable.
   const isMobile = useMediaQuery("(max-width: 767px)");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  // Publishes the sticky top block's live height as --app-sticky-h on <html>,
+  // so a page with its own sticky header (the dashboard) docks UNDER it instead
+  // of over it. It wraps to 2-3 rows below lg, so it cannot be a constant.
+  const stickyRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = stickyRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() =>
+      document.documentElement.style.setProperty("--app-sticky-h", `${el.offsetHeight}px`),
+    );
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   const closeMobileNav = useCallback(() => setMobileNavOpen(false), []);
 
   // Auto-collapse on narrow / portrait viewports — the always-on 240px
@@ -186,7 +200,7 @@ export default function DashboardLayout() {
         <div className={`pl-0 ${sidebarCollapsed ? "md:pl-14" : "md:pl-60"} transition-all duration-300 print:!pl-0`}>
           {/* Sticky as one block: a sticky child cannot leave its parent, so
               the header's own sticky did nothing while this wrapper scrolled. */}
-          <div className="sticky top-0 z-30 print:hidden">
+          <div ref={stickyRef} className="sticky top-0 z-30 print:hidden">
             <Topbar />
             <Breadcrumbs />
           </div>

@@ -351,7 +351,7 @@ export function ProductionDailyPanels({
       ) : (
         <>
           <div className="grid grid-cols-2 xl:grid-cols-3 gap-3">
-            <Kpi label="Production revenue" value={formatCurrency(revTotals.sen)} sub={period.day ? dayLabel(period.day) : periodLabel(period)} valueColorClass="text-[#3E6570]" valueSizeClass="text-xl" />
+            <Kpi label="Production revenue" value={formatCurrency(revTotals.sen)} sub={period.day ? dayLabel(period.day) : periodLabel(period)} valueColorClass="text-[#3E6570]" />
             <Kpi label="Orders upholstered" value={fmtN(revTotals.orders)} />
             <Kpi label="Completed with no price" value={fmtN(revTotals.unpriced)} sub="value could not be resolved (counted as RM 0)" valueColorClass={revTotals.unpriced ? "text-[#9C6F1E]" : undefined} />
           </div>
