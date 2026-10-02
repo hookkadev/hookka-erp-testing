@@ -137,3 +137,56 @@ export function prorateHours<T extends { weight: number }>(
     .map((b, i) => ({ ...b, hours: cents[i] / 100 }))
     .filter((b) => b.hours > 0);
 }
+
+/**
+ * Carve a day's hours into per-(department × category) rows: the scans decide
+ * the ratio (buildDeptBuckets), prorateHours keeps the rows summing to the
+ * total. ONE path for both the punch-out autofill and the worker's live
+ * "Today's departments" card (DEV-31), so what the phone shows mid-day is the
+ * split punch-out will save if the worker stopped now.
+ */
+export function splitDayHours(
+  totalHours: number,
+  clockInMin: number,
+  clockOutMin: number,
+  homeDeptCode: string,
+  events: DeptScanEvent[],
+): Array<{ departmentCode: string; category: string | null; hours: number }> {
+  return prorateHours(
+    totalHours,
+    buildDeptBuckets(clockInMin, clockOutMin, homeDeptCode, events).map((b) => ({
+      departmentCode: b.departmentCode,
+      category: b.category,
+      weight: b.minutes,
+    })),
+  ).map(({ departmentCode, category, hours }) => ({ departmentCode, category, hours }));
+}
+
+/**
+ * Where the worker is right now: the latest scan that is a real station change
+ * (same rule as buildDeptBuckets: a re-scan of the same dept + category is not
+ * a boundary, so "since" keeps the first scan's time), else the home department
+ * from clock-in. null when there is neither.
+ */
+export function currentStation(
+  clockInMin: number,
+  homeDeptCode: string,
+  events: DeptScanEvent[],
+): { departmentCode: string; category: string | null; sinceMin: number; scanned: boolean } | null {
+  const home = (homeDeptCode || "").trim().toUpperCase();
+  let cur: { departmentCode: string; category: string | null; sinceMin: number; scanned: boolean } | null =
+    home ? { departmentCode: home, category: null, sinceMin: clockInMin, scanned: false } : null;
+  const sorted = (events ?? [])
+    .filter((e) => e && typeof e.departmentCode === "string" && e.departmentCode.trim() !== "")
+    .map((e) => ({
+      departmentCode: e.departmentCode.trim().toUpperCase(),
+      category: (e.category ?? "").trim().toUpperCase() || null,
+      atMin: Math.max(Math.round(e.atMin), clockInMin),
+    }))
+    .sort((a, b) => a.atMin - b.atMin);
+  for (const e of sorted) {
+    if (cur && cur.departmentCode === e.departmentCode && cur.category === e.category) continue;
+    cur = { departmentCode: e.departmentCode, category: e.category, sinceMin: e.atMin, scanned: true };
+  }
+  return cur;
+}

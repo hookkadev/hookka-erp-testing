@@ -24,8 +24,8 @@
 // day one means reads and writes can never disagree).
 // ---------------------------------------------------------------------------
 import {
-  buildDeptBuckets,
-  prorateHours,
+  currentStation,
+  splitDayHours,
   type DeptScanEvent,
 } from "../../lib/dept-scan-split";
 import { computeAttendanceDay, hhmmToMinutes } from "../../lib/attendance-rules";
@@ -95,6 +95,26 @@ export async function recordDeptScan(
       new Date().toISOString(),
     )
     .run();
+}
+
+/** One worker's dept-QR scans for a day, in time order. */
+async function loadDeptScanEvents(
+  db: D1Database,
+  workerId: string,
+  date: string,
+): Promise<DeptScanEvent[]> {
+  await ensureDeptScanEvents(db);
+  const evRes = await db
+    .prepare(
+      "SELECT departmentcode, category, atmin FROM dept_scan_events WHERE workerid = ? AND date = ? ORDER BY atmin",
+    )
+    .bind(workerId, date)
+    .all<{ departmentcode: string; category: string | null; atmin: number }>();
+  return (evRes.results ?? []).map((r) => ({
+    departmentCode: String(r.departmentcode ?? ""),
+    category: r.category ?? null,
+    atMin: Number(r.atmin) || 0,
+  }));
 }
 
 /**
@@ -193,31 +213,10 @@ export async function autofillWorkingHoursFromPunch(
   );
   if (totalHours <= 0) return { created: 0 };
 
-  await ensureDeptScanEvents(db);
-  const evRes = await db
-    .prepare(
-      "SELECT departmentcode, category, atmin FROM dept_scan_events WHERE workerid = ? AND date = ? ORDER BY atmin",
-    )
-    .bind(args.workerId, args.date)
-    .all<{ departmentcode: string; category: string | null; atmin: number }>();
-  const events: DeptScanEvent[] = (evRes.results ?? []).map((r) => ({
-    departmentCode: String(r.departmentcode ?? ""),
-    category: r.category ?? null,
-    atMin: Number(r.atmin) || 0,
-  }));
-
+  const events = await loadDeptScanEvents(db, args.workerId, args.date);
   const home = (args.homeDeptCode ?? "").trim().toUpperCase();
-  const buckets = buildDeptBuckets(inMin, outMin, home, events);
-  if (buckets.length === 0) return { created: 0 };
-
-  const deptRows = prorateHours(
-    totalHours,
-    buckets.map((b) => ({
-      departmentCode: b.departmentCode,
-      category: b.category,
-      weight: b.minutes,
-    })),
-  );
+  const deptRows = splitDayHours(totalHours, inMin, outMin, home, events);
+  if (deptRows.length === 0) return { created: 0 };
 
   const scanned = events.length > 0;
   let created = 0;
@@ -311,4 +310,71 @@ export async function autofillWorkingHoursFromPunch(
     created++;
   }
   return { created };
+}
+
+export type DeptDayRow = { departmentCode: string; category: string | null; hours: number };
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/**
+ * DEV-31: the worker's "Today's departments" card while the punch is still
+ * open. Same maths as autofillWorkingHoursFromPunch above with "now" as the
+ * end of the window (rules engine for the day total, splitDayHours for the
+ * ratio), so the phone shows the split punch-out would save if the worker
+ * stopped this minute. Approved non-production hours come off the total and
+ * show as their own rows, the way punch-out treats them. Read-only.
+ */
+export async function computeLiveDeptDay(
+  db: D1Database,
+  args: {
+    attendanceId: string;
+    workerId: string;
+    date: string;
+    clockIn: string;
+    nowMin: number;
+    homeDeptCode: string | null | undefined;
+  },
+): Promise<{
+  rows: DeptDayRow[];
+  hoursSoFar: number;
+  current: ReturnType<typeof currentStation>;
+}> {
+  let versions: Awaited<ReturnType<typeof loadPayRuleVersions>> = [];
+  try {
+    versions = await loadPayRuleVersions(db);
+  } catch {
+    versions = [];
+  }
+  const rules = toAttendanceRules(resolvePayRulesAsOf(versions, args.date));
+  const inMin = hhmmToMinutes(args.clockIn);
+  if (inMin == null) return { rows: [], hoursSoFar: 0, current: null };
+
+  const events = await loadDeptScanEvents(db, args.workerId, args.date);
+  const home = (args.homeDeptCode ?? "").trim().toUpperCase();
+
+  const existing = await db
+    .prepare(
+      "SELECT departmentCode, category, hours, notes FROM working_hour_entries WHERE attendanceId = ?",
+    )
+    .bind(args.attendanceId)
+    .all<Record<string, unknown>>();
+  const nonProdRows: DeptDayRow[] = (existing.results ?? [])
+    .filter((r) => String(r.notes ?? "").startsWith("Non-production (approved)"))
+    .map((r) => ({
+      departmentCode: String(r.departmentCode ?? r.departmentcode ?? r.department_code ?? ""),
+      category: String(r.category ?? "") || null,
+      hours: Number(r.hours) || 0,
+    }))
+    .filter((r) => r.departmentCode && r.hours > 0);
+  const nonProdHours = nonProdRows.reduce((s, r) => s + r.hours, 0);
+
+  const outMin = Math.max(inMin, args.nowMin);
+  const day = computeAttendanceDay(inMin, outMin, rules);
+  const total = Math.max(0, round2((day.regularWorkMin + day.otMin) / 60 - nonProdHours));
+  const rows = [...splitDayHours(total, inMin, outMin, home, events), ...nonProdRows];
+  return {
+    rows,
+    hoursSoFar: round2(rows.reduce((s, r) => s + r.hours, 0)),
+    current: currentStation(inMin, home, events),
+  };
 }

@@ -51,6 +51,7 @@ import { aggregateWipTimes } from "../lib/wip-times-core";
 import {
   recordDeptScan,
   autofillWorkingHoursFromPunch,
+  computeLiveDeptDay,
 } from "../lib/punch-autofill";
 import { loadPayRuleVersions } from "../lib/pay-rules-store";
 import { resolvePayRulesAsOf, toAttendanceRules, payrollDayRateSen, payrollHourDivisor } from "../../lib/pay-rules";
@@ -235,6 +236,108 @@ async function getCurrentDeptForWorker(
     /* fall through */
   }
   return (homeDept || "").trim().toUpperCase();
+}
+
+// Department code → the label the phone shows (short name first, as the rest
+// of the worker app does).
+async function loadDeptNames(db: D1Database): Promise<Map<string, string>> {
+  const res = await db
+    .prepare("SELECT code, name, shortName FROM departments")
+    .all<Record<string, unknown>>();
+  const names = new Map<string, string>();
+  for (const d of res.results ?? []) {
+    const code = String(d.code ?? "").trim().toUpperCase();
+    if (!code) continue;
+    names.set(code, String(d.shortName ?? d.shortname ?? "") || String(d.name ?? "") || code);
+  }
+  return names;
+}
+
+const minToHhmm = (m: number) =>
+  `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+
+// DEV-31 "Today's departments": where the worker is now and the hours in each
+// department today. Open punch → the live split (same maths punch-out saves);
+// punched out → the saved Working Hours rows, so an office correction shows.
+async function buildDeptDay(
+  db: D1Database,
+  worker: { id: string; departmentCode?: string | null },
+) {
+  const my = malaysiaNow();
+  const date = my.toISOString().slice(0, 10);
+  const att = await db
+    .prepare(
+      "SELECT id, clockIn, clockOut FROM attendance_records WHERE employeeId = ? AND date = ? ORDER BY clockIn DESC LIMIT 1",
+    )
+    .bind(worker.id, date)
+    .first<{ id: string; clockIn: string | null; clockOut: string | null }>();
+  if (!att?.clockIn) {
+    return { clockedIn: false, final: false, current: null, rows: [], hoursSoFar: 0 };
+  }
+  const names = await loadDeptNames(db);
+  const named = (r: { departmentCode: string; category: string | null; hours: number }) => ({
+    ...r,
+    name: names.get(r.departmentCode) ?? r.departmentCode,
+  });
+  if (att.clockOut) {
+    const saved = await db
+      .prepare(
+        "SELECT departmentCode, category, hours FROM working_hour_entries WHERE workerId = ? AND date = ?",
+      )
+      .bind(worker.id, date)
+      .all<Record<string, unknown>>();
+    const rows = (saved.results ?? [])
+      .map((r) => ({
+        departmentCode: String(r.departmentCode ?? r.departmentcode ?? r.department_code ?? "").toUpperCase(),
+        category: String(r.category ?? "") || null,
+        hours: Number(r.hours) || 0,
+      }))
+      .filter((r) => r.departmentCode && r.hours > 0)
+      .map(named);
+    return {
+      clockedIn: true,
+      final: true,
+      current: null,
+      rows,
+      hoursSoFar: Math.round(rows.reduce((s, r) => s + r.hours, 0) * 100) / 100,
+    };
+  }
+  const live = await computeLiveDeptDay(db, {
+    attendanceId: att.id,
+    workerId: worker.id,
+    date,
+    clockIn: att.clockIn,
+    nowMin: my.getUTCHours() * 60 + my.getUTCMinutes(),
+    homeDeptCode: worker.departmentCode,
+  });
+  return {
+    clockedIn: true,
+    final: false,
+    current: live.current
+      ? {
+          departmentCode: live.current.departmentCode,
+          name: names.get(live.current.departmentCode) ?? live.current.departmentCode,
+          category: live.current.category,
+          since: minToHhmm(live.current.sinceMin),
+          scanned: live.current.scanned,
+        }
+      : null,
+    rows: live.rows.map(named),
+    hoursSoFar: live.hoursSoFar,
+  };
+}
+
+// The card is extra: a failure here must never take down /today or a scan.
+async function buildDeptDaySafe(
+  db: D1Database,
+  worker: { id: string; departmentCode?: string | null },
+) {
+  try {
+    return await buildDeptDay(db, worker);
+  } catch (err) {
+    console.error("[worker] deptDay failed:", err);
+    return null;
+  }
 }
 
 function genId(prefix: string): string {
@@ -524,6 +627,7 @@ app.get("/today", async (c) => {
       doneToday,
       doneByDept,
       earningsSen,
+      deptDay: await buildDeptDaySafe(c.var.DB, worker),
     },
   });
 });
@@ -1390,6 +1494,7 @@ app.post("/dept-scan", async (c) => {
       departmentName: dept.shortName || dept.name || dept.code,
       category,
       time,
+      deptDay: await buildDeptDaySafe(c.var.DB, worker),
     },
   });
 });
@@ -1436,7 +1541,8 @@ app.get("/history", async (c) => {
         "workers",
       ] as const,
       orgId: DEFAULT_ORG_ID,
-      cacheKey: `${workerId}:${fromStr}:${toStr}`,
+      // v2: daily[] rows carry deptHours (DEV-31) — older snapshots lack it.
+      cacheKey: `v2:${workerId}:${fromStr}:${toStr}`,
     },
     async (db) => {
 
@@ -1455,16 +1561,29 @@ app.get("/history", async (c) => {
   // is typically 0. Sum hours per date and let working_hour_entries take precedence
   // over attendance clock-time wherever both exist.
   const wheRes = await db.prepare(
-    "SELECT date, hours FROM working_hour_entries WHERE workerId = ? AND date >= ? AND date <= ?",
+    "SELECT date, hours, departmentCode, category FROM working_hour_entries WHERE workerId = ? AND date >= ? AND date <= ?",
   )
     .bind(workerId, fromStr, toStr)
-    .all<{ date: string; hours: number }>();
+    .all<Record<string, unknown>>();
   const wheMinutesByDate = new Map<string, number>();
+  // DEV-31: the same rows per department, so the phone shows the split the
+  // office sees on Working Hours (one total per day hid it).
+  const deptNames = await loadDeptNames(db);
+  const deptHoursByDate = new Map<
+    string,
+    Array<{ departmentCode: string; name: string; category: string | null; hours: number }>
+  >();
   for (const r of wheRes.results ?? []) {
-    const d = (r.date || "").slice(0, 10);
+    const d = String(r.date ?? "").slice(0, 10);
     if (!d) continue;
     const mins = Math.round((Number(r.hours) || 0) * 60);
     wheMinutesByDate.set(d, (wheMinutesByDate.get(d) ?? 0) + mins);
+    const code = String(r.departmentCode ?? r.departmentcode ?? r.department_code ?? "").toUpperCase();
+    const hours = Number(r.hours) || 0;
+    if (!code || hours <= 0) continue;
+    const list = deptHoursByDate.get(d) ?? [];
+    list.push({ departmentCode: code, name: deptNames.get(code) ?? code, category: String(r.category ?? "") || null, hours });
+    deptHoursByDate.set(d, list);
   }
 
   // Approved EXTRA PRODUCTION TIME claims (kind='ADD_PROD') for this worker in
@@ -1821,9 +1940,9 @@ app.get("/history", async (c) => {
     if (!prev.departmentName) prev.departmentName = c2.departmentCode;
     dailyMap.set(d, prev);
   }
-  const daily = Array.from(dailyMap.values()).sort((a, b) =>
-    a.date.localeCompare(b.date),
-  );
+  const daily = Array.from(dailyMap.values())
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map((d) => ({ ...d, deptHours: deptHoursByDate.get(d.date) ?? [] }));
 
   // workedMinutes / overtimeMinutes — split per date once we know which side
   // (working_hour_entries vs attendance clock-time) wins. Per-date split:

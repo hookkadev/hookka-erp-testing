@@ -1,5 +1,6 @@
 # Employees & Payroll — Module Guide
 
+> **Last verified: 2026-10-02** (branch `feat/dev31-worker-dept-hours-main`): DEV-31 to main, the `worker.ts` / `punch-autofill.ts` / `dept-scan-split.ts` anchors re-read on the merged tree. Nothing else re-checked.
 > **Last verified: 2026-10-01** (branch `fix/worker-history-snapshot-stale`): `POST /clock` / `POST /dept-scan` anchors re-derived after worker.ts grew 5 lines (BUG-2026-10-01-245). Nothing else re-checked.
 
 > **Last verified: 2026-10-01** (branch `feat/dev22-worker-penalty`) — Worker Penalty (DEV-22) added to entry points, data model, core flows and gotchas, checked against `src/api/lib/worker-penalties.ts`, `src/api/routes/worker-penalties.ts`, `src/api/routes/payslips.ts`. Nothing else re-checked.
@@ -48,8 +49,8 @@ Owns the whole workforce lifecycle: the **employee master** (workers + effective
 - `departments` — department master (`isProduction` flag gates the efficiency denominator); `leaves`, `worker_issues`, `public_holidays` (via `kv_config['public_holidays']`).
 
 ## Core flows
-1. **PIN login → token** — `worker-auth.ts` `POST /login` **:124**. First login with `firstTimePin` registers the PIN; SHA-256 (`hashPin`, `src/api/lib/auth-utils.ts`); legacy cleartext rows rewritten on match; brute-force throttle 10/15 min; `must_reset` gate forces 6-digit reset. Every worker-app request then carries `X-Worker-Token`, resolved by `resolveWorkerToken` (`worker-auth.ts:337`) via `getWorker` (`worker.ts:160`), which also 403s any non-ACTIVE worker (locks a resigned phone mid-session).
-2. **Clock / dept-scan** — `worker.ts` `POST /clock` **:1067** (CLOCK_IN/OUT, optional geo + selfie), `POST /dept-scan` **:1324**, `GET /today` **:362**. Feeds working-hour capture and attendance.
+1. **PIN login → token** — `worker-auth.ts` `POST /login` **:124**. First login with `firstTimePin` registers the PIN; SHA-256 (`hashPin`, `src/api/lib/auth-utils.ts`); legacy cleartext rows rewritten on match; brute-force throttle 10/15 min; `must_reset` gate forces 6-digit reset. Every worker-app request then carries `X-Worker-Token`, resolved by `resolveWorkerToken` (`worker-auth.ts:337`) via `getWorker` (`worker.ts:163`), which also 403s any non-ACTIVE worker (locks a resigned phone mid-session).
+2. **Clock / dept-scan** — `worker.ts` `POST /clock` **:1173** (CLOCK_IN/OUT, optional geo + selfie), `POST /dept-scan` **:1430**, `GET /today` **:480**. Feeds working-hour capture and attendance. **DEV-31:** `/today` and `/dept-scan` also return `deptDay` (`buildDeptDay`, `worker.ts:262`): while the punch is open it is `computeLiveDeptDay` (`punch-autofill.ts:327`), the punch-out split with "now" as the end (rules engine, minus approved non-production hours, then `splitDayHours`), so the phone shows what punch-out would save; once punched out it is the saved `working_hour_entries` rows. `/history` `daily[].deptHours` carries each day's rows by department (snapshot key `v2:`).
 3. **Payslip generation (the engine)** — `payslips.ts` `POST /` **:1012** calls `computeMonthlyLabor` (`labor-engine.ts:557`) once per worker (`:1264`); `GET /projected` **:722** runs the IDENTICAL engine for all ACTIVE workers (`:867`). Salary resolved via `effectiveSalarySenForMonth` (`labor-engine.ts:408`); statutory via `calcStatutory` (`payslips.ts:303`); per-day absence/OT detail via `buildDayDetailForPeriod` (`:488`). **`payroll.ts POST /` (**:125**) is NOT a run-header guard — it is DISABLED.** After the `payroll:create` RBAC check it returns **501** unconditionally (`payroll.ts:125-139`), because it used to invent overtime hours with a random number generator instead of reading attendance; its own header calls it "a legacy duplicate" and says refusing is the fix. Payroll is generated only by `POST /api/payslips`. `GET`/`PUT` on `/api/payroll` are left working so existing rows stay readable.
 4. **Day-typed OT** — inside `computeMonthlyLabor` (`labor-engine.ts:557`), OT hours split into weekday(1.5×)/Sunday(2×)/holiday(3×) buckets; payslips persist `otWeekday/Sunday/HolidayPaySen`. Holidays from `kv_config['public_holidays']`.
 5. **Short-hour dock** — `payroll-hour-deductions.ts` `POST /auto-from-punch` **:149** derives docks from punches; `POST /settle-period` **:211** folds them into the period.
@@ -80,8 +81,11 @@ Owns the whole workforce lifecycle: the **employee master** (workers + effective
 | `WorkerPenaltyTab` | `src/components/worker-penalty-tab.tsx:153` | Worker Penalty tab (DEV-22) — list, editor, detail drawer |
 | `payrollPeriodForApproval` / `findPenaltyDrift` / `postPenaltiesForPeriod` | `src/api/lib/worker-penalties.ts:303 / 449 / 502` | Penalty payroll month, approval drift guard, posting on payroll approval |
 | `POST /login` / `resolveWorkerToken` | `src/api/routes/worker-auth.ts:124 / 337` | PIN login + token resolution |
-| `getWorker` (token gate) | `src/api/routes/worker.ts:160` | X-Worker-Token → ACTIVE worker or 401/403 |
-| `POST /clock` / `POST /dept-scan` | `src/api/routes/worker.ts:1078 / 1335` | Clock in/out + department scan |
+| `getWorker` (token gate) | `src/api/routes/worker.ts:163` | X-Worker-Token → ACTIVE worker or 401/403 |
+| `POST /clock` / `POST /dept-scan` | `src/api/routes/worker.ts:1182 / 1439` | Clock in/out + department scan |
+| `buildDeptDay` | `src/api/routes/worker.ts:262` | DEV-31 "Today's departments" payload (live or saved) |
+| `computeLiveDeptDay` | `src/api/lib/punch-autofill.ts:327` | Live split: punch-out maths with now as the end |
+| `splitDayHours` / `currentStation` | `src/lib/dept-scan-split.ts:148 / 171` | Shared split (autofill + live) and where the worker is now |
 | `GET /salary/effective` | `src/api/routes/workers.ts:1242` | Day-weighted salary per period |
 | `POST /auto-from-punch` / `settle-period` | `src/api/routes/payroll-hour-deductions.ts:149 / 211` | Short-hour docks |
 
@@ -93,7 +97,8 @@ Owns the whole workforce lifecycle: the **employee master** (workers + effective
 - **Three screens reconcile to the sen.** Payroll / Dept Labor / Labor Cost tie out via `roundSen` + `distributeRoundSen` (largest-remainder, `src/lib/utils.ts`); leftover sen → largest-fraction dept. Don't add per-screen ad-hoc plugs.
 - **Salary is effective-dated** (`worker_salary_history`, mig 0153) — never read one "current" salary; use `GET /salary/effective`. Join/resign does NO proration; unworked working days dock ÷26 as absences.
 - **Migrations are inert** — `payroll_hour_deductions` (0152), `worker_salary_history` (0153) etc. reach prod only via runtime `ensurePendingMigrations` self-apply, not by replaying migration files on deploy.
-- **PINs are SHA-256, unsalted by design** (10^4–10^6 space; brute-force is throttled instead). A resigned/inactive worker is locked out of the ENTIRE app mid-session via `getWorker` (`worker.ts:160`), not just at login.
+- **PINs are SHA-256, unsalted by design** (10^4–10^6 space; brute-force is throttled instead). A resigned/inactive worker is locked out of the ENTIRE app mid-session via `getWorker` (`worker.ts:163`), not just at login.
+- **Two "home department" sources (DEV-31).** The Today's departments card (`buildDeptDay`) and the punch-out autofill treat `workers.departmentCode` as home before the first scan; the wrong-department sticker check (`getCurrentDeptForWorker`) prefers the attendance row's `departmentCode` first. If those ever differ for a worker, the card and the popup can disagree on a day with no scan. Change them together.
 - **camelCase DB columns fold to lowercase** and can silently return undefined (`clockinphoto ↛ clockInPhoto`); read at-risk cols dual-keyed `r.camelCase ?? r.snake_case`. New columns snake_case; a write to a camelCase col needs a `column-rename-map.json` entry.
 - **Employee Detail tab is intentionally guard-unmounted** (`{activeTab === "detail" && …}` inside `EmployeesPage`, `employees.tsx:11615`) — don't refactor to always-mounted.
 - **UI is 100% English** — no Chinese strings/comments. Add a new tab to BOTH the tab array and the `activeTab` switch inside `EmployeesPage`.

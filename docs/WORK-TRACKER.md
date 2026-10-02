@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-02**: branch `feat/dev31-worker-dept-hours-main` (DEV-31 to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-02**: branch `feat/schedule-summary-email-to-main` (to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-02**: one Scan on Payment Vouchers (#673) closed ✅ with its prod check.
 > **Last verified: 2026-10-01**: one Scan on Payment Vouchers in progress (branch `feat/pv-scan-one-button`).
@@ -83,6 +84,13 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-02: 🔵 DEV-31 worker department hours to main (branch `feat/dev31-worker-dept-hours-main` to `main`)
+
+- Asked: PR DEV-31 to main, to check on canary. Staging PR #651, tested on staging (#659).
+- Cherry-pick of the staging commit onto main. `/history` on main runs inside the `freshReads` snapshot callback, so the new department read uses its `db` handle (staging used `c.var.DB`). The staging-only sequence-unlock import in `scan.tsx` was left out.
+- No new tables or columns: reads `dept_scan_events` and `working_hour_entries`, which main already writes.
+- 🟡 Not yet checked on canary / prod.
 
 ## 2026-10-02 — 🔵 Schedule email summary and full list filter to main (branch `feat/schedule-summary-email-to-main` → `main`)
 

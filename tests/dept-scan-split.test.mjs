@@ -176,3 +176,84 @@ test("prorateHours folds sub-0.1h fragments into the largest bucket (owner 2026-
   assert.equal(ok.length, 2);
   assert.equal(ok.reduce((s, r) => s + r.hours, 0), 9);
 });
+
+// ---------------------------------------------------------------------------
+// DEV-31 — the worker's live "Today's departments" card. It must show the
+// split punch-out would save if the worker stopped now, so it goes through
+// the SAME splitDayHours the autofill uses, fed by the same rules engine.
+// ---------------------------------------------------------------------------
+const rulesLib = await import(
+  pathToFileURL(resolve(process.cwd(), "src/lib/attendance-rules.ts")).href
+);
+
+test("splitDayHours = prorateHours over buildDeptBuckets (the autofill's old inline path)", () => {
+  const events = [
+    { departmentCode: "FAB_SEW", category: "BEDFRAME", atMin: 8 * 60 + 5 },
+    { departmentCode: "R_AND_D", category: null, atMin: 12 * 60 + 40 },
+  ];
+  const viaHelper = lib.splitDayHours(7.53, 7 * 60 + 59, 16 * 60 + 32, "FAB_SEW", events);
+  const viaOld = lib
+    .prorateHours(
+      7.53,
+      lib.buildDeptBuckets(7 * 60 + 59, 16 * 60 + 32, "FAB_SEW", events).map((b) => ({
+        departmentCode: b.departmentCode,
+        category: b.category,
+        weight: b.minutes,
+      })),
+    )
+    .map(({ departmentCode, category, hours }) => ({ departmentCode, category, hours }));
+  assert.deepEqual(viaHelper, viaOld);
+  assert.equal(Math.round(viaHelper.reduce((s, r) => s + r.hours, 0) * 100), 753);
+});
+
+test("live day: rules engine up to now, then split — lunch shared, rows sum to the total", () => {
+  const inMin = 8 * 60;
+  const now = 14 * 60 + 12;
+  const day = rulesLib.computeAttendanceDay(inMin, now, rulesLib.HOOKKA_ATTENDANCE);
+  // 6h12m on the clock, 1h lunch unpaid, no OT, no late → 5.20h.
+  assert.equal((day.regularWorkMin + day.otMin) / 60, 5.2);
+  const rows = lib.splitDayHours(5.2, inMin, now, "FAB_CUT", [
+    { departmentCode: "FAB_SEW", category: "SOFA", atMin: 10 * 60 + 42 },
+  ]);
+  assert.deepEqual(rows, [
+    { departmentCode: "FAB_CUT", category: null, hours: 2.26 },
+    { departmentCode: "FAB_SEW", category: "SOFA", hours: 2.94 },
+  ]);
+});
+
+test("live day before the shift starts or right at clock-in → nothing to split", () => {
+  const day = rulesLib.computeAttendanceDay(7 * 60 + 50, 7 * 60 + 55, rulesLib.HOOKKA_ATTENDANCE);
+  assert.equal(day.regularWorkMin + day.otMin, 0);
+  assert.deepEqual(lib.splitDayHours(0, 470, 475, "FAB_SEW", []), []);
+});
+
+test("currentStation: no scans → home department since clock-in, not scanned", () => {
+  assert.deepEqual(lib.currentStation(480, "fab_sew", []), {
+    departmentCode: "FAB_SEW",
+    category: null,
+    sinceMin: 480,
+    scanned: false,
+  });
+});
+
+test("currentStation: latest real station change wins; a re-scan keeps the first time", () => {
+  const cur = lib.currentStation(480, "FAB_CUT", [
+    { departmentCode: "FAB_SEW", category: "SOFA", atMin: 642 },
+    { departmentCode: "FAB_SEW", category: "SOFA", atMin: 700 }, // same station again
+  ]);
+  assert.deepEqual(cur, { departmentCode: "FAB_SEW", category: "SOFA", sinceMin: 642, scanned: true });
+});
+
+test("currentStation: switching line inside one department is a change; early scans clamp to clock-in", () => {
+  const cur = lib.currentStation(480, "FAB_SEW", [
+    { departmentCode: "FAB_SEW", category: "SOFA", atMin: 470 },
+    { departmentCode: "FAB_SEW", category: "BEDFRAME", atMin: 600 },
+  ]);
+  assert.deepEqual(cur, { departmentCode: "FAB_SEW", category: "BEDFRAME", sinceMin: 600, scanned: true });
+  const early = lib.currentStation(480, "", [{ departmentCode: "PACKING", atMin: 470 }]);
+  assert.equal(early.sinceMin, 480);
+});
+
+test("currentStation: no home department and no scans → null", () => {
+  assert.equal(lib.currentStation(480, "", []), null);
+});
