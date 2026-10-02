@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-02**: branch `feat/schedule-dept-share-table` (to `staging`) entry got item 4 (summary-only email, full list filter).
 > **Last verified: 2026-10-02**: branch `feat/schedule-dept-share-table` (to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-02**: branch `fix/schedule-email-full-list-row` (to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-02**: branch `fix/efficiency-email-dept-table` (to `staging`, BUG-2026-10-02-248) added below (its entry is the newest).
@@ -120,6 +121,7 @@ Owner ask: the Production Schedule should read as overall totals, then a departm
 1. ✅ `renderScheduleHtml`: a `Departments` table under the four top boxes, heaviest planned time first, shares to one decimal, and a "Show full list" link under it in the email only (the in-app page already is the full list). The department sections and their last-row link are unchanged.
 2. ✅ Display only: every figure is a department total `collectScheduleData` already returns; no existing number changes. `tests/schedule-department-share.test.mjs`; the row-count test in `schedule-email-size.test.mjs` now counts job rows only. Looked at at 375px with the real 2 October department totals (no sideways scroll).
 3. 🔵 Not done, not asked: the top two departments call-out, the unassigned-PIC count, and anything else from the earlier suggestions list. The requester decides.
+4. ✅ Owner follow-up: the email stops at the department table and one "Show full list" link (no job rows; the row cap and its "N more not shown" rows are gone, about 8 KB on any day). The in-app full list page repeats the summary, then a department filter (`?dept=<code>`, plain links) and every job row. Preview published as an artifact for the owner; tests updated (`schedule-email-size`, `report-emails-mobile`).
 
 ## 2026-10-02 — ✅ Schedule email: "Show full list" in the last row of each capped department (branch `fix/schedule-email-full-list-row` → `staging`)
 

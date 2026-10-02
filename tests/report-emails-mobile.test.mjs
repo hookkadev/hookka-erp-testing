@@ -36,8 +36,10 @@ test("schedule email: viewport, screen-only card layout, no print button", () =>
   const html = renderScheduleHtml(schedule, { email: true });
   assert.match(html, viewport);
   assert.match(html, /@media screen and \(max-width: 900px\)/);
-  assert.match(html, /class="m-lbl">Qty <\/span>2/);
-  assert.match(html, />IN PROGRESS</);
+  // Job rows (and their phone card labels) are on the in-app page; the email is the summary.
+  const page = renderScheduleHtml(schedule);
+  assert.match(page, /class="m-lbl">Qty <\/span>2/);
+  assert.match(page, />IN PROGRESS</);
   assert.doesNotMatch(html, /window\.print\(\)/);
   assert.match(renderScheduleHtml(schedule), /window\.print\(\)/);
 });
