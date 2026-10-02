@@ -169,10 +169,10 @@ function StateTags({ ss }: { ss: StateSnapshot | undefined }) {
 
 function Stat({ label, value, sub, color }: { label: string; value: string; sub?: string; color?: string }) {
   return (
-    <div className="min-w-0 rounded-lg bg-[#F7F4EF] px-3 py-2">
-      {/* Wraps, never truncates: a cut-off amount on a phone reads as a different number. */}
+    <div className="@container min-w-0 rounded-lg bg-[#F7F4EF] px-3 py-2">
+      {/* Label and sub wrap; the value scales with the tile (cqi) and never splits a word. */}
       <p className="break-words text-[10px] uppercase tracking-wider" style={{ color: MUTED }}>{label}</p>
-      <p className="break-words text-lg font-bold tabular-nums" style={{ color: color ?? "#1F1D1B" }}>{value}</p>
+      <p className="whitespace-nowrap overflow-hidden text-ellipsis text-[clamp(0.8rem,8cqi,1.125rem)] font-bold tabular-nums" style={{ color: color ?? "#1F1D1B" }} title={value}>{value}</p>
       {sub && <p className="break-words text-[10px]" style={{ color: MUTED }}>{sub}</p>}
     </div>
   );

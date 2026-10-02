@@ -5,6 +5,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Search } from "lucide-react";
 import {
+  KPI_ROW,
   TAUPE, TEAL, RED, AMBER, GREEN, MUTED, BORDER, CHART_GOLD, fmtN,
   inPeriod, inFocus, dayLabel, periodLabel, type Period, type ServiceSub,
 } from "./dashboard-shared-lib";
@@ -166,7 +167,7 @@ export function ServiceView({
 
       {sub === "overview" && (
         <>
-          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
+          <div className={KPI_ROW}>
             <Kpi label="New cases" value={fmtN(logged.length)} sub={`logged, ${periodLabel(period)}`} />
             <Kpi label="Open" value={fmtN(count("OPEN"))} sub="of those logged" valueColorClass="text-[#9C6F1E]" />
             <Kpi label="In progress" value={fmtN(count("IN_PROGRESS"))} sub="of those logged" valueColorClass="text-[#3E6570]" />
@@ -257,7 +258,7 @@ export function ServiceView({
 
       {sub === "overdue" && (
         <>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          <div className={KPI_ROW}>
             <Kpi label="Overdue cases" value={fmtN(overdue.length)} sub={`open > ${threshold} days`} valueColorClass="text-[#9A3A2D]" />
             <Kpi label="Worst" value={overdue[0] ? `${overdue[0].daysOverdue} d` : "—"} sub={overdue[0]?.caseNo ?? undefined} valueColorClass="text-[#9C6F1E]" />
             <Kpi label="Pending approvals" value={fmtN(pendingApprovals)} sub="cases waiting for a decision" valueColorClass="text-[#3E6570]" />

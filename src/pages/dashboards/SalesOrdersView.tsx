@@ -20,6 +20,7 @@ import { formatCurrency } from "@/lib/utils";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { CalendarX2 } from "lucide-react";
 import {
+  KPI_ROW,
   TAUPE, GREEN, AMBER, TEAL, fmtN, fmtRMAxis, ymd, dayLabel,
   CHART_INK, CHART_GOLD, CHART_AXIS, CARD_BORDER, CARD_BG, CHART_SERIES,
   inPeriod, inFocus, periodLabel, isConfirmedOrder, type Period,
@@ -475,7 +476,7 @@ export function SalesOrdersView({
         )}
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+      <div className={KPI_ROW}>
         <Kpi
           label="Total Orders"
           value={fmtN(kpis.soCount)}
@@ -494,7 +495,7 @@ export function SalesOrdersView({
               : undefined
           }
           valueColorClass="text-[#6B5C32]"
-          valueSizeClass="text-xl"
+         
         />
         <Kpi
           label="Outstanding"

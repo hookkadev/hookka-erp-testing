@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-02**: newest entry BUG-2026-10-02-252 (branch `fix/dashboard-exp-kpi-scale`, to staging; 251 is taken on `main`); a log, so "verified" means the entry matches the code on its branch.
 > **Last verified: 2026-10-02** (branch `chore/sync-staging-from-main-1002`, staging<-main merge): both logs merged, one copy of each entry. Numbering follows `main`: staging's BUG-2026-10-01-241 (accessories got every job card twice) is the same bug as main's BUG-2026-10-01-244, so staging's entry is dropped for main's (which has the (FC) follow-up), and 241 now means main's DEV-08 entry. Main-only entries 238, 237, 241, 243 to 247 and 250 added.
 > **Last verified: 2026-10-02**: BUG-2026-10-01-240 got a second follow-up (the email is now summary only; branch `feat/schedule-dept-share-table`, to staging); a log, so "verified" means the entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-02**: BUG-2026-10-01-240 got a follow-up paragraph (the "Show full list" row, branch `fix/schedule-email-full-list-row`, to staging); a log, so "verified" means the entry matches the code on its branch, not that every older entry is still true.
@@ -92,6 +93,24 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-10-02-252 — Dashboard Experimental: number tiles flush at the top on phones, cramped and split at laptop width `ui-frontend` 🟢
+
+🟢 Fixed on `fix/dashboard-exp-kpi-scale` (to `staging`). Report (owner, after #681): numbers out of their boxes, bad padding, not centred, cramped, not scaling.
+
+**Measured on staging (2026-10-02, after #681 and #682 deployed), at 390 / 768 / 1024 / 1280 / 1440 / 1920px:**
+- Phones: every number tile had padding-top 0px and padding-bottom 12px. `CardContent`'s base classes carried `max-md:p-[var(--card-pad,1rem)] max-md:pt-0`; a caller's `p-3` beats the plain classes through tailwind-merge but cannot beat a `max-md:` variant, so every card that set its own padding (52 in the dashboards alone) lost its top padding below 768px.
+- 1024px: the Overview row went to 5 columns at `lg` (a screen-width breakpoint) inside ~730px of content beside the sidebar, about 130px a tile; with #681's `break-words` the bottleneck value read "UPHOLSTER / Y".
+- Sideways scroll: Sales at 390px was 91px too wide (the state / category donut card, a grid item that could not shrink below its chart); every tab at 768px was 5px too wide (the staging top bar was one row from `md`).
+- Scrolling: the dashboard's sticky header used `top-0`, the same spot as the app's sticky top block, so it covered the top bar on desktop and stacked half over the 3-row bar on phones.
+
+**Fix.** `card.tsx`: the phone default padding goes through `--card-pad-auto` instead of a `max-md:` padding class, so a caller's own padding wins at every width (no change for cards that do not set one). Number tiles: the value is `whitespace-nowrap` and sized `clamp(0.875rem, 8.5cqi, 1.5rem)` against the tile (`@container`), so it shrinks with the tile and never splits a word; rows use `KPI_ROW` (flex-wrap, 10rem basis) instead of breakpoint grids, so the count follows the space the row really has. The dashboard root sets `[&_.grid>*]:min-w-0`. The staging top bar wraps below `lg`. The sticky top block stays (owner ask, `fix/staging-sticky-topbar`) and publishes its height as `--app-sticky-h`; the dashboard header docks under it instead of over it, which also stops it hiding the top bar on desktop.
+
+**Sweep.** All tile rows on the page (Overview, Sales, Operations, Employees, Service, Service Performance, Finance) moved to `KPI_ROW`; the four callers that forced `text-xl` to squeeze RM values in no longer need it. Other pages: the card padding fix applies to every page; their non-padded cards render exactly as before.
+
+**Regression.** `tests/card-padding-phone.test.mjs` (fails on the old `card.tsx`: 3 of 4).
 
 ---
 

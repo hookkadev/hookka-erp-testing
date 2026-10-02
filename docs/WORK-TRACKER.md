@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-02**: branch `fix/dashboard-exp-kpi-scale` (to `staging`, BUG-2026-10-02-252) added below (its entry is the newest).
 > **Last verified: 2026-10-02**: branch `feat/dashboard-plan-vs-actual-jobcards` (to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-02**: branch `chore/sync-staging-from-main-1002` (staging<-main merge): both trackers merged, main-only entries added, main's duplicate BUG-34 entry (mislabelled BUG-2026-09-28-210) dropped for staging's (-233), and staging's accessories entry now carries main's number BUG-2026-10-01-244.
 > **Last verified: 2026-10-02**: branch `feat/dashboard-exp-mobile` (to `staging`) added below (its entry is the newest).
@@ -138,6 +139,16 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-02 — 🔵 Dashboard Experimental scales at every width, round 2 (branch `fix/dashboard-exp-kpi-scale` → `staging`, BUG-2026-10-02-252)
+
+Owner, after #681: numbers out of the box, padding bad and not centred, cramped, not scaling. #681 had been checked at one phone width only.
+
+1. 🔵 Tiles flush at the top on phones (0px top padding, measured): fixed once in `card.tsx`.
+2. 🔵 Cramped 5-across rows and "UPHOLSTER / Y" at 1024px: rows fill their real width (`KPI_ROW`), values scale with the tile and never split.
+3. 🔵 Page sideways on Sales at 390 (91px) and on every tab at 768 (5px): grid boxes may shrink, top bar wraps below lg.
+4. 🔵 Sticky bars stacked: the dashboard header now docks under the app top block (`--app-sticky-h`), which stays pinned as the owner asked on 2026-10-01.
+5. ⬜ Verify on the PR preview at 390 / 768 / 1024 / 1280 / 1440 / 1920, then on staging after merge.
 
 ## 2026-10-02 — 🔵 Experimental dashboard, Operations > Plan vs Actual on the Schedule email's measures (branch `feat/dashboard-plan-vs-actual-jobcards` → `staging`)
 

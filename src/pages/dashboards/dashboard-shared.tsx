@@ -557,10 +557,11 @@ export function Kpi({
   const down = sub?.startsWith("-");
   const Trend = down ? TrendingDown : TrendingUp;
   return (
-    <Card>
+    <Card className="@container">
       <CardContent className="p-3 min-w-0">
-        {/* Label and value wrap rather than truncate: two tiles a row on a
-            phone is ~140px, and a cut-off amount reads as a different number. */}
+        {/* The label wraps. The value never wraps or splits a word: it scales
+            with the tile's own width (cqi), so a 10rem tile still fits
+            "RM 12,345,678.90". The ellipsis is only a last resort. */}
         <p className="text-xs text-[#6B7280] break-words">
           {label}
           {hint && (
@@ -571,11 +572,11 @@ export function Kpi({
         </p>
         <p
           className={cn(
-            "mt-1 font-bold break-words tabular-nums max-md:text-xl",
-            valueSizeClass ?? "text-2xl",
+            "mt-1 font-bold tabular-nums leading-tight whitespace-nowrap overflow-hidden text-ellipsis text-[clamp(0.875rem,8.5cqi,1.5rem)]",
+            valueSizeClass,
             valueColorClass ?? "text-[#1F1D1B]",
           )}
-        >
+         title={value}>
           {value}
         </p>
         {sub &&
@@ -587,7 +588,7 @@ export function Kpi({
               )}
             >
               <Trend className="h-3 w-3 shrink-0" />
-              <span className="truncate">{sub}</span>
+              <span className="min-w-0">{sub}</span>
             </span>
           ) : (
             <p className="mt-1 text-xs text-[#6B7280]">{sub}</p>
