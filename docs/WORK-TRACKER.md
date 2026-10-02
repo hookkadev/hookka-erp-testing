@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-01**: one Scan on Payment Vouchers in progress (branch `feat/pv-scan-one-button`).
 > **Last verified: 2026-10-02**: branch `feat/email-reports-to-main` (to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `fix/bom-editor-layered` (BUG-2026-10-01-247, Edit BOM tree back to layered colour cards) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: OCB attachments + New AP Payment popup (#668) closed ✅ with its prod check.
@@ -206,6 +207,14 @@ Verified: `tsc -p tsconfig.app.json` exit 0; `npm test` all pass. NOT verified o
 4. 🔵 **Bug-id collisions — followed `main`:** main's numbers stand; staging's colliding entries renumbered after main's max (194) and every staging-side reference (code comments, tests, docs, short forms) moved with them: 09-23-184→196, 185→197; 09-24-182→198, 183→199, 184→200, 185→201, 186→202 (186b→202b), 187→203, 188→204, 189→205, 190→206, 191→207; rack-scan 09-25-193→195.
 tsc strict 0; `npm test` 5047 pass / 0 fail.
 ---
+
+## 2026-10-01 — 🔵 Payment Vouchers: ONE Scan (owner「不能做一起吗？」→「就是一个 ocr … 多张 receipt 转一张 payment voucher, 支持一次性开多张 voucher」→「不保留，做」)(branch `feat/pv-scan-one-button`)
+
+1. 🔵 `ScanVouchers` replaces Scan Bills + Scan Receipt: every receipt starts as its own voucher; tick several → Merge into one
+   voucher (split undoes); Create = draft vouchers dated today with their receipts attached; the last voucher can open in the
+   full form. No other-creditor bills from this page (owner: not kept) — those are scanned on Other Creditor Bills and paid
+   through New AP Payment. The form's own "Scan bill (OCR)" stays. Guards updated: `finance-scan-learn-ui`, `pv-attachments`,
+   `ocb-attachments-ap-popup`.
 
 ## 2026-10-01 — ✅ Other-creditor bill attachments; New AP Payment as a popup (owner「OCB 附件要做」+「new ap payment 的页面还是这样」)(#668 82f632d4, prod-verified; branch `feat/ocb-attachments-ap-popup`)
 
