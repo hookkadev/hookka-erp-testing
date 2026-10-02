@@ -1,6 +1,6 @@
 # Hookka ERP — Work Tracker
 
-> **Last verified: 2026-10-02**: finance right-click row menus + Esc closes popups in progress (branch `feat/finance-row-menu-esc`).
+> **Last verified: 2026-10-02**: finance right-click row menus + Esc + fund transfer description edit (#680) closed ✅ with its prod check.
 > **Last verified: 2026-10-02**: branch `feat/m-install-and-desktop-switch` (to `main`, BUG-2026-10-02-250) added below (its entry is the newest).
 > **Last verified: 2026-10-02**: branch `feat/dev31-worker-dept-hours-main` (DEV-31 to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-02**: branch `feat/schedule-summary-email-to-main` (to `main`) added below (its entry is the newest).
@@ -87,19 +87,27 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
-## 2026-10-02 — 🔵 Finance lists: row actions on right-click; Esc closes popups; Fund Transfer edit (owner「FUND TRANSFER无法edit?」+「这个显示太多了，能不能right click 才选我的东西」+「点开后无法用esc 关闭，create new pv 时也是这样」)(branch `feat/finance-row-menu-esc`)
+## 2026-10-02 — ✅ Finance lists: row actions on right-click; Esc closes popups; Fund Transfer edit (owner「FUND TRANSFER无法edit?」+「这个显示太多了，能不能right click 才选我的东西」+「点开后无法用esc 关闭，create new pv 时也是这样」)(#680 1b339244, prod-verified; branch `feat/finance-row-menu-esc`)
 
-1. 🔵 Fund Transfer edit — the old Fund Transfer page never had an edit (void / unvoid / delete only). The Payment
+1. ✅ Fund Transfer edit — the old Fund Transfer page never had an edit (void / unvoid / delete only). The Payment
    Vouchers popup told every outside door "Edit … live on that page" — wrong for a fund transfer; now said per door.
    Owner then「我要可以edit, 因为我发现description 少了」→ built **Edit description**: `PUT /fund-transfers/:no/description`
    rewrites only the text of the transfer's two live ledger legs ("Transfer <no> · <text>"); accounts, amounts, date and a
    bank match (held by leg id) stay; a voided transfer is refused. From the Fund Transfer page and from Payment Vouchers
    (menu + popup). Changing the money is still void + post again.
-2. 🔵 Row actions on right-click (plus a ⋮ per row, as the data grid has): Payment Vouchers, Receipts, Fund Transfer,
+2. ✅ Row actions on right-click (plus a ⋮ per row, as the data grid has): Payment Vouchers, Receipts, Fund Transfer,
    Other Party Bills / Payments, Supplier Payment — no action links in the rows; double-click still opens the popup.
-3. 🔵 Esc closes the popup on top: the document popups, the voucher / AP payment / AP bill forms (they ask first when
+3. ✅ Esc closes the popup on top: the document popups, the voucher / AP payment / AP bill forms (they ask first when
    something was keyed), the scan dialogs, the report image — one shared stack (`src/lib/escape-stack.ts`) that the confirm
    dialog joins, so Esc on a confirm never also closes the form under it.
+4. Prod (2026-10-02, read-only — nothing saved, voided or created; voucher count unchanged): Payment Vouchers rows all
+   carry the ⋮ and no action links; a real right-click on a row opens its menu there (row highlighted, the browser menu
+   held back), the ⋮ opens it under itself inside the screen; menus match each kind (approved voucher, fund transfer with
+   Edit description, receipt, supplier payment with Edit); Esc closes the menu, then the popup; New Payment Voucher closes
+   on Esc when empty, asks when typed, Esc on the question keeps the form and its text, Discard closes it. The description
+   editor opens with the transfer's current text (empty for the one without), Save stays off until it changes, Esc closes
+   it. `PUT …/description` refuses an unknown number (404) and an over-long text (400) before writing; the transfers'
+   descriptions read back unchanged — the real edit is the owner's.
 
 ## 2026-10-02 — 🔵 /m office app: one-tap Install app, and a working "Open the full desktop app" (branch `feat/m-install-and-desktop-switch` → `main`)
 
