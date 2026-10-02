@@ -1,6 +1,6 @@
 # Hookka ERP — Codebase Map (the single authoritative map)
 
-> **Restamped 2026-10-02 on branch `feat/email-reports-to-main`:** Reports module line counts and the Email Reports settings page row only. Nothing else re-checked.
+> **Restamped 2026-10-02 on branch `feat/email-reports-to-main`:** Reports module line counts, the Email Reports settings page row, and the `switchOrg` line ref in `sidebar.tsx` (moved by the new menu link) only. Nothing else re-checked.
 > **Restamped 2026-10-01 on branch `feat/ocb-attachments-ap-popup`:** Accounting row, bill attachments + AP Payment popup. Nothing else re-checked. Last verified: 2026-10-01.
 > **Restamped 2026-10-01 on branch `claude/main-accessories-duplicate-cards-fdxaik`:** Production & BOM gotcha on job-card breakdown (L1-only BOM → auto chain of its L1 steps; L1 duplicates skipped). Nothing else re-checked. Last verified: 2026-10-01.
 > **Restamped 2026-10-01 on branch `feat/finance-tables-drills`:** Accounting row, finance tables + monthly drills (`src/lib/use-resizable-tables.ts`, `PlMonthlyDrillRows`, `CfMonthlyDrillRows`). Nothing else re-checked. Last verified: 2026-10-01.
@@ -2407,7 +2407,7 @@ deliberately not dropped.
 **This field is NOT the tenant boundary, and never was.** `getOrgId(c)`
 (`src/api/lib/tenant.ts:109`) resolves the request's org from the session's `users.orgId`
 and never reads `inter_company_config`, so switching company has never rescoped a single
-query — despite `switchOrg` in `sidebar.tsx:444` doing a full `window.location.reload()`,
+query — despite `switchOrg` in `sidebar.tsx:457` doing a full `window.location.reload()`,
 which reads as though it should. `activeOrgId` drives exactly two things: the switcher's
 label + tick (`sidebar.tsx:894`/`:949`) and the highlight ring on Settings → Organisations
 (`settings/organisations.tsx:329`). **Open owner question:** `PUT /api/organisations` is
