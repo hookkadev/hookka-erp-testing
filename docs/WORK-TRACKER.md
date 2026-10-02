@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-02**: branch `feat/email-reports-to-main` (to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `fix/bom-editor-layered` (BUG-2026-10-01-247, Edit BOM tree back to layered colour cards) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: OCB attachments + New AP Payment popup (#668) closed ✅ with its prod check.
 > **Last verified: 2026-10-01**: OCB attachments + New AP Payment popup in progress (branch `feat/ocb-attachments-ap-popup`).
@@ -79,6 +80,16 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-02 — 🔵 BUG-36 Email Reports to main: per-report recipients and send times (branch `feat/email-reports-to-main` → `main`)
+
+Owner asked for the Email Reports system built on staging to go to main, with the phone fixes, and for NO change to any report calculation.
+
+1. 🔵 Settings > Email Reports (SUPER_ADMIN): per report on/off, own recipient list, daily / weekly / monthly at one or more times, send-test. Stored in `kv_config['daily_report_settings']`. A report nobody has saved keeps the old shared recipient list (env, then `daily_report_recipients`, then SUPER_ADMINs) and its old time.
+2. 🔵 `daily-reports.yml` runs every 15 minutes against `due-trigger` instead of four fixed crons. Defaults are today's times (brief 07:00, schedule 08:00, efficiency 12:00, overdue 17:00 SGT). First run after deploy records what already went out today instead of sending it again (`seedLastSent`).
+3. ✅ Phone layouts for all four emails (BUG-2026-09-29-221 / -232 / -248) and the Schedule email size cap (BUG-2026-10-01-240), presentation only.
+4. ✅ NOT brought over, because they change a calculation: the Efficiency email covering today instead of the previous working day, and the production revenue figure. They stay on staging; moving the Efficiency email to the evening needs the owner's say.
+5. ✅ Mail goes through `sendMail` as on main (Brevo, else Resend). MailSlurp is staging only and is not in this branch.
 
 ## 2026-10-01 — 🔵 Accessories doubled on Fab Cut (Violet) (staging #656 merged + verified; branch `fix/accessory-l1-only-job-cards-main` → `main`, BUG-2026-10-01-244)
 

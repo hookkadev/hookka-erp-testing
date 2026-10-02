@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-02**: newest entry BUG-2026-10-02-248 (branch `feat/email-reports-to-main`, to main); entries -221, -232, -240 and -248 are the Email Reports phone and size fixes brought over from staging; a log, so "verified" means the entries match the code on this branch, not that every older entry is still true.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-246 (branch `fix/fin-tables-ceil`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-01**: BUG-2026-10-01-244 got a follow-up section (the (FC) Fab Cut card, branch `claude/main-accessories-duplicate-cards-fdxaik`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-245 (branch `fix/worker-history-snapshot-stale`; ids 240 and 242 are on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
@@ -62,6 +63,92 @@ Entries themselves stay newest-first.
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
 
 ---
+
+## BUG-2026-10-02-248 — the Efficiency email cut off its Efficiency column on a phone `reports` `ui-frontend` 🟢
+
+🟢 Fixed on `feat/email-reports-to-main` (BUG-36 follow-up to -232).
+
+Found by rendering all four report emails at 375px wide, not by a test: the
+-232 test only checked that the viewport tag and the card CSS were present.
+The Efficiency email's Department Efficiency table has five columns, and the
+phone rules set `white-space: nowrap` on every cell of every `table.data`
+(meant to keep hour values like "11h 40m" on one line). Five unwrappable
+columns do not fit, so the page scrolled sideways (scrollWidth 395 on a 375
+screen) and the last column, Efficiency %, the main number in the report, was
+clipped ("Efficienc", "73", "54").
+
+Fix (`src/api/lib/efficiency-report.ts`, inside the existing 640px `screen`
+media query): the department table's first column may wrap (so a name plus its
+LOW badge takes two lines), and its text is 9pt. The employee cards and the
+A4 print are unchanged.
+
+Measured after the fix at 375px with four departments (longest names, two
+flagged LOW): scrollWidth 375, Efficiency column fully visible. Not checked: a
+real mail app (Gmail, Outlook), real data.
+
+Regression test: `tests/report-emails-mobile.test.mjs` (efficiency case).
+
+## BUG-2026-10-01-240 — Today's Production Orders email was too big (past Gmail's clip size) `reports` 🟢
+
+🟢 Fixed on `feat/email-reports-to-main` (BUG-36 follow-up). First found on staging, where the mail
+provider refuses a body over 100,000 bytes; Gmail also clips HTML past ~102 KB,
+so production's Schedule email on a busy day is cut off too (UNMEASURED on prod).
+
+Measured on staging 2026-10-01: 256 job cards rendered ~199 KB (Efficiency
+48 KB, Overdue 14 KB); data and render were fast, the body was just twice the cap.
+
+Fix (`schedule-overdue-report.ts`, email mode only, no figure changes): row
+markup is capped at `EMAIL_ROWS_BUDGET` (80,000 bytes) split evenly across
+departments. Department totals always show; rows past a department's share
+become "N more job cards ... not shown in this email" plus a link, and a line
+under the summary says "This email lists X of Y job cards". The link is
+`<origin>/api/reports/schedule?date=` where origin is the request that
+triggered the send. Whitespace between row tags is stripped. A 100-card day is
+not capped at all, and the in-app page is never capped.
+
+Regression: `tests/schedule-email-size.test.mjs`.
+
+## BUG-2026-09-29-232 — the Schedule, Efficiency and Morning Brief emails were unreadable on a phone `reports` `ui-frontend` 🟢
+
+🟢 Fixed on `feat/email-reports-to-main` (BUG-36 follow-up to -221).
+
+Same cause as the Overdue email (-221): each email is a desktop or A4 page
+with no viewport tag, so a phone shrinks it to fit. The Schedule email is a
+9-column table per department; the Efficiency email a 7-column employee table.
+The Morning Brief was already a 720px email layout but had no viewport tag,
+and one of its notices (pending schedule proposals) was in Chinese, against
+the English-only UI rule.
+
+Fix: `schedule-overdue-report.ts` shares `PHONE_CSS` between Schedule and
+Overdue (rows become cards below 900px, labels added, status with spaces);
+`efficiency-report.ts`: below 640px summary boxes go two per row and each
+employee row becomes a card; `production-brief.ts`: viewport tag, tighter
+padding below 640px, the proposals notice in English.
+`renderScheduleHtml` / `renderEfficiencyHtml` take `{ email: true }` from
+`runAndSendReport` and drop the Print button; the in-app pages keep it. No
+figure, query or date changes. All phone rules are `screen`-only, so the A4
+prints are unchanged. Outlook's phone app partly ignores embedded media queries.
+
+Regression test: `tests/report-emails-mobile.test.mjs`.
+
+## BUG-2026-09-29-221 — the Overdue email was unreadable on a phone `reports` `ui-frontend` 🟢
+
+🟢 Fixed on `feat/email-reports-to-main` (BUG-36 follow-up).
+
+The emailed Overdue Report is the same HTML as the A4-landscape print page:
+a 10-column table, no viewport tag, no small-screen rules. A phone shrank the
+whole ~1000px page to fit, so the table text was a third of its size, and
+`IN_PRODUCTION` (one word, no break point) was cut off in its column. The email
+also carried a "Print / Save as PDF" button that does nothing inside a mail
+client.
+
+Fix (`schedule-overdue-report.ts`): a viewport tag plus a `screen`-only media
+query below 900px that turns each SO row into a card with small labels, and the
+summary boxes two per row. Status now renders with spaces (`IN PRODUCTION`).
+`renderOverdueHtml` takes `{ email: true }`, which drops the Print button from
+the email only. No figure changes.
+
+Regression test: `tests/overdue-email-mobile.test.mjs`.
 
 ## BUG-2026-10-01-247 — Edit BOM's WIP tree lost its layers: every row read "{DIVAN_HEIGHT} Divan- {SI…" `bom` `ui-frontend` 🟢
 

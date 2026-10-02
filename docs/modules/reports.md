@@ -1,5 +1,7 @@
 # Reports & Analytics — Module Guide
 
+> **Last verified: 2026-10-02** (branch `feat/email-reports-to-main`): `reports.ts` and report-lib line counts and every `reports.ts` anchor in this file re-derived, plus the Email Reports settings / due-trigger / phone-layout notes. Nothing else re-checked.
+
 > **Last verified: 2026-08-14** (branch `docs/docs-vs-code-audit`) — corrected against the
 > source by the prose audit; the row(s) touched here are itemised in
 > [`docs/DOCS-VS-CODE-AUDIT.md`](../DOCS-VS-CODE-AUDIT.md). Only the claims listed there were
@@ -22,12 +24,12 @@ Two unrelated report worlds share the name **Reports**:
   - `/analytics/forecast` → `src/pages/analytics/forecast.tsx:50` (`ForecastPage` — demand forecast vs historical sales)
   - `/dashboard-b` → `src/pages/dashboard-b/index.tsx` (the production dashboard; `/dashboard-b` redirects to `/dashboard` — `dashboard-routes.tsx:233`. See [[dashboard]].)
 - API routes (mounted in `src/api/worker.ts`)
-  - `/api/reports/*` → `src/api/routes/reports.ts` (973 lines) — mount `worker.ts:1431`
+  - `/api/reports/*` → `src/api/routes/reports.ts` (1080 lines) — mount `worker.ts:1431`
   - `/api/internal/reports/*` → `internal` export of `reports.ts` (cron triggers) — mount `worker.ts:1432`
   - `/api/forecasts` → `src/api/routes/forecasts.ts` (155) — mount `worker.ts:1346`
   - `/api/dashboard/overview` → `src/api/routes/dashboard-overview.ts` (2316) — mount `worker.ts:1304`
 - Report engines (logic lives here, not in the route)
-  - `src/api/lib/compliance-report.ts` (1519) · `efficiency-report.ts` (644) · `schedule-overdue-report.ts` (713) · `operations-report.ts` (1248) · `production-brief.ts` (738)
+  - `src/api/lib/compliance-report.ts` (1519) · `efficiency-report.ts` (669) · `schedule-overdue-report.ts` (779) · `operations-report.ts` (1248) · `production-brief.ts` (742)
 - Shared client engines: `src/lib/print-report.ts` (351, WYSIWYG print) · `src/lib/export-report.ts` (146, CSV/XLSX/PDF export)
 
 ## Data model
@@ -39,8 +41,8 @@ Two unrelated report worlds share the name **Reports**:
 - Reports hub tabs own no tables — they read `/api/sales-orders`, `/api/invoices`, `/api/production-orders`, `/api/products`, `/api/purchase-orders`, `/api/workers` and aggregate client-side.
 
 ## Core flows
-1. **Daily Report (compliance)** — `GET /compliance.json` `reports.ts:596` → `buildComplianceCached` (`:648`, SWR snapshot cache, serve-stale + background refresh) → `collectComplianceData` (`compliance-report.ts:1398`) returns `ComplianceData` (`:360`: grouped exception rows + counts). `daily-report.tsx:1009` renders it.
-2. **Emailed report dispatch** — cron `POST /api/internal/reports/{efficiency,schedule,overdue,brief}-trigger` (`reports.ts:836/842/848/854`) → `cronGate` (`:811`, `authCron` shared-secret + skip Sun/PH) → `dispatchReport` (`:761`) resolves date + `resolveRecipients` (`:169`) → `runAndSendReport` (`:891`) collects data, renders HTML+text, `sendMail`.
+1. **Daily Report (compliance)** — `GET /compliance.json` `reports.ts:620` → `buildComplianceCached` (`:672`, SWR snapshot cache, serve-stale + background refresh) → `collectComplianceData` (`compliance-report.ts:1398`) returns `ComplianceData` (`:360`: grouped exception rows + counts). `daily-report.tsx:1009` renders it.
+2. **Emailed report dispatch** — cron `POST /api/internal/reports/{efficiency,schedule,overdue,brief}-trigger` (`reports.ts:866/872/878/884`) → `cronGate` (`:836`, `authCron` shared-secret + skip Sun/PH) → `dispatchReport` (`:783`) resolves date + `resolveRecipients` (`:183`) → `runAndSendReport` (`:994`) collects data, renders HTML+text, `sendMail`.
 3. **Manual send-now** — UI buttons hit `POST /efficiency/send` (`:374`), `/schedule/send` (`:875`), `/overdue/send` (`:880`), `/brief/send` (`:532`); all funnel into the same `dispatchReport` path but bypass the cron working-day gate.
 4. **Production Brief** — `brief-trigger` (`:854`) is Agent-Console-gated (`isAgentPaused("PRODUCTION")`) and wrapped in `recordAgentRun` for token accounting; LLM budget via `llmKeyIfBudgetAllows`.
 5. **Reports hub tab** — e.g. `SalesReportTab` (`reports.tsx:428`) fetches `/api/sales-orders` + `/api/invoices` and computes summaries in-browser; print via `printReport`, export via `exportReportCsv`/`Xlsx`/`Pdf`.
@@ -53,14 +55,14 @@ Two unrelated report worlds share the name **Reports**:
 | `TABS` | `reports.tsx:406` | Tab definitions |
 | `DailyReportPage` | `src/pages/daily-report.tsx:1009` | Compliance exceptions page |
 | `ForecastPage` | `src/pages/analytics/forecast.tsx:50` | Forecast vs historical-sales view |
-| `GET /compliance.json` | `src/api/routes/reports.ts:596` | Daily Report JSON (cached) |
-| `buildComplianceCached` | `reports.ts:648` | SWR snapshot wrapper (serve-stale) |
+| `GET /compliance.json` | `src/api/routes/reports.ts:620` | Daily Report JSON (cached) |
+| `buildComplianceCached` | `reports.ts:672` | SWR snapshot wrapper (serve-stale) |
 | `collectComplianceData` | `src/api/lib/compliance-report.ts:1398` | Daily Report exception engine |
-| `dispatchReport` | `reports.ts:761` | Shared send path (cron + Agent Console + manual) |
-| `resolveRecipients` | `reports.ts:169` | kv_config → SUPER_ADMIN fallback |
-| `cronGate` / `runAndSendReport` | `reports.ts:811 / 934` | Working-day gate · collect+render+send |
-| `internal` (Hono) | `reports.ts:738` | `/api/internal/reports/*` cron triggers |
-| `GET /operations.json` | `reports.ts:345` | Ops rollup (daily/weekly/monthly) |
+| `dispatchReport` | `reports.ts:783` | Shared send path (cron + Agent Console + manual) |
+| `resolveRecipients` | `reports.ts:183` | kv_config → SUPER_ADMIN fallback |
+| `cronGate` / `runAndSendReport` | `reports.ts:836 / 994` | Working-day gate · collect+render+send |
+| `internal` (Hono) | `reports.ts:762` | `/api/internal/reports/*` cron triggers |
+| `GET /operations.json` | `reports.ts:369` | Ops rollup (daily/weekly/monthly) |
 | `collectEfficiencyData` / `renderEfficiencyHtml` | `efficiency-report.ts:133 / 439` | Worker efficiency data + HTML |
 | `collectScheduleData` / `collectOverdueData` | `schedule-overdue-report.ts:113 / 229` | Schedule + overdue data |
 | `collectOperationsReport` | `operations-report.ts:1112` | Ops report builder |
@@ -72,9 +74,9 @@ Two unrelated report worlds share the name **Reports**:
 
 ## Gotchas
 - **The Reports hub and `/api/reports/*` do NOT share data.** `reports.tsx` tabs fetch source-module list APIs and aggregate client-side; only `daily-report.tsx` consumes `/api/reports/compliance.json`. Don't expect matching shapes.
-- **Logic lives in `src/api/lib/*`, not the route.** `reports.ts` (973) is a thin shim over `compliance-report.ts` (1519), `efficiency-report.ts` (644), `schedule-overdue-report.ts` (713), `operations-report.ts` (1248), `production-brief.ts` (738). Edit the lib, not the handler.
+- **Logic lives in `src/api/lib/*`, not the route.** `reports.ts` (1080) is a thin shim over `compliance-report.ts` (1519), `efficiency-report.ts` (669), `schedule-overdue-report.ts` (779), `operations-report.ts` (1248), `production-brief.ts` (742). Edit the lib, not the handler.
 - **`/send` endpoints touch the email/cron path** — they resolve recipients from `kv_config` + `users` and call `sendMail`; not a pure read. The cron `-trigger` variants add `authCron` (`x-cron-secret`) + `cronGate` (skip Sunday / public holidays).
-- **Daily Report is expensive → snapshot-cached.** `collectComplianceData` cold-computes ~6s across the whole order/delivery/invoice/procurement chain; `buildComplianceCached` (`reports.ts:648`) serves last-good instantly and refreshes in the background. Numbers are byte-identical.
+- **Daily Report is expensive → snapshot-cached.** `collectComplianceData` cold-computes ~6s across the whole order/delivery/invoice/procurement chain; `buildComplianceCached` (`reports.ts:672`) serves last-good instantly and refreshes in the background. Numbers are byte-identical.
 - **Production Brief is Agent-Console-gated.** A paused `PRODUCTION` agent (or global kill switch) silences the automatic brief; manual `/brief/send` still works. It also runs under `recordAgentRun` for token accounting.
 - **`forecasts.ts` reads only `forecast_entries`.** The forecast *page* additionally pulls `/api/historical-sales` and `/api/promise-date`; the route itself is a plain CRUD over one table (camelCase cols).
 - **`dashboard-b/` IS the production dashboard** (it is not experimental — the legacy `/dashboard` page was retired 2026-05-21); `/dashboard-b` redirects to `/dashboard`. `charts.tsx` is lazy-loaded to defer the ~357KB recharts/d3 bundle — don't import recharts eagerly into `index.tsx`. See [[dashboard]].
@@ -83,8 +85,10 @@ Two unrelated report worlds share the name **Reports**:
 ## Common tasks (mini-playbook)
 - **Add a Reports-hub tab** → new entry in `TABS` (`reports.tsx:406`) + a `<XReportTab/>` component following the existing tab pattern (fetch source API, aggregate client-side, `printReport`/`exportReport*`). No `/api/reports/*` route needed.
 - **Change a Daily-Report exception rule** → edit the detector in `compliance-report.ts` and the `ComplianceData` shape (`:360`); the route + cache wrapper stay untouched. Grace windows are in `GraceDays` (`compliance-report.ts:80`).
-- **Add / change an emailed report** → add a collect+render pair in a `src/api/lib/*-report.ts`, wire a `ReportKind` into `dispatchReport` (`reports.ts:761`) + a `-trigger` on the `internal` Hono (`:738`) + a manual `/send`. Recipients via `resolveRecipients` (`:169`).
-- **Change report recipients / schedule** → `kv_config['daily_report_recipients']` (fallback SUPER_ADMINs); cron workflows drive the `-trigger` endpoints. Working-day skip logic is `cronGate`/`nonWorkingDayReason` (`reports.ts:811 / 154`).
+- **Add / change an emailed report** → add a collect+render pair in a `src/api/lib/*-report.ts`, wire a `ReportKind` into `dispatchReport` (`reports.ts:783`) + a `-trigger` on the `internal` Hono (`:762`) + a manual `/send`. Recipients via `resolveRecipients` (`:183`).
+- **Change report recipients / schedule** → `kv_config['daily_report_recipients']` (fallback SUPER_ADMINs); cron workflows drive the `-trigger` endpoints. Working-day skip logic is `cronGate`/`nonWorkingDayReason` (`reports.ts:836 / 154`).
+- **Email Reports (Settings → Email Reports, SUPER_ADMIN)** → `GET/PUT /api/reports/settings` (`reports.ts:950 / 960`) read and write `kv_config['daily_report_settings']` through `lib/report-settings.ts`. A report with a saved entry uses its OWN recipient list (an empty list sends to nobody, it never falls back to SUPER_ADMINs); a report with no entry keeps the old shared list and its old time. `daily-reports.yml` calls `due-trigger` (`reports.ts:912`) every 15 minutes; `dueSlot` decides what is due and `daily_report_last_sent` records what went out. `DEFAULT_TIMES` are the old fixed times (brief 07:00, schedule 08:00, efficiency 12:00, overdue 17:00 SGT); change them only on purpose. The first due-trigger run on a database calls `seedLastSent` so times already passed that day are marked handled, not re-sent.
+- **Every report email has a phone layout; keep it screen-only, and keep it presentation only.** The same template serves the email, the in-app page and the A4 print. Schedule + Overdue share `PHONE_CSS` in `schedule-overdue-report.ts` (below 900px rows become cards); Efficiency has its own block (below 640px, employee rows become cards and the department table's name column wraps so the Efficiency % column stays on screen, BUG-2026-10-02-248); the Brief only has a viewport tag and tighter padding. `render{Schedule,Overdue,Efficiency}Html(data, { email: true })` drops the Print button. The Schedule email caps its rows at `EMAIL_ROWS_BUDGET` (80,000 bytes) so Gmail does not clip it (totals always show). Put new phone rules inside `@media screen` so print is unchanged (BUG-2026-09-29-221 / -232, BUG-2026-10-01-240; tests `overdue-email-mobile`, `report-emails-mobile`, `schedule-email-size`, `report-settings`).
 - **Touch forecasts** → `forecasts.ts` CRUD (`:55 / :80`) over `forecast_entries`; the page composes it with historical-sales + promise-date.
 
 ## Related modules

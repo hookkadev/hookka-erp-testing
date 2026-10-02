@@ -1,31 +1,33 @@
 name: Daily Reports — Brief / Schedule / Efficiency / Overdue
 
-# Hits the three /api/internal/reports/*-trigger endpoints at fixed SGT
-# times. Times in cron syntax are UTC, so:
-#   08:00 SGT = 00:00 UTC  → schedule (today's plan, sent at start of day)
-#   12:00 SGT = 04:00 UTC  → efficiency (yesterday's work, summarised at noon)
-#   17:00 SGT = 09:00 UTC  → overdue (any delays as of end of day)
+# Every 15 minutes, asks /api/internal/reports/due-trigger to send whatever is
+# due. WHEN each report goes out (daily / weekly / monthly, at an SGT time) and
+# WHO gets it are set per report on Settings > Email Reports in the ERP; the
+# server remembers what it already sent today, so a late or dropped run just
+# sends late, never twice. Unconfigured reports keep their old daily times:
+# brief 07:00, schedule 08:00, efficiency 12:00, overdue 17:00 SGT. Nothing sends
+# on Sundays or public holidays.
 #
 # Auth: each endpoint expects an x-cron-secret header. Shared secret lives in
 # repo secrets as CRON_SECRET and on Cloudflare Pages env as CRON_SECRET. The
 # Pages worker rejects with 503 if env var missing, 403 if header mismatches.
 #
-# Recipients: defaults to every active SUPER_ADMIN's email. To override, set
-# DAILY_REPORT_RECIPIENTS on the Pages worker (comma-separated).
+# Recipients: a report never saved on Settings > Email Reports falls back to
+# DAILY_REPORT_RECIPIENTS, then SUPER_ADMINs.
+#
+# NOTE: GitHub runs scheduled workflows from the DEFAULT branch (main) only, so
+# a schedule change here takes effect once it reaches main.
 #
 # Manual trigger: workflow_dispatch lets the operator backfill any single
-# report on demand without waiting for the scheduled hour.
+# report on demand, ignoring its schedule.
 
 on:
   schedule:
-    - cron: '0 23 * * *'  # 07:00 SGT (next day) — Production Morning Brief
-    - cron: '0 0 * * *'   # 08:00 SGT — Production Schedule
-    - cron: '0 4 * * *'   # 12:00 SGT — Efficiency Report
-    - cron: '0 9 * * *'   # 17:00 SGT — Overdue Report
+    - cron: '*/15 * * * *'
   workflow_dispatch:
     inputs:
       kind:
-        description: 'Which report to fire (defaults to all three)'
+        description: 'Which report to fire (defaults to all four)'
         required: false
         type: choice
         default: 'all'
@@ -40,6 +42,11 @@ on:
         required: false
         type: string
 
+# Two overlapping runs could both see a report as due.
+concurrency:
+  group: daily-reports
+  cancel-in-progress: false
+
 jobs:
   trigger:
     runs-on: ubuntu-latest
@@ -49,9 +56,6 @@ jobs:
         env:
           GH_EVENT: ${{ github.event_name }}
           KIND_INPUT: ${{ inputs.kind }}
-          # Each scheduled run carries the cron expression in github.event.schedule
-          # — branch on that to pick the right endpoint.
-          CRON_EXPR: ${{ github.event.schedule }}
         run: |
           if [ "$GH_EVENT" = "workflow_dispatch" ]; then
             case "${KIND_INPUT:-all}" in
@@ -62,13 +66,7 @@ jobs:
               *)          echo "kinds=brief schedule efficiency overdue" >> "$GITHUB_OUTPUT" ;;
             esac
           else
-            case "$CRON_EXPR" in
-              "0 23 * * *") echo "kinds=brief"     >> "$GITHUB_OUTPUT" ;;
-              "0 0 * * *") echo "kinds=schedule"   >> "$GITHUB_OUTPUT" ;;
-              "0 4 * * *") echo "kinds=efficiency" >> "$GITHUB_OUTPUT" ;;
-              "0 9 * * *") echo "kinds=overdue"    >> "$GITHUB_OUTPUT" ;;
-              *)           echo "kinds=brief schedule efficiency overdue" >> "$GITHUB_OUTPUT" ;;
-            esac
+            echo "kinds=due" >> "$GITHUB_OUTPUT"
           fi
 
       - name: POST trigger endpoint(s)

@@ -461,12 +461,58 @@ const PAGE_CSS = `
   .print-bar { position: sticky; top: 0; background: #F4EFE3; padding: 8px 12px; border-bottom: 1px solid #E5E1DC; text-align: right; z-index: 10; }
   .print-bar button { padding: 6px 14px; font-size: 10pt; border: 1px solid #1F1D1B; background: #1F1D1B; color: #fff; cursor: pointer; border-radius: 4px; }
   .secondary { color: #6B7280; font-size: 8pt; }
+  .more { margin: 6px 0 0; font-size: 9pt; color: #6B5C32; }
   .num { font-variant-numeric: tabular-nums; }
 `;
 
-export function renderScheduleHtml(data: ScheduleReport): string {
+// Phone layout for the Schedule and Overdue emails (BUG-36): below 900px
+// (phones, and the narrow reading pane of Gmail or Outlook) each table row
+// becomes a card and the 4 summary boxes go two per row. `screen` only, so
+// the A4 print is unchanged. The small labels are hidden on desktop, where
+// the table header names the columns.
+const PHONE_CSS = `
+  .m-lbl { display: none; }
+  @media screen and (max-width: 900px) {
+    body { font-size: 11pt; }
+    .page { padding: 10px 12px; }
+    h1 { font-size: 16pt; }
+    .summary { display: block; overflow: hidden; }
+    .summary .cell { display: block; float: left; width: 50%; padding: 6px 8px; }
+    .summary .val { font-size: 14pt; }
+    table.data, table.data tbody, table.data tr, table.data td { display: block; width: auto !important; }
+    table.data colgroup, table.data thead { display: none; }
+    table.data tbody tr { border: 1px solid #E5E1DC; border-radius: 6px; margin-bottom: 8px; padding: 8px 10px; }
+    table.data tbody tr:last-child td, table.data tbody td { border: 0; padding: 1px 0; overflow: visible; text-align: left !important; font-size: 10.5pt; }
+    table.data tbody td.m-inline { display: inline-block; margin-right: 14px; }
+    table.data tbody td:empty { display: none; }
+    .m-lbl { display: inline; color: #6B7280; font-weight: 400; font-size: 9pt; }
+    .secondary { font-size: 9pt; }
+    .dept-card { border: 0; }
+    .dept-head { flex-wrap: wrap; gap: 2px 10px; border-radius: 4px; margin-bottom: 8px; }
+  }
+`;
+
+// Row markup allowed in the EMAIL, split evenly across departments. A full
+// day (256 cards on 2026-10-01) rendered ~199 KB: MailSlurp (staging) rejects
+// a body over 100,000 bytes and Gmail clips past ~102 KB. Department totals
+// always show; rows past a department's share become "N more" + a link to
+// the full in-app list. The in-app page (opts.email unset) is never capped.
+// ponytail: an unused share is not handed to busier departments; pool it if
+// a big department keeps getting cut while small ones leave room.
+export const EMAIL_ROWS_BUDGET = 80_000;
+const utf8 = new TextEncoder();
+
+export function renderScheduleHtml(
+  data: ScheduleReport,
+  opts: { email?: boolean; fullListUrl?: string } = {},
+): string {
   const { date, totals, byDepartment } = data;
   const longDate = formatDateLong(date);
+  const share = opts.email ? Math.floor(EMAIL_ROWS_BUDGET / Math.max(byDepartment.length, 1)) : Infinity;
+  const fullLink = opts.fullListUrl
+    ? `<a href="${escapeHtml(opts.fullListUrl)}">open the full list</a>`
+    : "open Reports in the ERP for the full list";
+  let shownCards = 0;
 
   const colWidths = `
     <colgroup>
@@ -483,23 +529,35 @@ export function renderScheduleHtml(data: ScheduleReport): string {
 
   const deptSections = byDepartment
     .map((d) => {
-      const rows = d.rows
+      const rowHtml = d.rows
         .map((r) => {
-          const status = `<span style="color:${statusColor(r.status)};font-weight:600;">${escapeHtml(r.status)}</span>`;
+          const status = `<span style="color:${statusColor(r.status)};font-weight:600;">${escapeHtml(r.status.replace(/_/g, " "))}</span>`;
           const pic = [r.pic1Name, r.pic2Name].filter(Boolean).join(", ");
           return `<tr>
-            <td>${escapeHtml(r.poNo)}</td>
+            <td><strong>${escapeHtml(r.poNo)}</strong></td>
             <td>${escapeHtml(r.customerName)}</td>
             <td>${escapeHtml(r.productCode)}<br><span class="secondary">${escapeHtml(r.productName)}</span></td>
-            <td>${escapeHtml(r.sizeLabel ?? "")}</td>
-            <td>${escapeHtml(r.wipLabel ?? "")}</td>
-            <td class="num" style="text-align:right;">${r.quantity}</td>
-            <td class="num" style="text-align:right;">${formatMinutes(r.prodMinutes)}</td>
-            <td>${status}</td>
-            <td>${escapeHtml(pic || "—")}</td>
-          </tr>`;
-        })
-        .join("");
+            <td class="m-inline">${r.sizeLabel ? `<span class="m-lbl">Size </span>${escapeHtml(r.sizeLabel)}` : ""}</td>
+            <td class="m-inline">${r.wipLabel ? `<span class="m-lbl">Stage </span>${escapeHtml(r.wipLabel)}` : ""}</td>
+            <td class="num m-inline" style="text-align:right;"><span class="m-lbl">Qty </span>${r.quantity}</td>
+            <td class="num m-inline" style="text-align:right;"><span class="m-lbl">Mins </span>${formatMinutes(r.prodMinutes)}</td>
+            <td class="m-inline">${status}</td>
+            <td class="m-inline"><span class="m-lbl">PIC </span>${escapeHtml(pic || "—")}</td>
+          </tr>`.replace(/>\s+</g, "><"); // indentation is ~15% of a row
+        });
+      let used = 0;
+      let shown = 0;
+      for (const html of rowHtml) {
+        used += utf8.encode(html).length;
+        if (used > share) break;
+        shown++;
+      }
+      shownCards += shown;
+      const rows = rowHtml.slice(0, shown).join("");
+      const hidden = rowHtml.length - shown;
+      const more = hidden > 0
+        ? `<p class="more">${hidden} more job card${hidden === 1 ? "" : "s"} in ${escapeHtml(d.name)} not shown in this email: ${fullLink}.</p>`
+        : "";
       return `<div class="dept-card">
         <div class="dept-head">
           <span>${escapeHtml(d.name)}</span>
@@ -520,6 +578,7 @@ export function renderScheduleHtml(data: ScheduleReport): string {
           </tr></thead>
           <tbody>${rows}</tbody>
         </table>
+        ${more}
       </div>`;
     })
     .join("\n");
@@ -528,11 +587,12 @@ export function renderScheduleHtml(data: ScheduleReport): string {
 <html lang="en">
 <head>
 <meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Production Schedule — ${escapeHtml(longDate)}</title>
-<style>${PAGE_CSS}</style>
+<style>${PAGE_CSS}${PHONE_CSS}</style>
 </head>
 <body>
-<div class="print-bar no-print"><button onclick="window.print()">Print / Save as PDF</button></div>
+${opts.email ? "" : `<div class="print-bar no-print"><button onclick="window.print()">Print / Save as PDF</button></div>`}
 <div class="page">
   <h1>Production Schedule</h1>
   <div class="meta">${escapeHtml(longDate)} &nbsp;·&nbsp; Hookka Manufacturing ERP</div>
@@ -542,6 +602,7 @@ export function renderScheduleHtml(data: ScheduleReport): string {
     <div class="cell"><div class="lbl">Planned Time</div><div class="val num">${formatMinutes(totals.prodMinutes)}</div><div class="sub">sum of estimates</div></div>
     <div class="cell"><div class="lbl">Departments</div><div class="val num">${totals.departments}</div><div class="sub">with work scheduled</div></div>
   </div>
+  ${shownCards < totals.jobCards ? `<p class="more">This email lists ${shownCards} of ${totals.jobCards} job cards; ${fullLink}.</p>` : ""}
   ${deptSections || `<p style="text-align:center;padding:30px;color:#9CA3AF;">No job cards scheduled for this date.</p>`}
   <div class="footer">Generated ${escapeHtml(new Date(data.generatedAtIso).toLocaleString("en-GB", { timeZone: "Asia/Singapore" }))} SGT</div>
 </div>
@@ -558,7 +619,11 @@ function formatRM(sen: number): string {
   });
 }
 
-export function renderOverdueHtml(data: OverdueReport): string {
+
+export function renderOverdueHtml(
+  data: OverdueReport,
+  opts: { email?: boolean } = {},
+): string {
   const { date, totals, rows } = data;
   const longDate = formatDateLong(date);
 
@@ -599,18 +664,18 @@ export function renderOverdueHtml(data: OverdueReport): string {
           : r.daysOverdue >= 14
             ? "#FFF7ED"
             : "transparent";
-      const status = `<span style="color:${statusColor(r.status)};font-weight:600;">${escapeHtml(r.status)}</span>`;
+      const status = `<span style="color:${statusColor(r.status)};font-weight:600;">${escapeHtml(r.status.replace(/_/g, " "))}</span>`;
       return `<tr style="background:${rowBg};">
         <td><strong>${escapeHtml(r.companySOId || r.salesOrderId)}</strong></td>
         <td>${escapeHtml(r.customerName)}${r.customerState ? ` <span class="secondary">· ${escapeHtml(r.customerState)}</span>` : ""}</td>
         <td>${escapeHtml(r.productSummary || "—")}</td>
-        <td class="num" style="text-align:right;">${r.itemCount}</td>
-        <td class="num" style="text-align:right;">${r.totalQty}</td>
-        <td class="num">${escapeHtml(r.customerDeliveryDate)}</td>
-        <td class="num"><span class="secondary">${escapeHtml(r.hookkaExpectedDD ?? "—")}</span></td>
-        <td class="num" style="text-align:right;font-weight:700;color:${daysColor};">${r.daysOverdue}d</td>
-        <td class="num" style="text-align:right;">${escapeHtml(formatRM(r.totalSen))}</td>
-        <td>${status}</td>
+        <td class="num m-inline" style="text-align:right;"><span class="m-lbl">Items </span>${r.itemCount}</td>
+        <td class="num m-inline" style="text-align:right;"><span class="m-lbl">Units </span>${r.totalQty}</td>
+        <td class="num m-inline"><span class="m-lbl">Customer DD </span>${escapeHtml(r.customerDeliveryDate)}</td>
+        <td class="num m-inline"><span class="m-lbl">Our target </span><span class="secondary">${escapeHtml(r.hookkaExpectedDD ?? "—")}</span></td>
+        <td class="num m-inline" style="text-align:right;font-weight:700;color:${daysColor};"><span class="m-lbl">Overdue </span>${r.daysOverdue}d</td>
+        <td class="num m-inline" style="text-align:right;">${escapeHtml(formatRM(r.totalSen))}</td>
+        <td class="m-inline">${status}</td>
       </tr>`;
     })
     .join("");
@@ -630,11 +695,12 @@ export function renderOverdueHtml(data: OverdueReport): string {
 <html lang="en">
 <head>
 <meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Overdue Report — ${escapeHtml(longDate)}</title>
-<style>${PAGE_CSS}</style>
+<style>${PAGE_CSS}${PHONE_CSS}</style>
 </head>
 <body>
-<div class="print-bar no-print"><button onclick="window.print()">Print / Save as PDF</button></div>
+${opts.email ? "" : `<div class="print-bar no-print"><button onclick="window.print()">Print / Save as PDF</button></div>`}
 <div class="page">
   <h1>Overdue Report</h1>
   <div class="meta">${escapeHtml(longDate)} &nbsp;·&nbsp; Hookka Manufacturing ERP &nbsp;·&nbsp; sales orders past customer delivery date</div>

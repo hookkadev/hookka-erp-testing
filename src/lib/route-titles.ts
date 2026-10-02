@@ -57,6 +57,7 @@ const PATH_TITLES: Array<[RegExp, (m: RegExpExecArray) => string]> = [
   [/^\/maintenance\/?$/, () => "Maintenance"],
   [/^\/settings\/organisations\/?$/, () => "Organisations"],
   [/^\/settings\/variants\/?$/, () => "Variants"],
+  [/^\/settings\/email-reports\/?$/, () => "Email Reports"],
   [/^\/settings\/?$/, () => "Settings"],
   [/^\/consignment\/create\/?$/, () => "New Consignment"],
   [/^\/consignment\/note\/?$/, () => "Consignment Note"],
