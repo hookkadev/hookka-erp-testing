@@ -117,7 +117,8 @@ Ask: the Overdue, Today's Production Orders, Efficiency & Revenue and Morning Br
 
 1. ✅ Rendered all four from `staging` at 375px: Overdue, Schedule and Brief fit; Efficiency scrolled sideways and clipped its Efficiency column (BUG-2026-10-02-248).
 2. ✅ Fixed in `efficiency-report.ts`, regression test added, re-measured at 375px (no sideways scroll).
-3. 🔵 Not done: `main` has none of the phone layout (no viewport tag in any of the four renderers); what goes to `main` is the owner's call. Not checked in a real mail app.
+3. 🔵 Owner ask: send all four emails to one test address from staging for one round, then decide what goes to `main`. Needs this fix on `staging` and a signed-in staging session; arrival in the inbox is for the owner to confirm (staging sends through MailSlurp).
+4. 🔵 Not done: `main` has none of the phone layout (no viewport tag in any of the four renderers); what goes to `main` is the owner's call. Not checked in a real mail app.
 
 ## 2026-10-01 — 🔵 DEV-08 Pillows scheduled with their sofa, rule B (Violet, High) (branch `feat/dev08-pillow-follows-sofa` → `staging`)
 
