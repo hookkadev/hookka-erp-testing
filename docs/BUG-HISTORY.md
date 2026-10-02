@@ -81,6 +81,28 @@ Entries themselves stay newest-first.
 
 ---
 
+## BUG-2026-10-02-249 — Staging mail: a link in an opened email showed "refused to connect" `ui-frontend` 🟢
+
+🟢 Fixed on `fix/staging-mail-links-new-tab` (to `staging`, STAGING ONLY).
+
+Found by the owner: on `/staging-mail`, opening the Production Schedule email and
+clicking its "View full list" link replaced the email preview with
+"staging.hookka-erp-testing.pages.dev refused to connect".
+
+Cause (measured 2026-10-02): the email body is shown inside an iframe, so the
+link loaded the staging page inside that iframe. The worker sends
+`X-Frame-Options: DENY` and `frame-ancestors 'none'` (`src/api/worker.ts`) on
+purpose, so the browser refused to show it there. The link itself was fine.
+
+Fix (`src/pages/staging-mail.tsx`): a `<base target="_blank">` is put inside the
+email's `<head>` (or in front when there is none), and the iframe sandbox now
+allows popups that escape the sandbox, so links open in a new tab. Scripts stay
+off. The anti-framing headers are unchanged.
+
+Not checked yet: clicking the link on the deployed staging site.
+
+Regression test: `tests/staging-mail.test.mjs` (links case; fails on the old page).
+
 ## BUG-2026-10-02-248 — the Efficiency email cut off its Efficiency column on a phone `reports` `ui-frontend` 🟢
 
 🟢 Fixed on `fix/efficiency-email-dept-table` (BUG-36 follow-up to -232, to `staging`).
