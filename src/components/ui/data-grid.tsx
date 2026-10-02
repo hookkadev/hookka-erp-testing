@@ -382,10 +382,11 @@ function matchesFilter(value: any, filter: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Context Menu
+// Context Menu — also used by plain document tables (finance lists, owner
+// 2026-10-02: row actions on right-click), so it is exported.
 // ---------------------------------------------------------------------------
 
-function ContextMenu({
+export function ContextMenu({
   x,
   y,
   items,
@@ -417,7 +418,9 @@ function ContextMenu({
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) onClose();
     }
     function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") { onClose(); return; }
+      // preventDefault: this Esc is used up here, so a popup underneath
+      // (src/lib/escape-stack.ts) stays open.
+      if (e.key === "Escape") { e.preventDefault(); onClose(); return; }
       const enabledIndices = items.reduce<number[]>((acc, item, i) => {
         if (!item.disabled) acc.push(i);
         return acc;

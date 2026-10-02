@@ -55,7 +55,8 @@ test("a foreign row prints, opens and voids through ITS OWN document — never t
   assert.match(tab, /\? `\/api\/supplier-payments\/\$\{encodeURIComponent\(row\.no\)\}\/lifecycle`\s*\n\s*: row\.ft\s*\n\s*\? `\/api\/accounting\/fund-transfers\/\$\{encodeURIComponent\(row\.no\)\}\/lifecycle`\s*\n\s*: `\/api\/accounting\/other-party-payments\/\$\{encodeURIComponent\(row\.no\)\}\/lifecycle`;/);
   assert.match(tab, /const foreignHref = \(row: PayRow\) => row\.sp \? "\/invoices\/supplier-payments" : row\.ft \? "\/accounting\?tab=transfer" : "\/accounting\?tab=ocreditorpay";/);
   // Double-click opens the shared shell; single click does nothing (owner 2026-10-01).
-  assert.match(tab, /onDoubleClick=\{\(\) => setDetailPayKey\(g\.key\)\}\s*\n\s*title="Double-click to open"/);
+  // Right-click (2026-10-02) opens the row's menu: print / its page / void.
+  assert.match(tab, /onDoubleClick=\{\(\) => setDetailPayKey\(g\.key\)\}\s*\n\s*onContextMenu=\{rowMenu\.onContextMenu\(g\.key, \(\) => payRowMenu\(g\)\)\}\s*\n\s*title="Double-click to open · right-click for actions"/);
   assert.match(tab, /title=\{`\$\{PAY_DOOR_LABEL\[g\.door\]\} \$\{g\.no\}`\}/);
 });
 

@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-02**: finance right-click row menus + Esc closes popups in progress (branch `feat/finance-row-menu-esc`).
 > **Last verified: 2026-10-02**: branch `feat/dev31-worker-dept-hours-main` (DEV-31 to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-02**: branch `feat/schedule-summary-email-to-main` (to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-02**: one Scan on Payment Vouchers (#673) closed ✅ with its prod check.
@@ -84,6 +85,18 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-02 — 🔵 Finance lists: row actions on right-click; Esc closes popups; Fund Transfer edit (owner「FUND TRANSFER无法edit?」+「这个显示太多了，能不能right click 才选我的东西」+「点开后无法用esc 关闭，create new pv 时也是这样」)(branch `feat/finance-row-menu-esc`)
+
+1. 🔵 Fund Transfer edit — answered: the old Fund Transfer page never had an edit (void / unvoid / delete only; there is
+   no `PUT /fund-transfers`). The Payment Vouchers popup told every outside door "Edit … live on that page" — wrong for a
+   fund transfer; now said per door. A transfer keyed as New Payment Voucher → Transfer is editable. Building an edit for
+   the old transfers is the owner's call (one matched on a bank statement would come unmatched).
+2. 🔵 Row actions on right-click (plus a ⋮ per row, as the data grid has): Payment Vouchers, Receipts, Fund Transfer,
+   Other Party Bills / Payments, Supplier Payment — no action links in the rows; double-click still opens the popup.
+3. 🔵 Esc closes the popup on top: the document popups, the voucher / AP payment / AP bill forms (they ask first when
+   something was keyed), the scan dialogs, the report image — one shared stack (`src/lib/escape-stack.ts`) that the confirm
+   dialog joins, so Esc on a confirm never also closes the form under it.
 
 ## 2026-10-02: 🔵 DEV-31 worker department hours to main (branch `feat/dev31-worker-dept-hours-main` to `main`)
 

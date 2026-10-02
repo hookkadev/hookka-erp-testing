@@ -5,7 +5,7 @@ import { useCachedJson, invalidateCachePrefix } from "@/lib/cached-fetch";
 import { humanizeError } from "@/lib/humanize-error";
 import { useToast } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/confirm-dialog";
-import { LifecycleActions, LifecycleBadge } from "@/components/accounting/lifecycle-actions";
+import { LifecycleBadge } from "@/components/accounting/lifecycle-actions";
 import { defaultBankCode } from "@/lib/default-bank";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -28,6 +28,8 @@ import { isCleanImportShape, detectRawShape, parseRawStockTakeRows, impliedYmFro
 import { printVoucher, printVouchers, type VoucherSpec, type VoucherLine } from "@/lib/print-voucher";
 import { useRowSelection } from "@/lib/use-row-selection";
 import { useResizableTables } from "@/lib/use-resizable-tables";
+import { useEscapeClose } from "@/lib/escape-stack";
+import { useRowMenu, lifecycleMenuItems, type RowMenuGroups } from "@/components/accounting/row-menu";
 import { BatchActionsBar } from "@/components/accounting/batch-actions-bar";
 import { amountInWords } from "@/lib/amount-in-words";
 import { COMPANY } from "@/lib/constants";
@@ -466,7 +468,9 @@ function AccountPicker({
               e.preventDefault();
               pick(sel.code);
             }
-          } else if (e.key === "Escape") {
+          } else if (e.key === "Escape" && open) {
+            // Used up here: the popup around the picker stays open.
+            e.preventDefault();
             setOpen(false);
           }
         }}
@@ -3190,6 +3194,7 @@ function JournalsTab({
   // a row (or ⋮ › View) to see every line with the DR/CR totals; single click
   // keeps selecting for the batch bar. The actions inside mirror the ⋮ menu.
   const [detailJv, setDetailJv] = useState<JournalEntry | null>(null);
+  useEscapeClose(() => setDetailJv(null), !!detailJv);
 
   // Owner 2026-07-28 (JE-2607-0001): this used to ignore the response entirely
   // — a rejected/aborted Post showed NOTHING and the entry silently stayed
@@ -6492,6 +6497,7 @@ function ScanPrefillButton({ label, onResult, allDocs }: { label: string; onResu
   // wizard). Drop a PDF/photo into the zone or click it to browse; the modal
   // shows the scanning state and closes itself when the form is prefilled.
   const [open, setOpen] = useState(false);
+  useEscapeClose(() => { if (!busy) setOpen(false); }, open);
   const startFile = (f: File | undefined) => {
     void onFile(f).then(() => setOpen(false));
   };
@@ -6658,6 +6664,7 @@ function ScanVouchers({ accounts, bankCash, onDone, onOpenInForm }: {
   onOpenInForm: (v: { payee: string; date: string; docs: ScanDoc[] }) => void;
 }) {
   const { toast } = useToast();
+  const { confirm } = useConfirm();
   const [open, setOpen] = useState(false);
   const [phase, setPhase] = useState<"drop" | "scanning" | "review">("drop");
   const [progress, setProgress] = useState<{ name: string; state: "queued" | "scanning" | "done" | "unreadable"; note?: string }[]>([]);
@@ -6789,6 +6796,15 @@ function ScanVouchers({ accounts, bankCash, onDone, onOpenInForm }: {
 
   const reset = () => { setVouchers([]); setProgress([]); setPhase("drop"); };
   const close = () => { if (!creating && phase !== "scanning") { setOpen(false); reset(); } };
+  // Esc = ✕ (owner 2026-10-02); receipts read but not yet made into vouchers
+  // are asked about first — reading them again costs another scan.
+  const escClose = async () => {
+    if (creating || phase === "scanning") return;
+    if (vouchers.some((v) => v.state !== "created")
+      && !(await confirm({ title: "Close the scan?", message: "Receipts not yet made into vouchers are dropped — scanning them again reads them again.", confirmLabel: "Close", cancelLabel: "Keep", danger: true }))) return;
+    close();
+  };
+  useEscapeClose(() => void escClose(), open);
   const cell = "rounded border border-[#E2DDD8] bg-white px-1.5 py-1 text-xs";
   const pending = vouchers.filter((v) => v.ticked && v.state !== "created");
   const notCreated = vouchers.filter((v) => v.state !== "created");
@@ -7469,6 +7485,8 @@ function ApInvoicesTab({ accounts }: { accounts: ChartOfAccount[] }) {
 function DocDetailModal({ title, badges, onClose, children, actions, wide }: {
   title: string; badges?: React.ReactNode; onClose: () => void; children: React.ReactNode; actions?: React.ReactNode; wide?: boolean;
 }) {
+  // Esc closes it (owner 2026-10-02 「点开后无法用esc 关闭」) — the ✕ always said so.
+  useEscapeClose(onClose);
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
       <div className={`bg-white rounded-lg shadow-xl w-full ${wide ? "max-w-4xl" : "max-w-3xl"} max-h-[90vh] overflow-y-auto`} onClick={(e) => e.stopPropagation()}>
@@ -7652,6 +7670,8 @@ function OtherPartyBillsManager({ parties, accounts, side, formOnly }: { parties
     formOnly?.bill && formOnly.mode !== "new"
       ? billFormFrom(formOnly.bill, formOnly.mode, today)
       : { partyId: "", billDate: today, referenceNo: "", description: "", taxStr: "", lines: [blankLine()], isOpening: false });
+  // The popup's form as it opened — Esc closes at once while nothing differs.
+  const [formAtOpen] = useState(() => JSON.stringify(form));
 
   const load = () => {
     fetch(`/api/accounting/other-party-bills?type=${side}`)
@@ -7816,6 +7836,17 @@ function OtherPartyBillsManager({ parties, accounts, side, formOnly }: { parties
   const blankPartyDraft = { name: "", contactPerson: "", phone: "", email: "", tin: "", registrationNo: "", address: "", notes: "" };
   const [newPartyDraft, setNewPartyDraft] = useState<typeof blankPartyDraft | null>(null);
   const [creatingParty, setCreatingParty] = useState(false);
+  useEscapeClose(() => { if (!creatingParty) setNewPartyDraft(null); }, !!newPartyDraft);
+  // Esc closes the AP bill popup (owner 2026-10-02): at once when nothing was
+  // changed, after a confirm when something was. The page's inline form stays.
+  const requestCloseBillPopup = async () => {
+    if ((JSON.stringify(form) !== formAtOpen || pendingBillFiles.length > 0)
+      && !(await confirm({ title: "Close without saving?", message: "What you keyed in this bill will be lost.", confirmLabel: "Discard", cancelLabel: "Keep editing", danger: true }))) return;
+    setShowForm(false);
+    setEditingBillNo(null);
+    formOnly?.onDone();
+  };
+  useEscapeClose(() => void requestCloseBillPopup(), !!formOnly);
   const createPartyFromDraft = async () => {
     if (!newPartyDraft || !newPartyDraft.name.trim()) { toast.error("Name is required"); return; }
     setCreatingParty(true);
@@ -7903,8 +7934,32 @@ function OtherPartyBillsManager({ parties, accounts, side, formOnly }: { parties
       )
     : null;
 
+  // Row actions on right-click or the row's ⋮ (owner 2026-10-02) — no action
+  // links in the rows; double-click still opens the bill.
+  const rowMenu = useRowMenu();
+  const billRowMenu = (b: OtherPartyBill): RowMenuGroups => {
+    const active = (b.lifecycleState ?? "ACTIVE") === "ACTIVE";
+    return [
+      [{ label: openBill === b.id ? "Close the bill" : "Open the bill", action: () => setOpenBill(openBill === b.id ? null : b.id) }],
+      [
+        { label: "Print", action: () => printVoucher(buildOtherPartyBillVoucher(b, accounts)) },
+        ...((b.attachmentCount ?? 0) > 0 ? [{ label: "Print + files", action: () => void printBillWithFiles(b, accounts).catch((e: Error) => toast.error(`Not printed — ${e.message}`)) }] : []),
+      ],
+      [
+        ...(active ? [{ label: "Edit", action: () => editBill(b) }] : []),
+        { label: "Copy", action: () => copyBill(b) },
+      ],
+      lifecycleMenuItems(b.lifecycleState, {
+        void: () => void handleLifecycle(b.billNo, "void"),
+        delete: () => void handleLifecycle(b.billNo, "delete"),
+        unvoid: () => void handleLifecycle(b.billNo, "unvoid"),
+      }, active && b.paidAmountSen > 0 ? "paid against" : undefined),
+    ];
+  };
+
   return (
     <div className="space-y-3">
+      {rowMenu.element}
       <div className="flex flex-wrap items-center justify-end gap-3">
         {(!formOnly || formOnly.mode !== "edit") && <ScanPrefillButton label="Scan Bill" onResult={applyScan} />}
         {!formOnly && <Button variant="primary" size="sm" onClick={() => {
@@ -8146,7 +8201,7 @@ function OtherPartyBillsManager({ parties, accounts, side, formOnly }: { parties
             <tbody>
               {visibleBills.map((b) => (
                 <React.Fragment key={b.id}>
-                  <tr className="border-b border-[#F0ECE9]" onDoubleClick={() => setOpenBill(openBill === b.id ? null : b.id)} title="Double-click to open the full bill">
+                  <tr className={`border-b border-[#F0ECE9] ${rowMenu.openKey === b.id ? "bg-[#F0ECE9]" : ""}`} onDoubleClick={() => setOpenBill(openBill === b.id ? null : b.id)} onContextMenu={rowMenu.onContextMenu(b.id, () => billRowMenu(b))} title="Double-click to open the full bill · right-click for actions">
                     <td className="px-3 py-1.5 w-8" onDoubleClick={(e) => e.stopPropagation()}>
                       <input type="checkbox" checked={billSel.isSelected(b.billNo ?? b.id)} onChange={() => billSel.toggle(b.billNo ?? b.id)} className="h-3.5 w-3.5 accent-[#6B5C32] align-middle" />
                     </td>
@@ -8164,23 +8219,7 @@ function OtherPartyBillsManager({ parties, accounts, side, formOnly }: { parties
                       <LifecycleBadge state={b.lifecycleState} />
                       {(b.lifecycleState ?? "ACTIVE") === "ACTIVE" && b.status}
                     </td>
-                    <td className="px-4 py-1.5 text-right whitespace-nowrap">
-                      <button onClick={() => printVoucher(buildOtherPartyBillVoucher(b, accounts))} title="Print bill voucher" className="inline-flex items-center gap-1 text-[#6B5C32] hover:text-[#1F1D1B] text-xs underline decoration-dotted cursor-pointer mr-3"><Printer className="h-3 w-3" />print</button>
-                      {(b.attachmentCount ?? 0) > 0 && (
-                        <button onClick={() => void printBillWithFiles(b, accounts).catch((e: Error) => toast.error(`Not printed — ${e.message}`))} title="The bill with its attached files behind it" className="inline-flex items-center gap-1 text-[#6B5C32] hover:text-[#1F1D1B] text-xs underline decoration-dotted cursor-pointer mr-3"><Printer className="h-3 w-3" />print + files</button>
-                      )}
-                      {(b.lifecycleState ?? "ACTIVE") === "ACTIVE" && (
-                        <button onClick={() => editBill(b)} className="text-[#6B5C32] hover:underline text-xs mr-3">Edit</button>
-                      )}
-                      <button onClick={() => copyBill(b)} className="text-[#6B5C32] hover:underline text-xs mr-3">Copy</button>
-                      <LifecycleActions
-                        state={b.lifecycleState}
-                        disabled={(b.lifecycleState ?? "ACTIVE") === "ACTIVE" && b.paidAmountSen > 0}
-                        onVoid={() => handleLifecycle(b.billNo, "void")}
-                        onDelete={() => handleLifecycle(b.billNo, "delete")}
-                        onUnvoid={() => handleLifecycle(b.billNo, "unvoid")}
-                      />
-                    </td>
+                    <td className="px-1 py-1 text-right w-8">{rowMenu.button(b.id, () => billRowMenu(b))}</td>
                   </tr>
                   {openBill === b.id && (
                     /* Full bill detail (owner 2026-08-31: 「我要看bill 的全部
@@ -8490,6 +8529,7 @@ function OtherPartyPaymentsManager({ parties, accounts, side }: { parties: Other
   const { confirm } = useConfirm();
   const [history, setHistory] = useState<PaymentGroup[] | null>(null);
   const [detail, setDetail] = useState<PaymentGroup | null>(null);
+  useEscapeClose(() => setDetail(null), !!detail);
   // Edit mode: the payment being re-stated in place (same number).
   const [editing, setEditing] = useState<PaymentGroup | null>(null);
   const verb = side === "CREDITOR" ? "Payment" : "Receipt";
@@ -8529,8 +8569,25 @@ function OtherPartyPaymentsManager({ parties, accounts, side }: { parties: Other
 
   const opaySel = useRowSelection(history ?? [], (p) => p.paymentNo);
 
+  // Row actions on right-click or the row's ⋮ (owner 2026-10-02) — no action
+  // links in the rows; a click still opens the payment.
+  const rowMenu = useRowMenu();
+  const opayRowMenu = (g: PaymentGroup): RowMenuGroups => [
+    [{ label: "Open", action: () => setDetail(g) }],
+    [
+      { label: "Print", action: () => printVoucher(buildOtherPartyPaymentVoucher(g, accounts)) },
+      ...((g.lifecycleState ?? "ACTIVE") === "ACTIVE" ? [{ label: "Edit", action: () => editPayment(g) }] : []),
+    ],
+    lifecycleMenuItems(g.lifecycleState, {
+      void: () => void handleLifecycle(g.paymentNo, "void"),
+      delete: () => void handleLifecycle(g.paymentNo, "delete"),
+      unvoid: () => void handleLifecycle(g.paymentNo, "unvoid"),
+    }),
+  ];
+
   return (
     <div className="space-y-3">
+      {rowMenu.element}
       <OtherPartyPaymentForm
         key={editing?.paymentNo ?? "new"}
         parties={parties}
@@ -8576,7 +8633,7 @@ function OtherPartyPaymentsManager({ parties, accounts, side }: { parties: Other
             </tr></thead>
             <tbody>
               {history.map((g) => (
-                <tr key={g.paymentNo} onClick={() => setDetail(g)} onDoubleClick={() => setDetail(g)} className="border-b border-[#F0ECE9] cursor-pointer hover:bg-[#FAF8F5]">
+                <tr key={g.paymentNo} onClick={() => setDetail(g)} onDoubleClick={() => setDetail(g)} onContextMenu={rowMenu.onContextMenu(g.paymentNo, () => opayRowMenu(g))} title="Click to open · right-click for actions" className={`border-b border-[#F0ECE9] cursor-pointer hover:bg-[#FAF8F5] ${rowMenu.openKey === g.paymentNo ? "bg-[#F0ECE9]" : ""}`}>
                   <td className="px-3 py-1.5 w-8" onClick={(e) => e.stopPropagation()}>
                     <input type="checkbox" checked={opaySel.isSelected(g.paymentNo)} onChange={() => opaySel.toggle(g.paymentNo)} className="h-3.5 w-3.5 accent-[#6B5C32] align-middle" />
                   </td>
@@ -8586,17 +8643,8 @@ function OtherPartyPaymentsManager({ parties, accounts, side }: { parties: Other
                   <td className="px-4 py-1.5 text-right tabular-nums">{formatCurrency(g.totalSen)}</td>
                   <td className="px-4 py-1.5 text-center">{g.lines.length}</td>
                   <td className="px-4 py-1.5 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                    <button onClick={() => printVoucher(buildOtherPartyPaymentVoucher(g, accounts))} title="Print payment voucher" className="inline-flex items-center gap-1 text-[#6B5C32] hover:text-[#1F1D1B] text-xs underline decoration-dotted cursor-pointer mr-3"><Printer className="h-3 w-3" />print</button>
-                    {(g.lifecycleState ?? "ACTIVE") === "ACTIVE" && (
-                      <button onClick={() => editPayment(g)} className="text-xs text-[#3E6570] hover:underline mr-2">Edit</button>
-                    )}
                     <span className="mr-2"><LifecycleBadge state={g.lifecycleState} /></span>
-                    <LifecycleActions
-                      state={g.lifecycleState}
-                      onVoid={() => handleLifecycle(g.paymentNo, "void")}
-                      onDelete={() => handleLifecycle(g.paymentNo, "delete")}
-                      onUnvoid={() => handleLifecycle(g.paymentNo, "unvoid")}
-                    />
+                    {rowMenu.button(g.paymentNo, () => opayRowMenu(g))}
                   </td>
                 </tr>
               ))}
@@ -9911,6 +9959,9 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
   // Editing a not-yet-posted voucher goes to PUT (plain replace); editing a
   // posted one goes to /restate (reverse + re-post under the same number).
   const [editingPosted, setEditingPosted] = useState(true);
+  // The edited voucher's form as it opened (JSON) — Esc closes at once while
+  // nothing differs from it.
+  const editBaseline = useRef("");
 
   // ── AP Payment form (Houzs: New AP Payment) ──
   // One creditor per voucher: a supplier (purchase invoices, optional advance)
@@ -10427,18 +10478,21 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
     setEditingPosted(isPosted(r));
     if (r.pvKind === "AP") {
       // Only an unposted AP voucher is editable (posted → cancel and redo).
-      setFormKind("AP");
-      setApForm({
-        date: r.date, payFrom: r.payFrom ?? "", partyKind: r.partyKind === "OTHER" ? "OTHER" : "SUPPLIER", partyId: r.partyId ?? "",
+      const af = {
+        date: r.date, payFrom: r.payFrom ?? "", partyKind: (r.partyKind === "OTHER" ? "OTHER" : "SUPPLIER") as "SUPPLIER" | "OTHER", partyId: r.partyId ?? "",
         reference: r.description ?? "", advance: (r.advanceSen ?? 0) > 0 ? ((r.advanceSen ?? 0) / 100).toFixed(2) : "",
-      });
-      setApAlloc(Object.fromEntries((r.allocs ?? []).map((a) => [a.docId, (a.amountSen / 100).toFixed(2)])));
+      };
+      const alloc: Record<string, string> = Object.fromEntries((r.allocs ?? []).map((a) => [a.docId, (a.amountSen / 100).toFixed(2)]));
+      setFormKind("AP");
+      setApForm(af);
+      setApAlloc(alloc);
+      editBaseline.current = JSON.stringify([af, alloc]);
       setShowForm(true);
       return;
     }
     setFormKind("EXPENSE");
     const isTransfer = r.pvKind === "TRANSFER";
-    setForm({
+    const f: PvFormState = {
       ...blankPvForm(),
       date: r.date, payee: r.payee ?? "", description: r.description ?? "", accrued: r.accrued === 1,
       payFrom: r.payFrom ?? "", accrualAccount: r.accrualAccount ?? "", productLine: r.productLine ?? "",
@@ -10446,8 +10500,11 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
       mode: isTransfer ? "TRANSFER" : "PAYMENT",
       transferTo: isTransfer ? (r.lines[0]?.accountCode ?? "") : "",
       transferAmount: isTransfer ? (r.totalSen / 100).toFixed(2) : "",
-    });
-    setLines(!isTransfer && r.lines.length ? r.lines.map((l) => ({ accountCode: l.accountCode, description: l.description ?? "", amount: (l.amountSen / 100).toFixed(2) })) : [{ accountCode: "", description: "", amount: "" }]);
+    };
+    const ls: PvLineDraft[] = !isTransfer && r.lines.length ? r.lines.map((l) => ({ accountCode: l.accountCode, description: l.description ?? "", amount: (l.amountSen / 100).toFixed(2) })) : [{ accountCode: "", description: "", amount: "" }];
+    setForm(f);
+    setLines(ls);
+    editBaseline.current = JSON.stringify([f, ls]);
     setShowForm(true);
   };
 
@@ -10540,8 +10597,77 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
     );
   };
 
+  // Esc closes the voucher popup (owner 2026-10-02 「create new pv 时也是这样」):
+  // at once when nothing was keyed, after a confirm when something was. A new
+  // voucher counts as keyed once it holds a payee, text, an account, an amount
+  // or a scan; an edited one once it differs from the voucher as it opened.
+  const formKeyed = (): boolean => {
+    if (editingId) return JSON.stringify(formKind === "AP" ? [apForm, apAlloc] : [form, lines]) !== editBaseline.current;
+    if (pendingScanFiles.length > 0) return true;
+    if (formKind === "AP") return !!(apForm.partyId || apForm.payFrom || apForm.reference.trim() || apForm.advance.trim() || Object.values(apAlloc).some((v) => v.trim()));
+    return !!(form.payee.trim() || form.description.trim() || form.billNo.trim() || form.notes.trim() || form.payFrom || form.accrualAccount
+      || form.transferTo || form.transferAmount.trim() || lines.some((l) => l.accountCode || l.description.trim() || l.amount.trim()));
+  };
+  const requestCloseForm = async () => {
+    if (saving) return;
+    if (formKeyed() && !(await confirm({ title: "Close without saving?", message: "What you keyed in this voucher will be lost.", confirmLabel: "Discard", cancelLabel: "Keep editing", danger: true }))) return;
+    resetForm();
+  };
+  useEscapeClose(() => void requestCloseForm(), showForm);
+
+  // Row actions on right-click or the row's ⋮ (owner 2026-10-02 「这个显示太多了，
+  // 能不能 right click 才选我的东西」) — the same actions as the popup's buttons;
+  // the rows carry no action links.
+  const navigate = useNavigate();
+  const rowMenu = useRowMenu();
+  const pvRowMenu = (r: PvRow): RowMenuGroups => {
+    const st = apState(r);
+    const live = r.status !== "VOID";
+    return [
+      [{ label: "Open", action: () => setDetailPvId(r.id) }],
+      [
+        ...(live && (st === "DRAFT" || st === "PREPARED") ? [{ label: "Edit", disabled: ladderBusy, action: () => startEdit(r) }] : []),
+        ...(live && st === "DRAFT" ? [{ label: "Prepare →", disabled: ladderBusy, action: () => void handleLadder(r, "prepare") }] : []),
+        ...(live && st === "PREPARED" ? [
+          { label: "Withdraw", disabled: ladderBusy, action: () => void handleLadder(r, "withdraw") },
+          { label: "Reject", disabled: ladderBusy, action: () => void handleLadder(r, "reject") },
+          { label: "Check →", disabled: ladderBusy, action: () => void handleLadder(r, "check") },
+        ] : []),
+        ...(live && st === "CHECKED" ? [
+          { label: "Reject", disabled: ladderBusy, action: () => void handleLadder(r, "reject") },
+          { label: "Approve & post", disabled: ladderBusy, action: () => void handleLadder(r, "approve") },
+        ] : []),
+        ...(isPosted(r) && r.pvKind !== "AP" ? [{ label: "Edit", action: () => startEdit(r) }] : []),
+        ...(isPosted(r) && r.accrued === 1 && !r.settledAt ? [{ label: "Settle", action: () => void handleSettle(r) }] : []),
+      ],
+      [
+        { label: "Print", action: () => void printPvWithDetail(r) },
+        ...((r.attachmentCount ?? 0) > 0 ? [{ label: bundleBusy === r.id ? "Print + files (preparing…)" : "Print + files", disabled: bundleBusy === r.id, action: () => void printPvBundle(r) }] : []),
+      ],
+      lifecycleMenuItems(r.lifecycleState, {
+        void: () => void handleLifecycle(r.id, r.pvNo, "void"),
+        delete: () => void handleLifecycle(r.id, r.pvNo, "delete"),
+        unvoid: () => void handleLifecycle(r.id, r.pvNo, "unvoid"),
+      }),
+    ];
+  };
+  // A row from another door: print, its own page, void through its own endpoint.
+  const payRowMenu = (g: PayRow): RowMenuGroups => [
+    [{ label: "Open", action: () => setDetailPayKey(g.key) }],
+    [
+      { label: "Print", action: () => printVoucher(payVoucherOf(g)) },
+      { label: `Open on the ${PAY_DOOR_LABEL[g.door]} page ↗`, action: () => navigate(foreignHref(g)) },
+    ],
+    lifecycleMenuItems(g.state, {
+      void: () => void handleForeignLifecycle(g, "void"),
+      delete: () => void handleForeignLifecycle(g, "delete"),
+      unvoid: () => void handleForeignLifecycle(g, "unvoid"),
+    }),
+  ];
+
   return (
     <div className="space-y-4">
+      {rowMenu.element}
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-lg font-semibold text-[#1F1D1B]">Payment Vouchers</h2>
@@ -11066,16 +11192,17 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
                 {visibleRows.map((row) => {
                   // A row from another door: read-only here apart from print /
                   // void (its own endpoint) — double-click opens the popup with
-                  // everything, "open ↗" goes to its page. Single click does
-                  // nothing (owner 2026-10-01 「我不要点一次打开」).
+                  // everything, right-click (or ⋮) has print / its page / void.
+                  // Single click does nothing (owner 2026-10-01 「我不要点一次打开」).
                   if (!row.pv) {
                     const g = row;
                     return (
                       <React.Fragment key={g.key}>
                         <tr
-                          className={`border-b border-[#F0ECE9] cursor-pointer hover:bg-[#FAF8F5] ${g.state !== "ACTIVE" ? "opacity-50" : g.advanceOpen ? "text-blue-600" : ""}`}
+                          className={`border-b border-[#F0ECE9] cursor-pointer hover:bg-[#FAF8F5] ${rowMenu.openKey === g.key ? "bg-[#F0ECE9]" : ""} ${g.state !== "ACTIVE" ? "opacity-50" : g.advanceOpen ? "text-blue-600" : ""}`}
                           onDoubleClick={() => setDetailPayKey(g.key)}
-                          title="Double-click to open"
+                          onContextMenu={rowMenu.onContextMenu(g.key, () => payRowMenu(g))}
+                          title="Double-click to open · right-click for actions"
                         >
                           <td className="px-3 py-1.5 w-8" onClick={(e) => e.stopPropagation()}>
                             <input type="checkbox" checked={pvSel.isSelected(g.key)} onChange={() => pvSel.toggle(g.key)} className="h-3.5 w-3.5 accent-[#6B5C32]" />
@@ -11102,16 +11229,7 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
                                 ? <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold bg-[#FBF3E4] text-[#7A5B12]" title="Unapplied supplier advance — knock it off on the Supplier Payment page">Approved · advance open {formatCurrency(spAdvanceOpenSen(g.sp))}</span>
                                 : <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold bg-[#EAF3DE] text-[#27500A]" title={`Posted on save — ${PAY_DOOR_HINT[g.door]}`}>Approved · paid</span>}
                           </td>
-                          <td className="px-3 py-1.5 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                            <button onClick={() => printVoucher(payVoucherOf(g))} title={`Print ${PAY_DOOR_LABEL[g.door].toLowerCase()} voucher`} className="inline-flex items-center gap-1 text-[#6B5C32] hover:text-[#1F1D1B] text-xs underline decoration-dotted cursor-pointer mr-3"><Printer className="h-3 w-3" />print</button>
-                            <Link to={foreignHref(g)} className="text-[#6B5C32] hover:text-[#1F1D1B] text-xs underline decoration-dotted mr-3" title={`Open on the ${PAY_DOOR_LABEL[g.door]} page (edit / knock-off there)`}>open ↗</Link>
-                            <LifecycleActions
-                              state={g.state}
-                              onVoid={() => void handleForeignLifecycle(g, "void")}
-                              onDelete={() => void handleForeignLifecycle(g, "delete")}
-                              onUnvoid={() => void handleForeignLifecycle(g, "unvoid")}
-                            />
-                          </td>
+                          <td className="px-1 py-1 text-right w-8">{rowMenu.button(g.key, () => payRowMenu(g))}</td>
                         </tr>
                       </React.Fragment>
                     );
@@ -11120,9 +11238,10 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
                   return (
                   <React.Fragment key={r.id}>
                   <tr
-                    className={`border-b border-[#F0ECE9] cursor-pointer hover:bg-[#FAF8F5] ${r.status === "VOID" ? "opacity-50" : ""}`}
+                    className={`border-b border-[#F0ECE9] cursor-pointer hover:bg-[#FAF8F5] ${rowMenu.openKey === row.key ? "bg-[#F0ECE9]" : ""} ${r.status === "VOID" ? "opacity-50" : ""}`}
                     onDoubleClick={() => setDetailPvId(r.id)}
-                    title="Double-click to open"
+                    onContextMenu={rowMenu.onContextMenu(row.key, () => pvRowMenu(r))}
+                    title="Double-click to open · right-click for actions"
                   >
                     <td className="px-3 py-1.5 w-8" onClick={(e) => e.stopPropagation()}>
                       <input type="checkbox" checked={pvSel.isSelected(row.key)} onChange={() => pvSel.toggle(row.key)} className="h-3.5 w-3.5 accent-[#6B5C32]" />
@@ -11162,44 +11281,7 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
                         <div className="text-[10px] text-[#9A3A2D] mt-0.5 max-w-[16rem] truncate" title={r.rejectReason ?? r.reject_reason ?? ""}>↩ {r.rejectReason ?? r.reject_reason}</div>
                       )}
                     </td>
-                    <td className="px-3 py-1.5 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                      {r.status !== "VOID" && apState(r) === "DRAFT" && (
-                        <>
-                          <button disabled={ladderBusy} onClick={() => startEdit(r)} className="text-[#6B5C32] hover:text-[#1F1D1B] text-xs underline decoration-dotted cursor-pointer mr-3">edit</button>
-                          <button disabled={ladderBusy} onClick={() => void handleLadder(r, "prepare")} className="text-[#2C4170] hover:text-[#1F1D1B] text-xs font-semibold cursor-pointer mr-3">Prepare →</button>
-                        </>
-                      )}
-                      {r.status !== "VOID" && apState(r) === "PREPARED" && (
-                        <>
-                          <button disabled={ladderBusy} onClick={() => startEdit(r)} className="text-[#6B5C32] hover:text-[#1F1D1B] text-xs underline decoration-dotted cursor-pointer mr-3">edit</button>
-                          <button disabled={ladderBusy} onClick={() => void handleLadder(r, "withdraw")} className="text-[#9CA3AF] hover:text-[#1F1D1B] text-xs underline decoration-dotted cursor-pointer mr-3">withdraw</button>
-                          <button disabled={ladderBusy} onClick={() => void handleLadder(r, "reject")} className="text-[#9A3A2D] hover:text-[#791F1F] text-xs underline decoration-dotted cursor-pointer mr-3">reject</button>
-                          <button disabled={ladderBusy} onClick={() => void handleLadder(r, "check")} className="text-[#7A5B12] hover:text-[#1F1D1B] text-xs font-semibold cursor-pointer mr-3">Check →</button>
-                        </>
-                      )}
-                      {r.status !== "VOID" && apState(r) === "CHECKED" && (
-                        <>
-                          <button disabled={ladderBusy} onClick={() => void handleLadder(r, "reject")} className="text-[#9A3A2D] hover:text-[#791F1F] text-xs underline decoration-dotted cursor-pointer mr-3">reject</button>
-                          <button disabled={ladderBusy} onClick={() => void handleLadder(r, "approve")} className="rounded bg-[#6B5C32] text-white px-2 py-0.5 text-xs font-semibold cursor-pointer mr-3">Approve &amp; post</button>
-                        </>
-                      )}
-                      <button onClick={() => void printPvWithDetail(r)} title="Print payment voucher" className="inline-flex items-center gap-1 text-[#6B5C32] hover:text-[#1F1D1B] text-xs underline decoration-dotted cursor-pointer mr-3"><Printer className="h-3 w-3" />print</button>
-                      {(r.attachmentCount ?? 0) > 0 && (
-                        <button disabled={bundleBusy === r.id} onClick={() => void printPvBundle(r)} title="Print the voucher with every attachment as one document" className="inline-flex items-center gap-1 text-[#6B5C32] hover:text-[#1F1D1B] text-xs underline decoration-dotted cursor-pointer mr-3"><Printer className="h-3 w-3" />{bundleBusy === r.id ? "preparing…" : "print + files"}</button>
-                      )}
-                      {isPosted(r) && r.pvKind !== "AP" && (
-                        <button onClick={() => startEdit(r)} className="text-[#6B5C32] hover:text-[#1F1D1B] text-xs underline decoration-dotted cursor-pointer mr-3">edit</button>
-                      )}
-                      {isPosted(r) && r.accrued === 1 && !r.settledAt && (
-                        <button onClick={() => handleSettle(r)} className="text-[#6B5C32] hover:text-[#1F1D1B] text-xs underline decoration-dotted cursor-pointer mr-3">settle</button>
-                      )}
-                      <LifecycleActions
-                        state={r.lifecycleState}
-                        onVoid={() => handleLifecycle(r.id, r.pvNo, "void")}
-                        onDelete={() => handleLifecycle(r.id, r.pvNo, "delete")}
-                        onUnvoid={() => handleLifecycle(r.id, r.pvNo, "unvoid")}
-                      />
-                    </td>
+                    <td className="px-1 py-1 text-right w-8">{rowMenu.button(row.key, () => pvRowMenu(r))}</td>
                   </tr>
                   </React.Fragment>
                   );
@@ -11356,7 +11438,11 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
               <DetailField label={g.ft ? "Description" : "Reference"} span={3}>{(g.ft ? g.ft.description : g.ocp?.reference) || "—"}</DetailField>
               <DetailField label="Total"><span className="tabular-nums">{formatCurrency(g.totalSen)}</span></DetailField>
             </div>
-            <div className="text-[11px] text-[#9CA3AF]">Recorded on the {PAY_DOOR_LABEL[g.door]} page — it posted when it was saved (no approval ladder). Edit, knock-off and FX live on that page.</div>
+            {/* Per door (owner 2026-10-02 「FUND TRANSFER无法edit?」): the old Fund
+                Transfer page never had an edit — this line used to say it did. */}
+            <div className="text-[11px] text-[#9CA3AF]">Recorded on the {PAY_DOOR_LABEL[g.door]} page — it posted when it was saved (no approval ladder). {g.ft
+              ? "A fund transfer has no edit: void it and post it again. A transfer keyed as New Payment Voucher → Transfer can be edited."
+              : g.sp ? "Edit, knock-off and FX live on that page." : "Edit lives on that page."}</div>
             <div className="border border-[#E2DDD8] rounded-md px-3 py-2">{foreignDetailTable(g)}</div>
             <DocTrailBlock family={g.sp ? "supplier_payment" : g.ft ? "fund_transfer" : "other_party_payment"} sourceId={g.no} />
           </DocDetailModal>
@@ -11700,8 +11786,25 @@ function ReceiptsHubTab({ accounts }: { accounts: ChartOfAccount[] }) {
     : k === "OTHER" ? <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold bg-[#EEF2FB] text-[#2C4170]" title="Other debtor receipt — settles other-debtor bills">OD</span>
     : <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold bg-[#F6F1E7] text-[#6B5C32]" title="Official receipt — sundry income">OR</span>;
 
+  // Row actions on right-click or the row's ⋮ (owner 2026-10-02) — no action
+  // links in the rows; double-click still opens the popup.
+  const rowMenu = useRowMenu();
+  const receiptRowMenu = (r: ReceiptHubRow): RowMenuGroups => [
+    [{ label: "Open", action: () => setDetailKey(r.key) }],
+    [
+      { label: "Print", action: () => printVoucher(voucherOf(r)) },
+      ...(r.lifecycleState === "ACTIVE" && (r.cust || r.od) ? [{ label: "Edit", action: () => startEdit(r) }] : []),
+    ],
+    lifecycleMenuItems(r.lifecycleState, {
+      void: () => void lifecycle(r, "void"),
+      delete: () => void lifecycle(r, "delete"),
+      unvoid: () => void lifecycle(r, "unvoid"),
+    }),
+  ];
+
   return (
     <div className="space-y-4">
+      {rowMenu.element}
       <div className="flex justify-between items-center flex-wrap gap-2">
         <div>
           <h2 className="text-lg font-semibold text-[#1F1D1B]">Receipts</h2>
@@ -11783,10 +11886,11 @@ function ReceiptsHubTab({ accounts }: { accounts: ChartOfAccount[] }) {
                 {visible.map((r) => (
                   <React.Fragment key={r.key}>
                     <tr
-                      className={`border-b border-[#F0ECE9] cursor-pointer hover:bg-[#FAF8F5] ${r.lifecycleState !== "ACTIVE" ? "opacity-50" : r.cust && hasUnallocated(r.cust) ? "text-blue-600" : ""}`}
+                      className={`border-b border-[#F0ECE9] cursor-pointer hover:bg-[#FAF8F5] ${rowMenu.openKey === r.key ? "bg-[#F0ECE9]" : ""} ${r.lifecycleState !== "ACTIVE" ? "opacity-50" : r.cust && hasUnallocated(r.cust) ? "text-blue-600" : ""}`}
                       onClick={() => setExpanded((m) => ({ ...m, [r.key]: !m[r.key] }))}
                       onDoubleClick={() => setDetailKey(r.key)}
-                      title="Click to expand · double-click to open"
+                      onContextMenu={rowMenu.onContextMenu(r.key, () => receiptRowMenu(r))}
+                      title="Click to expand · double-click to open · right-click for actions"
                     >
                       <td className="px-3 py-1.5 w-8" onClick={(e) => e.stopPropagation()}>
                         <input type="checkbox" checked={sel.isSelected(r.key)} onChange={() => sel.toggle(r.key)} className="h-3.5 w-3.5 accent-[#6B5C32]" />
@@ -11798,18 +11902,7 @@ function ReceiptsHubTab({ accounts }: { accounts: ChartOfAccount[] }) {
                       <td className="px-3 py-1.5 text-xs text-[#6B7280]">{r.note}</td>
                       <td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(r.totalSen)}</td>
                       <td className="px-3 py-1.5 text-xs"><LifecycleBadge state={r.lifecycleState} />{r.lifecycleState === "ACTIVE" && (r.cust ? r.cust.status : "POSTED")}</td>
-                      <td className="px-3 py-1.5 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                        <button onClick={() => printVoucher(voucherOf(r))} title="Print receipt" className="inline-flex items-center gap-1 text-[#6B5C32] hover:text-[#1F1D1B] text-xs underline decoration-dotted cursor-pointer mr-3"><Printer className="h-3 w-3" />print</button>
-                        {r.lifecycleState === "ACTIVE" && (r.cust || r.od) && (
-                          <button onClick={() => startEdit(r)} className="text-[#6B5C32] hover:text-[#1F1D1B] text-xs underline decoration-dotted cursor-pointer mr-3">edit</button>
-                        )}
-                        <LifecycleActions
-                          state={r.lifecycleState}
-                          onVoid={() => lifecycle(r, "void")}
-                          onDelete={() => lifecycle(r, "delete")}
-                          onUnvoid={() => lifecycle(r, "unvoid")}
-                        />
-                      </td>
+                      <td className="px-1 py-1 text-right w-8" onClick={(e) => e.stopPropagation()}>{rowMenu.button(r.key, () => receiptRowMenu(r))}</td>
                     </tr>
                     {expanded[r.key] && (
                       <tr className="bg-[#FAF8F5] border-b border-[#F0ECE9]">
@@ -11969,8 +12062,23 @@ function FundTransferTab({ accounts }: { accounts: ChartOfAccount[] }) {
     } else toast.error(j?.error || `${verb} failed`);
   };
 
+  // Row actions on right-click or the row's ⋮ (owner 2026-10-02). A transfer
+  // has no edit — void it and post it again (owner 2026-10-02 「FUND TRANSFER
+  // 无法edit?」: none was ever built; the popup says so).
+  const rowMenu = useRowMenu();
+  const ftRowMenu = (r: FtRow): RowMenuGroups => [
+    [{ label: "Open", action: () => setDetailFt(r.no) }],
+    [{ label: "Print", action: () => printVoucher(buildFundTransferVoucher(r, accounts)) }],
+    lifecycleMenuItems(r.lifecycleState, {
+      void: () => void handleLifecycle(r.no, "void"),
+      delete: () => void handleLifecycle(r.no, "delete"),
+      unvoid: () => void handleLifecycle(r.no, "unvoid"),
+    }),
+  ];
+
   return (
     <div className="space-y-4">
+      {rowMenu.element}
       <h2 className="text-lg font-semibold text-[#1F1D1B]">Fund Transfer</h2>
 
       <Card>
@@ -12068,7 +12176,7 @@ function FundTransferTab({ accounts }: { accounts: ChartOfAccount[] }) {
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={r.no} className={`border-b border-[#F0ECE9] ${(r.lifecycleState ?? "ACTIVE") !== "ACTIVE" ? "opacity-50" : ""}`} onDoubleClick={() => setDetailFt(r.no)} title="Double-click to open">
+                  <tr key={r.no} className={`border-b border-[#F0ECE9] ${rowMenu.openKey === r.no ? "bg-[#F0ECE9]" : ""} ${(r.lifecycleState ?? "ACTIVE") !== "ACTIVE" ? "opacity-50" : ""}`} onDoubleClick={() => setDetailFt(r.no)} onContextMenu={rowMenu.onContextMenu(r.no, () => ftRowMenu(r))} title="Double-click to open · right-click for actions">
                     <td className="px-3 py-1.5 w-8" onDoubleClick={(e) => e.stopPropagation()}>
                       <input type="checkbox" checked={ftSel.isSelected(r.no)} onChange={() => ftSel.toggle(r.no)} className="h-3.5 w-3.5 accent-[#6B5C32] align-middle" />
                     </td>
@@ -12081,22 +12189,10 @@ function FundTransferTab({ accounts }: { accounts: ChartOfAccount[] }) {
                     <td className="px-3 py-1.5 text-xs text-[#6B7280]">{r.description ?? ""}</td>
                     <td className="px-3 py-1.5 text-right whitespace-nowrap">
                       {/* Owner 2026-08-28 「fund transfer 没有办法 print out
-                          voucher」— the batch bar could always print selected
-                          rows, but nothing on the row said so; give every row
-                          its own print link like the JV grid has. */}
-                      <button
-                        className="text-xs underline decoration-dotted cursor-pointer text-[#6B5C32] hover:text-[#4A3F22] mr-3"
-                        onClick={() => printVoucher(buildFundTransferVoucher(r, accounts))}
-                      >
-                        print
-                      </button>
+                          voucher」— every row prints: since 2026-10-02 from its
+                          right-click / ⋮ menu, as the JV grid's does. */}
                       <span className="mr-2"><LifecycleBadge state={r.lifecycleState} /></span>
-                      <LifecycleActions
-                        state={r.lifecycleState}
-                        onVoid={() => handleLifecycle(r.no, "void")}
-                        onDelete={() => handleLifecycle(r.no, "delete")}
-                        onUnvoid={() => handleLifecycle(r.no, "unvoid")}
-                      />
+                      {rowMenu.button(r.no, () => ftRowMenu(r))}
                     </td>
                   </tr>
                 ))}
@@ -12132,7 +12228,7 @@ function FundTransferTab({ accounts }: { accounts: ChartOfAccount[] }) {
               <DetailField label="To" span={2}>{r.toAccount} · {r.toName}</DetailField>
               <DetailField label="Description" span={2}>{r.description || "—"}</DetailField>
             </div>
-            <div className="rounded-md bg-[#FAF8F5] border border-[#F0ECE9] px-3 py-2 text-xs text-[#6B7280]">Posted as DR {r.toAccount} / CR {r.fromAccount} — {formatCurrency(r.amountSen)}.</div>
+            <div className="rounded-md bg-[#FAF8F5] border border-[#F0ECE9] px-3 py-2 text-xs text-[#6B7280]">Posted as DR {r.toAccount} / CR {r.fromAccount} — {formatCurrency(r.amountSen)}. A fund transfer has no edit: void it and post it again (a transfer keyed as New Payment Voucher → Transfer can be edited).</div>
           </DocDetailModal>
         );
       })()}
@@ -13105,6 +13201,7 @@ function DailyCashTab() {
     if (imgPopup) URL.revokeObjectURL(imgPopup);
     setImgPopup(null);
   };
+  useEscapeClose(closeImgPopup, !!imgPopup);
   const boardRef = useRef<HTMLDivElement | null>(null);
   // Owner 2026-09-22 「这些 tick 了还需要出现吗？」— a ticked row has gone through
   // the bank, so it leaves the pending list and folds under a one-line count
