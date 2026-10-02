@@ -461,8 +461,13 @@ const PAGE_CSS = `
   .print-bar { position: sticky; top: 0; background: #F4EFE3; padding: 8px 12px; border-bottom: 1px solid #E5E1DC; text-align: right; z-index: 10; }
   .print-bar button { padding: 6px 14px; font-size: 10pt; border: 1px solid #1F1D1B; background: #1F1D1B; color: #fff; cursor: pointer; border-radius: 4px; }
   .secondary { color: #6B7280; font-size: 8pt; }
-  .more { margin: 6px 0 0; font-size: 9pt; color: #6B5C32; }
+  .more, .full-link { margin: 6px 0 0; font-size: 9pt; color: #6B5C32; }
   .more-row td { font-size: 9pt; color: #6B5C32; }
+  table.share { width: 100%; border-collapse: collapse; margin: 0 0 6px; }
+  table.share thead th { background: #F4EFE3; color: #1F1D1B; font-size: 8pt; font-weight: 700; padding: 5px 8px; text-align: right; letter-spacing: 0.3px; border-bottom: 1px solid #E5E1DC; }
+  table.share tbody td { font-size: 9pt; padding: 5px 8px; border-bottom: 1px solid #F0ECE9; text-align: right; }
+  table.share th:first-child, table.share td:first-child { text-align: left; }
+  table.share tbody td:first-child { font-weight: 600; }
   .num { font-variant-numeric: tabular-nums; }
 `;
 
@@ -488,6 +493,8 @@ const PHONE_CSS = `
     table.data tbody td:empty { display: none; }
     .m-lbl { display: inline; color: #6B7280; font-weight: 400; font-size: 9pt; }
     .secondary { font-size: 9pt; }
+    table.share th, table.share td { padding: 5px 4px; font-size: 9pt; }
+    table.share thead th { white-space: normal; vertical-align: bottom; }
     .dept-card { border: 0; }
     .dept-head { flex-wrap: wrap; gap: 2px 10px; border-radius: 4px; margin-bottom: 8px; }
   }
@@ -514,6 +521,25 @@ export function renderScheduleHtml(
     ? `<a href="${escapeHtml(opts.fullListUrl)}">open the full list</a>`
     : "open Reports in the ERP for the full list";
   let shownCards = 0;
+
+  // Department summary: planned time and job cards per department, with each
+  // department's share of the day. Heaviest first. Display only: every figure
+  // is the one already on the department header below.
+  const pct = (n: number, of: number) => (of > 0 ? `${(Math.round((n / of) * 1000) / 10).toFixed(1)}%` : "—");
+  const shareRows = [...byDepartment]
+    .sort((a, b) => b.prodMinutes - a.prodMinutes)
+    .map(
+      (d) =>
+        `<tr><td>${escapeHtml(d.name)}</td><td class="num">${d.count}</td><td class="num">${formatMinutes(d.prodMinutes)}</td><td class="num">${pct(d.prodMinutes, totals.prodMinutes)}</td><td class="num">${pct(d.count, totals.jobCards)}</td></tr>`,
+    )
+    .join("");
+  const showFull = opts.fullListUrl ? `<a href="${escapeHtml(opts.fullListUrl)}">Show full list</a>` : "Full list in Reports";
+  const shareTable =
+    byDepartment.length > 0
+      ? `<h2>Departments</h2>
+  <table class="share"><thead><tr><th>Department</th><th>Job cards</th><th>Planned time</th><th>% of planned time</th><th>% of job cards</th></tr></thead><tbody>${shareRows}</tbody></table>${opts.email ? `
+  <p class="full-link">${showFull}</p>` : ""}`
+      : "";
 
   const colWidths = `
     <colgroup>
@@ -606,6 +632,7 @@ ${opts.email ? "" : `<div class="print-bar no-print"><button onclick="window.pri
     <div class="cell"><div class="lbl">Planned Time</div><div class="val num">${formatMinutes(totals.prodMinutes)}</div><div class="sub">sum of estimates</div></div>
     <div class="cell"><div class="lbl">Departments</div><div class="val num">${totals.departments}</div><div class="sub">with work scheduled</div></div>
   </div>
+  ${shareTable}
   ${shownCards < totals.jobCards ? `<p class="more">This email lists ${shownCards} of ${totals.jobCards} job cards; ${fullLink}.</p>` : ""}
   ${deptSections || `<p style="text-align:center;padding:30px;color:#9CA3AF;">No job cards scheduled for this date.</p>`}
   <div class="footer">Generated ${escapeHtml(new Date(data.generatedAtIso).toLocaleString("en-GB", { timeZone: "Asia/Singapore" }))} SGT</div>

@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-02**: branch `feat/schedule-dept-share-table` (to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-02**: branch `fix/schedule-email-full-list-row` (to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-02**: branch `fix/efficiency-email-dept-table` (to `staging`, BUG-2026-10-02-248) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: DEV-31 entry updated with the staging test run (#651 merged, measured on staging).
@@ -111,6 +112,14 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-02 — ✅ Schedule email: department summary with share of the day (branch `feat/schedule-dept-share-table` → `staging`)
+
+Owner ask: the Production Schedule should read as overall totals, then a department table (job cards, planned time, % of planned time, % of job cards), with the full list still below and a "Show full list" link.
+
+1. ✅ `renderScheduleHtml`: a `Departments` table under the four top boxes, heaviest planned time first, shares to one decimal, and a "Show full list" link under it in the email only (the in-app page already is the full list). The department sections and their last-row link are unchanged.
+2. ✅ Display only: every figure is a department total `collectScheduleData` already returns; no existing number changes. `tests/schedule-department-share.test.mjs`; the row-count test in `schedule-email-size.test.mjs` now counts job rows only. Looked at at 375px with the real 2 October department totals (no sideways scroll).
+3. 🔵 Not done, not asked: the top two departments call-out, the unassigned-PIC count, and anything else from the earlier suggestions list. The requester decides.
 
 ## 2026-10-02 — ✅ Schedule email: "Show full list" in the last row of each capped department (branch `fix/schedule-email-full-list-row` → `staging`)
 

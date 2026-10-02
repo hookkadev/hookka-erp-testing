@@ -50,10 +50,10 @@ test("a heavy day stays under the 100,000-byte limit and links to the full list"
 test("a light day is not capped, and the in-app page never is", () => {
   const light = renderScheduleHtml(day(20), { email: true, fullListUrl: url });
   assert.doesNotMatch(light, /class="more"/);
-  assert.equal(light.match(/<tr>/g).length - 7, 20); // minus one header row per dept
+  assert.equal(light.match(/<tr><td><strong>/g).length, 20); // job rows only: the department summary has its own rows
   const page = renderScheduleHtml(day(1000));
   assert.doesNotMatch(page, /class="more"/);
-  assert.equal(page.match(/<tr>/g).length - 7, 1000);
+  assert.equal(page.match(/<tr><td><strong>/g).length, 1000);
 });
 
 test("no link without an origin: the email says where to look instead", () => {
