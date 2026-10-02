@@ -566,6 +566,9 @@ export function renderEfficiencyHtml(
     .summary .cell { display: block; float: left; width: 50%; }
     .summary .val { font-size: 15pt; }
     table.data td, table.data th { padding: 5px 6px !important; white-space: nowrap; }
+    /* Department table: let the name wrap so the Efficiency column is not pushed off the screen. */
+    table.data:not(.emp) td, table.data:not(.emp) th { font-size: 9pt !important; }
+    table.data:not(.emp) td:first-child { white-space: normal; }
     table.emp, table.emp tbody, table.emp tr, table.emp td { display: block; }
     table.emp thead { display: none; }
     table.emp tbody tr { border: 1px solid #E5E1DC; border-radius: 6px; margin-bottom: 6px; padding: 6px 10px; }
