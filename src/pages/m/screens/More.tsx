@@ -9,12 +9,13 @@
 // flow as the desktop top bar. No fabricated profile data.
 import { useNavigate } from "react-router-dom";
 import { ChevronRight, LogOut, Moon, Sun } from "lucide-react";
-import { MobileHeader, MobileCard } from "../components";
+import { MobileHeader, MobileCard, InstallAppCard } from "../components";
 import { MORE_GROUPS } from "../nav";
 import { M } from "../theme";
 import { useMobileThemeMode } from "../lib/theme-mode";
 import { getCurrentUser, clearAuth } from "@/lib/auth";
 import { usePermissions } from "@/lib/use-permission";
+import { setPreferDesktop } from "@/lib/prefer-desktop";
 
 // POST /api/auth/logout, then clear local state and bounce to /login — the same
 // best-effort flow the desktop top bar uses (a network hiccup must not trap the
@@ -212,6 +213,8 @@ export default function MobileMore() {
           </button>
         </MobileCard>
 
+        <InstallAppCard />
+
         {MORE_GROUPS.map((g) => ({
           ...g,
           // Rows with a navGate follow the server's nav gate (hidden for roles
@@ -300,9 +303,11 @@ export default function MobileMore() {
           </section>
         ))}
 
-        {/* Link back to the full desktop app. */}
+        {/* Link back to the full desktop app. The flag stops the desktop shell
+            sending this phone straight back to /m (BUG-2026-10-02-250). */}
         <a
           href="/dashboard"
+          onClick={() => setPreferDesktop(true)}
           style={{
             textAlign: "center",
             fontSize: 12,
