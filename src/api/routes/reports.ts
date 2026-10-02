@@ -411,7 +411,7 @@ app.get("/schedule", async (c) => {
   const date = parseDateParam(c.req.query("date"), todayYmdSgt);
   try {
     const data = await collectScheduleData(c.var.DB, date);
-    return new Response(renderScheduleHtml(data), {
+    return new Response(renderScheduleHtml(data, { dept: c.req.query("dept") }), {
       status: 200,
       headers: {
         "Content-Type": "text/html; charset=utf-8",

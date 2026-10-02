@@ -1,5 +1,7 @@
 # Reports & Analytics — Module Guide
 
+> **Last verified: 2026-10-02** (branch `feat/schedule-dept-share-table`): `schedule-overdue-report.ts` line count (804) and anchor (509), the Schedule email department summary, summary-only email and full-list filter note only. Nothing else re-checked.
+
 > **Last verified: 2026-10-02** (branch `fix/schedule-email-full-list-row`): `schedule-overdue-report.ts` line count (783) only. Nothing else re-checked.
 
 > **Last verified: 2026-10-02** (branch `fix/efficiency-email-dept-table`): `efficiency-report.ts` line count (701) and anchors (140 / 446), and the Efficiency phone-layout gotcha only.
@@ -41,7 +43,7 @@ Two unrelated report worlds share the name **Reports**:
   - `/api/forecasts` → `src/api/routes/forecasts.ts` (155) — mount `worker.ts:1346`
   - `/api/dashboard/overview` → `src/api/routes/dashboard-overview.ts` (2316) — mount `worker.ts:1304`
 - Report engines (logic lives here, not in the route)
-  - `src/api/lib/compliance-report.ts` (1519) · `efficiency-report.ts` (701) · `schedule-overdue-report.ts` (783) · `operations-report.ts` (1248) · `production-brief.ts` (742)
+  - `src/api/lib/compliance-report.ts` (1519) · `efficiency-report.ts` (701) · `schedule-overdue-report.ts` (804) · `operations-report.ts` (1248) · `production-brief.ts` (742)
 - Shared client engines: `src/lib/print-report.ts` (351, WYSIWYG print) · `src/lib/export-report.ts` (146, CSV/XLSX/PDF export)
 
 ## Data model
@@ -88,7 +90,7 @@ Two unrelated report worlds share the name **Reports**:
 
 ## Gotchas
 - **The Reports hub and `/api/reports/*` do NOT share data.** `reports.tsx` tabs fetch source-module list APIs and aggregate client-side; only `daily-report.tsx` consumes `/api/reports/compliance.json`. Don't expect matching shapes.
-- **Logic lives in `src/api/lib/*`, not the route.** `reports.ts` (1044) is a thin shim over `compliance-report.ts` (1519), `efficiency-report.ts` (701), `schedule-overdue-report.ts` (783), `operations-report.ts` (1248), `production-brief.ts` (742). Edit the lib, not the handler.
+- **Logic lives in `src/api/lib/*`, not the route.** `reports.ts` (1044) is a thin shim over `compliance-report.ts` (1519), `efficiency-report.ts` (701), `schedule-overdue-report.ts` (804), `operations-report.ts` (1248), `production-brief.ts` (742). Edit the lib, not the handler.
 - **`/send` endpoints touch the email/cron path** — they resolve recipients from `kv_config` + `users` and call `sendMail`; not a pure read. "Send test now" (Settings → Email Reports) hits the same `/send`; a toast of "No email provider configured" means the environment has no Brevo / Resend / MailSlurp secret (staging uses MailSlurp: `MAILSLURP_API_KEY` + `MAILSLURP_INBOX_ID`). The cron `-trigger` variants add `authCron` (`x-cron-secret`) + `cronGate` (skip Sunday / public holidays).
 - **Daily Report is expensive → snapshot-cached.** `collectComplianceData` cold-computes ~6s across the whole order/delivery/invoice/procurement chain; `buildComplianceCached` (`reports.ts:669`) serves last-good instantly and refreshes in the background. Numbers are byte-identical.
 - **Production Brief is Agent-Console-gated.** A paused `PRODUCTION` agent (or global kill switch) silences the automatic brief; manual `/brief/send` still works. It also runs under `recordAgentRun` for token accounting.
@@ -97,6 +99,7 @@ Two unrelated report worlds share the name **Reports**:
 - **Reuse the shared print/export engines** (`print-report.ts`, `export-report.ts`) — don't hand-roll print or CSV/XLSX/PDF.
 
 - **Every report email has a phone layout; keep it screen-only.** The same template serves the email, the in-app page and the A4 print. Schedule + Overdue share `PHONE_CSS` in `schedule-overdue-report.ts` (below 900px rows become cards); Efficiency has its own block (below 640px, employee rows become cards and the department table's name column wraps so the Efficiency % column stays on screen, BUG-2026-10-02-248); the Brief only has a viewport tag and tighter padding. `render{Schedule,Overdue,Efficiency}Html(data, { email: true })` drops the Print button, which does nothing in a mail client. Put new phone rules inside `@media screen` so print is unchanged (BUG-2026-09-29-221 / -222, `tests/overdue-email-mobile.test.mjs`, `tests/report-emails-mobile.test.mjs`).
+- **The Production Schedule has a department summary under the top boxes** (`table.share` in `renderScheduleHtml`, `schedule-overdue-report.ts:509`): per department the job cards, planned time and its share of the day's planned time and of job cards, heaviest first, plus a "Show full list" link in the email. Display only: it re-uses the department totals `collectScheduleData` already returns (`:113`), nothing is recomputed from rows. The EMAIL stops after the table and that link (no job rows); the in-app page (`GET /api/reports/schedule`, reads `?dept=<code>`) repeats the summary, then a department filter and every job row. Tests: `tests/schedule-department-share.test.mjs`, `tests/schedule-email-size.test.mjs`.
 
 ## Common tasks (mini-playbook)
 - **Add a Reports-hub tab** → new entry in `TABS` (`reports.tsx:406`) + a `<XReportTab/>` component following the existing tab pattern (fetch source API, aggregate client-side, `printReport`/`exportReport*`). No `/api/reports/*` route needed.
