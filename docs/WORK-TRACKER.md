@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-02**: branch `feat/schedule-summary-email-to-main` (to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-02**: one Scan on Payment Vouchers (#673) closed ✅ with its prod check.
 > **Last verified: 2026-10-01**: one Scan on Payment Vouchers in progress (branch `feat/pv-scan-one-button`).
 > **Last verified: 2026-10-02**: branch `feat/email-reports-to-main` (to `main`) added below (its entry is the newest).
@@ -82,6 +83,14 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-02 — 🔵 Schedule email summary and full list filter to main (branch `feat/schedule-summary-email-to-main` → `main`)
+
+Owner asked to bring the Schedule email layout verified on staging (#674, #676) to main.
+
+1. 🔵 Email: four top boxes, a Departments table (job cards, planned time, % of planned time, % of job cards, heaviest first) and one "Show full list" link; no job rows, so the row cap is removed.
+2. 🔵 Full list page (`GET /api/reports/schedule`): the same summary, then a department filter (`?dept=<code>`, plain links) and every job row.
+3. ✅ Display only, no figure recalculated. Verified on the staging site 2026-10-02 (8 department rows, 9 filter buttons, 164 job rows; `?dept=UPHOLSTERY` shows only Upholstery's 50).
 
 ## 2026-10-02 — 🔵 BUG-36 Email Reports to main: per-report recipients and send times (branch `feat/email-reports-to-main` → `main`)
 
