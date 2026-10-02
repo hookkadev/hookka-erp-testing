@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-02**: newest entry BUG-2026-10-02-251 (branch `feat/finance-row-menu-esc`; renumbered from 250, which `main` took first; 249 is on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-02**: newest entry BUG-2026-10-02-250 (branch `feat/m-install-and-desktop-switch`, to main); a log, so "verified" means the entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-02**: BUG-2026-10-01-240 got a follow-up (the Schedule email is now summary only; branch `feat/schedule-summary-email-to-main`, to main); a log, so "verified" means the entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-02**: newest entry BUG-2026-10-02-248 (branch `feat/email-reports-to-main`, to main); entries -221, -232, -240 and -248 are the Email Reports phone and size fixes brought over from staging; a log, so "verified" means the entries match the code on this branch, not that every older entry is still true.
@@ -65,6 +66,32 @@ Entries themselves stay newest-first.
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
 
 ---
+
+## BUG-2026-10-02-251 — Finance popups said Esc closes them (it did not); a fund transfer's popup said its page could edit it (it never could) `accounting` `ui-frontend` 🟢
+
+🟢 Fixed on `feat/finance-row-menu-esc`.
+
+Owner 2026-10-02 「点开后无法用esc 关闭，create new pv 时也是这样」 and 「FUND TRANSFER无法edit?」.
+
+1. The document popup's ✕ carried the tooltip "Close (Esc)", but nothing listened for Esc — not in that
+   popup, not in the voucher / AP payment forms, the scan dialogs or the other finance popups. Fix: one
+   Esc stack (`src/lib/escape-stack.ts`) — every popup pushes its close while open and Esc runs only the
+   newest. The confirm dialog had its own window listener; left alone it would fire after a popup's (same
+   target, later registration), so one Esc on a confirm would also have closed the form under it. It
+   now joins the stack, as does the data grid's right-click menu. A form with something keyed asks
+   before Esc drops it (a new form: anything keyed or scanned; an edit: any change from how it opened);
+   a dropdown that closes itself on Esc marks the key used, so the popup around it stays. Found while
+   checking in a browser: the shared `SearchableSelect` focuses its search box a tick after opening (later
+   still in a background tab), so an Esc in between reached the form and asked to discard it with the
+   list still open — an open list now sits on the stack itself.
+2. A row from another door, opened on Payment Vouchers, said "Edit, knock-off and FX live on that page"
+   for every door. The old Fund Transfer page has no edit — void / unvoid / delete only, and the API has
+   no `PUT` / restate for transfers (checked). The line is now per door. The owner then asked for an edit
+   (a description was missing): a transfer's description is now editable — only the text of its two live
+   ledger legs; accounts, amounts, date and any bank match stay; the money is still void + post again.
+
+Regression test: `tests/finance-row-menu-esc.test.mjs` (the stack is exercised for real: top only, a used
+key, IME, nothing open).
 
 ## BUG-2026-10-02-250 — "Open the full desktop app" in /m sent a phone straight back to /m `ui-frontend` 🟢
 

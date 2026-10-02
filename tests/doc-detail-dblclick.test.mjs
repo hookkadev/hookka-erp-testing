@@ -19,7 +19,8 @@ test("one shell for every document popup", () => {
 
 test("Payment Vouchers: double-click opens the popup; single click does nothing (owner 2026-10-01)", () => {
   const pv = block("function PaymentsTab(", "// =============== TAB: OFFICIAL RECEIPT");
-  assert.match(pv, /onDoubleClick=\{\(\) => setDetailPvId\(r\.id\)\}\s*\n\s*title="Double-click to open"/);
+  // Right-click (2026-10-02) opens the row's menu; double-click still opens the popup.
+  assert.match(pv, /onDoubleClick=\{\(\) => setDetailPvId\(r\.id\)\}\s*\n\s*onContextMenu=\{rowMenu\.onContextMenu\(row\.key, \(\) => pvRowMenu\(r\)\)\}\s*\n\s*title="Double-click to open · right-click for actions"/);
   assert.doesNotMatch(pv, /setExpandedPv|expandedPv/, "no inline expand any more");
   assert.match(pv, /const r = \(rows \?\? \[\]\)\.find\(\(x\) => x\.id === detailPvId\);/, "resolved from rows so it refreshes after actions");
   // The popup carries the ladder trail, the lines / bills and the attachments block.

@@ -32,6 +32,7 @@ import {
   type ReactNode,
 } from "react";
 import { Button } from "@/components/ui/button";
+import { pushEscape } from "@/lib/escape-stack";
 
 export type ConfirmOptions = {
   // Optional heading. Defaults to "Please confirm" when omitted.
@@ -85,17 +86,11 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
     r?.(value);
   }, []);
 
-  // Esc cancels the dialog (same as backdrop / Cancel button).
+  // Esc cancels the dialog (same as backdrop / Cancel button) — through the
+  // shared Esc stack, so a popup under the dialog stays open (2026-10-02).
   useEffect(() => {
     if (!opts) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        settle(false);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    return pushEscape(() => settle(false));
   }, [opts, settle]);
 
   const isDanger = opts?.danger === true || opts?.tone === "danger";
