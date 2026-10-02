@@ -59,15 +59,17 @@ export function Topbar({ user }: TopbarProps) {
     : "—";
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-[#E2DDD8] bg-white px-4 xl:px-6">
+    <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-[#E2DDD8] bg-white px-4 xl:px-6 max-md:h-auto max-md:flex-wrap max-md:justify-end max-md:gap-2 max-md:py-2">
       {/* Workspace tab strip (open pages persist as browser-style tabs).
           Renders a plain flex spacer until a 2nd tab exists. */}
       {/* Staging only (never PR'd into main): the staging tools take the tab strip's
           place, all in one row on the left. Labels drop to icons below xl instead of
           wrapping. The row never shrinks below its pills (no min-w-0): the search box
-          is the one that gives, otherwise it covered the last pill. */}
+          is the one that gives, otherwise it covered the last pill. Phones: the
+          tools drop to their own wrapping row under the search / org / bell, or
+          the row alone was wider than the screen and the page slid sideways. */}
       {window.location.hostname.startsWith("staging.") ? (
-        <div className="flex flex-1 items-center gap-2">
+        <div className="flex flex-1 items-center gap-2 max-md:order-last max-md:basis-full max-md:flex-wrap">
           <StagingApiLog />
           <StagingViewAs />
           <StagingTodayControl />

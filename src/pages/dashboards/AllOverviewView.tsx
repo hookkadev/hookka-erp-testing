@@ -119,7 +119,7 @@ function Hero({
         <p className="text-[11px] uppercase tracking-wide" style={{ color: MUTED }}>
           {label}
         </p>
-        <p className="text-2xl font-bold tabular-nums truncate text-[#1F1D1B]">{value}</p>
+        <p className="text-2xl max-md:text-xl font-bold tabular-nums break-words text-[#1F1D1B]">{value}</p>
         {children}
       </CardContent>
     </Card>
@@ -129,8 +129,8 @@ function Hero({
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
-      <p className="text-[10px] uppercase tracking-wide truncate" style={{ color: MUTED }}>{label}</p>
-      <p className="text-sm font-semibold tabular-nums truncate text-[#1F1D1B]">{value}</p>
+      <p className="text-[10px] uppercase tracking-wide break-words" style={{ color: MUTED }}>{label}</p>
+      <p className="text-sm font-semibold tabular-nums break-words text-[#1F1D1B]">{value}</p>
     </div>
   );
 }

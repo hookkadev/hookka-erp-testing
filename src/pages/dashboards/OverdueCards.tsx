@@ -84,7 +84,7 @@ export function DueSoonWorklist({ orders }: { orders: ProdOrderSummary[] }) {
         </div>
       </CardHeader>
       <CardContent className="p-0">
-        <div className="grid grid-cols-4 gap-2 px-4 pb-3">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 px-4 pb-3">
           {LANES.map((l) => {
             const n = laneCounts.get(l.d) ?? 0;
             const on = lane === l.d;

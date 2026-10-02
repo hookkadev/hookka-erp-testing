@@ -170,9 +170,10 @@ function StateTags({ ss }: { ss: StateSnapshot | undefined }) {
 function Stat({ label, value, sub, color }: { label: string; value: string; sub?: string; color?: string }) {
   return (
     <div className="min-w-0 rounded-lg bg-[#F7F4EF] px-3 py-2">
-      <p className="truncate text-[10px] uppercase tracking-wider" style={{ color: MUTED }}>{label}</p>
-      <p className="truncate text-lg font-bold tabular-nums" style={{ color: color ?? "#1F1D1B" }}>{value}</p>
-      {sub && <p className="truncate text-[10px]" style={{ color: MUTED }}>{sub}</p>}
+      {/* Wraps, never truncates: a cut-off amount on a phone reads as a different number. */}
+      <p className="break-words text-[10px] uppercase tracking-wider" style={{ color: MUTED }}>{label}</p>
+      <p className="break-words text-lg font-bold tabular-nums" style={{ color: color ?? "#1F1D1B" }}>{value}</p>
+      {sub && <p className="break-words text-[10px]" style={{ color: MUTED }}>{sub}</p>}
     </div>
   );
 }
@@ -736,7 +737,7 @@ export function PurchasingCard({ period }: { period: Period }) {
         <Gate loading={ovR.loading} what="purchasing" />
       ) : (
         <div className="space-y-3">
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <Stat label="Open POs" value={fmtN(pur.openPOCount)} sub="all open" />
             <Stat label="PI spend" value={fmtRM2(pur.piSpendThisMonthSen)} sub={`${scoped ?? "all time"} · by invoice date`} />
             <Stat label="Prev month" value={pur.prevPeriod ? fmtRM2(pur.piSpendPrevMonthSen) : "—"} sub={pur.prevPeriod || "—"} />
@@ -898,7 +899,7 @@ export function AgingRatiosCard({ period }: { period: Period }) {
           {!ratios ? (
             <FinGate s={ratiosS} what="the ratios" />
           ) : (
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <Stat label="Gross margin" value={fmtPct2(ratios.grossMarginPct)} sub="gross profit ÷ sales" />
               <Stat label="Current ratio" value={ratios.currentRatio == null ? "—" : fmtDec2(ratios.currentRatio)} sub="current assets ÷ current liabilities" />
               <Stat label="Quick ratio" value={ratios.quickRatio == null ? "—" : fmtDec2(ratios.quickRatio)} sub="(current assets − inventory) ÷ current liabilities" />

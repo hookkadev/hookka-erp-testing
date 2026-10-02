@@ -559,7 +559,9 @@ export function Kpi({
   return (
     <Card>
       <CardContent className="p-3 min-w-0">
-        <p className="text-xs text-[#6B7280] truncate">
+        {/* Label and value wrap rather than truncate: two tiles a row on a
+            phone is ~140px, and a cut-off amount reads as a different number. */}
+        <p className="text-xs text-[#6B7280] break-words">
           {label}
           {hint && (
             <span title={hint} aria-label={hint} role="img" className="ml-1 inline-flex align-[-2px] cursor-help">
@@ -569,7 +571,7 @@ export function Kpi({
         </p>
         <p
           className={cn(
-            "mt-1 font-bold truncate tabular-nums max-md:text-xl",
+            "mt-1 font-bold break-words tabular-nums max-md:text-xl",
             valueSizeClass ?? "text-2xl",
             valueColorClass ?? "text-[#1F1D1B]",
           )}

@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-02**: branch `feat/dashboard-exp-mobile` (to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-02**: branch `feat/schedule-dept-share-table` (to `staging`) entry got item 4 (summary-only email, full list filter).
 > **Last verified: 2026-10-02**: branch `feat/schedule-dept-share-table` (to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-02**: branch `fix/schedule-email-full-list-row` (to `staging`) added below (its entry is the newest).
@@ -113,6 +114,14 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-02 — 🔵 Dashboard Experimental works at phone width (branch `feat/dashboard-exp-mobile` → `staging`)
+
+Ask (owner): make the Experimental dashboard mobile friendly and scalable, on the desktop page itself, not in the /m app.
+
+1. Measured on staging at 390px: the page was 655px wide on every tab. Cause: the staging tool row in the top bar did not wrap. Fixed: on phones the header wraps and the tools take their own row.
+2. Measured: several tiles cut numbers off ("UPHOLST...", "RM 6,456,942.11" in a 76px tile). Fixed: `Kpi` and the widget `Stat` tiles wrap instead of truncating; the three-across Purchasing and Ratios rows stack below `sm`; the Due-soon lanes go 2x2 below `sm`.
+3. Not changed: phones are still sent to /m. The "Open the full desktop app" switch (PR #679) is on `main` and reaches staging with the next main sync. Wide tables keep scrolling inside their own box.
 
 ## 2026-10-02 — ✅ Schedule email: department summary with share of the day (branch `feat/schedule-dept-share-table` → `staging`)
 
