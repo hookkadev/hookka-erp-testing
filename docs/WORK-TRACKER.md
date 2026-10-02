@@ -1,6 +1,7 @@
 # Hookka ERP — Work Tracker
 
 > **Last verified: 2026-10-02**: finance right-click row menus + Esc closes popups in progress (branch `feat/finance-row-menu-esc`).
+> **Last verified: 2026-10-02**: branch `feat/m-install-and-desktop-switch` (to `main`, BUG-2026-10-02-250) added below (its entry is the newest).
 > **Last verified: 2026-10-02**: branch `feat/dev31-worker-dept-hours-main` (DEV-31 to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-02**: branch `feat/schedule-summary-email-to-main` (to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-02**: one Scan on Payment Vouchers (#673) closed ✅ with its prod check.
@@ -97,6 +98,16 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 3. 🔵 Esc closes the popup on top: the document popups, the voucher / AP payment / AP bill forms (they ask first when
    something was keyed), the scan dialogs, the report image — one shared stack (`src/lib/escape-stack.ts`) that the confirm
    dialog joins, so Esc on a confirm never also closes the form under it.
+
+## 2026-10-02 — 🔵 /m office app: one-tap Install app, and a working "Open the full desktop app" (branch `feat/m-install-and-desktop-switch` → `main`)
+
+Owner asks, in order:
+
+1. Installing the office app always opens `/m`. Explained: `start_url` is `/m` in `public/manifest-erp.webmanifest`, and `scope` is `/`, so every page stays inside the installed app. No change asked.
+2. "Open the full desktop app" in `/m` More stays in `/m`. Bug, BUG-2026-10-02-250. Fixed: the link sets a session flag (`src/lib/prefer-desktop.ts`) that the desktop shell's phone redirect honours; the desktop shell shows a "Back to mobile app" bar to phones. Owner picked "until the app or tab is closed" (sessionStorage).
+3. Let people install without the browser menu. Built: `src/lib/pwa-install.ts` catches the browser's one-time install offer at page load (imported from `src/main.tsx`); `/m` gets an Install app row in More (always, until installed) and a dismissible card on Home (`src/pages/m/components/InstallAppCard.tsx`). Android / desktop Chromium: one tap. iPhone Safari: the three Share steps (Apple allows nothing else). Other browsers: a browser-menu hint. The worker portal card now reads the same offer, so it no longer misses an offer that fired before it mounted.
+
+Not checked yet: the one-tap install needs a published https build, so it can only be tried after deploy.
 
 ## 2026-10-02: 🔵 DEV-31 worker department hours to main (branch `feat/dev31-worker-dept-hours-main` to `main`)
 

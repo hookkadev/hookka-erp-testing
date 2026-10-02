@@ -1,6 +1,7 @@
 # Bug History
 
-> **Last verified: 2026-10-02**: newest entry BUG-2026-10-02-250 (branch `feat/finance-row-menu-esc`; 249 is on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
+> **Last verified: 2026-10-02**: newest entry BUG-2026-10-02-251 (branch `feat/finance-row-menu-esc`; renumbered from 250, which `main` took first; 249 is on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
+> **Last verified: 2026-10-02**: newest entry BUG-2026-10-02-250 (branch `feat/m-install-and-desktop-switch`, to main); a log, so "verified" means the entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-02**: BUG-2026-10-01-240 got a follow-up (the Schedule email is now summary only; branch `feat/schedule-summary-email-to-main`, to main); a log, so "verified" means the entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-02**: newest entry BUG-2026-10-02-248 (branch `feat/email-reports-to-main`, to main); entries -221, -232, -240 and -248 are the Email Reports phone and size fixes brought over from staging; a log, so "verified" means the entries match the code on this branch, not that every older entry is still true.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-246 (branch `fix/fin-tables-ceil`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
@@ -66,7 +67,7 @@ Entries themselves stay newest-first.
 
 ---
 
-## BUG-2026-10-02-250 — Finance popups said Esc closes them (it did not); a fund transfer's popup said its page could edit it (it never could) `accounting` `ui-frontend` 🟢
+## BUG-2026-10-02-251 — Finance popups said Esc closes them (it did not); a fund transfer's popup said its page could edit it (it never could) `accounting` `ui-frontend` 🟢
 
 🟢 Fixed on `feat/finance-row-menu-esc`.
 
@@ -91,6 +92,20 @@ Owner 2026-10-02 「点开后无法用esc 关闭，create new pv 时也是这样
 
 Regression test: `tests/finance-row-menu-esc.test.mjs` (the stack is exercised for real: top only, a used
 key, IME, nothing open).
+
+## BUG-2026-10-02-250 — "Open the full desktop app" in /m sent a phone straight back to /m `ui-frontend` 🟢
+
+🟢 Fixed on `feat/m-install-and-desktop-switch` (to `main`).
+
+Found by the owner: on a phone, the link at the bottom of `/m` More never left `/m`.
+
+Cause (read from the code): the link goes to `/dashboard`, and the desktop shell (`src/layouts/DashboardLayout.tsx`) sends every phone-class user agent to `/m` before rendering anything. Nothing recorded that the person had chosen the desktop site, so the link could not work on any phone.
+
+Fix: the link sets `hookka.preferDesktop` in sessionStorage (`src/lib/prefer-desktop.ts`); the redirect is now `shouldRedirectToMobile(ua, prefersDesktop())`. A phone on the desktop site sees a "Back to mobile app" bar that clears the flag. The choice lasts until the tab or installed app is closed (owner's pick).
+
+Not checked yet: a real phone on the deployed site.
+
+Regression test: `tests/prefer-desktop.test.mjs` (fails on the old always-redirect rule).
 
 ## BUG-2026-10-02-248 — the Efficiency email cut off its Efficiency column on a phone `reports` `ui-frontend` 🟢
 
