@@ -66,16 +66,12 @@ test("the drill's description is the voucher's purpose, else the line text witho
   assert.match(fn, /const description = purpose \? \(variant \? `\$\{purpose\} · \$\{variant\}` : purpose\) : tidyDescription\(legText, ref1, who\);/);
 });
 
-test("the panel: whole payment + share only when split, short bank, one Amount in brackets, month blocks with totals", () => {
-  const panel = slice(ui, "function CfDrillPanel(", "\nfunction ");
-  assert.match(panel, /const anySplit = shown\.some\(\(it\) => it\.ofSen\);/);
-  assert.match(panel, /\{anySplit && <th className=\{thR\} title="The whole payment — this line got a share of it">Whole payment<\/th>\}/);
-  assert.match(panel, /\{anySplit && <th className=\{thR\} title="This line's share of the whole payment">Share<\/th>\}/);
-  assert.match(panel, /`\$\{\(\(Math\.abs\(it\.sen\) \/ it\.ofSen\) \* 100\)\.toFixed\(1\)\}%`/);
-  assert.match(panel, /shortBankName\(o\.name\) \|\| o\.code/);
-  assert.match(panel, /title=\{it\.otherSide\.map\(\(o\) => `\$\{o\.code\} \$\{o\.name\}`\)\.join\(", "\)\}/, "full name on hover");
-  assert.match(panel, /const amt = \(sen: number\) => \(sen < 0 \? `\(\$\{plDrillAmt\(-sen\)\}\)` : plDrillAmt\(sen\)\);/);
-  assert.doesNotMatch(panel, /Money in|Money out|part of/, "the old two columns / inline note are back");
-  assert.match(panel, /\[\.\.\.new Set\(shown\.map\(\(it\) => it\.ym\)\)\]\.sort\(\)/, "month blocks oldest first");
-  assert.match(panel, /<td className="py-1" colSpan=\{colCount - 1\}>\{b\.label\} total<\/td>/);
+test("the rows (owner 2026-10-01, monthly layout): a split shows its share, the whole payment and bank on hover, brackets for money out", () => {
+  const rows = slice(ui, "function CfMonthlyDrillRows(", "\nfunction ");
+  assert.match(rows, /This line's share of a payment of RM \$\{plDrillAmt\(it\.ofSen\)\} \(\$\{\(\(Math\.abs\(it\.sen\) \/ it\.ofSen\) \* 100\)\.toFixed\(1\)\}%\)/);
+  assert.match(rows, /shortBankName\(o\.name\) \|\| o\.code/);
+  assert.match(rows, /Bank: \$\{it\.otherSide\.map\(\(o\) => `\$\{o\.code\} \$\{o\.name\}`\)\.join\(", "\)\}/, "full bank name on hover");
+  assert.match(rows, /const amt = \(sen: number\) => \(sen < 0 \? `\(\$\{plDrillAmt\(-sen\)\}\)` : plDrillAmt\(sen\)\);/);
+  assert.doesNotMatch(rows, /Money in|Money out|part of/, "the old two columns / inline note are not back");
+  assert.match(rows, /const sen = c\.accum \? total : \(perMonth\.get\(c\.key\) \?\? 0\);/, "each month's subtotal = the line's figure");
 });

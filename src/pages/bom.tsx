@@ -6,6 +6,7 @@ import { useToast } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { getVariantsConfigSync } from "@/lib/kv-config";
 import { resolveWipTokens, type BomVariantContext } from "@/api/lib/bom-wip-breakdown";
+import { withProductCategory } from "./bom-category";
 import type {
   MaterialScaling,
   MaterialScalingDimension,
@@ -2833,11 +2834,160 @@ function flattenWipTree(
   return out;
 }
 
-/** Depth → the 3px accent bar. Replaces the old stacked background colours:
- *  the hierarchy still reads, but the eye isn't fighting four fills at once. */
-const WIP_DEPTH_BAR = ["#3E6570", "#6B4A6D", "#B8601A", "#4F7C3A", "#9A3A2D"];
-function depthBar(depth: number): string {
-  return WIP_DEPTH_BAR[depth % WIP_DEPTH_BAR.length];
+/** Depth → the same level palette the BOM Structure view uses (L2 blue, L3
+ *  purple, L4 orange, L5 green, L6 rose), as hex so it can drive gradients. */
+const WIP_LEVEL_HEX = [
+  { bg: "#E0EDF0", border: "#A8CAD2", text: "#3E6570" },
+  { bg: "#F1E6F0", border: "#D1B7D0", text: "#6B4A6D" },
+  { bg: "#FBE4CE", border: "#E8B786", text: "#B8601A" },
+  { bg: "#D1FAE5", border: "#6EE7B7", text: "#047857" },
+  { bg: "#F9E1DA", border: "#E8B2A1", text: "#9A3A2D" },
+];
+function wipLevelHex(depth: number) {
+  return WIP_LEVEL_HEX[Math.min(depth, WIP_LEVEL_HEX.length - 1)];
+}
+function wipLevelGradient(depth: number): string {
+  const c = wipLevelHex(depth);
+  return `linear-gradient(135deg, ${c.bg} 0%, ${c.bg}B3 60%, #FFFFFF 100%)`;
+}
+
+/** Display name for a WIP node: the code resolved against the product
+ *  ("8\" Divan- 6FT Foam"), not the raw "{DIVAN_HEIGHT} Divan- {SIZE}" template. */
+function wipDisplayName(node: WIPComponent, product?: Product): string {
+  return (
+    buildWipCodeDisplay(node.codeSegments, product) ||
+    node.wipCode ||
+    WIP_TYPE_LABELS[node.wipType]?.label ||
+    "(unnamed)"
+  );
+}
+
+/**
+ * The LEFT pane of the Edit BOM WIP tab, drawn as nested colour cards — the
+ * same layered look as the BOM Structure view — so the editor reads like the
+ * BOM it produces. Owner 2026-10-01: the flat 3px-bar list (two-pane redesign
+ * of 2026-08-03) showed every row as "{DIVAN_HEIGHT} Divan- {SI…" and lost the
+ * hierarchy. Editing still happens in the right pane at full width, so deep
+ * nodes keep their wide inputs; only the structure got its colour back.
+ */
+function WipTreeCard({
+  node,
+  wi,
+  path,
+  depth,
+  product,
+  selectedKey,
+  collapsed,
+  onSelect,
+  onToggle,
+}: {
+  node: WIPComponent;
+  wi: number;
+  path: number[];
+  depth: number;
+  product?: Product;
+  selectedKey: string | null;
+  collapsed: Set<string>;
+  onSelect: (key: string) => void;
+  onToggle: (key: string) => void;
+}) {
+  const key = wipRowKey(wi, path);
+  const active = selectedKey === key;
+  const c = wipLevelHex(depth);
+  const children = node.children ?? [];
+  const isCollapsed = collapsed.has(key);
+  const processes = node.processes ?? [];
+  const mats = (node.materials ?? []).length;
+  const totalMin = processes.reduce((s, p) => s + (p.minutes || 0), 0) * (node.quantity || 1);
+  const name = wipDisplayName(node, product);
+  return (
+    <div
+      className={`rounded-lg border transition-shadow ${active ? "shadow-md" : "hover:shadow-sm"}`}
+      style={{
+        background: wipLevelGradient(depth),
+        borderColor: active ? "#6B5C32" : c.border,
+        boxShadow: active ? "0 0 0 2px #6B5C32" : undefined,
+      }}
+    >
+      <div
+        className="cursor-pointer px-2.5 py-2"
+        onClick={() => onSelect(key)}
+      >
+        <div className="flex items-center gap-1.5">
+          {children.length > 0 ? (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggle(key);
+              }}
+              className="w-3 shrink-0 text-gray-500 hover:text-gray-800 leading-none"
+              aria-label={isCollapsed ? "Expand" : "Collapse"}
+            >
+              {isCollapsed ? "▸" : "▾"}
+            </button>
+          ) : (
+            <span className="w-3 shrink-0" />
+          )}
+          <span
+            className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold bg-white/80"
+            style={{ color: c.text, border: `1px solid ${c.border}` }}
+          >
+            L{depth + 2}
+          </span>
+          <span
+            className={`min-w-0 flex-1 truncate text-[13px] ${active ? "font-semibold text-[#111827]" : "font-medium text-[#1F2937]"}`}
+            title={node.wipCode ? `${name}\n${node.wipCode}` : name}
+          >
+            {name}
+          </span>
+          <span className="shrink-0 text-[11px] text-gray-500">× {node.quantity}</span>
+          <span className="shrink-0 text-[12px] font-semibold text-[#111827]">{totalMin}m</span>
+        </div>
+        {(processes.length > 0 || mats > 0) && (
+          <div className="mt-1.5 flex flex-wrap gap-1 pl-[18px]">
+            {processes.map((p, i) => {
+              const color = DEPT_COLORS[p.deptCode] || "#6B7280";
+              return (
+                <span
+                  key={i}
+                  className="inline-flex items-center gap-1 rounded-full bg-white/70 px-1.5 py-px text-[10px] font-medium whitespace-nowrap"
+                  style={{ color, border: `1px solid ${color}55` }}
+                >
+                  <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: color }} />
+                  {DEPT_LABELS[p.deptCode] || p.dept}
+                  <span className="opacity-70">{p.category}</span>
+                  <span className="font-semibold">{p.minutes}m</span>
+                </span>
+              );
+            })}
+            {mats > 0 && (
+              <span className="inline-flex items-center rounded-full border border-[#C6DBA8] bg-white/70 px-1.5 py-px text-[10px] text-[#4F7C3A]">
+                {mats} mat
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+      {children.length > 0 && !isCollapsed && (
+        <div className="space-y-1.5 pb-2 pl-3 pr-1.5">
+          {children.map((child, i) => (
+            <WipTreeCard
+              key={child.id ?? i}
+              node={child}
+              wi={wi}
+              path={[...path, i]}
+              depth={depth + 1}
+              product={product}
+              selectedKey={selectedKey}
+              collapsed={collapsed}
+              onSelect={onSelect}
+              onToggle={onToggle}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 /** Resolve a node by (wi, path) — null when the path no longer exists. */
@@ -2879,11 +3029,14 @@ function WipNodeDetail({
   onRemove,
   onMove,
   onWrap,
+  product,
 }: {
   node: WIPComponent;
   wi: number;
   path: number[];
   depth: number;
+  /** Resolves the display name ("8\" Divan- 6FT Foam") in the header. */
+  product?: Product;
   fabricOptions: string[];
   variantCategories: VariantCategoryInfo[];
   rawMaterials: RawMaterialOption[];
@@ -2909,15 +3062,25 @@ function WipNodeDetail({
   const procGrid = "grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_84px_28px_28px_28px] gap-2 items-center";
   return (
     <div className="space-y-5">
-      {/* Header */}
-      <div className="flex items-center gap-2">
-        <span className="h-5 w-[3px] shrink-0" style={{ backgroundColor: depthBar(depth) }} />
-        <span className="text-[15px] font-medium text-[#111827] truncate">
-          {node.wipCode || WIP_TYPE_LABELS[node.wipType]?.label || "(unnamed)"}
+      {/* Header — same level colour as its card in the left tree */}
+      <div
+        className="flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2.5"
+        style={{ background: wipLevelGradient(depth), borderColor: wipLevelHex(depth).border }}
+      >
+        <span
+          className="shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold bg-white/80"
+          style={{ color: wipLevelHex(depth).text, border: `1px solid ${wipLevelHex(depth).border}` }}
+        >
+          L{depth + 2}
         </span>
-        <span className="text-[11px] text-gray-400 shrink-0">
-          {depth === 0 ? "level 1" : `level ${depth + 1}`}
-        </span>
+        <div className="min-w-0 flex-1">
+          <div className="text-[15px] font-semibold text-[#111827] truncate">
+            {wipDisplayName(node, product)}
+          </div>
+          {node.wipCode && node.wipCode !== wipDisplayName(node, product) && (
+            <div className="text-[11px] text-gray-500 truncate">{node.wipCode}</div>
+          )}
+        </div>
         <div className="ml-auto flex shrink-0 items-center gap-1">
           <button onClick={() => onMove(wi, path, -1)} className="px-1.5 py-1 text-xs text-gray-500 hover:bg-gray-100 rounded" title="Move up">↑</button>
           <button onClick={() => onMove(wi, path, 1)} className="px-1.5 py-1 text-xs text-gray-500 hover:bg-gray-100 rounded" title="Move down">↓</button>
@@ -3107,9 +3270,10 @@ function EditBOMDialog({
   /* eslint-disable react-hooks/set-state-in-effect -- mirror master-template cache into local state when dialog opens */
   useEffect(() => {
     if (!open) return;
-    const cat = (product.category === "SOFA" ? "SOFA" : "BEDFRAME") as
-      | "BEDFRAME"
-      | "SOFA";
+    const cat: BOMCategory =
+      product.category === "SOFA" ? "SOFA"
+      : product.category === "ACCESSORY" ? "ACCESSORY"
+      : "BEDFRAME";
     setMasterTemplates(loadAllMasterTemplates(cat));
     // When D1 hydration finishes after the dialog is already open, re-pull
     // from the (now-populated) cache so the Load Default picker isn't stuck
@@ -3675,7 +3839,10 @@ function EditBOMDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-white rounded-xl shadow-xl w-[min(1160px,95vw)] max-h-[85vh] flex flex-col">
+      {/* The WIP tab needs a DEFINITE height: with only max-h the body grew to
+          its content and overflow-hidden clipped both panes, so neither could
+          scroll (owner 2026-10-01「这里不能scroll」). */}
+      <div className={`bg-white rounded-xl shadow-xl w-[min(1360px,96vw)] flex flex-col ${tab === "wip" ? "h-[90vh]" : "max-h-[90vh]"}`}>
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[#E2DDD8]">
           <div>
@@ -3872,7 +4039,9 @@ function EditBOMDialog({
             // the inputs — by level 3 the category select was clipped to
             // "CAT 3". Structure now lives on the LEFT and editing on the
             // RIGHT, so a level-5 node is exactly as editable as a level-1 one.
-            const rows = flattenWipTree(wipComponents, collapsedWip);
+            // Selection resolves against the FULL tree, so collapsing a parent
+            // never silently moves the right pane to another node.
+            const rows = flattenWipTree(wipComponents, new Set());
             const sel = rows.find((r) => r.key === selectedWipKey) ?? rows[0] ?? null;
             const node = sel ? wipNodeAt(wipComponents, sel.wi, sel.path) : null;
             const toggle = (key: string) =>
@@ -3883,9 +4052,9 @@ function EditBOMDialog({
                 return next;
               });
             return (
-              <div className="grid h-full grid-cols-[240px_minmax(0,1fr)]">
-                {/* ── Structure ─────────────────────────────────────────── */}
-                <div className="flex min-h-0 flex-col border-r border-[#E2DDD8] bg-[#FAF9F7]">
+              <div className="grid h-full grid-cols-1 grid-rows-[auto_minmax(0,1fr)] md:grid-rows-[minmax(0,1fr)] md:grid-cols-[minmax(320px,400px)_minmax(0,1fr)]">
+                {/* ── Structure (nested colour cards, like BOM Structure) ── */}
+                <div className="flex min-h-0 max-h-[40vh] md:max-h-none flex-col border-b md:border-b-0 md:border-r border-[#E2DDD8] bg-gradient-to-b from-[#FAF9F7] to-[#F3EFE8]">
                   <div className="flex items-center justify-between px-3 py-2.5 border-b border-[#E2DDD8]">
                     <span className="text-xs font-medium text-[#6B7280]">
                       WIP Components ({wipComponents.length})
@@ -3897,53 +4066,26 @@ function EditBOMDialog({
                       + Add
                     </button>
                   </div>
-                  <div className="flex-1 overflow-y-auto p-2 space-y-1">
-                    {rows.length === 0 && (
+                  <div className="min-h-0 flex-1 overflow-y-auto p-2.5 space-y-2">
+                    {wipComponents.length === 0 && (
                       <p className="px-2 py-6 text-center text-xs text-gray-400">
                         No WIP components yet.
                       </p>
                     )}
-                    {rows.map((r) => {
-                      const active = sel?.key === r.key;
-                      const procs = r.node.processes?.length ?? 0;
-                      const mats = (r.node.materials ?? []).length;
-                      return (
-                        <div
-                          key={r.key}
-                          style={{ marginLeft: r.depth * 12, borderLeftColor: depthBar(r.depth) }}
-                          className={`border-l-[3px] cursor-pointer px-2 py-1.5 ${
-                            active ? "bg-white shadow-sm" : "bg-transparent hover:bg-white/60"
-                          }`}
-                          onClick={() => setSelectedWipKey(r.key)}
-                        >
-                          <div className="flex items-center gap-1.5">
-                            {r.hasChildren ? (
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  toggle(r.key);
-                                }}
-                                className="text-gray-400 hover:text-gray-700 leading-none"
-                                aria-label={collapsedWip.has(r.key) ? "Expand" : "Collapse"}
-                              >
-                                {collapsedWip.has(r.key) ? "\u25B8" : "\u25BE"}
-                              </button>
-                            ) : (
-                              <span className="w-[9px]" />
-                            )}
-                            <span
-                              className={`truncate text-[13px] ${active ? "font-medium text-[#111827]" : "text-[#374151]"}`}
-                              title={r.node.wipCode || WIP_TYPE_LABELS[r.node.wipType]?.label}
-                            >
-                              {r.node.wipCode || WIP_TYPE_LABELS[r.node.wipType]?.label || "(unnamed)"}
-                            </span>
-                          </div>
-                          <div className="ml-[15px] text-[11px] text-gray-400">
-                            {r.node.quantity} pcs · {procs} proc{mats > 0 ? ` · ${mats} mat` : ""}
-                          </div>
-                        </div>
-                      );
-                    })}
+                    {wipComponents.map((root, wi) => (
+                      <WipTreeCard
+                        key={root.id ?? wi}
+                        node={root}
+                        wi={wi}
+                        path={[]}
+                        depth={0}
+                        product={product}
+                        selectedKey={sel?.key ?? null}
+                        collapsed={collapsedWip}
+                        onSelect={setSelectedWipKey}
+                        onToggle={toggle}
+                      />
+                    ))}
                   </div>
                 </div>
 
@@ -3959,6 +4101,7 @@ function EditBOMDialog({
                       wi={sel.wi}
                       path={sel.path}
                       depth={sel.depth}
+                      product={product}
                       fabricOptions={fabricOptions}
                       variantCategories={productVariantCategories}
                       rawMaterials={rawMaterials}
@@ -6245,7 +6388,10 @@ function BatchEditMaterialsDialog({
 export default function BOMManagementPage() {
   const { toast } = useToast();
   const [products, setProducts] = useState<Product[]>([]);
-  const [templates, setTemplates] = useState<BOMTemplate[]>([]);
+  const [rawTemplates, setTemplates] = useState<BOMTemplate[]>([]);
+  // Every setTemplates path (load, save rollback, batch edit, create) lands
+  // here, so ACCESSORY is fixed in one place. See bom-category.ts.
+  const templates = useMemo(() => withProductCategory(rawTemplates, products), [rawTemplates, products]);
   const [rawMaterials, setRawMaterials] = useState<RawMaterialOption[]>([]);
   const [fabricOptions, setFabricOptions] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);

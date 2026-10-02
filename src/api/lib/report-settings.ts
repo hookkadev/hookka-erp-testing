@@ -157,6 +157,28 @@ export function dueSlot(
   return last && last >= slot ? null : slot;
 }
 
+/**
+ * First run on a database: nothing records what already went out, so every
+ * report whose time had already passed today would send again, a duplicate of
+ * what the old fixed crons sent. Mark those as handled and leave today's later
+ * times to send normally. Fills `lastSent` in place; returns the kinds it
+ * seeded, which the caller must not send this run.
+ */
+export function seedLastSent(
+  settings: ReportSettings,
+  lastSent: Partial<Record<ReportKind, string>>,
+  now: Date,
+): ReportKind[] {
+  const today = new Date(now.getTime() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const seeded: ReportKind[] = [];
+  for (const kind of REPORT_KINDS) {
+    if (lastSent[kind] !== undefined) continue;
+    lastSent[kind] = dueSlot(kind, settings[kind], now, undefined) ?? `${today} 00:00`;
+    seeded.push(kind);
+  }
+  return seeded;
+}
+
 type Db = {
   prepare(sql: string): {
     bind(...v: unknown[]): { run(): Promise<unknown>; first<T>(): Promise<T | null> };

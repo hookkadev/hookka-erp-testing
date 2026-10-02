@@ -10,6 +10,7 @@ import {
   invalidEmailsIn,
   cleanEmails,
   dueSlot,
+  seedLastSent,
   MAX_TIMES,
 } from "../src/api/lib/report-settings.ts";
 
@@ -117,4 +118,23 @@ test("reports.ts: a configured report uses its own list, never the SUPER_ADMIN f
   // The due-trigger marks a report sent before sending, so it never double-sends.
   const due = src.slice(src.indexOf('internal.post("/due-trigger"'));
   assert.ok(due.indexOf("saveLastSent(") < due.indexOf("sendScheduled(c, kind)"));
+});
+
+test("first run: times already passed today are marked handled, later times still send", () => {
+  // 15:00 SGT (07:00 UTC) on a Monday. Defaults: brief 07:00, schedule 08:00, overdue 08:00 passed; efficiency 18:30 not yet.
+  const now = new Date("2026-09-28T07:00:00Z");
+  const last = {};
+  const seeded = seedLastSent({}, last, now);
+  assert.deepEqual(seeded.sort(), ["brief", "efficiency", "overdue", "schedule"]);
+  for (const k of ["brief", "schedule", "overdue"]) assert.equal(dueSlot(k, undefined, now, last[k]), null, k + " must not resend");
+  assert.equal(dueSlot("efficiency", undefined, new Date("2026-09-28T10:30:00Z"), last.efficiency), "2026-09-28 18:30", "efficiency still sends at 18:30");
+  // 06:00 SGT: nothing has passed yet, the 07:00 brief must still send at 07:00.
+  const early = new Date("2026-09-27T22:00:00Z");
+  const l2 = {};
+  seedLastSent({}, l2, early);
+  assert.equal(dueSlot("brief", undefined, new Date("2026-09-27T23:00:00Z"), l2.brief), "2026-09-28 07:00");
+  // Already recorded: left alone.
+  const l3 = { brief: "2026-09-28 07:00" };
+  assert.deepEqual(seedLastSent({}, l3, now).includes("brief"), false);
+  assert.equal(l3.brief, "2026-09-28 07:00");
 });

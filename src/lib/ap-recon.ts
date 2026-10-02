@@ -51,6 +51,8 @@ export type ApReconPaymentRow = {
 };
 
 export type ApReconItem = {
+  /** The kind in the side's own words ("receipt GL mismatch" on the debtor side). */
+  kindLabel?: string;
   kind:
     | "opening_coverage" // opening 400-0000 leg vs Σ faces it should cover
     | "pi_gl_mismatch" // a PI's own GL net-CR ≠ its expected face (or ≠ 0)
@@ -88,7 +90,23 @@ const DEAD_STATUSES = new Set(["DRAFT", "CANCELLED"]);
 // The decomposition algebra is side-agnostic — the AR control (300-0000,
 // DR-normal) reuses it by feeding legs with debit/credit SWAPPED and this
 // config naming its GL families. Defaults = the original AP behaviour.
+// The words the notes use, so the debtor twin speaks of invoices and receipts
+// on 300-0000 instead of PIs and payments on 400-0000 (owner 2026-10-01: the
+// Self-check debtor card read in supplier words).
+export type ReconWords = {
+  control: string; // the control account
+  doc: string; // one document
+  docs: string; // documents
+  pay: string; // one settlement
+  bookings: string; // what a settlement claims
+  remainder: string; // its unapplied part
+  docGl: string; // a document's own GL direction on the control
+  payGl: string; // a settlement's GL direction on the control
+  paidDrift: string; // the paid-drift note
+};
+
 export type ReconCfg = {
+  words: ReconWords;
   docPrefix: string; // GL family of the document postings (face legs)
   payPrefix: string; // GL family of the settlement postings
   cnPrefix: string; // GL family of credit notes ("§none§" = not applicable)
@@ -98,6 +116,12 @@ export type ReconCfg = {
 };
 
 export const AP_RECON_CFG: ReconCfg = {
+  words: {
+    control: "400-0000", doc: "PI", docs: "PIs", pay: "payment",
+    bookings: "bookings to live bills", remainder: "advance remainder",
+    docGl: "net-CR", payGl: "net-DR",
+    paidDrift: "stored paid_amount_sen ≠ Σ live payment rows — run POST /api/supplier-payments/recompute-pi-paid",
+  },
   docPrefix: "purchase_invoice",
   payPrefix: "supplier_payment",
   cnPrefix: "purchase_credit_note",
@@ -106,6 +130,12 @@ export const AP_RECON_CFG: ReconCfg = {
 };
 
 export const AR_RECON_CFG: ReconCfg = {
+  words: {
+    control: "300-0000", doc: "invoice", docs: "invoices", pay: "receipt",
+    bookings: "allocations to live invoices", remainder: "on-account remainder",
+    docGl: "net-DR", payGl: "net-CR",
+    paidDrift: "stored paid amount ≠ Σ live receipt allocations",
+  },
   docPrefix: "invoice",
   payPrefix: "payment",
   cnPrefix: "§none§",
@@ -133,6 +163,7 @@ export function buildApReconciliation(input: {
   cnAllocCtlSen: number; // Σ booked_sen of method='CREDIT_NOTE' rows (mirrors /ap-control)
 }, cfg: ReconCfg = AP_RECON_CFG): ApReconReport {
   const { legs400, pis, paymentRows, pcnPostedSen, cnAllocCtlSen } = input;
+  const w = cfg.words;
 
   // ---- GL side --------------------------------------------------------------
   let openingCr = 0; // net CR of opening legs
@@ -224,7 +255,7 @@ export function buildApReconciliation(input: {
       expectedSen: openFaceSen,
       actualSen: openingCr,
       contributionSen: openingCr - openFaceSen,
-      note: "400-0000 opening leg vs Σ face of opening-covered bills (opening seeds + included pre-opening PIs). Re-post opening if the covered set changed.",
+      note: `${w.control} opening leg vs Σ face of the opening-covered ${w.docs} (opening seeds + included pre-opening ${w.docs}). Re-post opening if the covered set changed.`,
     });
   }
 
@@ -239,16 +270,16 @@ export function buildApReconciliation(input: {
     const expected = pi && inA(pi) && !openingCovered(pi) ? pi.amountSen : 0;
     if (actual === expected) continue;
     const why = !pi
-      ? "GL legs reference no known PI"
+      ? `GL legs reference no known ${w.doc}`
       : pi.floored
-        ? "excluded pre-opening PI still has visible post-floor GL"
+        ? `excluded pre-opening ${w.doc} still has visible post-floor GL`
         : cfg.deadStatuses.has(pi.status)
-          ? `PI status ${pi.status} should net to 0 on the control`
+          ? `${w.doc} status ${pi.status} should net to 0 on the control`
           : openingCovered(pi)
-            ? "opening-covered PI has its own GL (double-counted with the opening entry)"
+            ? `opening-covered ${w.doc} has its own GL (double-counted with the opening entry)`
             : actual === 0
-              ? "live PI has NO visible GL on 400-0000 (never posted / hidden legs)"
-              : "GL net-CR differs from the PI face";
+              ? `live ${w.doc} has NO visible GL on ${w.control} (never posted / hidden legs)`
+              : `GL ${w.docGl} differs from the ${w.doc} face`;
     items.push({
       kind: "pi_gl_mismatch",
       ref: pi?.piNo || id,
@@ -339,9 +370,9 @@ export function buildApReconciliation(input: {
           actualSen: glDr,
           contributionSen: claim - glDr,
           note:
-            (outsideSen !== 0 ? `RM ${(outsideSen / 100).toFixed(2)} booked to floored/dead/unknown PIs (claims nothing). ` : "") +
-            (advSen !== 0 ? `Includes advance remainder ${(advSen / 100).toFixed(2)}. ` : "") +
-            "Subledger claim (bookings to live bills + advance remainder) vs visible GL net-DR on 400-0000.",
+            (outsideSen !== 0 ? `RM ${(outsideSen / 100).toFixed(2)} booked to floored/dead/unknown ${w.docs} (claims nothing). ` : "") +
+            (advSen !== 0 ? `Includes ${w.remainder} ${(advSen / 100).toFixed(2)}. ` : "") +
+            `Subledger claim (${w.bookings} + ${w.remainder}) vs visible GL ${w.payGl} on ${w.control}.`,
         });
       }
     } else {
@@ -356,8 +387,8 @@ export function buildApReconciliation(input: {
           contributionSen: -glDr,
           note:
             rows.length === 0
-              ? "GL legs reference no supplier_payments rows"
-              : "voided/deleted payment still nets non-zero visible GL on 400-0000",
+              ? `GL legs reference no ${w.pay} record`
+              : `voided/deleted ${w.pay} still nets non-zero visible GL on ${w.control}`,
         });
       }
     }
@@ -376,7 +407,7 @@ export function buildApReconciliation(input: {
         expectedSen: rowsPaid,
         actualSen: pi.paidSen,
         contributionSen: pi.paidSen - rowsPaid,
-        note: "stored paid_amount_sen ≠ Σ live payment rows — run POST /api/supplier-payments/recompute-pi-paid",
+        note: w.paidDrift,
       });
     }
     if (inS3(pi) && pi.paidSen > pi.amountSen) {
@@ -388,7 +419,7 @@ export function buildApReconciliation(input: {
         expectedSen: pi.amountSen,
         actualSen: pi.paidSen,
         contributionSen: -clamp,
-        note: "paid exceeds face — the subledger clamps outstanding at 0 while the GL keeps the excess DR",
+        note: `paid exceeds face — the subledger clamps outstanding at 0 while the GL keeps the excess ${w.payGl.replace("net-", "")}`,
       });
     }
     if (!inS3(pi) && pi.amountSen !== pi.paidSen) {
@@ -399,7 +430,7 @@ export function buildApReconciliation(input: {
         expectedSen: pi.paidSen,
         actualSen: pi.amountSen,
         contributionSen: pi.amountSen - pi.paidSen,
-        note: `status ${pi.status} keeps this PI out of the aging sum, but face − paid = ${((pi.amountSen - pi.paidSen) / 100).toFixed(2)} ≠ 0`,
+        note: `status ${pi.status} keeps this ${w.doc} out of the aging sum, but face − paid = ${((pi.amountSen - pi.paidSen) / 100).toFixed(2)} ≠ 0`,
       });
     }
   }
@@ -428,10 +459,11 @@ export function buildApReconciliation(input: {
       expectedSen: 0,
       actualSen: o.net,
       contributionSen: o.net,
-      note: "non-PI/payment/CN/opening source posting to 400-0000 — verify it belongs on the control",
+      note: `non-${w.doc}/${w.pay}/CN/opening source posting to ${w.control} — verify it belongs on the control`,
     });
   }
 
+  for (const it of items) it.kindLabel = kindLabelOf(it.kind, w);
   items.sort((a, b) => Math.abs(b.contributionSen) - Math.abs(a.contributionSen));
   const explainedSen = items.reduce((s, it) => s + it.contributionSen, 0);
 
@@ -451,4 +483,19 @@ export function buildApReconciliation(input: {
     explainedSen,
     unexplainedResidualSen: driftSen - explainedSen,
   };
+}
+
+// An item's kind in the side's own words.
+function kindLabelOf(kind: ApReconItem["kind"], w: ReconWords): string {
+  switch (kind) {
+    case "opening_coverage": return "opening coverage";
+    case "pi_gl_mismatch": return `${w.doc} GL mismatch`;
+    case "payment_gl_mismatch": return `${w.pay} GL mismatch`;
+    case "void_payment_gl_leak": return `void ${w.pay} GL leak`;
+    case "pi_paid_drift": return `${w.doc} paid drift`;
+    case "overpaid_clamp": return "overpaid clamp";
+    case "status_excluded_outstanding": return "outstanding outside the aging";
+    case "cn_block_mismatch": return "credit-note block mismatch";
+    case "other_source_leg": return "other posting on the control";
+  }
 }

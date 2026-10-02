@@ -17,13 +17,15 @@ test("one shell for every document popup", () => {
   assert.ok((ui.match(/<DocDetailModal/g) ?? []).length >= 3, "PV, receipts and fund transfer all use the shell");
 });
 
-test("Payment Vouchers: double-click opens the popup, single click still expands", () => {
+test("Payment Vouchers: double-click opens the popup; single click does nothing (owner 2026-10-01)", () => {
   const pv = block("function PaymentsTab(", "// =============== TAB: OFFICIAL RECEIPT");
-  assert.match(pv, /onClick=\{\(\) => setExpandedPv\(\(m\) => \(\{ \.\.\.m, \[r\.id\]: !m\[r\.id\] \}\)\)\}\s*\n\s*onDoubleClick=\{\(\) => setDetailPvId\(r\.id\)\}/);
+  assert.match(pv, /onDoubleClick=\{\(\) => setDetailPvId\(r\.id\)\}\s*\n\s*title="Double-click to open"/);
+  assert.doesNotMatch(pv, /setExpandedPv|expandedPv/, "no inline expand any more");
   assert.match(pv, /const r = \(rows \?\? \[\]\)\.find\(\(x\) => x\.id === detailPvId\);/, "resolved from rows so it refreshes after actions");
   // The popup carries the ladder trail, the lines / bills and the attachments block.
   assert.match(pv, /Ladder trail — who did what, when\./);
-  assert.match(pv, /<PvAttachmentsBlock pv=\{r\} onChanged=\{load\} \/>\s*\n\s*<\/DocDetailModal>/);
+  assert.match(pv, /<PvAttachmentsBlock pv=\{r\} onChanged=\{load\} \/>/);
+  assert.match(pv, /<DocTrailBlock family="payment_voucher" sourceId=\{r\.id\} \/>\s*\n\s*<\/DocDetailModal>/, "ledger entry + bank state close the popup");
   // Actions inside mirror the row: same handlers, same gates.
   for (const rung of ['"prepare"', '"withdraw"', '"reject"', '"check"', '"approve"']) assert.match(pv, new RegExp(`onClick=\\{\\(\\) => void handleLadder\\(r, ${rung}\\)\\}>`));
   assert.match(pv, /onClick=\{\(\) => \{ close\(\); void handleLifecycle\(r\.id, r\.pvNo, "void"\); \}\}/);

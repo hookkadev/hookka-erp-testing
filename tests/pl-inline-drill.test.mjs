@@ -70,7 +70,8 @@ test("the statement's own pass does the tracing, so the drill sums to the line",
 test("GET /pl-drill: read permission, same period window, refs, other side, tie flag", () => {
   const ep = slice(api, 'app.get("/pl-drill"', 'app.get("/pl-monthly"');
   assert.match(ep, /requirePermission\(c, "accounting", "read"\)/);
-  assert.match(ep, /const startYm = periodStartYm\(period\);\n  const endYm = periodEndYm\(period\);/, "the statement's own window");
+  assert.match(ep, /const startYm = ranged \? fromQ : periodStartYm\(period\);\n  const endYm = ranged \? toQ : periodEndYm\(period\);/, "the statement's own window, or the Monthly P&L's run of months (2026-10-01)");
+  assert.match(ep, /const ranged = ymRe\.test\(fromQ\) && ymRe\.test\(toQ\) && fromQ <= toQ;/);
   assert.match(ep, /selectHistoricalWindow\(historical, openingMonth, startYm, "all"\)/, "a month from the old books says so");
   assert.match(ep, /await glWindowSigned\(db, orgId, startYm, endYm, dc, trace\);/);
   // The lines come from the builder shared with the balance-sheet drill (2026-09-30).

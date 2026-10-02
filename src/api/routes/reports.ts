@@ -63,6 +63,7 @@ import {
   loadReportSettings,
   normalizeReportSettings,
   saveLastSent,
+  seedLastSent,
   saveReportSettings,
   type ReportKind,
 } from "../lib/report-settings";
@@ -914,8 +915,13 @@ internal.post("/due-trigger", async (c) => {
     loadLastSent(c.var.DB),
   ]);
   const now = new Date();
+  // First run on this database: record what the old fixed crons already sent
+  // today instead of sending it again (see seedLastSent).
+  const seeded = seedLastSent(settings, lastSent, now);
+  if (seeded.length > 0) await saveLastSent(c.var.DB, lastSent);
   const results: Partial<Record<ReportKind, unknown>> = {};
   for (const kind of REPORT_KINDS) {
+    if (seeded.includes(kind)) continue;
     if (settings[kind]?.enabled === false) continue;
     const slot = dueSlot(kind, settings[kind], now, lastSent[kind]);
     if (!slot) continue;

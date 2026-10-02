@@ -1,6 +1,8 @@
 # Employees & Payroll — Module Guide
 
 > **Last verified: 2026-10-01** (branch `feat/dev31-worker-dept-hours`) — DEV-31 worker "Today's departments": core flow 2 and the `worker.ts` / `punch-autofill.ts` / `dept-scan-split.ts` anchors re-read from the source. Nothing else re-checked.
+> **Last verified: 2026-10-02** (branch `feat/dev31-worker-dept-hours-main`): DEV-31 to main, the `worker.ts` / `punch-autofill.ts` / `dept-scan-split.ts` anchors re-read on the merged tree. Nothing else re-checked.
+> **Last verified: 2026-10-01** (branch `fix/worker-history-snapshot-stale`): `POST /clock` / `POST /dept-scan` anchors re-derived after worker.ts grew 5 lines (BUG-2026-10-01-245). Nothing else re-checked.
 
 > **Last verified: 2026-10-01** (branch `feat/dev22-worker-penalty`) — Worker Penalty (DEV-22) added to entry points, data model, core flows and gotchas, checked against `src/api/lib/worker-penalties.ts`, `src/api/routes/worker-penalties.ts`, `src/api/routes/payslips.ts`. Nothing else re-checked.
 
@@ -81,7 +83,7 @@ Owns the whole workforce lifecycle: the **employee master** (workers + effective
 | `payrollPeriodForApproval` / `findPenaltyDrift` / `postPenaltiesForPeriod` | `src/api/lib/worker-penalties.ts:303 / 449 / 502` | Penalty payroll month, approval drift guard, posting on payroll approval |
 | `POST /login` / `resolveWorkerToken` | `src/api/routes/worker-auth.ts:124 / 337` | PIN login + token resolution |
 | `getWorker` (token gate) | `src/api/routes/worker.ts:163` | X-Worker-Token → ACTIVE worker or 401/403 |
-| `POST /clock` / `POST /dept-scan` | `src/api/routes/worker.ts:1173 / 1430` | Clock in/out + department scan |
+| `POST /clock` / `POST /dept-scan` | `src/api/routes/worker.ts:1182 / 1439` | Clock in/out + department scan |
 | `buildDeptDay` | `src/api/routes/worker.ts:262` | DEV-31 "Today's departments" payload (live or saved) |
 | `computeLiveDeptDay` | `src/api/lib/punch-autofill.ts:327` | Live split: punch-out maths with now as the end |
 | `splitDayHours` / `currentStation` | `src/lib/dept-scan-split.ts:148 / 171` | Shared split (autofill + live) and where the worker is now |
