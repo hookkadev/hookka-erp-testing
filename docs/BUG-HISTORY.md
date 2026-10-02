@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-02**: newest entry BUG-2026-10-02-248 (branch `fix/efficiency-email-dept-table`, to staging); a log, so "verified" means the entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-242 (branch `fix/worker-login-signin-text`, to staging then main); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-241 (branch `fix/accessory-l1-only-job-cards`, to staging); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-240 (branch `fix/schedule-email-size`, to staging); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
@@ -78,6 +79,30 @@ Entries themselves stay newest-first.
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
 
 ---
+
+## BUG-2026-10-02-248 — the Efficiency email cut off its Efficiency column on a phone `reports` `ui-frontend` 🟢
+
+🟢 Fixed on `fix/efficiency-email-dept-table` (BUG-36 follow-up to -232, to `staging`).
+
+Found by rendering all four report emails at 375px wide, not by a test: the
+-232 test only checked that the viewport tag and the card CSS were present.
+The Efficiency email's Department Efficiency table has five columns, and the
+phone rules set `white-space: nowrap` on every cell of every `table.data`
+(meant to keep hour values like "11h 40m" on one line). Five unwrappable
+columns do not fit, so the page scrolled sideways (scrollWidth 395 on a 375
+screen) and the last column, Efficiency %, the main number in the report, was
+clipped ("Efficienc", "73", "54").
+
+Fix (`src/api/lib/efficiency-report.ts`, inside the existing 640px `screen`
+media query): the department table's first column may wrap (so a name plus its
+LOW badge takes two lines), and its text is 9pt. The employee cards and the
+A4 print are unchanged.
+
+Measured after the fix at 375px with four departments (longest names, two
+flagged LOW) and the revenue box: scrollWidth 375, Efficiency column fully
+visible. Not checked: a real mail app (Gmail, Outlook), real data.
+
+Regression test: `tests/report-emails-mobile.test.mjs` (efficiency case).
 
 ## BUG-2026-10-01-242 — Worker login told returning workers to "Create a 6-digit PIN" `worker-portal` `ui-frontend` 🟢
 

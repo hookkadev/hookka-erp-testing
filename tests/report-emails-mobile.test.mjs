@@ -47,6 +47,8 @@ test("efficiency email: viewport, employee cards, no print button", () => {
   assert.match(html, viewport);
   assert.match(html, /@media screen and \(max-width: 640px\)/);
   assert.match(html, /<table class="data emp">/);
+  // BUG-2026-10-02-248: the department table must let its name wrap, or the Efficiency column is pushed off a 375px screen
+  assert.match(html, /table\.data:not\(\.emp\) td:first-child \{ white-space: normal/);
   assert.match(html, /class="m-lbl">Efficiency <\/span>75%/);
   assert.doesNotMatch(html, /window\.print\(\)/);
   assert.match(renderEfficiencyHtml(efficiency), /window\.print\(\)/);

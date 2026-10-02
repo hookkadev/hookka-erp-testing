@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-02**: branch `fix/efficiency-email-dept-table` (to `staging`, BUG-2026-10-02-248) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: DEV-31 entry updated with the staging test run (#651 merged, measured on staging).
 > **Last verified: 2026-10-01**: branch `feat/dev08-pillow-follows-sofa` (DEV-08 rule B) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: branch `fix/accessory-l1-only-job-cards` (to `staging`, BUG-2026-10-01-241) added below (its entry is the newest).
@@ -109,6 +110,15 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-02 — ✅ Check all four report emails on a phone (branch `fix/efficiency-email-dept-table` → `staging`, BUG-2026-10-02-248)
+
+Ask: the Overdue, Today's Production Orders, Efficiency & Revenue and Morning Brief emails stay as `main` has them (Brief not removed); double-check all four read on a phone before anything goes to `main`.
+
+1. ✅ Rendered all four from `staging` at 375px: Overdue, Schedule and Brief fit; Efficiency scrolled sideways and clipped its Efficiency column (BUG-2026-10-02-248).
+2. ✅ Fixed in `efficiency-report.ts`, regression test added, re-measured at 375px (no sideways scroll).
+3. 🔵 Owner ask: send all four emails to one test address from staging for one round, then decide what goes to `main`. Needs this fix on `staging` and a signed-in staging session; arrival in the inbox is for the owner to confirm (staging sends through MailSlurp).
+4. 🔵 Not done: `main` has none of the phone layout (no viewport tag in any of the four renderers); what goes to `main` is the owner's call. Not checked in a real mail app.
 
 ## 2026-10-01 — 🔵 DEV-08 Pillows scheduled with their sofa, rule B (Violet, High) (branch `feat/dev08-pillow-follows-sofa` → `staging`)
 
