@@ -462,6 +462,7 @@ const PAGE_CSS = `
   .print-bar button { padding: 6px 14px; font-size: 10pt; border: 1px solid #1F1D1B; background: #1F1D1B; color: #fff; cursor: pointer; border-radius: 4px; }
   .secondary { color: #6B7280; font-size: 8pt; }
   .more { margin: 6px 0 0; font-size: 9pt; color: #6B5C32; }
+  .more-row td { font-size: 9pt; color: #6B5C32; }
   .num { font-variant-numeric: tabular-nums; }
 `;
 
@@ -555,8 +556,12 @@ export function renderScheduleHtml(
       shownCards += shown;
       const rows = rowHtml.slice(0, shown).join("");
       const hidden = rowHtml.length - shown;
-      const more = hidden > 0
-        ? `<p class="more">${hidden} more job card${hidden === 1 ? "" : "s"} in ${escapeHtml(d.name)} not shown in this email: ${fullLink}.</p>`
+      // Last row of a capped department: what is hidden, and the link in the last (PIC) column.
+      const listLink = opts.fullListUrl
+        ? `<a href="${escapeHtml(opts.fullListUrl)}">Show full list</a>`
+        : "Full list in Reports";
+      const moreRow = hidden > 0
+        ? `<tr class="more-row"><td colspan="8">${hidden} more job card${hidden === 1 ? "" : "s"} in ${escapeHtml(d.name)} not shown in this email</td><td class="m-inline">${listLink}</td></tr>`
         : "";
       return `<div class="dept-card">
         <div class="dept-head">
@@ -576,9 +581,8 @@ export function renderScheduleHtml(
             <th>Status</th>
             <th>PIC</th>
           </tr></thead>
-          <tbody>${rows}</tbody>
+          <tbody>${rows}${moreRow}</tbody>
         </table>
-        ${more}
       </div>`;
     })
     .join("\n");

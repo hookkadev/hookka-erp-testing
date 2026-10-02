@@ -40,6 +40,8 @@ test("a heavy day stays under the 100,000-byte limit and links to the full list"
     assert.match(html, new RegExp(`This email lists \\d+ of ${cards} job cards`));
     assert.match(html, /more job cards in Dept 0 not shown in this email/);
     assert.ok(html.includes(`<a href="${url}">open the full list</a>`));
+    // Last row of each capped department: the count in the first cell, "Show full list" in the last column.
+    assert.match(html, /<tr class="more-row"><td colspan="8">\d+ more job cards in Dept 0 not shown in this email<\/td><td class="m-inline"><a href="[^"]+">Show full list<\/a><\/td><\/tr><\/tbody>/);
     // Every department still shows its totals.
     for (let d = 0; d < 7; d++) assert.match(html, new RegExp(`<span>Dept ${d}</span>`));
   }

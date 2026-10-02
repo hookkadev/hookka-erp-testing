@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-02**: branch `fix/schedule-email-full-list-row` (to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-02**: branch `fix/efficiency-email-dept-table` (to `staging`, BUG-2026-10-02-248) added below (its entry is the newest).
 > **Last verified: 2026-10-01**: DEV-31 entry updated with the staging test run (#651 merged, measured on staging).
 > **Last verified: 2026-10-01**: branch `feat/dev08-pillow-follows-sofa` (DEV-08 rule B) added below (its entry is the newest).
@@ -110,6 +111,13 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-02 — ✅ Schedule email: "Show full list" in the last row of each capped department (branch `fix/schedule-email-full-list-row` → `staging`)
+
+Owner ask: where the Production Orders email cuts off a department's jobs, add a last row with "Show full list" in the last column. Nothing else in the email changes (owner: keep the format, ask the requester about any other additions first).
+
+1. ✅ `renderScheduleHtml`: a capped department ends with a `more-row` row, the count in the first cell and a "Show full list" link in the last (PIC) column; the sentence under the table is gone. The one-line total under the summary stays. Without a link base it reads "Full list in Reports".
+2. ✅ `tests/schedule-email-size.test.mjs` asserts the row and its last-column link. Looked at at 375px (a card, no sideways scroll) and on a wide screen.
 
 ## 2026-10-02 — ✅ Check all four report emails on a phone (branch `fix/efficiency-email-dept-table` → `staging`, BUG-2026-10-02-248)
 
