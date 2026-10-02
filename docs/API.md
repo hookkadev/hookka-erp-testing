@@ -1,7 +1,7 @@
 # API — generated reference
 
 > **GENERATED FILE — do not hand-edit.** Regenerate with `node scripts/gen-api-docs.mjs`.
-> **Last generated: 2026-10-01** from `src/api/worker.ts` + `src/api/routes/*.ts`.
+> **Last generated: 2026-10-02** from `src/api/worker.ts` + `src/api/routes/*.ts`.
 
 The backend is a single [Hono](https://hono.dev) app in `src/api/worker.ts`, served
 as a Cloudflare Pages Function via `functions/api/[[route]].ts`. There is no
@@ -31,7 +31,7 @@ as a Cloudflare Pages Function via `functions/api/[[route]].ts`. There is no
   route module) and is exempt from the rate limiter.
 
 **Counts at generation time:** 142 mounts, 140 route files in
-`src/api/routes/`, 1000 top-level handler registrations discovered.
+`src/api/routes/`, 1003 top-level handler registrations discovered.
 
 ## Scope and limits of this file
 
@@ -193,8 +193,8 @@ offsets pointing past the end of their own file.
 | `/api/service-orders` | `src/api/routes/service-orders.ts` | `GET /` <sub>:427</sub><br>`GET /:id` <sub>:471</sub><br>`POST /` <sub>:557</sub><br>`PUT /:id` <sub>:950</sub><br>`PUT /:id/status` <sub>:1030</sub><br>`PUT /:id/mode` <sub>:1221</sub><br>`POST /:id/returns` <sub>:1481</sub><br>`PUT /:id/returns/:rid` <sub>:1571</sub><br>`POST /:id/returns/:rid/scrap` <sub>:1682</sub><br>`DELETE /:id` <sub>:1845</sub> | gated |
 | `/api/department-performance` | `src/api/routes/department-performance.ts` | `GET /` <sub>:202</sub> | gated |
 | `/api/wip-times` | `src/api/routes/wip-times.ts` | `GET /` <sub>:117</sub><br>`PUT /` <sub>:252</sub><br>`POST /bulk-import` <sub>:412</sub> | gated |
-| `/api/reports` | `src/api/routes/reports.ts` | `GET /efficiency` <sub>:285</sub><br>`GET /efficiency.json` <sub>:319</sub><br>`GET /operations.json` <sub>:345</sub><br>`POST /efficiency/send` <sub>:374</sub><br>`GET /schedule` <sub>:384</sub><br>`GET /schedule.json` <sub>:403</sub><br>`GET /overdue` <sub>:420</sub><br>`GET /overdue.json` <sub>:439</sub><br>`GET /brief` <sub>:498</sub><br>`POST /brief/send` <sub>:532</sub><br>`GET /cogs-integrity.json` <sub>:554</sub><br>`GET /ocr-code-misses.json` <sub>:582</sub><br>`GET /compliance.json` <sub>:596</sub><br>`POST /schedule/send` <sub>:875</sub><br>`POST /overdue/send` <sub>:880</sub> | gated |
-| `/api/internal/reports` | `src/api/routes/reports.ts` | `POST /efficiency-trigger` <sub>:836</sub><br>`POST /schedule-trigger` <sub>:842</sub><br>`POST /overdue-trigger` <sub>:848</sub><br>`POST /brief-trigger` <sub>:854</sub> | **public** (PUBLIC_PREFIXES) |
+| `/api/reports` | `src/api/routes/reports.ts` | `GET /efficiency` <sub>:309</sub><br>`GET /efficiency.json` <sub>:343</sub><br>`GET /operations.json` <sub>:369</sub><br>`POST /efficiency/send` <sub>:398</sub><br>`GET /schedule` <sub>:408</sub><br>`GET /schedule.json` <sub>:427</sub><br>`GET /overdue` <sub>:444</sub><br>`GET /overdue.json` <sub>:463</sub><br>`GET /brief` <sub>:522</sub><br>`POST /brief/send` <sub>:556</sub><br>`GET /cogs-integrity.json` <sub>:578</sub><br>`GET /ocr-code-misses.json` <sub>:606</sub><br>`GET /compliance.json` <sub>:620</sub><br>`GET /settings` <sub>:950</sub><br>`PUT /settings` <sub>:960</sub><br>`POST /schedule/send` <sub>:978</sub><br>`POST /overdue/send` <sub>:983</sub> | gated |
+| `/api/internal/reports` | `src/api/routes/reports.ts` | `POST /efficiency-trigger` <sub>:866</sub><br>`POST /schedule-trigger` <sub>:872</sub><br>`POST /overdue-trigger` <sub>:878</sub><br>`POST /brief-trigger` <sub>:884</sub><br>`POST /due-trigger` <sub>:912</sub> | **public** (PUBLIC_PREFIXES) |
 | `/api/assistant/conversations` | `src/api/routes/assistant-history.ts` | `GET /` <sub>:87</sub><br>`GET /:id` <sub>:112</sub><br>`PUT /:id` <sub>:140</sub><br>`PATCH /:id` <sub>:204</sub><br>`DELETE /:id` <sub>:234</sub> | gated |
 | `/api/assistant` | `src/api/routes/assistant.ts` | `POST /chat` <sub>:522</sub> | gated |
 | `/api/agents` | `src/api/routes/agent-console.ts` | `GET /status` <sub>:165</sub><br>`GET /review` <sub>:410</sub><br>`POST /run-now` <sub>:562</sub><br>`POST /pause` <sub>:703</sub><br>`POST /kill-all` <sub>:730</sub><br>`POST /gate` <sub>:757</sub><br>`POST /phase` <sub>:787</sub><br>`POST /rollback-last-batch` <sub>:839</sub><br>`GET /config-proposals` <sub>:953</sub><br>`POST /config-proposals/decide` <sub>:983</sub> | gated |

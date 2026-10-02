@@ -496,14 +496,18 @@ export function renderBriefHtml(d: BriefData): string {
   const th = 'style="padding:5px 10px;text-align:left;background:#F0ECE9;font:600 12px Arial;color:#374151"';
   const thR = 'style="padding:5px 10px;text-align:right;background:#F0ECE9;font:600 12px Arial;color:#374151"';
   const table = 'style="border-collapse:collapse;width:100%;font:13px Arial;color:#1F1D1B"';
-  return `<!doctype html><html><body style="margin:0;padding:20px;background:#FAF9F7;font-family:Arial">
-<div style="max-width:720px;margin:0 auto;background:#fff;border:1px solid #E2DDD8;border-radius:10px;padding:24px">
+  // Phone (BUG-36): the viewport tag stops mail apps shrinking a desktop
+  // page; the media query trims the outer padding and table cells.
+  return `<!doctype html><html><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>@media screen and (max-width: 640px) { body { padding: 6px !important; } .card { padding: 14px !important; } td, th { padding: 4px 6px !important; } td:first-child { white-space: nowrap; } }</style>
+</head><body style="margin:0;padding:20px;background:#FAF9F7;font-family:Arial">
+<div class="card" style="max-width:720px;margin:0 auto;background:#fff;border:1px solid #E2DDD8;border-radius:10px;padding:24px">
 <div style="border-bottom:2px solid #1F1D1B;padding-bottom:10px;margin-bottom:6px">
   <div style="font:700 20px Georgia;color:#1F1D1B">Hookka · Production Morning Brief</div>
   <div style="font:12px Arial;color:#6B7280;margin-top:2px">${d.date} · plan for today, actuals from ${d.prevDate}</div>
 </div>
 ${d.aiFocus ? `<div style="background:#FBF7EC;border:1px solid #E2D9C3;border-radius:8px;padding:12px 14px;font:14px/1.6 Arial;color:#4B3F1D;margin:14px 0">${esc(d.aiFocus)}</div>` : ""}
-${d.proposals.pending > 0 ? `<div style="background:#EEF3EA;border:1px solid #CBDCC0;border-radius:8px;padding:10px 14px;font:13px/1.5 Arial;color:#33512A;margin:14px 0">排产提案：<b>${d.proposals.pending}</b> 张卡待批准排产 — Planning &gt; Schedule Proposals 里一键批准后写入交期。</div>` : ""}
+${d.proposals.pending > 0 ? `<div style="background:#EEF3EA;border:1px solid #CBDCC0;border-radius:8px;padding:10px 14px;font:13px/1.5 Arial;color:#33512A;margin:14px 0">Schedule proposals: <b>${d.proposals.pending}</b> job card(s) waiting for approval. Approve them in Planning &gt; Schedule Proposals to write their dates.</div>` : ""}
 <h2 ${h2}>1 · Today's Plan — ${d.schedule.totals.jobCards} job cards · ${hm(d.schedule.totals.prodMinutes)}</h2>
 <table ${table}><tr><th ${th}>Department</th><th ${thR}>Cards</th><th ${thR}>Units</th><th ${thR}>Time</th></tr>${deptRows || `<tr><td colspan="4" style="padding:8px 10px;color:#9CA3AF">Nothing due today.</td></tr>`}</table>
 <h2 ${h2}>2 · Overdue — ${d.overdue.totals.salesOrders} orders (worst ${d.overdue.totals.worstDays}d)</h2>
