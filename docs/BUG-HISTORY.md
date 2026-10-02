@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-02**: BUG-2026-10-01-240 got a follow-up paragraph (the "Show full list" row, branch `fix/schedule-email-full-list-row`, to staging); a log, so "verified" means the entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-02**: newest entry BUG-2026-10-02-248 (branch `fix/efficiency-email-dept-table`, to staging); a log, so "verified" means the entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-242 (branch `fix/worker-login-signin-text`, to staging then main); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-241 (branch `fix/accessory-l1-only-job-cards`, to staging); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry was re-checked.
@@ -156,6 +157,8 @@ Fix (`schedule-overdue-report.ts`, email mode only):
 - Whitespace between row tags is stripped (~15% of each row), so about 119
   rows fit instead of 98. A 100-card day is not capped at all.
 - The in-app page (`GET /api/reports/schedule`) is never capped.
+
+Follow-up 2026-10-02 (branch `fix/schedule-email-full-list-row`): the "N more ... not shown" sentence under each capped department became that department's last table row, with "Show full list" in the last column (a link to the same URL, or "Full list in Reports" when there is no origin). The one-line total under the summary is unchanged.
 
 Regression: `tests/schedule-email-size.test.mjs` (256 and 1,000 cards stay
 under 100,000 bytes, every department still shows, light day and in-app page

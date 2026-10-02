@@ -1,5 +1,7 @@
 # Reports & Analytics — Module Guide
 
+> **Last verified: 2026-10-02** (branch `fix/schedule-email-full-list-row`): `schedule-overdue-report.ts` line count (783) only. Nothing else re-checked.
+
 > **Last verified: 2026-10-02** (branch `fix/efficiency-email-dept-table`): `efficiency-report.ts` line count (701) and anchors (140 / 446), and the Efficiency phone-layout gotcha only.
 
 > **Last verified: 2026-09-29** (branch `fix/report-emails-mobile`): lib line counts for `efficiency-report.ts`, `schedule-overdue-report.ts`, `production-brief.ts` and the report-email phone-layout gotcha only.
@@ -39,7 +41,7 @@ Two unrelated report worlds share the name **Reports**:
   - `/api/forecasts` → `src/api/routes/forecasts.ts` (155) — mount `worker.ts:1346`
   - `/api/dashboard/overview` → `src/api/routes/dashboard-overview.ts` (2316) — mount `worker.ts:1304`
 - Report engines (logic lives here, not in the route)
-  - `src/api/lib/compliance-report.ts` (1519) · `efficiency-report.ts` (701) · `schedule-overdue-report.ts` (749) · `operations-report.ts` (1248) · `production-brief.ts` (742)
+  - `src/api/lib/compliance-report.ts` (1519) · `efficiency-report.ts` (701) · `schedule-overdue-report.ts` (783) · `operations-report.ts` (1248) · `production-brief.ts` (742)
 - Shared client engines: `src/lib/print-report.ts` (351, WYSIWYG print) · `src/lib/export-report.ts` (146, CSV/XLSX/PDF export)
 
 ## Data model
@@ -86,7 +88,7 @@ Two unrelated report worlds share the name **Reports**:
 
 ## Gotchas
 - **The Reports hub and `/api/reports/*` do NOT share data.** `reports.tsx` tabs fetch source-module list APIs and aggregate client-side; only `daily-report.tsx` consumes `/api/reports/compliance.json`. Don't expect matching shapes.
-- **Logic lives in `src/api/lib/*`, not the route.** `reports.ts` (1044) is a thin shim over `compliance-report.ts` (1519), `efficiency-report.ts` (701), `schedule-overdue-report.ts` (749), `operations-report.ts` (1248), `production-brief.ts` (742). Edit the lib, not the handler.
+- **Logic lives in `src/api/lib/*`, not the route.** `reports.ts` (1044) is a thin shim over `compliance-report.ts` (1519), `efficiency-report.ts` (701), `schedule-overdue-report.ts` (783), `operations-report.ts` (1248), `production-brief.ts` (742). Edit the lib, not the handler.
 - **`/send` endpoints touch the email/cron path** — they resolve recipients from `kv_config` + `users` and call `sendMail`; not a pure read. "Send test now" (Settings → Email Reports) hits the same `/send`; a toast of "No email provider configured" means the environment has no Brevo / Resend / MailSlurp secret (staging uses MailSlurp: `MAILSLURP_API_KEY` + `MAILSLURP_INBOX_ID`). The cron `-trigger` variants add `authCron` (`x-cron-secret`) + `cronGate` (skip Sunday / public holidays).
 - **Daily Report is expensive → snapshot-cached.** `collectComplianceData` cold-computes ~6s across the whole order/delivery/invoice/procurement chain; `buildComplianceCached` (`reports.ts:669`) serves last-good instantly and refreshes in the background. Numbers are byte-identical.
 - **Production Brief is Agent-Console-gated.** A paused `PRODUCTION` agent (or global kill switch) silences the automatic brief; manual `/brief/send` still works. It also runs under `recordAgentRun` for token accounting.
