@@ -5,21 +5,19 @@
 //
 // DEFINITIONS (the UI repeats these in its subtitles — keep them in sync):
 //
-//  ORDER PLAN vs ACTUAL, per day
-//    plan   = production orders (not CANCELLED) whose target_end_date is that
-//             day — "scheduled to finish that day".
-//    actual = production orders with status COMPLETED whose completed_date is
-//             that day — "finished that day".
-//    Both are counted in orders and in units (quantity). variance = actual −
-//    plan. These are two independent tallies by date, NOT "of the orders
-//    planned that day, how many finished": an order finished late counts as
-//    actual on the day it finished and as plan on the day it was due.
-//
-//  STAGE PLAN vs ACTUAL, per day per department
-//    plan   = job cards (not CANCELLED) whose due_date is that day.
+//  PLAN vs ACTUAL, per day per department — job-card based, the same three
+//  measures as the Schedule email (schedule-overdue-report.ts): job cards,
+//  units, planned time.
+//    plan   = job cards (not CANCELLED, PO not CANCELLED) whose due_date is
+//             that day.
 //    actual = job cards COMPLETED/TRANSFERRED whose completed_date is that day.
-//    Counted in cards (one card = one department stage of one order); job
-//    cards carry no unit count in the feed.
+//    units  = the card's production-order quantity (as the email counts it).
+//    minutes= estimate-first (est_minutes, else actual_minutes) through
+//             jcMinutesTotal, on BOTH sides, so actual = the planned time of
+//             the work that finished. (The email uses actual-first, but it only
+//             lists open cards, where that is the estimate anyway.)
+//    Two independent tallies by date: a card finished late counts as actual
+//    on the day it finished and as plan on the day it was due.
 //
 //  PRODUCTION REVENUE, per day
 //    Pre-aggregated in SQL by dashboard-prototype.ts with the main dashboard's
@@ -30,15 +28,18 @@
 //    revenue. Orders whose price resolves to 0 are counted in
 //    `unpricedOrders`, not hidden.
 // ---------------------------------------------------------------------------
+import { jcMinutesTotal } from "../../lib/job-card-minutes";
 
 export type DailyPo = {
   id: string;
   status: string | null;
   quantity: number | string | null;
-  targetEndDate: string | null;
-  completedDate: string | null;
 };
 export type DailyJc = {
+  productionOrderId?: string | null;
+  estMinutes?: number | string | null;
+  actualMinutes?: number | string | null;
+  wipQty?: number | string | null;
   departmentCode: string | null;
   status: string | null;
   dueDate: string | null;
@@ -52,15 +53,16 @@ export type DailyRevenueRow = {
   revenueSen: number | string;
 };
 
+export type StageDay = {
+  date: string; dept: string;
+  plan: number; actual: number;
+  planUnits: number; actualUnits: number;
+  planMin: number; actualMin: number;
+};
+
 export type DailySlice = {
-  orders: {
-    byDay: { date: string; planOrders: number; planUnits: number; actualOrders: number; actualUnits: number }[];
-    // Non-cancelled orders with no target_end_date cannot be planned on any day.
-    withoutTarget: number;
-    completedTotal: number;
-  };
   stages: {
-    byDay: { date: string; dept: string; plan: number; actual: number }[];
+    byDay: StageDay[];
     cardsWithoutDue: number;
   };
   // null when the value maps could not be loaded (reason says why).
@@ -87,62 +89,50 @@ export function buildDailySlice(
   revenueByDay: DailyRevenueRow[] | null,
   revenueError?: string,
 ): DailySlice {
-  const ord = new Map<string, { date: string; planOrders: number; planUnits: number; actualOrders: number; actualUnits: number }>();
-  const o = (d: string) => {
-    let e = ord.get(d);
-    if (!e) ord.set(d, (e = { date: d, planOrders: 0, planUnits: 0, actualOrders: 0, actualUnits: 0 }));
-    return e;
-  };
-  let withoutTarget = 0;
-  let completedTotal = 0;
-  for (const p of pos) {
-    const st = up(p.status);
-    if (st === "CANCELLED") continue;
-    const qty = num(p.quantity);
-    const t = day(p.targetEndDate);
-    if (t) {
-      const e = o(t);
-      e.planOrders++;
-      e.planUnits += qty;
-    } else withoutTarget++;
-    if (st !== "COMPLETED") continue;
-    completedTotal++;
-    const c = day(p.completedDate);
-    if (!c) continue;
-    const e = o(c);
-    e.actualOrders++;
-    e.actualUnits += qty;
-  }
+  const poById = new Map(pos.map((p) => [p.id, p]));
 
   const rev = (revenueByDay ?? []).flatMap((r) => {
     const d = day(r.date);
     return d ? [{ date: d, orders: num(r.orders), unpricedOrders: num(r.unpricedOrders), revenueSen: Math.round(num(r.revenueSen)) }] : [];
   });
 
-  const stg = new Map<string, { date: string; dept: string; plan: number; actual: number }>();
+  const stg = new Map<string, StageDay>();
   const s = (d: string, dept: string) => {
     const k = `${d}|${dept}`;
     let e = stg.get(k);
-    if (!e) stg.set(k, (e = { date: d, dept, plan: 0, actual: 0 }));
+    if (!e) stg.set(k, (e = { date: d, dept, plan: 0, actual: 0, planUnits: 0, actualUnits: 0, planMin: 0, actualMin: 0 }));
     return e;
   };
   let cardsWithoutDue = 0;
   for (const c of cards) {
     const st = up(c.status);
-    if (st === "CANCELLED") continue;
+    const po = c.productionOrderId ? poById.get(c.productionOrderId) : undefined;
+    if (st === "CANCELLED" || up(po?.status) === "CANCELLED") continue;
     const dept = c.departmentCode || "(no dept)";
+    const units = num(po?.quantity);
+    const mins = jcMinutesTotal(num(c.estMinutes) || num(c.actualMinutes), {
+      departmentCode: c.departmentCode, wipQty: num(c.wipQty),
+    });
     const due = day(c.dueDate);
-    if (due) s(due, dept).plan++;
-    else cardsWithoutDue++;
+    if (due) {
+      const e = s(due, dept);
+      e.plan++;
+      e.planUnits += units;
+      e.planMin += mins;
+    } else cardsWithoutDue++;
     if (st === "COMPLETED" || st === "TRANSFERRED") {
       const d = day(c.completedDate);
-      if (d) s(d, dept).actual++;
+      if (d) {
+        const e = s(d, dept);
+        e.actual++;
+        e.actualUnits += units;
+        e.actualMin += mins;
+      }
     }
   }
 
   const byDate = <T extends { date: string }>(a: T, b: T) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
   return {
-    orders: { byDay: [...ord.values()].sort(byDate), withoutTarget, completedTotal },
     stages: { byDay: [...stg.values()].sort(byDate), cardsWithoutDue },
     revenue: revenueByDay ? { byDay: rev.sort(byDate), unpricedOrders: rev.reduce((a, r) => a + r.unpricedOrders, 0) } : null,
     ...(revenueError ? { revenueError } : {}),

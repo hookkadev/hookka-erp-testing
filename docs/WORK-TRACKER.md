@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-02**: branch `feat/dashboard-plan-vs-actual-jobcards` (to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-02**: branch `chore/sync-staging-from-main-1002` (staging<-main merge): both trackers merged, main-only entries added, main's duplicate BUG-34 entry (mislabelled BUG-2026-09-28-210) dropped for staging's (-233), and staging's accessories entry now carries main's number BUG-2026-10-01-244.
 > **Last verified: 2026-10-02**: branch `feat/dashboard-exp-mobile` (to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-02**: branch `feat/schedule-dept-share-table` (to `staging`) entry got item 4 (summary-only email, full list filter).
@@ -137,6 +138,14 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-02 — 🔵 Experimental dashboard, Operations > Plan vs Actual on the Schedule email's measures (branch `feat/dashboard-plan-vs-actual-jobcards` → `staging`)
+
+Owner ask: Plan vs Actual should follow the Schedule report: job cards, units and planned time.
+
+1. 🔵 `buildDailySlice` (`dashboard-daily-slice.ts`): per day per department now carries job cards, units (the card's order quantity) and planned time (`jcMinutesTotal`, estimate first on both sides, so actual = planned time of the work that finished). Cards of cancelled orders excluded. The order-based tallies (`orders`) are removed; nothing else read them. `jcAllSec` in `dashboard-prototype.ts` selects `est_minutes, actual_minutes, wip_qty`.
+2. 🔵 `ProductionDailyPanels.tsx`: three KPIs (Job cards / Units / Planned time, actual / plan and variance), chart toggle Job cards / Units / Planned time, department table with all three plan / actual / variance. The Overview tile "Plan vs Actual" (stage completion of open orders) is a different measure and is unchanged.
+3. Test: `tests/dashboard-daily-slice.test.mjs`. Staging check: UNMEASURED until deployed.
 
 ## 2026-10-02 — 🔵 Sync `staging` from `main` (branch `chore/sync-staging-from-main-1002` → `staging`)
 
