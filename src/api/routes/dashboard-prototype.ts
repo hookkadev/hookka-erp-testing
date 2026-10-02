@@ -603,7 +603,7 @@ app.get("/", async (c) => {
   const jcAllSec = await section("job cards (all)", () =>
     c.var.DB.prepare(
       `SELECT production_order_id, department_code, status, sequence, due_date,
-              wip_type, completed_date
+              wip_type, completed_date, est_minutes, actual_minutes, wip_qty
          FROM job_cards
         WHERE org_id = ?`,
     )
@@ -616,6 +616,9 @@ app.get("/", async (c) => {
         dueDate: string | null;
         wipType: string | null;
         completedDate: string | null;
+        estMinutes: number | string | null;
+        actualMinutes: number | string | null;
+        wipQty: number | string | null;
       }>()
       .then((r) => r.results ?? []),
   );
