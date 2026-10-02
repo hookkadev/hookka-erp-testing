@@ -2,8 +2,8 @@
 // PwaInstallPrompt — "Add to Home Screen" card for the Worker Portal
 //
 // PWA Phase 1 install UX. Behaviour by platform:
-//   - Android / Chromium: the browser fires `beforeinstallprompt`. We
-//     preventDefault() + stash the event, then show an "Install app" button
+//   - Android / Chromium: the browser fires `beforeinstallprompt`;
+//     src/lib/pwa-install stashes it at page load, then we show an "Install app" button
 //     that calls .prompt() on tap. After the user responds the event is
 //     single-use, so we hide the card.
 //   - iOS Safari: there is NO beforeinstallprompt. We detect iOS + Safari and
@@ -17,6 +17,12 @@
 import { useEffect, useState } from "react";
 import { Bell, Download, Home, PlusSquare, Share, X } from "lucide-react";
 import { getWorkerToken, workerFetch } from "@/layouts/WorkerLayout";
+import {
+  isIosSafari,
+  isStandalone,
+  promptInstall,
+  useInstallOffer,
+} from "@/lib/pwa-install";
 
 const DISMISS_KEY = "hookka.pwa.install.dismissed";
 // Separate dismiss key for the notification opt-in card so dismissing one
@@ -41,34 +47,6 @@ function urlBase64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
   const out = new Uint8Array(raw.length);
   for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
   return out;
-}
-
-// The shape of the (non-standard but widely-shipped) beforeinstallprompt event.
-type BeforeInstallPromptEvent = Event & {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
-};
-
-// Already running as an installed app? Then there's nothing to prompt.
-function isStandalone(): boolean {
-  if (typeof window === "undefined") return false;
-  const mql =
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(display-mode: standalone)").matches;
-  // iOS Safari exposes navigator.standalone instead of the display-mode query.
-  const iosStandalone =
-    (navigator as Navigator & { standalone?: boolean }).standalone === true;
-  return mql || iosStandalone;
-}
-
-// iOS Safari has no beforeinstallprompt — we show a manual hint there only.
-function isIosSafari(): boolean {
-  if (typeof navigator === "undefined") return false;
-  const ua = navigator.userAgent;
-  const isIos = /iphone|ipad|ipod/i.test(ua);
-  // Exclude Chrome / Firefox / Edge on iOS (they can't Add to Home Screen).
-  const isSafari = /safari/i.test(ua) && !/crios|fxios|edgios/i.test(ua);
-  return isIos && isSafari;
 }
 
 function wasDismissed(): boolean {
@@ -99,14 +77,12 @@ function pushSupported(): boolean {
 }
 
 export default function PwaInstallPrompt() {
-  // Stashed Android/Chromium install event (null until the browser offers it).
-  const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(
-    null,
-  );
-  // Whether to render at all. Starts hidden; flipped on by the platform checks.
-  const [show, setShow] = useState(false);
+  // Android/Chromium install offer, caught at page load by src/lib/pwa-install.
+  const offer = useInstallOffer();
+  const [dismissed, setDismissed] = useState(wasDismissed);
   // iOS variant (manual hint) vs Android variant (one-tap button).
-  const [iosHint, setIosHint] = useState(false);
+  const iosHint = !offer && isIosSafari();
+  const show = !dismissed && !isStandalone() && (offer !== null || iosHint);
 
   // Notification opt-in card — shown separately from the install card. Only
   // surfaces when the browser supports push, a worker is logged in, permission
@@ -142,61 +118,18 @@ export default function PwaInstallPrompt() {
     };
   }, []);
 
-  useEffect(() => {
-    // Installed already, or the worker dismissed the card before → stay hidden.
-    if (isStandalone() || wasDismissed()) return;
-
-    // Android / Chromium: capture the install event, show the one-tap button.
-    const onBeforeInstall = (e: Event) => {
-      e.preventDefault();
-      setDeferred(e as BeforeInstallPromptEvent);
-      setShow(true);
-      setIosHint(false);
-    };
-    window.addEventListener("beforeinstallprompt", onBeforeInstall);
-
-    // Hide immediately once the app gets installed.
-    const onInstalled = () => {
-      setShow(false);
-      setDeferred(null);
-    };
-    window.addEventListener("appinstalled", onInstalled);
-
-    // iOS Safari: no event ever fires, so show the manual hint directly.
-    /* eslint-disable react-hooks/set-state-in-effect -- one-shot mount-time platform probe; safe single render, no cascade */
-    if (isIosSafari()) {
-      setIosHint(true);
-      setShow(true);
-    }
-    /* eslint-enable react-hooks/set-state-in-effect */
-
-    return () => {
-      window.removeEventListener("beforeinstallprompt", onBeforeInstall);
-      window.removeEventListener("appinstalled", onInstalled);
-    };
-  }, []);
-
   function dismiss() {
     try {
       localStorage.setItem(DISMISS_KEY, "1");
     } catch {
       /* ignore storage failures — worst case the card shows again */
     }
-    setShow(false);
+    setDismissed(true);
   }
 
-  async function install() {
-    if (!deferred) return;
-    try {
-      await deferred.prompt();
-      await deferred.userChoice;
-    } catch {
-      /* user closed the native dialog — nothing to do */
-    }
-    // The event is single-use; drop it and hide the card either way.
-    setDeferred(null);
-    setShow(false);
-  }
+  // The offer is single-use; once used, useInstallOffer() goes null and the
+  // card hides itself.
+  const install = promptInstall;
 
   function dismissNotif() {
     try {

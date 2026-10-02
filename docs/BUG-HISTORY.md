@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-02**: newest entry BUG-2026-10-02-250 (branch `feat/m-install-and-desktop-switch`, to main); a log, so "verified" means the entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-02**: BUG-2026-10-01-240 got a follow-up (the Schedule email is now summary only; branch `feat/schedule-summary-email-to-main`, to main); a log, so "verified" means the entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-02**: newest entry BUG-2026-10-02-248 (branch `feat/email-reports-to-main`, to main); entries -221, -232, -240 and -248 are the Email Reports phone and size fixes brought over from staging; a log, so "verified" means the entries match the code on this branch, not that every older entry is still true.
 > **Last verified: 2026-10-01**: newest entry BUG-2026-10-01-246 (branch `fix/fin-tables-ceil`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
@@ -64,6 +65,20 @@ Entries themselves stay newest-first.
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
 
 ---
+
+## BUG-2026-10-02-250 — "Open the full desktop app" in /m sent a phone straight back to /m `ui-frontend` 🟢
+
+🟢 Fixed on `feat/m-install-and-desktop-switch` (to `main`).
+
+Found by the owner: on a phone, the link at the bottom of `/m` More never left `/m`.
+
+Cause (read from the code): the link goes to `/dashboard`, and the desktop shell (`src/layouts/DashboardLayout.tsx`) sends every phone-class user agent to `/m` before rendering anything. Nothing recorded that the person had chosen the desktop site, so the link could not work on any phone.
+
+Fix: the link sets `hookka.preferDesktop` in sessionStorage (`src/lib/prefer-desktop.ts`); the redirect is now `shouldRedirectToMobile(ua, prefersDesktop())`. A phone on the desktop site sees a "Back to mobile app" bar that clears the flag. The choice lasts until the tab or installed app is closed (owner's pick).
+
+Not checked yet: a real phone on the deployed site.
+
+Regression test: `tests/prefer-desktop.test.mjs` (fails on the old always-redirect rule).
 
 ## BUG-2026-10-02-248 — the Efficiency email cut off its Efficiency column on a phone `reports` `ui-frontend` 🟢
 

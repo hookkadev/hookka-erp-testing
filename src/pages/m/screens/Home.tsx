@@ -67,7 +67,7 @@ import {
   type SemanticStyle,
 } from "@/lib/design-tokens";
 import type { RawMaterial } from "@/types";
-import { MobileCard, StatusPill, FormSheet, Sheet } from "../components";
+import { MobileCard, StatusPill, FormSheet, Sheet, InstallAppCard } from "../components";
 import { GlobalSearchSheet } from "../components/GlobalSearchSheet";
 import { ORDERS_DUE_URL, STOCK_ALERTS_URL } from "../lib/preload";
 import { M, M_ACCENT, M_DELTA } from "../theme";
@@ -932,6 +932,8 @@ export default function MobileHome() {
       </div>
 
       <div style={{ padding: "0 18px" }}>
+        {/* One-tap install offer (hidden once installed or dismissed). */}
+        <InstallAppCard dismissible />
         {/* ===== Quick actions (FIRST per dc13 order) ===== */}
         <div style={{ display: "flex", gap: 9, marginTop: 14 }}>
           <QuickAction
