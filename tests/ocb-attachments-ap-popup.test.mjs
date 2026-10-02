@@ -3,7 +3,7 @@
 //   · 「OCB 附件要做」: other-party bills take attachments — the same file store
 //     and the same one upload / one delete path as the payment vouchers; a
 //     voided bill takes no new file; once money is paid against a bill its
-//     files are locked; the scanned bill (Scan Bill / Scan Bills) and any file
+//     files are locked; the scanned bill (Scan Bill) and any file
 //     picked in the form go onto the new bill when it is saved; the bill's
 //     views show the files and print the bill with them;
 //   · 「new ap payment 的页面还是这样」: New AP Payment is the same popup as the
@@ -49,15 +49,13 @@ test("the bill's views show its files and print the bill with them", () => {
   assert.match(ui, /printVoucher\(\{ \.\.\.buildOtherPartyBillVoucher\(b, accounts\), appendix \}\);/);
 });
 
-test("a new bill takes its files: the scan, files picked in the form, and Scan Bills' OCB rows", () => {
+test("a new bill takes its files: the scan and files picked in the form", () => {
   const mgr = slice(ui, "function OtherPartyBillsManager(", "\ntype OpenBill = ");
   assert.match(mgr, /const applyScan = async \(d: ScanFinanceResult, file: File\) => \{/);
   assert.match(mgr, /setPendingBillFiles\(\[file\]\);/);
   assert.match(mgr, /const newBillNo = !editingBillNo \? rawRes\?\.data\?\.billNo : undefined;/, "only a NEW bill — an edit keeps its own files");
   assert.match(mgr, /await uploadBillAttachment\(newBillNo, f\);/);
   assert.match(mgr, /📎 Attach files/);
-  const batch = slice(ui, "function ScanBillsBatch(", "// Party match for scan prefill.");
-  assert.match(batch, /await uploadBillAttachment\(j\.data\.billNo, x\.file\);/);
 });
 
 test("New AP Payment is a popup like the voucher form; fields and rules unchanged", () => {

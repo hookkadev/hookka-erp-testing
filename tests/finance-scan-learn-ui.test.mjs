@@ -6,9 +6,10 @@
 //   · the scan memory reads finance documents only — approved / posted
 //     vouchers and active other-creditor bills to learn from, plus the bill
 //     numbers already on the books — and writes nothing anywhere;
-//   · Scan Bills is a review table: one row per bill, duplicates left unticked,
-//     PV = draft dated today, OCB = posted bill dated by the bill, a new
-//     creditor registered once, then "Create all";
+//   · the Payment Vouchers page has ONE Scan (owner 2026-10-01): every receipt
+//     starts as its own voucher, ticked ones Merge into one voucher, Create
+//     makes draft vouchers dated today with their receipts — no other-creditor
+//     bills here (they are scanned on their own page, paid via AP Payment);
 //   · the voucher form takes several receipts into one voucher, SST as its own
 //     line; the creditor-bill form never counts the SST twice.
 // The shared OCR engine and the party-alias memory are not touched.
@@ -41,24 +42,26 @@ test("scan memory: finance documents only, read-only, dropped after a save", () 
   assert.equal((ui.match(/forgetScanMemory\(\);/g) ?? []).length, 3, "dropped after a voucher save, a bill save and a batch");
 });
 
-test("Scan Bills: a review table, one row per bill, then Create all", () => {
-  const b = slice(ui, "function ScanBillsBatch({ accounts, bankCash, onDone }", "// Party match for scan prefill.");
-  assert.match(b, /const docs: ScanFinanceDoc\[\] = j\.data\.docs\?\.length \? j\.data\.docs : \[j\.data\];/, "every bill in the PDF");
-  assert.match(b, /include: !dup,/, "a bill already recorded starts unticked");
-  assert.match(b, /\?\? findDuplicate\(\[\.\.\.items, \.\.\.found\]\.map/, "the same bill twice in one batch is caught too");
-  assert.match(b, /voucherDate: new Date\(\)\.toISOString\(\)\.slice\(0, 10\),/, "a voucher is dated today");
-  assert.match(b, /if \(x\.kind === "OCB" && !\/\^\\d\{4\}-\\d\{2\}-\\d\{2\}\$\/\.test\(x\.billDate\)\) return "bill date missing";/, "a bill is dated by the bill");
+test("one Scan: every receipt its own voucher, merge several into one, create drafts — vouchers only", () => {
+  const b = slice(ui, "function ScanVouchers({ accounts, bankCash, onDone, onOpenInForm }", "// Party match for scan prefill.");
+  assert.match(b, /const docs: ScanFinanceDoc\[\] = j\.data\.docs\?\.length \? j\.data\.docs : \[j\.data\];/, "every receipt in the PDF");
+  assert.match(b, /found\.push\(\{ key: `v\$\{run\}:\$\{i\}:\$\{k\}`, docs: \[doc\], ticked: !dup,/, "each receipt starts as its own voucher; a recorded one starts unticked");
+  assert.match(b, /\?\? findDuplicate\(\[\.\.\.already, \.\.\.found\.flatMap\(\(v\) => v\.docs\)\]\.map/, "the same receipt twice in one scan is caught too");
+  assert.match(b, /const mergeTicked = \(\) => \{/);
+  assert.match(b, /docs: picked\.flatMap\(\(v\) => v\.docs\), ticked: true,/, "merged = one voucher holding every ticked receipt");
+  assert.match(b, /const split = \(v: ScanVoucher\)/, "a merged voucher splits back");
+  assert.match(b, /lines: v\.docs\.flatMap\(\(d\) => d\.lines\.map/, "one voucher, every receipt's lines");
+  assert.match(b, /billNo: v\.docs\.map\(\(d\) => d\.billNo\)\.filter\(Boolean\)\.join\(", "\)/);
+  assert.match(b, /for \(const f of \[\.\.\.new Set\(v\.docs\.map\(\(d\) => d\.file\)\)\]\) \{\n\s+try \{ await uploadPvAttachment\(j\.data\.id, f\); \}/, "every receipt attached, a shared PDF once");
   assert.match(b, /saveAs: "draft",/, "vouchers go onto the approval ladder");
-  assert.match(b, /await uploadPvAttachment\(j\.data\.id, x\.file\)/, "the scanned bill is attached");
-  assert.match(b, /taxSen: x\.lines\.filter\(\(l\) => l\.isTax\)\.reduce/, "SST goes to the bill's tax field");
-  assert.match(b, /let partyId = x\.partyId \|\| newParty\.get\(normPayee\(x\.payee\)\) \|\| "";/, "a new creditor is registered once per batch");
+  assert.match(b, /voucherDate: new Date\(\)\.toISOString\(\)\.slice\(0, 10\), state: "ready" \}\);/, "dated today");
   assert.match(b, /if \(l\.isTax\) return \{ description: l\.description, amountSen: l\.amountSen, accountCode: "706-0000", guess: null, isTax: true \};/);
-  assert.match(b, /\{creating \? "Creating…" : `Create all \(\$\{pending\.length\}\)`\}/);
-  assert.doesNotMatch(b, /new payee .* key it by hand/, "a new payee is no longer skipped");
+  assert.doesNotMatch(b, /other-party-bills|"OCB"|other-parties/, "no other-creditor bills from this page");
+  assert.match(b, /onOpenInForm\(\{ payee: v\.payee, date: v\.voucherDate, docs: v\.docs \}\)/, "the last voucher can go into the full form");
 });
 
 test("guesses say where they came from; a new payee's are marked suggested", () => {
-  const h = slice(ui, "function scanGuessHint(", "// Scan Bills — a STACK of bills at once");
+  const h = slice(ui, "function scanGuessHint(", "// Scan — the Payment Vouchers page's ONE OCR");
   assert.match(h, /if \(g\.source === "suggested"\) return \{ kind: "suggested", text: `Suggested — like \$\{g\.basis\}` \};/);
   assert.match(ui, /\{l\.hint && <div className=\{`text-\[10px\] mt-0\.5 \$\{l\.hint\.kind === "suggested" \? "text-\[#7A5B12\] font-semibold" : "text-\[#9CA3AF\]"\}`\}>\{l\.hint\.text\}<\/div>\}/);
 });
@@ -71,7 +74,9 @@ test("voucher form: several receipts, one voucher; SST its own line; a known bil
   assert.match(scan, /billNo: \[f\.billNo\.trim\(\), \.\.\.docNos\]\.filter\(Boolean\)\.join\(", "\)/);
   assert.match(scan, /is already on this voucher — not added again\./);
   assert.match(scan, /if \(l\.isTax\) return \{ accountCode: "706-0000",/);
-  assert.match(tab, /<ScanPrefillButton label="Scan Receipt" allDocs onResult=\{applyScan\} \/>/);
+  assert.match(tab, /<ScanVouchers accounts=\{accounts\} bankCash=\{bankCash\} onDone=\{load\} onOpenInForm=\{openScanInForm\} \/>/, "ONE Scan on the page");
+  assert.doesNotMatch(tab, /label="Scan Receipt"|<ScanBillsBatch/, "the two old buttons are gone");
+  assert.match(tab, /setPendingScanFiles\(\[\.\.\.new Set\(v\.docs\.map\(\(d\) => d\.file\)\)\]\);/, "open in form keeps the receipts to attach");
   assert.match(tab, /const billDups = !isTransfer && scanMemory\n\s+\? form\.billNo\.split\(\/\[,;\]\/\)/);
   assert.match(ui, /if \(!allDocs && j\.data\.extraDocs > 0\) \{/, "the 'only the first was used' warning stays for single-bill forms");
 });

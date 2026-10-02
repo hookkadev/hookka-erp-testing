@@ -6558,11 +6558,11 @@ function ScanPrefillButton({ label, onResult, allDocs }: { label: string; onResu
 // What finance scans learn from (owner 2026-10-01, plan batch 3): approved /
 // posted payment vouchers and active other-creditor bills (the account each
 // line went to, by its description), the bill numbers already on our books
-// (vouchers, other-creditor bills, purchase invoices) and each payee's last
-// record type. Finance documents only — nothing shared with the other scans.
+// (vouchers, other-creditor bills, purchase invoices). Finance documents
+// only — nothing shared with the other scans.
 // Read once per page visit, on the first scan, and dropped after every save
 // so the next scan learns from it.
-type ScanMemory = { history: LearnedLine[]; known: KnownDoc[]; lastKind: Map<string, { kind: "PV" | "OCB"; date: string }> };
+type ScanMemory = { history: LearnedLine[]; known: KnownDoc[] };
 let scanMemoryPromise: Promise<ScanMemory> | null = null;
 function forgetScanMemory() { scanMemoryPromise = null; }
 function loadScanMemory(): Promise<ScanMemory> {
@@ -6584,18 +6584,10 @@ function loadScanMemory(): Promise<ScanMemory> {
       ]);
       const history: LearnedLine[] = [];
       const known: KnownDoc[] = [];
-      const lastKind = new Map<string, { kind: "PV" | "OCB"; date: string }>();
-      const noteKind = (payee: string, kind: "PV" | "OCB", date: string) => {
-        const p = normPayee(payee);
-        if (!p) return;
-        const cur = lastKind.get(p);
-        if (!cur || date > cur.date) lastKind.set(p, { kind, date });
-      };
       for (const r of pvs) {
         const approved = r.status === "POSTED" && ((r.approvalState ?? r.approval_state) ?? "APPROVED") === "APPROVED";
         if (approved && r.pvKind !== "AP" && r.pvKind !== "TRANSFER") {
           for (const l of r.lines ?? []) history.push({ payee: r.payee ?? "", description: l.description || r.description || "", accountCode: l.accountCode, date: String(r.date ?? "") });
-          noteKind(r.payee ?? "", "PV", String(r.date ?? ""));
         }
         // Several receipts on one voucher keep their numbers comma-separated.
         if (r.status !== "VOID") {
@@ -6607,14 +6599,13 @@ function loadScanMemory(): Promise<ScanMemory> {
       for (const b of bills) {
         if ((b.lifecycleState ?? "ACTIVE") !== "ACTIVE" || b.status === "CANCELLED") continue;
         for (const it of b.items ?? []) history.push({ payee: b.partyName, description: it.description || b.description || "", accountCode: it.counterAccount, date: String(b.billDate ?? "") });
-        noteKind(b.partyName, "OCB", String(b.billDate ?? ""));
         if (b.referenceNo) known.push({ docNo: b.referenceNo, payee: b.partyName, ref: b.billNo });
       }
       for (const p of pis) {
         if (p.status === "CANCELLED" || !p.supplierInvoiceNo) continue;
         known.push({ docNo: p.supplierInvoiceNo, payee: p.supplierName ?? "", ref: p.piNo ?? "" });
       }
-      return { history, known, lastKind };
+      return { history, known };
     })();
   }
   return scanMemoryPromise;
@@ -6632,50 +6623,54 @@ function scanGuessHint(g: AccountGuess): ScanHint | undefined {
   return { kind: "learned", text: `Learned — this payee's usual account (${g.basis})` };
 }
 
-// Scan Bills — a STACK of bills at once (Houzs adoption Phase 5, 2026-09-22;
-// review table since 2026-10-01, plan batch 3). Every bill the files hold —
-// several in one PDF included — becomes a row to check first: payee, bill no.
-// and date, the account of each line (learned by description; a new payee's
-// guesses are marked "suggested"), SST as its own line, and whether it is a
-// payment voucher (dated today, a draft on the approval ladder) or an
-// other-creditor bill (dated by the bill; it posts when created). A bill
-// already on our books is flagged and left unticked. Nothing is created until
-// "Create all"; a bill the AI cannot read is listed, never guessed.
+// Scan — the Payment Vouchers page's ONE OCR (owner 2026-10-01 「我在别的 erp
+// 做就是一个 ocr 罢了 … 多张 receipt 转一张 payment voucher, 支持一次性开多张
+// voucher with 不一样的 receipt」→ OCB left out →「做」). Drop one receipt or a
+// stack: every receipt the files hold (several in one PDF included) is listed,
+// each as its own voucher to start with. Tick receipts and Merge them into one
+// voucher, Split a merged one back, then Create — one DRAFT voucher each (on
+// the approval ladder), dated today, its receipts attached. Each line's
+// account is learned by its description (a new payee's marked "suggested"),
+// the SST is its own line, and a bill no. already on our books is flagged and
+// left unticked. "Open in form" takes the last voucher into the full form
+// (accrue, post now…). Other-creditor bills are scanned on their own page
+// (Scan Bill) and paid through New AP Payment.
 type ScanReviewLine = { description: string; amountSen: number; accountCode: string; guess: AccountGuess; isTax?: boolean };
-type ScanReviewItem = {
+type ScanDoc = {
   key: string; file: File; fileName: string; docIndex: number; docCount: number;
-  include: boolean; kind: "PV" | "OCB";
-  payee: string; docType: string; billNo: string; billDate: string; voucherDate: string;
-  lines: ScanReviewLine[]; totalSen: number;
-  duplicateOf: string | null; partyId: string;
+  payee: string; docType: string; billNo: string; billDate: string;
+  lines: ScanReviewLine[]; totalSen: number; duplicateOf: string | null;
+};
+type ScanVoucher = {
+  key: string; docs: ScanDoc[]; ticked: boolean; payee: string; voucherDate: string;
   state: "ready" | "creating" | "created" | "failed"; result?: string;
 };
-function ScanBillsBatch({ accounts, bankCash, onDone }: {
+const scanVoucherTotal = (v: ScanVoucher) => v.docs.reduce((s, d) => s + d.totalSen, 0);
+// What the voucher says it is: one receipt by its type and number, several by count.
+const scanVoucherDescription = (v: ScanVoucher) =>
+  v.docs.length === 1
+    ? ([v.docs[0].docType, v.docs[0].billNo].filter(Boolean).join(" · ") || v.docs[0].fileName)
+    : `${v.docs.length} receipts`;
+function ScanVouchers({ accounts, bankCash, onDone, onOpenInForm }: {
   accounts: ChartOfAccount[];
   bankCash: ChartOfAccount[];
   onDone: () => void;
+  onOpenInForm: (v: { payee: string; date: string; docs: ScanDoc[] }) => void;
 }) {
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [phase, setPhase] = useState<"drop" | "scanning" | "review">("drop");
   const [progress, setProgress] = useState<{ name: string; state: "queued" | "scanning" | "done" | "unreadable"; note?: string }[]>([]);
-  const [items, setItems] = useState<ScanReviewItem[]>([]);
+  const [vouchers, setVouchers] = useState<ScanVoucher[]>([]);
   const [creating, setCreating] = useState(false);
-  const [creditors, setCreditors] = useState<{ id: string; name: string; type: string; isActive?: boolean }[]>([]);
-  const aliases = usePartyAliases("OTHER_PARTY", open);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const runRef = useRef(0);
   const lineAccounts = accounts.filter((a) => a.isPostable !== false && a.specialAccountType !== "SDC" && a.specialAccountType !== "SBK" && a.specialAccountType !== "SCH");
-  useEffect(() => {
-    if (!open) return;
-    let dead = false;
-    fetch("/api/accounting/other-parties").then((r) => r.json() as Promise<{ success?: boolean; data?: typeof creditors }>)
-      .then((j) => { if (!dead && j?.success) setCreditors((j.data ?? []).filter((p) => p.type === "CREDITOR" && p.isActive !== false)); })
-      .catch(() => {});
-    return () => { dead = true; };
-  }, [open]);
-  const update = (key: string, patch: Partial<ScanReviewItem>) => setItems((list) => list.map((x) => (x.key === key ? { ...x, ...patch } : x)));
-  const creditorName = (id: string) => creditors.find((p) => p.id === id)?.name ?? "";
+  const update = (key: string, patch: Partial<ScanVoucher>) => setVouchers((list) => list.map((v) => (v.key === key ? { ...v, ...patch } : v)));
+  const setLineAccount = (vKey: string, docKey: string, li: number, code: string) => setVouchers((list) => list.map((v) => (v.key !== vKey ? v : {
+    ...v,
+    docs: v.docs.map((d) => (d.key !== docKey ? d : { ...d, lines: d.lines.map((y, yi) => (yi === li ? { ...y, accountCode: code, guess: null } : y)) })),
+  })));
 
   const runFiles = async (files: File[]) => {
     if (!files.length) return;
@@ -6683,7 +6678,8 @@ function ScanBillsBatch({ accounts, bankCash, onDone }: {
     setPhase("scanning");
     setProgress(files.map((f) => ({ name: f.name, state: "queued" })));
     const memory = await loadScanMemory();
-    const found: ScanReviewItem[] = [];
+    const already = vouchers.flatMap((v) => v.docs);
+    const found: ScanVoucher[] = [];
     for (let i = 0; i < files.length; i++) {
       setProgress((q) => q.map((x, j) => (j === i ? { ...x, state: "scanning" } : x)));
       try {
@@ -6698,127 +6694,116 @@ function ScanBillsBatch({ accounts, bankCash, onDone }: {
           const printed = d.lines.length ? d.lines : d.totalSen ? [{ description: d.docNo ?? files[i].name, amountSen: d.totalSen }] : [];
           if (!printed.length) { unread += 1; return; }
           const payee = d.partyName ?? "";
-          const hit = scanNameMatch(creditors, payee, aliases);
-          // The register's name first (that is what earlier bills carry),
-          // then the letterhead as printed.
-          const guessFor = (desc: string) => {
-            const own = hit ? guessAccount(memory.history, hit.name, desc) : null;
-            return own && own.source !== "suggested" ? own : guessAccount(memory.history, payee, desc);
-          };
           const lines: ScanReviewLine[] = linesWithTax(printed, d.taxSen, d.totalSen).map((l) => {
             if (l.isTax) return { description: l.description, amountSen: l.amountSen, accountCode: "706-0000", guess: null, isTax: true };
-            const guess = guessFor(l.description);
+            const guess = guessAccount(memory.history, payee, l.description);
             return { description: l.description, amountSen: l.amountSen, accountCode: guess?.accountCode ?? "", guess };
           });
-          // Already on the books, or the same bill twice in this batch.
+          // Already on the books, or the same receipt twice in this table.
           const dup = findDuplicate(memory.known, d.docNo, payee)
-            ?? findDuplicate([...items, ...found].map((o) => ({ docNo: o.billNo, payee: o.payee, ref: `${o.fileName} (this batch)` })), d.docNo, payee);
-          found.push({
+            ?? findDuplicate([...already, ...found.flatMap((v) => v.docs)].map((o) => ({ docNo: o.billNo, payee: o.payee, ref: `${o.fileName} (this scan)` })), d.docNo, payee);
+          const doc: ScanDoc = {
             key: `${run}:${i}:${k}`, file: files[i], fileName: files[i].name, docIndex: k, docCount: docs.length,
-            include: !dup,
-            kind: memory.lastKind.get(normPayee(payee))?.kind ?? (hit ? memory.lastKind.get(normPayee(hit.name))?.kind : undefined) ?? "PV",
-            payee, docType: d.docType ?? "", billNo: d.docNo ?? "", billDate: d.docDate ?? "", voucherDate: new Date().toISOString().slice(0, 10),
-            lines, totalSen: lines.reduce((s, l) => s + l.amountSen, 0),
-            duplicateOf: dup ? dup.ref : null, partyId: hit?.id ?? "", state: "ready",
-          });
+            payee, docType: d.docType ?? "", billNo: d.docNo ?? "", billDate: d.docDate ?? "",
+            lines, totalSen: lines.reduce((s, l) => s + l.amountSen, 0), duplicateOf: dup ? dup.ref : null,
+          };
+          found.push({ key: `v${run}:${i}:${k}`, docs: [doc], ticked: !dup, payee, voucherDate: new Date().toISOString().slice(0, 10), state: "ready" });
         });
         const readable = docs.length - unread;
         if (!readable) throw new Error("no amount read");
-        setProgress((q) => q.map((x, jj) => (jj === i ? { ...x, state: "done", note: `${readable} bill${readable === 1 ? "" : "s"}${unread ? ` · ${unread} unreadable` : ""}` } : x)));
+        setProgress((q) => q.map((x, jj) => (jj === i ? { ...x, state: "done", note: `${readable} receipt${readable === 1 ? "" : "s"}${unread ? ` · ${unread} unreadable` : ""}` } : x)));
       } catch (e) {
         setProgress((q) => q.map((x, jj) => (jj === i ? { ...x, state: "unreadable", note: (e as Error).message } : x)));
       }
     }
-    setItems((list) => [...list, ...found]);
+    setVouchers((list) => [...list, ...found]);
     setPhase("review");
   };
 
-  const problemOf = (x: ScanReviewItem): string | null => {
-    if (!x.payee.trim()) return "payee missing";
-    if (x.lines.some((l) => !l.accountCode)) return "pick an account for every line";
-    if (x.totalSen <= 0) return "no amount";
-    if (x.kind === "PV" && !/^\d{4}-\d{2}-\d{2}$/.test(x.voucherDate)) return "voucher date missing";
-    if (x.kind === "OCB" && !/^\d{4}-\d{2}-\d{2}$/.test(x.billDate)) return "bill date missing";
+  // Several receipts → one voucher (where the first ticked one stood); the
+  // payee and date are the first's, both editable.
+  const mergeTicked = () => {
+    const picked = vouchers.filter((v) => v.ticked && v.state !== "created");
+    if (picked.length < 2) return;
+    const merged: ScanVoucher = {
+      key: `m${++runRef.current}`, docs: picked.flatMap((v) => v.docs), ticked: true,
+      payee: picked[0].payee, voucherDate: picked[0].voucherDate, state: "ready",
+    };
+    const gone = new Set(picked.map((v) => v.key));
+    setVouchers((list) => {
+      const out: ScanVoucher[] = [];
+      for (const v of list) {
+        if (!gone.has(v.key)) out.push(v);
+        else if (v.key === picked[0].key) out.push(merged);
+      }
+      return out;
+    });
+  };
+  // A merged voucher back to one per receipt.
+  const split = (v: ScanVoucher) => setVouchers((list) => list.flatMap((x) => (x.key !== v.key ? [x] : x.docs.map((d, i) => ({
+    key: `${x.key}/${i}`, docs: [d], ticked: x.ticked, payee: d.payee || x.payee, voucherDate: x.voucherDate, state: "ready" as const,
+  })))));
+
+  const problemOf = (v: ScanVoucher): string | null => {
+    if (!v.payee.trim()) return "payee missing";
+    if (v.docs.some((d) => d.lines.some((l) => !l.accountCode))) return "pick an account for every line";
+    if (scanVoucherTotal(v) <= 0) return "no amount";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(v.voucherDate)) return "voucher date missing";
     return null;
   };
-  const createAll = async () => {
-    const todo = items.filter((x) => x.include && x.state !== "created");
-    const bad = todo.find((x) => problemOf(x));
-    if (bad) { toast.error(`${bad.payee || bad.fileName}: ${problemOf(bad)}`); return; }
+  const createTicked = async () => {
+    const todo = vouchers.filter((v) => v.ticked && v.state !== "created");
+    const bad = todo.find((v) => problemOf(v));
+    if (bad) { toast.error(`${bad.payee || bad.docs[0]?.fileName}: ${problemOf(bad)}`); return; }
     setCreating(true);
     let made = 0;
-    // A new creditor is registered once, even when the batch holds several of its bills.
-    const newParty = new Map<string, string>();
-    for (const x of todo) {
-      update(x.key, { state: "creating" });
+    for (const v of todo) {
+      update(v.key, { state: "creating" });
       try {
-        if (x.kind === "PV") {
-          const res = await fetch("/api/accounting/payment-vouchers", {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              date: x.voucherDate, payee: x.payee.trim(), description: [x.docType, x.billNo].filter(Boolean).join(" · ") || x.fileName,
-              billNo: x.billNo, billDate: x.billDate || undefined, accrued: false, payFrom: defaultBankCode(bankCash), saveAs: "draft",
-              lines: x.lines.map((l) => ({ accountCode: l.accountCode, description: l.description, amountSen: l.amountSen })),
-            }),
-          });
-          const j = (await res.json()) as { success?: boolean; error?: string; data?: { id: string; pvNo: string } };
-          if (!j?.success || !j.data) throw new Error(j?.error || "save failed");
-          let note = "draft voucher";
-          try { await uploadPvAttachment(j.data.id, x.file); } catch (e) { note += ` · attachment failed: ${(e as Error).message}`; }
-          update(x.key, { state: "created", result: note });
-        } else {
-          let partyId = x.partyId || newParty.get(normPayee(x.payee)) || "";
-          if (!partyId) {
-            const pr = await fetch("/api/accounting/other-parties", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "CREDITOR", name: x.payee.trim() }) });
-            const pj = (await pr.json()) as { success?: boolean; error?: string; data?: { id: string; name?: string } };
-            if (!pj?.success || !pj.data?.id) throw new Error(pj?.error || "could not register the creditor");
-            partyId = pj.data.id;
-            newParty.set(normPayee(x.payee), partyId);
-            setCreditors((list) => [...list, { id: partyId, name: x.payee.trim(), type: "CREDITOR", isActive: true }]);
-          }
-          const res = await fetch("/api/accounting/other-party-bills", {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              partyId, billDate: x.billDate, referenceNo: x.billNo, description: [x.payee.trim(), x.docType].filter(Boolean).join(" · "),
-              // SST goes to the bill's own tax field (→ 706-0000), the rest are its lines.
-              taxSen: x.lines.filter((l) => l.isTax).reduce((s, l) => s + l.amountSen, 0), isOpening: false,
-              items: x.lines.filter((l) => !l.isTax).map((l) => ({ counterAccount: l.accountCode, amountSen: l.amountSen, description: l.description })),
-            }),
-          });
-          const j = (await res.json()) as { success?: boolean; error?: string; data?: { billNo?: string } };
-          if (!j?.success) throw new Error(j?.error || "save failed");
-          let note = `bill ${j.data?.billNo ?? ""} posted`;
-          if (j.data?.billNo) {
-            try { await uploadBillAttachment(j.data.billNo, x.file); } catch (e) { note += ` · attachment failed: ${(e as Error).message}`; }
-          }
-          update(x.key, { state: "created", partyId, result: note });
+        const res = await fetch("/api/accounting/payment-vouchers", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            date: v.voucherDate, payee: v.payee.trim(), description: scanVoucherDescription(v),
+            billNo: v.docs.map((d) => d.billNo).filter(Boolean).join(", "), billDate: v.docs[0]?.billDate || undefined,
+            accrued: false, payFrom: defaultBankCode(bankCash), saveAs: "draft",
+            lines: v.docs.flatMap((d) => d.lines.map((l) => ({ accountCode: l.accountCode, description: l.description, amountSen: l.amountSen }))),
+          }),
+        });
+        const j = (await res.json()) as { success?: boolean; error?: string; data?: { id: string; pvNo: string } };
+        if (!j?.success || !j.data) throw new Error(j?.error || "save failed");
+        // Every receipt rides along — a PDF holding several is attached once.
+        let note = v.docs.length > 1 ? `draft voucher · ${v.docs.length} receipts` : "draft voucher";
+        for (const f of [...new Set(v.docs.map((d) => d.file))]) {
+          try { await uploadPvAttachment(j.data.id, f); } catch (e) { note += ` · ${f.name} not attached: ${(e as Error).message}`; }
         }
+        update(v.key, { state: "created", result: note });
         made += 1;
       } catch (e) {
-        update(x.key, { state: "failed", result: (e as Error).message });
+        update(v.key, { state: "failed", result: (e as Error).message });
       }
     }
     setCreating(false);
     forgetScanMemory();
-    if (made) { toast.success(`${made} created — vouchers wait on the approval ladder; bills are posted`); onDone(); }
+    if (made) { toast.success(`${made} draft voucher${made === 1 ? "" : "s"} created — Prepare / Check / Approve them on the list`); onDone(); }
   };
 
-  const reset = () => { setItems([]); setProgress([]); setPhase("drop"); };
+  const reset = () => { setVouchers([]); setProgress([]); setPhase("drop"); };
   const close = () => { if (!creating && phase !== "scanning") { setOpen(false); reset(); } };
   const cell = "rounded border border-[#E2DDD8] bg-white px-1.5 py-1 text-xs";
-  const pending = items.filter((x) => x.include && x.state !== "created");
+  const pending = vouchers.filter((v) => v.ticked && v.state !== "created");
+  const notCreated = vouchers.filter((v) => v.state !== "created");
   return (
     <>
-      <Button variant="outline" size="sm" onClick={() => { reset(); setOpen(true); }} title="Drop a whole stack of bills — check them in one table, then create them all">
-        <Upload className="h-4 w-4 mr-1.5" /> Scan Bills
+      <Button variant="outline" size="sm" onClick={() => { reset(); setOpen(true); }} title="Scan receipts / bills — one voucher each, or merge several into one voucher">
+        <Upload className="h-4 w-4 mr-1.5" /> Scan
       </Button>
       {open && (
         <div className="fixed inset-0 bg-black/50 z-50 overflow-y-auto p-4" onClick={close}>
           <div className={`bg-white rounded-lg shadow-xl w-full mx-auto my-6 ${phase === "drop" ? "max-w-2xl" : "max-w-6xl"}`} onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between p-5 border-b border-[#E2DDD8]">
               <div>
-                <h2 className="text-base font-semibold text-[#1F1D1B]">Scan Bills</h2>
-                <p className="text-xs text-[#6B7280] mt-0.5">Drop several bills at once — a PDF holding several bills gives one row each. Check the table, then <b>Create all</b>: a <b>PV</b> becomes a draft voucher dated today; an <b>OCB</b> becomes an other-creditor bill dated by the bill (it posts when created and can be edited). Accounts are learned from what was saved before; a new payee's are marked <i>suggested</i>.</p>
+                <h2 className="text-base font-semibold text-[#1F1D1B]">Scan</h2>
+                <p className="text-xs text-[#6B7280] mt-0.5">Drop one receipt or a stack — a PDF holding several gives one row each. Every receipt starts as its own voucher; tick several and <b>Merge</b> to make them one voucher. <b>Create</b> makes draft vouchers dated today with their receipts attached. Accounts are learned from what was saved before; a new payee's are marked <i>suggested</i>. Bills you owe and pay later: scan them on Other Creditor Bills, pay through New AP Payment.</p>
               </div>
               <button onClick={close} className="text-[#9CA3AF] hover:text-[#6B7280] text-lg leading-none cursor-pointer" title={creating || phase === "scanning" ? "Busy — please wait" : "Close"}>✕</button>
             </div>
@@ -6831,7 +6816,7 @@ function ScanBillsBatch({ accounts, bankCash, onDone }: {
                   onDrop={(e) => { e.preventDefault(); void runFiles(Array.from(e.dataTransfer?.files ?? []).slice(0, 20)); }}
                 >
                   <Upload className="h-8 w-8 mx-auto text-[#B4B2A9]" />
-                  <p className="mt-3 text-sm font-medium text-[#1F1D1B]">Drop PDFs / photos here</p>
+                  <p className="mt-3 text-sm font-medium text-[#1F1D1B]">Drop receipts / bills here (PDF or photo)</p>
                   <p className="mt-1 text-xs text-[#6B7280]">or click to browse — up to 20 files, each ~30–90s to scan</p>
                 </div>
               )}
@@ -6844,55 +6829,56 @@ function ScanBillsBatch({ accounts, bankCash, onDone }: {
                   ))}
                 </div>
               )}
-              {phase === "review" && items.length === 0 && <div className="text-sm text-[#6B7280]">No readable bill in these files.</div>}
-              {items.length > 0 && (
+              {phase === "review" && vouchers.length === 0 && <div className="text-sm text-[#6B7280]">No readable receipt in these files.</div>}
+              {vouchers.length > 0 && (
                 // No overflow box here: the account picker drops down past the last row.
                 <div>
                   <table className="w-full text-xs">
                     <thead>
                       <tr className="text-left text-[#6B7280] border-b border-[#E2DDD8]">
-                        <th className="py-1.5 pr-2 w-6" title="Ticked rows are created" />
-                        <th className="py-1.5 pr-2">Type</th>
-                        <th className="py-1.5 pr-2">Payee</th>
-                        <th className="py-1.5 pr-2">Bill no.</th>
-                        <th className="py-1.5 pr-2">Bill date</th>
-                        <th className="py-1.5 pr-2">Voucher date</th>
+                        <th className="py-1.5 pr-2 w-6" title="Ticked vouchers are merged / created" />
+                        <th className="py-1.5 pr-2">Voucher</th>
+                        <th className="py-1.5 pr-2">Payee · date</th>
+                        <th className="py-1.5 pr-2">Receipts</th>
                         <th className="py-1.5 pr-2">Lines · account</th>
                         <th className="py-1.5 pr-2 text-right">Amount</th>
                         <th className="py-1.5">Status</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {items.map((x) => {
-                        const done = x.state === "created";
+                      {vouchers.map((v, vi) => {
+                        const done = v.state === "created";
                         const locked = done || creating;
-                        const problem = x.include && !done ? problemOf(x) : null;
+                        const problem = v.ticked && !done ? problemOf(v) : null;
+                        const dups = v.docs.filter((d) => d.duplicateOf);
                         return (
-                          <tr key={x.key} className={`border-b border-[#F0ECE9] align-top ${!x.include && !done ? "opacity-60" : ""}`}>
-                            <td className="py-1.5 pr-2"><input type="checkbox" disabled={locked} checked={x.include} onChange={(e) => update(x.key, { include: e.target.checked })} className="h-3.5 w-3.5 accent-[#6B5C32]" /></td>
-                            <td className="py-1.5 pr-2">
-                              <select disabled={locked} value={x.kind} onChange={(e) => update(x.key, { kind: e.target.value as "PV" | "OCB" })} className={cell} title="PV = paid now (draft voucher) · OCB = owed, paid later (other-creditor bill)">
-                                <option value="PV">PV</option>
-                                <option value="OCB">OCB</option>
-                              </select>
-                            </td>
-                            <td className="py-1.5 pr-2 min-w-[11rem]">
-                              <input disabled={locked} value={x.payee} onChange={(e) => update(x.key, { payee: e.target.value, partyId: scanNameMatch(creditors, e.target.value, aliases)?.id ?? "" })} className={`${cell} w-full`} />
-                              <div className="text-[10px] text-[#9CA3AF] mt-0.5 truncate" title={x.fileName}>{x.fileName}{x.docCount > 1 ? ` · bill ${x.docIndex + 1} of ${x.docCount}` : ""}</div>
-                              {x.kind === "OCB" && !done && x.payee.trim() && (
-                                x.partyId
-                                  ? <div className="text-[10px] text-[#6B7280]">creditor: {creditorName(x.partyId)}</div>
-                                  : <div className="text-[10px] text-[#7A5B12]">new creditor — registered with this name</div>
+                          <tr key={v.key} className={`border-b border-[#F0ECE9] align-top ${!v.ticked && !done ? "opacity-60" : ""} ${v.docs.length > 1 ? "bg-[#FAF8F5]" : ""}`}>
+                            <td className="py-1.5 pr-2"><input type="checkbox" disabled={locked} checked={v.ticked} onChange={(e) => update(v.key, { ticked: e.target.checked })} className="h-3.5 w-3.5 accent-[#6B5C32]" /></td>
+                            <td className="py-1.5 pr-2 whitespace-nowrap">
+                              <div className="font-semibold text-[#1F1D1B]">V{vi + 1}</div>
+                              {v.docs.length > 1 && <div className="text-[10px] text-[#6B5C32]">{v.docs.length} receipts merged</div>}
+                              {!locked && v.docs.length > 1 && <button type="button" onClick={() => split(v)} className="text-[10px] text-[#6B5C32] underline decoration-dotted cursor-pointer">split</button>}
+                              {!locked && notCreated.length === 1 && (
+                                <div><button type="button" onClick={() => { onOpenInForm({ payee: v.payee, date: v.voucherDate, docs: v.docs }); setOpen(false); reset(); }} className="text-[10px] text-[#6B5C32] underline decoration-dotted cursor-pointer" title="The full voucher form — accrue, post now, notes…">open in form</button></div>
                               )}
                             </td>
-                            <td className="py-1.5 pr-2"><input disabled={locked} value={x.billNo} onChange={(e) => update(x.key, { billNo: e.target.value })} className={`${cell} w-28`} /></td>
-                            <td className="py-1.5 pr-2"><input type="date" disabled={locked} value={x.billDate} onChange={(e) => update(x.key, { billDate: e.target.value })} className={cell} /></td>
-                            <td className="py-1.5 pr-2">{x.kind === "PV" ? <input type="date" disabled={locked} value={x.voucherDate} onChange={(e) => update(x.key, { voucherDate: e.target.value })} className={cell} /> : <span className="text-[#9CA3AF]">= bill date</span>}</td>
+                            <td className="py-1.5 pr-2 min-w-[12rem]">
+                              <input disabled={locked} value={v.payee} onChange={(e) => update(v.key, { payee: e.target.value })} className={`${cell} w-full`} />
+                              <input type="date" disabled={locked} value={v.voucherDate} onChange={(e) => update(v.key, { voucherDate: e.target.value })} className={`${cell} mt-1`} title="Voucher date" />
+                            </td>
+                            <td className="py-1.5 pr-2 min-w-[11rem]">
+                              {v.docs.map((d) => (
+                                <div key={d.key} className="mb-1">
+                                  <div className="truncate max-w-[14rem]" title={d.fileName}>{d.billNo || "—"}{d.billDate ? ` · ${d.billDate}` : ""}</div>
+                                  <div className="text-[10px] text-[#9CA3AF] truncate max-w-[14rem]" title={d.fileName}>{d.fileName}{d.docCount > 1 ? ` · ${d.docIndex + 1} of ${d.docCount}` : ""}{v.docs.length > 1 && d.payee && d.payee !== v.payee ? ` · ${d.payee}` : ""}</div>
+                                </div>
+                              ))}
+                            </td>
                             <td className="py-1.5 pr-2 min-w-[18rem]">
-                              {x.lines.map((l, li) => {
+                              {v.docs.flatMap((d) => d.lines.map((l, li) => {
                                 const hint = scanGuessHint(l.guess);
                                 return (
-                                  <div key={li} className="mb-1.5">
+                                  <div key={`${d.key}:${li}`} className="mb-1.5">
                                     <div className="flex justify-between gap-2 text-[11px] text-[#6B7280]"><span className="truncate" title={l.description}>{l.description || "—"}</span><span className="tabular-nums">{formatCurrency(l.amountSen)}</span></div>
                                     {l.isTax ? (
                                       <div className="text-[11px] text-[#1F1D1B]">706-0000 · SST, its own line</div>
@@ -6900,20 +6886,20 @@ function ScanBillsBatch({ accounts, bankCash, onDone }: {
                                       <div className="text-[11px] text-[#1F1D1B]">{l.accountCode}</div>
                                     ) : (
                                       <>
-                                        <AccountPicker accounts={lineAccounts} value={l.accountCode} onChange={(code) => update(x.key, { lines: x.lines.map((y, yi) => (yi === li ? { ...y, accountCode: code, guess: null } : y)) })} placeholder="— pick account —" />
+                                        <AccountPicker accounts={lineAccounts} value={l.accountCode} onChange={(code) => setLineAccount(v.key, d.key, li, code)} placeholder="— pick account —" />
                                         {hint && <div className={`text-[10px] mt-0.5 ${hint.kind === "suggested" ? "text-[#7A5B12] font-semibold" : "text-[#9CA3AF]"}`}>{hint.text}</div>}
                                       </>
                                     )}
                                   </div>
                                 );
-                              })}
+                              }))}
                             </td>
-                            <td className="py-1.5 pr-2 text-right tabular-nums whitespace-nowrap">{formatCurrency(x.totalSen)}</td>
+                            <td className="py-1.5 pr-2 text-right tabular-nums whitespace-nowrap">{formatCurrency(scanVoucherTotal(v))}</td>
                             <td className="py-1.5 min-w-[9rem]">
-                              {x.duplicateOf && !done && <div className="text-[#9A3A2D] font-semibold">Already recorded: {x.duplicateOf}</div>}
-                              {x.state === "created" && <span className="rounded-full bg-[#EAF3DE] text-[#27500A] px-2 py-0.5 font-semibold">{x.result}</span>}
-                              {x.state === "creating" && <span className="text-[#7A5B12]">creating…</span>}
-                              {x.state === "failed" && <div className="text-[#9A3A2D]">failed — {x.result}</div>}
+                              {!done && dups.map((d) => <div key={d.key} className="text-[#9A3A2D] font-semibold">Already recorded: {d.billNo} → {knownRefLabel(d.duplicateOf ?? "")}</div>)}
+                              {v.state === "created" && <span className="rounded-full bg-[#EAF3DE] text-[#27500A] px-2 py-0.5 font-semibold">{v.result}</span>}
+                              {v.state === "creating" && <span className="text-[#7A5B12]">creating…</span>}
+                              {v.state === "failed" && <div className="text-[#9A3A2D]">failed — {v.result}</div>}
                               {problem && <div className="text-[#7A5B12]">{problem}</div>}
                             </td>
                           </tr>
@@ -6924,11 +6910,14 @@ function ScanBillsBatch({ accounts, bankCash, onDone }: {
                 </div>
               )}
               {phase === "review" && (
-                <div className="flex justify-end gap-2">
+                <div className="flex flex-wrap justify-end gap-2">
                   <Button variant="outline" size="sm" disabled={creating} onClick={() => inputRef.current?.click()}>Scan more</Button>
+                  <Button variant="outline" size="sm" disabled={creating || pending.length < 2} onClick={mergeTicked} title="The ticked receipts become ONE voucher">
+                    Merge into one voucher{pending.length >= 2 ? ` (${pending.length})` : ""}
+                  </Button>
                   <Button variant="outline" size="sm" disabled={creating} onClick={close}>Close</Button>
-                  <Button variant="primary" size="sm" disabled={creating || pending.length === 0} onClick={() => void createAll()}>
-                    {creating ? "Creating…" : `Create all (${pending.length})`}
+                  <Button variant="primary" size="sm" disabled={creating || pending.length === 0} onClick={() => void createTicked()}>
+                    {creating ? "Creating…" : `Create ${pending.length} voucher${pending.length === 1 ? "" : "s"}`}
                   </Button>
                 </div>
               )}
@@ -10470,6 +10459,31 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
   // payees' similar lines), the SST is its own line, and a bill number already
   // on our books is flagged. With the form already holding lines, the scan
   // ADDS its receipt to this voucher — several receipts, one voucher.
+  // Scan → "open in form": the scanned voucher in the full form (accrue, post
+  // now, notes…), its receipts held to attach on save.
+  const openScanInForm = (v: { payee: string; date: string; docs: ScanDoc[] }) => {
+    resetForm();
+    setFormKind("EXPENSE");
+    const billNos = v.docs.map((d) => d.billNo).filter(Boolean);
+    setForm({
+      ...blankPvForm(),
+      mode: "PAYMENT",
+      date: v.date,
+      payee: v.payee,
+      billNo: billNos.join(", "),
+      billDate: v.docs[0]?.billDate ?? "",
+      description: v.docs.length === 1 ? ([v.docs[0].docType, v.docs[0].billNo].filter(Boolean).join(" · ") || v.docs[0].fileName) : `${v.docs.length} receipts`,
+    });
+    setLines(v.docs.flatMap((d) => d.lines.map((l): PvLineDraft => ({
+      accountCode: l.accountCode,
+      description: l.description,
+      amount: (l.amountSen / 100).toFixed(2),
+      hint: l.isTax ? { kind: "sst", text: "SST — its own line (706-0000)" } : scanGuessHint(l.guess),
+    }))));
+    setPendingScanFiles([...new Set(v.docs.map((d) => d.file))]);
+    setShowForm(true);
+  };
+
   const applyScan = async (d: ScanFinanceResult, file: File) => {
     const memory = await loadScanMemory();
     setScanMemory(memory);
@@ -10534,8 +10548,7 @@ function PaymentsTab({ accounts }: { accounts: ChartOfAccount[] }) {
           <p className="text-[11px] text-[#9CA3AF]">Every payment out, one door. <b>AP Payment</b> pays a creditor's bills (purchase invoices / other-creditor bills); <b>Payment Voucher</b> pays an expense. Draft → Prepared → Checked → Approved (posted), or Post now. Foreign-currency PIs, advance knock-off and trade-finance repayment: <Link to="/invoices/supplier-payments" className="underline decoration-dotted text-[#6B5C32]">Supplier Payment page</Link>. Payments recorded there and on <Link to="/accounting?tab=ocreditorpay" className="underline decoration-dotted text-[#6B5C32]">Other Creditor Payments</Link> are listed below too (badges <b>SP</b> / <b>OCP</b>) — same HPV number series, one list.</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">
-          <ScanBillsBatch accounts={accounts} bankCash={bankCash} onDone={load} />
-          <ScanPrefillButton label="Scan Receipt" allDocs onResult={applyScan} />
+          <ScanVouchers accounts={accounts} bankCash={bankCash} onDone={load} onOpenInForm={openScanInForm} />
           <Button variant="primary" size="sm" onClick={() => (showForm && formKind === "AP" && !editingId ? resetForm() : openNew("AP"))} title="Pay a supplier's purchase invoices or an other creditor's bills">
             <Plus className="h-4 w-4" /> New AP Payment
           </Button>

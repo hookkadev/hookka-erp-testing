@@ -9,7 +9,7 @@
 //     MIME allowlist + magic-byte sniff can never be bypassed;
 //   · a cancelled voucher takes no new file; delete is refused from CHECK on;
 //     a delete must name a file that belongs to THAT voucher;
-//   · Scan Bills attaches the scanned file to the draft it created; Scan
+//   · Scan attaches the scanned receipts to the draft it created; the form's scan
 //     Receipt holds the file and attaches it on save;
 //   · the print bundle refuses when any attachment cannot be rendered (no
 //     silent holes), and the print window waits for the images to decode.
@@ -68,10 +68,10 @@ test("voucher attachment routes: cancelled takes nothing, evidence locked from C
   assert.match(list, /attachmentCount: attachCountById\.get\(id\) \?\? 0/);
 });
 
-test("scans become evidence: Scan Bills attaches to the draft it made, Scan Receipt attaches on save", () => {
-  const batch = ui.slice(ui.indexOf("function ScanBillsBatch("), ui.indexOf("function PvAttachmentsBlock("));
-  assert.match(batch, /await uploadPvAttachment\(j\.data\.id, x\.file\)/);
-  assert.match(batch, /attachment failed:/, "a failed upload is said, the voucher is kept");
+test("scans become evidence: Scan attaches the receipts to the draft it made, the form's scan attaches on save", () => {
+  const batch = ui.slice(ui.indexOf("function ScanVouchers("), ui.indexOf("function PvAttachmentsBlock("));
+  assert.match(batch, /await uploadPvAttachment\(j\.data\.id, f\)/);
+  assert.match(batch, /not attached: /, "a failed upload is said, the voucher is kept");
   assert.match(ui, /onResult: \(d: ScanFinanceResult, file: File\) => void \| Promise<void>/);
   assert.match(ui, /setPendingScanFiles\(\[file\]\);/);
   assert.match(ui, /setPendingScanFiles\(\(fs\) => \[\.\.\.fs, file\]\);/, "another receipt joins the same voucher (2026-10-01)");
