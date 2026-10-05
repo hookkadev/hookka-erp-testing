@@ -441,6 +441,19 @@ function CreateSalesOrderPage() {
     [stockResp],
   );
 
+  // Products whose BOM WIP tab is empty (or that have no BOM). Production
+  // would make job cards of its own for them, so flag each line up front.
+  const { data: emptyWipResp } = useCachedJson<{ data?: string[] }>(
+    stockCodes.length
+      ? `/api/sales-orders/empty-wip?productCodes=${encodeURIComponent(stockCodes.join(","))}`
+      : null,
+    30,
+  );
+  const emptyWipCodes = useMemo(
+    () => new Set(emptyWipResp?.data ?? []),
+    [emptyWipResp],
+  );
+
   // Multi-Company Phase 2 — active companies for the Company dropdown.
   const activeOrgs = useMemo(
     () => (orgsResp?.organisations ?? []).filter((o) => o.isActive !== false),
@@ -2269,6 +2282,7 @@ function CreateSalesOrderPage() {
               item={item}
               idx={idx}
               stock={stockByCode[item.productCode]}
+              emptyWip={emptyWipCodes.has(item.productCode)}
               // Filter the catalogue down to what's actually assigned to
               // this customer. When no customer is selected, fall through
               // to the full master list — stays compatible with workflows
@@ -3040,6 +3054,8 @@ type LineItemCardProps = {
   getLineTotal: (item: LineItem) => number;
   /** R14 — availability for this line's product code, when there is any. */
   stock?: StockAvailability;
+  /** This line's product has an empty BOM WIP tab (or no BOM). */
+  emptyWip: boolean;
   getTotalHeight: (item: LineItem) => number;
   maintenanceConfig: Record<string, MaintenanceConfigValue[]> | null;
   // 0134 — Service Order mode lets the operator type Base Price directly
@@ -3059,6 +3075,7 @@ function LineItemCard({
   getUnitPrice, getLineTotal, getTotalHeight, maintenanceConfig,
   isServiceOrderMode,
   stock,
+  emptyWip,
 }: LineItemCardProps) {
   const [showSpecialOrders, setShowSpecialOrders] = useState(false);
   const [showModuleDropdown, setShowModuleDropdown] = useState(false);
@@ -3376,6 +3393,16 @@ function LineItemCard({
           </div>
         );
       })()}
+
+      {emptyWip && (
+        <div className="mt-2 flex items-start gap-1.5 rounded px-2 py-1 text-xs bg-[#FAEFCB] text-[#9C6F1E]">
+          <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+          <span>
+            WIP components for {item.productCode} are not filled in its BOM yet.
+            Fill them in Products &rarr; BOM before this goes to production.
+          </span>
+        </div>
+      )}
 
       {/* R14 — what already exists, before a delivery date is promised. This
           screen fetched no stock of any kind: a salesperson could sell a thing

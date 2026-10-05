@@ -518,6 +518,58 @@ export async function findIncompleteBomProducts(
   return incomplete;
 }
 
+// Create-SO warning: which of these product codes have an empty WIP tab (or
+// no BOM at all). Owner 2026-10-05: an empty WIP tab must be flagged when the
+// line is added, accessories included, because the job-card builder fills the
+// gap with cards of its own (the L1 steps, or FG_MAIN across every dept).
+// A warning only; confirm is still gated by findIncompleteBomProducts.
+//
+// Picks the BOM row exactly as production-builder does (newest ACTIVE, else
+// newest of any status) and asks breakBomIntoWips, so "empty" means what the
+// builder will see: missing, unparseable, [] or no usable top-level node.
+export async function findEmptyWipProducts(
+  db: D1Database,
+  productCodes: string[],
+): Promise<string[]> {
+  const codes = [...new Set(productCodes.map((c) => c.trim()).filter(Boolean))];
+  if (codes.length === 0) return [];
+  const ph = codes.map(() => "?").join(",");
+  const rows = await db
+    .prepare(
+      `SELECT productCode, wipComponents, versionStatus, effectiveFrom
+         FROM bom_templates WHERE productCode IN (${ph})`,
+    )
+    .bind(...codes)
+    .all<{
+      productCode: string | null;
+      wipComponents: string | null;
+      versionStatus: string | null;
+      effectiveFrom: string | null;
+    }>();
+  const best = new Map<
+    string,
+    { wipComponents: string | null; active: boolean; eff: string }
+  >();
+  for (const r of rows.results ?? []) {
+    const code = (r.productCode || "").trim();
+    if (!code) continue;
+    const active = (r.versionStatus || "").toUpperCase() === "ACTIVE";
+    const eff = r.effectiveFrom || "";
+    const prev = best.get(code);
+    if (
+      !prev ||
+      (active && !prev.active) ||
+      (active === prev.active && eff > prev.eff)
+    ) {
+      best.set(code, { wipComponents: r.wipComponents, active, eff });
+    }
+  }
+  return codes.filter((code) => {
+    const wips = breakBomIntoWips(best.get(code)?.wipComponents ?? null, code);
+    return wips.length === 1 && wips[0].wipKey === `${code}::FG_MAIN`;
+  });
+}
+
 export function rowToStatusChange(r: SOStatusChangeRow) {
   return {
     id: r.id,
