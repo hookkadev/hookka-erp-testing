@@ -379,6 +379,8 @@ export function bomMinutesForCard(
 // ---------------------------------------------------------------------------
 // POST /api/production/sync-jobcards-from-bom/fill-zero-minutes
 //   ?dryRun=true             preview only
+// Live cards only (WAITING / IN_PROGRESS / PAUSED / BLOCKED): a CANCELLED card
+// is never filled.
 //   &completedFrom=YYYY-MM-DD  also fill COMPLETED/TRANSFERRED cards finished
 //                              on or after this date (default: none)
 //
@@ -417,7 +419,7 @@ app.post("/fill-zero-minutes", async (c) => {
          FROM job_cards jc
          JOIN production_orders po ON po.id = jc.productionOrderId
         WHERE COALESCE(jc.productionTimeMinutes, 0) = 0
-          AND (jc.status NOT IN ('COMPLETED','TRANSFERRED')
+          AND (jc.status IN ('WAITING','IN_PROGRESS','PAUSED','BLOCKED')
                ${completedFrom ? "OR jc.completedDate >= ?" : ""})
         ORDER BY jc.id`,
     )

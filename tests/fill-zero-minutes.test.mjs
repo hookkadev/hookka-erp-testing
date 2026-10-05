@@ -188,12 +188,13 @@ test("TC-07 live run writes only the fillable cards, each guarded and audited", 
   }
 });
 
-test("TC-08 only cards at 0 are selected; without completedFrom, completed cards are out", async () => {
+test("TC-08 only live cards at 0 are selected; cancelled never, completed only with completedFrom", async () => {
   const f = makeDb();
   await call(f.db, "?dryRun=true");
   const sel = f.selects[0];
   assert.match(sel.sql, /COALESCE\(jc\.productionTimeMinutes, 0\) = 0/);
-  assert.match(sel.sql, /jc\.status NOT IN \('COMPLETED','TRANSFERRED'\)/);
+  assert.match(sel.sql, /jc\.status IN \('WAITING','IN_PROGRESS','PAUSED','BLOCKED'\)/);
+  assert.doesNotMatch(sel.sql, /CANCELLED/, "a cancelled card must never be selected");
   assert.doesNotMatch(sel.sql, /completedDate >=/);
   assert.deepEqual(sel.bound, []);
 });
