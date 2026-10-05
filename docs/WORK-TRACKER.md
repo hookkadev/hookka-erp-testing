@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-05**: branch `fix/bom-minutes-leading-zero-main` (to `main`, BUG-2026-10-05-254) added below (its entry is the newest).
 > **Last verified: 2026-10-05**: branch `feat/bom-manual-minutes-main` (to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-05**: branch `feat/kpi-assign-unassign-to-main` (to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-05**: branch `feat/permissions-tab-main` (Permissions tab, staging to `main`) added below (its entry is the newest).
@@ -89,6 +90,10 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-05 — 🔵 BOM minutes box showed "052" while typing (branch `fix/bom-minutes-leading-zero-main` → `main`, BUG-2026-10-05-254)
+
+1. 🔵 Owner screenshot (Edit BOM, A02): typing 52 showed "052". The minutes box is now a text box that always shows the stored number (digits only, 0 to 1440). Checks: `tsc -p tsconfig.app.json` exit 0, `tests/bom-manual-minutes.test.mjs` extended. Prod check pending until deployed.
 
 ## 2026-10-05 — 🔵 BOM process minutes typed in by hand, CAT 1-14 removed (branch `feat/bom-manual-minutes-main` → `main`, same change as #688 to staging)
 

@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-05**: newest entry BUG-2026-10-05-254 (branch `fix/bom-minutes-leading-zero-main`, to main); a log, so "verified" means the entry matches the fix it describes.
 > **Last verified: 2026-10-05**: newest entry BUG-2026-10-05-253 (branch `feat/kpi-assign-unassign-to-main`, to main; 252 is taken on staging).
 > **Last verified: 2026-10-02**: newest entry BUG-2026-10-02-251 (branch `feat/finance-row-menu-esc`; renumbered from 250, which `main` took first; 249 is on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-02**: newest entry BUG-2026-10-02-250 (branch `feat/m-install-and-desktop-switch`, to main); a log, so "verified" means the entry matches the code on its branch, not that every older entry is still true.
@@ -67,6 +68,16 @@ Entries themselves stay newest-first.
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
 
 ---
+
+## BUG-2026-10-05-254 — BOM minutes box shows "052" while typing `bom` 🟢
+
+🟢 Fixed on `fix/bom-minutes-leading-zero-main` (to `main`). Report (owner, screenshot of Edit BOM on A02): typing 52 into a Packing row's minutes box showed "052".
+
+**Cause.** The box added in #688 / #689 (`MinutesInput`, `src/pages/bom.tsx`) was `type="number"` with `value={number}`. Typing after the 0 makes the text "052"; it parses to 52, and React does not rewrite a number input whose numeric value already equals the prop, so the leading zero stays on screen. The saved value was 52; only the display was wrong.
+
+**Fix.** The box is `type="text"` with `inputMode="numeric"` (phones still get the number pad) and `value={String(value)}`, so the text always matches the stored number. `parseMinutes` keeps digits only and caps at 1440. Same box on all 7 BOM process rows.
+
+**Guard.** `tests/bom-manual-minutes.test.mjs` ("minutes box shows the clean number"): pins the text input and runs `parseMinutes` on "052", "", "4a5", "-7" and "2000".
 
 ## BUG-2026-10-05-253 — KPI: no way to take a person off a KPI, and a removal would have rewritten their settled months `kpi` 🟢
 

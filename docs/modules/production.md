@@ -1,5 +1,6 @@
 # Production & BOM — Module Guide
 
+> **Last verified: 2026-10-05** (branch `fix/bom-minutes-leading-zero-main`): only the `bom.tsx` anchors (`BOMManagementPage`, `EditBOMDialog`, `MasterTemplatesDialog`), re-read after `parseMinutes` moved them 5 lines.
 > **Last verified: 2026-10-05** (branch `feat/bom-manual-minutes-main`): only the `bom.tsx` anchors (`BOMManagementPage`, `EditBOMDialog`, `MasterTemplatesDialog`) and the minute-rates gotcha, read from `src/pages/bom.tsx`.
 > **Last verified: 2026-09-30** (branch `feat/production-overview-cards-main`): only the `ProductionPage`, `filteredOrders` and
 > `loadFgStickers` / `packingStickerUrl` anchors, re-derived after the Overview Cards view (#592 / #595 / #596) was brought to `main`.
@@ -31,7 +32,7 @@ Owns the shop floor: a **dept-tabbed WIP board** (one production_order per confi
   - `/production/tracker` → redirect to `/planning?tab=tracker` (`src/dashboard-routes.tsx`). The Master Tracker lives as a TAB of the Planning page; the standalone `production/tracker.tsx` was deleted 2026-08-13 — unreachable since the route became a redirect, imported nowhere. **`PlanningPage` does not read `?tab=` yet** (`activeTab` is local state), so this redirect and the Production page's own "Master Tracker" button both land on Capacity Overview.
   - `/production/scan` → `src/pages/production/scan.tsx` (shop-floor dept scan) · `/production/fg-scan` → `src/pages/production/fg-scan.tsx`
   - `/production/wip-times` → `src/pages/production/wip-times.tsx` (per-dept minute rates)
-  - `/bom` → `src/pages/bom.tsx:6299` (`BOMManagementPage`) · `/cnc-templates` → `src/pages/cnc-templates.tsx`
+  - `/bom` → `src/pages/bom.tsx:6304` (`BOMManagementPage`) · `/cnc-templates` → `src/pages/cnc-templates.tsx`
 - API routes
   - PO / job-card / WIP / scan **handlers** → `src/api/routes/production-orders.ts` (3903 lines); every shared
     function lives in `src/api/routes/production-orders/_helpers.ts` (5799). Mounted `worker.ts:1233`.
@@ -55,7 +56,7 @@ Owns the shop floor: a **dept-tabbed WIP board** (one production_order per confi
 3. **PO status recompute + completion cascade** — `recomputePoStatusAndProgress` (`_helpers.ts:4133`) is the single source of truth for PO `status` + progress. On full completion it fans out to `postProductionOrderCompletion` (`fg-completion.ts`, FG units/batches), `postJobCardLabor` (`po-cost-cascade.ts:953`), and the SO/CO cascades (`cascadePoCompletionToSO` `_helpers.ts:3900` / `cascadeUpholsteryToSO` `:3536` / `cascadeCNCompletionToCO` `:3994`).
 4. **Cost cascade** — on scan/completion: `consumeRawMaterialsForPO` (`po-cost-cascade.ts:803`, RM_ISSUE), `postJobCardLabor` (`:953`, LABOR_POSTED — idempotent via a `cost_ledger` check in the scan handler), `backfillFGBatchCost` (`:1153`), `postWIPCompletionMarker` (`:1276`). All append-only to `cost_ledger`.
 5. **Stock PO create** — `app.post("/stock")` (`production-orders.ts:1187`) builds make-to-stock POs (no SO). Board list read is `app.get("/")` (`:726`) via `fetchFilteredPOs` (`_helpers.ts:1444`); board summary `app.get("/board")` (`:3301`).
-6. **BOM edit** — `bom.tsx` `EditBOMDialog` (`:3187`) → `PUT /templates/:id` (`bom.ts:484`); master templates via `MasterTemplatesDialog` (`bom.tsx:4074`). Per-dept minute rates are edited on `src/pages/production/wip-times.tsx` (backed by `wip-times.ts`) and land in `bom_templates.wipComponents`.
+6. **BOM edit** — `bom.tsx` `EditBOMDialog` (`:3192`) → `PUT /templates/:id` (`bom.ts:484`); master templates via `MasterTemplatesDialog` (`bom.tsx:4079`). Per-dept minute rates are edited on `src/pages/production/wip-times.tsx` (backed by `wip-times.ts`) and land in `bom_templates.wipComponents`.
 
 ## Key functions / sections (locate-to-function)
 | Symbol / section | file:line | Role |
@@ -63,8 +64,8 @@ Owns the shop floor: a **dept-tabbed WIP board** (one production_order per confi
 | `ProductionPage` | `src/pages/production/index.tsx:627` | WIP board; every column/row branches on `activeTab` |
 | `filteredOrders` (memo) | `src/pages/production/index.tsx:2944` | Dept-narrow + overdue-set grid filter |
 | `loadFgStickers` / `packingStickerUrl` | `src/pages/production/index.tsx:5665 / 5624` | FG sticker set (immediate paint → /p/ token upgrade) |
-| `BOMManagementPage` | `src/pages/bom.tsx:6299` | BOM page shell (tabs, list) |
-| `EditBOMDialog` / `MasterTemplatesDialog` | `src/pages/bom.tsx:3187 / 4074` | L1+WIP editor / master variants |
+| `BOMManagementPage` | `src/pages/bom.tsx:6304` | BOM page shell (tabs, list) |
+| `EditBOMDialog` / `MasterTemplatesDialog` | `src/pages/bom.tsx:3192 / 4079` | L1+WIP editor / master variants |
 | `rowToPO` | `production-orders/_helpers.ts:905` | PO row → API shape (dual-keyed reads) |
 | `applyWipInventoryChange` | `production-orders/_helpers.ts:2574` | WIP inventory change; idempotent ONLY when `orgId` passed |
 | `recomputePoStatusAndProgress` | `production-orders/_helpers.ts:4133` | Single source of truth for PO status/progress |
