@@ -417,6 +417,24 @@ function CreateSalesOrderPage() {
   const [notes, setNotes] = useState("");
   const [items, setItems] = useState<LineItem[]>([makeEmptyLine()]);
 
+  // Products whose BOM WIP tab is empty (or that have no BOM). Production
+  // would make job cards of its own for them, so flag each line up front.
+  const lineCodes = useMemo(
+    () =>
+      [...new Set(items.map((i) => i.productCode).filter(Boolean))].sort(),
+    [items],
+  );
+  const { data: emptyWipResp } = useCachedJson<{ data?: string[] }>(
+    lineCodes.length
+      ? `/api/sales-orders/empty-wip?productCodes=${encodeURIComponent(lineCodes.join(","))}`
+      : null,
+    30,
+  );
+  const emptyWipCodes = useMemo(
+    () => new Set(emptyWipResp?.data ?? []),
+    [emptyWipResp],
+  );
+
   // Multi-Company Phase 2 — active companies for the Company dropdown.
   const activeOrgs = useMemo(
     () => (orgsResp?.organisations ?? []).filter((o) => o.isActive !== false),
@@ -1967,7 +1985,7 @@ function CreateSalesOrderPage() {
               <button onClick={() => setBomError({ open: false, incompleteProducts: [], soId: null })} className="text-[#9CA3AF] hover:text-[#374151]"><X className="h-5 w-5" /></button>
             </div>
             <p className="text-sm text-[#374151]">
-              Cannot confirm — the following products have no BOM yet:
+              Cannot confirm — these products have no WIP components in their BOM yet:
             </p>
             <ul className="space-y-1 text-sm bg-[#FBF3F1] border border-[#E8B2A1] rounded-md p-3 max-h-64 overflow-y-auto">
               {bomError.incompleteProducts.map((p) => (
@@ -1977,7 +1995,7 @@ function CreateSalesOrderPage() {
               ))}
             </ul>
             <p className="text-xs text-[#6B7280]">
-              Please complete their BOM in Products &rarr; BOM first, then retry. The order has been saved as DRAFT.
+              Fill in their WIP components in Products &rarr; BOM first, then retry. The order has been saved as DRAFT.
             </p>
             <div className="flex justify-end gap-3">
               {bomError.incompleteProducts.length === 1 && (
@@ -2280,6 +2298,7 @@ function CreateSalesOrderPage() {
               getTotalHeight={getTotalHeight}
               maintenanceConfig={maintenanceConfig}
               isServiceOrderMode={isServiceOrderMode}
+              emptyWip={emptyWipCodes.has(item.productCode)}
             />
           ))}
         </CardContent>
@@ -3011,6 +3030,8 @@ type LineItemCardProps = {
   // Fabric is still required for production routing; it just doesn't
   // drive the price field in this mode.
   isServiceOrderMode: boolean;
+  /** This line's product has an empty BOM WIP tab (or no BOM). */
+  emptyWip: boolean;
 };
 
 function LineItemCard({
@@ -3022,6 +3043,7 @@ function LineItemCard({
   onAddSofaModules, onUpdate, onRemove, canRemove,
   getUnitPrice, getLineTotal, getTotalHeight, maintenanceConfig,
   isServiceOrderMode,
+  emptyWip,
 }: LineItemCardProps) {
   const [showSpecialOrders, setShowSpecialOrders] = useState(false);
   const [showModuleDropdown, setShowModuleDropdown] = useState(false);
@@ -3339,6 +3361,16 @@ function LineItemCard({
           </div>
         );
       })()}
+
+      {emptyWip && (
+        <div className="mt-2 flex items-start gap-1.5 rounded px-2 py-1 text-xs bg-[#FAEFCB] text-[#9C6F1E]">
+          <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+          <span>
+            WIP components for {item.productCode} are not filled in its BOM yet.
+            You can save this order as a draft, but it can't be confirmed until they're filled in Products &rarr; BOM.
+          </span>
+        </div>
+      )}
 
       {/* Qty / Configuration (category-dependent) */}
       {item.itemCategory === "ACCESSORY" ? (

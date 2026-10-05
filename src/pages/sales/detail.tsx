@@ -985,7 +985,7 @@ export default function SalesOrderDetailPage() {
               <button onClick={() => setBomError({ open: false, incompleteProducts: [] })} className="text-[#9CA3AF] hover:text-[#374151]"><X className="h-5 w-5" /></button>
             </div>
             <p className="text-sm text-[#374151]">
-              Cannot confirm — the following products have no BOM yet:
+              Cannot confirm — these products have no WIP components in their BOM yet:
             </p>
             <ul className="space-y-1 text-sm bg-[#FBF3F1] border border-[#E8B2A1] rounded-md p-3 max-h-64 overflow-y-auto">
               {bomError.incompleteProducts.map((p) => (
@@ -995,7 +995,7 @@ export default function SalesOrderDetailPage() {
               ))}
             </ul>
             <p className="text-xs text-[#6B7280]">
-              Please complete their BOM in Products &rarr; BOM first, then retry. The order remains in DRAFT status.
+              Fill in their WIP components in Products &rarr; BOM first, then retry. The order remains in DRAFT status.
             </p>
             <div className="flex justify-end gap-3">
               {bomError.incompleteProducts.length === 1 && (
