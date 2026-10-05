@@ -35,9 +35,25 @@ test("flags empty, missing, unparseable and L1-only BOMs; not a filled one", asy
     { productCode: "JUNK", wipComponents: "not json", versionStatus: "ACTIVE", effectiveFrom: "2026-01-01" },
   ]);
   const out = await findEmptyWipProducts(db, [
-    "FILLED", "EMPTY", "NULLWIP", "JUNK", "NOBOM", "", " FILLED ",
+    "FILLED", "EMPTY", "NULLWIP", "JUNK", "NOBOM", "", " ",
   ]);
   assert.deepEqual(out.sort(), ["EMPTY", "JUNK", "NOBOM", "NULLWIP"]);
+});
+
+test("a code with a trailing space comes back exactly as sent", async () => {
+  const db = fakeDb([
+    { productCode: "PILLOW ", wipComponents: "[]", versionStatus: "ACTIVE", effectiveFrom: "2026-01-01" },
+    { productCode: "FILLED ", wipComponents: WIP, versionStatus: "ACTIVE", effectiveFrom: "2026-01-01" },
+  ]);
+  assert.deepEqual(await findEmptyWipProducts(db, ["PILLOW ", "FILLED "]), ["PILLOW "]);
+});
+
+test("service charge is never flagged (owner 2026-10-05)", async () => {
+  const db = fakeDb([]);
+  assert.deepEqual(
+    await findEmptyWipProducts(db, ["SERVICE CHARGE ", "service charge", "NOBOM"]),
+    ["NOBOM"],
+  );
 });
 
 test("ACTIVE row wins over a newer draft, like the builder", async () => {
