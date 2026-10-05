@@ -22,7 +22,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import type { Env } from "../worker";
 import { resolveWorkerToken } from "./worker-auth";
-import { computeMonthlyLabor, computeAttendanceDayDetail, absenceCutoffDay, effectiveSalarySenForMonth } from "../../lib/labor-engine";
+import { computeMonthlyLabor, computeAttendanceDayDetail, absenceCutoffDay, effectiveSalarySenForMonth, workerPayrollDayRateSen } from "../../lib/labor-engine";
 import { jcMinutesTotal } from "../../lib/job-card-minutes";
 import { deriveBarcodeToken, deptOfBarcodeToken, isBarcodeToken } from "../../lib/job-card-id";
 import { computeMonthlyEfficiencyByWorker, resolveEfficiencyAllowanceSen, monthBounds } from "../lib/efficiency-allowance";
@@ -54,7 +54,7 @@ import {
   computeLiveDeptDay,
 } from "../lib/punch-autofill";
 import { loadPayRuleVersions } from "../lib/pay-rules-store";
-import { resolvePayRulesAsOf, toAttendanceRules, payrollDayRateSen, payrollHourDivisor } from "../../lib/pay-rules";
+import { resolvePayRulesAsOf, toAttendanceRules, payrollHourDivisor } from "../../lib/pay-rules";
 import { computeAttendanceDay, hhmmToMinutes, otMinutesAtLeastMinimum } from "../../lib/attendance-rules";
 import {
   rowToMinimalPO,
@@ -2114,9 +2114,10 @@ app.get("/payslips", async (c) => {
         "employee_advances",
       ] as const,
       orgId: DEFAULT_ORG_ID,
-      // ":adv" retires snapshots built before history carried the advance, so
-      // the phone never serves a cached month that hides it.
-      cacheKey: `${workerId}:${snapPeriod}:adv`,
+      // The suffix retires snapshots built before a fix to what history
+      // carries (":adv" the salary advance, ":late" the late charge priced
+      // from a per-day worker's day rate), so no cached month hides either.
+      cacheKey: `${workerId}:${snapPeriod}:adv:late`,
     },
     async (db) => {
 
@@ -2152,10 +2153,10 @@ app.get("/payslips", async (c) => {
       .bind(workerId)
       .all<{ date: string; hours: number }>();
     const wRow = await db.prepare(
-      "SELECT basicSalarySen, workingDaysPerMonth, workingHoursPerDay FROM workers WHERE id = ?",
+      "SELECT basicSalarySen, payMode, dailyRateSen, workingDaysPerMonth, workingHoursPerDay FROM workers WHERE id = ?",
     )
       .bind(workerId)
-      .first<{ basicSalarySen: number; workingDaysPerMonth: number; workingHoursPerDay: number }>();
+      .first<{ basicSalarySen: number; payMode: string | null; dailyRateSen: number | null; workingDaysPerMonth: number; workingHoursPerDay: number }>();
     const versions = await loadPayRuleVersions(db);
     for (const d of dedRes.results ?? []) {
       const h = Number(d.hours) || 0;
@@ -2168,8 +2169,14 @@ app.get("/payslips", async (c) => {
       // Rules as of THAT period — a rule change today must not re-price a
       // month the worker was already paid for.
       const cfg = resolvePayRulesAsOf(versions, `${per}-28`);
-      const dayRate = payrollDayRateSen(
-        Number(wRow.basicSalarySen) || 0,
+      // Pay-mode aware: a per-day (OSC) worker has no monthly basic, so the
+      // salary-only rate priced their late hours at RM 0 and the line vanished.
+      const dayRate = workerPayrollDayRateSen(
+        {
+          basicSalarySen: Number(wRow.basicSalarySen) || 0,
+          payMode: wRow.payMode,
+          dailyRateSen: wRow.dailyRateSen,
+        },
         {
           workingDaysPerMonth: Number(wRow.workingDaysPerMonth) || 26,
           calendarDays: 30,
@@ -2530,9 +2537,9 @@ async function buildWorkerDayDetail(
 }> {
   const [yy, mm] = period.split("-").map(Number);
   const w = await db
-    .prepare("SELECT workingHoursPerDay, basicSalarySen, workingDaysPerMonth FROM workers WHERE id = ?")
+    .prepare("SELECT workingHoursPerDay, basicSalarySen, payMode, dailyRateSen, workingDaysPerMonth FROM workers WHERE id = ?")
     .bind(workerId)
-    .first<{ workingHoursPerDay: number | null; basicSalarySen: number | null; workingDaysPerMonth: number | null }>();
+    .first<{ workingHoursPerDay: number | null; basicSalarySen: number | null; payMode: string | null; dailyRateSen: number | null; workingDaysPerMonth: number | null }>();
   const hoursPerDay = Number(w?.workingHoursPerDay) || 9;
 
   const heRes = await db
@@ -2574,8 +2581,12 @@ async function buildWorkerDayDetail(
     .prepare("SELECT date, hours FROM payroll_hour_deductions WHERE workerId = ? AND date LIKE ? ORDER BY date")
     .bind(workerId, `${period}-%`)
     .all<{ date: string; hours: number }>();
-  const dayRate = payrollDayRateSen(
-    Number(w?.basicSalarySen) || 0,
+  const dayRate = workerPayrollDayRateSen(
+    {
+      basicSalarySen: Number(w?.basicSalarySen) || 0,
+      payMode: w?.payMode,
+      dailyRateSen: w?.dailyRateSen,
+    },
     {
       workingDaysPerMonth: Number(w?.workingDaysPerMonth) || 26,
       calendarDays: lastDay,
