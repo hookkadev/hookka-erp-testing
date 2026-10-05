@@ -1,5 +1,7 @@
 # Production & BOM — Module Guide
 
+> **Last verified: 2026-10-05** (branch `fix/bom-master-template-accessory`): only the `bom-master-templates.ts` line count, read from the file. Nothing else re-checked.
+>
 > **Last verified: 2026-10-05** (branch `fix/bom-minutes-leading-zero-main`): only the `bom.tsx` anchors (`BOMManagementPage`, `EditBOMDialog`, `MasterTemplatesDialog`), re-read after `parseMinutes` moved them 5 lines.
 > **Last verified: 2026-10-05** (branch `feat/bom-manual-minutes-main`): only the `bom.tsx` anchors (`BOMManagementPage`, `EditBOMDialog`, `MasterTemplatesDialog`) and the minute-rates gotcha, read from `src/pages/bom.tsx`.
 > **Last verified: 2026-09-30** (branch `feat/production-overview-cards-main`): only the `ProductionPage`, `filteredOrders` and
@@ -36,7 +38,7 @@ Owns the shop floor: a **dept-tabbed WIP board** (one production_order per confi
 - API routes
   - PO / job-card / WIP / scan **handlers** → `src/api/routes/production-orders.ts` (3903 lines); every shared
     function lives in `src/api/routes/production-orders/_helpers.ts` (5799). Mounted `worker.ts:1233`.
-  - BOM templates + versions → `src/api/routes/bom.ts` (1454) · master variants → `bom-master-templates.ts` (243)
+  - BOM templates + versions → `src/api/routes/bom.ts` (1454) · master variants → `bom-master-templates.ts` (271)
   - Job-card reads + event timeline → `job-cards.ts` (804) · folders group/ungroup → `production-folders.ts` (461)
   - CNC Model→Size/Seat derive → `cnc-templates.ts` (1322) · minute counts → `wip-times.ts` (588) · due-date buffer → `production-leadtimes.ts` (625)
   - BOM explosion engine → `src/api/lib/bom-wip-breakdown.ts` · cost cascade → `src/api/lib/po-cost-cascade.ts`

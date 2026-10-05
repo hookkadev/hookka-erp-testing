@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-05**: branch `fix/bom-master-template-accessory` (to `main`, BUG-2026-10-05-255) added below (its entry is the newest).
 > **Last verified: 2026-10-05**: branch `fix/bom-minutes-leading-zero-main` (to `main`, BUG-2026-10-05-254) added below (its entry is the newest).
 > **Last verified: 2026-10-05**: branch `feat/bom-manual-minutes-main` (to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-05**: branch `feat/kpi-assign-unassign-to-main` (to `main`) added below (its entry is the newest).
@@ -90,6 +91,10 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-05 — 🔵 Accessory master BOM templates could not be saved (branch `fix/bom-master-template-accessory` → `main`, BUG-2026-10-05-255)
+
+1. 🔵 Owner screenshot (Edit Master Templates, ARMREST): Save Templates showed "Some details aren't valid". Staging confirmed the server refuses ACCESSORY (400). The route now accepts ACCESSORY and widens the table CHECK at runtime. Checks: `tsc -p tsconfig.app.json` exit 0, new `tests/bom-master-template-accessory.test.mjs`. Prod check pending until deployed.
 
 ## 2026-10-05 — 🔵 BOM minutes box showed "052" while typing (branch `fix/bom-minutes-leading-zero-main` → `main`, BUG-2026-10-05-254)
 
