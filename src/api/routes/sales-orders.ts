@@ -1309,7 +1309,9 @@ app.get("/late-to-customer", async (c) => {
     );
   }
   const scope = await customerScopeSql(c, "so.customerId");
-  const rows = await lateToCustomerOrders(c, period, scope);
+  // ?all=1 — every order shipped that month, each tagged LATE / EARLY /
+  // ON_TIME. The KPI card's inline order list.
+  const rows = await lateToCustomerOrders(c, period, scope, c.req.query("all") === "1");
   return c.json({ success: true, period, data: rows });
 });
 
