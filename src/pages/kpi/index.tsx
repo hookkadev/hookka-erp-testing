@@ -973,23 +973,6 @@ export default function KpiPage() {
                             </Badge>
                           )}
                         </div>
-                        {l.purpose && (
-                          <p className="text-[12px] text-[#1F1D1B] mt-1.5 leading-relaxed">
-                            <span className="font-semibold">Why: </span>{l.purpose}
-                          </p>
-                        )}
-                        {l.definition && (
-                          <p className="text-[12px] text-[#3A3733] mt-1 leading-relaxed">
-                            <span className="font-semibold">What is counted: </span>{l.definition}
-                          </p>
-                        )}
-                        {(l.measurement?.length ?? 0) > 0 && (
-                          <ol className="mt-1.5 ml-4 list-decimal space-y-0.5">
-                            {l.measurement!.map((m) => (
-                              <li key={m} className="text-[11.5px] text-[#3A3733] leading-relaxed">{m}</li>
-                            ))}
-                          </ol>
-                        )}
                         {l.key === "customer_delivery_date" ? (
                           <DeliveryOrderList period={period} evidence={l.evidence} />
                         ) : (
@@ -1037,8 +1020,67 @@ export default function KpiPage() {
                         {l.points !== null && (
                           <p className="text-[11px] font-semibold">{l.points} pts</p>
                         )}
+                        <button
+                          type="button"
+                          onClick={() => setExpanded(expanded === l.key ? null : l.key)}
+                          aria-expanded={expanded === l.key}
+                          className="mt-1 text-[11px] text-[#6B5C32] underline decoration-dotted"
+                        >
+                          {expanded === l.key ? "Hide calculation" : "View calculation"}
+                        </button>
                       </div>
                     </div>
+
+                    {/* DEV-39: the person being measured asked to see how each
+                        result is worked out. The rules come from the catalogue;
+                        the last part repeats the server's own numbers for this
+                        person, so nothing here is recomputed in the browser. */}
+                    {expanded === l.key && (
+                      <div className="mt-3 space-y-2 rounded-lg border border-[#F2EFE9] bg-[#FCFBF8] p-3">
+                        {l.purpose && (
+                          <p className="text-[12px] text-[#1F1D1B] leading-relaxed">
+                            <span className="font-semibold">Why: </span>{l.purpose}
+                          </p>
+                        )}
+                        {l.definition && (
+                          <p className="text-[12px] text-[#3A3733] leading-relaxed">
+                            <span className="font-semibold">What is counted: </span>{l.definition}
+                          </p>
+                        )}
+                        {l.formula && (
+                          <p className="text-[12px] text-[#3A3733] leading-relaxed">
+                            <span className="font-semibold">Formula: </span>{l.formula}
+                          </p>
+                        )}
+                        {(l.measurement?.length ?? 0) > 0 && (
+                          <ol className="ml-4 list-decimal space-y-0.5">
+                            {l.measurement!.map((m) => (
+                              <li key={m} className="text-[11.5px] text-[#3A3733] leading-relaxed">{m}</li>
+                            ))}
+                          </ol>
+                        )}
+                        <div className="border-t border-[#EFEBE4] pt-2 text-[12px] text-[#3A3733] leading-relaxed">
+                          <p className="font-semibold text-[#1F1D1B]">Your result for {card.period}</p>
+                          {l.attainment === null ? (
+                            <p>{l.evidence || "No result yet this month."}</p>
+                          ) : (
+                            <ol className="ml-4 list-decimal space-y-0.5">
+                              <li>Measured: <b>{fmt(l.actual, l.unit)}</b>{l.evidence && <> · {l.evidence}</>}</li>
+                              <li>Score for this KPI: <b>{l.attainment}</b> out of 100</li>
+                              {l.shape !== "GATE" && l.points !== null && (
+                                <>
+                                  <li>{l.attainment} × weight {l.weight} ÷ 100 = <b>{l.points} points</b></li>
+                                  <li>
+                                    Your month's score is all points earned ÷ total weight {card.weightMeasured} × 100
+                                    = <b>{card.score ?? "—"}</b>
+                                  </li>
+                                </>
+                              )}
+                            </ol>
+                          )}
+                        </div>
+                      </div>
+                    )}
 
                     {l.scoring === "CHECKLIST" && (l.checklistItems?.length ?? 0) > 0 && (
                       <ChecklistBlock
