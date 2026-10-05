@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-05**: newest entry BUG-2026-10-05-255 (branch `fix/bom-master-template-accessory`, to main).
 > **Last verified: 2026-10-05**: newest entry BUG-2026-10-05-254 (branch `fix/bom-minutes-leading-zero-main`, to main); a log, so "verified" means the entry matches the fix it describes.
 > **Last verified: 2026-10-05**: newest entry BUG-2026-10-05-253 (branch `feat/kpi-assign-unassign-to-main`, to main; 252 is taken on staging).
 > **Last verified: 2026-10-02**: newest entry BUG-2026-10-02-251 (branch `feat/finance-row-menu-esc`; renumbered from 250, which `main` took first; 249 is on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
@@ -68,6 +69,16 @@ Entries themselves stay newest-first.
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
 
 ---
+
+## BUG-2026-10-05-255 — Accessory master BOM templates could never be saved `bom` 🟡
+
+🟡 Fix on `fix/bom-master-template-accessory` (to `main`). Report (owner, screenshot): Edit Master Templates, ARMREST (an Accessory template), Save Templates showed "Some details aren't valid — please check them and try again."
+
+**Cause.** The BOM page gained the ACCESSORY category (BUG-2026-10-01-237 covers the BOM side), but `src/api/routes/bom-master-templates.ts` still only accepted BEDFRAME or SOFA. PUT `/:id` answered 400 "category must be BEDFRAME or SOFA" (measured on staging 2026-10-05 with a request that is refused before any write; staging held 2 BEDFRAME and 13 SOFA masters, no ACCESSORY). The bulk PUT skipped ACCESSORY rows with no error. Migration 0006's CHECK on `bom_master_templates.category` had the same two values, so fixing the route alone would have moved the failure to the database. The client toast hid the server text because it shows a generic line for any 400.
+
+**Fix.** The route accepts BEDFRAME, SOFA and ACCESSORY (`isCategory`). Both PUT handlers await `ensureCategoryCheck` before the first write; it drops `bom_master_templates_category_check` and re-adds it with ACCESSORY (runtime self-apply, recorded as `migrations-postgres/0239_bom_master_templates_accessory.sql`). That name is Postgres's default for 0006's inline CHECK, and prod's `outbox_emails_status_check` (also inline, 0081) carried its default name in BUG-2026-06-24-006, but this table's constraint name itself is UNMEASURED. If it differs, the first Accessory save after deploy fails with a CHECK violation that names the real constraint in the server log.
+
+**Guard.** `tests/bom-master-template-accessory.test.mjs`: the three categories pass and nothing else does, the DDL lists ACCESSORY, and both PUTs ensure before their INSERT.
 
 ## BUG-2026-10-05-254 — BOM minutes box shows "052" while typing `bom` 🟢
 

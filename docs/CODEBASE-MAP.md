@@ -1,5 +1,6 @@
 # Hookka ERP — Codebase Map (the single authoritative map)
 
+> **Restamped 2026-10-05 on branch `fix/bom-master-template-accessory` (to `main`, BUG-2026-10-05-255):** nothing in this map changed; `bom-master-templates.ts` is still listed as master CRUD. Nothing else re-checked.
 > **Restamped 2026-10-05 on branch `fix/bom-minutes-leading-zero-main` (to `main`, BUG-2026-10-05-254):** the `src/pages/bom.tsx` row and line-range index, read from the file. Nothing else re-checked.
 > **Restamped 2026-10-05 on branch `feat/bom-manual-minutes-main` (to `main`):** the `src/pages/bom.tsx` row (line count) and its line-range index, read from the file; the BOM minutes gotcha. Nothing else re-checked.
 > **Last verified: 2026-10-05 on branch `feat/kpi-assign-unassign-to-main` (to `main`)**: the KPI row (Library row-click pick, remove button on holder chips) and the new gotcha on removals vs settled months, read from `src/pages/kpi/index.tsx` and `src/api/routes/kpi.ts`. Nothing else re-checked.
