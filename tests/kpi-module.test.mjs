@@ -186,6 +186,21 @@ test("every KPI explains how it is calculated", () => {
   }
 });
 
+test("the card sends the calculation to the person, and the page shows it", () => {
+  // DEV-39. The card's "View calculation" block reads purpose / definition /
+  // measurement off each line. They were declared on the page but never sent,
+  // so the block rendered nothing. Every branch of buildCard must carry them.
+  const build = ROUTE.slice(ROUTE.indexOf("async function buildCard"), ROUTE.indexOf('app.get("/me"'));
+  const pushes = build.split("lines.push({").slice(1);
+  assert.equal(pushes.length, 3, "locked, unavailable and live lines");
+  for (const p of pushes) {
+    assert.match(p, /purpose: def\.purpose, definition: def\.definition, measurement: def\.measurement/);
+  }
+  const page = readFileSync(resolve(process.cwd(), "src/pages/kpi/index.tsx"), "utf8");
+  assert.match(page, /"View calculation"/);
+  assert.match(page, /l\.formula/, "the formula is shown, not just sent");
+});
+
 test("every AUTO KPI can be drilled into", () => {
   // A number nobody can click is a number nobody trusts. A checklist is its
   // own drill-down — the items ARE the detail.
