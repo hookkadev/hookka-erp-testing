@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-05**: branch `fix/backfill-zero-minutes-open-cards` (to `main`, BUG-2026-10-05-256) added below (its entry is the newest).
 > **Last verified: 2026-10-05**: branch `fix/bom-master-template-accessory` (to `main`, BUG-2026-10-05-255) added below (its entry is the newest).
 > **Last verified: 2026-10-05**: branch `fix/bom-minutes-leading-zero-main` (to `main`, BUG-2026-10-05-254) added below (its entry is the newest).
 > **Last verified: 2026-10-05**: branch `feat/bom-manual-minutes-main` (to `main`) added below (its entry is the newest).
@@ -91,6 +92,10 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-05 — 🔵 Fill job cards stuck at 0 production minutes (branch `fix/backfill-zero-minutes-open-cards` → `main`, BUG-2026-10-05-256)
+
+1. 🔵 Owner screenshot (Fab Cut sheet, A02 at 0 min): fill the cards whose BOM was filled after they were made. Owner scope: unfinished cards first, plus cards completed in Sep and Oct 2026; cards that already have minutes are left alone. New `fill-zero-minutes` endpoint, dry run first. Checks: `tsc -p tsconfig.app.json` exit 0, new `tests/fill-zero-minutes.test.mjs`. Prod run pending until deployed; expected from the read-only preview: about 159 unfinished + 140 Sep/Oct completed.
 
 ## 2026-10-05 — 🔵 Accessory master BOM templates could not be saved (branch `fix/bom-master-template-accessory` → `main`, BUG-2026-10-05-255)
 

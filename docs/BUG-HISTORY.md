@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-05**: newest entry BUG-2026-10-05-256 (branch `fix/backfill-zero-minutes-open-cards`, to main).
 > **Last verified: 2026-10-05**: newest entry BUG-2026-10-05-255 (branch `fix/bom-master-template-accessory`, to main).
 > **Last verified: 2026-10-05**: newest entry BUG-2026-10-05-254 (branch `fix/bom-minutes-leading-zero-main`, to main); a log, so "verified" means the entry matches the fix it describes.
 > **Last verified: 2026-10-05**: newest entry BUG-2026-10-05-253 (branch `feat/kpi-assign-unassign-to-main`, to main; 252 is taken on staging).
@@ -69,6 +70,18 @@ Entries themselves stay newest-first.
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
 
 ---
+
+## BUG-2026-10-05-256 — Job cards kept 0 production minutes after their BOM was filled in `production` `bom` 🟡
+
+🟡 Fix on `fix/backfill-zero-minutes-open-cards` (to `main`). Report (owner, screenshot): Fab Cut production sheet, A02 cards SO-2609-281-12 / 393-13 / 393-14 / 247-11 / 247-12 showed Prod Time 0 while the newer SO-2610-035-12 showed 10.
+
+**Cause.** A card's minutes are copied from the BOM once, when the card is created. These A02 / A01 / SB02 / BC05-MF cards were cut while their BOM steps had no minutes, so they got 0. Filling the BOM later never reaches existing cards: `jobcard-sync` only inserts missing cards, `/resync-job-card-times` reads the dept x category Production Times table, not the product's BOM, and `/backfill-jc-production-time-from-bom` cannot match a merged Fab Cut card (its wipKey is `<poId>::<model>::<fabric>::FAB_CUT`, not a BOM wipKey). Its dry run on prod (2026-10-05) also wanted to rewrite 22,738 cards (22,146 completed, back to June) whose minutes differ from today's BOM, none of them zeros.
+
+**Measured on prod 2026-10-05 (read-only, `/api/job-cards` per dept, capped at 5,000 rows per dept).** 778 cards at 0. Of the unfinished ones, 159 have BOM minutes to fill; completed in Sep/Oct 2026, 140. The rest stay: their BOM step is still 0 (Foam on 1005 / 2006(A) / 1030 mattresses), their dept is not in the BOM (leftovers of BUG-2026-10-01-244), or a sofa Fab Cut merge.
+
+**Fix.** `POST /api/production/sync-jobcards-from-bom/fill-zero-minutes` (`?dryRun=true`, `&completedFrom=YYYY-MM-DD` to include cards finished from that date). Only cards at 0 are touched; a card with minutes is never changed. Minutes come from `computeExpectedJcs`, the same expected-card list the builder makes; a merged Fab Cut card gets the sum of its PO's Fab Cut steps (`aggregateFcSlots`); a sofa merge spanning POs is skipped. Each write re-checks 0 and is audited (`fill-zero-minutes-from-bom`). Labour cost is not re-posted for completed cards (posting runs once, at completion, and posted nothing at 0).
+
+**Guard.** `tests/fill-zero-minutes.test.mjs` (11 cases): the matching rule (merged Fab Cut sum, sofa merge skip, wipKey + dept match incl. FG L1 cards, unknown dept skipped) and the real handler against a fake DB (dry run writes nothing; live run writes only fillable cards, each with the re-check-0 guard and an audit row; only 0-minute cards selected; completedFrom scoping; bad date 400; no permission 403). Not fixed: a BOM edit still does not reach existing cards.
 
 ## BUG-2026-10-05-255 — Accessory master BOM templates could never be saved `bom` 🟡
 

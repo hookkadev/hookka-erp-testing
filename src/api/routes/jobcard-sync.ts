@@ -24,6 +24,7 @@
 import { Hono } from "hono";
 import type { Env } from "../worker";
 import { requirePermission } from "../lib/rbac";
+import { buildAuditStatement } from "../lib/audit";
 import {
   breakBomIntoJobCardWips,
   deriveJobCardId,
@@ -352,6 +353,159 @@ app.post("/", async (c) => {
     createdJCs: totalCreated,
     perPO,
   });
+});
+
+// The minutes the CURRENT BOM gives an existing card, or why it can't say.
+// A merged Fab Cut card (wipKey `<poId>::<model>::<fabric>::FAB_CUT`) gets the
+// sum of every Fab Cut step of its PO, the same total aggregateFcSlots stamps
+// on a new one. A sofa merge spans several POs (key starts with the SO id), so
+// one PO's BOM can't price it.
+export function bomMinutesForCard(
+  card: { wipKey: string; deptCode: string; poId: string },
+  expected: readonly { wipKey: string; deptCode: string; estMinutes: number }[],
+): { minutes: number } | { skip: "sofaFabCutMerge" | "noMatch" } {
+  if (card.deptCode === "FAB_CUT" && card.wipKey.endsWith("::FAB_CUT")) {
+    if (!card.wipKey.startsWith(`${card.poId}::`)) return { skip: "sofaFabCutMerge" };
+    const fc = expected.filter((e) => e.deptCode === "FAB_CUT");
+    if (fc.length === 0) return { skip: "noMatch" };
+    return { minutes: fc.reduce((sum, e) => sum + e.estMinutes, 0) };
+  }
+  const hit = expected.find(
+    (e) => e.wipKey === card.wipKey && e.deptCode === card.deptCode,
+  );
+  return hit ? { minutes: hit.estMinutes } : { skip: "noMatch" };
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/production/sync-jobcards-from-bom/fill-zero-minutes
+//   ?dryRun=true             preview only
+//   &completedFrom=YYYY-MM-DD  also fill COMPLETED/TRANSFERRED cards finished
+//                              on or after this date (default: none)
+//
+// A card's minutes are copied from the BOM once, when the card is created, so
+// a card cut while its BOM step had no minutes keeps 0 after the BOM is filled.
+// This fills ONLY cards still at 0. A card that has minutes is never touched,
+// even if the BOM has changed since: that is the BOM of its day, not a gap.
+// Each write is audited (before/after) so it can be traced and reversed.
+// ---------------------------------------------------------------------------
+app.post("/fill-zero-minutes", async (c) => {
+  const denied = await requirePermission(c, "production-orders", "update");
+  if (denied) return denied;
+  const db = c.var.DB;
+  const dryRun = c.req.query("dryRun") === "true";
+  const completedFrom = c.req.query("completedFrom") ?? "";
+  if (completedFrom && !/^\d{4}-\d{2}-\d{2}$/.test(completedFrom)) {
+    return c.json({ success: false, error: "completedFrom must be YYYY-MM-DD" }, 400);
+  }
+
+  type ZeroCard = ProductionOrderRow & {
+    jcId: string;
+    wipKey: string | null;
+    deptCode: string | null;
+    status: string;
+    completedDate: string | null;
+    poNo: string | null;
+  };
+  const sel = await db
+    .prepare(
+      `SELECT jc.id AS "jcId", jc.wipKey AS "wipKey", jc.departmentCode AS "deptCode",
+              jc.status AS "status", jc.completedDate AS "completedDate",
+              po.poNo AS "poNo", po.id, po.salesOrderId, po.productCode,
+              po.itemCategory, po.quantity, po.currentDepartment, po.targetEndDate,
+              po.startDate, po.sizeCode, po.sizeLabel, po.fabricCode, po.gapInches,
+              po.divanHeightInches, po.legHeightInches
+         FROM job_cards jc
+         JOIN production_orders po ON po.id = jc.productionOrderId
+        WHERE COALESCE(jc.productionTimeMinutes, 0) = 0
+          AND (jc.status NOT IN ('COMPLETED','TRANSFERRED')
+               ${completedFrom ? "OR jc.completedDate >= ?" : ""})
+        ORDER BY jc.id`,
+    )
+    .bind(...(completedFrom ? [completedFrom] : []))
+    .all<ZeroCard>();
+  const cards = sel.results ?? [];
+
+  const bomCache = new Map<string, Awaited<ReturnType<typeof loadBomTemplate>>>();
+  const expectedByPo = new Map<string, ExpectedJc[]>();
+  const fills: Array<{
+    jcId: string;
+    poNo: string;
+    productCode: string;
+    deptCode: string;
+    status: string;
+    minutes: number;
+  }> = [];
+  const skipped = { bomZero: 0, noMatch: 0, sofaFabCutMerge: 0 };
+  const skippedSamples: Array<{ jcId: string; poNo: string; productCode: string; deptCode: string; reason: string }> = [];
+
+  for (const r of cards) {
+    const productCode = r.productCode ?? "";
+    let expected = expectedByPo.get(r.id);
+    if (!expected) {
+      if (!bomCache.has(productCode)) bomCache.set(productCode, await loadBomTemplate(db, productCode));
+      expected = computeExpectedJcs(r, bomCache.get(productCode) ?? null);
+      expectedByPo.set(r.id, expected);
+    }
+    const res = bomMinutesForCard(
+      { wipKey: r.wipKey ?? "", deptCode: r.deptCode ?? "", poId: r.id },
+      expected,
+    );
+    if ("skip" in res || res.minutes <= 0) {
+      const reason = "skip" in res ? res.skip : "bomZero";
+      skipped[reason]++;
+      if (skippedSamples.length < 50) {
+        skippedSamples.push({ jcId: r.jcId, poNo: r.poNo ?? "", productCode, deptCode: r.deptCode ?? "", reason });
+      }
+      continue;
+    }
+    fills.push({
+      jcId: r.jcId,
+      poNo: r.poNo ?? "",
+      productCode,
+      deptCode: r.deptCode ?? "",
+      status: r.status,
+      minutes: res.minutes,
+    });
+  }
+
+  const summary = {
+    scanned: cards.length,
+    toFill: fills.length,
+    toFillCompleted: fills.filter((f) => f.status === "COMPLETED" || f.status === "TRANSFERRED").length,
+    skipped,
+  };
+  if (dryRun) {
+    return c.json({ success: true, dryRun: true, completedFrom, ...summary, fills, skippedSamples });
+  }
+
+  let updated = 0;
+  for (const part of chunk(fills, 50)) {
+    const stmts: D1PreparedStatement[] = [];
+    for (const f of part) {
+      // Re-checks 0 so a card that got minutes since the SELECT is left alone.
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE job_cards SET productionTimeMinutes = ?, estMinutes = ?
+              WHERE id = ? AND COALESCE(productionTimeMinutes, 0) = 0`,
+          )
+          .bind(f.minutes, f.minutes, f.jcId),
+      );
+      const audit = await buildAuditStatement(c, {
+        resource: "job-cards",
+        resourceId: f.jcId,
+        action: "fill-zero-minutes-from-bom",
+        before: { productionTimeMinutes: 0, deptCode: f.deptCode },
+        after: { productionTimeMinutes: f.minutes, estMinutes: f.minutes, deptCode: f.deptCode },
+        source: "admin",
+      });
+      if (audit) stmts.push(audit);
+    }
+    await db.batch(stmts);
+    updated += part.length;
+  }
+
+  return c.json({ success: true, dryRun: false, completedFrom, ...summary, updated });
 });
 
 export default app;
