@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-05**: branch `fix/worker-pay-advance-line-main` (to `main`, BUG-2026-10-05-257) added below (its entry is the newest).
 > **Last verified: 2026-10-05**: branch `fix/backfill-zero-minutes-open-cards` (to `main`, BUG-2026-10-05-256) added below (its entry is the newest).
 > **Last verified: 2026-10-05**: branch `fix/bom-master-template-accessory` (to `main`, BUG-2026-10-05-255) added below (its entry is the newest).
 > **Last verified: 2026-10-05**: branch `fix/bom-minutes-leading-zero-main` (to `main`, BUG-2026-10-05-254) added below (its entry is the newest).
@@ -92,6 +93,14 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-05 — 🔵 Worker My Pay shows the salary advance (branch `fix/worker-pay-advance-line-main` → `main`, same fix as #700 to `staging`, BUG-2026-10-05-257)
+
+Owner ask: a worker's Net was RM 100 below Gross with no reason on the phone. Measured on prod: a RM 100 salary advance (21 Sep, no note), not a penalty.
+
+1. 🔵 `GET /api/worker/payslips` returns each slip's stored advance and the advance dates and notes.
+2. 🔵 The finished-month card shows "Salary advance" after Tax, tap for the dates. New label in all four worker languages.
+3. ⬜ Check on the staging site after #700 merges, then live after this merges.
 
 ## 2026-10-05 — 🔵 Fill job cards stuck at 0 production minutes (branch `fix/backfill-zero-minutes-open-cards` → `main`, BUG-2026-10-05-256)
 
