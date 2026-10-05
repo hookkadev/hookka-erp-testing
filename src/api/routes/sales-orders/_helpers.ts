@@ -531,7 +531,11 @@ export async function findEmptyWipProducts(
   db: D1Database,
   productCodes: string[],
 ): Promise<string[]> {
-  const codes = [...new Set(productCodes.map((c) => c.trim()).filter(Boolean))];
+  // Codes are used as-is (the builder matches them untrimmed: one product is
+  // "SERVICE CHARGE " with a space). Service charge is never checked (owner).
+  const codes = [...new Set(productCodes.filter(
+    (c) => c.trim() && c.trim().toUpperCase() !== "SERVICE CHARGE",
+  ))];
   if (codes.length === 0) return [];
   const ph = codes.map(() => "?").join(",");
   const rows = await db
@@ -551,7 +555,7 @@ export async function findEmptyWipProducts(
     { wipComponents: string | null; active: boolean; eff: string }
   >();
   for (const r of rows.results ?? []) {
-    const code = (r.productCode || "").trim();
+    const code = r.productCode || "";
     if (!code) continue;
     const active = (r.versionStatus || "").toUpperCase() === "ACTIVE";
     const eff = r.effectiveFrom || "";
