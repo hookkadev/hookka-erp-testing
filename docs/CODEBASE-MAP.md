@@ -1,5 +1,6 @@
 # Hookka ERP — Codebase Map (the single authoritative map)
 
+> **Restamped 2026-10-05 on branch `feat/bom-manual-minutes-main` (to `main`):** the `src/pages/bom.tsx` row (line count) and its line-range index, read from the file; the BOM minutes gotcha. Nothing else re-checked.
 > **Last verified: 2026-10-05 on branch `feat/kpi-assign-unassign-to-main` (to `main`)**: the KPI row (Library row-click pick, remove button on holder chips) and the new gotcha on removals vs settled months, read from `src/pages/kpi/index.tsx` and `src/api/routes/kpi.ts`. Nothing else re-checked.
 > **Restamped 2026-10-02 on branch `feat/finance-row-menu-esc`:** Accounting row, finance row menus + Esc (`src/components/accounting/row-menu.tsx`, `src/lib/escape-stack.ts`). Nothing else re-checked. Last verified: 2026-10-02.
 > **Last verified: 2026-10-02 on branch `feat/m-install-and-desktop-switch` (to `main`)**: new Install-app / desktop-switch row under Quality, Warehouse, Scanning & Platform, and the dashboard-prototype row's "a real phone never sees that picker" claim corrected, read from `src/lib/pwa-install.ts`, `src/lib/prefer-desktop.ts`, `src/layouts/DashboardLayout.tsx`. Nothing else re-checked.
@@ -607,7 +608,7 @@ authoritative current detail.** New here? Start with [ONBOARDING-PATH.md](ONBOAR
 | | `src/api/lib/packing-piece-identity.ts` — `packingPieceIdentity` (shared piece warehouse identity; appends `· pc N of M` to notes when pieceNo set + multi-piece) | | |
 | | `src/api/lib/job-card-completed-at.ts` — `ensureJobCardCompletedAt` / `observedCompletionAt` / `reconcileCompletedAt` / `readCompletedAt` (the completion INSTANT, beside the date-only `completed_date`) | `job_cards.completed_at` | `tests/job-card-completed-at.test.mjs` |
 | `src/pages/production/dept.tsx` / `overview.tsx` — thin wrappers over `production/index.tsx`, whose Overview counts now gate on `ordersObserved` (cold landing / in flight / dead read all print "—", -146) | `src/api/routes/wip-times.ts` — minute counts + `coverage.productsWithoutActiveBom` (`number \| null`, from `countProductsWithoutActiveBom` in `src/api/lib/wip-times-core.ts`) | `kv_config` · `products` (read: ACTIVE products with no ACTIVE bom_template) | `tests/sofa-combo.test.mjs` · `tests/planning-production-tile-truthfulness.test.mjs` |
-| `src/pages/bom.tsx` — BOM Management (7211) | `src/api/routes/production-leadtimes.ts` — due-date buffer | | |
+| `src/pages/bom.tsx` — BOM Management (6782) | `src/api/routes/production-leadtimes.ts` — due-date buffer | | |
 | `src/pages/cnc-templates.tsx` — CNC drilldown | | | |
 | `src/pages/production/components/` — BatchActionToolbar / CreateStockPODialog / CellBox / ProductDetailLine / OverviewCards (Cards view: WorkOrderCard, WorkOrderHeader, StagePipeline) | | | |
 
@@ -632,19 +633,19 @@ authoritative current detail.** New here? Start with [ONBOARDING-PATH.md](ONBOAR
   - PATCH /:id rack-assign — inline rackingNumber UPDATE then `applyPackingRack` (text re-affirm + occupancy) — L4180-4195
   - POST /packing-rack-tokens — authed /p/ token mint (batched: 2 queries + parallel mint) — L6001-6135
 - `src/pages/bom.tsx`
-  - RoutingPill / WIPCodeBuilder / RawMaterialSelect / MaterialScalingEditor helpers — L568-1092
-  - WIPNode (recursive BOM tree node) — L1093-1357
-  - BOMTreeView (template tree render, L1 + WIP) — L1358-1718
-  - CreateBOMDialog — L1719-2313
-  - CollapsibleGroup / SubWIPTree — L2314-2702 (still used by MasterTemplatesDialog; EditBOMDialog no longer renders it)
-  - flattenWipTree / wipNodeAt / depthBar — L2690-2752 (two-pane tree helpers)
-  - WipNodeDetail (right pane — edits ONE node at any depth) — L2753-2962
-  - EditBOMDialog (L1 tab + two-pane WIP tab) — L2963-3892
-  - MasterTemplatesDialog (Bedframe/Sofa/Accessory tabs + copy-from) — L3408-4368
-  - ProductionTimesDialog (per-dept minute rates) — L4369-4945
-  - BatchEditMaterialsDialog — L4946-6165
-  - DeptPivotCategoryDialog — L6166-6725
-  - BOMManagementPage (default export — page shell, tabs, list) — L6726-7211
+  - MinutesInput (typed process minutes, 0-1440) — L169-183
+  - RoutingPill / WIPCodeBuilder / RawMaterialSelect / MaterialScalingEditor helpers — L598-1224
+  - WIPNode (recursive BOM tree node) — L1225-1489
+  - BOMTreeView (template tree render, L1 + WIP) — L1490-1850
+  - CreateBOMDialog — L1851-2430
+  - CollapsibleGroup / SubWIPTree — L2431-2768 (still used by MasterTemplatesDialog; EditBOMDialog no longer renders it)
+  - flattenWipTree / wipNodeAt / depthBar — L2769-2966 (two-pane tree helpers)
+  - WipNodeDetail (right pane — edits ONE node at any depth) — L2967-3186
+  - EditBOMDialog (L1 tab + two-pane WIP tab) — L3187-4073
+  - MasterTemplatesDialog (Bedframe/Sofa/Accessory tabs + copy-from) — L4074-5210
+  - BatchEditMaterialsDialog — L5211-6298
+  - BOMManagementPage (default export — page shell, tabs, list) — L6299-6782
+  - (ProductionTimesDialog and DeptPivotCategoryDialog were removed 2026-08-01.)
 
 **Gotchas**
 - index.tsx is 8888 lines, driven entirely by activeTab (dept code: ALL, UPHOLSTERY, PACKING, FOAM, FAB_CUT, FAB_SEW). Almost every column set, row derivation, render block branches on activeTab — never assume one code path. Use the section ranges; don't read end-to-end.
@@ -658,7 +659,7 @@ authoritative current detail.** New here? Start with [ONBOARDING-PATH.md](ONBOAR
 - **A job card now carries TWO completion columns and they mean different things (2026-08-14, BUG-2026-08-13-120).** `job_cards.completed_date` is the DAY the completion is filed under — date-only by design, and depended on by the efficiency scan, the dept sheets, the list filters, the archive union and every `substr(completedDate::text,1,10)` comparison; unchanged. `job_cards.completed_at` (nullable TEXT, ISO-8601, indexed; self-applied by `ensureJobCardCompletedAt`, migration 0228 is the RECORD only) is the INSTANT the system OBSERVED the card complete. **It is written ONLY by the four paths that watch a completion happen** — `/scan-complete`, `/scan-complete-dept`, `/scan-complete-shared` and the office PATCH's auto-stamp (`applyPoUpdate`, `if (isDone)`). Every other writer — a typed date, the Sheets webhook, every import/backfill — goes through `reconcileCompletedAt`, which can only KEEP an existing instant (same day) or DROP it, never mint one. **Historical rows are deliberately NULL and are not backfilled**: the time is gone, and a plausible 09:00 would be C15. The invariant `completedAt travels with completedDate in the SAME statement` is enforced across all of `src/api` by `tests/job-card-completed-at.test.mjs` — a new completion writer fails CI until it is wired. TEXT rather than TIMESTAMPTZ so it is the same shape as `job_cards.distributed_at`, which is what it exists to be subtracted from.
 - camelCase DB columns: most at-risk WIP/production cols are dual-keyed (r.camelCase ?? r.snake_case); db-pg toCamel can't recover folded-lowercase camelCase. New columns snake_case; a camelCase write column needs a `column-rename-map.json` entry.
 - `bom_templates.category` can only hold BEDFRAME / SOFA, so an ACCESSORY product's BOM is stored as BEDFRAME. Read category from the product row: `withProductCategory` (`src/pages/bom-category.ts`) on the BOM page, `COALESCE(p.category, bt.category)` in `wip-times-core.ts` (BUG-2026-10-01-237).
-- BOM production-time / minute rates written into `bom_templates.wipComponents` from BOTH bom.tsx (ProductionTimesDialog) and wip-times.tsx/route — keep consistent; feed productionCostRatePerMinuteSen in the PO cost cascade.
+- BOM process minutes are TYPED IN on every BOM process row (`MinutesInput`, bom.tsx) or bulk-edited on WIP Times (wip-times.tsx/route); both write `bom_templates.wipComponents` / `l1Processes` and feed productionCostRatePerMinuteSen in the PO cost cascade. The CAT 1-14 dropdown and its Production Times matrix lookup were removed 2026-10-05 (owner); old rows keep their stored `category`, new rows save `""`, and `production-order-builder.ts` no longer stamps `"CAT 1"` on job cards (the dept+category job-card resync in `bom.ts` skips empty categories). Pins: `tests/bom-manual-minutes.test.mjs`.
 - EditBOMDialog's WIP tab is TWO-PANE (2026-08-03): `flattenWipTree` turns the recursive tree into indented rows on the left (selection + collapse, addressed by a `wi.path` key), and `WipNodeDetail` edits the SELECTED node on the right at full width. It replaced an inline recursive render inside a fixed 720px dialog, where each nesting level stole ~20px and the category select clipped to "CAT 3" by level 3, with four clashing background fills stacked inside one another. Depth now reads as a 3px left colour bar. The dialog is `w-[min(1160px,95vw)]` and the WIP tab owns its own scrolling (the body switches to `overflow-hidden` so each pane scrolls independently). Because ONE detail pane serves every depth, EditBOMDialog carries depth-agnostic adapters (`nUpdate`, `nAddProcess`, `nMove`, …) that dispatch on `path.length === 0` between the `xxxWIP(wi,…)` and `xxxAtPath(wi,path,…)` handler families — BOTH families are still live and must stay in sync. MasterTemplatesDialog still uses the old recursive `SubWIPTree`. Pins: `tests/bom-editor-reorder.test.mjs`.
 - Sofa combo pricing is BACKEND-unified (`applySofaCombos`) wired into sales-orders POST/PUT — production reads the priced SO; don't re-price in the production layer.
 - CNC hierarchy (Model→Size/Seat→Files) is DERIVED on the frontend; cnc_templates has no category column (from products.category) and total_height doubles as sofa seat size. No migration for the hierarchy.
