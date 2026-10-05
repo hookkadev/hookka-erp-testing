@@ -454,75 +454,34 @@ export type IncompleteProduct = {
   reason: string;
 };
 
-// BOM completeness guard: a product is confirm-incomplete when its ACTIVE
-// bom_templates row is missing OR both wipComponents[] AND l1Processes[] are
-// empty. Accessory SKUs (pillows) legitimately have empty wipComponents but
-// at least one l1Process (FAB_CUT/FAB_SEW/PACKING), so those pass. Falls back
-// to the most recent version if no ACTIVE row exists — mirrors the cascade's
-// reverse-schedule lookup.
+// BOM completeness guard for confirm. Owner 2026-10-05: a product whose BOM
+// WIP tab is empty must be stopped BEFORE the job-card builder falls back to
+// cards of its own (the L1 steps, or FG_MAIN across every dept), accessories
+// included. Same rule as the Create SO warning (findEmptyWipProducts), so the
+// warning and this block can never disagree. Drafts are not affected.
 export async function findIncompleteBomProducts(
   db: D1Database,
   items: SalesOrderItemRow[],
 ): Promise<IncompleteProduct[]> {
-  const incomplete: IncompleteProduct[] = [];
-  const seen = new Set<string>();
+  const names = new Map<string, string>();
   for (const item of items) {
     const productCode = item.productCode ?? "";
-    if (!item.productId || !productCode) continue;
-    if (seen.has(productCode)) continue;
-    seen.add(productCode);
-
-    let bomRow = await db
-      .prepare(
-        `SELECT wipComponents, l1Processes FROM bom_templates
-           WHERE productCode = ? AND versionStatus = 'ACTIVE'
-           ORDER BY effectiveFrom DESC LIMIT 1`,
-      )
-      .bind(productCode)
-      .first<{ wipComponents: string | null; l1Processes: string | null }>();
-    if (!bomRow) {
-      bomRow = await db
-        .prepare(
-          `SELECT wipComponents, l1Processes FROM bom_templates
-             WHERE productCode = ? ORDER BY effectiveFrom DESC LIMIT 1`,
-        )
-        .bind(productCode)
-        .first<{ wipComponents: string | null; l1Processes: string | null }>();
-    }
-
-    const parseLen = (raw: string | null): number => {
-      if (!raw) return 0;
-      try {
-        const arr = JSON.parse(raw);
-        return Array.isArray(arr) ? arr.length : 0;
-      } catch {
-        return 0;
-      }
-    };
-
-    const isIncomplete =
-      !bomRow ||
-      (parseLen(bomRow.wipComponents) === 0 &&
-        parseLen(bomRow.l1Processes) === 0);
-
-    if (isIncomplete) {
-      incomplete.push({
-        productCode,
-        productName: item.productName ?? productCode,
-        reason: !bomRow
-          ? "No BOM template exists"
-          : "BOM has no WIP components and no FG-level processes",
-      });
-    }
+    if (!item.productId || !productCode || names.has(productCode)) continue;
+    names.set(productCode, item.productName ?? productCode);
   }
-  return incomplete;
+  const empty = await findEmptyWipProducts(db, [...names.keys()]);
+  return empty.map((productCode) => ({
+    productCode,
+    productName: names.get(productCode) ?? productCode,
+    reason: "BOM has no WIP components",
+  }));
 }
 
 // Create-SO warning: which of these product codes have an empty WIP tab (or
 // no BOM at all). Owner 2026-10-05: an empty WIP tab must be flagged when the
 // line is added, accessories included, because the job-card builder fills the
 // gap with cards of its own (the L1 steps, or FG_MAIN across every dept).
-// A warning only; confirm is still gated by findIncompleteBomProducts.
+// findIncompleteBomProducts blocks confirm on the same rule.
 //
 // Picks the BOM row exactly as production-builder does (newest ACTIVE, else
 // newest of any status) and asks breakBomIntoWips, so "empty" means what the

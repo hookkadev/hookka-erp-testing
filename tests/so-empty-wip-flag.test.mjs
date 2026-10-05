@@ -70,3 +70,27 @@ test("no codes means no query", async () => {
   const db = { prepare: () => { throw new Error("should not query"); } };
   assert.deepEqual(await findEmptyWipProducts(db, ["", " "]), []);
 });
+
+// Confirm block (owner 2026-10-05): stopped before the builder's own cards.
+const { findIncompleteBomProducts } = await import(
+  "../src/api/routes/sales-orders/_helpers.ts"
+);
+
+test("confirm is blocked for an empty WIP tab even when L1 has steps", async () => {
+  const db = fakeDb([
+    { productCode: "SB02", wipComponents: "[]", versionStatus: "ACTIVE", effectiveFrom: "2026-01-01" },
+    { productCode: "1003-(Q)", wipComponents: WIP, versionStatus: "ACTIVE", effectiveFrom: "2026-01-01" },
+  ]);
+  const out = await findIncompleteBomProducts(db, [
+    { productId: "p1", productCode: "SB02", productName: "SANDBACK 02" },
+    { productId: "p1", productCode: "SB02", productName: "SANDBACK 02" },
+    { productId: "p2", productCode: "1003-(Q)", productName: "HILTON" },
+    { productId: "p3", productCode: "SERVICE CHARGE ", productName: "SERVICE CHARGE" },
+    { productId: "p4", productCode: "NOBOM", productName: "No BOM" },
+    { productId: "", productCode: "UNLINKED", productName: "Unlinked line" },
+  ]);
+  assert.deepEqual(out, [
+    { productCode: "SB02", productName: "SANDBACK 02", reason: "BOM has no WIP components" },
+    { productCode: "NOBOM", productName: "No BOM", reason: "BOM has no WIP components" },
+  ]);
+});

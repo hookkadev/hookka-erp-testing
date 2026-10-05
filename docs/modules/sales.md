@@ -1,5 +1,7 @@
 # Sales — Module Guide
 
+> **Last verified: 2026-10-05** (branch `feat/block-confirm-empty-wip`): confirm is now blocked for any product whose BOM WIP tab is empty (`findIncompleteBomProducts` wraps `findEmptyWipProducts`, `sales-orders/_helpers.ts:489`); the shorter guard moved the `_helpers.ts` anchors below to :591 / :788 / :1298 / :1497. Nothing else re-checked.
+
 > **Last verified: 2026-10-05** (branch `fix/empty-wip-skip-service-charge`): `findEmptyWipProducts` skips service charge and no longer trims codes, which moved the `_helpers.ts` anchors below to :632 / :829 / :1339 / :1538. Nothing else re-checked.
 
 > **Last verified: 2026-10-05** (branch `feat/so-create-empty-wip-flag`): `findEmptyWipProducts` (`sales-orders/_helpers.ts:530`) added for the Create SO empty-WIP warning, which shifted the anchors below; re-derived from the source: `CopyFromSourceModal` :2429, `LineItemCard` :3068, `app.post("/")` :1763, `/:id/confirm` :2548, `app.put("/:id")` :3216, and `_helpers.ts` :628 / :825 / :1335 / :1534. Nothing else re-checked.
@@ -25,7 +27,7 @@
 > `sales-orders.ts`: SO create `:1713`→`:1747`, confirm `:2494`→`:2528`,
 > `createProductionOrdersForSO` call `:2667`→`:2701`, edit `:3096`→`:3170`;
 > `SalesOrderDetailPage` `:338`→`:558`. `ensurePendingMigrations` is still
-> `_helpers.ts:1339`.
+> `_helpers.ts:1298`.
 >
 > **Last verified: 2026-09-11** — T-006 R1: "Transfer to Delivery Order" now
 > sends `productionOrderIds` (sourced from `/api/delivery-orders/ready-planning`),
@@ -43,7 +45,7 @@
 > Corrected 2026-08-19 — **eight call-site offsets were stale and are re-derived**:
 > `runSofaComboPass` is called at `:2133` (POST) and `:3679` (PUT), not `:2043`/`:3589`;
 > `createProductionOrdersForSO` is called at `:2547`, not `:2457`; `copy-for-service-order`
-> is `:5201`, not `:5094`; `ensurePendingMigrations` is `_helpers.ts:1339`,
+> is `:5201`, not `:5094`; `ensurePendingMigrations` is `_helpers.ts:1298`,
 > not `:1273`; `seatHeightOf` is `sofa-combo-pass.ts:64`, not `:46`; the snapshot
 > invalidation config lines are `:374 / 452 / 522 / 574 / 601` (five, not four, and three of
 > the four listed were wrong) and the rationale comment is `:5706`, not `:5599`;
@@ -94,7 +96,7 @@ Owns the customer-facing order lifecycle: **Sales Orders** (SO) and their line i
 
 ## Core flows
 1. **Create SO** — `app.post("/")` `sales-orders.ts:1763`. Validates/normalizes items → item-catalog-snap enrich (import at `:42`) → sofa-combo repricing via `runSofaComboPass` at `:2292` (guarded by `if (!isServiceOrder)` at `:2252`) → insert SO + items (`:2343`) → invalidate list snapshot.
-2. **Confirm / status cascade (DRAFT/PENDING → IN_PRODUCTION)** — `app.post("/:id/confirm")` `sales-orders.ts:2548`. Idempotent; flips status, writes `so_status_changes` (autoActions JSON), and calls `createProductionOrdersForSO` (`_helpers.ts:632`, called at `sales-orders.ts:2701`; a second call site for the PUT path sits at `:4114`) to insert one PO per item. Further transitions cascade via `cascadeSOStatusToPOs` (`_helpers.ts:829`).
+2. **Confirm / status cascade (DRAFT/PENDING → IN_PRODUCTION)** — `app.post("/:id/confirm")` `sales-orders.ts:2548`. Idempotent; flips status, writes `so_status_changes` (autoActions JSON), and calls `createProductionOrdersForSO` (`_helpers.ts:591`, called at `sales-orders.ts:2701`; a second call site for the PUT path sits at `:4114`) to insert one PO per item. Further transitions cascade via `cascadeSOStatusToPOs` (`_helpers.ts:788`).
 3. **Sofa-combo pricing** — `runSofaComboPass` `sofa-combo-pass.ts:132` (resolves base prices via `resolveLineBasePriceSen` `:76`, `seatHeightOf` `:64`) → calls `applySofaCombos` `sofa-combo.ts:209` which subset-matches lines (`findComboSubset` `:98`, module-private) and returns `newBaseByKey` + total discount; per-unit split via `distributeComboUnitPrices` (`:165`). Called from SO POST (`sales-orders.ts:2253`) and PUT (`:3799`) — those are the ONLY two call sites.
 4. **Edit SO** — `app.put("/:id")` `sales-orders.ts:3216`. Re-resolves items, re-runs `runSofaComboPass` at `:3912` (old full-price combo SOs re-price down here), re-cascades status/locks.
 5. **Copy-from-source (draft picker)** — `CopyFromSourceModal` `create.tsx:2411` (2-step) + backend `app.post("/copy-for-service-order")` `sales-orders.ts:5434`.
@@ -113,11 +115,11 @@ Owns the customer-facing order lifecycle: **Sales Orders** (SO) and their line i
 | `app.post("/")` (create) | `src/api/routes/sales-orders.ts:1763` | SO create + combo pass + snapshot invalidation |
 | `app.put("/:id")` (edit) | `src/api/routes/sales-orders.ts:3216` | SO edit + re-run combo pass |
 | `app.post("/:id/confirm")` | `src/api/routes/sales-orders.ts:2548` | DRAFT/PENDING → IN_PRODUCTION, cascade to POs |
-| `createProductionOrdersForSO` | `sales-orders/_helpers.ts:632` | One production_orders row per SO item |
-| `cascadeSOStatusToPOs` | `sales-orders/_helpers.ts:829` | Propagate SO status change to POs/JCs |
+| `createProductionOrdersForSO` | `sales-orders/_helpers.ts:591` | One production_orders row per SO item |
+| `cascadeSOStatusToPOs` | `sales-orders/_helpers.ts:788` | Propagate SO status change to POs/JCs |
 | `rowToSO` / `rowToSOList` | `sales-orders/_helpers.ts:243 / 307` | Row → API shape (dual-keyed) |
-| `buildPoDeliveryMap` | `sales-orders/_helpers.ts:1538` | SO detail: which DO each linked PO shows (live DO beats cancelled) |
-| `ensurePendingMigrations` | `sales-orders/_helpers.ts:1339` | Runtime column self-apply |
+| `buildPoDeliveryMap` | `sales-orders/_helpers.ts:1497` | SO detail: which DO each linked PO shows (live DO beats cancelled) |
+| `ensurePendingMigrations` | `sales-orders/_helpers.ts:1298` | Runtime column self-apply |
 | `runSofaComboPass` | `src/api/lib/sofa-combo-pass.ts:132` | Wrapper: resolve prices → applySofaCombos → write back |
 | `resolveLineBasePriceSen` | `src/api/lib/sofa-combo-pass.ts:76` | Resolve a line's base price (sen) |
 | `applySofaCombos` | `src/api/lib/sofa-combo.ts:209` | Pure combo matcher/renegotiator |
@@ -138,8 +140,8 @@ Owns the customer-facing order lifecycle: **Sales Orders** (SO) and their line i
 - **camelCase columns need a rename-map entry** (`column-rename-map.json`) or they 400 "Invalid request body"; read folded-lowercase cols dual-keyed (`r.camelCase ?? r.snake_case`). Prefer snake_case for new columns.
 
 ## Common tasks (mini-playbook)
-- **Add a field to the SO** → column self-apply in `ensurePendingMigrations` (`sales-orders/_helpers.ts:1339`); persist in `app.post("/")` (`sales-orders.ts:1763`) and `app.put("/:id")` (`:3880`); surface in `rowToSO` (`_helpers.ts:243`) / `rowToSOList` (`:307`); render in `create.tsx:214` and `detail.tsx:558`. New column = snake_case (+ rename-map if camelCase).
-- **Change the status cascade** → edit `cascadeSOStatusToPOs` (`sales-orders/_helpers.ts:829`) and the confirm handler (`sales-orders.ts:2548`); keep the `so_status_changes` autoActions JSON write in sync.
+- **Add a field to the SO** → column self-apply in `ensurePendingMigrations` (`sales-orders/_helpers.ts:1298`); persist in `app.post("/")` (`sales-orders.ts:1763`) and `app.put("/:id")` (`:3880`); surface in `rowToSO` (`_helpers.ts:243`) / `rowToSOList` (`:307`); render in `create.tsx:214` and `detail.tsx:558`. New column = snake_case (+ rename-map if camelCase).
+- **Change the status cascade** → edit `cascadeSOStatusToPOs` (`sales-orders/_helpers.ts:788`) and the confirm handler (`sales-orders.ts:2548`); keep the `so_status_changes` autoActions JSON write in sync.
 - **Adjust sofa-combo pricing** → change the engine in `applySofaCombos` (`sofa-combo.ts:209`) / `findComboSubset` (`:98`); never touch the frontend. Rule data via `sofa-combos.ts` + grid `maintenance/sofa-combos.tsx:370`. Verify with `tests/sofa-combo.test.mjs`.
 - **Touch consignment flow** → CO in `consignment-orders.ts` (create `:653`, confirm `:1700`, edit `:1817`, cancel `:2487`, hub `:2630`); CN dispatch/delivered in `consignment-notes.ts`.
 

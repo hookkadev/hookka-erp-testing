@@ -2004,7 +2004,7 @@ function CreateSalesOrderPage() {
               <button onClick={() => setBomError({ open: false, incompleteProducts: [], soId: null })} className="text-[#9CA3AF] hover:text-[#374151]"><X className="h-5 w-5" /></button>
             </div>
             <p className="text-sm text-[#374151]">
-              Cannot confirm — the following products have no BOM yet:
+              Cannot confirm — these products have no WIP components in their BOM yet:
             </p>
             <ul className="space-y-1 text-sm bg-[#FBF3F1] border border-[#E8B2A1] rounded-md p-3 max-h-64 overflow-y-auto">
               {bomError.incompleteProducts.map((p) => (
@@ -2014,7 +2014,7 @@ function CreateSalesOrderPage() {
               ))}
             </ul>
             <p className="text-xs text-[#6B7280]">
-              Please complete their BOM in Products &rarr; BOM first, then retry. The order has been saved as DRAFT.
+              Fill in their WIP components in Products &rarr; BOM first, then retry. The order has been saved as DRAFT.
             </p>
             <div className="flex justify-end gap-3">
               {bomError.incompleteProducts.length === 1 && (
@@ -3399,7 +3399,7 @@ function LineItemCard({
           <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
           <span>
             WIP components for {item.productCode} are not filled in its BOM yet.
-            Fill them in Products &rarr; BOM before this goes to production.
+            You can save this order as a draft, but it can't be confirmed until they're filled in Products &rarr; BOM.
           </span>
         </div>
       )}
