@@ -63,6 +63,8 @@ type LibItem = {
   purpose?: string; definition?: string; measurement?: string[];
   defaultTarget: number; defaultWeight: number; available: boolean;
   current: number | null; evidence: string;
+  editableRules?: string[];
+  penaltyPerPct?: number; earlyStepPct?: number; earlyBonusPerStep?: number; earlyMaxBonus?: number;
   assignedTo: Array<{ userId: string; name: string; role: string }>;
 };
 type PersonRow = {
@@ -466,6 +468,9 @@ export default function KpiPage() {
                               <li key={m} className="text-[11.5px] text-[#3A3733] leading-relaxed">{m}</li>
                             ))}
                           </ol>
+                        )}
+                        {k.key === "customer_delivery_date" && (k.editableRules?.length ?? 0) > 0 && (
+                          <DeliveryRulesEditor item={k} />
                         )}
                         {(k.surveyQuestions?.length ?? 0) > 0 && (
                           <div>
@@ -1194,6 +1199,81 @@ function SurveyLinkMaker({
           in 30 days — generate a new one for the next customer.
         </p>
       )}
+    </div>
+  );
+}
+
+/**
+ * The delivery KPI's scoring numbers, editable by Super Admin. One set for the
+ * whole company. Saving refetches the library, so the explanation above it is
+ * rebuilt from the new numbers.
+ */
+function DeliveryRulesEditor({ item }: { item: LibItem }) {
+  const [form, setForm] = useState({
+    penaltyPerPct: String(item.penaltyPerPct ?? 10),
+    earlyStepPct: String(item.earlyStepPct ?? 10),
+    earlyBonusPerStep: String(item.earlyBonusPerStep ?? 1),
+    earlyMaxBonus: String(item.earlyMaxBonus ?? 5),
+  });
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  const num = (key: keyof typeof form, label: string) => (
+    <input
+      type="number"
+      min={0}
+      max={100}
+      step="any"
+      inputMode="decimal"
+      aria-label={label}
+      value={form[key]}
+      onChange={(e) => { setForm({ ...form, [key]: e.target.value }); setMsg(""); }}
+      className="mx-1 h-7 w-14 rounded-md border border-[#E2DDD8] bg-white px-1.5 text-right text-[11.5px] tabular-nums"
+    />
+  );
+
+  const save = async () => {
+    setBusy(true);
+    setMsg("");
+    try {
+      const r = await fetch(`/api/kpi/rules/${item.key}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(Object.fromEntries(Object.entries(form).map(([k, v]) => [k, Number(v)]))),
+      });
+      const j = (await r.json()) as { success?: boolean; error?: string };
+      if (!r.ok || !j.success) throw new Error(j.error || "Could not save the rules");
+      setMsg("Saved. Every month not yet settled now uses these numbers.");
+      invalidateCachePrefix("/api/kpi");
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "Could not save the rules");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-2 rounded-lg border border-[#E2DDD8] bg-white p-3 space-y-2">
+      <p className="text-[11.5px] font-semibold text-[#1F1D1B]">Scoring rules (applies to everyone)</p>
+      <p className="text-[11.5px] text-[#3A3733] leading-loose">
+        Lose{num("penaltyPerPct", "Points lost per 1% late")}points for every 1% of orders shipped late.
+      </p>
+      <p className="text-[11.5px] text-[#3A3733] leading-loose">
+        Win back{num("earlyBonusPerStep", "Bonus points per step")}point(s) for every
+        {num("earlyStepPct", "Early % per step")}% shipped early, up to
+        {num("earlyMaxBonus", "Most bonus points")}points. The score never goes above 100.
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void save()}
+          className="h-7 rounded-md bg-[#6B5C32] px-3 text-[11.5px] font-semibold text-white disabled:opacity-50"
+        >
+          {busy ? "Saving..." : "Save rules"}
+        </button>
+        {msg && <span className="text-[11px] text-[#5A5550]">{msg}</span>}
+      </div>
     </div>
   );
 }

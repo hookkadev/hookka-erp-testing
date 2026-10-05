@@ -10,7 +10,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import {
-  KPI_CATALOG, GATE_FAIL_CAP, attainment, kpiByKey, kpisForRole,
+  KPI_CATALOG, GATE_FAIL_CAP, attainment, kpiByKey, kpisForRole, withRules,
 } from "../src/api/lib/kpi-catalog.ts";
 
 const ROUTE = readFileSync(resolve(process.cwd(), "src/api/routes/kpi.ts"), "utf8");
@@ -89,6 +89,31 @@ test("a rated KPI publishes its bands before the month starts", () => {
       `${k.key} must say plainly that a human scores it`,
     );
   }
+});
+
+test("late deliveries cost points, early ones win some back, never past 100", () => {
+  // Owner 2026-10-05: 1% late → 90 … 10% late → 0; 10% early → +1 … 50% → +5.
+  const d = kpiByKey("customer_delivery_date");
+  assert.equal(attainment(d, 0, 0, 0), 100);
+  assert.equal(attainment(d, 0, 3, 0), 70);
+  assert.equal(attainment(d, 0, 0, 30), 100, "the bonus never lifts the score past 100");
+  assert.equal(attainment(d, 0, 3, 30), 73);
+  assert.equal(attainment(d, 0, 3, 39.9), 73, "steps round down");
+  assert.equal(attainment(d, 0, 5, 60), 55, "the bonus stops at its maximum");
+  assert.equal(attainment(d, 0, 17.5, 0), 0);
+  assert.equal(attainment(d, 0, 2), 80, "no early figure is no bonus");
+
+  // Saved company rules replace the numbers AND the wording the card shows.
+  const r = withRules(d, { penaltyPerPct: 5, earlyStepPct: 20, earlyBonusPerStep: 2, earlyMaxBonus: 4 });
+  assert.equal(attainment(r, 0, 3, 0), 85);
+  assert.equal(attainment(r, 0, 3, 45), 89);
+  assert.equal(attainment(withRules(d, { penaltyPerPct: 0 }), 0, 50), 100, "0 is a real setting, not a fallback to 10");
+  assert.match(r.detail, /costs 5 points/);
+  assert.match(r.formula, /× 5/);
+  assert.ok(r.measurement.some((m) => /Every 20% of orders shipped early wins back 2 point/.test(m)));
+  assert.equal(d.penaltyPerPct, 10, "the catalogue entry itself is not mutated");
+  assert.equal(withRules(kpiByKey("setup_completeness"), { penaltyPerPct: 5 }).penaltyPerPct, undefined,
+    "a KPI with no editable rules ignores them");
 });
 
 test("invoicing lag costs 10 points per document-day", () => {
