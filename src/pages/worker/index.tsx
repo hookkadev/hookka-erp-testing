@@ -1329,9 +1329,9 @@ export default function WorkerHomePage() {
         </div>
       )}
 
-      {/* Daily attendance MOVED to the Pay page (owner 2026-06-12: the per-day
-          punch records belong under the pay breakdown, following its month
-          picker). Home stays focused on today + completed pieces. */}
+      {/* Daily attendance lives on its own History tab (/worker/history,
+          owner 2026-10-05; it sat under Pay from 2026-06-12). Home stays
+          focused on today + completed pieces. */}
 
       {/* Team summary lived here pre-2026-05-10. Moved to /worker/team
           (dedicated tab on the bottom nav) so the leader gets the full
