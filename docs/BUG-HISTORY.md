@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-05**: newest entry BUG-2026-10-05-257 (branch `fix/worker-pay-advance-line`, to staging; 254 and 255 are on `main`, 256 is on open branch `fix/backfill-zero-minutes-open-cards`); a log, so "verified" means the entry matches the code on its branch.
 > **Last verified: 2026-10-05**: newest entry BUG-2026-10-05-253 (branch `feat/kpi-assign-unassign`, to staging); a log, so "verified" means the entry matches the code on its branch.
 > **Last verified: 2026-10-02**: newest entry BUG-2026-10-02-252 (branch `fix/dashboard-exp-kpi-scale`, to staging; 251 is taken on `main`); a log, so "verified" means the entry matches the code on its branch.
 > **Last verified: 2026-10-02** (branch `chore/sync-staging-from-main-1002`, staging<-main merge): both logs merged, one copy of each entry. Numbering follows `main`: staging's BUG-2026-10-01-241 (accessories got every job card twice) is the same bug as main's BUG-2026-10-01-244, so staging's entry is dropped for main's (which has the (FC) follow-up), and 241 now means main's DEV-08 entry. Main-only entries 238, 237, 241, 243 to 247 and 250 added.
@@ -96,6 +97,20 @@ Entries themselves stay newest-first.
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
 
 ---
+
+## BUG-2026-10-05-257 — Worker My Pay: Net below Gross with no reason shown when a salary advance was taken `payroll` 🟢
+
+🟢 Fixed on `fix/worker-pay-advance-line` (to `staging`). Report (owner, photo of a worker's phone): Gross RM 2,114.80, Net RM 2,014.80, no line explaining the RM 100.
+
+**Measured on prod (read only, 2026-10-05).** The slip is September 2026 for one worker, still DRAFT: `grossPay` 211480, `netPay` 201480, EPF / SOCSO / EIS / PCB all 0, `advanceDeductionSen` 10000, `penaltyDeductionSen` 0. One `employee_advances` row for that worker: 2026-09-21, 10000 sen, empty note, UNSETTLED. Prod has no penalty records at all, so this was never a penalty.
+
+**Cause.** Payroll takes salary advances off Net (`netPayAfterAdvanceAndPenaltySen`), and the admin page and the PDF payslip both show the advance. The worker phone did not: `GET /api/worker/payslips` never selected `advance_deduction_sen`, and the finished-month card in `src/pages/worker/pay.tsx` only had rows for EPF, SOCSO, EIS and Tax.
+
+**Fix.** The handler self-applies the advance column (`ensureAdvanceTables`), selects it and returns `advanceDeductionSen` plus `advanceDays` (date, amount, note per advance dated in that month, the same rule as the PDF). The card shows "Salary advance − RM x" after Tax; tapping it lists the dates and notes. `employee_advances` joins the snapshot's source tables and the cache key gains `:adv`, so a cached month built before this change is never served. Limit: `employee_advances` has no `updated_at`, so an in-place edit of an advance's note or date (`PUT /api/employee-advances/:id`) can show the old chip text until another source table changes; the amount comes from the payslip and is always current.
+
+**Not changed.** Penalties are still shown in their own card under the pay card, not as a line between Gross and Net.
+
+**Guard.** `tests/worker-pay-advance-line.test.mjs`. `tests/db-schema.json` gains `payslips.advance_deduction_sen` (runtime-added by `ensureAdvanceTables`; on prod it holds the 10000 above), so `tests/sql-columns-exist.test.mjs` accepts the new SELECT.
 
 ## BUG-2026-10-05-253 — KPI: no way to take a person off a KPI, and a removal would have rewritten their settled months `kpi` 🟢
 
