@@ -21,6 +21,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCachedJson, invalidateCachePrefix } from "@/lib/cached-fetch";
 import { getCurrentUser } from "@/lib/auth";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { drillHref, SETUP_FIELD_LABEL } from "@/lib/kpi-drill";
 
 /** The four per-field cuts offered under the setup_completeness drill link. */
@@ -110,6 +111,7 @@ const Badge = ({ kind, children }: { kind: string; children: React.ReactNode }) 
 
 export default function KpiPage() {
   const me = getCurrentUser();
+  const { confirm } = useConfirm();
   const isSuperAdmin = (me?.role ?? "").toUpperCase() === "SUPER_ADMIN";
   const [period, setPeriod] = useState(() => new Date().toISOString().slice(0, 7));
   const months = useMemo(() => monthsBack(12), []);
@@ -204,6 +206,31 @@ export default function KpiPage() {
     } finally {
       setSaving(false);
     }
+  };
+
+  // Taking one person off one KPI. The upsert route already accepts
+  // isActive:false; the Library only reads active rows, so the chip goes.
+  // Target and weight are overwritten, which is harmless: re-assigning sends
+  // both again.
+  const unassign = async (k: LibItem, a: LibItem["assignedTo"][number]) => {
+    const ok = await confirm({
+      title: "Remove from KPI?",
+      message: `Take ${a.name} off "${k.label}"? Months already settled keep their score.`,
+      danger: true,
+      confirmLabel: "Remove",
+    });
+    if (!ok) return;
+    setMsg(null);
+    const r = await fetch(`/api/kpi/kpi/${k.key}/assignees`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        assignees: [{ userId: a.userId, target: k.defaultTarget, weight: 0, isActive: false }],
+      }),
+    });
+    const j = (await r.json().catch(() => ({}))) as { success?: boolean; error?: string };
+    if (!r.ok || !j.success) setMsg(j.error || `Could not remove ${a.name}`);
+    invalidateCachePrefix("/api/kpi");
   };
 
   // ---- Payout settings, per person ----------------------------------------
@@ -344,8 +371,11 @@ export default function KpiPage() {
               <div>
                 <p className="text-sm font-bold">All KPIs</p>
                 <p className="text-[11px] text-[#9CA3AF]">
-                  {lib.length} defined · tick several, then assign in one go
+                  {lib.length} defined · click KPIs to pick them, then assign in one go
                 </p>
+                {/* A failed removal with nothing picked has no Assign footer to
+                    show in, so the message surfaces here. */}
+                {msg && !pickedDefs.length && <p className="text-[11px] text-[#9A3A2D]">{msg}</p>}
               </div>
             </div>
             {libLoading && !lib.length ? (
@@ -364,11 +394,17 @@ export default function KpiPage() {
                         sit here in full and turned every row into a wall of
                         text — the list has to be scannable first, explained
                         second. */}
-                    <div className="flex items-center gap-3 px-4 py-3">
+                    {/* The whole row picks the KPI, not just the tick; the tick
+                        is readOnly so its own click bubbles here once. */}
+                    <div
+                      onClick={() => togglePick(k.key)}
+                      className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-[#FBF8F2]"
+                    >
                       <input
                         type="checkbox"
                         checked={picked.has(k.key)}
-                        onChange={() => togglePick(k.key)}
+                        readOnly
+                        aria-label={`Pick ${k.label}`}
                         className="shrink-0"
                       />
                       <div className="flex-1 min-w-0">
@@ -393,8 +429,17 @@ export default function KpiPage() {
                         </span>
                       ) : (
                         k.assignedTo.map((a) => (
-                          <span key={a.userId} className="rounded-full bg-[#EDE7DA] px-2 py-0.5 text-[10px] text-[#5A5550]">
+                          <span key={a.userId} className="inline-flex items-center rounded-full bg-[#EDE7DA] pl-2 text-[10px] text-[#5A5550]">
                             {a.name}
+                            <button
+                              type="button"
+                              onClick={() => unassign(k, a)}
+                              aria-label={`Remove ${a.name} from ${k.label}`}
+                              title="Remove"
+                              className="grid h-6 w-6 place-items-center rounded-full text-[13px] leading-none text-[#8A8178] hover:bg-[#DCD3C1] hover:text-[#9A3A2D]"
+                            >
+                              ×
+                            </button>
                           </span>
                         ))
                       )}
@@ -496,7 +541,7 @@ export default function KpiPage() {
             )}
           </Card>
 
-          <Card className="bg-white rounded-xl overflow-hidden">
+          <Card className="bg-white rounded-xl overflow-hidden lg:sticky lg:top-[calc(var(--app-sticky-h,0px)+1rem)]">
             <CardContent className="p-4">
               <p className="text-sm font-bold">
                 {pickedDefs.length ? `Assign ${pickedDefs.length} KPI(s)` : "Pick a KPI"}
@@ -504,7 +549,7 @@ export default function KpiPage() {
               <p className="text-[11px] text-[#9CA3AF]">
                 {pickedDefs.length
                   ? "Targets come from the catalogue — you set the weight"
-                  : "Tick one or more on the left to assign them"}
+                  : "Click one or more KPIs on the left to assign them"}
               </p>
               {/* Weight per KPI — a target belongs to the KPI, so the weight
                   it carries does too. */}
@@ -539,23 +584,29 @@ export default function KpiPage() {
                     {Math.round(weightTotal) === 100 ? " ✓" : " / 100"}
                   </span>
                 </div>
-                {(usersResp?.data ?? []).map((u) => (
-                  <label key={u.id} className="flex items-center gap-2 py-1 text-[11.5px] cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={chosenPeople.has(u.id)}
-                      onChange={() => {
-                        const next = new Set(chosenPeople);
-                        if (next.has(u.id)) next.delete(u.id);
-                        else next.add(u.id);
-                        setChosenPeople(next);
-                      }}
-                    />
-                    <span className="flex-1 truncate">
-                      {u.displayName || u.email} <span className="text-[#9CA3AF]">· {u.role}</span>
-                    </span>
-                  </label>
-                ))}
+                {/* Scrolls inside the panel so Assign stays in view. */}
+                <div className="max-h-[45vh] overflow-y-auto -mx-1 px-1">
+                  {(usersResp?.data ?? []).map((u) => (
+                    <label key={u.id} className="flex items-center gap-2 py-1 text-[11.5px] cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={chosenPeople.has(u.id)}
+                        onChange={() => {
+                          const next = new Set(chosenPeople);
+                          if (next.has(u.id)) next.delete(u.id);
+                          else next.add(u.id);
+                          setChosenPeople(next);
+                        }}
+                      />
+                      <span className="flex-1 truncate">
+                        {u.displayName || u.email} <span className="text-[#9CA3AF]">· {u.role}</span>
+                      </span>
+                      {pickedDefs.every((k) => k.assignedTo.some((a) => a.userId === u.id)) && (
+                        <span className="shrink-0 rounded-full bg-[#F2F7EE] px-1.5 text-[10px] text-[#3B6D11]">has it</span>
+                      )}
+                    </label>
+                  ))}
+                </div>
                 <div className="mt-2.5 flex items-center gap-2 flex-wrap">
                   <button
                     type="button"

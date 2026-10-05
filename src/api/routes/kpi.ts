@@ -174,8 +174,10 @@ async function buildCard(c: Context<Env>, userId: string, role: string, period: 
 
   for (const def of offered) {
     const a = assigned.get(def.key);
-    if (!a || a.isActive === false) continue;
+    if (!a) continue;
 
+    // A settled month keeps what it was settled on: taking someone off a KPI
+    // later must not change a score that was already agreed.
     if (isLocked) {
       const row = lockedRows.find((r) => r.kpiKey === def.key);
       if (!row) continue;
@@ -192,6 +194,7 @@ async function buildCard(c: Context<Env>, userId: string, role: string, period: 
       });
       continue;
     }
+    if (a.isActive === false) continue;
 
     if (!def.available) {
       lines.push({
