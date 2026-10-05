@@ -61,6 +61,7 @@ const dict: Dict = {
     my: 'ဝန်ထမ်းပေါ်တယ်',
   },
   'nav.home': { en: 'Home', ms: 'Utama', zh: '主页', my: 'ပင်မ' },
+  'nav.history': { en: 'History', ms: 'Sejarah', zh: '记录', my: 'မှတ်တမ်း' },
   'nav.scan': { en: 'Scan', ms: 'Imbas', zh: '扫码', my: 'စကင်န်' },
   'nav.team': { en: 'Team', ms: 'Pasukan', zh: '团队', my: 'အသင်း' },
   'nav.pay': { en: 'Pay', ms: 'Gaji', zh: '薪水', my: 'လစာ' },
