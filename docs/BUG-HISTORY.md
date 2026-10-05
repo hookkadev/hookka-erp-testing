@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-05**: newest entry BUG-2026-10-05-253 (branch `feat/kpi-assign-unassign-to-main`, to main; 252 is taken on staging).
 > **Last verified: 2026-10-02**: newest entry BUG-2026-10-02-251 (branch `feat/finance-row-menu-esc`; renumbered from 250, which `main` took first; 249 is on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-02**: newest entry BUG-2026-10-02-250 (branch `feat/m-install-and-desktop-switch`, to main); a log, so "verified" means the entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-02**: BUG-2026-10-01-240 got a follow-up (the Schedule email is now summary only; branch `feat/schedule-summary-email-to-main`, to main); a log, so "verified" means the entry matches the code on its branch, not that every older entry is still true.
@@ -66,6 +67,18 @@ Entries themselves stay newest-first.
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
 
 ---
+
+## BUG-2026-10-05-253 — KPI: no way to take a person off a KPI, and a removal would have rewritten their settled months `kpi` 🟢
+
+🟢 Fixed on `feat/kpi-assign-unassign` (to `staging`). Report (owner): once someone is assigned a KPI in the Library they cannot be removed; picking KPIs only works through the small tick box.
+
+**Cause.** The assignees route (`PUT /api/kpi/kpi/:kpiKey/assignees`) has always accepted `isActive: false`, but the Library page never offered a way to send it. Found while adding that: `buildCard` skipped inactive rows BEFORE it served a settled month's snapshot, so the first removal would also have dropped that KPI from every month already settled for that person and moved their agreed score.
+
+**Fix.** Each holder chip has a remove button (confirm, then the existing route with `isActive: false`); the whole KPI row picks it; the people list scrolls inside the panel; people already carrying the picked KPIs show "has it". `buildCard` now serves the locked snapshot first and only then skips inactive rows.
+
+**Prod effect of the reorder: UNMEASURED.** The per-person `PUT /assignments/:id` has accepted `isActive: false` all along, so an inactive row that overlaps a settled month may already exist; its line would come back on that month's card (to what was settled). Read-only check: count `kpi_assignments` rows with `isActive = FALSE` whose user has a `kpi_periods` row with `lockedAt IS NOT NULL`.
+
+**Guard.** `tests/kpi-module.test.mjs` ("a settled month is served as stored"): the locked branch must come before the inactive skip.
 
 ## BUG-2026-10-02-251 — Finance popups said Esc closes them (it did not); a fund transfer's popup said its page could edit it (it never could) `accounting` `ui-frontend` 🟢
 

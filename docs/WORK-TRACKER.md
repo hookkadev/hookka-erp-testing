@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-05**: branch `feat/kpi-assign-unassign-to-main` (to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-05**: branch `feat/permissions-tab-main` (Permissions tab, staging to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-02**: finance right-click row menus + Esc + fund transfer description edit (#680) closed ✅ with its prod check.
 > **Last verified: 2026-10-02**: branch `feat/m-install-and-desktop-switch` (to `main`, BUG-2026-10-02-250) added below (its entry is the newest).
@@ -87,6 +88,15 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-05 — 🔵 KPI Library: easier to pick, and people can be taken off a KPI (branch `feat/kpi-assign-unassign-to-main` → `main`, same change as #686 to staging)
+
+Owner ask: picking KPIs means hitting the small tick on the left, and once someone is assigned there is no way to take them off.
+
+1. 🔵 Clicking anywhere on a KPI row picks it (the tick stays). The people list scrolls inside the panel so Assign / Clear stay in view, and anyone already carrying every picked KPI shows "has it".
+2. 🔵 Each name chip on a KPI row has a remove button: confirm, then the existing `PUT /api/kpi/kpi/:kpiKey/assignees` with `isActive: false`. No new endpoint.
+3. 🔵 A removed KPI stays on the person's already-settled months (`buildCard` now checks the locked snapshot before the inactive skip), so removing someone never changes a settled score.
+4. ⬜ Verify on the PR preview / staging.
 
 ## 2026-10-05 — 🔵 Permissions tab to `main` (branch `feat/permissions-tab-main`)
 

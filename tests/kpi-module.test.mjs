@@ -189,10 +189,17 @@ test("a settled month is served as stored, not recomputed", () => {
   // agreed — and the whole thing becomes unarguable.
   assert.match(ROUTE, /lockedAt IS NOT NULL/);
   assert.match(ROUTE, /if \(isLocked\)/);
+  // Taking someone off a KPI must not drop it from a month already settled:
+  // the inactive skip has to come after the locked snapshot is served.
+  assert.ok(
+    ROUTE.indexOf("if (isLocked) {") < ROUTE.indexOf("if (a.isActive === false) continue;"),
+    "an unassigned KPI would vanish from a settled month",
+  );
 });
 
 test("a person is scored on what they were assigned, not on the whole catalogue", () => {
-  assert.match(ROUTE, /if \(!a \|\| a\.isActive === false\) continue;/);
+  assert.match(ROUTE, /if \(!a\) continue;/);
+  assert.match(ROUTE, /if \(a\.isActive === false\) continue;/);
   assert.ok(kpisForRole("OFFICE").length >= 4);
   assert.equal(kpisForRole("NOT_A_ROLE").length, 0);
 });
