@@ -79,6 +79,8 @@ type PayData = {
     socsoEeSen?: number;
     eisEeSen?: number;
     taxSen?: number;
+    advanceDeductionSen?: number;
+    advanceDays?: Array<{ date: string; amountSen: number; note: string }>;
   }>;
 };
 type PayslipRow = PayData["history"][number];
@@ -125,6 +127,17 @@ function asPayslipRow(v: unknown): PayslipRow | null {
     socsoEeSen: asNumber(v.socsoEeSen) ?? undefined,
     eisEeSen: asNumber(v.eisEeSen) ?? undefined,
     taxSen: asNumber(v.taxSen) ?? undefined,
+    advanceDeductionSen: asNumber(v.advanceDeductionSen) ?? 0,
+    advanceDays: Array.isArray(v.advanceDays)
+      ? v.advanceDays
+          .filter(isRecord)
+          .map((d) => ({
+            date: String(d.date ?? ""),
+            amountSen: asNumber(d.amountSen) ?? 0,
+            note: asString(d.note) ?? "",
+          }))
+          .filter((d) => d.date)
+      : [],
   };
 }
 
@@ -781,6 +794,19 @@ function FinalisedBreakdown({ slip, t }: { slip: PayslipRow; t: Translate }) {
         {slip.taxSen ? (
           <Row label="Tax" value={`− ${rm(slip.taxSen)}`} muted />
         ) : null}
+        {/* Cash already collected during the month. Net is net of it, so
+            without this line Net sat below Gross with no reason shown. */}
+        {slip.advanceDeductionSen ? (
+          <DetailRow
+            label={t("pay.salaryAdvance")}
+            value={`− ${rm(slip.advanceDeductionSen)}`}
+            chips={(slip.advanceDays ?? []).map((d, i) => ({
+              key: `${d.date}-${i}`,
+              text: `${fmtDay(d.date)} · ${rm(d.amountSen)}${d.note ? ` · ${d.note}` : ""}`,
+            }))}
+            tone="red"
+          />
+        ) : null}
         <div className="pt-2 mt-2 border-t border-white/10">
           <Row label="Net" value={rm(slip.netSen)} bold />
         </div>
@@ -861,7 +887,7 @@ function DetailRow({
           {chips.map((c) => (
             <span
               key={c.key}
-              className={`inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-medium tabular-nums ${palette}`}
+              className={`inline-flex max-w-full items-center break-words rounded px-1.5 py-0.5 text-[11px] font-medium tabular-nums ${palette}`}
             >
               {c.text}
             </span>

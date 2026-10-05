@@ -733,6 +733,13 @@ const dict: Dict = {
     zh: '迟到 / 工时不足',
     my: 'နောက်ကျ / နာရီမပြည့်',
   },
+  // Cash the worker already collected during the month, taken off Net pay.
+  'pay.salaryAdvance': {
+    en: 'Salary advance',
+    ms: 'Pendahuluan gaji',
+    zh: '预支薪水',
+    my: 'လစာကြိုတင်ငွေ',
+  },
   'pay.attendanceOt': {
     en: 'Attendance & OT',
     ms: 'Kehadiran & OT',
