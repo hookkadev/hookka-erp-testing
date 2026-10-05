@@ -31,7 +31,7 @@ as a Cloudflare Pages Function via `functions/api/[[route]].ts`. There is no
   route module) and is exempt from the rate limiter.
 
 **Counts at generation time:** 143 mounts, 141 route files in
-`src/api/routes/`, 1011 top-level handler registrations discovered.
+`src/api/routes/`, 1012 top-level handler registrations discovered.
 
 ## Scope and limits of this file
 
@@ -135,7 +135,7 @@ offsets pointing past the end of their own file.
 | `/api/dashboard/overview` | `src/api/routes/dashboard-overview.ts` | `GET /` <sub>:49</sub> | gated |
 | `/api/dashboard/prototype` | `src/api/routes/dashboard-prototype.ts` | `GET /` <sub>:293</sub> | gated |
 | `/api/dashboard/finance` | `src/api/routes/dashboard-finance.ts` | `GET /` <sub>:42</sub><br>`PUT /valuation` <sub>:110</sub> | gated |
-| `/api/kpi` | `src/api/routes/kpi.ts` | `GET /me` <sub>:280</sub><br>`GET /users/:id` <sub>:289</sub><br>`GET /payout/:id` <sub>:304</sub><br>`PUT /payout/:id` <sub>:311</sub><br>`PUT /checklist/:kpiKey` <sub>:383</sub><br>`GET /checklist/:kpiKey` <sub>:447</sub><br>`POST /survey/:kpiKey` <sub>:469</sub><br>`POST /survey/:kpiKey/link` <sub>:526</sub><br>`PUT /rating/:kpiKey` <sub>:593</sub><br>`GET /survey/:kpiKey` <sub>:646</sub><br>`GET /library` <sub>:667</sub><br>`GET /people` <sub>:713</sub><br>`GET /catalog` <sub>:762</sub><br>`GET /assignments/:id` <sub>:774</sub><br>`PUT /assignments/:id` <sub>:787</sub><br>`PUT /kpi/:kpiKey/assignees` <sub>:850</sub> | gated |
+| `/api/kpi` | `src/api/routes/kpi.ts` | `GET /me` <sub>:304</sub><br>`GET /users/:id` <sub>:313</sub><br>`GET /payout/:id` <sub>:328</sub><br>`PUT /payout/:id` <sub>:335</sub><br>`PUT /checklist/:kpiKey` <sub>:407</sub><br>`GET /checklist/:kpiKey` <sub>:471</sub><br>`POST /survey/:kpiKey` <sub>:493</sub><br>`POST /survey/:kpiKey/link` <sub>:550</sub><br>`PUT /rating/:kpiKey` <sub>:617</sub><br>`GET /survey/:kpiKey` <sub>:670</sub><br>`GET /library` <sub>:691</sub><br>`PUT /rules/:kpiKey` <sub>:745</sub><br>`GET /people` <sub>:785</sub><br>`GET /catalog` <sub>:834</sub><br>`GET /assignments/:id` <sub>:848</sub><br>`PUT /assignments/:id` <sub>:861</sub><br>`PUT /kpi/:kpiKey/assignees` <sub>:924</sub> | gated |
 | `/api/mdm` | `src/api/routes/mdm.ts` | `GET /review-queue` <sub>:89</sub><br>`POST /review-queue/:id/dismiss` <sub>:198</sub><br>`POST /review-queue/:id/merge` <sub>:212</sub><br>`POST /detection/run` <sub>:232</sub> | gated |
 | `/api/files` | `src/api/routes/files.ts` | `POST /` <sub>:377</sub><br>`GET /` <sub>:406</sub><br>`PATCH /:id/cover` <sub>:437</sub><br>`GET /:id` <sub>:461</sub><br>`GET /:id/download` <sub>:483</sub><br>`GET /:id/stream` <sub>:526</sub><br>`DELETE /:id` <sub>:570</sub> | gated |
 | `/api/sheets-sync` | `src/api/routes/sheets-sync.ts` | `POST /apps-script-webhook` <sub>:66</sub><br>`POST /backfill` <sub>:332</sub> | gated (some paths public) |

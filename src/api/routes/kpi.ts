@@ -29,10 +29,13 @@ import {
   DEFAULT_PAYOUT_BANDS,
   bandFor,
   attainment,
+  editableRules,
+  withRules,
   kpiByKey,
   kpisForRole,
   payoutSen,
   type KpiDef,
+  type KpiRules,
   type PayoutSettings,
 } from "../lib/kpi-catalog";
 import {
@@ -77,6 +80,25 @@ async function loadAssignments(
     .all<AssignmentRow>();
   const m = new Map<string, AssignmentRow>();
   for (const r of res.results ?? []) m.set(String(r.kpiKey), r);
+  return m;
+}
+
+/** The company's saved scoring numbers, per KPI. Missing or broken = defaults. */
+async function loadRules(c: Context<Env>): Promise<Map<string, KpiRules>> {
+  const res = await c.var.DB.prepare(
+    `SELECT kpiKey, rules FROM kpi_rule_settings WHERE orgId = ?`,
+  )
+    .bind(getOrgId(c))
+    .all<{ kpiKey: string; rules: string | null }>();
+  const m = new Map<string, KpiRules>();
+  for (const r of res.results ?? []) {
+    try {
+      const parsed = r.rules ? JSON.parse(r.rules) : null;
+      if (parsed && typeof parsed === "object") m.set(String(r.kpiKey), parsed as KpiRules);
+    } catch {
+      /* keep the default */
+    }
+  }
   return m;
 }
 
@@ -156,6 +178,7 @@ async function buildCard(c: Context<Env>, userId: string, role: string, period: 
   const isLocked = lockedRows.length > 0;
 
   const assigned = await loadAssignments(c, userId);
+  const rules = await loadRules(c);
   // A person is measured on exactly what they were ASSIGNED — driven off the
   // assignment rows, NOT off their role's slice of the catalogue.
   //
@@ -169,7 +192,8 @@ async function buildCard(c: Context<Env>, userId: string, role: string, period: 
   // Assigning nothing still shows an empty card rather than every default.
   const offered = [...assigned.keys()]
     .map((k) => kpiByKey(k))
-    .filter((d): d is KpiDef => Boolean(d));
+    .filter((d): d is KpiDef => Boolean(d))
+    .map((d) => withRules(d, rules.get(d.key)));
   const lines: CardLine[] = [];
 
   for (const def of offered) {
@@ -218,7 +242,7 @@ async function buildCard(c: Context<Env>, userId: string, role: string, period: 
             ? await manualRating(c, period, userId, def.key)
             : await computeMetric(c, def.key, period);
     const att =
-      m.actual === null ? null : attainment(def, Number(a.target), m.actual);
+      m.actual === null ? null : attainment(def, Number(a.target), m.actual, m.earlyPct);
     lines.push({
       key: def.key, label: def.label, detail: def.detail,
       scoring: def.scoring, formula: def.formula, checklistItems: def.checklistItems,
@@ -691,8 +715,10 @@ app.get("/library", async (c) => {
     byKpi.set(String(h.kpiKey), list);
   }
 
+  const rules = await loadRules(c);
   const data = [];
-  for (const def of KPI_CATALOG) {
+  for (const base of KPI_CATALOG) {
+    const def = withRules(base, rules.get(base.key));
     // The company-level current value, so a target can be set against reality
     // rather than against a guess.
     const m = def.available
@@ -703,10 +729,56 @@ app.get("/library", async (c) => {
       current: m.actual,
       evidence: m.detail,
       sampleSize: m.sampleSize,
+      editableRules: editableRules(def.key),
       assignedTo: byKpi.get(def.key) ?? [],
     });
   }
   return c.json({ success: true, period, data, gateCap: GATE_FAIL_CAP });
+});
+
+// ---- Scoring rules, one set for the company -------------------------------
+//
+// Owner 2026-10-05: the numbers behind a KPI (points per 1% late, the early
+// bonus) are set from the Library tab instead of in code. Only the fields in
+// EDITABLE_RULES are accepted. A settled month keeps the score it was settled
+// with; every month not yet settled is recomputed with the new numbers.
+app.put("/rules/:kpiKey", async (c) => {
+  const denied = requireSuperAdmin(c);
+  if (denied) return denied;
+  await ensureKpiTables(c.var.DB);
+  const kpiKey = c.req.param("kpiKey");
+  const fields = editableRules(kpiKey);
+  if (!fields.length) {
+    return c.json({ success: false, error: `${kpiKey} has no editable rules` }, 400);
+  }
+
+  let body: Record<string, unknown>;
+  try {
+    body = (await c.req.json()) as Record<string, unknown>;
+  } catch {
+    return c.json({ success: false, error: "Invalid JSON body" }, 400);
+  }
+  const rules: KpiRules = {};
+  for (const f of fields) {
+    const v = Number(body[f]);
+    if (body[f] == null || !Number.isFinite(v) || v < 0 || v > 100) {
+      return c.json({ success: false, error: `${f} must be a number from 0 to 100` }, 400);
+    }
+    rules[f] = v;
+  }
+  if (rules.earlyStepPct !== undefined && rules.earlyStepPct <= 0) {
+    return c.json({ success: false, error: "earlyStepPct must be more than 0" }, 400);
+  }
+
+  await c.var.DB.prepare(
+    `INSERT INTO kpi_rule_settings (kpiKey, orgId, rules, updatedBy, updatedAt)
+     VALUES (?, ?, ?, ?, NOW())
+     ON CONFLICT (orgId, kpiKey) DO UPDATE
+       SET rules = EXCLUDED.rules, updatedBy = EXCLUDED.updatedBy, updatedAt = NOW()`,
+  )
+    .bind(kpiKey, getOrgId(c), JSON.stringify(rules), ctxGet(c, "userId"))
+    .run();
+  return c.json({ success: true, data: rules });
 });
 
 // ---- People: everyone's score for a period, without clicking in -----------
@@ -762,10 +834,12 @@ app.get("/people", async (c) => {
 app.get("/catalog", async (c) => {
   const denied = requireSuperAdmin(c);
   if (denied) return denied;
+  await ensureKpiTables(c.var.DB);
   const role = (c.req.query("role") ?? "").toUpperCase();
+  const rules = await loadRules(c);
   return c.json({
     success: true,
-    data: role ? kpisForRole(role) : KPI_CATALOG,
+    data: (role ? kpisForRole(role) : KPI_CATALOG).map((d) => withRules(d, rules.get(d.key))),
     gateCap: GATE_FAIL_CAP,
   });
 });
