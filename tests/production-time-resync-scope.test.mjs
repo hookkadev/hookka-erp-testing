@@ -53,8 +53,9 @@ test("the retired Production Times dialog stays retired", () => {
     !/function ProductionTimesDialog\(/.test(bomPage),
     "the inline Production Times dialog was retired - re-adding it must also restore runProductionTimeResync()",
   );
-  // The matrix is still READ for BOM minute auto-fill; only the writer is gone.
-  assert.match(bomPage, /cfg\?\.productionTimes\?\.\[deptCode\]/);
+  // Owner 2026-10-05: BOM minutes are typed in, so the page no longer reads the
+  // matrix either (tests/bom-manual-minutes.test.mjs pins the rest).
+  assert.doesNotMatch(bomPage, /productionTimes/);
   // The endpoint itself is untouched by the UI change.
   assert.match(bomRoute, /resync-job-card-times/);
 });

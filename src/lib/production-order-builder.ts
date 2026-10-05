@@ -182,7 +182,7 @@ export function createJobCardsFromBOM(
         completedDate: null,
         estMinutes: p.minutes,
         actualMinutes: null,
-        category: p.category || "CAT 1",
+        category: p.category || "",
         productionTimeMinutes: p.minutes,
         overdue: "PENDING",
         // BOM-branch identifier (added 2026-04-27). Equals the top-level

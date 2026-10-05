@@ -4,7 +4,6 @@ import { useNavigate } from "react-router-dom";
 import { cachedFetchJson, invalidateCachePrefix } from "@/lib/cached-fetch";
 import { useToast } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/confirm-dialog";
-import { getVariantsConfigSync } from "@/lib/kv-config";
 import { resolveWipTokens, type BomVariantContext } from "@/api/lib/bom-wip-breakdown";
 import { withProductCategory } from "./bom-category";
 import type {
@@ -138,13 +137,6 @@ const DEPT_LABELS: Record<string, string> = {
   PACKING: "Packing",
 };
 
-// ---------- Production Time lookup ----------
-// Reads the dept × category minutes matrix the user configures in
-// /settings/variants → Production Times. BOM process rows use this to
-// auto-fill minutes when a category is picked.
-// Data lives in D1 under kv_config('variants-config'); the in-memory cache is
-// primed at dashboard mount (see DashboardLayout.tsx) so this sync API stays
-// ergonomic for the dozens of call sites here.
 // A BOM material is a FILLER (sponge / sheet) when the raw material it points
 // to belongs to a FILLER item group — then its consumption is area-based
 // (cut size ÷ sheet size). autoDetect (fabric / leg) lines are never filler.
@@ -171,21 +163,23 @@ function materialHasKit(m: WIPMaterial): boolean {
   return !!code && KIT_PARENT_CODES.has(code);
 }
 
-function getProductionMinutes(deptCode: string, category: string): number {
-  if (typeof window === "undefined") return 0;
-  const cfg = getVariantsConfigSync();
-  return cfg?.productionTimes?.[deptCode]?.[category] ?? 0;
-}
-
-// Category options come from the user-configured fabricGroups list
-// (Variants & Options → Fabric Groups). These double as the
-// production-time categories used by BOM process rows.
-function getCategoryOptions(): string[] {
-  const DEFAULTS = ["CAT 1", "CAT 2", "CAT 3", "CAT 4", "CAT 5", "CAT 6", "CAT 7"];
-  if (typeof window === "undefined") return DEFAULTS;
-  const cfg = getVariantsConfigSync();
-  const groups = cfg?.fabricGroups;
-  return Array.isArray(groups) && groups.length > 0 ? groups : DEFAULTS;
+// Minutes of a BOM process row, typed in by hand: whole minutes, 0 to 1440
+// (the WIP Times cap). Owner 2026-10-05: the CAT 1-14 categories that used
+// to fill this in from the Production Times matrix are gone from the BOM.
+function MinutesInput({ value, onChange, className }: { value: number; onChange: (minutes: number) => void; className: string }) {
+  return (
+    <input
+      type="number"
+      min={0}
+      max={1440}
+      step={1}
+      value={value}
+      onFocus={(e) => e.target.select()}
+      onChange={(e) => onChange(Math.min(1440, Math.max(0, Math.round(Number(e.target.value) || 0))))}
+      aria-label="Minutes"
+      className={className}
+    />
+  );
 }
 
 const WIP_TYPE_LABELS: Record<string, { label: string; color: string }> = {
@@ -438,9 +432,9 @@ function buildFallbackMasterTemplate(cat: BOMCategory): MasterTemplate {
       isDefault: true,
       category: "ACCESSORY",
       l1Processes: [
-        { dept: "Fab Cut", deptCode: "FAB_CUT", category: "CAT 1", minutes: 10 },
-        { dept: "Fab Sew", deptCode: "FAB_SEW", category: "CAT 1", minutes: 20 },
-        { dept: "Packing", deptCode: "PACKING", category: "CAT 1", minutes: 5 },
+        { dept: "Fab Cut", deptCode: "FAB_CUT", category: "", minutes: 10 },
+        { dept: "Fab Sew", deptCode: "FAB_SEW", category: "", minutes: 20 },
+        { dept: "Packing", deptCode: "PACKING", category: "", minutes: 5 },
       ],
       l1Materials: [
         { code: "", name: "Fabric (from order)", qty: 1, unit: "MTR", autoDetect: "FABRIC" },
@@ -456,9 +450,9 @@ function buildFallbackMasterTemplate(cat: BOMCategory): MasterTemplate {
       isDefault: true,
       category: "BEDFRAME",
       l1Processes: [
-        { dept: "Fab Cut", deptCode: "FAB_CUT", category: "CAT 3", minutes: 50 },
-        { dept: "Fab Sew", deptCode: "FAB_SEW", category: "CAT 3", minutes: 120 },
-        { dept: "Foam Bonding", deptCode: "FOAM", category: "CAT 3", minutes: 25 },
+        { dept: "Fab Cut", deptCode: "FAB_CUT", category: "", minutes: 50 },
+        { dept: "Fab Sew", deptCode: "FAB_SEW", category: "", minutes: 120 },
+        { dept: "Foam Bonding", deptCode: "FOAM", category: "", minutes: 25 },
       ],
       l1Materials: [
         { code: "", name: "Fabric (from order)", qty: 1, unit: "MTR", autoDetect: "FABRIC" },
@@ -476,11 +470,11 @@ function buildFallbackMasterTemplate(cat: BOMCategory): MasterTemplate {
           wipType: "DIVAN",
           quantity: 1,
           processes: [
-            { dept: "Wood Cut", deptCode: "WOOD_CUT", category: "CAT 1", minutes: 20 },
-            { dept: "Framing", deptCode: "FRAMING", category: "CAT 6", minutes: 20 },
-            { dept: "Webbing", deptCode: "WEBBING", category: "CAT 1", minutes: 4 },
-            { dept: "Upholstery", deptCode: "UPHOLSTERY", category: "CAT 6", minutes: 15 },
-            { dept: "Packing", deptCode: "PACKING", category: "CAT 3", minutes: 20 },
+            { dept: "Wood Cut", deptCode: "WOOD_CUT", category: "", minutes: 20 },
+            { dept: "Framing", deptCode: "FRAMING", category: "", minutes: 20 },
+            { dept: "Webbing", deptCode: "WEBBING", category: "", minutes: 4 },
+            { dept: "Upholstery", deptCode: "UPHOLSTERY", category: "", minutes: 15 },
+            { dept: "Packing", deptCode: "PACKING", category: "", minutes: 20 },
           ],
           materials: [
             { code: "", name: "Fabric (from order)", qty: 1, unit: "MTR", autoDetect: "FABRIC" },
@@ -498,11 +492,11 @@ function buildFallbackMasterTemplate(cat: BOMCategory): MasterTemplate {
           wipType: "HEADBOARD",
           quantity: 1,
           processes: [
-            { dept: "Wood Cut", deptCode: "WOOD_CUT", category: "CAT 5", minutes: 10 },
-            { dept: "Framing", deptCode: "FRAMING", category: "CAT 4", minutes: 40 },
-            { dept: "Webbing", deptCode: "WEBBING", category: "CAT 7", minutes: 20 },
-            { dept: "Upholstery", deptCode: "UPHOLSTERY", category: "CAT 4", minutes: 40 },
-            { dept: "Packing", deptCode: "PACKING", category: "CAT 2", minutes: 30 },
+            { dept: "Wood Cut", deptCode: "WOOD_CUT", category: "", minutes: 10 },
+            { dept: "Framing", deptCode: "FRAMING", category: "", minutes: 40 },
+            { dept: "Webbing", deptCode: "WEBBING", category: "", minutes: 20 },
+            { dept: "Upholstery", deptCode: "UPHOLSTERY", category: "", minutes: 40 },
+            { dept: "Packing", deptCode: "PACKING", category: "", minutes: 30 },
           ],
           materials: [
             { code: "", name: "Fabric (from order)", qty: 1, unit: "MTR", autoDetect: "FABRIC" },
@@ -520,9 +514,9 @@ function buildFallbackMasterTemplate(cat: BOMCategory): MasterTemplate {
     isDefault: true,
     category: "SOFA",
     l1Processes: [
-      { dept: "Fab Cut", deptCode: "FAB_CUT", category: "CAT 6", minutes: 50 },
-      { dept: "Packing", deptCode: "PACKING", category: "CAT 1", minutes: 40 },
-      { dept: "Upholstery", deptCode: "UPHOLSTERY", category: "CAT 6", minutes: 20 },
+      { dept: "Fab Cut", deptCode: "FAB_CUT", category: "", minutes: 50 },
+      { dept: "Packing", deptCode: "PACKING", category: "", minutes: 40 },
+      { dept: "Upholstery", deptCode: "UPHOLSTERY", category: "", minutes: 20 },
     ],
     l1Materials: [
       { code: "", name: "Fabric (from order)", qty: 1, unit: "MTR", autoDetect: "FABRIC" },
@@ -538,11 +532,11 @@ function buildFallbackMasterTemplate(cat: BOMCategory): MasterTemplate {
         wipType: "SOFA_BASE",
         quantity: 1,
         processes: [
-          { dept: "Fab Sew", deptCode: "FAB_SEW", category: "CAT 4", minutes: 150 },
-          { dept: "Foam Bonding", deptCode: "FOAM", category: "CAT 4", minutes: 30 },
-          { dept: "Wood Cut", deptCode: "WOOD_CUT", category: "CAT 4", minutes: 30 },
-          { dept: "Framing", deptCode: "FRAMING", category: "CAT 4", minutes: 40 },
-          { dept: "Webbing", deptCode: "WEBBING", category: "CAT 4", minutes: 20 },
+          { dept: "Fab Sew", deptCode: "FAB_SEW", category: "", minutes: 150 },
+          { dept: "Foam Bonding", deptCode: "FOAM", category: "", minutes: 30 },
+          { dept: "Wood Cut", deptCode: "WOOD_CUT", category: "", minutes: 30 },
+          { dept: "Framing", deptCode: "FRAMING", category: "", minutes: 40 },
+          { dept: "Webbing", deptCode: "WEBBING", category: "", minutes: 20 },
         ],
         materials: [
           { code: "", name: "Fabric (from order)", qty: 1, unit: "MTR", autoDetect: "FABRIC" },
@@ -558,11 +552,11 @@ function buildFallbackMasterTemplate(cat: BOMCategory): MasterTemplate {
         wipType: "SOFA_CUSHION",
         quantity: 1,
         processes: [
-          { dept: "Fab Sew", deptCode: "FAB_SEW", category: "CAT 1", minutes: 40 },
-          { dept: "Foam Bonding", deptCode: "FOAM", category: "CAT 1", minutes: 15 },
-          { dept: "Wood Cut", deptCode: "WOOD_CUT", category: "CAT 1", minutes: 15 },
-          { dept: "Framing", deptCode: "FRAMING", category: "CAT 1", minutes: 15 },
-          { dept: "Webbing", deptCode: "WEBBING", category: "CAT 1", minutes: 15 },
+          { dept: "Fab Sew", deptCode: "FAB_SEW", category: "", minutes: 40 },
+          { dept: "Foam Bonding", deptCode: "FOAM", category: "", minutes: 15 },
+          { dept: "Wood Cut", deptCode: "WOOD_CUT", category: "", minutes: 15 },
+          { dept: "Framing", deptCode: "FRAMING", category: "", minutes: 15 },
+          { dept: "Webbing", deptCode: "WEBBING", category: "", minutes: 15 },
         ],
         materials: [
           { code: "", name: "Fabric (from order)", qty: 1, unit: "MTR", autoDetect: "FABRIC" },
@@ -610,7 +604,6 @@ function RoutingPill({ process }: { process: BOMProcess }) {
     >
       <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: color }} />
       {DEPT_LABELS[process.deptCode] || process.dept}
-      <span className="opacity-70">{process.category}</span>
       <span className="font-semibold">{process.minutes}m</span>
     </span>
   );
@@ -1338,7 +1331,7 @@ function wipToPrintHtml(wip: WIPComponent, level: number, product: Product): str
     wip.processes.reduce((s, p) => s + p.minutes, 0) * (wip.quantity || 1);
   const wipCodeText = buildWipCodeDisplay(wip.codeSegments, product) || wip.wipCode || "";
   const procs = wip.processes
-    .map((p) => `<span class="pill">${p.dept} · ${p.category} · ${p.minutes}m</span>`)
+    .map((p) => `<span class="pill">${p.dept} · ${p.minutes}m</span>`)
     .join(" ");
   const mats = (wip.materials || [])
     .map((m) => {
@@ -1406,7 +1399,7 @@ function buildBOMPrintDoc(template: BOMTemplate, product: Product): string {
   const wipMin = sumWipTreeMinutes(template.wipComponents);
   const totalMin = l1Min + wipMin;
   const l1Procs = template.l1Processes
-    .map((p) => `<span class="pill">${p.dept} · ${p.category} · ${p.minutes}m</span>`)
+    .map((p) => `<span class="pill">${p.dept} · ${p.minutes}m</span>`)
     .join(" ");
   const l1Mats = (template.l1Materials || [])
     .map((m) => {
@@ -1875,7 +1868,7 @@ function CreateBOMDialog({
   const [selectedCode, setSelectedCode] = useState("");
   const [prodSearch, setProdSearch] = useState("");
   const [l1Processes, setL1Processes] = useState<BOMProcess[]>([
-    { dept: "Fab Cut", deptCode: "FAB_CUT", category: "CAT 3", minutes: 30 },
+    { dept: "Fab Cut", deptCode: "FAB_CUT", category: "", minutes: 30 },
   ]);
   const [l1Materials, setL1Materials] = useState<WIPMaterial[]>([]);
   const [wipComponents, setWipComponents] = useState<WIPComponent[]>([]);
@@ -1930,7 +1923,7 @@ function CreateBOMDialog({
   function addL1Process() {
     setL1Processes((prev) => [
       ...prev,
-      { dept: "Fab Sew", deptCode: "FAB_SEW", category: "CAT 3", minutes: 30 },
+      { dept: "Fab Sew", deptCode: "FAB_SEW", category: "", minutes: 30 },
     ]);
   }
 
@@ -1944,12 +1937,7 @@ function CreateBOMDialog({
         if (idx !== i) return p;
         if (field === "deptCode") {
           const code = value as string;
-          const minutes = getProductionMinutes(code, p.category) || p.minutes;
-          return { ...p, deptCode: code, dept: DEPT_LABELS[code] || code, minutes };
-        }
-        if (field === "category") {
-          const minutes = getProductionMinutes(p.deptCode, value as string);
-          return { ...p, category: value as string, minutes };
+          return { ...p, deptCode: code, dept: DEPT_LABELS[code] || code };
         }
         return { ...p, [field]: value };
       })
@@ -1988,8 +1976,8 @@ function CreateBOMDialog({
         wipType: wipType as WIPComponent["wipType"],
         quantity: 1,
         processes: [
-          { dept: "Wood Cut", deptCode: "WOOD_CUT", category: "CAT 1", minutes: 20 },
-          { dept: "Framing", deptCode: "FRAMING", category: "CAT 4", minutes: 20 },
+          { dept: "Wood Cut", deptCode: "WOOD_CUT", category: "", minutes: 20 },
+          { dept: "Framing", deptCode: "FRAMING", category: "", minutes: 20 },
         ],
         materials: (() => {
           const mats: WIPMaterial[] = [];
@@ -2020,7 +2008,7 @@ function CreateBOMDialog({
               ...w,
               processes: [
                 ...w.processes,
-                { dept: "Packing", deptCode: "PACKING", category: "CAT 3", minutes: 20 },
+                { dept: "Packing", deptCode: "PACKING", category: "", minutes: 20 },
               ],
             }
           : w
@@ -2046,12 +2034,7 @@ function CreateBOMDialog({
                 if (pidx !== pi) return p;
                 if (field === "deptCode") {
                   const code = value as string;
-                  const minutes = getProductionMinutes(code, p.category) || p.minutes;
-                  return { ...p, deptCode: code, dept: DEPT_LABELS[code] || code, minutes };
-                }
-                if (field === "category") {
-                  const minutes = getProductionMinutes(p.deptCode, value as string);
-                  return { ...p, category: value as string, minutes };
+                  return { ...p, deptCode: code, dept: DEPT_LABELS[code] || code };
                 }
                 return { ...p, [field]: value };
               }),
@@ -2132,7 +2115,7 @@ function CreateBOMDialog({
     // Reset
     setSelectedCode("");
     setProdSearch("");
-    setL1Processes([{ dept: "Fab Cut", deptCode: "FAB_CUT", category: "CAT 3", minutes: 30 }]);
+    setL1Processes([{ dept: "Fab Cut", deptCode: "FAB_CUT", category: "", minutes: 30 }]);
     setL1Materials([]);
     setWipComponents([]);
     setStep(1);
@@ -2236,17 +2219,7 @@ function CreateBOMDialog({
                         <option key={d} value={d}>{DEPT_LABELS[d]}</option>
                       ))}
                     </select>
-                    <select
-                      value={p.category}
-                      onChange={(e) => updateL1Process(i, "category", e.target.value)}
-                      className="text-sm border border-[#E2DDD8] rounded px-2 py-1 w-20 bg-white"
-                    >
-                      <option value="">CAT</option>
-                      {getCategoryOptions().map((c) => (
-                        <option key={c} value={c}>{c}</option>
-                      ))}
-                    </select>
-                    <span className="text-sm text-gray-700 bg-[#FAF9F7] border border-[#E2DDD8] rounded px-2 py-1 w-20 text-center tabular-nums">{p.minutes}</span>
+                    <MinutesInput value={p.minutes} onChange={(m) => updateL1Process(i, "minutes", m)} className="text-sm text-gray-700 bg-white border border-[#E2DDD8] rounded px-2 py-1 w-20 text-center tabular-nums" />
                     <span className="text-xs text-gray-400">min</span>
                     <button onClick={() => removeL1Process(i)} className="ml-auto p-1 hover:bg-[#F9E1DA] rounded text-[#9A3A2D]">
                       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -2339,17 +2312,7 @@ function CreateBOMDialog({
                             <option key={d} value={d}>{DEPT_LABELS[d]}</option>
                           ))}
                         </select>
-                        <select
-                          value={p.category}
-                          onChange={(e) => updateWIPProcess(wi, pi, "category", e.target.value)}
-                          className="text-xs border border-gray-200 rounded px-1.5 py-1 w-16 bg-white"
-                        >
-                          <option value="">CAT</option>
-                          {getCategoryOptions().map((c) => (
-                            <option key={c} value={c}>{c}</option>
-                          ))}
-                        </select>
-                        <span className="text-xs text-gray-700 bg-gray-50 border border-gray-200 rounded px-1.5 py-1 w-14 text-center tabular-nums">{p.minutes}</span>
+                        <MinutesInput value={p.minutes} onChange={(m) => updateWIPProcess(wi, pi, "minutes", m)} className="text-xs text-gray-700 bg-white border border-gray-200 rounded px-1.5 py-1 w-14 text-center tabular-nums" />
                         <span className="text-[10px] text-gray-400">min</span>
                         <button onClick={() => removeWIPProcess(wi, pi)} className="ml-auto text-[#9A3A2D] hover:text-[#7A2E24]">
                           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -2662,11 +2625,7 @@ function SubWIPTree({
                 <select value={p.deptCode} onChange={(e) => onUpdateProcess(childPath, pi, "deptCode", e.target.value)} className="text-xs border border-gray-200 rounded px-1.5 py-1 bg-white">
                   {DEPT_ORDER.map((d) => (<option key={d} value={d}>{DEPT_LABELS[d]}</option>))}
                 </select>
-                <select value={p.category} onChange={(e) => onUpdateProcess(childPath, pi, "category", e.target.value)} className="text-xs border border-gray-200 rounded px-1.5 py-1 w-16 bg-white">
-                  <option value="">CAT</option>
-                  {getCategoryOptions().map((c) => (<option key={c} value={c}>{c}</option>))}
-                </select>
-                <span className="text-xs text-gray-700 bg-gray-50 border border-gray-200 rounded px-1.5 py-1 w-14 text-center tabular-nums">{p.minutes}</span>
+                <MinutesInput value={p.minutes} onChange={(m) => onUpdateProcess(childPath, pi, "minutes", m)} className="text-xs text-gray-700 bg-white border border-gray-200 rounded px-1.5 py-1 w-14 text-center tabular-nums" />
                 <span className="text-[10px] text-gray-400">min</span>
                 {onMoveProcessUp && (
                   <button onClick={() => onMoveProcessUp(childPath, pi)} disabled={pi === 0} className="ml-auto text-[10px] px-1.5 py-0.5 bg-[#E0EDF0] text-[#3E6570] rounded hover:bg-[#A8CAD2] disabled:opacity-30 disabled:cursor-not-allowed" title="Move process up">↑</button>
@@ -2955,7 +2914,6 @@ function WipTreeCard({
                 >
                   <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: color }} />
                   {DEPT_LABELS[p.deptCode] || p.dept}
-                  <span className="opacity-70">{p.category}</span>
                   <span className="font-semibold">{p.minutes}m</span>
                 </span>
               );
@@ -3059,7 +3017,7 @@ function WipNodeDetail({
 }) {
   // One grid template shared by the header row and every process row, so the
   // columns line up instead of drifting the way the old inline flex rows did.
-  const procGrid = "grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_84px_28px_28px_28px] gap-2 items-center";
+  const procGrid = "grid grid-cols-[minmax(0,1fr)_84px_28px_28px_28px] gap-2 items-center";
   return (
     <div className="space-y-5">
       {/* Header — same level colour as its card in the left tree */}
@@ -3144,7 +3102,7 @@ function WipNodeDetail({
         ) : (
           <>
             <div className={`${procGrid} px-1 pb-1 text-[11px] text-gray-400`}>
-              <span>Department</span><span>Category</span><span className="text-right">Minutes</span><span /><span /><span />
+              <span>Department</span><span className="text-right">Minutes</span><span /><span /><span />
             </div>
             <div className="space-y-1.5">
               {node.processes.map((p, pi) => (
@@ -3152,11 +3110,7 @@ function WipNodeDetail({
                   <select value={p.deptCode} onChange={(e) => onUpdateProcess(wi, path, pi, "deptCode", e.target.value)} className="text-sm border border-[#E2DDD8] rounded px-2 py-1.5 bg-white">
                     {DEPT_ORDER.map((d) => (<option key={d} value={d}>{DEPT_LABELS[d]}</option>))}
                   </select>
-                  <select value={p.category} onChange={(e) => onUpdateProcess(wi, path, pi, "category", e.target.value)} className="text-sm border border-[#E2DDD8] rounded px-2 py-1.5 bg-white">
-                    <option value="">CAT</option>
-                    {getCategoryOptions().map((c) => (<option key={c} value={c}>{c}</option>))}
-                  </select>
-                  <span className="text-sm text-gray-700 bg-[#FAF9F7] border border-[#E2DDD8] rounded px-2 py-1.5 text-right tabular-nums">{p.minutes}</span>
+                  <MinutesInput value={p.minutes} onChange={(m) => onUpdateProcess(wi, path, pi, "minutes", m)} className="text-sm text-gray-700 bg-white border border-[#E2DDD8] rounded px-2 py-1.5 text-right tabular-nums" />
                   <button onClick={() => onMoveProcess(wi, path, pi, -1)} disabled={pi === 0} className="text-xs text-gray-500 hover:bg-gray-100 rounded py-1 disabled:opacity-30" title="Move up">↑</button>
                   <button onClick={() => onMoveProcess(wi, path, pi, 1)} disabled={pi === node.processes.length - 1} className="text-xs text-gray-500 hover:bg-gray-100 rounded py-1 disabled:opacity-30" title="Move down">↓</button>
                   <button onClick={() => onRemoveProcess(wi, path, pi)} className="text-[#9A3A2D] hover:bg-[#F9E1DA] rounded py-1" title="Remove">
@@ -3379,7 +3333,7 @@ function EditBOMDialog({
   function addL1Process() {
     setL1Processes((prev) => [
       ...prev,
-      { dept: "Fab Sew", deptCode: "FAB_SEW", category: "CAT 3", minutes: 30 },
+      { dept: "Fab Sew", deptCode: "FAB_SEW", category: "", minutes: 30 },
     ]);
   }
   function removeL1Process(i: number) {
@@ -3391,12 +3345,7 @@ function EditBOMDialog({
         if (idx !== i) return p;
         if (field === "deptCode") {
           const code = value as string;
-          const minutes = getProductionMinutes(code, p.category) || p.minutes;
-          return { ...p, deptCode: code, dept: DEPT_LABELS[code] || code, minutes };
-        }
-        if (field === "category") {
-          const minutes = getProductionMinutes(p.deptCode, value as string);
-          return { ...p, category: value as string, minutes };
+          return { ...p, deptCode: code, dept: DEPT_LABELS[code] || code };
         }
         return { ...p, [field]: value };
       })
@@ -3430,8 +3379,8 @@ function EditBOMDialog({
         wipType: wipType as WIPComponent["wipType"],
         quantity: 1,
         processes: [
-          { dept: "Wood Cut", deptCode: "WOOD_CUT", category: "CAT 1", minutes: 20 },
-          { dept: "Framing", deptCode: "FRAMING", category: "CAT 4", minutes: 20 },
+          { dept: "Wood Cut", deptCode: "WOOD_CUT", category: "", minutes: 20 },
+          { dept: "Framing", deptCode: "FRAMING", category: "", minutes: 20 },
         ],
         materials: makeAutoMaterials(),
         children: [],
@@ -3450,7 +3399,7 @@ function EditBOMDialog({
     setWipComponents((prev) =>
       prev.map((w, idx) =>
         idx === wi
-          ? { ...w, processes: [...w.processes, { dept: "Packing", deptCode: "PACKING", category: "CAT 3", minutes: 20 }] }
+          ? { ...w, processes: [...w.processes, { dept: "Packing", deptCode: "PACKING", category: "", minutes: 20 }] }
           : w
       )
     );
@@ -3472,12 +3421,7 @@ function EditBOMDialog({
                 if (pidx !== pi) return p;
                 if (field === "deptCode") {
                   const code = value as string;
-                  const minutes = getProductionMinutes(code, p.category) || p.minutes;
-                  return { ...p, deptCode: code, dept: DEPT_LABELS[code] || code, minutes };
-                }
-                if (field === "category") {
-                  const minutes = getProductionMinutes(p.deptCode, value as string);
-                  return { ...p, category: value as string, minutes };
+                  return { ...p, deptCode: code, dept: DEPT_LABELS[code] || code };
                 }
                 return { ...p, [field]: value };
               }),
@@ -3557,7 +3501,7 @@ function EditBOMDialog({
           codeSegments: autoSegs,
           wipType: wipType as WIPComponent["wipType"],
           quantity: 1,
-          processes: [{ dept: "Wood Cut", deptCode: "WOOD_CUT", category: "CAT 1", minutes: 15 }],
+          processes: [{ dept: "Wood Cut", deptCode: "WOOD_CUT", category: "", minutes: 15 }],
           materials: autoMats,
           children: [],
         }],
@@ -3712,7 +3656,7 @@ function EditBOMDialog({
     setWipComponents((prev) =>
       prev.map((w, idx) => idx !== wi ? w : updateAtPath(w, path, (node) => ({
         ...node,
-        processes: [...node.processes, { dept: "Packing", deptCode: "PACKING", category: "CAT 3", minutes: 20 }],
+        processes: [...node.processes, { dept: "Packing", deptCode: "PACKING", category: "", minutes: 20 }],
       })))
     );
   }
@@ -3730,20 +3674,10 @@ function EditBOMDialog({
         ...node,
         processes: node.processes.map((p, i) => {
           if (i !== pi) return p;
-          // Mirror updateWIPProcess (top-level) behavior so nested Sub-WIP
-          // process edits auto-derive minutes from Production Times the same
-          // way the L1 row does. Without the dept/category cases below, the
-          // user changes "Category: CAT 5 -> CAT 6" inside a Sub-WIP row and
-          // ONLY category mutates - minutes still display the old value, so
-          // the edit looks like a no-op.
+          // Mirror updateWIPProcess (top-level): a department change keeps the typed minutes.
           if (field === "deptCode") {
             const code = value as string;
-            const minutes = getProductionMinutes(code, p.category) || p.minutes;
-            return { ...p, deptCode: code, dept: DEPT_LABELS[code] || code, minutes };
-          }
-          if (field === "category") {
-            const minutes = getProductionMinutes(p.deptCode, value as string);
-            return { ...p, category: value as string, minutes };
+            return { ...p, deptCode: code, dept: DEPT_LABELS[code] || code };
           }
           return { ...p, [field]: value };
         }),
@@ -3966,11 +3900,7 @@ function EditBOMDialog({
                     <select value={p.deptCode} onChange={(e) => updateL1Process(i, "deptCode", e.target.value)} className="text-sm border border-[#E2DDD8] rounded px-2 py-1 bg-white">
                       {DEPT_ORDER.map((d) => (<option key={d} value={d}>{DEPT_LABELS[d]}</option>))}
                     </select>
-                    <select value={p.category} onChange={(e) => updateL1Process(i, "category", e.target.value)} className="text-sm border border-[#E2DDD8] rounded px-2 py-1 w-20 bg-white">
-                      <option value="">CAT</option>
-                      {getCategoryOptions().map((c) => (<option key={c} value={c}>{c}</option>))}
-                    </select>
-                    <span className="text-sm text-gray-700 bg-[#FAF9F7] border border-[#E2DDD8] rounded px-2 py-1 w-20 text-center tabular-nums">{p.minutes}</span>
+                    <MinutesInput value={p.minutes} onChange={(m) => updateL1Process(i, "minutes", m)} className="text-sm text-gray-700 bg-white border border-[#E2DDD8] rounded px-2 py-1 w-20 text-center tabular-nums" />
                     <span className="text-xs text-gray-400">min</span>
                     <button onClick={() => removeL1Process(i)} className="ml-auto p-1 hover:bg-[#F9E1DA] rounded text-[#9A3A2D]">
                       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
@@ -4321,7 +4251,7 @@ function MasterTemplatesDialog({
   function addL1Process() {
     setCurrent((prev) => ({
       ...prev,
-      l1Processes: [...prev.l1Processes, { dept: DEPT_LABELS["FAB_CUT"], deptCode: "FAB_CUT", category: "CAT 1", minutes: 0 }],
+      l1Processes: [...prev.l1Processes, { dept: DEPT_LABELS["FAB_CUT"], deptCode: "FAB_CUT", category: "", minutes: 0 }],
     }));
   }
   function removeL1Process(i: number) {
@@ -4343,12 +4273,7 @@ function MasterTemplatesDialog({
         if (idx !== i) return p;
         if (field === "deptCode") {
           const code = value as string;
-          const minutes = getProductionMinutes(code, p.category) || p.minutes;
-          return { ...p, deptCode: code, dept: DEPT_LABELS[code] || code, minutes };
-        }
-        if (field === "category") {
-          const minutes = getProductionMinutes(p.deptCode, value as string);
-          return { ...p, category: value as string, minutes };
+          return { ...p, deptCode: code, dept: DEPT_LABELS[code] || code };
         }
         return { ...p, [field]: value };
       }),
@@ -4539,7 +4464,7 @@ function MasterTemplatesDialog({
   function addProcessAtPath(wi: number, path: number[]) {
     mutateWIP(wi, path, (node) => ({
       ...node,
-      processes: [...node.processes, { dept: DEPT_LABELS["WOOD_CUT"], deptCode: "WOOD_CUT", category: "CAT 1", minutes: 0 }],
+      processes: [...node.processes, { dept: DEPT_LABELS["WOOD_CUT"], deptCode: "WOOD_CUT", category: "", minutes: 0 }],
     }));
   }
   function removeProcessAtPath(wi: number, path: number[], pi: number) {
@@ -4562,12 +4487,7 @@ function MasterTemplatesDialog({
         if (i !== pi) return p;
         if (field === "deptCode") {
           const code = value as string;
-          const minutes = getProductionMinutes(code, p.category) || p.minutes;
-          return { ...p, deptCode: code, dept: DEPT_LABELS[code] || code, minutes };
-        }
-        if (field === "category") {
-          const minutes = getProductionMinutes(p.deptCode, value as string);
-          return { ...p, category: value as string, minutes };
+          return { ...p, deptCode: code, dept: DEPT_LABELS[code] || code };
         }
         return { ...p, [field]: value };
       }),
@@ -4841,11 +4761,7 @@ function MasterTemplatesDialog({
                   <select value={p.deptCode} onChange={(e) => updateL1Process(i, "deptCode", e.target.value)} className="text-sm border border-[#E8D597] rounded px-2 py-1 bg-white">
                     {DEPT_ORDER.map((d) => (<option key={d} value={d}>{DEPT_LABELS[d]}</option>))}
                   </select>
-                  <select value={p.category} onChange={(e) => updateL1Process(i, "category", e.target.value)} className="text-sm border border-[#E8D597] rounded px-2 py-1 w-20 bg-white">
-                    <option value="">CAT</option>
-                    {getCategoryOptions().map((c) => (<option key={c} value={c}>{c}</option>))}
-                  </select>
-                  <span className="text-sm text-gray-700 bg-[#FAEFCB] border border-[#E8D597] rounded px-2 py-1 w-20 text-center tabular-nums">{p.minutes}</span>
+                  <MinutesInput value={p.minutes} onChange={(m) => updateL1Process(i, "minutes", m)} className="text-sm text-gray-700 bg-white border border-[#E8D597] rounded px-2 py-1 w-20 text-center tabular-nums" />
                   <span className="text-xs text-gray-400">min</span>
                   <button onClick={() => moveL1Process(i, -1)} disabled={i === 0} className="ml-auto text-xs px-1.5 py-0.5 bg-white border border-[#E8D597] text-[#9C6F1E] rounded hover:bg-[#FAEFCB] disabled:opacity-30 disabled:cursor-not-allowed" title="Move process up">↑</button>
                   <button onClick={() => moveL1Process(i, 1)} disabled={i === current.l1Processes.length - 1} className="text-xs px-1.5 py-0.5 bg-white border border-[#E8D597] text-[#9C6F1E] rounded hover:bg-[#FAEFCB] disabled:opacity-30 disabled:cursor-not-allowed" title="Move process down">↓</button>
@@ -4981,11 +4897,7 @@ function MasterTemplatesDialog({
                       <select value={p.deptCode} onChange={(e) => updateProcessAtPath(wi, [], pi, "deptCode", e.target.value)} className="text-xs border border-gray-200 rounded px-1.5 py-1 bg-white">
                         {DEPT_ORDER.map((d) => (<option key={d} value={d}>{DEPT_LABELS[d]}</option>))}
                       </select>
-                      <select value={p.category} onChange={(e) => updateProcessAtPath(wi, [], pi, "category", e.target.value)} className="text-xs border border-gray-200 rounded px-1.5 py-1 w-16 bg-white">
-                        <option value="">CAT</option>
-                        {getCategoryOptions().map((c) => (<option key={c} value={c}>{c}</option>))}
-                      </select>
-                      <span className="text-xs text-gray-700 bg-gray-50 border border-gray-200 rounded px-1.5 py-1 w-14 text-center tabular-nums">{p.minutes}</span>
+                      <MinutesInput value={p.minutes} onChange={(m) => updateProcessAtPath(wi, [], pi, "minutes", m)} className="text-xs text-gray-700 bg-white border border-gray-200 rounded px-1.5 py-1 w-14 text-center tabular-nums" />
                       <span className="text-[10px] text-gray-400">min</span>
                       <button onClick={() => removeProcessAtPath(wi, [], pi)} className="ml-auto text-[#9A3A2D] hover:text-[#7A2E24]">
                         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
@@ -5106,9 +5018,8 @@ function MasterTemplatesDialog({
 // ---------- Production Times ----------
 // The inline Production Times matrix DIALOG was removed 2026-08-01 per owner —
 // the dedicated WIP Times module is the single place those minutes are edited
-// now. The read-side lookup (getProductionMinutes, near the top of this file)
-// is untouched: BOM process rows still auto-fill minutes from the same
-// variants-config matrix when a category is picked.
+// now. The CAT dropdown and its matrix lookup went too (owner 2026-10-05):
+// BOM process minutes are typed in by hand.
 
 // Sample variant context for token resolution in catalog-level views. There is
 // no SO line driving variant values here, so we fall back to the same defaults
