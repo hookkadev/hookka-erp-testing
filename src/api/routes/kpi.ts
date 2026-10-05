@@ -109,6 +109,10 @@ interface CardLine {
   scoring: KpiDef["scoring"];
   /** Plain-English derivation, shown to the person being measured. */
   formula: string;
+  /** Why, what is counted, and the steps: the card's "View calculation" block. */
+  purpose: string;
+  definition: string;
+  measurement: string[];
   checklistItems?: string[];
   surveyQuestions?: string[];
   /** MANUAL only — what earns a high mark, so the score is not a surprise. */
@@ -208,6 +212,7 @@ async function buildCard(c: Context<Env>, userId: string, role: string, period: 
       lines.push({
         key: def.key, label: def.label, detail: def.detail,
         scoring: def.scoring, formula: def.formula, checklistItems: def.checklistItems,
+        purpose: def.purpose, definition: def.definition, measurement: def.measurement,
         shape: def.shape, unit: def.unit, available: def.available,
         blockedBy: def.blockedBy, drillPath: def.drillPath,
         target: Number(row.target), weight: Number(row.weight),
@@ -224,6 +229,7 @@ async function buildCard(c: Context<Env>, userId: string, role: string, period: 
       lines.push({
         key: def.key, label: def.label, detail: def.detail,
         scoring: def.scoring, formula: def.formula, checklistItems: def.checklistItems,
+        purpose: def.purpose, definition: def.definition, measurement: def.measurement,
         shape: def.shape, unit: def.unit, available: false,
         blockedBy: def.blockedBy, drillPath: def.drillPath,
         target: Number(a.target), weight: Number(a.weight),
@@ -246,6 +252,7 @@ async function buildCard(c: Context<Env>, userId: string, role: string, period: 
     lines.push({
       key: def.key, label: def.label, detail: def.detail,
       scoring: def.scoring, formula: def.formula, checklistItems: def.checklistItems,
+      purpose: def.purpose, definition: def.definition, measurement: def.measurement,
       surveyQuestions: def.surveyQuestions, ratingGuide: def.ratingGuide,
       shape: def.shape, unit: def.unit, available: true,
       drillPath: def.drillPath,
