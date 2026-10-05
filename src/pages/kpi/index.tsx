@@ -990,8 +990,12 @@ export default function KpiPage() {
                             ))}
                           </ol>
                         )}
-                        <p className="text-[12px] text-[#5A5550] mt-1.5 font-medium">{l.evidence}</p>
-                        {l.drillPath && (
+                        {l.key === "customer_delivery_date" ? (
+                          <DeliveryOrderList period={period} evidence={l.evidence} />
+                        ) : (
+                          <p className="text-[12px] text-[#5A5550] mt-1.5 font-medium">{l.evidence}</p>
+                        )}
+                        {l.drillPath && l.key !== "customer_delivery_date" && (
                           // The card's month travels with the link. Without it
                           // the target page opens "all of them, ever", which is
                           // a different set from the one this row counted —
@@ -1198,6 +1202,105 @@ function SurveyLinkMaker({
           One customer, one link, {period}. It can be answered once and expires
           in 30 days — generate a new one for the next customer.
         </p>
+      )}
+    </div>
+  );
+}
+
+type DeliveryStatus = "LATE" | "EARLY" | "ON_TIME";
+const DELIVERY_STATUS: Record<DeliveryStatus, { label: string; cls: string }> = {
+  LATE: { label: "Late", cls: "bg-[#F9E4E0] text-[#9A3A2D]" },
+  EARLY: { label: "Early", cls: "bg-[#E3EEDA] text-[#3B6D11]" },
+  ON_TIME: { label: "On time", cls: "bg-[#EDE7DA] text-[#5A5550]" },
+};
+
+/** Whole days between two YYYY-MM-DD dates (b − a). */
+const daysBetween = (a: string, b: string) =>
+  Math.round((Date.parse(b) - Date.parse(a)) / 86_400_000);
+
+/**
+ * The delivery KPI's orders, opened in place on the card. Tap the summary line
+ * and every order shipped that month is listed with its Late / Early / On time
+ * tag, filterable by tag. Same query as the score, so the counts match it.
+ */
+function DeliveryOrderList({ period, evidence }: { period: string; evidence: string }) {
+  const [open, setOpen] = useState(false);
+  const [show, setShow] = useState<DeliveryStatus | "ALL">("ALL");
+  const { data, loading, error } = useCachedJson<{
+    data?: Array<{
+      id: string; companySOId: string | null; customerName: string | null;
+      customerDeliveryDate: string | null; shippedOn: string | null; status: DeliveryStatus;
+    }>;
+  }>(open ? `/api/sales-orders/late-to-customer?period=${period}&all=1` : "");
+  const rows = data?.data ?? [];
+  const count = (s: DeliveryStatus) => rows.filter((r) => r.status === s).length;
+  const shown = show === "ALL" ? rows : rows.filter((r) => r.status === show);
+
+  return (
+    <div className="mt-1.5">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        className="text-left text-[12px] font-medium text-[#5A5550] hover:text-[#1F1D1B]"
+      >
+        {evidence}{" "}
+        <span className="text-[11px] text-[#6B5C32] underline decoration-dotted whitespace-nowrap">
+          {open ? "Hide orders" : "Show orders"}
+        </span>
+      </button>
+      {open && (
+        <div className="mt-2 rounded-lg border border-[#E2DDD8] bg-[#FCFBF8]">
+          {loading && !rows.length ? (
+            <Skeleton height={80} />
+          ) : error ? (
+            <p className="p-3 text-[11.5px] text-[#9A3A2D]">Could not load the orders: {error}</p>
+          ) : rows.length === 0 ? (
+            <p className="p-3 text-[11.5px] text-[#9CA3AF]">No orders shipped in {period}.</p>
+          ) : (
+            <>
+              <div className="flex flex-wrap gap-1.5 border-b border-[#E2DDD8] p-2">
+                {(["ALL", "LATE", "EARLY", "ON_TIME"] as const).map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => setShow(s)}
+                    className={`rounded-full border px-2.5 py-0.5 text-[11px] ${
+                      show === s
+                        ? "border-[#6B5C32] bg-[#6B5C32] text-white font-semibold"
+                        : "border-[#E2DDD8] bg-white text-[#5A5550]"
+                    }`}
+                  >
+                    {s === "ALL" ? "All" : DELIVERY_STATUS[s].label} {s === "ALL" ? rows.length : count(s)}
+                  </button>
+                ))}
+              </div>
+              <ul className="max-h-80 overflow-y-auto divide-y divide-[#EFEBE4]">
+                {shown.map((r) => {
+                  const diff =
+                    r.customerDeliveryDate && r.shippedOn
+                      ? daysBetween(r.customerDeliveryDate, r.shippedOn)
+                      : 0;
+                  return (
+                    <li key={r.id} className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-3 py-2 text-[11.5px]">
+                      <Link to={`/sales/${r.id}`} className="font-semibold text-[#6B5C32] underline decoration-dotted">
+                        {r.companySOId || r.id}
+                      </Link>
+                      <span className="min-w-0 flex-1 truncate text-[#3A3733]">{r.customerName || "—"}</span>
+                      <span className="text-[#9CA3AF] tabular-nums">
+                        promised {r.customerDeliveryDate ?? "—"} · shipped {r.shippedOn ?? "—"}
+                      </span>
+                      <span className={`rounded-full px-2 py-0.5 text-[10.5px] font-semibold ${DELIVERY_STATUS[r.status].cls}`}>
+                        {DELIVERY_STATUS[r.status].label}
+                        {diff !== 0 && ` ${Math.abs(diff)}d`}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
+          )}
+        </div>
       )}
     </div>
   );
