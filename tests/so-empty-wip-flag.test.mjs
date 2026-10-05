@@ -1,0 +1,96 @@
+// ---------------------------------------------------------------------------
+// so-empty-wip-flag.test.mjs — findEmptyWipProducts, the lookup behind the
+// Create SO "WIP components not filled" warning.
+//
+// Owner 2026-10-05: a product whose BOM WIP tab is empty must be flagged when
+// the line is added, accessories included, because the job-card builder makes
+// cards of its own for it. "Empty" must mean what the builder sees: the same
+// row pick (newest ACTIVE, else newest of any status) and breakBomIntoWips'
+// FG_MAIN fallback.
+// ---------------------------------------------------------------------------
+import test from "node:test";
+import assert from "node:assert/strict";
+
+const { findEmptyWipProducts } = await import(
+  "../src/api/routes/sales-orders/_helpers.ts"
+);
+
+const WIP = JSON.stringify([
+  { wipCode: "HB", wipType: "HEADBOARD", processes: [{ deptCode: "FAB_CUT" }] },
+]);
+
+function fakeDb(rows) {
+  return {
+    prepare: () => ({
+      bind: () => ({ all: async () => ({ results: rows }) }),
+    }),
+  };
+}
+
+test("flags empty, missing, unparseable and L1-only BOMs; not a filled one", async () => {
+  const db = fakeDb([
+    { productCode: "FILLED", wipComponents: WIP, versionStatus: "ACTIVE", effectiveFrom: "2026-01-01" },
+    { productCode: "EMPTY", wipComponents: "[]", versionStatus: "ACTIVE", effectiveFrom: "2026-01-01" },
+    { productCode: "NULLWIP", wipComponents: null, versionStatus: "ACTIVE", effectiveFrom: "2026-01-01" },
+    { productCode: "JUNK", wipComponents: "not json", versionStatus: "ACTIVE", effectiveFrom: "2026-01-01" },
+  ]);
+  const out = await findEmptyWipProducts(db, [
+    "FILLED", "EMPTY", "NULLWIP", "JUNK", "NOBOM", "", " ",
+  ]);
+  assert.deepEqual(out.sort(), ["EMPTY", "JUNK", "NOBOM", "NULLWIP"]);
+});
+
+test("a code with a trailing space comes back exactly as sent", async () => {
+  const db = fakeDb([
+    { productCode: "PILLOW ", wipComponents: "[]", versionStatus: "ACTIVE", effectiveFrom: "2026-01-01" },
+    { productCode: "FILLED ", wipComponents: WIP, versionStatus: "ACTIVE", effectiveFrom: "2026-01-01" },
+  ]);
+  assert.deepEqual(await findEmptyWipProducts(db, ["PILLOW ", "FILLED "]), ["PILLOW "]);
+});
+
+test("service charge is never flagged (owner 2026-10-05)", async () => {
+  const db = fakeDb([]);
+  assert.deepEqual(
+    await findEmptyWipProducts(db, ["SERVICE CHARGE ", "service charge", "NOBOM"]),
+    ["NOBOM"],
+  );
+});
+
+test("ACTIVE row wins over a newer draft, like the builder", async () => {
+  const db = fakeDb([
+    { productCode: "A", wipComponents: "[]", versionStatus: "ACTIVE", effectiveFrom: "2026-01-01" },
+    { productCode: "A", wipComponents: WIP, versionStatus: "DRAFT", effectiveFrom: "2026-09-01" },
+    { productCode: "B", wipComponents: "[]", versionStatus: "DRAFT", effectiveFrom: "2026-01-01" },
+    { productCode: "B", wipComponents: WIP, versionStatus: "DRAFT", effectiveFrom: "2026-09-01" },
+  ]);
+  assert.deepEqual(await findEmptyWipProducts(db, ["A", "B"]), ["A"]);
+});
+
+test("no codes means no query", async () => {
+  const db = { prepare: () => { throw new Error("should not query"); } };
+  assert.deepEqual(await findEmptyWipProducts(db, ["", " "]), []);
+});
+
+// Confirm block (owner 2026-10-05): stopped before the builder's own cards.
+const { findIncompleteBomProducts } = await import(
+  "../src/api/routes/sales-orders/_helpers.ts"
+);
+
+test("confirm is blocked for an empty WIP tab even when L1 has steps", async () => {
+  const db = fakeDb([
+    { productCode: "SB02", wipComponents: "[]", versionStatus: "ACTIVE", effectiveFrom: "2026-01-01" },
+    { productCode: "1003-(Q)", wipComponents: WIP, versionStatus: "ACTIVE", effectiveFrom: "2026-01-01" },
+  ]);
+  const out = await findIncompleteBomProducts(db, [
+    { productId: "p1", productCode: "SB02", productName: "SANDBACK 02" },
+    { productId: "p1", productCode: "SB02", productName: "SANDBACK 02" },
+    { productId: "p2", productCode: "1003-(Q)", productName: "HILTON" },
+    { productId: "p3", productCode: "SERVICE CHARGE ", productName: "SERVICE CHARGE" },
+    { productId: "p4", productCode: "NOBOM", productName: "No BOM" },
+    { productId: "", productCode: "UNLINKED", productName: "Unlinked line" },
+  ]);
+  assert.deepEqual(out, [
+    { productCode: "SB02", productName: "SANDBACK 02", reason: "BOM has no WIP components" },
+    { productCode: "NOBOM", productName: "No BOM", reason: "BOM has no WIP components" },
+  ]);
+});
