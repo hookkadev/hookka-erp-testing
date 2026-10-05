@@ -76,6 +76,7 @@ import { DEFAULT_ORG_ID } from "../lib/tenant";
 import { normalizeStoredPcbStatus } from "../../lib/pcb";
 import { ensurePayrollTaxColumns } from "../lib/payroll-tax-columns";
 import { ensureWorkerPenaltyTables, freshAll } from "../lib/worker-penalties";
+import { ensureAdvanceTables, rowToAdvance, type AdvanceRow } from "../lib/employee-advances";
 // One shared completion core with the desktop QC page — see the QC-on-the-
 // phone block below for why the phone must not own a second copy.
 import { completeInspection } from "./qc-pending";
@@ -2060,6 +2061,8 @@ type PayslipRow = {
   otWeekdayHours?: number | null;
   otSundayHours?: number | null;
   otPhHours?: number | null;
+  advanceDeductionSen?: number | null;
+  advance_deduction_sen?: number | null;
 };
 
 app.get("/payslips", async (c) => {
@@ -2075,6 +2078,8 @@ app.get("/payslips", async (c) => {
   // migrations are inert on deploy here — without this the whole My Pay
   // history 400s on a database where payroll has never been generated.
   await ensurePayrollTaxColumns(c.var.DB);
+  // Same for payslips.advance_deduction_sen and the employee_advances table.
+  await ensureAdvanceTables(c.var.DB);
 
   // Current-month key for the snapshot. Computed up front so the cache_key is
   // stable for the whole request; the live compute below re-derives the same
@@ -2105,9 +2110,13 @@ app.get("/payslips", async (c) => {
         "kv_config",
         "workers",
         "worker_nonprod_requests",
+        // The advance dates and notes shown under a finished month.
+        "employee_advances",
       ] as const,
       orgId: DEFAULT_ORG_ID,
-      cacheKey: `${workerId}:${snapPeriod}`,
+      // ":adv" retires snapshots built before history carried the advance, so
+      // the phone never serves a cached month that hides it.
+      cacheKey: `${workerId}:${snapPeriod}:adv`,
     },
     async (db) => {
 
@@ -2121,7 +2130,7 @@ app.get("/payslips", async (c) => {
     `SELECT id, employeeId, period, basicSalarySen, totalOtSen, allowancesSen,
             grossPaySen, netPaySen, epfEmployeeSen, socsoEmployeeSen,
             eisEmployeeSen, pcbSen, pcb_status, absentDays, absenceDeductionSen,
-            otWeekdayHours, otSundayHours, otPhHours
+            otWeekdayHours, otSundayHours, otPhHours, advance_deduction_sen
        FROM payslips
       WHERE employeeId = ?
       ORDER BY period DESC`,
@@ -2177,6 +2186,32 @@ app.get("/payslips", async (c) => {
     console.error("[worker/payslips] late-day detail unavailable:", e);
   }
 
+  // Which days the worker drew a salary advance, per pay period (an advance is
+  // recovered in the month it is dated in, the same rule payroll and the PDF
+  // payslip use). Display only: the money is the stored advance_deduction_sen.
+  const advancesByPeriod = new Map<string, Array<{ date: string; amountSen: number; note: string }>>();
+  try {
+    const advRes = await db
+      .prepare(
+        `SELECT id, worker_id, advance_date, amount_sen, note
+           FROM employee_advances
+          WHERE worker_id = ?
+          ORDER BY advance_date, id`,
+      )
+      .bind(workerId)
+      .all<AdvanceRow>();
+    for (const raw of advRes.results ?? []) {
+      const a = rowToAdvance(raw);
+      const per = a.date.slice(0, 7);
+      const arr = advancesByPeriod.get(per) ?? [];
+      arr.push({ date: a.date, amountSen: a.amountSen, note: a.note });
+      advancesByPeriod.set(per, arr);
+    }
+  } catch (e) {
+    // Same as the late days: the amount below is still right, only the dates go.
+    console.error("[worker/payslips] advance detail unavailable:", e);
+  }
+
   const history = (res.results ?? []).map((r) => ({
     id: r.id,
     period: r.period,
@@ -2201,6 +2236,10 @@ app.get("/payslips", async (c) => {
       (Number(r.otPhHours ?? 0) || 0),
     lateDays: lateByPeriod.get(r.period) ?? [],
     shortHourDeductionSen: lateSenByPeriod.get(r.period) ?? 0,
+    // Cash already handed over that month, taken off Net. Without it the phone
+    // showed Net below Gross with nothing in between to explain the gap.
+    advanceDeductionSen: Number(r.advanceDeductionSen ?? r.advance_deduction_sen ?? 0) || 0,
+    advanceDays: advancesByPeriod.get(r.period) ?? [],
   }));
 
   // Live current-month estimate, computed by the shared labor engine —
