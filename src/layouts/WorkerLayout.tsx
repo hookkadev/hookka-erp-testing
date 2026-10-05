@@ -5,7 +5,7 @@
 //   1. Guards the routes: if no valid `hookka.worker.token` in
 //      localStorage, redirect to /worker/login.
 //   2. Renders a compact top bar (brand + language menu).
-//   3. Renders a 4-tab bottom navigation bar (Home / Scan / Pay / Me).
+//   3. Renders a bottom navigation bar (Home / History / [Team] / Scan / Pay / Me).
 //
 // The layout is mobile-first — tap targets ≥44px, single-column
 // content, bottom nav always sticky. It looks fine on a desktop
@@ -13,7 +13,7 @@
 // ============================================================
 import { Outlet, useLocation, useNavigate, Link } from "react-router-dom";
 import { useEffect, useState } from "react";
-import { Home, Wallet, User, Globe, Users, ScanLine } from "lucide-react";
+import { Home, CalendarDays, Wallet, User, Globe, Users, ScanLine } from "lucide-react";
 import {
   useT,
   useApplyHtmlLang,
@@ -204,13 +204,19 @@ export default function WorkerLayout() {
       {!isLogin && (
         <nav className="fixed bottom-0 left-0 right-0 z-30 bg-white border-t border-[#D8D2CC] shadow-[0_-2px_8px_rgba(0,0,0,0.04)]">
           <div
-            className={`max-w-md mx-auto grid ${isLeader ? "grid-cols-5" : "grid-cols-4"}`}
+            className={`max-w-md mx-auto grid ${isLeader ? "grid-cols-6" : "grid-cols-5"}`}
           >
             <TabButton
               to="/worker"
               active={pathname === "/worker"}
               icon={<Home className="h-5 w-5" />}
               label={t("nav.home")}
+            />
+            <TabButton
+              to="/worker/history"
+              active={pathname.startsWith("/worker/history")}
+              icon={<CalendarDays className="h-5 w-5" />}
+              label={t("nav.history")}
             />
             {isLeader && (
               <TabButton
