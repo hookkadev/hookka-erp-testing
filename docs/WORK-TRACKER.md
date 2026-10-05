@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-05**: branch `fix/worker-pay-late-daily-rate` (to `main`, BUG-2026-10-05-258) added below (its entry is the newest).
 > **Last verified: 2026-10-05**: branch `fix/worker-pay-advance-line-main` (to `main`, BUG-2026-10-05-257) added below (its entry is the newest).
 > **Last verified: 2026-10-05**: branch `fix/backfill-zero-minutes-open-cards` (to `main`, BUG-2026-10-05-256) added below (its entry is the newest).
 > **Last verified: 2026-10-05**: branch `fix/bom-master-template-accessory` (to `main`, BUG-2026-10-05-255) added below (its entry is the newest).
@@ -93,6 +94,13 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-05 — 🔵 Worker My Pay shows a per-day worker's late charge (branch `fix/worker-pay-late-daily-rate` → `main`, then `staging`, BUG-2026-10-05-258)
+
+Owner ask: is the same worker late, and why does the phone not show it. Measured: late 3 days in September, RM 10.21 docked; the phone priced it from basic salary (RM 0 for an OSC worker) and hid the line.
+
+1. 🔵 Both late-charge sites in `src/api/routes/worker.ts` use the pay-mode aware day rate.
+2. ⬜ Check on staging, then live, after merge.
 
 ## 2026-10-05 — 🔵 Worker My Pay shows the salary advance (branch `fix/worker-pay-advance-line-main` → `main`, same fix as #700 to `staging`, BUG-2026-10-05-257)
 
