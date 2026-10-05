@@ -104,6 +104,11 @@ type UserRow = {
   // snake_case and db-pg camelCases it on read.
   mustChangePassword?: boolean | number | null;
   must_change_password?: boolean | number | null;
+  // The same photo the Org Chart shows; the header avatar reads it from /me.
+  photoFileId?: string | null;
+  photo_file_id?: string | null;
+  department?: string | null;
+  position?: string | null;
 };
 
 function publicUser(u: UserRow) {
@@ -116,6 +121,9 @@ function publicUser(u: UserRow) {
     // Surfaced so the app can make the first thing an admin-created user does
     // be choosing their own password. Nothing else depends on it.
     mustChangePassword: mustChange === true || mustChange === 1,
+    photoFileId: u.photoFileId ?? u.photo_file_id ?? null,
+    department: u.department ?? "",
+    position: u.position ?? "",
   };
 }
 

@@ -119,7 +119,7 @@ function makeDb(workers = WORKERS) {
   };
 }
 
-function call(db, method, path, role, body) {
+function call(db, method, path, role, body, userId) {
   _resetOrgReportingMigForTests();
   _resetOrgPhotoMigForTests();
   const app = new Hono();
@@ -127,6 +127,7 @@ function call(db, method, path, role, body) {
     c.set('DB', db);
     c.set('orgId', 'hookka');
     c.set('userRole', role);
+    if (userId) c.set('userId', userId);
     await next();
   });
   app.route('/', orgChartApp);
@@ -376,4 +377,29 @@ test('the lightbox renders the SAME /stream URL, keyed off viewingPhoto rather t
 test('both render sites open the SAME lightbox via onView, not a second modal each', () => {
   const uses = (UI.match(/onView=\{\(\) => setViewingPhoto\(/g) ?? []).length;
   assert.equal(uses, 2, 'the tree card and the board card must both wire onView to the one lightbox state');
+});
+
+// Owner 2026-10-05: the header's Profile panel lets anyone change their OWN
+// photo. "Own" is the session's userId, never the body.
+test('a role without users:update MAY set its own user photo', async () => {
+  const { db, writes } = makeDb();
+  const res = await call(db, 'PUT', '/photo', 'HR', { personKey: 'user:u-1', fileId: 'file-new-u1' }, 'u-1');
+  assert.equal(res.status, 200);
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].table, 'users');
+  assert.equal(writes[0].id, 'u-1');
+});
+
+test("a role without users:update is still refused on someone else's photo", async () => {
+  const { db, writes } = makeDb();
+  const res = await call(db, 'PUT', '/photo', 'HR', { personKey: 'worker:w-1', fileId: 'file-new' }, 'u-1');
+  assert.equal(res.status, 403);
+  assert.equal(writes.length, 0);
+});
+
+test('the own-photo check still refuses a file that is not your photo', async () => {
+  const { db, writes } = makeDb();
+  const res = await call(db, 'PUT', '/photo', 'HR', { personKey: 'user:u-1', fileId: 'file-so-pdf' }, 'u-1');
+  assert.equal(res.status, 400);
+  assert.equal(writes.length, 0);
 });

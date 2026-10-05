@@ -1,10 +1,13 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { ChevronDown, LogOut, User, Building2, ScrollText } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { GlobalSearch } from "./global-search";
 import { NotificationBell } from "./notification-bell";
 import { WorkspaceTabs } from "./workspace-tabs";
+import { ProfileDialog, type Me } from "./profile-dialog";
+import { PHOTO_CHANGED_EVENT, type PhotoChanged } from "@/lib/photo-changed";
 import { clearAuth, getCurrentUser } from "@/lib/auth";
 import { StagingTodayControl } from "@/components/staging-today-control"; // staging-only
 import { StagingApiLog } from "@/components/staging-api-log"; // staging-only, never PR into main
@@ -41,6 +44,33 @@ const organisations = [
 export function Topbar({ user }: TopbarProps) {
   const [orgDropdownOpen, setOrgDropdownOpen] = useState(false);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  // The signed-in person from /api/auth/me, for the avatar photo and the
+  // Profile panel. Plain fetch, not useCachedJson. A photo saved anywhere in
+  // the app is applied from the event, not by refetching (see photo-changed.ts).
+  const [me, setMe] = useState<Me | null>(null);
+  const [photoBroken, setPhotoBroken] = useState(false);
+  useEffect(() => {
+    const load = () =>
+      fetch("/api/auth/me")
+        .then((r) => (r.ok ? (r.json() as Promise<{ data?: { user?: Me } }>) : null))
+        .then((j) => {
+          if (j?.data?.user) {
+            setMe(j.data.user);
+            setPhotoBroken(false);
+          }
+        })
+        .catch(() => {});
+    load();
+    const onPhoto = (e: Event) => {
+      const { personKey, fileId } = (e as CustomEvent<PhotoChanged>).detail;
+      setMe((cur) => (cur && personKey === `user:${cur.id}` ? { ...cur, photoFileId: fileId } : cur));
+      setPhotoBroken(false);
+    };
+    window.addEventListener(PHOTO_CHANGED_EVENT, onPhoto);
+    return () => window.removeEventListener(PHOTO_CHANGED_EVENT, onPhoto);
+  }, []);
+  const photoFileId = photoBroken ? null : me?.photoFileId;
   const currentOrg = user?.organisationCode || "HOOKKA";
 
   // Prefer the real signed-in user for the avatar label + dropdown.
@@ -131,8 +161,17 @@ export function Topbar({ user }: TopbarProps) {
           onClick={() => { setUserDropdownOpen(!userDropdownOpen); setOrgDropdownOpen(false); }}
           className="flex items-center gap-2 rounded-md p-1.5 hover:bg-[#F0ECE9] transition-colors"
         >
-          <div className="h-8 w-8 rounded-full bg-[#6B5C32] flex items-center justify-center text-white text-sm font-medium">
-            {displayName.charAt(0).toUpperCase() || "U"}
+          <div className="h-8 w-8 shrink-0 overflow-hidden rounded-full bg-[#6B5C32] flex items-center justify-center text-white text-sm font-medium">
+            {photoFileId ? (
+              <img
+                src={`/api/files/${photoFileId}/stream`}
+                alt=""
+                className="h-full w-full object-cover"
+                onError={() => setPhotoBroken(true)}
+              />
+            ) : (
+              displayName.charAt(0).toUpperCase() || "U"
+            )}
           </div>
           <div className="hidden xl:block whitespace-nowrap text-left">
             <p className="text-sm font-medium text-[#1F1D1B]">{displayName}</p>
@@ -142,7 +181,11 @@ export function Topbar({ user }: TopbarProps) {
         </button>
         {userDropdownOpen && (
           <div className="absolute right-0 top-full mt-1 w-48 rounded-md border border-[#E2DDD8] bg-white shadow-lg py-1 z-50">
-            <button className="flex w-full items-center gap-2 px-4 py-2 text-sm text-[#4B5563] hover:bg-[#F0ECE9]">
+            <button
+              className="flex w-full items-center gap-2 px-4 py-2 text-sm text-[#4B5563] hover:bg-[#F0ECE9] disabled:opacity-50"
+              disabled={!me}
+              onClick={() => { setProfileOpen(true); setUserDropdownOpen(false); }}
+            >
               <User className="h-4 w-4" />
               Profile
             </button>
@@ -157,6 +200,13 @@ export function Topbar({ user }: TopbarProps) {
           </div>
         )}
       </div>
+      {/* Portalled: the sticky header is its own stacking context, so a
+          dialog rendered inside it would sit under the sidebar. */}
+      {profileOpen && me &&
+        createPortal(
+          <ProfileDialog me={me} roleLabel={displayRole} onClose={() => setProfileOpen(false)} />,
+          document.body,
+        )}
     </header>
   );
 }

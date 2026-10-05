@@ -1,5 +1,6 @@
 # Customers & Platform — Module Guide
 
+> **Last verified: 2026-10-05** (branch `feat/topbar-profile`): the `auth.ts` anchor rows re-derived after `/me` started returning the photo. Nothing else re-checked.
 > **Last verified: 2026-08-19** against `src/pages/customers.tsx`, `src/pages/settings/Users.tsx`,
 > `src/pages/mail-center/{index.tsx,mail-prefs.ts}`, `src/api/routes/customers.ts`,
 > `customer-products.ts`, `customer-maintenance.ts` (read in full), `customer-hubs.ts`,
@@ -73,7 +74,7 @@ Owns **customers** (the debtor master) and the **platform plumbing** every other
 | `resolveCustomerPriceAsOf` | `src/api/routes/customer-products.ts:1004` | Effective-dated price lookup |
 | `app.post("/:customerId/copy-from-master")` | `src/api/routes/customer-maintenance.ts:30` | Copy `kv_config` master blob + mirror `maintenance_config_history` (corrupt-guard) |
 | `requireSuperAdmin`-gated mutations | `src/api/routes/users.ts:166/259/361/556/633` | backfill-org / create / edit / delete / reset-password (also `:778` invite, `:941` resend, `:996` invite-delete) |
-| `app.post("/login")` | `src/api/routes/auth.ts:149` | Office login → `user_sessions` |
+| `app.post("/login")` | `src/api/routes/auth.ts:159` | Office login → `user_sessions` |
 | `app.post("/login")` | `src/api/routes/worker-auth.ts:124` | Factory-worker PIN login (separate system) |
 
 ## Gotchas
