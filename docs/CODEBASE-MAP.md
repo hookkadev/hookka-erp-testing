@@ -1,5 +1,6 @@
 # Hookka ERP — Codebase Map (the single authoritative map)
 
+> **Last verified: 2026-10-06 on branch `feat/kpi-delivery-rules-orders-main` (to `main`)**: the KPI drill-down row (`late-to-customer?all=1` returns every order with a LATE / EARLY / ON_TIME status; the card lists them inline), read from the code. Same change as staging #694. Nothing else re-checked.
 > **Last verified: 2026-10-06 on branch `feat/kpi-delivery-rules-orders-main` (to `main`)**: the KPI rows (`PUT /rules/:kpiKey`, `kpi_rule_settings`, `withRules` / `EDITABLE_RULES` in kpi-catalog.ts, the early count in `customerDeliveryLate`) and the new gotcha on editable scoring rules, read from the code. Same change as staging #692. Nothing else re-checked.
 > **Last verified: 2026-10-06 on branch `feat/pay-card-main` (to `main`)**: the `src/pages/worker/pay.tsx` row (every worker and month now uses `src/pages/worker/pay-card.tsx`), read from `pay.tsx`, `pay-card.tsx` and the `/payslips` handler in `src/api/routes/worker.ts`. Nothing else re-checked.
 > **Restamped 2026-10-05 on branch `fix/worker-pay-late-daily-rate` (to `main`):** the `src/pages/worker/pay.tsx` row (late charge priced with `workerPayrollDayRateSen`, pay-mode aware), read from `src/api/routes/worker.ts`. Nothing else re-checked.
@@ -1036,7 +1037,7 @@ that proves those locks can actually go red.
 | | `src/api/lib/ensure-kpi-tables.ts` — runtime self-apply. Migrations are inert; every column arrives here | | |
 | | `src/api/lib/kpi-survey-token.ts` — mint / URL / state / answer validation for the public survey link | | |
 | | `src/lib/kpi-drill.ts` — the "See the list →" contract shared by the card and every landing page: `drillHref` (stamps `{period}`), `narrowToIds`, `serviceCaseCountedIn`, `validPeriod` | | `tests/kpi-drilldown.test.mjs` |
-| | Drill-down list endpoints: `GET /api/sales-orders/late-to-customer?period=` (`sales-orders.ts`, before `/:id`, `customerScopeSql` in SQL) · `GET /api/products/setup-incomplete?missing=` (`products.ts`, before `/:id`) | | |
+| | Drill-down list endpoints: `GET /api/sales-orders/late-to-customer?period=` (`sales-orders.ts`, before `/:id`, `customerScopeSql` in SQL; `&all=1` returns every order shipped that month tagged `status` LATE / EARLY / ON_TIME, which the delivery KPI card lists inline instead of a See the list link) · `GET /api/products/setup-incomplete?missing=` (`products.ts`, before `/:id`) | | |
 
 **Read before touching this module:**
 - Four scoring types (`AUTO` / `CHECKLIST` / `SURVEY` / `MANUAL`) and six attainment

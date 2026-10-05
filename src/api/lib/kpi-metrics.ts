@@ -125,6 +125,7 @@ export interface LateOrderRow {
   customerName: string | null;
   customerDeliveryDate: string | null;
   shippedOn: string | null;
+  status: "LATE" | "EARLY" | "ON_TIME";
 }
 
 /**
@@ -139,11 +140,16 @@ export interface LateOrderRow {
  * list is legitimately SHORTER than the count. Narrowing here rather than in
  * the browser is the point: a client-side filter over a full payload has
  * already shipped the rows.
+ *
+ * `all` returns every order the metric counted (late, early and on time),
+ * each tagged with its status by the same two tests. The KPI card lists them
+ * inline so a person can see which order fell on which side.
  */
 export async function lateToCustomerOrders(
   c: Context<Env>,
   period: string,
   scope: { clause: string; binds: string[] } = { clause: "", binds: [] },
+  all = false,
 ): Promise<LateOrderRow[]> {
   const { start, end } = periodBounds(period);
   const scopeClause = scope.clause ? ` AND ${scope.clause}` : "";
@@ -154,9 +160,12 @@ export async function lateToCustomerOrders(
             so.customerId AS "customerId",
             so.customerName AS "customerName",
             substr(so.customerDeliveryDate::text, 1, 10) AS "customerDeliveryDate",
-            f.shipped_on AS "shippedOn"
-       ${DISPATCHED_IN_PERIOD}
-        AND ${IS_LATE}${scopeClause}
+            f.shipped_on AS "shippedOn",
+            CASE WHEN ${IS_LATE} THEN 'LATE'
+                 WHEN ${IS_EARLY} THEN 'EARLY'
+                 ELSE 'ON_TIME' END AS "status"
+       ${DISPATCHED_IN_PERIOD}${all ? "" : `
+        AND ${IS_LATE}`}${scopeClause}
       ORDER BY f.shipped_on DESC, so.id DESC`,
   )
     .bind(start, end, ...scope.binds)
