@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-05**: branch `feat/bom-manual-minutes-main` (to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-05**: branch `feat/kpi-assign-unassign-to-main` (to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-05**: branch `feat/permissions-tab-main` (Permissions tab, staging to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-02**: finance right-click row menus + Esc + fund transfer description edit (#680) closed ✅ with its prod check.
@@ -88,6 +89,13 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-05 — 🔵 BOM process minutes typed in by hand, CAT 1-14 removed (branch `feat/bom-manual-minutes-main` → `main`, same change as #688 to staging)
+
+1. 🔵 Owner asked to remove the CAT dropdown from BOM process rows completely, so minutes are only typed in. (First asked as a "Manual" option next to the CATs; changed to full removal before anything shipped.) Done in `src/pages/bom.tsx`: all 7 CAT dropdowns removed (New BOM, Edit BOM, Master Templates), the read-only minutes box is now `MinutesInput` (whole minutes, 0-1440), a department change keeps the typed minutes, CAT no longer shows on routing pills or the printed BOM, and new rows save no CAT.
+2. 🔵 `src/lib/production-order-builder.ts`: a process with no CAT no longer becomes `"CAT 1"` on its job card, so the dept+category job-card resync cannot overwrite typed minutes.
+3. Existing BOM minutes and stored CAT labels, existing job cards, the Production Times record in `kv_config` and the WIP Times page are left as they are.
+4. Checks: `tsc -p tsconfig.app.json` exit 0; new `tests/bom-manual-minutes.test.mjs`. Owner tested it on staging (#688) before this went to main.
 
 ## 2026-10-05 — 🔵 KPI Library: easier to pick, and people can be taken off a KPI (branch `feat/kpi-assign-unassign-to-main` → `main`, same change as #686 to staging)
 
