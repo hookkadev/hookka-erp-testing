@@ -360,10 +360,15 @@ app.post("/", async (c) => {
 // sum of every Fab Cut step of its PO, the same total aggregateFcSlots stamps
 // on a new one. A sofa merge spans several POs (key starts with the SO id), so
 // one PO's BOM can't price it.
+// A `<product>::FG_MAIN` card is the all-dept chain a PO got while its BOM was
+// empty (before BUG-2026-10-01-244). Today's BOM has other wipKeys, so it is
+// matched by dept instead: the sum of that dept's steps. Skipped when the PO
+// has another live card in the same dept, or that work would be counted twice.
 export function bomMinutesForCard(
   card: { wipKey: string; deptCode: string; poId: string },
   expected: readonly { wipKey: string; deptCode: string; estMinutes: number }[],
-): { minutes: number } | { skip: "sofaFabCutMerge" | "noMatch" } {
+  otherCardInDept = false,
+): { minutes: number } | { skip: "sofaFabCutMerge" | "noMatch" | "duplicateDept" } {
   if (card.deptCode === "FAB_CUT" && card.wipKey.endsWith("::FAB_CUT")) {
     if (!card.wipKey.startsWith(`${card.poId}::`)) return { skip: "sofaFabCutMerge" };
     const fc = expected.filter((e) => e.deptCode === "FAB_CUT");
@@ -373,16 +378,22 @@ export function bomMinutesForCard(
   const hit = expected.find(
     (e) => e.wipKey === card.wipKey && e.deptCode === card.deptCode,
   );
-  return hit ? { minutes: hit.estMinutes } : { skip: "noMatch" };
+  if (hit) return { minutes: hit.estMinutes };
+  if (!card.wipKey.endsWith("::FG_MAIN")) return { skip: "noMatch" };
+  if (otherCardInDept) return { skip: "duplicateDept" };
+  const steps = expected.filter((e) => e.deptCode === card.deptCode);
+  if (steps.length === 0) return { skip: "noMatch" };
+  return { minutes: steps.reduce((sum, e) => sum + e.estMinutes, 0) };
 }
 
 // ---------------------------------------------------------------------------
 // POST /api/production/sync-jobcards-from-bom/fill-zero-minutes
 //   ?dryRun=true             preview only
-// Live cards only (WAITING / IN_PROGRESS / PAUSED / BLOCKED): a CANCELLED card
-// is never filled.
 //   &completedFrom=YYYY-MM-DD  also fill COMPLETED/TRANSFERRED cards finished
 //                              on or after this date (default: none)
+//
+// Live cards only (WAITING / IN_PROGRESS / PAUSED / BLOCKED): a CANCELLED card
+// is never filled.
 //
 // A card's minutes are copied from the BOM once, when the card is created, so
 // a card cut while its BOM step had no minutes keeps 0 after the BOM is filled.
@@ -429,6 +440,8 @@ app.post("/fill-zero-minutes", async (c) => {
 
   const bomCache = new Map<string, Awaited<ReturnType<typeof loadBomTemplate>>>();
   const expectedByPo = new Map<string, ExpectedJc[]>();
+  // Per PO: dept -> wipKeys of its non-cancelled cards (for the FG_MAIN guard).
+  const deptKeysByPo = new Map<string, Map<string, string[]>>();
   const fills: Array<{
     jcId: string;
     poNo: string;
@@ -437,7 +450,7 @@ app.post("/fill-zero-minutes", async (c) => {
     status: string;
     minutes: number;
   }> = [];
-  const skipped = { bomZero: 0, noMatch: 0, sofaFabCutMerge: 0 };
+  const skipped = { bomZero: 0, noMatch: 0, sofaFabCutMerge: 0, duplicateDept: 0 };
   const skippedSamples: Array<{ jcId: string; poNo: string; productCode: string; deptCode: string; reason: string }> = [];
 
   for (const r of cards) {
@@ -448,9 +461,28 @@ app.post("/fill-zero-minutes", async (c) => {
       expected = computeExpectedJcs(r, bomCache.get(productCode) ?? null);
       expectedByPo.set(r.id, expected);
     }
+    let deptKeys = deptKeysByPo.get(r.id);
+    if (!deptKeys) {
+      const own = await db
+        .prepare(
+          `SELECT wipKey AS "wipKey", departmentCode AS "deptCode" FROM job_cards
+            WHERE productionOrderId = ? AND status <> 'CANCELLED'`,
+        )
+        .bind(r.id)
+        .all<{ wipKey: string | null; deptCode: string | null }>();
+      deptKeys = new Map();
+      for (const o of own.results ?? []) {
+        const list = deptKeys.get(o.deptCode ?? "") ?? [];
+        list.push(o.wipKey ?? "");
+        deptKeys.set(o.deptCode ?? "", list);
+      }
+      deptKeysByPo.set(r.id, deptKeys);
+    }
+    const wipKey = r.wipKey ?? "";
     const res = bomMinutesForCard(
-      { wipKey: r.wipKey ?? "", deptCode: r.deptCode ?? "", poId: r.id },
+      { wipKey, deptCode: r.deptCode ?? "", poId: r.id },
       expected,
+      (deptKeys.get(r.deptCode ?? "") ?? []).some((k) => k !== wipKey),
     );
     if ("skip" in res || res.minutes <= 0) {
       const reason = "skip" in res ? res.skip : "bomZero";

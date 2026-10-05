@@ -41,6 +41,24 @@ test("TC-04 a dept the BOM no longer has is skipped, not guessed", () => {
   assert.deepEqual(bomMinutesForCard(card, expected), { skip: "noMatch" });
 });
 
+test("TC-12 an old all-dept FG_MAIN card gets that dept's steps from today's BOM", () => {
+  const sew = { wipKey: "A02::FG_MAIN", deptCode: "FAB_SEW", poId: "pord-1" };
+  assert.deepEqual(bomMinutesForCard(sew, expected), { minutes: 30 });
+  // Several steps in the dept: the one card stands for all of them.
+  const cut = { wipKey: "A02::FG_MAIN", deptCode: "FAB_CUT", poId: "pord-1" };
+  assert.deepEqual(bomMinutesForCard(cut, expected), { minutes: 20 });
+});
+
+test("TC-13 an FG_MAIN card is skipped when its PO has another card in that dept", () => {
+  const cut = { wipKey: "A02::FG_MAIN", deptCode: "FAB_CUT", poId: "pord-1" };
+  assert.deepEqual(bomMinutesForCard(cut, expected, true), { skip: "duplicateDept" });
+});
+
+test("TC-14 an FG_MAIN card in a dept today's BOM doesn't have stays at 0", () => {
+  const wood = { wipKey: "A02::FG_MAIN", deptCode: "WOOD_CUT", poId: "pord-1" };
+  assert.deepEqual(bomMinutesForCard(wood, expected), { skip: "noMatch" });
+});
+
 // ---- Part 2: the endpoint against a fake DB --------------------------------
 
 // A02 as it is set up on prod: armrest tree (Upholstery > Sew > Fab Cut,
@@ -101,14 +119,17 @@ const ZERO_CARDS = [
   card("foam", po("pord-3", "1005-(Q)", "BEDFRAME"), "FOAM", keyOf("1005-(Q)")), // BOM still 0
 ];
 
-function makeDb(zeroCards = ZERO_CARDS) {
+// otherCards: extra live cards on the same POs that are not at 0.
+function makeDb(zeroCards = ZERO_CARDS, otherCards = []) {
   const selects = [];
   const writes = [];
+  const poCards = [...zeroCards, ...otherCards].map((c) => ({ poId: c.id, wipKey: c.wipKey, deptCode: c.deptCode }));
   function prepare(sql) {
     const s = String(sql).replace(/\s+/g, " ").trim();
     let bound = [];
     const rows = () => {
       if (/FROM bom_templates/.test(s)) return BOMS[bound[0]] ? [BOMS[bound[0]]] : [];
+      if (/FROM job_cards WHERE productionOrderId = \?/.test(s)) return poCards.filter((c) => c.poId === bound[0]);
       if (/FROM job_cards jc JOIN production_orders/.test(s)) return zeroCards;
       return [];
     };
@@ -155,7 +176,25 @@ test("TC-05 dry run lists what would change and writes nothing", async () => {
   assert.deepEqual(got, { fc: 15, sew: 30, pack: 10, done: 15 });
   assert.equal(body.toFill, 4);
   assert.equal(body.toFillCompleted, 1);
-  assert.deepEqual(body.skipped, { bomZero: 1, noMatch: 1, sofaFabCutMerge: 1 });
+  assert.deepEqual(body.skipped, { bomZero: 1, noMatch: 1, sofaFabCutMerge: 1, duplicateDept: 0 });
+});
+
+test("TC-15 the screenshot order: old all-dept cards filled from today's BOM, no double Fab Cut", async () => {
+  // SO-2609-281-12 as it is on prod: a merged (FC) card plus the old
+  // A02::FG_MAIN chain in every dept, all at 0. One old FG_MAIN Fab Cut card
+  // too, which the merged card already covers.
+  const p = po("pord-9", "A02");
+  const old = (dept) => card(`old-${dept}`, p, dept, "A02::FG_MAIN");
+  const cards = [
+    card("fc9", p, "FAB_CUT", "pord-9::A02::GD526-16::FAB_CUT"),
+    old("FAB_CUT"), old("FAB_SEW"), old("UPHOLSTERY"), old("PACKING"), old("WOOD_CUT"),
+  ];
+  const f = makeDb(cards);
+  const { body } = await call(f.db, "?dryRun=true");
+  const got = Object.fromEntries(body.fills.map((x) => [x.jcId, x.minutes]));
+  assert.deepEqual(got, { fc9: 15, "old-FAB_SEW": 30, "old-UPHOLSTERY": 15, "old-PACKING": 10 });
+  assert.equal(body.skipped.duplicateDept, 1, "the old Fab Cut card must not double the merged one");
+  assert.equal(body.skipped.noMatch, 1, "Wood Cutting is not in this BOM");
 });
 
 test("TC-06 the screenshot case: A02 merged Fab Cut card at 0 becomes 15", async () => {

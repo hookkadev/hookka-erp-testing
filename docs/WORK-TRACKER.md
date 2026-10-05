@@ -95,7 +95,7 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
 
 ## 2026-10-05 — 🔵 Fill job cards stuck at 0 production minutes (branch `fix/backfill-zero-minutes-open-cards` → `main`, BUG-2026-10-05-256)
 
-1. 🔵 Owner screenshot (Fab Cut sheet, A02 at 0 min): fill the cards whose BOM was filled after they were made. Owner scope: unfinished cards, plus cards completed from 2026-10-01 (September left alone so September pay is not affected); cards that already have minutes are left alone. New `fill-zero-minutes` endpoint, dry run first. Checks: `tsc -p tsconfig.app.json` exit 0, new `tests/fill-zero-minutes.test.mjs`. Prod run pending until deployed; expected from the read-only preview: about 159 unfinished + 22 completed in October.
+1. 🔵 Owner screenshot (Fab Cut sheet, A02 at 0 min): fill the cards whose BOM was filled after they were made. Owner scope: unfinished cards, plus cards completed from 2026-10-01 (September left alone so September pay is not affected); cards that already have minutes are left alone. New `fill-zero-minutes` endpoint, dry run first. Checks: `tsc -p tsconfig.app.json` exit 0, new `tests/fill-zero-minutes.test.mjs`. Prod run pending until deployed; Canary dry run (prod data, read-only) found cancelled cards selected (fixed) and 355 live zeros on the old FG_MAIN all-dept chain; owner chose to fill those by dept from today's BOM. Re-run the dry run on the canary before merge.
 
 ## 2026-10-05 — 🔵 Accessory master BOM templates could not be saved (branch `fix/bom-master-template-accessory` → `main`, BUG-2026-10-05-255)
 
