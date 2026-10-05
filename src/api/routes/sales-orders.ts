@@ -98,6 +98,7 @@ import {
   soListToOrdersDue,
   ORDERS_DUE_DEFAULT_TOP,
   findIncompleteBomProducts,
+  findEmptyWipProducts,
   rowToStatusChange,
   rowToPriceOverride,
   genSoId,
@@ -1311,6 +1312,19 @@ app.get("/late-to-customer", async (c) => {
   const scope = await customerScopeSql(c, "so.customerId");
   const rows = await lateToCustomerOrders(c, period, scope);
   return c.json({ success: true, period, data: rows });
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/sales-orders/empty-wip?productCodes=A,B — which of these products
+// have an empty WIP tab (or no BOM). Feeds the per-line warning on Create SO;
+// see findEmptyWipProducts. Registered BEFORE /:id.
+// ---------------------------------------------------------------------------
+app.get("/empty-wip", async (c) => {
+  const denied = await requirePermission(c, "sales-orders", "read");
+  if (denied) return denied;
+  const codes = (c.req.query("productCodes") ?? "").split(",");
+  const data = await findEmptyWipProducts(c.var.DB, codes);
+  return c.json({ success: true, data });
 });
 
 // ---------------------------------------------------------------------------
