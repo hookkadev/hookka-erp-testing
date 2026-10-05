@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-05**: BUG-2026-10-05-256 flipped to 🟢 with its measured prod run (#696).
 > **Last verified: 2026-10-05**: newest entry BUG-2026-10-05-258 (branch `fix/worker-pay-late-daily-rate`, to main then staging).
 > **Last verified: 2026-10-05**: newest entry BUG-2026-10-05-257 (branch `fix/worker-pay-advance-line-main`, to main; 256 is on open branch `fix/backfill-zero-minutes-open-cards`).
 > **Last verified: 2026-10-05**: newest entry BUG-2026-10-05-256 (branch `fix/backfill-zero-minutes-open-cards`, to main).
@@ -101,9 +102,9 @@ Entries themselves stay newest-first.
 
 **Guard.** `tests/worker-pay-advance-line.test.mjs`. `tests/db-schema.json` gains `payslips.advance_deduction_sen` (runtime-added by `ensureAdvanceTables`; on prod it holds the 10000 above), so `tests/sql-columns-exist.test.mjs` accepts the new SELECT.
 
-## BUG-2026-10-05-256 — Job cards kept 0 production minutes after their BOM was filled in `production` `bom` 🟡
+## BUG-2026-10-05-256 — Job cards kept 0 production minutes after their BOM was filled in `production` `bom` 🟢
 
-🟡 Fix on `fix/backfill-zero-minutes-open-cards` (to `main`). Report (owner, screenshot): Fab Cut production sheet, A02 cards SO-2609-281-12 / 393-13 / 393-14 / 247-11 / 247-12 showed Prod Time 0 while the newer SO-2610-035-12 showed 10.
+🟢 Fixed on `fix/backfill-zero-minutes-open-cards` (to `main`, #696) and run on prod. Prod run 2026-10-05 after #696 (7d507a59) deployed, `completedFrom=2026-10-01`: updated 309 (254 live, 55 completed in October). Measured after: a second dry run finds 0 to fill (cards at 0 scanned fell 825 to 516); the reported A02 Fab Cut cards SO-2609-281-12 / 393-13 / 393-14 / 247-11 / 247-12 read 15; the audit row on SO-2609-281-12's cut card is 0 to 15; SO-2610-035-12 (had minutes) still 10. Left at 0 on purpose: 411 cards whose BOM step is still 0 (mostly pillow Packing, 1005-(Q) Foam) and 103 in a dept their BOM does not use. Report (owner, screenshot): Fab Cut production sheet, A02 cards SO-2609-281-12 / 393-13 / 393-14 / 247-11 / 247-12 showed Prod Time 0 while the newer SO-2610-035-12 showed 10.
 
 **Cause.** A card's minutes are copied from the BOM once, when the card is created. These A02 / A01 / SB02 / BC05-MF cards were cut while their BOM steps had no minutes, so they got 0. Filling the BOM later never reaches existing cards: `jobcard-sync` only inserts missing cards, `/resync-job-card-times` reads the dept x category Production Times table, not the product's BOM, and `/backfill-jc-production-time-from-bom` cannot match a merged Fab Cut card (its wipKey is `<poId>::<model>::<fabric>::FAB_CUT`, not a BOM wipKey). Its dry run on prod (2026-10-05) also wanted to rewrite 22,738 cards (22,146 completed, back to June) whose minutes differ from today's BOM, none of them zeros.
 

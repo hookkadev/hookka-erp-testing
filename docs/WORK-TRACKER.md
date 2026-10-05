@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-05**: fill job cards stuck at 0 minutes (#696, BUG-2026-10-05-256) closed ✅ with its prod run.
 > **Last verified: 2026-10-05**: branch `fix/worker-pay-late-daily-rate` (to `main`, BUG-2026-10-05-258) added below (its entry is the newest).
 > **Last verified: 2026-10-05**: branch `fix/worker-pay-advance-line-main` (to `main`, BUG-2026-10-05-257) added below (its entry is the newest).
 > **Last verified: 2026-10-05**: branch `fix/backfill-zero-minutes-open-cards` (to `main`, BUG-2026-10-05-256) added below (its entry is the newest).
@@ -110,9 +111,10 @@ Owner ask: a worker's Net was RM 100 below Gross with no reason on the phone. Me
 2. 🔵 The finished-month card shows "Salary advance" after Tax, tap for the dates. New label in all four worker languages.
 3. ⬜ Check on the staging site after #700 merges, then live after this merges.
 
-## 2026-10-05 — 🔵 Fill job cards stuck at 0 production minutes (branch `fix/backfill-zero-minutes-open-cards` → `main`, BUG-2026-10-05-256)
+## 2026-10-05 — ✅ Fill job cards stuck at 0 production minutes (branch `fix/backfill-zero-minutes-open-cards` → `main`, BUG-2026-10-05-256, #696 7d507a59, prod-run)
 
-1. 🔵 Owner screenshot (Fab Cut sheet, A02 at 0 min): fill the cards whose BOM was filled after they were made. Owner scope: unfinished cards, plus cards completed from 2026-10-01 (September left alone so September pay is not affected); cards that already have minutes are left alone. New `fill-zero-minutes` endpoint, dry run first. Checks: `tsc -p tsconfig.app.json` exit 0, new `tests/fill-zero-minutes.test.mjs`. Prod run pending until deployed; Canary dry run (prod data, read-only) found cancelled cards selected (fixed) and 355 live zeros on the old FG_MAIN all-dept chain; owner chose to fill those by dept from today's BOM. Re-run the dry run on the canary before merge.
+1. ✅ Owner screenshot (Fab Cut sheet, A02 at 0 min): fill the cards whose BOM was filled after they were made. Owner scope: unfinished cards, plus cards completed from 2026-10-01 (September left alone so September pay is not affected); cards that already have minutes are left alone. New `fill-zero-minutes` endpoint, dry run first. Checks: `tsc -p tsconfig.app.json` exit 0, new `tests/fill-zero-minutes.test.mjs`. Prod run pending until deployed; Canary dry run (prod data, read-only) found cancelled cards selected (fixed) and 355 live zeros on the old FG_MAIN all-dept chain; owner chose to fill those by dept from today's BOM. Re-run the dry run on the canary before merge.
+2. ✅ Prod run 2026-10-05 after #696 (7d507a59) deployed, `completedFrom=2026-10-01`: updated 309 (254 live, 55 completed in October). Measured after: a second dry run finds 0 to fill (cards at 0 scanned fell 825 to 516); the reported A02 Fab Cut cards SO-2609-281-12 / 393-13 / 393-14 / 247-11 / 247-12 read 15; the audit row on SO-2609-281-12's cut card is 0 to 15; SO-2610-035-12 (had minutes) still 10. Left at 0 on purpose: 411 cards whose BOM step is still 0 (mostly pillow Packing, 1005-(Q) Foam) and 103 in a dept their BOM does not use.
 
 ## 2026-10-05 — 🔵 Accessory master BOM templates could not be saved (branch `fix/bom-master-template-accessory` → `main`, BUG-2026-10-05-255)
 
