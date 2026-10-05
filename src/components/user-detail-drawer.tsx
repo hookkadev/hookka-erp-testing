@@ -29,6 +29,7 @@
 import { useRef, useState } from "react";
 import { X, Trash2, Ban, CheckCircle2, Save, Camera, Loader2 } from "lucide-react";
 import { uploadFileAsset } from "@/lib/upload-file";
+import { announcePhotoChange } from "@/lib/photo-changed";
 
 export type DrawerUser = {
   id: string;
@@ -163,6 +164,8 @@ export function UserDetailDrawer({
       setPhotoFileId(fileId || null);
       setOk(fileId ? "Photo saved" : "Photo removed");
       onSaved();
+      // The header avatar may be this person.
+      announcePhotoChange(`user:${user.id}`, fileId || null);
     } catch {
       setError("Could not reach the server.");
     } finally {

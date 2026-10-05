@@ -1,5 +1,6 @@
 # Quality, Warehouse, Scanning & Platform — Module Guide
 
+> **Last verified: 2026-10-05** (branch `feat/topbar-profile`): the `auth.ts` anchor rows re-derived after `/me` started returning the photo. Nothing else re-checked.
 > **Last verified: 2026-09-30** (branch `feat/account-permissions-tab`) — the two `rbac.ts` anchor rows re-derived after the per-account permission lookup moved them. Nothing else re-checked.
 
 > **Last verified: 2026-09-25** (branch `feat/m-warehouse-locate`) — the rack stock-in flow (#3) and the warehouse / public-rack-qr anchor rows re-derived after DEV-09 moved them; `GET /locate` added.
@@ -99,8 +100,8 @@ is enforced by hand in the handler, not by the middleware.
 | `applyPackingRack` | `src/api/lib/packing-rack-write.ts:71` | Rack set/clear + `rack_items` occupancy mirror |
 | `ensurePiecePicsRackingColumn` | `src/api/lib/packing-rack-write.ts:35` | Shared mig-0192 DDL self-apply |
 | `packingPieceIdentity` | `src/api/lib/packing-piece-identity.ts:48` | Shared description + notes move-match key |
-| `POST /login` | `src/api/routes/auth.ts:148` | Session + CSRF cookie issue (TOTP-aware) |
-| `GET /me/permissions` | `src/api/routes/auth.ts:521` | Effective permission set for the FE |
+| `POST /login` | `src/api/routes/auth.ts:159` | Session + CSRF cookie issue (TOTP-aware) |
+| `GET /me/permissions` | `src/api/routes/auth.ts:531` | Effective permission set for the FE |
 | `authMiddleware` | `src/api/lib/auth-middleware.ts` | Auth gate + double-submit CSRF |
 | `PUBLIC_PREFIXES` | `src/api/lib/auth-middleware.ts:66` | Prefix allow-list that bypasses the gate |
 | `requirePermission` | `src/api/lib/rbac.ts:212` | Per-resource:action RBAC (ADMIN/SUPER_ADMIN bypass; an account's own list from `user_permissions` before its role; fails CLOSED on a thrown lookup) |

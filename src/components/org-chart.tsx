@@ -28,6 +28,7 @@ import {
 import { useCachedJson, invalidateCachePrefix } from "@/lib/cached-fetch";
 import { buildOrgTree, countSubtree, type OrgNode, type OrgPerson } from "@/lib/org-people";
 import { uploadFileAsset } from "@/lib/upload-file";
+import { announcePhotoChange } from "@/lib/photo-changed";
 
 /**
  * Fallback column order, used only until the server's department list arrives
@@ -503,6 +504,8 @@ ${styles}
         }
         invalidateCachePrefix("/api/org-chart");
         refresh();
+        // The header avatar may be this person.
+        announcePhotoChange(personKey, uploaded.id);
       } catch {
         setError("Could not reach the server.");
       } finally {

@@ -420,7 +420,8 @@ app.put("/reporting", async (c) => {
 // (resourceType "org-photo", resourceId the person's composite key) and only
 // hands this endpoint the resulting file id — this route never touches file
 // bytes. Same gate as /reporting (users:update): whoever may re-point who a
-// person reports to may also set their photo, and no other role can.
+// person reports to may also set their photo, and no other role can, except
+// that everyone may set their OWN (see below).
 //
 // fileId null/absent CLEARS the photo (falls back to initials), matching how
 // `managerKey` clearing already works on /reporting.
@@ -436,8 +437,6 @@ async function isOwnPhoto(db: D1Database, orgId: string, fileId: string, pk: str
 }
 
 app.put("/photo", async (c) => {
-  const denied = await requirePermission(c, "users", "update");
-  if (denied) return denied;
   let body: { personKey?: unknown; fileId?: unknown };
   try {
     body = await c.req.json();
@@ -446,6 +445,15 @@ app.put("/photo", async (c) => {
   }
   const pk = typeof body.personKey === "string" ? body.personKey.trim() : "";
   const fileId = typeof body.fileId === "string" ? body.fileId.trim() : "";
+
+  // Owner 2026-10-05: anyone may change their OWN photo from the Profile panel
+  // in the header. Everyone else's still needs users:update. The session's
+  // userId decides "own", never anything in the body.
+  const selfId = (c as unknown as { get: (k: string) => unknown }).get("userId");
+  if (!(typeof selfId === "string" && selfId && pk === `user:${selfId}`)) {
+    const denied = await requirePermission(c, "users", "update");
+    if (denied) return denied;
+  }
 
   const parsed = parsePersonKey(pk);
   if (!parsed) {

@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-05**: branch `feat/topbar-profile` (to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-05**: branch `fix/worker-pay-advance-line` (to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-05**: branch `feat/bom-manual-minutes` (to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-05**: branch `feat/kpi-assign-unassign` (to `staging`) added below (its entry is the newest).
@@ -142,6 +143,16 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-05 — 🔵 Top-right Profile menu works, profile picture synced (branch `feat/topbar-profile` → `staging`)
+
+Owner ask: make the top-right Profile item actually work and sync the profile picture.
+
+1. 🔵 Header avatar shows the signed-in person's photo (the same `users.photo_file_id` the Org Chart uses), initial as fallback. `GET /api/auth/me` now returns `photoFileId`.
+2. 🔵 Profile opens a panel: photo, name, email, role, department, position.
+3. 🔵 Anyone can change or remove their OWN photo there (owner decision 2026-10-05). `PUT /api/org-chart/photo` skips the `users:update` check only when the person key is the caller's own user.
+4. 🔵 A photo change from the Org Chart or User Management updates the header without a reload.
+5. ⬜ Check on the staging site after merge.
 
 ## 2026-10-05 — 🔵 Worker My Pay shows the salary advance (branch `fix/worker-pay-advance-line` → `staging`, BUG-2026-10-05-257)
 
