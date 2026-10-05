@@ -1,7 +1,7 @@
 # API — generated reference
 
 > **GENERATED FILE — do not hand-edit.** Regenerate with `node scripts/gen-api-docs.mjs`.
-> **Last generated: 2026-10-02** from `src/api/worker.ts` + `src/api/routes/*.ts`.
+> **Last generated: 2026-10-05** from `src/api/worker.ts` + `src/api/routes/*.ts`.
 
 The backend is a single [Hono](https://hono.dev) app in `src/api/worker.ts`, served
 as a Cloudflare Pages Function via `functions/api/[[route]].ts`. There is no
@@ -136,7 +136,7 @@ offsets pointing past the end of their own file.
 | `/api/dashboard/overview` | `src/api/routes/dashboard-overview.ts` | `GET /` <sub>:49</sub> | gated |
 | `/api/dashboard/prototype` | `src/api/routes/dashboard-prototype.ts` | `GET /` <sub>:294</sub> | gated |
 | `/api/dashboard/finance` | `src/api/routes/dashboard-finance.ts` | `GET /` <sub>:42</sub><br>`PUT /valuation` <sub>:110</sub> | gated |
-| `/api/kpi` | `src/api/routes/kpi.ts` | `GET /me` <sub>:277</sub><br>`GET /users/:id` <sub>:286</sub><br>`GET /payout/:id` <sub>:301</sub><br>`PUT /payout/:id` <sub>:308</sub><br>`PUT /checklist/:kpiKey` <sub>:380</sub><br>`GET /checklist/:kpiKey` <sub>:444</sub><br>`POST /survey/:kpiKey` <sub>:466</sub><br>`POST /survey/:kpiKey/link` <sub>:523</sub><br>`PUT /rating/:kpiKey` <sub>:590</sub><br>`GET /survey/:kpiKey` <sub>:643</sub><br>`GET /library` <sub>:664</sub><br>`GET /people` <sub>:710</sub><br>`GET /catalog` <sub>:759</sub><br>`GET /assignments/:id` <sub>:771</sub><br>`PUT /assignments/:id` <sub>:784</sub><br>`PUT /kpi/:kpiKey/assignees` <sub>:847</sub> | gated |
+| `/api/kpi` | `src/api/routes/kpi.ts` | `GET /me` <sub>:280</sub><br>`GET /users/:id` <sub>:289</sub><br>`GET /payout/:id` <sub>:304</sub><br>`PUT /payout/:id` <sub>:311</sub><br>`PUT /checklist/:kpiKey` <sub>:383</sub><br>`GET /checklist/:kpiKey` <sub>:447</sub><br>`POST /survey/:kpiKey` <sub>:469</sub><br>`POST /survey/:kpiKey/link` <sub>:526</sub><br>`PUT /rating/:kpiKey` <sub>:593</sub><br>`GET /survey/:kpiKey` <sub>:646</sub><br>`GET /library` <sub>:667</sub><br>`GET /people` <sub>:713</sub><br>`GET /catalog` <sub>:762</sub><br>`GET /assignments/:id` <sub>:774</sub><br>`PUT /assignments/:id` <sub>:787</sub><br>`PUT /kpi/:kpiKey/assignees` <sub>:850</sub> | gated |
 | `/api/mdm` | `src/api/routes/mdm.ts` | `GET /review-queue` <sub>:89</sub><br>`POST /review-queue/:id/dismiss` <sub>:198</sub><br>`POST /review-queue/:id/merge` <sub>:212</sub><br>`POST /detection/run` <sub>:232</sub> | gated |
 | `/api/files` | `src/api/routes/files.ts` | `POST /` <sub>:377</sub><br>`GET /` <sub>:406</sub><br>`PATCH /:id/cover` <sub>:437</sub><br>`GET /:id` <sub>:461</sub><br>`GET /:id/download` <sub>:483</sub><br>`GET /:id/stream` <sub>:526</sub><br>`DELETE /:id` <sub>:570</sub> | gated |
 | `/api/sheets-sync` | `src/api/routes/sheets-sync.ts` | `POST /apps-script-webhook` <sub>:66</sub><br>`POST /backfill` <sub>:332</sub> | gated (some paths public) |
