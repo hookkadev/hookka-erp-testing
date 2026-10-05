@@ -1,5 +1,6 @@
 # Hookka ERP — Codebase Map (the single authoritative map)
 
+> **Restamped 2026-10-05 on branch `fix/bom-minutes-leading-zero-main` (to `main`, BUG-2026-10-05-254):** the `src/pages/bom.tsx` row and line-range index, read from the file. Nothing else re-checked.
 > **Restamped 2026-10-05 on branch `feat/bom-manual-minutes-main` (to `main`):** the `src/pages/bom.tsx` row (line count) and its line-range index, read from the file; the BOM minutes gotcha. Nothing else re-checked.
 > **Last verified: 2026-10-05 on branch `feat/kpi-assign-unassign-to-main` (to `main`)**: the KPI row (Library row-click pick, remove button on holder chips) and the new gotcha on removals vs settled months, read from `src/pages/kpi/index.tsx` and `src/api/routes/kpi.ts`. Nothing else re-checked.
 > **Restamped 2026-10-02 on branch `feat/finance-row-menu-esc`:** Accounting row, finance row menus + Esc (`src/components/accounting/row-menu.tsx`, `src/lib/escape-stack.ts`). Nothing else re-checked. Last verified: 2026-10-02.
@@ -608,7 +609,7 @@ authoritative current detail.** New here? Start with [ONBOARDING-PATH.md](ONBOAR
 | | `src/api/lib/packing-piece-identity.ts` — `packingPieceIdentity` (shared piece warehouse identity; appends `· pc N of M` to notes when pieceNo set + multi-piece) | | |
 | | `src/api/lib/job-card-completed-at.ts` — `ensureJobCardCompletedAt` / `observedCompletionAt` / `reconcileCompletedAt` / `readCompletedAt` (the completion INSTANT, beside the date-only `completed_date`) | `job_cards.completed_at` | `tests/job-card-completed-at.test.mjs` |
 | `src/pages/production/dept.tsx` / `overview.tsx` — thin wrappers over `production/index.tsx`, whose Overview counts now gate on `ordersObserved` (cold landing / in flight / dead read all print "—", -146) | `src/api/routes/wip-times.ts` — minute counts + `coverage.productsWithoutActiveBom` (`number \| null`, from `countProductsWithoutActiveBom` in `src/api/lib/wip-times-core.ts`) | `kv_config` · `products` (read: ACTIVE products with no ACTIVE bom_template) | `tests/sofa-combo.test.mjs` · `tests/planning-production-tile-truthfulness.test.mjs` |
-| `src/pages/bom.tsx` — BOM Management (6782) | `src/api/routes/production-leadtimes.ts` — due-date buffer | | |
+| `src/pages/bom.tsx` — BOM Management (6787) | `src/api/routes/production-leadtimes.ts` — due-date buffer | | |
 | `src/pages/cnc-templates.tsx` — CNC drilldown | | | |
 | `src/pages/production/components/` — BatchActionToolbar / CreateStockPODialog / CellBox / ProductDetailLine / OverviewCards (Cards view: WorkOrderCard, WorkOrderHeader, StagePipeline) | | | |
 
@@ -633,18 +634,18 @@ authoritative current detail.** New here? Start with [ONBOARDING-PATH.md](ONBOAR
   - PATCH /:id rack-assign — inline rackingNumber UPDATE then `applyPackingRack` (text re-affirm + occupancy) — L4180-4195
   - POST /packing-rack-tokens — authed /p/ token mint (batched: 2 queries + parallel mint) — L6001-6135
 - `src/pages/bom.tsx`
-  - MinutesInput (typed process minutes, 0-1440) — L169-183
-  - RoutingPill / WIPCodeBuilder / RawMaterialSelect / MaterialScalingEditor helpers — L598-1224
-  - WIPNode (recursive BOM tree node) — L1225-1489
-  - BOMTreeView (template tree render, L1 + WIP) — L1490-1850
-  - CreateBOMDialog — L1851-2430
-  - CollapsibleGroup / SubWIPTree — L2431-2768 (still used by MasterTemplatesDialog; EditBOMDialog no longer renders it)
-  - flattenWipTree / wipNodeAt / depthBar — L2769-2966 (two-pane tree helpers)
-  - WipNodeDetail (right pane — edits ONE node at any depth) — L2967-3186
-  - EditBOMDialog (L1 tab + two-pane WIP tab) — L3187-4073
-  - MasterTemplatesDialog (Bedframe/Sofa/Accessory tabs + copy-from) — L4074-5210
-  - BatchEditMaterialsDialog — L5211-6298
-  - BOMManagementPage (default export — page shell, tabs, list) — L6299-6782
+  - parseMinutes / MinutesInput (typed process minutes, 0-1440; a text box, see BUG-2026-10-05-254) — L173-188
+  - RoutingPill / WIPCodeBuilder / RawMaterialSelect / MaterialScalingEditor helpers — L603-1229
+  - WIPNode (recursive BOM tree node) — L1230-1494
+  - BOMTreeView (template tree render, L1 + WIP) — L1495-1855
+  - CreateBOMDialog — L1856-2435
+  - CollapsibleGroup / SubWIPTree — L2436-2773 (still used by MasterTemplatesDialog; EditBOMDialog no longer renders it)
+  - flattenWipTree / wipNodeAt / depthBar — L2774-2971 (two-pane tree helpers)
+  - WipNodeDetail (right pane — edits ONE node at any depth) — L2972-3191
+  - EditBOMDialog (L1 tab + two-pane WIP tab) — L3192-4078
+  - MasterTemplatesDialog (Bedframe/Sofa/Accessory tabs + copy-from) — L4079-5215
+  - BatchEditMaterialsDialog — L5216-6303
+  - BOMManagementPage (default export — page shell, tabs, list) — L6304-6787
   - (ProductionTimesDialog and DeptPivotCategoryDialog were removed 2026-08-01.)
 
 **Gotchas**
