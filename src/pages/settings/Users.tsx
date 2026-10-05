@@ -31,6 +31,7 @@ import { OrgChart } from "@/components/org-chart";
 import { humanizeError } from "@/lib/humanize-error";
 import { verifiedSave, formatMismatchError } from "@/lib/verified-save";
 import { UserDetailDrawer, type DrawerUser } from "@/components/user-detail-drawer";
+import { UserPermissionsPanel } from "@/components/user-permissions-panel";
 import { AddUserDrawer } from "@/components/add-user-drawer";
 import { Tabs, type TabItem } from "@/components/ui/tabs";
 import { DataGrid, type Column } from "@/components/ui/data-grid";
@@ -174,7 +175,7 @@ type MailAddress = {
   createdAt: string;
 };
 
-type TabKey = "users" | "org" | "mailbox";
+type TabKey = "users" | "org" | "permissions" | "mailbox";
 
 // ---------- Small helpers --------------------------------------------------
 
@@ -1663,7 +1664,10 @@ export default function UsersPage() {
     { key: "users", label: "Users", count: users.length },
     { key: "org", label: "Org Chart" },
     ...(canManageUsers
-      ? [{ key: "mailbox" as TabKey, label: "Mailbox Access" }]
+      ? [
+          { key: "permissions" as TabKey, label: "Permissions" },
+          { key: "mailbox" as TabKey, label: "Mailbox Access" },
+        ]
       : []),
   ];
 
@@ -2142,6 +2146,17 @@ export default function UsersPage() {
             )}
           </CardContent>
         </Card>
+      )}
+
+      {/* =========================================================== */}
+      {/* TAB: PERMISSIONS (SUPER_ADMIN) — per-account access editor   */}
+      {/* =========================================================== */}
+      {tab === "permissions" && canManageUsers && (
+        <UserPermissionsPanel
+          users={users}
+          currentUserId={currentUser?.id}
+          onFlash={(msg, kind) => showFlash(kind, msg)}
+        />
       )}
 
       {/* =========================================================== */}

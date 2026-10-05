@@ -20,6 +20,7 @@
 import { Hono } from "hono";
 import { permissionsForRole, withDashboardAccess, dashboardTabsForRole } from "../lib/role-policy";
 import { requirePermission } from "../lib/rbac";
+import { getUserOverride } from "../lib/user-permissions";
 import { hiddenNavPrefixes, hiddenNavForRole, homeForPermissions } from "../lib/nav-permissions";
 import type { Context } from "hono";
 import type { Env } from "../worker";
@@ -576,6 +577,23 @@ app.get("/me/permissions", async (c) => {
 
     const roleId = roleRow.roleId ?? "role_read_only";
     const roleName = resolvedRole ?? "READ_ONLY";
+
+    // An account a Super Admin has edited uses its OWN list — the same lookup,
+    // in the same order, as the gate (rbac.ts getEffectivePermissions), so the
+    // menu can never show a page the API refuses or hide one it allows.
+    const own = await getUserOverride(c, userId);
+    if (own) {
+      const ownPerms = new Set(withDashboardAccess(own, roleName));
+      return c.json({
+        success: true,
+        role: roleName,
+        customized: true,
+        permissions: [...ownPerms],
+        navHidden: [...new Set([...hiddenNavPrefixes(ownPerms), ...hiddenNavForRole(roleName)])],
+        home: homeForPermissions(ownPerms, roleName),
+        dashboardTabs: dashboardTabsForRole(roleName),
+      });
+    }
 
     // A role whose policy is written in CODE never touches the table — the same
     // short-circuit rbac.ts uses for the GATE. Reading the table here while the

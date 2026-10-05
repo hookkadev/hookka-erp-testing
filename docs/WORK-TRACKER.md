@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-05**: branch `feat/permissions-tab-main` (Permissions tab, staging to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-02**: finance right-click row menus + Esc + fund transfer description edit (#680) closed ✅ with its prod check.
 > **Last verified: 2026-10-02**: branch `feat/m-install-and-desktop-switch` (to `main`, BUG-2026-10-02-250) added below (its entry is the newest).
 > **Last verified: 2026-10-02**: branch `feat/dev31-worker-dept-hours-main` (DEV-31 to `main`) added below (its entry is the newest).
@@ -86,6 +87,11 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-05 — 🔵 Permissions tab to `main` (branch `feat/permissions-tab-main`)
+
+Ask (owner): bring the staging Permissions tab (User Management → Permissions) to main, because access problems keep coming up and the owner wants to fix them per account without a code change.
+1. 🔵 Ported staging commit 8b1c6e71 as is (gate + menu read an account's own list before its role; `/api/user-permissions` Super Admin only; tab in User Management) plus the `worker-penalties: approve` catalog line from 9959320b. Staging-only "View as" changes to the same files are not included. An account never edited has no row, so shipping changes no one's access.
 
 ## 2026-10-02 — ✅ Finance lists: row actions on right-click; Esc closes popups; Fund Transfer edit (owner「FUND TRANSFER无法edit?」+「这个显示太多了，能不能right click 才选我的东西」+「点开后无法用esc 关闭，create new pv 时也是这样」)(#680 1b339244, prod-verified; branch `feat/finance-row-menu-esc`)
 

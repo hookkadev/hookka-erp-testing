@@ -27,6 +27,7 @@ import { permissionsForRole, dashboardTabsForRole, dashboardReadsForRole } from 
 // ---------------------------------------------------------------------------
 import type { Context } from "hono";
 import type { Env } from "../worker";
+import { getUserOverride } from "./user-permissions";
 
 const PERM_CACHE_TTL_S = 300;
 // In-isolate memo for role→permission sets (perf audit 2026-07-31). 5s TTL,
@@ -175,6 +176,20 @@ export async function getRolePermissions(
   return set;
 }
 
+/**
+ * The set the gate checks: the account's own list when a Super Admin has
+ * edited it (user-permissions.ts), otherwise its role's. Throws on a lookup
+ * failure; both callers catch and fail closed.
+ */
+async function getEffectivePermissions(c: Context<Env>, role: string): Promise<PermSet> {
+  const userId = (c as unknown as { get: (k: string) => string | undefined }).get("userId");
+  if (userId) {
+    const own = await getUserOverride(c, userId);
+    if (own) return own;
+  }
+  return getRolePermissions(c, role);
+}
+
 /** Wildcard match — allow `*:*`, `*:action`, `resource:*` and the exact match. */
 function permitted(set: PermSet, resource: string, action: string): boolean {
   return (
@@ -230,10 +245,10 @@ export async function requirePermission(
   // cost of a blip is one refused request, logged so ops can root-cause it.
   let set: PermSet;
   try {
-    set = await getRolePermissions(c, role);
+    set = await getEffectivePermissions(c, role);
   } catch (err) {
     console.warn(
-      `[rbac] getRolePermissions threw for role=${role} resource=${resource} action=${action} — denying unless the role has a legacy default. err=${
+      `[rbac] permission lookup threw for role=${role} resource=${resource} action=${action} — denying unless the role has a legacy default. err=${
         err instanceof Error ? err.message : String(err)
       }`,
     );
@@ -285,7 +300,7 @@ export async function hasPermission(
   if (role === "SUPER_ADMIN" || role === "ADMIN") return true;
   let set: PermSet;
   try {
-    set = await getRolePermissions(c, role);
+    set = await getEffectivePermissions(c, role);
   } catch {
     // Fail CLOSED for a field check. A transient failure hiding a price column
     // is a cosmetic problem; showing one is the thing being prevented.
