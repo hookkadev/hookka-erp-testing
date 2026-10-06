@@ -41,8 +41,6 @@ export type PayCardData = {
   plus: PayLine[];
   /** Taken off Gross: statutory, salary advance, penalties. */
   deductions: PayLine[];
-  /** Shown under Deductions, e.g. "before EPF…" on a live estimate. */
-  deductionsNote?: string;
 };
 
 const sum = (lines: PayLine[]) => lines.reduce((s, l) => s + l.amountSen, 0);
@@ -136,8 +134,6 @@ export function liveMonthCard(c: LiveMonth, t: Translate): PayCardData | null {
     deductions: [
       { label: t("pay.salaryAdvance"), amountSen: c.advanceSen ?? 0, chips: advanceChips(c.advanceDays) },
     ],
-    // The live estimate has no statutory figures yet; payroll works them out.
-    deductionsNote: t("pay.beforeStatutory"),
   };
   // The engine floors basic at 0 (absences can exceed a part month's salary);
   // the card's plain sum would then disagree, so keep the old card.
@@ -315,9 +311,6 @@ export default function PayCard({
         ))}
         {deductions.length > 0 && (
           <Subtotal label={t("pay.totalDeductions")} value={`− ${rm(totalDeductionsSen)}`} minus />
-        )}
-        {card.deductionsNote && (
-          <p className="text-xs text-[#8A8680]">{card.deductionsNote}</p>
         )}
       </Section>
 
