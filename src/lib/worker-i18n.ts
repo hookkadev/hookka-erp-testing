@@ -682,7 +682,7 @@ const dict: Dict = {
     zh: '查看工资单',
     my: 'လစာစာရွက် ကြည့်ရှုရန်',
   },
-  'pay.estimate': { en: 'estimate', ms: 'anggaran', zh: '估算', my: 'ခန့်မှန်း' },
+  'pay.estimate': { en: 'Estimate', ms: 'Anggaran', zh: '估算', my: 'ခန့်မှန်း' },
   'pay.basicFullMonth': {
     en: 'Basic',
     ms: 'Asas',
@@ -740,6 +740,42 @@ const dict: Dict = {
     ms: 'Pendahuluan gaji',
     zh: '预支薪水',
     my: 'လစာကြိုတင်ငွေ',
+  },
+  // My Pay card (pay-card.tsx), every worker. Per-day (outsourced) workers
+  // have no monthly basic, so their card names the day rate instead.
+  'pay.netPay': { en: 'Net pay', ms: 'Gaji bersih', zh: '实发薪水', my: 'အသားတင်လစာ' },
+  'pay.monthlySalary': {
+    en: 'Monthly salary',
+    ms: 'Gaji bulanan',
+    zh: '月薪',
+    my: 'လစဉ်လစာ',
+  },
+  'pay.final': { en: 'Final', ms: 'Muktamad', zh: '已确认', my: 'အတည်ပြုပြီး' },
+  'pay.earnings': { en: 'Earnings', ms: 'Pendapatan', zh: '收入', my: 'ဝင်ငွေ' },
+  'pay.deductions': { en: 'Deductions', ms: 'Potongan', zh: '扣除', my: 'နုတ်ယူငွေ' },
+  'pay.totalDeductions': {
+    en: 'Total deductions',
+    ms: 'Jumlah potongan',
+    zh: '扣除总额',
+    my: 'နုတ်ယူငွေ စုစုပေါင်း',
+  },
+  'pay.noDeductions': {
+    en: 'No deductions this month.',
+    ms: 'Tiada potongan bulan ini.',
+    zh: '本月没有扣除。',
+    my: 'ဤလအတွက် နုတ်ယူငွေ မရှိပါ။',
+  },
+  'pay.dailyRateNote': {
+    en: 'Paid daily at {rate} / day · no fixed monthly basic',
+    ms: 'Dibayar harian {rate} / hari · tiada gaji asas bulanan',
+    zh: '按日计薪 {rate} / 天 · 没有固定月底薪',
+    my: 'နေ့စား {rate} / ရက် · လစဉ် အခြေခံလစာ မရှိပါ',
+  },
+  'pay.dailyRateEarnings': {
+    en: 'Daily rate earnings ({n} days @ {rate}/day)',
+    ms: 'Pendapatan kadar harian ({n} hari @ {rate}/hari)',
+    zh: '日薪收入（{n} 天 × {rate}/天）',
+    my: 'နေ့စားဝင်ငွေ ({n} ရက် @ {rate}/ရက်)',
   },
   'pay.attendanceOt': {
     en: 'Attendance & OT',
