@@ -73,7 +73,7 @@ export type WorkerMonthlyEfficiency = {
 const JC_TOTAL_MIN =
   "CASE WHEN departmentCode = 'FAB_CUT' THEN COALESCE(productionTimeMinutes, 0) " +
   "ELSE COALESCE(productionTimeMinutes, 0) * GREATEST(1, COALESCE(wipQty, 1)) END";
-const JC_PROD_MINUTES_SQL = `
+const jcProdMinutesSql = (scopeSql = "") => `
   SELECT wid AS worker_id, SUM(contrib_min) AS production_minutes
     FROM (
       SELECT pic1Id AS wid,
@@ -85,7 +85,7 @@ const JC_PROD_MINUTES_SQL = `
        WHERE pic1Id IS NOT NULL AND pic1Id != ''
          AND status IN ('COMPLETED','TRANSFERRED')
          AND completedDate IS NOT NULL
-         AND completedDate >= ? AND completedDate <= ?
+         AND completedDate >= ? AND completedDate <= ?${scopeSql}
 
       UNION ALL
 
@@ -98,11 +98,22 @@ const JC_PROD_MINUTES_SQL = `
        WHERE pic2Id IS NOT NULL AND pic2Id != ''
          AND status IN ('COMPLETED','TRANSFERRED')
          AND completedDate IS NOT NULL
-         AND completedDate >= ? AND completedDate <= ?
+         AND completedDate >= ? AND completedDate <= ?${scopeSql}
     ) sub
    WHERE wid IS NOT NULL AND wid != ''
    GROUP BY wid
 `;
+
+/**
+ * Narrows efficiency to one production department, optionally one product
+ * category (SOFA / BEDFRAME). Used by the KPI module's department option
+ * (DEV-36). Omitted = the whole floor, exactly as before.
+ */
+export type EfficiencyScope = { dept: string; category?: string };
+
+/** Job cards whose production order is in the scope's category. */
+const PO_IN_CATEGORY =
+  "productionOrderId IN (SELECT id FROM production_orders WHERE itemCategory = ?)";
 
 /**
  * Approved EXTRA-PRODUCTION-TIME minutes per worker for [periodStart, periodEnd]
@@ -125,8 +136,22 @@ export async function computeApprovedAddProdMinutesByWorker(
   db: DbLike,
   periodStart: string,
   periodEnd: string,
+  scope?: EfficiencyScope,
 ): Promise<Map<string, number>> {
   const out = new Map<string, number>();
+  // A category scope can only place a claim through its job card, so a claim
+  // with no job card is left out of a SOFA / BEDFRAME figure rather than
+  // guessed into one.
+  let scopeSql = "";
+  const scopeBinds: unknown[] = [];
+  if (scope) {
+    scopeSql += " AND department_code = ?";
+    scopeBinds.push(scope.dept);
+    if (scope.category) {
+      scopeSql += ` AND job_card_id IN (SELECT id FROM job_cards WHERE ${PO_IN_CATEGORY})`;
+      scopeBinds.push(scope.category);
+    }
+  }
   try {
     const res = await db
       .prepare(
@@ -134,9 +159,9 @@ export async function computeApprovedAddProdMinutesByWorker(
            FROM worker_nonprod_requests
           WHERE kind = 'ADD_PROD'
             AND status = 'APPROVED'
-            AND date >= ? AND date <= ?`,
+            AND date >= ? AND date <= ?${scopeSql}`,
       )
-      .bind(periodStart, periodEnd)
+      .bind(periodStart, periodEnd, ...scopeBinds)
       .all<{ workerId: string; hours: number | string | null }>();
     for (const r of res.results ?? []) {
       const wid = r.workerId;
@@ -155,12 +180,34 @@ export async function computeApprovedAddProdMinutesByWorker(
  * Month-cumulative efficiency per worker for [periodStart, periodEnd]
  * (inclusive YYYY-MM-DD). Returns one entry per worker seen in either the
  * job-card or working-hour data for the window.
+ *
+ * With a scope, both sides of the ratio are narrowed to it: job cards of that
+ * department (and category, via the production order), approved extra time in
+ * that department, and hours keyed to that department (and category).
  */
 export async function computeMonthlyEfficiencyByWorker(
   db: DbLike,
   periodStart: string,
   periodEnd: string,
+  scope?: EfficiencyScope,
 ): Promise<Map<string, WorkerMonthlyEfficiency>> {
+  let jcScopeSql = "";
+  let wheScopeSql = "";
+  const jcScopeBinds: unknown[] = [];
+  const wheScopeBinds: unknown[] = [];
+  if (scope) {
+    jcScopeSql += " AND departmentCode = ?";
+    wheScopeSql += " AND departmentCode = ?";
+    jcScopeBinds.push(scope.dept);
+    wheScopeBinds.push(scope.dept);
+    if (scope.category) {
+      jcScopeSql += ` AND ${PO_IN_CATEGORY}`;
+      wheScopeSql += " AND category = ?";
+      jcScopeBinds.push(scope.category);
+      wheScopeBinds.push(scope.category);
+    }
+  }
+
   // 1. Which departments count toward the efficiency denominator. Truthy
   //    isProduction (1 / true) only — same test the Overview uses.
   const deptRes = await db
@@ -174,8 +221,8 @@ export async function computeMonthlyEfficiencyByWorker(
 
   // 2. Production minutes per worker (numerator).
   const jcRes = await db
-    .prepare(JC_PROD_MINUTES_SQL)
-    .bind(periodStart, periodEnd, periodStart, periodEnd)
+    .prepare(jcProdMinutesSql(jcScopeSql))
+    .bind(periodStart, periodEnd, ...jcScopeBinds, periodStart, periodEnd, ...jcScopeBinds)
     .all<{ workerId: string; productionMinutes: number | string | null }>();
   const prodMinByWorker = new Map<string, number>();
   for (const r of jcRes.results ?? []) {
@@ -193,6 +240,7 @@ export async function computeMonthlyEfficiencyByWorker(
     db,
     periodStart,
     periodEnd,
+    scope,
   );
   for (const [wid, mins] of addProdByWorker) {
     prodMinByWorker.set(wid, (prodMinByWorker.get(wid) ?? 0) + mins);
@@ -205,9 +253,9 @@ export async function computeMonthlyEfficiencyByWorker(
     .prepare(
       `SELECT workerId, departmentCode, date, hours
          FROM working_hour_entries
-        WHERE date >= ? AND date <= ?`,
+        WHERE date >= ? AND date <= ?${wheScopeSql}`,
     )
-    .bind(periodStart, periodEnd)
+    .bind(periodStart, periodEnd, ...wheScopeBinds)
     .all<{
       workerId: string;
       departmentCode: string;

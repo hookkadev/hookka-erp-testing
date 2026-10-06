@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-06**: branch `feat/kpi-efficiency-department` (DEV-36 to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-06**: branch `feat/pay-card-all-workers` (to `staging`) added item 5 (monthly workers) of the per-day card entry below.
 > **Last verified: 2026-10-06**: branch `feat/daily-pay-card-past-months` (to `staging`) closed item 3 of the per-day card entry below.
 > **Last verified: 2026-10-06**: branch `feat/daily-pay-card` (to `staging`, BUG-2026-10-06-259) added below (its entry is the newest).
@@ -146,6 +147,16 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-06 — 🔵 DEV-36: Production time efficiency KPI by department (branch `feat/kpi-efficiency-department` → `staging`)
+
+Owner ask (DEV-36, marked Done but never built): pick a department when assigning the Production time efficiency KPI, keep Overall, and score only that department's production when one is picked. Owner chose a team score: everyone assigned to a department gets that department's figure.
+
+1. 🔵 Department choice on the assignment: Overall, a production department (all types), or a department and type (Sofa / Bedframe / Accessory).
+2. 🔵 The efficiency figure is filtered to that department (and type) through the same per-worker function the payslip uses. Overall stays as it is.
+3. 🔵 The Library chips show which department each person is scored on.
+4. Not done, by design: the people list is not filtered by department (KPIs go to login accounts, which have no link to worker records), and there is no month settling yet, so nothing past can change.
+5. ⬜ Check on the staging site after merge.
 
 ## 2026-10-06 — 🔵 Worker My Pay: a card for per-day workers (branch `feat/daily-pay-card` → `staging`, BUG-2026-10-06-259)
 
