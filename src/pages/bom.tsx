@@ -166,16 +166,21 @@ function materialHasKit(m: WIPMaterial): boolean {
 // Minutes of a BOM process row, typed in by hand: whole minutes, 0 to 1440
 // (the WIP Times cap). Owner 2026-10-05: the CAT 1-14 categories that used
 // to fill this in from the Production Times matrix are gone from the BOM.
+// A text box, not type="number": a number input keeps the typed "052" on
+// screen because React leaves it alone when its numeric value already
+// equals the prop (BUG-2026-10-05-254). Here the shown text is always
+// String(value), so leading zeros and non-digits never stay.
+function parseMinutes(text: string): number {
+  return Math.min(1440, Number(text.replace(/\D/g, "")) || 0);
+}
 function MinutesInput({ value, onChange, className }: { value: number; onChange: (minutes: number) => void; className: string }) {
   return (
     <input
-      type="number"
-      min={0}
-      max={1440}
-      step={1}
-      value={value}
+      type="text"
+      inputMode="numeric"
+      value={String(value)}
       onFocus={(e) => e.target.select()}
-      onChange={(e) => onChange(Math.min(1440, Math.max(0, Math.round(Number(e.target.value) || 0))))}
+      onChange={(e) => onChange(parseMinutes(e.target.value))}
       aria-label="Minutes"
       className={className}
     />

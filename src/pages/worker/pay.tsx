@@ -9,7 +9,8 @@
 // reached.
 //
 // No date-range picker here: salary is viewed one whole month at a time.
-// Attendance / efficiency by date range lives on /worker (Home).
+// Attendance / efficiency by date range lives on /worker (Home); the per-day
+// punch records live on /worker/history.
 // ============================================================
 import { useCallback, useEffect, useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
@@ -243,26 +244,6 @@ function asWorkerPayResponse(v: unknown): WorkerPayResponse | null {
   return null;
 }
 
-// Per-day attendance for the selected month — the same /history slice the
-// Home page used to render (owner 2026-06-12: "搬进去 Pay 的里面" — the daily
-// punch records belong under the pay breakdown, following the month picker).
-type PayDeptHours = { name: string; category: string | null; hours: number };
-type PayDailyRow = {
-  date: string;
-  workingMinutes: number;
-  productionMinutes: number;
-  /** DEV-31: the day's Working Hours rows by department (office-grid split). */
-  deptHours: PayDeptHours[];
-};
-type PayAttRow = {
-  date: string;
-  clockIn: string | null;
-  clockOut: string | null;
-  overtimeMinutes: number;
-  lateMinutes: number;
-};
-type PayMonthHistory = { daily: PayDailyRow[]; attendance: PayAttRow[] };
-
 // DEV-22: the worker's own approved penalties, one row per penalty line.
 type WorkerPenalty = {
   id: string;
@@ -296,55 +277,12 @@ function asWorkerPenalties(v: unknown): WorkerPenalty[] {
     .filter((p) => p.id);
 }
 
-function asPayMonthHistory(v: unknown): PayMonthHistory | null {
-  if (!isRecord(v) || !isRecord(v.data)) return null;
-  const d = v.data;
-  if (!Array.isArray(d.daily) || !Array.isArray(d.attendance)) return null;
-  const daily = d.daily
-    .map((r) =>
-      isRecord(r) && typeof r.date === "string"
-        ? {
-            date: r.date,
-            workingMinutes: asNumber(r.workingMinutes) ?? 0,
-            productionMinutes: asNumber(r.productionMinutes) ?? 0,
-            deptHours: (Array.isArray(r.deptHours) ? r.deptHours : [])
-              .map((x) =>
-                isRecord(x) && typeof x.name === "string"
-                  ? {
-                      name: x.name,
-                      category: typeof x.category === "string" ? x.category : null,
-                      hours: asNumber(x.hours) ?? 0,
-                    }
-                  : null,
-              )
-              .filter((x): x is PayDeptHours => !!x && x.hours > 0),
-          }
-        : null,
-    )
-    .filter((x): x is PayDailyRow => !!x);
-  const attendance = d.attendance
-    .map((r) =>
-      isRecord(r) && typeof r.date === "string"
-        ? {
-            date: r.date,
-            clockIn: typeof r.clockIn === "string" ? r.clockIn : null,
-            clockOut: typeof r.clockOut === "string" ? r.clockOut : null,
-            overtimeMinutes: asNumber(r.overtimeMinutes) ?? 0,
-            lateMinutes: asNumber(r.lateMinutes) ?? 0,
-          }
-        : null,
-    )
-    .filter((x): x is PayAttRow => !!x);
-  return { daily, attendance };
-}
-
 // ============================================================
 export default function WorkerPayPage() {
   const t = useT();
   const [pay, setPay] = useState<PayData | null>(null);
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState<string | null>(null);
-  const [hist, setHist] = useState<PayMonthHistory | null>(null);
   const [penalties, setPenalties] = useState<WorkerPenalty[]>([]);
 
   const loadPay = useCallback(async () => {
@@ -383,30 +321,6 @@ export default function WorkerPayPage() {
       cancelled = true;
     };
   }, []);
-
-  // Daily attendance for the month being viewed. Swallows errors — the pay
-  // card must render even if the history slice fails.
-  const histPeriod = period ?? pay?.current.period ?? null;
-  useEffect(() => {
-    if (!histPeriod || !/^\d{4}-\d{2}$/.test(histPeriod)) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const [yy, mm] = histPeriod.split("-").map(Number);
-        const last = new Date(yy, mm, 0).getDate();
-        const res = await workerFetch(
-          `/api/worker/history?from=${histPeriod}-01&to=${histPeriod}-${String(last).padStart(2, "0")}`,
-        );
-        const j = asPayMonthHistory(await res.json());
-        if (!cancelled) setHist(j);
-      } catch {
-        if (!cancelled) setHist(null);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [histPeriod]);
 
   if (loading) {
     return (
@@ -497,13 +411,6 @@ export default function WorkerPayPage() {
           t={t}
         />
       )}
-
-      {/* Daily attendance for the SAME month — moved here from Home (owner
-          2026-06-12): money on top, the per-day punch records that produced
-          it right underneath. */}
-      {hist && hist.daily.length > 0 && (
-        <DailyAttendanceCard hist={hist} t={t} />
-      )}
     </div>
   );
 }
@@ -555,92 +462,6 @@ function PenaltyCard({ penalties, t }: { penalties: WorkerPenalty[]; t: Translat
             </div>
           </div>
         ))}
-      </div>
-    </div>
-  );
-}
-
-// Per-day table: Date / Working / Production / Eff%, with the punch line
-// (in → out · OT · Late) under any day that has a punch — identical facts to
-// the office Working Hours + Attendance views.
-function DailyAttendanceCard({ hist, t }: { hist: PayMonthHistory; t: Translate }) {
-  const mins2hrs = (m: number) => (m / 60).toFixed(1);
-  return (
-    <div className="bg-white rounded-xl border border-[#D8D2CC] overflow-hidden">
-      <div className="bg-[#1F2A3C] px-4 py-2.5">
-        <p className="text-[11px] font-bold uppercase tracking-wider text-white">
-          {t("pay.dailyAttendance")}
-        </p>
-      </div>
-      <div className="px-4 pb-2">
-        <div className="grid grid-cols-[auto_1fr_1fr_1fr] gap-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-[#8A8680] border-b border-[#E5E0DB]">
-          <span>{t("pay.colDate")}</span>
-          <span className="text-right">{t("home.colWorkingHrs")}</span>
-          <span className="text-right">{t("home.colProductionHrs")}</span>
-          <span className="text-right">{t("home.efficiencyPct")}</span>
-        </div>
-        {hist.daily.map((r) => {
-          const eff =
-            r.workingMinutes > 0
-              ? Math.round((r.productionMinutes / r.workingMinutes) * 100)
-              : null;
-          const effTone =
-            eff == null
-              ? "text-[#9CA3AF]"
-              : eff >= 80
-                ? "text-[#2A6B4A]"
-                : eff >= 60
-                  ? "text-[#9C6F1E]"
-                  : "text-[#9A3A2D]";
-          const att = hist.attendance.find(
-            (a) => a.date === r.date && (a.clockIn || a.clockOut),
-          );
-          return (
-            <div key={r.date} className="py-2.5 border-b border-[#F0ECE9] last:border-b-0">
-              <div className="grid grid-cols-[auto_1fr_1fr_1fr] gap-3 text-sm items-center">
-                <span className="font-medium text-[#1F1D1B]">{fmtDay(r.date)}</span>
-                <span className="tabular-nums text-right font-semibold">
-                  {mins2hrs(r.workingMinutes)}
-                </span>
-                <span className="tabular-nums text-right font-semibold text-[#3E6570]">
-                  {mins2hrs(r.productionMinutes)}
-                </span>
-                <span className={`tabular-nums text-right font-semibold ${effTone}`}>
-                  {eff == null ? "—" : `${eff}%`}
-                </span>
-              </div>
-              {att && (
-                <p className="mt-1 text-xs text-[#8A8680] tabular-nums">
-                  {att.clockIn ?? "—"} → {att.clockOut ?? "—"}
-                  {att.overtimeMinutes > 0 && (
-                    <span className="text-[#3E6570] font-medium">
-                      {" "}· OT {mins2hrs(att.overtimeMinutes)}h
-                    </span>
-                  )}
-                  {(att.lateMinutes ?? 0) > 0 && (
-                    <span className="text-[#9A3A2D] font-medium">
-                      {" "}· {t("home.lateBy")} {att.lateMinutes}m
-                    </span>
-                  )}
-                </p>
-              )}
-              {r.deptHours.length > 0 && (
-                <p className="mt-0.5 text-xs text-[#6B5C32] tabular-nums">
-                  {r.deptHours
-                    .map(
-                      (d) =>
-                        `${d.name}${
-                          d.category
-                            ? ` · ${d.category.charAt(0)}${d.category.slice(1).toLowerCase()}`
-                            : ""
-                        } ${d.hours.toFixed(2)}h`,
-                    )
-                    .join("  ·  ")}
-                </p>
-              )}
-            </div>
-          );
-        })}
       </div>
     </div>
   );

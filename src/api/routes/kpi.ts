@@ -41,6 +41,7 @@ import {
 import {
   computeMetric,
   parseEfficiencyScope,
+  formatEfficiencyScope,
   checklistProgress,
   surveyMean,
   manualRating,
@@ -955,33 +956,42 @@ app.put("/kpi/:kpiKey/assignees", async (c) => {
   const orgId = getOrgId(c);
   const actor = ctxGet(c, "userId");
 
-  // DEV-36: a department scope, production_efficiency only. An unknown or
-  // non-production department is refused here; stored, it would only ever
-  // score "no hours logged" and look like a bad month.
+  // DEV-36: a department scope, one or more departments stored as
+  // "FAB_CUT,FAB_SEW:SOFA". production_efficiency takes production departments,
+  // each optionally Sofa / Bedframe; department_efficiency takes any department
+  // (an R&D lead is scored on R&D's workers) and no type, because the dashboard
+  // it mirrors has none. Anything else is refused here; stored, it would only
+  // ever score "no hours logged" and look like a bad month.
   const scopes = new Map<string, string | null>();
-  let productionDepts: Set<string> | null = null;
+  let allDepts: Array<{ code: string; isProduction: number | boolean | null }> | null = null;
   for (const r of rows) {
     const raw = String(r.scope ?? "").trim();
     if (!raw) {
       scopes.set(String(r.userId), null);
       continue;
     }
-    if (kpiKey !== "production_efficiency") {
+    if (kpiKey !== "production_efficiency" && kpiKey !== "department_efficiency") {
       return c.json({ success: false, error: `${def.label} has no department option` }, 400);
     }
     const sc = parseEfficiencyScope(raw);
-    if (!productionDepts) {
+    if (!allDepts) {
       const res = await c.var.DB.prepare(`SELECT code, isProduction FROM departments`)
         .bind()
         .all<{ code: string; isProduction: number | boolean | null }>();
-      productionDepts = new Set(
-        (res.results ?? []).filter((d) => d.isProduction).map((d) => String(d.code)),
-      );
+      allDepts = res.results ?? [];
     }
-    if (!sc || !productionDepts.has(sc.dept)) {
-      return c.json({ success: false, error: `Unknown production department: ${raw}` }, 400);
+    const allowed = new Set(
+      allDepts
+        .filter((d) => kpiKey === "department_efficiency" || d.isProduction)
+        .map((d) => String(d.code)),
+    );
+    if (!sc || !sc.length || sc.some((p) => !allowed.has(p.dept))) {
+      return c.json({ success: false, error: `Unknown department: ${raw}` }, 400);
     }
-    scopes.set(String(r.userId), sc.category ? `${sc.dept}:${sc.category}` : sc.dept);
+    if (kpiKey === "department_efficiency" && sc.some((p) => p.category)) {
+      return c.json({ success: false, error: `${def.label} has no Sofa / Bedframe split` }, 400);
+    }
+    scopes.set(String(r.userId), formatEfficiencyScope(sc));
   }
 
   for (const r of rows) {

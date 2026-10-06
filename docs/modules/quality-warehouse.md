@@ -4,6 +4,7 @@
 > **Last verified: 2026-09-30** (branch `feat/account-permissions-tab`) — the two `rbac.ts` anchor rows re-derived after the per-account permission lookup moved them. Nothing else re-checked.
 
 > **Last verified: 2026-09-25** (branch `feat/m-warehouse-locate`) — the rack stock-in flow (#3) and the warehouse / public-rack-qr anchor rows re-derived after DEV-09 moved them; `GET /locate` added.
+> **Last verified: 2026-10-05** (branch `feat/permissions-tab-main`): the two `rbac.ts` anchor rows re-derived after the per-account permission lookup moved them. Nothing else re-checked.
 
 > **Last verified: 2026-08-14** (branch `docs/docs-vs-code-audit`) — corrected against the
 > source by the prose audit; the row(s) touched here are itemised in

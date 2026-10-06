@@ -10,13 +10,16 @@
 // Keyboard:
 //   - Arrow Up/Down   move highlight
 //   - Enter           select highlight
-//   - Escape          close without change
+//   - Escape          close without change — wherever the focus is: an open
+//                     list sits on the shared Esc stack, so inside a popup
+//                     the first Esc closes the list, not the popup
 //   - Typing          filter (case-insensitive substring on label)
 // ---------------------------------------------------------------------------
 import * as React from "react";
 import { ChevronDown, Check, Search as SearchIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { nextIncrementalCount, optionSliceCount } from "@/lib/incremental-window";
+import { useEscapeClose } from "@/lib/escape-stack";
 
 export type SearchableOption = {
   value: string;
@@ -61,6 +64,7 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
   emptyMessage = "No matches",
 }) => {
   const [open, setOpen] = React.useState(false);
+  useEscapeClose(() => setOpen(false), open);
   const [query, setQuery] = React.useState("");
   const [highlight, setHighlight] = React.useState(0);
 

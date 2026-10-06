@@ -21,6 +21,14 @@
 import type { Context } from "hono";
 import type { Env } from "../worker";
 import { kpiByKey } from "./kpi-catalog";
+import { getOrgId } from "./tenant";
+import {
+  buildPerfDays,
+  poolEfficiencyPct,
+  type PerfWheRow,
+  type PerfJcRow,
+  type PerfPicRow,
+} from "./workforce-perf";
 import {
   computeMonthlyEfficiencyByWorker,
   type EfficiencyScope,
@@ -30,17 +38,31 @@ import {
 export const EFFICIENCY_CATEGORIES = ["SOFA", "BEDFRAME"] as const;
 
 /**
- * An assignment's stored scope: "" / null = Overall, "FAB_CUT" = one
- * department, "FAB_CUT:SOFA" = one department and category. Anything else is
- * not a scope and reads as null, so the caller can refuse it.
+ * An assignment's stored scope: "" / null = Overall, otherwise a comma list of
+ * "FAB_CUT" (a department) and "FAB_CUT:SOFA" (a department and category),
+ * pooled into one figure. Anything else is not a scope and reads as null, so
+ * the caller can refuse it. Duplicates are dropped.
  */
 export function parseEfficiencyScope(raw: unknown): EfficiencyScope | null {
-  const [dept, category, extra] = String(raw ?? "").trim().toUpperCase().split(":");
-  if (!dept || extra !== undefined || !/^[A-Z0-9_]+$/.test(dept)) return null;
-  if (category === undefined) return { dept };
-  return (EFFICIENCY_CATEGORIES as readonly string[]).includes(category)
-    ? { dept, category }
-    : null;
+  const out: EfficiencyScope = [];
+  const seen = new Set<string>();
+  for (const item of String(raw ?? "").trim().toUpperCase().split(",")) {
+    const [dept, category, extra] = item.trim().split(":");
+    if (!dept || extra !== undefined || !/^[A-Z0-9_]+$/.test(dept)) return null;
+    if (category !== undefined && !(EFFICIENCY_CATEGORIES as readonly string[]).includes(category)) {
+      return null;
+    }
+    const key = category ? `${dept}:${category}` : dept;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(category ? { dept, category } : { dept });
+  }
+  return out;
+}
+
+/** The stored form of a parsed scope: "FAB_CUT,FAB_SEW:SOFA". */
+export function formatEfficiencyScope(scope: EfficiencyScope): string {
+  return scope.map((p) => (p.category ? `${p.dept}:${p.category}` : p.dept)).join(",");
 }
 
 export interface MetricResult {
@@ -681,8 +703,9 @@ export async function surveyMean(
  * carry no employee link (`users` has no employee_id), so a personal figure
  * cannot be resolved yet. Assign this to whoever owns the floor's output.
  *
- * DEV-36: an assignment can carry a scope (one department, optionally one
- * category). Everyone assigned that scope shares its figure, a team score.
+ * DEV-36: an assignment can carry a scope (one or more departments, each
+ * optionally one category, pooled). Everyone assigned that scope shares its
+ * figure, a team score.
  */
 export async function productionEfficiency(
   c: Context<Env>,
@@ -691,7 +714,9 @@ export async function productionEfficiency(
 ): Promise<MetricResult> {
   const { start, end } = periodBounds(period);
   const byWorker = await computeMonthlyEfficiencyByWorker(c.var.DB, start, end, scope ?? undefined);
-  const where = scope ? ` in ${scope.dept}${scope.category ? ` ${scope.category}` : ""}` : "";
+  const where = scope?.length
+    ? ` in ${scope.map((p) => (p.category ? `${p.dept} ${p.category}` : p.dept)).join(" + ")}`
+    : "";
 
   let minutes = 0;
   let hours = 0;
@@ -710,6 +735,87 @@ export async function productionEfficiency(
     actual: pct,
     sampleSize: counted,
     detail: `${Math.round(minutes).toLocaleString()} standard minutes earned on ${Math.round(hours).toLocaleString()} production hours, across ${counted} workers${where}`,
+  };
+}
+
+/**
+ * Department efficiency: the Dashboard Experimental > People > Efficiency
+ * figure for the month, for the workers whose home department is one of the
+ * assignment's departments (DEV-36). No departments = everyone, the page with
+ * no department picked.
+ *
+ * Built by lib/workforce-perf.ts, the same code the dashboard route runs, from
+ * the same tables, so this card and the page cannot disagree. The month's rows
+ * only: every per-day figure depends on that day's rows alone.
+ */
+export async function departmentEfficiency(
+  c: Context<Env>,
+  period: string,
+  scope?: EfficiencyScope | null,
+): Promise<MetricResult> {
+  const { start } = periodBounds(period);
+  const [y, m] = period.split("-").map(Number);
+  const next = new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 10);
+  const orgId = getOrgId(c);
+  const db = c.var.DB;
+
+  const depts = await db.prepare(`SELECT code, is_production FROM departments`)
+    .all<{ code: string; isProduction: number | boolean | null }>();
+  const productionDepts = new Set(
+    (depts.results ?? []).filter((d) => d.isProduction).map((d) => String(d.code)),
+  );
+  const whe = await db.prepare(
+    `SELECT worker_id, date, department_code, hours
+       FROM working_hour_entries
+      WHERE org_id = ? AND date >= ? AND date < ?`,
+  )
+    .bind(orgId, start, next)
+    .all<PerfWheRow>();
+  const doneInMonth = `org_id = ?
+          AND status IN ('COMPLETED','TRANSFERRED')
+          AND completed_date IS NOT NULL
+          AND completed_date >= ? AND completed_date < ?`;
+  const jobCards = await db.prepare(
+    `SELECT id, department_code, pic1_id, pic2_id, completed_date,
+            est_minutes, actual_minutes, wip_qty
+       FROM job_cards
+      WHERE ${doneInMonth}`,
+  )
+    .bind(orgId, start, next)
+    .all<PerfJcRow>();
+  const pics = await db.prepare(
+    `SELECT job_card_id, pic1_id, pic2_id FROM piece_pics
+      WHERE org_id = ? AND job_card_id IN (SELECT id FROM job_cards WHERE ${doneInMonth})`,
+  )
+    .bind(orgId, orgId, start, next)
+    .all<PerfPicRow>();
+
+  let workerIds: Set<string> | null = null;
+  if (scope?.length) {
+    const want = new Set(scope.map((s) => s.dept));
+    const ws = await db.prepare(`SELECT id, department_code FROM workers`)
+      .all<{ id: string; departmentCode: string | null }>();
+    workerIds = new Set(
+      (ws.results ?? []).filter((w) => want.has(String(w.departmentCode ?? ""))).map((w) => String(w.id)),
+    );
+  }
+
+  const { perfDays } = buildPerfDays({
+    whe: whe.results ?? [],
+    jobCards: jobCards.results ?? [],
+    pics: pics.results ?? [],
+    productionDepts,
+  });
+  const r = poolEfficiencyPct(perfDays, workerIds, (d) => d.startsWith(period));
+  const where = scope?.length ? ` in ${scope.map((s) => s.dept).join(" + ")}` : "";
+  if (r.pct === null) {
+    return { actual: null, sampleSize: 0, detail: `No production hours clocked${where} this month` };
+  }
+  const h = (min: number) => Math.round(min / 60).toLocaleString();
+  return {
+    actual: Math.round(r.pct * 10) / 10,
+    sampleSize: r.days,
+    detail: `${h(r.productionMinutes)} production hours on ${h(r.workingMinutes)} clocked hours over ${r.days} days${where}`,
   };
 }
 
@@ -796,6 +902,8 @@ export async function computeMetric(
       return documentsStuck(c, period);
     case "production_efficiency":
       return productionEfficiency(c, period, parseEfficiencyScope(scope));
+    case "department_efficiency":
+      return departmentEfficiency(c, period, parseEfficiencyScope(scope));
     case "service_case_resolution":
       return serviceCaseResolution(c, period);
     default:
