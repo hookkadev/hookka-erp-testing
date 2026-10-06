@@ -45,7 +45,8 @@ test("the bill's views show its files and print the bill with them", () => {
   assert.match(ap, /Print \+ files<\/Button>/);
   const mgr = slice(ui, "function OtherPartyBillsManager(", "\ntype OpenBill = ");
   assert.match(mgr, /<BillAttachmentsBlock bill=\{b\} onChanged=\{load\} \/>/);
-  assert.match(mgr, /print \+ files<\/button>/);
+  // (2026-10-02: the list row's actions moved to its right-click menu.)
+  assert.match(mgr, /\{ label: "Print \+ files", action: \(\) => void printBillWithFiles\(b, accounts\)/);
   assert.match(ui, /printVoucher\(\{ \.\.\.buildOtherPartyBillVoucher\(b, accounts\), appendix \}\);/);
 });
 

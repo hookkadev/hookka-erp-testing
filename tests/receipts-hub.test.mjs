@@ -71,7 +71,8 @@ test("each kind voids through its own document's endpoint", () => {
   assert.match(hub, /`\/api\/accounting\/other-party-payments\/\$\{encodeURIComponent\(r\.od\.paymentNo\)\}\/lifecycle`/);
   assert.match(hub, /`\/api\/accounting\/official-receipts\/\$\{r\.or!\.id\}\/lifecycle`/);
   // Official receipts have no in-place edit — only customer / other-debtor rows offer it.
-  assert.match(hub, /r\.lifecycleState === "ACTIVE" && \(r\.cust \|\| r\.od\) && \(/);
+  // (2026-10-02: the row's actions moved to its right-click menu.)
+  assert.match(hub, /\.\.\.\(r\.lifecycleState === "ACTIVE" && \(r\.cust \|\| r\.od\) \? \[\{ label: "Edit", action: \(\) => startEdit\(r\) \}\] : \[\]\),/);
 });
 
 test("the customer voucher / advance helpers live in one lib, used by both pages", () => {

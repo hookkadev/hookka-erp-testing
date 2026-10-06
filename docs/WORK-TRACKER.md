@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-06**: branch `chore/sync-staging-from-main-1006` (staging<-main merge): both trackers merged, main-only entries added, entries on both sides kept once in staging's wording. Sync entry added below.
 > **Last verified: 2026-10-06**: branch `feat/kpi-department-efficiency` (DEV-36 part 3 to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-06**: branch `fix/kpi-remove-floor-workers` (to `staging`) updated the DEV-36 part 2 entry below: floor workers removed again.
 > **Last verified: 2026-10-06**: branch `feat/kpi-efficiency-multi-dept` (DEV-36 part 2 to `staging`) added below (its entry is the newest), and closed item 5 of the DEV-36 entry (staging check).
@@ -19,6 +20,17 @@
 > **Last verified: 2026-10-02**: branch `feat/schedule-dept-share-table` (to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-02**: branch `fix/schedule-email-full-list-row` (to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-02**: branch `fix/efficiency-email-dept-table` (to `staging`, BUG-2026-10-02-248) added below (its entry is the newest).
+> **Last verified: 2026-10-06**: branch `feat/pay-card-main` (to `main`, BUG-2026-10-06-259) added below (its entry is the newest).
+> **Last verified: 2026-10-05**: fill job cards stuck at 0 minutes (#696, BUG-2026-10-05-256) closed ✅ with its prod run.
+> **Last verified: 2026-10-05**: branch `fix/worker-pay-late-daily-rate` (to `main`, BUG-2026-10-05-258) added below (its entry is the newest).
+> **Last verified: 2026-10-05**: branch `fix/worker-pay-advance-line-main` (to `main`, BUG-2026-10-05-257) added below (its entry is the newest).
+> **Last verified: 2026-10-05**: branch `fix/backfill-zero-minutes-open-cards` (to `main`, BUG-2026-10-05-256) added below (its entry is the newest).
+> **Last verified: 2026-10-05**: branch `fix/bom-master-template-accessory` (to `main`, BUG-2026-10-05-255) added below (its entry is the newest).
+> **Last verified: 2026-10-05**: branch `fix/bom-minutes-leading-zero-main` (to `main`, BUG-2026-10-05-254) added below (its entry is the newest).
+> **Last verified: 2026-10-05**: branch `feat/bom-manual-minutes-main` (to `main`) added below (its entry is the newest).
+> **Last verified: 2026-10-05**: branch `feat/kpi-assign-unassign-to-main` (to `main`) added below (its entry is the newest).
+> **Last verified: 2026-10-05**: branch `feat/permissions-tab-main` (Permissions tab, staging to `main`) added below (its entry is the newest).
+> **Last verified: 2026-10-02**: finance right-click row menus + Esc + fund transfer description edit (#680) closed ✅ with its prod check.
 > **Last verified: 2026-10-02**: branch `feat/m-install-and-desktop-switch` (to `main`, BUG-2026-10-02-250) added below (its entry is the newest).
 > **Last verified: 2026-10-02**: branch `feat/dev31-worker-dept-hours-main` (DEV-31 to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-02**: branch `feat/schedule-summary-email-to-main` (to `main`) added below (its entry is the newest).
@@ -151,6 +163,15 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
+## 2026-10-06 — 🔵 Sync `staging` from `main` (branch `chore/sync-staging-from-main-1006` → `staging`)
+
+50 `main` commits merged into `staging` (320 staging-only kept). Conflicts: 6 code/test files, 9 docs.
+1. 🔵 BOM minutes box (`bom.tsx`, `tests/bom-manual-minutes.test.mjs`): main's text box fix (BUG-2026-10-05-254).
+2. 🔵 My Pay (`worker/pay.tsx`): main's file; the merge had doubled `isFinalised` / `SavePayslipButton`. Daily Attendance moves to main's History tab.
+3. 🔵 KPI page and Create SO keep staging's (department scope, R14 stock line); git had also doubled the `emptyWip` prop on Create SO, so that file is staging's as is. `worker.ts` keeps the staging-only routes.
+4. 🔵 Docs: logs and stamps unioned, one copy of each entry, no bug id collisions. `API.md` regenerated (146 / 1021), sales and production anchors re-measured.
+`npm test` 5538 pass / 0 fail / 3 skipped. tsc not run locally.
+
 ## 2026-10-06 — 🔵 DEV-36 part 3: Department efficiency KPI (branch `feat/kpi-department-efficiency` → `staging`)
 
 Owner ask: an office lead (for example R&D or Upholstery) is scored on their own department's efficiency as Dashboard Experimental > People > Efficiency shows it, as a separate KPI card; Production time efficiency stays as it is. Owner chose: same grouping as the dashboard (each worker's home department), called Department efficiency, several departments combined.
@@ -202,6 +223,21 @@ Owner ask: make the top-right Profile item actually work and sync the profile pi
 4. 🔵 A photo change from the Org Chart or User Management updates the header without a reload.
 5. ⬜ Check on the staging site after merge.
 
+## 2026-10-06 — 🔵 Worker My Pay: one card for every worker and month (branch `feat/pay-card-main` → `main`, BUG-2026-10-06-259)
+
+Owner ask: redesign My Pay so a per-day worker's pay explains itself (no "Basic RM 0.00"), deductions come after earnings, and every worker and month uses the same card. Staging has it through #707 to #710; this brings it to main.
+
+1. 🔵 `GET /api/worker/payslips` prices the current month with the worker's pay mode and day rate, and returns `payMode`, `dailyRateSen`, `advanceSen`, `advanceDays`, plus each past month's `status`.
+2. 🔵 `src/pages/worker/pay-card.tsx` on My Pay for every worker and month: Net pay, Earnings (monthly salary or N days @ day rate, less absent and late, plus OT and allowances = the payslip's Gross), Deductions, Summary. Labels in all four worker languages.
+3. ⬜ Check on production after deploy (read and write path).
+
+## 2026-10-05 — 🔵 Worker My Pay shows a per-day worker's late charge (branch `fix/worker-pay-late-daily-rate` → `main`, then `staging`, BUG-2026-10-05-258)
+
+Owner ask: is the same worker late, and why does the phone not show it. Measured: late 3 days in September, RM 10.21 docked; the phone priced it from basic salary (RM 0 for an OSC worker) and hid the line.
+
+1. 🔵 Both late-charge sites in `src/api/routes/worker.ts` use the pay-mode aware day rate.
+2. ⬜ Check on staging, then live, after merge.
+
 ## 2026-10-05 — 🔵 Worker My Pay shows the salary advance (branch `fix/worker-pay-advance-line` → `staging`, BUG-2026-10-05-257)
 
 Owner ask: a worker's Net was RM 100 below Gross with no reason on the phone. Measured on prod: a RM 100 salary advance (21 Sep, no note), not a penalty.
@@ -209,6 +245,19 @@ Owner ask: a worker's Net was RM 100 below Gross with no reason on the phone. Me
 1. 🔵 `GET /api/worker/payslips` returns each slip's stored advance and the advance dates and notes.
 2. 🔵 The finished-month card shows "Salary advance" after Tax, tap for the dates. New label in all four worker languages.
 3. ⬜ Check on the staging site after merge.
+
+## 2026-10-05 — ✅ Fill job cards stuck at 0 production minutes (branch `fix/backfill-zero-minutes-open-cards` → `main`, BUG-2026-10-05-256, #696 7d507a59, prod-run)
+
+1. ✅ Owner screenshot (Fab Cut sheet, A02 at 0 min): fill the cards whose BOM was filled after they were made. Owner scope: unfinished cards, plus cards completed from 2026-10-01 (September left alone so September pay is not affected); cards that already have minutes are left alone. New `fill-zero-minutes` endpoint, dry run first. Checks: `tsc -p tsconfig.app.json` exit 0, new `tests/fill-zero-minutes.test.mjs`. Prod run pending until deployed; Canary dry run (prod data, read-only) found cancelled cards selected (fixed) and 355 live zeros on the old FG_MAIN all-dept chain; owner chose to fill those by dept from today's BOM. Re-run the dry run on the canary before merge.
+2. ✅ Prod run 2026-10-05 after #696 (7d507a59) deployed, `completedFrom=2026-10-01`: updated 309 (254 live, 55 completed in October). Measured after: a second dry run finds 0 to fill (cards at 0 scanned fell 825 to 516); the reported A02 Fab Cut cards SO-2609-281-12 / 393-13 / 393-14 / 247-11 / 247-12 read 15; the audit row on SO-2609-281-12's cut card is 0 to 15; SO-2610-035-12 (had minutes) still 10. Left at 0 on purpose: 411 cards whose BOM step is still 0 (mostly pillow Packing, 1005-(Q) Foam) and 103 in a dept their BOM does not use.
+
+## 2026-10-05 — 🔵 Accessory master BOM templates could not be saved (branch `fix/bom-master-template-accessory` → `main`, BUG-2026-10-05-255)
+
+1. 🔵 Owner screenshot (Edit Master Templates, ARMREST): Save Templates showed "Some details aren't valid". Staging confirmed the server refuses ACCESSORY (400). The route now accepts ACCESSORY and widens the table CHECK at runtime. Checks: `tsc -p tsconfig.app.json` exit 0, new `tests/bom-master-template-accessory.test.mjs`. Prod check pending until deployed.
+
+## 2026-10-05 — 🔵 BOM minutes box showed "052" while typing (branch `fix/bom-minutes-leading-zero-main` → `main`, BUG-2026-10-05-254)
+
+1. 🔵 Owner screenshot (Edit BOM, A02): typing 52 showed "052". The minutes box is now a text box that always shows the stored number (digits only, 0 to 1440). Checks: `tsc -p tsconfig.app.json` exit 0, `tests/bom-manual-minutes.test.mjs` extended. Prod check pending until deployed.
 
 ## 2026-10-05 — 🔵 BOM process minutes typed in by hand, CAT 1-14 removed (branch `feat/bom-manual-minutes` → `staging`)
 
@@ -252,6 +301,33 @@ Owner ask: Plan vs Actual should follow the Schedule report: job cards, units an
 3. 🔵 `worker.ts` `/history`: main's snapshot `db`. `scan.tsx` keeps staging's sequence-unlock import, `route-titles.ts` keeps both titles, `tests/worker-penalties.test.mjs` keeps staging's catalog check (the Permissions tab is staging only).
 4. 🔵 Docs: logs and stamps unioned, one copy of each entry. Bug numbers follow `main`: staging's accessories BUG-2026-10-01-241 is main's 244. `API.md` regenerated, module anchors re-measured.
 tsc strict 0; `npm test` 5464 pass / 0 fail.
+
+## 2026-10-05 — 🔵 Permissions tab to `main` (branch `feat/permissions-tab-main`)
+
+Ask (owner): bring the staging Permissions tab (User Management → Permissions) to main, because access problems keep coming up and the owner wants to fix them per account without a code change.
+1. 🔵 Ported staging commit 8b1c6e71 as is (gate + menu read an account's own list before its role; `/api/user-permissions` Super Admin only; tab in User Management) plus the `worker-penalties: approve` catalog line from 9959320b. Staging-only "View as" changes to the same files are not included. An account never edited has no row, so shipping changes no one's access.
+
+## 2026-10-02 — ✅ Finance lists: row actions on right-click; Esc closes popups; Fund Transfer edit (owner「FUND TRANSFER无法edit?」+「这个显示太多了，能不能right click 才选我的东西」+「点开后无法用esc 关闭，create new pv 时也是这样」)(#680 1b339244, prod-verified; branch `feat/finance-row-menu-esc`)
+
+1. ✅ Fund Transfer edit — the old Fund Transfer page never had an edit (void / unvoid / delete only). The Payment
+   Vouchers popup told every outside door "Edit … live on that page" — wrong for a fund transfer; now said per door.
+   Owner then「我要可以edit, 因为我发现description 少了」→ built **Edit description**: `PUT /fund-transfers/:no/description`
+   rewrites only the text of the transfer's two live ledger legs ("Transfer <no> · <text>"); accounts, amounts, date and a
+   bank match (held by leg id) stay; a voided transfer is refused. From the Fund Transfer page and from Payment Vouchers
+   (menu + popup). Changing the money is still void + post again.
+2. ✅ Row actions on right-click (plus a ⋮ per row, as the data grid has): Payment Vouchers, Receipts, Fund Transfer,
+   Other Party Bills / Payments, Supplier Payment — no action links in the rows; double-click still opens the popup.
+3. ✅ Esc closes the popup on top: the document popups, the voucher / AP payment / AP bill forms (they ask first when
+   something was keyed), the scan dialogs, the report image — one shared stack (`src/lib/escape-stack.ts`) that the confirm
+   dialog joins, so Esc on a confirm never also closes the form under it.
+4. Prod (2026-10-02, read-only — nothing saved, voided or created; voucher count unchanged): Payment Vouchers rows all
+   carry the ⋮ and no action links; a real right-click on a row opens its menu there (row highlighted, the browser menu
+   held back), the ⋮ opens it under itself inside the screen; menus match each kind (approved voucher, fund transfer with
+   Edit description, receipt, supplier payment with Edit); Esc closes the menu, then the popup; New Payment Voucher closes
+   on Esc when empty, asks when typed, Esc on the question keeps the form and its text, Discard closes it. The description
+   editor opens with the transfer's current text (empty for the one without), Save stays off until it changes, Esc closes
+   it. `PUT …/description` refuses an unknown number (404) and an over-long text (400) before writing; the transfers'
+   descriptions read back unchanged — the real edit is the owner's.
 
 ## 2026-10-02 — 🔵 /m office app: one-tap Install app, and a working "Open the full desktop app" (branch `feat/m-install-and-desktop-switch` → `main`)
 

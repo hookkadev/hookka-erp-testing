@@ -1,5 +1,7 @@
 # Hookka ERP — Start Here (read before any task)
 
+> **Last verified: 2026-10-06** (branch `chore/sync-staging-from-main-1006`, staging<-main merge): `docs/API.md` regenerated on the merged tree and the mount/handler counts below restamped (146 / 1021). Nothing else on this page re-checked.
+
 > **Last verified: 2026-09-30** (branch `chore/sync-staging-from-main-0930`, staging<-main merge): `docs/API.md` regenerated on the merged tree and the mount/handler counts below restamped (143 / 997). Nothing else on this page re-checked.
 
 > **Last verified: 2026-09-29** (branch `feat/org-chart-photo-ux`) — re-ran
@@ -54,8 +56,8 @@ measured 2026-09-22; this line said 2,122). Use the map's file:line +
 
 5. **Which endpoint** → [`docs/API.md`](docs/API.md) — **generated** from
    `src/api/worker.ts` + `src/api/routes/*.ts` by `node scripts/gen-api-docs.mjs`
-   (143 mounts, **997** handlers, plus the exact public/auth surface — re-measured 2026-09-30
-   by `--check`; this line said 142 / 988).
+   (146 mounts, **1021** handlers, plus the exact public/auth surface — re-measured 2026-10-06
+   by `--check`; this line said 143 / 997).
    Regenerate it instead of hand-editing; `--check` tells you if it is stale — **it WAS stale
    on `main` on 2026-08-14**, and the committed copy carried four duplicated mount rows with
    two different line sets for the same handlers. Run `--check` before trusting it.
