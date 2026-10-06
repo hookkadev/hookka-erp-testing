@@ -21,7 +21,27 @@
 import type { Context } from "hono";
 import type { Env } from "../worker";
 import { kpiByKey } from "./kpi-catalog";
-import { computeMonthlyEfficiencyByWorker } from "./efficiency-allowance";
+import {
+  computeMonthlyEfficiencyByWorker,
+  type EfficiencyScope,
+} from "./efficiency-allowance";
+
+/** Categories a production_efficiency scope may name (DEV-36). */
+export const EFFICIENCY_CATEGORIES = ["SOFA", "BEDFRAME"] as const;
+
+/**
+ * An assignment's stored scope: "" / null = Overall, "FAB_CUT" = one
+ * department, "FAB_CUT:SOFA" = one department and category. Anything else is
+ * not a scope and reads as null, so the caller can refuse it.
+ */
+export function parseEfficiencyScope(raw: unknown): EfficiencyScope | null {
+  const [dept, category, extra] = String(raw ?? "").trim().toUpperCase().split(":");
+  if (!dept || extra !== undefined || !/^[A-Z0-9_]+$/.test(dept)) return null;
+  if (category === undefined) return { dept };
+  return (EFFICIENCY_CATEGORIES as readonly string[]).includes(category)
+    ? { dept, category }
+    : null;
+}
 
 export interface MetricResult {
   actual: number | null;
@@ -660,13 +680,18 @@ export async function surveyMean(
  * NOTE: this is the FLOOR's efficiency, not the assignee's own. App users
  * carry no employee link (`users` has no employee_id), so a personal figure
  * cannot be resolved yet. Assign this to whoever owns the floor's output.
+ *
+ * DEV-36: an assignment can carry a scope (one department, optionally one
+ * category). Everyone assigned that scope shares its figure, a team score.
  */
 export async function productionEfficiency(
   c: Context<Env>,
   period: string,
+  scope?: EfficiencyScope | null,
 ): Promise<MetricResult> {
   const { start, end } = periodBounds(period);
-  const byWorker = await computeMonthlyEfficiencyByWorker(c.var.DB, start, end);
+  const byWorker = await computeMonthlyEfficiencyByWorker(c.var.DB, start, end, scope ?? undefined);
+  const where = scope ? ` in ${scope.dept}${scope.category ? ` ${scope.category}` : ""}` : "";
 
   let minutes = 0;
   let hours = 0;
@@ -678,13 +703,13 @@ export async function productionEfficiency(
     counted += 1;
   }
   if (hours <= 0) {
-    return { actual: null, sampleSize: 0, detail: "No production hours logged this month" };
+    return { actual: null, sampleSize: 0, detail: `No production hours logged${where} this month` };
   }
   const pct = Math.round((minutes / (hours * 60)) * 1000) / 10;
   return {
     actual: pct,
     sampleSize: counted,
-    detail: `${Math.round(minutes).toLocaleString()} standard minutes earned on ${Math.round(hours).toLocaleString()} production hours, across ${counted} workers`,
+    detail: `${Math.round(minutes).toLocaleString()} standard minutes earned on ${Math.round(hours).toLocaleString()} production hours, across ${counted} workers${where}`,
   };
 }
 
@@ -760,6 +785,7 @@ export async function computeMetric(
   c: Context<Env>,
   key: string,
   period: string,
+  scope?: string | null,
 ): Promise<MetricResult> {
   switch (key) {
     case "customer_delivery_date":
@@ -769,7 +795,7 @@ export async function computeMetric(
     case "documents_not_stuck":
       return documentsStuck(c, period);
     case "production_efficiency":
-      return productionEfficiency(c, period);
+      return productionEfficiency(c, period, parseEfficiencyScope(scope));
     case "service_case_resolution":
       return serviceCaseResolution(c, period);
     default:
