@@ -1,5 +1,15 @@
 # Bug History
 
+> **Last verified: 2026-10-06** (branch `chore/sync-staging-from-main-1006`, staging<-main merge): both logs merged, one copy of each entry. No id collisions: 253, 257, 258 and 259 are the same bugs on both sides (257 and 259 take main's copy, which adds its main PR note). Main's 251, 254, 255 and 256 are added.
+> **Last verified: 2026-10-06**: newest entry BUG-2026-10-06-259 (branch `feat/pay-card-main`, to main; the same fix reached staging through #707 to #710); a log, so "verified" means the entry matches the code on its branch.
+> **Last verified: 2026-10-05**: BUG-2026-10-05-256 flipped to 🟢 with its measured prod run (#696).
+> **Last verified: 2026-10-05**: newest entry BUG-2026-10-05-258 (branch `fix/worker-pay-late-daily-rate`, to main then staging).
+> **Last verified: 2026-10-05**: newest entry BUG-2026-10-05-257 (branch `fix/worker-pay-advance-line-main`, to main; 256 is on open branch `fix/backfill-zero-minutes-open-cards`).
+> **Last verified: 2026-10-05**: newest entry BUG-2026-10-05-256 (branch `fix/backfill-zero-minutes-open-cards`, to main).
+> **Last verified: 2026-10-05**: newest entry BUG-2026-10-05-255 (branch `fix/bom-master-template-accessory`, to main).
+> **Last verified: 2026-10-05**: newest entry BUG-2026-10-05-254 (branch `fix/bom-minutes-leading-zero-main`, to main); a log, so "verified" means the entry matches the fix it describes.
+> **Last verified: 2026-10-05**: newest entry BUG-2026-10-05-253 (branch `feat/kpi-assign-unassign-to-main`, to main; 252 is taken on staging).
+> **Last verified: 2026-10-02**: newest entry BUG-2026-10-02-251 (branch `feat/finance-row-menu-esc`; renumbered from 250, which `main` took first; 249 is on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-06**: BUG-2026-10-06-259 follow-up 2 no longer claims a before-statutory note; the note was removed (branch `fix/pay-card-drop-statutory-note`, to staging).
 > **Last verified: 2026-10-06**: BUG-2026-10-06-259 got a second follow-up, monthly workers use the same card (branch `feat/pay-card-all-workers`, to staging); a log, so "verified" means the entry matches the code on its branch.
 > **Last verified: 2026-10-06**: BUG-2026-10-06-259 got a follow-up (past months use the per-day card too) and main's BUG-2026-10-05-258 entry was copied in with its fix (branch `feat/daily-pay-card-past-months`, to staging); a log, so "verified" means the entry matches the code on its branch.
@@ -118,7 +128,10 @@ Entries themselves stay newest-first.
 
 **Follow-up 2 (branch `feat/pay-card-all-workers`, to staging).** Monthly workers kept the old layout (late above Basic, Net or Gross on top depending on the month, one flat list). Every worker and month now uses one card, `src/pages/worker/pay-card.tsx` (renamed from `daily-pay-card.tsx`): Net pay, then Earnings (monthly salary or N days @ day rate, less absent and late, plus OT and allowances), whose total is the payslip's Gross, then Deductions (EPF, SOCSO, EIS, tax, advance, penalties), then Gross − Deductions = Net. Absent and late moved from Deductions into Earnings on the per-day card too, so the phone's Gross is the PDF's Gross. Measured on staging (read only): every monthly payslip satisfies Net = Gross − EPF − SOCSO − EIS − PCB − advance − penalty, and Gross is never above basic − absence + OT + allowance, so a monthly payslip's late charge is exactly the gap. Run over all 142 staging payslips from June to September (138 monthly, 4 per-day), every one rebuilds its stored Net. Penalties come from the page's own penalty list (`deductedSen`), not a new SELECT.
 
+**To main (branch `feat/pay-card-main`).** The four staging PRs (#707, #708, #709, #710) as one change. Main already had BUG-2026-10-05-258, which #708 had brought over to staging. Main's pay page has no Daily Attendance table (it moved to the History tab), so that part of staging's page is not carried over.
+
 **Guard.** `tests/pay-card.test.mjs` (renamed from `tests/daily-pay-card.test.mjs`: the sums, the real staging months, the fallbacks, and that the handler passes the pay mode and day rate). `tests/worker-pay-advance-line.test.mjs` now accepts suffixes after `:adv` in the cache key.
+
 
 ## BUG-2026-10-05-258 — Worker My Pay: a per-day (OSC) worker's late charge read RM 0.00, so the Late line was hidden `payroll` `outsourced` 🟢
 
@@ -137,7 +150,7 @@ Entries themselves stay newest-first.
 
 ## BUG-2026-10-05-257 — Worker My Pay: Net below Gross with no reason shown when a salary advance was taken `payroll` 🟢
 
-🟢 Fixed on `fix/worker-pay-advance-line` (to `staging`). Report (owner, photo of a worker's phone): Gross RM 2,114.80, Net RM 2,014.80, no line explaining the RM 100.
+🟢 Fixed on `fix/worker-pay-advance-line` (to `main`; also PR #700 to `staging`). Report (owner, photo of a worker's phone): Gross RM 2,114.80, Net RM 2,014.80, no line explaining the RM 100.
 
 **Measured on prod (read only, 2026-10-05).** The slip is September 2026 for one worker, still DRAFT: `grossPay` 211480, `netPay` 201480, EPF / SOCSO / EIS / PCB all 0, `advanceDeductionSen` 10000, `penaltyDeductionSen` 0. One `employee_advances` row for that worker: 2026-09-21, 10000 sen, empty note, UNSETTLED. Prod has no penalty records at all, so this was never a penalty.
 
@@ -148,6 +161,38 @@ Entries themselves stay newest-first.
 **Not changed.** Penalties are still shown in their own card under the pay card, not as a line between Gross and Net.
 
 **Guard.** `tests/worker-pay-advance-line.test.mjs`. `tests/db-schema.json` gains `payslips.advance_deduction_sen` (runtime-added by `ensureAdvanceTables`; on prod it holds the 10000 above), so `tests/sql-columns-exist.test.mjs` accepts the new SELECT.
+
+## BUG-2026-10-05-256 — Job cards kept 0 production minutes after their BOM was filled in `production` `bom` 🟢
+
+🟢 Fixed on `fix/backfill-zero-minutes-open-cards` (to `main`, #696) and run on prod. Prod run 2026-10-05 after #696 (7d507a59) deployed, `completedFrom=2026-10-01`: updated 309 (254 live, 55 completed in October). Measured after: a second dry run finds 0 to fill (cards at 0 scanned fell 825 to 516); the reported A02 Fab Cut cards SO-2609-281-12 / 393-13 / 393-14 / 247-11 / 247-12 read 15; the audit row on SO-2609-281-12's cut card is 0 to 15; SO-2610-035-12 (had minutes) still 10. Left at 0 on purpose: 411 cards whose BOM step is still 0 (mostly pillow Packing, 1005-(Q) Foam) and 103 in a dept their BOM does not use. Report (owner, screenshot): Fab Cut production sheet, A02 cards SO-2609-281-12 / 393-13 / 393-14 / 247-11 / 247-12 showed Prod Time 0 while the newer SO-2610-035-12 showed 10.
+
+**Cause.** A card's minutes are copied from the BOM once, when the card is created. These A02 / A01 / SB02 / BC05-MF cards were cut while their BOM steps had no minutes, so they got 0. Filling the BOM later never reaches existing cards: `jobcard-sync` only inserts missing cards, `/resync-job-card-times` reads the dept x category Production Times table, not the product's BOM, and `/backfill-jc-production-time-from-bom` cannot match a merged Fab Cut card (its wipKey is `<poId>::<model>::<fabric>::FAB_CUT`, not a BOM wipKey). Its dry run on prod (2026-10-05) also wanted to rewrite 22,738 cards (22,146 completed, back to June) whose minutes differ from today's BOM, none of them zeros.
+
+**Measured on prod 2026-10-05 (read-only, `/api/job-cards` per dept, capped at 5,000 rows per dept).** 778 cards at 0. Of the unfinished ones, 159 have BOM minutes to fill; completed in Sep/Oct 2026, 140. The rest stay: their BOM step is still 0 (Foam on 1005 / 2006(A) / 1030 mattresses), their dept is not in the BOM (leftovers of BUG-2026-10-01-244), or a sofa Fab Cut merge.
+
+**Fix.** `POST /api/production/sync-jobcards-from-bom/fill-zero-minutes` (`?dryRun=true`, `&completedFrom=YYYY-MM-DD` to include cards finished from that date). Only cards at 0 are touched; a card with minutes is never changed. Minutes come from `computeExpectedJcs`, the same expected-card list the builder makes; a merged Fab Cut card gets the sum of its PO's Fab Cut steps (`aggregateFcSlots`); a sofa merge spanning POs is skipped. Live cards only (WAITING / IN_PROGRESS / PAUSED / BLOCKED); CANCELLED cards are never filled (the first version picked them up, seen in the PR canary dry run 2026-10-05). Most zeros on live POs are the old all-dept `<product>::FG_MAIN` chain from before BUG-2026-10-01-244 (355 live cards, measured on the PR canary 2026-10-05). Their wipKey matches nothing in today's BOM, so they are matched by dept (sum of that dept's steps): owner decision 2026-10-05, since those BOMs are now filled in. Skipped as `duplicateDept` when the PO has another live card in that dept, so a merged (FC) card and an old FG_MAIN Fab Cut card are not both filled. Each write re-checks 0 and is audited (`fill-zero-minutes-from-bom`). Labour cost is not re-posted for completed cards (posting runs once, at completion, and posted nothing at 0).
+
+**Guard.** `tests/fill-zero-minutes.test.mjs` (15 cases): the matching rule (merged Fab Cut sum, sofa merge skip, wipKey + dept match incl. FG L1 cards, unknown dept skipped, FG_MAIN dept match and its duplicate guard) and the real handler against a fake DB (the screenshot order with its old FG_MAIN chain; dry run writes nothing; live run writes only fillable cards, each with the re-check-0 guard and an audit row; only live 0-minute cards selected, never cancelled; completedFrom scoping; bad date 400; no permission 403). Not fixed: a BOM edit still does not reach existing cards.
+
+## BUG-2026-10-05-255 — Accessory master BOM templates could never be saved `bom` 🟡
+
+🟡 Fix on `fix/bom-master-template-accessory` (to `main`). Report (owner, screenshot): Edit Master Templates, ARMREST (an Accessory template), Save Templates showed "Some details aren't valid — please check them and try again."
+
+**Cause.** The BOM page gained the ACCESSORY category (BUG-2026-10-01-237 covers the BOM side), but `src/api/routes/bom-master-templates.ts` still only accepted BEDFRAME or SOFA. PUT `/:id` answered 400 "category must be BEDFRAME or SOFA" (measured on staging 2026-10-05 with a request that is refused before any write; staging held 2 BEDFRAME and 13 SOFA masters, no ACCESSORY). The bulk PUT skipped ACCESSORY rows with no error. Migration 0006's CHECK on `bom_master_templates.category` had the same two values, so fixing the route alone would have moved the failure to the database. The client toast hid the server text because it shows a generic line for any 400.
+
+**Fix.** The route accepts BEDFRAME, SOFA and ACCESSORY (`isCategory`). Both PUT handlers await `ensureCategoryCheck` before the first write; it drops `bom_master_templates_category_check` and re-adds it with ACCESSORY (runtime self-apply, recorded as `migrations-postgres/0239_bom_master_templates_accessory.sql`). That name is Postgres's default for 0006's inline CHECK, and prod's `outbox_emails_status_check` (also inline, 0081) carried its default name in BUG-2026-06-24-006, but this table's constraint name itself is UNMEASURED. If it differs, the first Accessory save after deploy fails with a CHECK violation that names the real constraint in the server log.
+
+**Guard.** `tests/bom-master-template-accessory.test.mjs`: the three categories pass and nothing else does, the DDL lists ACCESSORY, and both PUTs ensure before their INSERT.
+
+## BUG-2026-10-05-254 — BOM minutes box shows "052" while typing `bom` 🟢
+
+🟢 Fixed on `fix/bom-minutes-leading-zero-main` (to `main`). Report (owner, screenshot of Edit BOM on A02): typing 52 into a Packing row's minutes box showed "052".
+
+**Cause.** The box added in #688 / #689 (`MinutesInput`, `src/pages/bom.tsx`) was `type="number"` with `value={number}`. Typing after the 0 makes the text "052"; it parses to 52, and React does not rewrite a number input whose numeric value already equals the prop, so the leading zero stays on screen. The saved value was 52; only the display was wrong.
+
+**Fix.** The box is `type="text"` with `inputMode="numeric"` (phones still get the number pad) and `value={String(value)}`, so the text always matches the stored number. `parseMinutes` keeps digits only and caps at 1440. Same box on all 7 BOM process rows.
+
+**Guard.** `tests/bom-manual-minutes.test.mjs` ("minutes box shows the clean number"): pins the text input and runs `parseMinutes` on "052", "", "4a5", "-7" and "2000".
 
 ## BUG-2026-10-05-253 — KPI: no way to take a person off a KPI, and a removal would have rewritten their settled months `kpi` 🟢
 
@@ -178,6 +223,32 @@ Entries themselves stay newest-first.
 **Regression.** `tests/card-padding-phone.test.mjs` (fails on the old `card.tsx`: 3 of 4).
 
 ---
+
+## BUG-2026-10-02-251 — Finance popups said Esc closes them (it did not); a fund transfer's popup said its page could edit it (it never could) `accounting` `ui-frontend` 🟢
+
+🟢 Fixed on `feat/finance-row-menu-esc`.
+
+Owner 2026-10-02 「点开后无法用esc 关闭，create new pv 时也是这样」 and 「FUND TRANSFER无法edit?」.
+
+1. The document popup's ✕ carried the tooltip "Close (Esc)", but nothing listened for Esc — not in that
+   popup, not in the voucher / AP payment forms, the scan dialogs or the other finance popups. Fix: one
+   Esc stack (`src/lib/escape-stack.ts`) — every popup pushes its close while open and Esc runs only the
+   newest. The confirm dialog had its own window listener; left alone it would fire after a popup's (same
+   target, later registration), so one Esc on a confirm would also have closed the form under it. It
+   now joins the stack, as does the data grid's right-click menu. A form with something keyed asks
+   before Esc drops it (a new form: anything keyed or scanned; an edit: any change from how it opened);
+   a dropdown that closes itself on Esc marks the key used, so the popup around it stays. Found while
+   checking in a browser: the shared `SearchableSelect` focuses its search box a tick after opening (later
+   still in a background tab), so an Esc in between reached the form and asked to discard it with the
+   list still open — an open list now sits on the stack itself.
+2. A row from another door, opened on Payment Vouchers, said "Edit, knock-off and FX live on that page"
+   for every door. The old Fund Transfer page has no edit — void / unvoid / delete only, and the API has
+   no `PUT` / restate for transfers (checked). The line is now per door. The owner then asked for an edit
+   (a description was missing): a transfer's description is now editable — only the text of its two live
+   ledger legs; accounts, amounts, date and any bank match stay; the money is still void + post again.
+
+Regression test: `tests/finance-row-menu-esc.test.mjs` (the stack is exercised for real: top only, a used
+key, IME, nothing open).
 
 ## BUG-2026-10-02-250 — "Open the full desktop app" in /m sent a phone straight back to /m `ui-frontend` 🟢
 

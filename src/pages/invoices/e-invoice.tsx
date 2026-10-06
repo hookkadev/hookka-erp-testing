@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import type { EInvoice } from "@/types";
 import { useResizableTables } from "@/lib/use-resizable-tables";
+import { useEscapeClose } from "@/lib/escape-stack";
 
 type Invoice = {
   id: string;
@@ -53,6 +54,9 @@ export default function EInvoicePage() {
   const [cancelling, setCancelling] = useState<string | null>(null);
   const [cancelConfirmId, setCancelConfirmId] = useState<string | null>(null);
   const [selectedXmlId, setSelectedXmlId] = useState<string | null>(null);
+  // Esc = "No, Keep It" on the cancel confirmation (owner 2026-10-02: every
+  // finance popup closes on Esc); not while the cancel is being sent.
+  useEscapeClose(() => { if (!cancelling) setCancelConfirmId(null); }, !!cancelConfirmId);
 
   const fetchData = async () => {
     invalidateCachePrefix("/api/e-invoices");

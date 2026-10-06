@@ -11964,6 +11964,35 @@ app.post("/fund-transfers/:no/lifecycle", async (c) => {
   return c.json({ success: true, data: { state: lc.newState } });
 });
 
+// Edit a fund transfer's DESCRIPTION (owner 2026-10-02 「我要可以edit, 因为我
+// 发现description 少了」). A transfer lives only in its two ledger legs and its
+// description is their text ("Transfer <no> · <reference>"), so the edit
+// rewrites that text on the live original legs — nothing else: same legs,
+// accounts, amounts and date, so a bank-statement match (held by leg id) and
+// every report stay as they are. Changing the money is still void + post
+// again. A voided or deleted transfer is not edited.
+app.put("/fund-transfers/:no/description", async (c) => {
+  const denied = await requirePermission(c, "accounting", "update");
+  if (denied) return denied;
+  const orgId = getOrgId(c);
+  const no = c.req.param("no");
+  let reference: string;
+  try {
+    reference = String(((await c.req.json()) as { reference?: unknown }).reference ?? "").replace(/\s+/g, " ").trim();
+  } catch { return c.json({ success: false, error: "Invalid body" }, 400); }
+  if (reference.length > 200) return c.json({ success: false, error: "Description is too long (200 characters at most)" }, 400);
+  const ft = await c.var.DB.prepare("SELECT 1 AS ok FROM ledger_journal_entries WHERE sourceType = 'fund_transfer' AND sourceId = ? AND orgId = ? AND hidden = 0 LIMIT 1").bind(no, orgId).first<{ ok: number }>();
+  if (!ft) return c.json({ success: false, error: "Fund transfer not found" }, 404);
+  if ((await getDocState(c.var.DB, orgId, "fund_transfer", no)) !== "ACTIVE") {
+    return c.json({ success: false, error: "A voided transfer cannot be edited" }, 400);
+  }
+  const description = `Transfer ${no}${reference ? ` · ${reference}` : ""}`;
+  await c.var.DB.prepare(
+    "UPDATE ledger_journal_entries SET description = ? WHERE sourceType = 'fund_transfer' AND sourceId = ? AND orgId = ? AND hidden = 0",
+  ).bind(description, no, orgId).run();
+  return c.json({ success: true, data: { no, description } });
+});
+
 // ---------------------------------------------------------------------------
 // CONTRA (Phase 3.8, 2026-06) — when a customer IS also a supplier,
 // offset what we owe them (whole APPROVED PIs, ticked) against what they

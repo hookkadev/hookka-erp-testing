@@ -33,3 +33,19 @@ test("every process row edits minutes through MinutesInput", () => {
 test("PO builder does not invent a CAT for job cards", () => {
   assert.doesNotMatch(builder, /p\.category \|\| "CAT 1"/);
 });
+
+// BUG-2026-10-05-254: the box showed "052" after typing 52 over a 0. A
+// type="number" input keeps its own text when the numeric value already
+// matches the prop, so the box is text and always shows String(value).
+test("minutes box shows the clean number, never a leading zero", () => {
+  assert.match(bom, /function MinutesInput[\s\S]*?type="text"[\s\S]*?inputMode="numeric"[\s\S]*?value=\{String\(value\)\}/);
+  const body = bom.match(/function parseMinutes\(text: string\): number \{([\s\S]*?)\r?\n\}/)[1];
+  const parseMinutes = new Function("text", body);
+  assert.equal(parseMinutes("052"), 52);
+  assert.equal(parseMinutes("0"), 0);
+  assert.equal(parseMinutes(""), 0);
+  assert.equal(parseMinutes("4a5"), 45);
+  assert.equal(parseMinutes("-7"), 7);
+  assert.equal(parseMinutes("2000"), 1440);
+  assert.equal(String(parseMinutes("052")), "52");
+});
