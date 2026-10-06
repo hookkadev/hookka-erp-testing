@@ -681,7 +681,7 @@ const dict: Dict = {
     zh: '查看工资单',
     my: 'လစာစာရွက် ကြည့်ရှုရန်',
   },
-  'pay.estimate': { en: 'estimate', ms: 'anggaran', zh: '估算', my: 'ခန့်မှန်း' },
+  'pay.estimate': { en: 'Estimate', ms: 'Anggaran', zh: '估算', my: 'ခန့်မှန်း' },
   'pay.basicFullMonth': {
     en: 'Basic',
     ms: 'Asas',
@@ -740,9 +740,22 @@ const dict: Dict = {
     zh: '预支薪水',
     my: 'လစာကြိုတင်ငွေ',
   },
-  // Per-day (outsourced) workers' My Pay card. They have no monthly basic, so
-  // the card names the day rate instead of showing "Basic RM 0.00".
+  // My Pay card (pay-card.tsx), every worker. Per-day (outsourced) workers
+  // have no monthly basic, so their card names the day rate instead.
   'pay.netPay': { en: 'Net pay', ms: 'Gaji bersih', zh: '实发薪水', my: 'အသားတင်လစာ' },
+  'pay.monthlySalary': {
+    en: 'Monthly salary',
+    ms: 'Gaji bulanan',
+    zh: '月薪',
+    my: 'လစဉ်လစာ',
+  },
+  // The live estimate has no statutory figures until payroll runs.
+  'pay.beforeStatutory': {
+    en: 'EPF, SOCSO, EIS and tax are worked out when payroll runs.',
+    ms: 'KWSP, PERKESO, SIP dan cukai dikira semasa gaji diproses.',
+    zh: 'EPF、SOCSO、EIS 和税款在发薪时计算。',
+    my: 'EPF၊ SOCSO၊ EIS နှင့် အခွန်ကို လစာတွက်ချိန်တွင် တွက်ပါမည်။',
+  },
   'pay.final': { en: 'Final', ms: 'Muktamad', zh: '已确认', my: 'အတည်ပြုပြီး' },
   'pay.earnings': { en: 'Earnings', ms: 'Pendapatan', zh: '收入', my: 'ဝင်ငွေ' },
   'pay.deductions': { en: 'Deductions', ms: 'Potongan', zh: '扣除', my: 'နုတ်ယူငွေ' },

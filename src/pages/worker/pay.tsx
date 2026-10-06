@@ -15,7 +15,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { useT } from "@/lib/worker-i18n";
 import { workerFetch } from "@/layouts/WorkerLayout";
-import DailyPayCard, { dailyCardFromPayslip } from "./daily-pay-card";
+import PayCard, { liveMonthCard, payslipCard } from "./pay-card";
 
 // ---------- helpers ----------
 function rm(sen: number | undefined): string {
@@ -62,10 +62,11 @@ type PayData = {
     otDays?: Array<{ date: string; hours: number }>;
     lateDays?: Array<{ date: string; hours: number }>;
     payslipStatus?: string;
-    // Per-day workers (no monthly basic) get DailyPayCard instead.
+    // Per-day workers (no monthly basic): PayCard names the day rate instead.
     payMode?: "DAILY" | "MONTHLY";
     dailyRateSen?: number;
     advanceSen?: number;
+    advanceDays?: Array<{ date: string; amountSen: number; note: string }>;
   };
   history: Array<{
     absentDays?: number;
@@ -215,6 +216,16 @@ function asPayData(v: unknown): PayData | null {
       payMode: v.current.payMode === "DAILY" ? "DAILY" : "MONTHLY",
       dailyRateSen: asNumber(v.current.dailyRateSen) ?? 0,
       advanceSen: asNumber(v.current.advanceSen) ?? 0,
+      advanceDays: Array.isArray(v.current.advanceDays)
+        ? v.current.advanceDays
+            .filter(isRecord)
+            .map((d) => ({
+              date: String(d.date ?? ""),
+              amountSen: asNumber(d.amountSen) ?? 0,
+              note: asString(d.note) ?? "",
+            }))
+            .filter((d) => d.date)
+        : [],
     },
     history: v.history
       .map(asPayslipRow)
@@ -423,9 +434,25 @@ export default function WorkerPayPage() {
   const selected = period ?? pay.current.period;
   const isCurrent = selected === pay.current.period;
   const slip = pay.history.find((p) => p.period === selected) ?? null;
-  const dailySlip =
-    slip && pay.current.payMode === "DAILY"
-      ? dailyCardFromPayslip(slip, pay.current.dailyRateSen ?? 0, t)
+  // One card for every worker and month: Net, Earnings, Deductions, Summary.
+  // A month whose lines would not add up to payroll's figure keeps the old
+  // card (see pay-card.tsx).
+  const penaltySen = penalties
+    .filter((p) => p.payrollPeriod === selected && p.status === "DEDUCTED")
+    .reduce((s, p) => s + p.deductedSen, 0);
+  const card = isCurrent
+    ? liveMonthCard({ ...pay.current, periodLabel: monthLabel(selected) }, t)
+    : slip
+      ? payslipCard(
+          slip,
+          {
+            periodLabel: monthLabel(selected),
+            payMode: pay.current.payMode,
+            dailyRateSen: pay.current.dailyRateSen,
+            penaltySen,
+          },
+          t,
+        )
       : null;
 
   return (
@@ -447,17 +474,14 @@ export default function WorkerPayPage() {
         </select>
       </div>
 
-      {isCurrent && pay.current.payMode === "DAILY" ? (
-        <DailyCurrentMonth current={pay.current} t={t} />
+      {card ? (
+        <PayCard t={t} card={card}>
+          {isCurrent && isFinalised(pay.current) && (
+            <SavePayslipButton period={pay.current.period} />
+          )}
+        </PayCard>
       ) : isCurrent ? (
         <CurrentMonthBreakdown current={pay.current} t={t} />
-      ) : slip && dailySlip ? (
-        <DailyPayCard
-          {...dailySlip}
-          t={t}
-          periodLabel={monthLabel(slip.period)}
-          isEstimate={slip.status !== "APPROVED" && slip.status !== "PAID"}
-        />
       ) : slip ? (
         <FinalisedBreakdown slip={slip} t={t} />
       ) : (
@@ -675,32 +699,7 @@ function SavePayslipButton({ period }: { period: string }) {
   );
 }
 
-// Current month for a per-day worker. workedDays is the engine's daysWorked,
-// counted BEFORE the late/short dock, so the card's days × rate minus the dock
-// equals the engine's basic earned (no double count).
-function DailyCurrentMonth({ current: c, t }: { current: PayData["current"]; t: Translate }) {
-  const finalised = isFinalised(c);
-  return (
-    <DailyPayCard
-      t={t}
-      periodLabel={monthLabel(c.period)}
-      isEstimate={!finalised}
-      ratePerDaySen={c.dailyRateSen ?? 0}
-      daysWorked={c.workedDays}
-      otherEarnings={[
-        { label: `${t("pay.ot")} · ${(c.otMinutes / 60).toFixed(1)}h`, amountSen: c.otSen },
-        { label: t("pay.efficiencyAllowance"), amountSen: c.efficiencyAllowanceSen },
-        { label: t("pay.leadershipAllowance"), amountSen: c.leadershipAllowanceSen },
-      ]}
-      lateShortSen={c.shortHourDeductionSen}
-      lateDays={c.lateDays}
-      advanceSen={c.advanceSen ?? 0}
-    >
-      {finalised && <SavePayslipButton period={c.period} />}
-    </DailyPayCard>
-  );
-}
-
+// The old cards below are the fallback for a month PayCard cannot rebuild.
 // Current (in-progress) month — a LIVE estimate. Every line is itemised so the
 // worker can see how the gross is built; Absent / OT rows tap open to the dates.
 function CurrentMonthBreakdown({
