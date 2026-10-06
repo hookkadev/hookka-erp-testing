@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-06**: branch `feat/dev37-kpi-checklist-admin-only` (DEV-37 to `staging`) added item 6 of the DEV-37 entry below.
 > **Last verified: 2026-10-06**: branch `feat/dev37-kpi-office-self-view` (DEV-37 to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-06**: branch `chore/sync-staging-from-main-1006` (staging<-main merge): both trackers merged, main-only entries added, entries on both sides kept once in staging's wording. Sync entry added below.
 > **Last verified: 2026-10-06**: branch `feat/kpi-department-efficiency` (DEV-36 part 3 to `staging`) added below (its entry is the newest).
@@ -172,7 +173,8 @@ Reporter ask (Violet, DEV-37): office staff log in and see their own assigned KP
 2. 🔵 The `kpi` resource goes from `ALL_RESOURCES` / Office's exclusion / `NAV_RESOURCE`, so the per-user permission editor no longer shows a box that does nothing.
 3. 🔵 Guard test `tests/kpi-self-service.test.mjs`: menu + route stay open for every role (code roles and an empty permission set), every KPI route except `/me`, `/checklist` and `/survey` GET still calls `requireSuperAdmin`, those take the user from the session, and the page fetches the people lists only for a Super Admin.
 4. ⬜ Browser check with a non-admin login: not done locally, the only `.dev.vars` on this machine points at production.
-5. ⬜ Check on the staging site after merge with a non-admin login.
+5. ⬜ Check on the staging site after merge with a non-admin login. Super Admin side checked on staging 2026-10-06 (#719 deployed: `kpi` gone from the permission catalogue, 79 resources; KPI menu and all three tabs still there). The non-admin side waits for Violet.
+6. 🔵 Checklist ticks are Super Admin only (Violet 2026-10-06: "super admin only can tick. staff can view only"). `PUT /api/kpi/checklist/:kpiKey` calls `requireSuperAdmin`; a non-admin's card shows the boxes read-only with "Items are ticked by Super Admin." (branch `feat/dev37-kpi-checklist-admin-only`).
 
 ## 2026-10-06 — 🔵 Sync `staging` from `main` (branch `chore/sync-staging-from-main-1006` → `staging`)
 

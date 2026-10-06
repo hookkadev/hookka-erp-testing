@@ -11,7 +11,8 @@
 //             assign them to several people in one go.
 //   People  — everyone's score this month against last month.
 //   My KPI  — the card the person being measured sees, read-only, with the
-//             formula spelled out and any checklist items tickable.
+//             formula spelled out. Checklist items are ticked by Super Admin
+//             only (DEV-37); everyone else sees which are done.
 //
 // An ordinary user has only the third, so they never see the strip.
 // ---------------------------------------------------------------------------
@@ -1221,6 +1222,7 @@ export default function KpiPage() {
                         period={period}
                         userId={viewUserId}
                         locked={card.locked}
+                        canTick={isSuperAdmin}
                         onTick={tickItem}
                       />
                     )}
@@ -1661,12 +1663,13 @@ function RatingBlock({
  * The tickable items behind a checklist KPI.
  *
  * The list itself comes from the code catalogue, so the denominator cannot be
- * changed by anyone being measured against it; only the ticks are data.
+ * changed by anyone being measured against it; only the ticks are data. Only a
+ * Super Admin ticks; the person being measured sees the boxes read-only.
  */
 function ChecklistBlock({
-  kpiKey, items, period, userId, locked, onTick,
+  kpiKey, items, period, userId, locked, canTick, onTick,
 }: {
-  kpiKey: string; items: string[]; period: string; userId: string; locked: boolean;
+  kpiKey: string; items: string[]; period: string; userId: string; locked: boolean; canTick: boolean;
   onTick: (kpiKey: string, itemIndex: number, done: boolean) => Promise<void>;
 }) {
   const url = `/api/kpi/checklist/${kpiKey}?period=${period}${userId ? `&userId=${userId}` : ""}`;
@@ -1680,14 +1683,18 @@ function ChecklistBlock({
           <input
             type="checkbox"
             checked={done.has(i)}
-            disabled={locked}
+            disabled={locked || !canTick}
             onChange={(e) => void onTick(kpiKey, i, e.target.checked)}
             className="mt-0.5"
           />
           <span className={done.has(i) ? "text-[#5A5550]" : ""}>{it}</span>
         </label>
       ))}
-      {locked && <p className="text-[10.5px] text-[#9CA3AF]">This month is settled — items are locked.</p>}
+      {locked ? (
+        <p className="text-[10.5px] text-[#9CA3AF]">This month is settled — items are locked.</p>
+      ) : !canTick && (
+        <p className="text-[10.5px] text-[#9CA3AF]">Items are ticked by Super Admin.</p>
+      )}
     </div>
   );
 }
