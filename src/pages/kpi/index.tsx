@@ -63,6 +63,8 @@ type LibItem = {
   purpose?: string; definition?: string; measurement?: string[];
   defaultTarget: number; defaultWeight: number; available: boolean;
   current: number | null; evidence: string;
+  editableRules?: string[];
+  penaltyPerPct?: number; earlyStepPct?: number; earlyBonusPerStep?: number; earlyMaxBonus?: number;
   assignedTo: Array<{ userId: string; name: string; role: string }>;
 };
 type PersonRow = {
@@ -466,6 +468,9 @@ export default function KpiPage() {
                               <li key={m} className="text-[11.5px] text-[#3A3733] leading-relaxed">{m}</li>
                             ))}
                           </ol>
+                        )}
+                        {k.key === "customer_delivery_date" && (k.editableRules?.length ?? 0) > 0 && (
+                          <DeliveryRulesEditor item={k} />
                         )}
                         {(k.surveyQuestions?.length ?? 0) > 0 && (
                           <div>
@@ -985,8 +990,12 @@ export default function KpiPage() {
                             ))}
                           </ol>
                         )}
-                        <p className="text-[12px] text-[#5A5550] mt-1.5 font-medium">{l.evidence}</p>
-                        {l.drillPath && (
+                        {l.key === "customer_delivery_date" ? (
+                          <DeliveryOrderList period={period} evidence={l.evidence} />
+                        ) : (
+                          <p className="text-[12px] text-[#5A5550] mt-1.5 font-medium">{l.evidence}</p>
+                        )}
+                        {l.drillPath && l.key !== "customer_delivery_date" && (
                           // The card's month travels with the link. Without it
                           // the target page opens "all of them, ever", which is
                           // a different set from the one this row counted —
@@ -1194,6 +1203,180 @@ function SurveyLinkMaker({
           in 30 days — generate a new one for the next customer.
         </p>
       )}
+    </div>
+  );
+}
+
+type DeliveryStatus = "LATE" | "EARLY" | "ON_TIME";
+const DELIVERY_STATUS: Record<DeliveryStatus, { label: string; cls: string }> = {
+  LATE: { label: "Late", cls: "bg-[#F9E4E0] text-[#9A3A2D]" },
+  EARLY: { label: "Early", cls: "bg-[#E3EEDA] text-[#3B6D11]" },
+  ON_TIME: { label: "On time", cls: "bg-[#EDE7DA] text-[#5A5550]" },
+};
+
+/** Whole days between two YYYY-MM-DD dates (b − a). */
+const daysBetween = (a: string, b: string) =>
+  Math.round((Date.parse(b) - Date.parse(a)) / 86_400_000);
+
+/**
+ * The delivery KPI's orders, opened in place on the card. Tap the summary line
+ * and every order shipped that month is listed with its Late / Early / On time
+ * tag, filterable by tag. Same query as the score, so the counts match it.
+ */
+function DeliveryOrderList({ period, evidence }: { period: string; evidence: string }) {
+  const [open, setOpen] = useState(false);
+  const [show, setShow] = useState<DeliveryStatus | "ALL">("ALL");
+  const { data, loading, error } = useCachedJson<{
+    data?: Array<{
+      id: string; companySOId: string | null; customerName: string | null;
+      customerDeliveryDate: string | null; shippedOn: string | null; status: DeliveryStatus;
+    }>;
+  }>(open ? `/api/sales-orders/late-to-customer?period=${period}&all=1` : "");
+  const rows = data?.data ?? [];
+  const count = (s: DeliveryStatus) => rows.filter((r) => r.status === s).length;
+  const shown = show === "ALL" ? rows : rows.filter((r) => r.status === show);
+
+  return (
+    <div className="mt-1.5">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        className="text-left text-[12px] font-medium text-[#5A5550] hover:text-[#1F1D1B]"
+      >
+        {evidence}{" "}
+        <span className="text-[11px] text-[#6B5C32] underline decoration-dotted whitespace-nowrap">
+          {open ? "Hide orders" : "Show orders"}
+        </span>
+      </button>
+      {open && (
+        <div className="mt-2 rounded-lg border border-[#E2DDD8] bg-[#FCFBF8]">
+          {loading && !rows.length ? (
+            <Skeleton height={80} />
+          ) : error ? (
+            <p className="p-3 text-[11.5px] text-[#9A3A2D]">Could not load the orders: {error}</p>
+          ) : rows.length === 0 ? (
+            <p className="p-3 text-[11.5px] text-[#9CA3AF]">No orders shipped in {period}.</p>
+          ) : (
+            <>
+              <div className="flex flex-wrap gap-1.5 border-b border-[#E2DDD8] p-2">
+                {(["ALL", "LATE", "EARLY", "ON_TIME"] as const).map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => setShow(s)}
+                    className={`rounded-full border px-2.5 py-0.5 text-[11px] ${
+                      show === s
+                        ? "border-[#6B5C32] bg-[#6B5C32] text-white font-semibold"
+                        : "border-[#E2DDD8] bg-white text-[#5A5550]"
+                    }`}
+                  >
+                    {s === "ALL" ? "All" : DELIVERY_STATUS[s].label} {s === "ALL" ? rows.length : count(s)}
+                  </button>
+                ))}
+              </div>
+              <ul className="max-h-80 overflow-y-auto divide-y divide-[#EFEBE4]">
+                {shown.map((r) => {
+                  const diff =
+                    r.customerDeliveryDate && r.shippedOn
+                      ? daysBetween(r.customerDeliveryDate, r.shippedOn)
+                      : 0;
+                  return (
+                    <li key={r.id} className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-3 py-2 text-[11.5px]">
+                      <Link to={`/sales/${r.id}`} className="font-semibold text-[#6B5C32] underline decoration-dotted">
+                        {r.companySOId || r.id}
+                      </Link>
+                      <span className="min-w-0 flex-1 truncate text-[#3A3733]">{r.customerName || "—"}</span>
+                      <span className="text-[#9CA3AF] tabular-nums">
+                        promised {r.customerDeliveryDate ?? "—"} · shipped {r.shippedOn ?? "—"}
+                      </span>
+                      <span className={`rounded-full px-2 py-0.5 text-[10.5px] font-semibold ${DELIVERY_STATUS[r.status].cls}`}>
+                        {DELIVERY_STATUS[r.status].label}
+                        {diff !== 0 && ` ${Math.abs(diff)}d`}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The delivery KPI's scoring numbers, editable by Super Admin. One set for the
+ * whole company. Saving refetches the library, so the explanation above it is
+ * rebuilt from the new numbers.
+ */
+function DeliveryRulesEditor({ item }: { item: LibItem }) {
+  const [form, setForm] = useState({
+    penaltyPerPct: String(item.penaltyPerPct ?? 10),
+    earlyStepPct: String(item.earlyStepPct ?? 10),
+    earlyBonusPerStep: String(item.earlyBonusPerStep ?? 1),
+    earlyMaxBonus: String(item.earlyMaxBonus ?? 5),
+  });
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  const num = (key: keyof typeof form, label: string) => (
+    <input
+      type="number"
+      min={0}
+      max={100}
+      step="any"
+      inputMode="decimal"
+      aria-label={label}
+      value={form[key]}
+      onChange={(e) => { setForm({ ...form, [key]: e.target.value }); setMsg(""); }}
+      className="mx-1 h-7 w-14 rounded-md border border-[#E2DDD8] bg-white px-1.5 text-right text-[11.5px] tabular-nums"
+    />
+  );
+
+  const save = async () => {
+    setBusy(true);
+    setMsg("");
+    try {
+      const r = await fetch(`/api/kpi/rules/${item.key}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(Object.fromEntries(Object.entries(form).map(([k, v]) => [k, Number(v)]))),
+      });
+      const j = (await r.json()) as { success?: boolean; error?: string };
+      if (!r.ok || !j.success) throw new Error(j.error || "Could not save the rules");
+      setMsg("Saved. Every month not yet settled now uses these numbers.");
+      invalidateCachePrefix("/api/kpi");
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "Could not save the rules");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-2 rounded-lg border border-[#E2DDD8] bg-white p-3 space-y-2">
+      <p className="text-[11.5px] font-semibold text-[#1F1D1B]">Scoring rules (applies to everyone)</p>
+      <p className="text-[11.5px] text-[#3A3733] leading-loose">
+        Lose{num("penaltyPerPct", "Points lost per 1% late")}points for every 1% of orders shipped late.
+      </p>
+      <p className="text-[11.5px] text-[#3A3733] leading-loose">
+        Win back{num("earlyBonusPerStep", "Bonus points per step")}point(s) for every
+        {num("earlyStepPct", "Early % per step")}% shipped early, up to
+        {num("earlyMaxBonus", "Most bonus points")}points. The score never goes above 100.
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void save()}
+          className="h-7 rounded-md bg-[#6B5C32] px-3 text-[11.5px] font-semibold text-white disabled:opacity-50"
+        >
+          {busy ? "Saving..." : "Save rules"}
+        </button>
+        {msg && <span className="text-[11px] text-[#5A5550]">{msg}</span>}
+      </div>
     </div>
   );
 }

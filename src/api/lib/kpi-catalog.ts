@@ -156,6 +156,15 @@ export interface KpiDef {
   curve?: AttainmentCurve;
   /** PENALTY_PER_PCT only — points lost per percentage point. */
   penaltyPerPct?: number;
+  /**
+   * PENALTY_PER_PCT only — the early-delivery bonus. Every `earlyStepPct` of
+   * orders shipped before the promised date earns `earlyBonusPerStep` points,
+   * up to `earlyMaxBonus`. The bonus only wins back late points: the score
+   * never goes above 100 (owner 2026-10-05).
+   */
+  earlyStepPct?: number;
+  earlyBonusPerStep?: number;
+  earlyMaxBonus?: number;
   /** PENALTY_PER_UNIT only — points lost per whole unit of the actual. */
   penaltyPerUnit?: number;
   /**
@@ -209,29 +218,88 @@ export interface KpiDef {
  */
 export const GATE_FAIL_CAP = 60;
 
+/**
+ * The scoring numbers Super Admin can change from the Library tab, per KPI.
+ * One set for the whole company, stored in kpi_rule_settings. A KPI not listed
+ * here has no editable rules.
+ */
+export const EDITABLE_RULES = {
+  customer_delivery_date: ["penaltyPerPct", "earlyStepPct", "earlyBonusPerStep", "earlyMaxBonus"],
+} as const satisfies Record<string, ReadonlyArray<keyof KpiDef>>;
+
+export type RuleField = (typeof EDITABLE_RULES)[keyof typeof EDITABLE_RULES][number];
+export type KpiRules = Partial<Record<RuleField, number>>;
+
+export function editableRules(key: string): readonly RuleField[] {
+  return (EDITABLE_RULES as Record<string, readonly RuleField[]>)[key] ?? [];
+}
+
+/**
+ * The delivery KPI's wording, built from its numbers so the card can never
+ * describe a rule different from the one that scored it.
+ */
+function deliveryText(
+  per: number, step: number, bonus: number, max: number,
+): Pick<KpiDef, "detail" | "formula" | "measurement"> {
+  const zeroAt = per > 0 ? Math.round((100 / per) * 10) / 10 : null;
+  const earlyLine =
+    bonus > 0 && max > 0
+      ? `Every ${step}% of orders shipped early wins back ${bonus} point(s), up to ${max}. The score never goes above 100.`
+      : "Shipping early earns nothing extra.";
+  return {
+    detail: `Every 1% of orders shipped late costs ${per} points`,
+    formula:
+      `100 − (late % × ${per}) + early bonus, capped at 100.` +
+      (zeroAt !== null ? ` ${zeroAt}% late scores nothing before the bonus.` : ""),
+    measurement: [
+      "Take the date promised to the customer on the sales order. Our own internal estimate is never used.",
+      "Find the first dispatch date across every delivery order carrying that order's production.",
+      "Late % = orders dispatched after the promised date ÷ orders dispatched that month × 100. Early % is the same for orders dispatched before it; shipped on the day is neither.",
+      `Score starts at 100 and loses ${per} points per 1% late` +
+        (zeroAt !== null ? `: 0% → 100, 1% → ${Math.max(0, 100 - per)}, ${zeroAt}% or worse → 0.` : "."),
+      earlyLine,
+      "That score is then multiplied by whatever weight this KPI was assigned.",
+    ],
+  };
+}
+
+/**
+ * The catalogue entry with the company's saved rules applied, wording
+ * included. Unknown or non-editable fields in `rules` are ignored.
+ */
+export function withRules(def: KpiDef, rules?: KpiRules): KpiDef {
+  const fields = editableRules(def.key);
+  if (!fields.length || !rules) return def;
+  const d: KpiDef = { ...def };
+  for (const f of fields) {
+    const v = Number(rules[f]);
+    if (rules[f] != null && Number.isFinite(v)) d[f] = v;
+  }
+  if (d.key === "customer_delivery_date") {
+    Object.assign(d, deliveryText(d.penaltyPerPct!, d.earlyStepPct!, d.earlyBonusPerStep!, d.earlyMaxBonus!));
+  }
+  return d;
+}
+
 export const KPI_CATALOG: KpiDef[] = [
   {
     key: "customer_delivery_date",
     label: "On-time delivery to the customer's promised date",
-    detail: "Every 1% of orders shipped late costs 10 points",
+    ...deliveryText(10, 10, 1, 5),
     shape: "RATIO",
     direction: "LOWER_IS_BETTER",
     unit: "%",
     scoring: "AUTO",
     curve: "PENALTY_PER_PCT",
     penaltyPerPct: 10,
+    // Owner 2026-10-05: 10% early → +1 … 50% early → +5.
+    earlyStepPct: 10,
+    earlyBonusPerStep: 1,
+    earlyMaxBonus: 5,
     purpose:
       "A late delivery is the one failure the customer always notices. Everything else in the factory can slip; this is the promise we made.",
     definition:
       "The PERCENTAGE of sales orders shipped in the month whose first dispatch left after the date promised to that customer. Counted once per order, not per delivery note — a customer promised one date was let down once, however many trips it took.",
-    measurement: [
-      "Take the date promised to the customer on the sales order. Our own internal estimate is never used.",
-      "Find the first dispatch date across every delivery order carrying that order's production.",
-      "Late % = orders dispatched after the promised date ÷ orders dispatched that month × 100.",
-      "Score starts at 100 and loses 10 points per 1% late: 0% → 100, 1% → 90, 5% → 50, 10% or worse → 0.",
-      "That score is then multiplied by whatever weight this KPI was assigned.",
-    ],
-    formula: "100 − (late % × 10). 1% late costs 10 points; 10% late scores nothing.",
     defaultTarget: 0,
     defaultWeight: 30,
     available: true,
@@ -499,6 +567,9 @@ export function attainment(
         KpiDef,
         | "curve"
         | "penaltyPerPct"
+        | "earlyStepPct"
+        | "earlyBonusPerStep"
+        | "earlyMaxBonus"
         | "penaltyPerUnit"
         | "graceDays"
         | "efficiencyFloorPct"
@@ -508,14 +579,26 @@ export function attainment(
     >,
   target: number,
   actual: number,
+  /** PENALTY_PER_PCT only — % of orders shipped early, for the bonus. */
+  earlyPct?: number | null,
 ): number {
   if (!Number.isFinite(actual)) return 0;
 
   // Straight penalty off a perfect start. Used where the target is zero and a
-  // ratio would divide by it.
+  // ratio would divide by it. The early bonus can win points back but never
+  // lifts the score past 100.
   if (def.curve === "PENALTY_PER_PCT") {
-    const per = Number(def.penaltyPerPct) || 10;
-    return Math.max(0, Math.min(120, Math.round((100 - actual * per) * 10) / 10));
+    const per = Number.isFinite(Number(def.penaltyPerPct)) ? Number(def.penaltyPerPct) : 10;
+    const step = Number(def.earlyStepPct) || 0;
+    const early = Number(earlyPct) || 0;
+    const bonus =
+      step > 0 && early > 0
+        ? Math.min(
+            Number(def.earlyMaxBonus) || 0,
+            Math.floor(early / step + 1e-9) * (Number(def.earlyBonusPerStep) || 0),
+          )
+        : 0;
+    return Math.max(0, Math.min(100, Math.round((100 - actual * per + bonus) * 10) / 10));
   }
   // Same shape, but the actual is a COUNT (document-days late) rather than a
   // percentage, so nothing is normalised by a denominator first.

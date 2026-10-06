@@ -248,7 +248,7 @@ test("the drill-down list runs the metric's own SQL, not a copy of it", () => {
   // Two hand-written copies agree on the day they are written. The card would
   // then say 11 and the list would show 14, and the number loses its
   // authority — which is the whole reason the link exists.
-  for (const frag of ["FIRST_DISPATCH_CTE", "DISPATCHED_IN_PERIOD", "IS_LATE"]) {
+  for (const frag of ["FIRST_DISPATCH_CTE", "DISPATCHED_IN_PERIOD", "IS_LATE", "IS_EARLY"]) {
     const uses = METRICS.match(new RegExp(`\\$\\{${frag}\\}`, "g")) ?? [];
     assert.ok(
       uses.length >= 2,
