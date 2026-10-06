@@ -2115,8 +2115,9 @@ app.get("/payslips", async (c) => {
       ] as const,
       orgId: DEFAULT_ORG_ID,
       // ":adv" retires snapshots built before history carried the advance, so
-      // the phone never serves a cached month that hides it.
-      cacheKey: `${workerId}:${snapPeriod}:adv`,
+      // the phone never serves a cached month that hides it. ":daily" retires
+      // the ones built before the live estimate knew about per-day pay.
+      cacheKey: `${workerId}:${snapPeriod}:adv:daily`,
     },
     async (db) => {
 
@@ -2351,12 +2352,21 @@ app.get("/payslips", async (c) => {
     console.warn("[worker/pay] payroll_hour_deductions read skipped:", e);
   }
 
+  // Per-day (outsourced) people have no monthly basic. Without these two the
+  // engine priced them as a RM 0 monthly worker, so the phone showed RM 0.00
+  // basic while payroll paid days x day rate.
+  const payWorker = await db
+    .prepare("SELECT payMode, dailyRateSen FROM workers WHERE id = ?")
+    .bind(workerId)
+    .first<{ payMode: string | null; dailyRateSen: number | null }>();
   const labor = computeMonthlyLabor({
     worker: {
       basicSalarySen: effectiveSalarySen,
       workingDaysPerMonth: auth.worker.workingDaysPerMonth,
       workingHoursPerDay: auth.worker.workingHoursPerDay,
       otMultiplier: auth.worker.otMultiplier,
+      payMode: payWorker?.payMode,
+      dailyRateSen: Number(payWorker?.dailyRateSen) || 0,
     },
     year: now.getFullYear(),
     month: now.getMonth() + 1,
@@ -2456,6 +2466,19 @@ app.get("/payslips", async (c) => {
           // approved 才能 print). The phone hides Save-as-PDF until then, so a
           // mid-month figure can never be mistaken for the final one.
           payslipStatus,
+          // Per-day people get their own card on My Pay: "N days @ RM X/day"
+          // instead of a RM 0.00 basic. dailyRateSen is the engine's day rate,
+          // so the card prices the same days payroll does.
+          // Same test the engine uses: DAILY with no day rate is paid as monthly.
+          payMode:
+            payWorker?.payMode === "DAILY" && Number(payWorker?.dailyRateSen) > 0
+              ? "DAILY"
+              : "MONTHLY",
+          dailyRateSen: labor.payrollDailyRateSen,
+          // Cash already collected this month (recovered from this month's pay,
+          // same rule as payroll). Display only until the payslip is generated.
+          advanceSen: (advancesByPeriod.get(period) ?? []).reduce((s, a) => s + a.amountSen, 0),
+          advanceDays: advancesByPeriod.get(period) ?? [],
         },
         history,
       };

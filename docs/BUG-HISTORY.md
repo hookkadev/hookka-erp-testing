@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-06**: newest entry BUG-2026-10-06-259 (branch `feat/daily-pay-card`, to staging; 258 is on `main`); a log, so "verified" means the entry matches the code on its branch.
 > **Last verified: 2026-10-05**: newest entry BUG-2026-10-05-257 (branch `fix/worker-pay-advance-line`, to staging; 254 and 255 are on `main`, 256 is on open branch `fix/backfill-zero-minutes-open-cards`); a log, so "verified" means the entry matches the code on its branch.
 > **Last verified: 2026-10-05**: newest entry BUG-2026-10-05-253 (branch `feat/kpi-assign-unassign`, to staging); a log, so "verified" means the entry matches the code on its branch.
 > **Last verified: 2026-10-02**: newest entry BUG-2026-10-02-252 (branch `fix/dashboard-exp-kpi-scale`, to staging; 251 is taken on `main`); a log, so "verified" means the entry matches the code on its branch.
@@ -97,6 +98,20 @@ Entries themselves stay newest-first.
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
 
 ---
+
+## BUG-2026-10-06-259 — Worker My Pay: a per-day worker's current month priced as a RM 0 monthly salary `payroll` 🟢
+
+🟢 Fixed on `feat/daily-pay-card` (to `staging`). Report (owner): a per-day worker's My Pay shows "Basic: RM 0.00" with no explanation, and the deductions sit above the gross, so the sum reads backwards.
+
+**Measured on staging (read only, 2026-10-06).** One worker has `pay_mode = 'DAILY'`: OSC-001, `daily_rate_sen` 8500, `basic_salary_sen` 0. Their stored payslips also carry `basic_salary_sen` 0 (Sept: gross 177820, advance 10000, net 167820), and no payslip column holds the days worked. The phone response itself is UNMEASURED: `GET /api/worker/payslips` needs the worker's own sign-in.
+
+**Cause.** The live current-month estimate in `GET /api/worker/payslips` calls `computeMonthlyLabor` without `payMode` / `dailyRateSen`, so the engine's per-day branch never runs: a per-day worker is priced as a monthly worker on a RM 0 salary (basic 0, late hours and OT priced at 0). Payroll passes both fields, so the phone and the payslip disagreed. Same on `main`.
+
+**Fix.** The handler reads `payMode, dailyRateSen` and passes them to the engine, and returns `payMode`, `dailyRateSen` (the engine's day rate) and `advanceSen` (this month's advances) on `current`; the snapshot cache key gains `:daily`. `src/pages/worker/pay.tsx` shows the new `DailyPayCard` for a DAILY worker's current month: Net pay on top, then Earnings ("Daily rate earnings (N days @ RM X/day)", OT, allowances, Gross), then Deductions (late / short hours with the days as chips, salary advance, total), then Gross − Deductions = Net. No Basic row. New labels in all four worker languages. "Save payslip as PDF" moved into a shared `SavePayslipButton` so both cards keep it.
+
+**Not changed.** A finished month still uses the monthly card, which shows "Basic RM 0.00" for a per-day worker: the payslip row stores no days-worked figure to build the "N days" line from. That needs the days count the open `fix/worker-pay-days-worked` work adds.
+
+**Guard.** `tests/daily-pay-card.test.mjs` (the card's sum, and that the handler passes the pay mode and day rate). `tests/worker-pay-advance-line.test.mjs` now accepts suffixes after `:adv` in the cache key.
 
 ## BUG-2026-10-05-257 — Worker My Pay: Net below Gross with no reason shown when a salary advance was taken `payroll` 🟢
 
