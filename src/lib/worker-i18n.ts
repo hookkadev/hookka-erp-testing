@@ -749,13 +749,6 @@ const dict: Dict = {
     zh: '月薪',
     my: 'လစဉ်လစာ',
   },
-  // The live estimate has no statutory figures until payroll runs.
-  'pay.beforeStatutory': {
-    en: 'EPF, SOCSO, EIS and tax are worked out when payroll runs.',
-    ms: 'KWSP, PERKESO, SIP dan cukai dikira semasa gaji diproses.',
-    zh: 'EPF、SOCSO、EIS 和税款在发薪时计算。',
-    my: 'EPF၊ SOCSO၊ EIS နှင့် အခွန်ကို လစာတွက်ချိန်တွင် တွက်ပါမည်။',
-  },
   'pay.final': { en: 'Final', ms: 'Muktamad', zh: '已确认', my: 'အတည်ပြုပြီး' },
   'pay.earnings': { en: 'Earnings', ms: 'Pendapatan', zh: '收入', my: 'ဝင်ငွေ' },
   'pay.deductions': { en: 'Deductions', ms: 'Potongan', zh: '扣除', my: 'နုတ်ယူငွေ' },
