@@ -37,7 +37,7 @@ test("the worker payslips history carries the stored advance and its dates", () 
 
 test("a cached My Pay snapshot cannot hide the advance", () => {
   assert.match(payslipsHandler, /"employee_advances",\s*\] as const/);
-  assert.match(payslipsHandler, /cacheKey: `\$\{workerId\}:\$\{snapPeriod\}:adv`/);
+  assert.match(payslipsHandler, /cacheKey: `\$\{workerId\}:\$\{snapPeriod\}:adv(:\w+)*`/);
 });
 
 test("the finished-month card shows a Salary advance line", () => {
