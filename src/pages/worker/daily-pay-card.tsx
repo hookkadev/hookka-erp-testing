@@ -10,7 +10,8 @@
 //   Net pay (hero) → Earnings → Deductions → Summary (Gross − Deductions = Net)
 //
 // Presentational: every figure comes in as a prop, all money in integer sen.
-// /worker/pay renders it for the current month when payMode is DAILY.
+// /worker/pay renders it for a DAILY worker: the current month from the live
+// estimate, a past month via dailyCardFromPayslip.
 // ============================================================
 import { useId, useState, type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
@@ -65,6 +66,62 @@ export function computeDailyPay(p: {
     totalDeductionsSen,
     netSen: grossSen - totalDeductionsSen,
   };
+}
+
+// A finished month for a per-day worker, rebuilt from its stored payslip. The
+// payslip keeps basic 0 and no day count, but its pay before the late dock is a
+// whole number of days at the day rate, which gives the days back:
+//   gross − OT − allowance + late = days × rate.
+// "late" is the charge from today's late records; a month generated before
+// per-day late docks existed (Aug 2026) charged none, so 0 is tried too. A
+// 1 sen gap is allowed for rounding, and the shown late absorbs it so every
+// line still adds up to the stored Gross and Net. No fit (a day rate that
+// changed since, a penalty in Net) keeps the old card.
+export type StoredPayslip = {
+  grossSen?: number;
+  netSen?: number;
+  overtimeSen?: number;
+  otHours?: number;
+  allowancesSen?: number;
+  shortHourDeductionSen?: number;
+  lateDays?: LateDay[];
+  advanceDeductionSen?: number;
+  epfEeSen?: number;
+  socsoEeSen?: number;
+  eisEeSen?: number;
+  taxSen?: number;
+};
+export function dailyCardFromPayslip(slip: StoredPayslip, rateSen: number, t: Translate) {
+  if (rateSen <= 0 || slip.grossSen == null || slip.netSen == null) return null;
+  const extrasSen = (slip.overtimeSen ?? 0) + (slip.allowancesSen ?? 0);
+  const baseSen = slip.grossSen - extrasSen;
+  for (const tryLateSen of [slip.shortHourDeductionSen ?? 0, 0]) {
+    const days = Math.round((baseSen + tryLateSen) / rateSen);
+    const lateSen = days * rateSen - baseSen;
+    if (days < 0 || lateSen < 0 || Math.abs(lateSen - tryLateSen) > 1) continue;
+    const props = {
+      ratePerDaySen: rateSen,
+      daysWorked: days,
+      otherEarnings: [
+        {
+          label: `${t("pay.ot")}${slip.otHours ? ` · ${slip.otHours.toFixed(1)}h` : ""}`,
+          amountSen: slip.overtimeSen ?? 0,
+        },
+        { label: t("pay.allowance"), amountSen: slip.allowancesSen ?? 0 },
+      ],
+      lateShortSen: lateSen,
+      lateDays: lateSen > 0 ? slip.lateDays : [],
+      advanceSen: slip.advanceDeductionSen ?? 0,
+      otherDeductions: [
+        { label: "EPF", amountSen: slip.epfEeSen ?? 0 },
+        { label: "SOCSO", amountSen: slip.socsoEeSen ?? 0 },
+        { label: "EIS", amountSen: slip.eisEeSen ?? 0 },
+        { label: "Tax", amountSen: slip.taxSen ?? 0 },
+      ],
+    };
+    if (computeDailyPay(props).netSen === slip.netSen) return props;
+  }
+  return null;
 }
 
 // Same formatting as /worker/pay (copied, not imported: that page pulls in the

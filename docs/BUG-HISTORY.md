@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-06**: BUG-2026-10-06-259 got a follow-up (past months use the per-day card too) and main's BUG-2026-10-05-258 entry was copied in with its fix (branch `feat/daily-pay-card-past-months`, to staging); a log, so "verified" means the entry matches the code on its branch.
 > **Last verified: 2026-10-06**: newest entry BUG-2026-10-06-259 (branch `feat/daily-pay-card`, to staging; 258 is on `main`); a log, so "verified" means the entry matches the code on its branch.
 > **Last verified: 2026-10-05**: newest entry BUG-2026-10-05-257 (branch `fix/worker-pay-advance-line`, to staging; 254 and 255 are on `main`, 256 is on open branch `fix/backfill-zero-minutes-open-cards`); a log, so "verified" means the entry matches the code on its branch.
 > **Last verified: 2026-10-05**: newest entry BUG-2026-10-05-253 (branch `feat/kpi-assign-unassign`, to staging); a log, so "verified" means the entry matches the code on its branch.
@@ -109,9 +110,26 @@ Entries themselves stay newest-first.
 
 **Fix.** The handler reads `payMode, dailyRateSen` and passes them to the engine, and returns `payMode`, `dailyRateSen` (the engine's day rate) and `advanceSen` (this month's advances) on `current`; the snapshot cache key gains `:daily`. `src/pages/worker/pay.tsx` shows the new `DailyPayCard` for a DAILY worker's current month: Net pay on top, then Earnings ("Daily rate earnings (N days @ RM X/day)", OT, allowances, Gross), then Deductions (late / short hours with the days as chips, salary advance, total), then Gross − Deductions = Net. No Basic row. New labels in all four worker languages. "Save payslip as PDF" moved into a shared `SavePayslipButton` so both cards keep it.
 
-**Not changed.** A finished month still uses the monthly card, which shows "Basic RM 0.00" for a per-day worker: the payslip row stores no days-worked figure to build the "N days" line from. That needs the days count the open `fix/worker-pay-days-worked` work adds.
+**Not changed (first PR).** A finished month still used the monthly card, which shows "Basic RM 0.00" for a per-day worker.
+
+**Follow-up (branch `feat/daily-pay-card-past-months`, to staging).** Past months now use the same card. A payslip stores basic 0 and no day count, and re-running the engine on today's hours does not reproduce it (measured on staging: June and July were paid whole days before per-day late docks existed on 2026-08-31; September's DRAFT was generated on 25 Sep with 21 days, while the hours now show 23). So the card is rebuilt from the payslip itself: gross − OT − allowance + late = days × day rate, trying the late charge from today's late records and then 0. A 1 sen rounding gap is absorbed into the late line, and the card is used only when its Net equals the stored Net; otherwise the month keeps the old card (a day rate changed since, or a penalty in Net). On the staging per-day worker every month from May to September fits (0, 24, 25, 24 and 21 days). This needs main's BUG-2026-10-05-258 (late hours priced at the day rate), which the branch brings over: without it every past late charge reads 0 and September would not fit. The history rows also carry `status`, so a DRAFT month is tagged Estimate. Guard: `tests/daily-pay-card.test.mjs` (the real months above, and two no-fit cases).
 
 **Guard.** `tests/daily-pay-card.test.mjs` (the card's sum, and that the handler passes the pay mode and day rate). `tests/worker-pay-advance-line.test.mjs` now accepts suffixes after `:adv` in the cache key.
+
+## BUG-2026-10-05-258 — Worker My Pay: a per-day (OSC) worker's late charge read RM 0.00, so the Late line was hidden `payroll` `outsourced` 🟢
+
+🟢 Fixed on `fix/worker-pay-late-daily-rate` (to `main`, then `staging`). Found while checking BUG-2026-10-05-257: owner asked whether the same worker was late.
+
+**Measured on prod (read only, 2026-10-05).** The worker is OSC-001, `payMode` DAILY, `dailyRateSen` 8500, `basicSalarySen` 0. September attendance has three clock-ins past the 15 minute grace: 8 Sep 08:32, 12 Sep 08:16, 29 Sep 08:24. `payroll_hour_deductions` holds 0.53 h, 0.27 h and 0.40 h, and the admin payslip (`GET /api/payslips/:id`) prices them at 1021 sen. The phone showed no Late line.
+
+**Cause.** Both places in `src/api/routes/worker.ts` that price late hours (the `/payslips` history and `buildWorkerDayDetail`, which feeds the worker's own payslip) called `payrollDayRateSen(basicSalarySen)`. With basic 0 that is 0, the charge is 0, and the card hides a zero line. The admin routes already used `workerPayrollDayRateSen`, which returns the agreed day rate for a per-day worker (the same class as BUG-2026-08-02-002 on the labor cost side).
+
+**Fix.** Both sites read `payMode` and `dailyRateSen` and call `workerPayrollDayRateSen`. No bare `payrollDayRateSen` is left in the worker routes. The payslips snapshot key becomes `:adv:late`, so a month cached with the RM 0 figure is not served.
+
+**Not changed.** "Basic RM 0.00" on a per-day worker's card is the stored payslip value; the card does not yet say "paid per day".
+
+**Guard.** `tests/worker-pay-late-daily-rate.test.mjs` (no bare salary-only rate in the worker routes; RM 85.00 a day and those three days give 1021 sen).
+
 
 ## BUG-2026-10-05-257 — Worker My Pay: Net below Gross with no reason shown when a salary advance was taken `payroll` 🟢
 

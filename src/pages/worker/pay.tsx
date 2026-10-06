@@ -15,7 +15,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { useT } from "@/lib/worker-i18n";
 import { workerFetch } from "@/layouts/WorkerLayout";
-import DailyPayCard from "./daily-pay-card";
+import DailyPayCard, { dailyCardFromPayslip } from "./daily-pay-card";
 
 // ---------- helpers ----------
 function rm(sen: number | undefined): string {
@@ -86,6 +86,7 @@ type PayData = {
     taxSen?: number;
     advanceDeductionSen?: number;
     advanceDays?: Array<{ date: string; amountSen: number; note: string }>;
+    status?: string;
   }>;
 };
 type PayslipRow = PayData["history"][number];
@@ -143,6 +144,7 @@ function asPayslipRow(v: unknown): PayslipRow | null {
           }))
           .filter((d) => d.date)
       : [],
+    status: asString(v.status) ?? undefined,
   };
 }
 
@@ -421,6 +423,10 @@ export default function WorkerPayPage() {
   const selected = period ?? pay.current.period;
   const isCurrent = selected === pay.current.period;
   const slip = pay.history.find((p) => p.period === selected) ?? null;
+  const dailySlip =
+    slip && pay.current.payMode === "DAILY"
+      ? dailyCardFromPayslip(slip, pay.current.dailyRateSen ?? 0, t)
+      : null;
 
   return (
     <div className="space-y-4 pt-2">
@@ -445,6 +451,13 @@ export default function WorkerPayPage() {
         <DailyCurrentMonth current={pay.current} t={t} />
       ) : isCurrent ? (
         <CurrentMonthBreakdown current={pay.current} t={t} />
+      ) : slip && dailySlip ? (
+        <DailyPayCard
+          {...dailySlip}
+          t={t}
+          periodLabel={monthLabel(slip.period)}
+          isEstimate={slip.status !== "APPROVED" && slip.status !== "PAID"}
+        />
       ) : slip ? (
         <FinalisedBreakdown slip={slip} t={t} />
       ) : (
