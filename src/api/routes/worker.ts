@@ -80,8 +80,6 @@ import { ensureAdvanceTables, rowToAdvance, type AdvanceRow } from "../lib/emplo
 // One shared completion core with the desktop QC page — see the QC-on-the-
 // phone block below for why the phone must not own a second copy.
 import { completeInspection } from "./qc-pending";
-import { buildCard } from "./kpi";
-import { parseEfficiencyScope } from "../lib/kpi-metrics";
 
 const app = new Hono<Env>();
 
@@ -2041,51 +2039,6 @@ app.get("/history", async (c) => {
 //   • history  — stored payslips, aliasing payslips.* into the camelCase shape
 //     the /worker/pay frontend expects (basicSen, grossSen, netSen, ...).
 // ============================================================
-
-// ---- My KPI (DEV-36) ---------------------------------------------------------
-// GET /api/worker/kpi?period=YYYY-MM — the worker's own KPI card, the same
-// buildCard the office card uses, so the two can never show different scores.
-// Numbers only: the catalogue's English evidence line is not sent to a phone
-// that may be reading Burmese. Department names come from the departments table.
-app.get("/kpi", async (c) => {
-  const auth = await getWorker(c);
-  if (!auth.ok) return auth.response;
-  const p = (c.req.query("period") ?? "").trim();
-  // Malaysia time for "this month"; a UTC month flips 8 hours late.
-  const period = /^\d{4}-\d{2}$/.test(p)
-    ? p
-    : new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 7);
-  const card = await buildCard(c, auth.workerId, "WORKER", period);
-
-  const deptRes = await c.var.DB.prepare(`SELECT code, name FROM departments`)
-    .bind()
-    .all<{ code: string; name: string }>();
-  const deptName = new Map((deptRes.results ?? []).map((d) => [String(d.code), String(d.name)]));
-  const scopeNames = (raw: string | undefined) =>
-    (parseEfficiencyScope(raw) ?? []).map((s) => {
-      const name = deptName.get(s.dept) ?? s.dept;
-      return s.category ? `${name} ${s.category === "SOFA" ? "Sofa" : "Bedframe"}` : name;
-    });
-
-  return c.json({
-    success: true,
-    data: {
-      period,
-      score: card.score,
-      lines: card.lines.map((l) => ({
-        key: l.key,
-        label: l.label,
-        unit: l.unit,
-        actual: l.actual,
-        target: l.target,
-        weight: l.weight,
-        points: l.points,
-        departments: scopeNames(l.scope),
-      })),
-    },
-  });
-});
-
 type PayslipRow = {
   id: string;
   employeeId: string;

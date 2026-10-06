@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-06**: branch `fix/kpi-remove-floor-workers` (to `staging`) updated the DEV-36 part 2 entry below: floor workers removed again.
 > **Last verified: 2026-10-06**: branch `feat/kpi-efficiency-multi-dept` (DEV-36 part 2 to `staging`) added below (its entry is the newest), and closed item 5 of the DEV-36 entry (staging check).
 > **Last verified: 2026-10-06**: branch `feat/kpi-efficiency-department` (DEV-36 to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-06**: branch `feat/pay-card-all-workers` (to `staging`) added item 5 (monthly workers) of the per-day card entry below.
@@ -159,6 +160,7 @@ Owner ask: tick several departments for one Production time efficiency assignmen
 4. 🔵 Worker phone app: the worker's own KPI on the Me page, in all four languages.
 5. 🔵 One figure per department set per page load, so the People tab does not slow down with many workers.
 6. ⬜ Check on the staging site after merge.
+7. 🔵 Owner, same day after #714 merged: floor workers are not KPI holders after all; the ask is for office staff (e.g. R&D, Upholstery leads) to see their own department's efficiency. Items 2, 3, 4 and 5 removed again (branch `fix/kpi-remove-floor-workers` → `staging`): no worker holders, no Floor workers list, no My KPI on the worker app, People tab back to login accounts. Item 1 (several departments, pooled) stays. A separate department-efficiency KPI card based on the Dashboard Experimental figure is the next step, not started.
 
 ## 2026-10-06 — 🔵 DEV-36: Production time efficiency KPI by department (branch `feat/kpi-efficiency-department` → `staging`)
 

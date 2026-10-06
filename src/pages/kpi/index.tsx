@@ -23,7 +23,6 @@ import { useCachedJson, invalidateCachePrefix } from "@/lib/cached-fetch";
 import { getCurrentUser } from "@/lib/auth";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { drillHref, SETUP_FIELD_LABEL } from "@/lib/kpi-drill";
-import { workerInScope, type ScopeWorker } from "@/lib/kpi-worker-scope";
 
 /** The four per-field cuts offered under the setup_completeness drill link. */
 const SETUP_DRILL_FIELDS = (
@@ -151,8 +150,6 @@ export default function KpiPage() {
   const cardUserName =
     (usersResp?.data ?? []).find((u) => u.id === cardUserId)?.displayName ||
     (usersResp?.data ?? []).find((u) => u.id === cardUserId)?.email?.split("@")[0] ||
-    // A floor worker is opened from People, whose row carries the name.
-    (peopleResp?.data ?? []).find((p) => p.userId === cardUserId)?.name ||
     "this person";
 
   // ---- Library multi-select ------------------------------------------------
@@ -169,8 +166,6 @@ export default function KpiPage() {
   // one figure. Empty = Overall; entries are "FAB_CUT" or "FAB_CUT:SOFA".
   // Everyone assigned in one go shares it.
   const [effScopes, setEffScopes] = useState<string[]>([]);
-  // Floor workers ticked for production_efficiency (worker ids).
-  const [chosenWorkers, setChosenWorkers] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -196,18 +191,8 @@ export default function KpiPage() {
   const toggleScope = (v: string) =>
     setEffScopes((cur) => (cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v]));
 
-  const { data: workersResp } = useCachedJson<{ data?: Array<ScopeWorker & { id: string; name: string; empNo?: string }> }>(
-    isSuperAdmin && tab === "library" ? "/api/workers" : "",
-  );
   const lib = libResp?.data ?? [];
   const pickedDefs = lib.filter((k) => picked.has(k.key));
-  const effPicked = pickedDefs.find((k) => k.key === "production_efficiency");
-  const shownWorkers = useMemo(() => {
-    const prod = new Set(prodDepts.map((d) => d.code));
-    return (workersResp?.data ?? [])
-      .filter((w) => workerInScope(w, effScopes, prod))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [workersResp, effScopes, prodDepts]);
   const togglePick = (key: string) => {
     const next = new Set(picked);
     if (next.has(key)) next.delete(key);
@@ -224,19 +209,13 @@ export default function KpiPage() {
     setMsg(null);
     try {
       const people = [...chosenPeople];
-      // Only ticked workers still shown count: changing the departments hides
-      // workers outside them, and a hidden tick must not be assigned.
-      const workers = shownWorkers.filter((w) => chosenWorkers.has(w.id)).map((w) => w.id);
-      if (!people.length && !(effPicked && workers.length)) throw new Error("Pick at least one person");
+      if (!people.length) throw new Error("Pick at least one person");
       for (const def of pickedDefs) {
-        // Floor workers hold Production time efficiency only.
-        const holders = def.key === "production_efficiency" ? [...people, ...workers] : people;
-        if (!holders.length) continue;
         const r = await fetch(`/api/kpi/kpi/${def.key}/assignees`, {
           method: "PUT",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
-            assignees: holders.map((userId) => ({
+            assignees: people.map((userId) => ({
               userId,
               target: def.defaultTarget,
               weight: weightOf(def),
@@ -248,13 +227,9 @@ export default function KpiPage() {
         const j = (await r.json()) as { success?: boolean; error?: string };
         if (!r.ok || !j.success) throw new Error(j.error || `Failed on ${def.label}`);
       }
-      setMsg(
-        `Assigned ${pickedDefs.length} KPI(s) to ${people.length} person(s)` +
-          (effPicked ? ` and ${workers.length} worker(s).` : "."),
-      );
+      setMsg(`Assigned ${pickedDefs.length} KPI(s) to ${people.length} person(s).`);
       setPicked(new Set());
       setEffScopes([]);
-      setChosenWorkers(new Set());
       invalidateCachePrefix("/api/kpi");
     } catch (e) {
       setMsg(e instanceof Error ? e.message : "Save failed");
@@ -630,7 +605,7 @@ export default function KpiPage() {
                   <span className="text-[10px] text-[#9CA3AF]">wt</span>
                 </div>
               ))}
-              {effPicked && (
+              {pickedDefs.some((k) => k.key === "production_efficiency") && (
                 <div className="mt-3 text-[11.5px]">
                   <div className="flex items-baseline justify-between gap-2">
                     <b>Production time efficiency: departments</b>
@@ -717,52 +692,6 @@ export default function KpiPage() {
                     </label>
                   ))}
                 </div>
-                {/* DEV-36: floor workers, for Production time efficiency only,
-                    listed from the departments ticked above. */}
-                {effPicked && (
-                  <div className="mt-3 border-t border-[#E2DDD8] pt-2.5">
-                    <div className="flex items-center justify-between gap-2 mb-1">
-                      <span className="text-[11px] font-bold">
-                        Floor workers <span className="font-normal text-[#9CA3AF]">· Production time efficiency only</span>
-                      </span>
-                      {shownWorkers.length > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => setChosenWorkers(new Set(shownWorkers.map((w) => w.id)))}
-                          className="shrink-0 text-[11px] text-[#6B5C32] underline decoration-dotted"
-                        >
-                          Tick all {shownWorkers.length}
-                        </button>
-                      )}
-                    </div>
-                    <div className="max-h-[35vh] overflow-y-auto -mx-1 px-1">
-                      {shownWorkers.length === 0 && (
-                        <p className="py-1 text-[11px] text-[#9CA3AF]">No active workers in the ticked departments.</p>
-                      )}
-                      {shownWorkers.map((w) => (
-                        <label key={w.id} className="flex items-center gap-2 py-1 text-[11.5px] cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={chosenWorkers.has(w.id)}
-                            onChange={() => {
-                              const next = new Set(chosenWorkers);
-                              if (next.has(w.id)) next.delete(w.id);
-                              else next.add(w.id);
-                              setChosenWorkers(next);
-                            }}
-                          />
-                          <span className="flex-1 truncate">
-                            {w.name}
-                            {w.empNo && <span className="text-[#9CA3AF]"> · {w.empNo}</span>}
-                          </span>
-                          {effPicked.assignedTo.some((a) => a.userId === w.id) && (
-                            <span className="shrink-0 rounded-full bg-[#F2F7EE] px-1.5 text-[10px] text-[#3B6D11]">has it</span>
-                          )}
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                )}
                 <div className="mt-2.5 flex items-center gap-2 flex-wrap">
                   <button
                     type="button"
