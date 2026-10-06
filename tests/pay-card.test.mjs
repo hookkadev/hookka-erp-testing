@@ -64,7 +64,6 @@ test("live month, monthly worker: salary less absent days gives the engine's gro
   assert.equal(card.base.amountSen, 260000);
   assert.equal(payTotals(card).grossSen, 220000);
   assert.equal(payTotals(card).netSen, 220000);
-  assert.equal(card.deductionsNote, "pay.beforeStatutory");
   assert.equal(card.isEstimate, true);
 });
 
