@@ -30,17 +30,31 @@ import {
 export const EFFICIENCY_CATEGORIES = ["SOFA", "BEDFRAME"] as const;
 
 /**
- * An assignment's stored scope: "" / null = Overall, "FAB_CUT" = one
- * department, "FAB_CUT:SOFA" = one department and category. Anything else is
- * not a scope and reads as null, so the caller can refuse it.
+ * An assignment's stored scope: "" / null = Overall, otherwise a comma list of
+ * "FAB_CUT" (a department) and "FAB_CUT:SOFA" (a department and category),
+ * pooled into one figure. Anything else is not a scope and reads as null, so
+ * the caller can refuse it. Duplicates are dropped.
  */
 export function parseEfficiencyScope(raw: unknown): EfficiencyScope | null {
-  const [dept, category, extra] = String(raw ?? "").trim().toUpperCase().split(":");
-  if (!dept || extra !== undefined || !/^[A-Z0-9_]+$/.test(dept)) return null;
-  if (category === undefined) return { dept };
-  return (EFFICIENCY_CATEGORIES as readonly string[]).includes(category)
-    ? { dept, category }
-    : null;
+  const out: EfficiencyScope = [];
+  const seen = new Set<string>();
+  for (const item of String(raw ?? "").trim().toUpperCase().split(",")) {
+    const [dept, category, extra] = item.trim().split(":");
+    if (!dept || extra !== undefined || !/^[A-Z0-9_]+$/.test(dept)) return null;
+    if (category !== undefined && !(EFFICIENCY_CATEGORIES as readonly string[]).includes(category)) {
+      return null;
+    }
+    const key = category ? `${dept}:${category}` : dept;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(category ? { dept, category } : { dept });
+  }
+  return out;
+}
+
+/** The stored form of a parsed scope: "FAB_CUT,FAB_SEW:SOFA". */
+export function formatEfficiencyScope(scope: EfficiencyScope): string {
+  return scope.map((p) => (p.category ? `${p.dept}:${p.category}` : p.dept)).join(",");
 }
 
 export interface MetricResult {
@@ -681,8 +695,9 @@ export async function surveyMean(
  * carry no employee link (`users` has no employee_id), so a personal figure
  * cannot be resolved yet. Assign this to whoever owns the floor's output.
  *
- * DEV-36: an assignment can carry a scope (one department, optionally one
- * category). Everyone assigned that scope shares its figure, a team score.
+ * DEV-36: an assignment can carry a scope (one or more departments, each
+ * optionally one category, pooled). Everyone assigned that scope shares its
+ * figure, a team score.
  */
 export async function productionEfficiency(
   c: Context<Env>,
@@ -691,7 +706,9 @@ export async function productionEfficiency(
 ): Promise<MetricResult> {
   const { start, end } = periodBounds(period);
   const byWorker = await computeMonthlyEfficiencyByWorker(c.var.DB, start, end, scope ?? undefined);
-  const where = scope ? ` in ${scope.dept}${scope.category ? ` ${scope.category}` : ""}` : "";
+  const where = scope?.length
+    ? ` in ${scope.map((p) => (p.category ? `${p.dept} ${p.category}` : p.dept)).join(" + ")}`
+    : "";
 
   let minutes = 0;
   let hours = 0;
