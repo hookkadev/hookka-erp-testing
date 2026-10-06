@@ -43,9 +43,11 @@ test("every KPI route that is not your own card is Super Admin only", () => {
   const handlers = [...src.matchAll(/^app\.(get|post|put|delete)\("([^"]+)"/gm)];
   assert.ok(handlers.length >= 15, "the handler scan found too few routes");
 
-  // These three serve the caller's own card and only switch to someone else
-  // for a Super Admin; checked separately below.
-  const own = new Set(["GET /me", "PUT /checklist/:kpiKey", "GET /checklist/:kpiKey", "GET /survey/:kpiKey"]);
+  // These read the caller's own card and only switch to someone else for a
+  // Super Admin; checked separately below. Ticking a checklist item is a WRITE
+  // to a score and is Super Admin only (Violet 2026-10-06: "super admin only
+  // can tick. staff can view only"), so PUT /checklist is not in this list.
+  const own = new Set(["GET /me", "GET /checklist/:kpiKey", "GET /survey/:kpiKey"]);
   for (let i = 0; i < handlers.length; i++) {
     const [, verb, path] = handlers[i];
     const name = `${verb.toUpperCase()} ${path}`;
@@ -62,7 +64,6 @@ test("the own-card routes take the user from the session, not the request", () =
   assert.doesNotMatch(me, /c\.req\.(query|param)\("userId"\)|body\.userId/);
   // ?userId= / body.userId is honoured only for a Super Admin.
   for (const [start, end] of [
-    ['app.put("/checklist/:kpiKey"', 'app.get("/checklist/:kpiKey"'],
     ['app.get("/checklist/:kpiKey"', 'app.post("/survey/:kpiKey"'],
     ['app.get("/survey/:kpiKey"', 'app.get("/library"'],
   ]) {
@@ -81,4 +82,10 @@ test("a non-admin page asks only for its own card", () => {
     assert.match(page.slice(at - 60, at), /isSuperAdmin/, `${url} must only load for a Super Admin`);
   }
   assert.match(page, /`\/api\/kpi\/me\?period=\$\{period\}`/);
+});
+
+test("only a Super Admin can tick a checklist item, on the page too", () => {
+  const page = read("src/pages/kpi/index.tsx");
+  assert.match(page, /canTick=\{isSuperAdmin\}/);
+  assert.match(page, /disabled=\{locked \|\| !canTick\}/);
 });

@@ -411,11 +411,12 @@ app.put("/payout/:id", async (c) => {
 
 // ---- Checklist ticks -------------------------------------------------------
 //
-// A person ticks their OWN items; Super Admin may tick anyone's and is the one
-// who verifies. Both go through here, and the id comes from the context for a
-// self-tick — never from the body — so "my checklist" cannot be pointed at
-// someone else's month.
+// Super Admin only (DEV-37, Violet 2026-10-06: "super admin only can tick.
+// staff can view only"). A self-tick counted towards the score with nobody
+// checking it, so the person being measured could raise their own number.
 app.put("/checklist/:kpiKey", async (c) => {
+  const denied = requireSuperAdmin(c);
+  if (denied) return denied;
   await ensureKpiTables(c.var.DB);
   const kpiKey = c.req.param("kpiKey");
   const def = kpiByKey(kpiKey);
@@ -431,13 +432,8 @@ app.put("/checklist/:kpiKey", async (c) => {
   }
 
   const self = ctxGet(c, "userId");
-  const isAdmin = requireSuperAdmin(c) === null;
-  // Only a Super Admin may tick on someone else's behalf.
-  const userId = body.userId && isAdmin ? String(body.userId) : self;
+  const userId = body.userId ? String(body.userId) : self;
   if (!userId) return c.json({ success: false, error: "Unauthorized" }, 401);
-  if (body.userId && !isAdmin && String(body.userId) !== self) {
-    return c.json({ success: false, error: "Forbidden" }, 403);
-  }
 
   const period = /^\d{4}-\d{2}$/.test(String(body.period ?? "")) ? String(body.period) : periodOf(c);
   const idx = Number(body.itemIndex);
@@ -469,8 +465,8 @@ app.put("/checklist/:kpiKey", async (c) => {
     .bind(
       `kct_${userId}_${period}_${kpiKey}_${idx}`,
       userId, period, kpiKey, idx, done,
-      isAdmin ? self : null,
-      isAdmin ? new Date().toISOString() : null,
+      self,
+      new Date().toISOString(),
       body.note ?? null,
       getOrgId(c),
     )
