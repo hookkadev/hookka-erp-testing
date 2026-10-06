@@ -29,7 +29,6 @@ import {
   type Announcement,
 } from "./announcement-media";
 import { AnnouncementCategoryBadge } from "@/components/announcement-category-badge";
-import MyKpiCard from "./kpi-card";
 import {
   ANNOUNCEMENT_CATEGORIES,
   ANNOUNCEMENT_CATEGORY_ORDER,
@@ -654,9 +653,6 @@ export default function WorkerMePage() {
           {phoneError && <p className="mt-1 text-xs text-[#9A3A2D]">{phoneError}</p>}
         </label>
       </div>
-
-      {/* My KPI (DEV-36): renders nothing unless the worker holds one. */}
-      <MyKpiCard />
 
       {/* Leaves card — Wei Siang 2026-05-10: hidden until rollout. */}
       {SHOW_LEAVES && (
