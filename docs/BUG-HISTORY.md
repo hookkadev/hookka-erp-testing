@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-06**: newest entry BUG-2026-10-06-261 (branch `fix/bom-wip-delete-move`, to main); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-06**: newest entry BUG-2026-10-06-260 (branch `fix/production-overview-scrollbar`, to main; no open PR holds 260); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-06**: newest entry BUG-2026-10-06-259 (branch `feat/pay-card-main`, to main; the same fix reached staging through #707 to #710); a log, so "verified" means the entry matches the code on its branch.
 > **Last verified: 2026-10-05**: BUG-2026-10-05-256 flipped to 🟢 with its measured prod run (#696).
@@ -75,6 +76,19 @@ Entries themselves stay newest-first.
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
 
 ---
+
+## BUG-2026-10-06-261 — BOM editor: deleting a middle WIP level wiped every level below it, and ↑/↓ did nothing in a single chain `ui-frontend` 🟡
+
+🟡 Fixed on `fix/bom-wip-delete-move` (to `main`). Report (owner, with a screenshot of a sofa base chain L2 → L7, one component per level): "I only want to delete the middle level, it won't delete; and moving up/down doesn't work."
+
+**Cause.** Both in `EditBOMDialog` (`src/pages/bom.tsx`, the WIP Components tab). (1) Delete called `removeSubWIPAtPath`, which `filter`ed the node out of its parent's `children`, so its whole subtree went with it: deleting L4 also removed L5, L6 and L7. The master-template editor already kept the children ("promote"), the product editor did not. (2) ↑/↓ called `moveSubWIPAtPath` / `moveWIP`, which only swap a node with a SIBLING. In a linear chain every level is an only child, so both buttons were silent no-ops.
+
+**Fix.** New pure module `src/lib/wip-tree-ops.ts`. `removeWipLevel` removes only the selected level and splices its children into its place (roots too). `moveWipNode` keeps the sibling swap and, when there is no sibling that way, swaps LEVELS: ↑ swaps with the parent, ↓ with the first child (content moves, tree shape and each slot's children stay). The right pane follows the moved node, and ↑/↓ are disabled when `canMoveWipNode` says nothing can move (the first root going up, a leaf with no next sibling going down). The four old handlers are gone.
+
+**Verified.** `tests/bom-wip-tree-ops.test.mjs` 8/8 on the six-level chain (delete L4 → L2 L3 L5 L6 L7; L4 ↑ → L2 L4 L3 …; L4 ↓ → L2 L3 L5 L4 …; sibling swap unchanged; boundaries). `npm test` 5243 pass, strict typecheck and eslint clean. Not yet seen in the live dialog: needs a deploy, then open a BOM with a chain, delete a middle level and press ↑/↓.
+
+**Guard.** `tests/bom-wip-tree-ops.test.mjs` (new module, so it cannot run on the old code); `tests/bom-editor-reorder.test.mjs` pins now point at `moveWipNode`.
+
 
 ## BUG-2026-10-06-260 — Production Overview Grid: the up/down scrollbar only showed after scrolling all the way right `ui-frontend` 🟢
 

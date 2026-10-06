@@ -68,10 +68,10 @@ test("EditBOMDialog defines every reorder handler", () => {
   const body = componentBody("EditBOMDialog");
   for (const fn of [
     "moveProcessAtPath", // nested process (甲)
-    "moveSubWIPAtPath",  // nested WIP among siblings (乙)
     "wrapSubWIPAtPath",  // insert a parent level above (乙)
-    "moveWIP",           // top-level WIP reorder
     "moveWIPProcess",    // top-level process reorder (甲)
+    // WIP node ↑/↓ moved to the pure moveWipNode() in src/lib/wip-tree-ops.ts
+    // (2026-10-06) — pinned behaviourally in bom-wip-tree-ops.test.mjs.
   ]) {
     assert.match(body, new RegExp(`function ${fn}\\b`), `${fn} must exist in EditBOMDialog`);
   }
@@ -89,8 +89,8 @@ test("EditBOMDialog routes every reorder through its depth-agnostic adapters", (
   // the two depths silently loses the affordance.
   assert.match(body, /nMoveProcess[\s\S]*?moveWIPProcess\(wi, pi, dir\)[\s\S]*?moveProcessAtPath\(wi, path, pi, dir\)/);
   assert.match(body, /nMove = \(wi: number, path: number\[\], dir: -1 \| 1\)/);
-  assert.match(body, /moveWIP\(wi, dir\)/);
-  assert.match(body, /moveSubWIPAtPath\(wi, path\.slice\(0, -1\), path\[path\.length - 1\], dir\)/);
+  // One depth-agnostic helper serves roots and nested nodes alike.
+  assert.match(body, /moveWipNode\(wipComponents, wi, path, dir\)/);
   // "+ Above" (insert a parent level) survived the rework.
   assert.match(body, /wrapSubWIPAtPath\(wi, path\.slice\(0, -1\), path\[path\.length - 1\]\)/);
 });
