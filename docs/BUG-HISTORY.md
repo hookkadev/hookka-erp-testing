@@ -113,6 +113,21 @@ Entries themselves stay newest-first.
 
 **Guard.** `tests/daily-pay-card.test.mjs` (the card's sum, and that the handler passes the pay mode and day rate). `tests/worker-pay-advance-line.test.mjs` now accepts suffixes after `:adv` in the cache key.
 
+## BUG-2026-10-05-258 — Worker My Pay: a per-day (OSC) worker's late charge read RM 0.00, so the Late line was hidden `payroll` `outsourced` 🟢
+
+🟢 Fixed on `fix/worker-pay-late-daily-rate` (to `main`, then `staging`). Found while checking BUG-2026-10-05-257: owner asked whether the same worker was late.
+
+**Measured on prod (read only, 2026-10-05).** The worker is OSC-001, `payMode` DAILY, `dailyRateSen` 8500, `basicSalarySen` 0. September attendance has three clock-ins past the 15 minute grace: 8 Sep 08:32, 12 Sep 08:16, 29 Sep 08:24. `payroll_hour_deductions` holds 0.53 h, 0.27 h and 0.40 h, and the admin payslip (`GET /api/payslips/:id`) prices them at 1021 sen. The phone showed no Late line.
+
+**Cause.** Both places in `src/api/routes/worker.ts` that price late hours (the `/payslips` history and `buildWorkerDayDetail`, which feeds the worker's own payslip) called `payrollDayRateSen(basicSalarySen)`. With basic 0 that is 0, the charge is 0, and the card hides a zero line. The admin routes already used `workerPayrollDayRateSen`, which returns the agreed day rate for a per-day worker (the same class as BUG-2026-08-02-002 on the labor cost side).
+
+**Fix.** Both sites read `payMode` and `dailyRateSen` and call `workerPayrollDayRateSen`. No bare `payrollDayRateSen` is left in the worker routes. The payslips snapshot key becomes `:adv:late`, so a month cached with the RM 0 figure is not served.
+
+**Not changed.** "Basic RM 0.00" on a per-day worker's card is the stored payslip value; the card does not yet say "paid per day".
+
+**Guard.** `tests/worker-pay-late-daily-rate.test.mjs` (no bare salary-only rate in the worker routes; RM 85.00 a day and those three days give 1021 sen).
+
+
 ## BUG-2026-10-05-257 — Worker My Pay: Net below Gross with no reason shown when a salary advance was taken `payroll` 🟢
 
 🟢 Fixed on `fix/worker-pay-advance-line` (to `staging`). Report (owner, photo of a worker's phone): Gross RM 2,114.80, Net RM 2,014.80, no line explaining the RM 100.
