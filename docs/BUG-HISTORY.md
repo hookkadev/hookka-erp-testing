@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-06**: newest entry BUG-2026-10-06-260 (branch `fix/production-overview-scrollbar`, to main; no open PR holds 260); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-06**: newest entry BUG-2026-10-06-259 (branch `feat/pay-card-main`, to main; the same fix reached staging through #707 to #710); a log, so "verified" means the entry matches the code on its branch.
 > **Last verified: 2026-10-05**: BUG-2026-10-05-256 flipped to 🟢 with its measured prod run (#696).
 > **Last verified: 2026-10-05**: newest entry BUG-2026-10-05-258 (branch `fix/worker-pay-late-daily-rate`, to main then staging).
@@ -74,6 +75,19 @@ Entries themselves stay newest-first.
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
 
 ---
+
+## BUG-2026-10-06-260 — Production Overview Grid: the up/down scrollbar only showed after scrolling all the way right `ui-frontend` 🟢
+
+🟢 Fixed on `fix/production-overview-scrollbar` (to `main`). Report (owner, with screenshots): on the Production tab's Grid view the table's scrollbar only appears once you have scrolled horizontally to the end, so nothing tells you the table scrolls.
+
+**Cause.** The Grid was two nested scroll boxes. The outer one scrolled left and right only; the inner body (`OverviewVirtualRows`) scrolled up and down only but was given the full table width (`minWidth: overviewMinWidth`). A scrollbar sits on its own box's right edge, so the up/down scrollbar was drawn at the table's far right, off screen until the outer box was scrolled all the way across.
+
+**Fix.** `src/pages/production/index.tsx`: the Grid body is now one `overflow-auto` box with no table-width minimum, so both scrollbars sit on its visible edges. The header row moved into that box (`overviewHeaderRow`, passed through a new `header` prop on `OverviewVirtualRows`) and is `sticky top-0`, so it stays on top while the rows scroll. The empty-grid case keeps the header in a plain side-scroll box. Filter pop-ups are portaled to `<body>` and re-anchor on any scroll, so the new box does not clip them.
+
+**Verified.** A stand-alone page with the old and the new nesting at 1000px wide and a 2200px table: old, the up/down scrollbar sat at x=2200 (off screen); new, at x=1000 (the visible edge), with the side scrollbar still there and the header still at the top after scrolling down. Not yet seen on the live page: needs a deploy, then Production, Grid, check both scrollbars show before scrolling.
+
+**Guard.** `tests/production-overview-scrollbar.test.mjs` (fails on the old code 3 of 3).
+
 
 ## BUG-2026-10-06-259 — Worker My Pay: a per-day worker's current month priced as a RM 0 monthly salary `payroll` 🟢
 

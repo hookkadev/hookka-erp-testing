@@ -7263,6 +7263,21 @@ export default function ProductionPage({
       renderFilter={() => renderStageFilter(d.code)}
     />
   ));
+  // Grid header row. Sticky so it stays on top while the body scrolls.
+  const overviewHeaderRow = (
+    <div
+      className="grid text-[10px] font-semibold uppercase tracking-wider text-[#6B7280] bg-[#FAF8F4] border-b border-[#E6E0D9] sticky top-0 z-20"
+      style={{ gridTemplateColumns: overviewTemplate, minWidth: overviewMinWidth }}
+    >
+      {/* Select-all checkbox gutter. Scopes to the currently-visible
+          (filtered + sorted) rows = visibleOrders. */}
+      <div className="flex items-center justify-center px-1.5 py-2.5">
+        {overviewSelectAll}
+      </div>
+      {overviewFieldHeaders}
+      {overviewStageHeaders}
+    </div>
+  );
   const togglePill = (col: string) => setOpenFilterCol(openFilterCol === col ? null : col);
   const closePill = () => setOpenFilterCol(null);
   const moreFiltersCount = overviewFieldFilters.filter((f) => isFilterActive(f.key)).length;
@@ -8352,20 +8367,6 @@ export default function ProductionPage({
           )
         ) : (
         <OverviewResizeCtx.Provider value={overviewResizeValue}>
-        <div className="overflow-x-auto">
-        {/* Header row */}
-        <div
-          className="grid text-[10px] font-semibold uppercase tracking-wider text-[#6B7280] bg-[#FAF8F4] border-b border-[#E6E0D9] relative z-20"
-          style={{ gridTemplateColumns: overviewTemplate, minWidth: overviewMinWidth }}
-        >
-          {/* Select-all checkbox gutter. Scopes to the currently-visible
-              (filtered + sorted) rows = visibleOrders. */}
-          <div className="flex items-center justify-center px-1.5 py-2.5">
-            {overviewSelectAll}
-          </div>
-          {overviewFieldHeaders}
-          {overviewStageHeaders}
-        </div>
 
         {/* Body rows. Wrapped in a scroll container + virtualizer so we
             only mount the ~30 rows currently in viewport. See the
@@ -8376,19 +8377,19 @@ export default function ProductionPage({
             rows that wrap (long product line) get their real height
             measured. */}
         {visibleOrders.length === 0 ? (
-          overviewEmpty
+          <div className="overflow-x-auto">{overviewHeaderRow}{overviewEmpty}</div>
         ) : (
           <OverviewVirtualRows
             key="grid"
             count={visibleOrders.length}
             resetKey={overviewFilters}
-            // overflow-x-hidden: the body only scrolls VERTICALLY. Horizontal
-            // scrolling is owned by the outer wrapper (which keeps header +
-            // rows aligned). Without this the body grew its own, unsynced
-            // horizontal scrollbar from the vertical scrollbar's gutter —
-            // two left/right scrollbars. — Wei Siang 2026-05-29
-            className="overflow-y-auto overflow-x-hidden"
-            style={{ maxHeight: "calc(100vh - 320px)", minWidth: overviewMinWidth }}
+            header={overviewHeaderRow}
+            // ONE box scrolls both ways, so both scrollbars sit on its visible
+            // edges. It used to be a full-table-width vertical box inside a
+            // horizontal one, which put the vertical scrollbar at the table's
+            // far right: hidden until you scrolled all the way across.
+            className="overflow-auto"
+            style={{ maxHeight: "calc(100vh - 320px)" }}
             renderRow={(rowIndex, rowStart, measureRef) => {
             const order = visibleOrders[rowIndex];
             if (!order) return null;
@@ -8515,7 +8516,6 @@ export default function ProductionPage({
           }}
           />
         )}
-        </div>{/* /overflow-x-auto matrix scroll wrapper */}
         </OverviewResizeCtx.Provider>
         )}
 
@@ -9864,6 +9864,7 @@ function OverviewVirtualRows({
   estimateSize = 36,
   className,
   style,
+  header,
   renderRow,
 }: {
   count: number;
@@ -9871,6 +9872,8 @@ function OverviewVirtualRows({
   estimateSize?: number;
   className?: string;
   style?: React.CSSProperties;
+  // Rendered inside the scroll box above the rows (e.g. a sticky header).
+  header?: React.ReactNode;
   renderRow: (
     index: number,
     start: number,
@@ -9889,6 +9892,7 @@ function OverviewVirtualRows({
   }, [resetKey]);
   return (
     <div ref={scrollRef} className={className} style={style}>
+      {header}
       <div
         style={{
           height: `${virtualizer.getTotalSize()}px`,
