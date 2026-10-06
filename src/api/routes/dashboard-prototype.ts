@@ -62,6 +62,7 @@ import { poInPlanning, poReadyForDelivery, type PipelinePO } from "../../lib/del
 import { loadPoValueMap, loadDoValueMap } from "../lib/do-value";
 import { buildDailySlice } from "../lib/dashboard-daily-slice";
 import { countsToHeadcount } from "../lib/headcount-rule";
+import { buildPerfDays, num, dayKey } from "../lib/workforce-perf";
 
 const app = new Hono<Env>();
 
@@ -251,10 +252,6 @@ const NON_REVENUE_STATUSES = new Set(["DRAFT", "CANCELLED", "ON_HOLD"]);
 const isConfirmed = (status: string | null | undefined): boolean =>
   !NON_REVENUE_STATUSES.has((status ?? "").toUpperCase());
 
-const num = (v: unknown): number => {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : 0;
-};
 
 /**
  * Run one section's query, and turn a failure into an EMPTY result plus a
@@ -284,12 +281,6 @@ async function section<T>(
 // Postgres hands back `date` as a Date or an ISO string depending on driver
 // and column type; both collapse to YYYY-MM-DD here so the day key is one
 // thing everywhere downstream.
-const dayKey = (v: unknown): string | null => {
-  if (!v) return null;
-  const s = typeof v === "string" ? v : new Date(v as string).toISOString();
-  const m = /^(\d{4}-\d{2}-\d{2})/.exec(s);
-  return m ? m[1] : null;
-};
 
 app.get("/", async (c) => {
   // sales-orders:read remains the front-door gate — Sales Orders is the tab
@@ -632,113 +623,14 @@ app.get("/", async (c) => {
       .then((r) => r.results ?? []),
   );
 
-  // FAB_CUT stores the per-SET total on the card (wipQty = piece count), every
-  // other department stores per-PIECE minutes. Multiplying FAB_CUT by wipQty
-  // triple-counts it. Same rule as src/lib/job-card-minutes.ts.
-  const jcMinutesTotal = (perUnit: number, dept: string | null, wipQty: number): number =>
-    (dept ?? "") === "FAB_CUT" ? perUnit : perUnit * Math.max(1, wipQty || 1);
-
-  const picsByJc = new Map<string, Array<{ pic1: string | null; pic2: string | null }>>();
-  for (const p of picsSec.rows) {
-    const arr = picsByJc.get(p.jobCardId) ?? [];
-    arr.push({ pic1: p.pic1Id, pic2: p.pic2Id });
-    picsByJc.set(p.jobCardId, arr);
-  }
-
-  // date -> { working, production, allDept } and date -> worker -> { same }.
-  // `workingMinutes` stays PRODUCTION-DEPARTMENT-ONLY clocked time (unchanged
-  // meaning — it is "Prod Hours" downstream). `allDeptMinutes` is new: EVERY
-  // clocked hour that day regardless of department. The difference between
-  // the two is time clocked OUTSIDE a production department — MEASURED
-  // 2026-08-27 (WANNA HLAING, 2026-08-17): 9.0h all-dept (8.9h under R_AND_D
-  // + 0.1h under FOAM) vs 0.1h production-dept-only. Without allDeptMinutes
-  // there was no way to show that 8.9h anywhere; "Non-Prod Hours" was instead
-  // computed as clocked-minus-earned, which is a DIFFERENT quantity (a
-  // shortfall against standard time, not "time spent elsewhere that day") and
-  // read as 0h for her precisely because her earned credit (3.33h) exceeded
-  // her tiny production-dept clock time.
-  const perfByDay = new Map<string, { date: string; workingMinutes: number; productionMinutes: number; allDeptMinutes: number }>();
-  const perfByDayWorker = new Map<string, Map<string, { workingMinutes: number; productionMinutes: number; allDeptMinutes: number }>>();
-  const perfWorkerIds = new Set<string>();
-  const perfDay = (d: string) => {
-    let e = perfByDay.get(d);
-    if (!e) perfByDay.set(d, (e = { date: d, workingMinutes: 0, productionMinutes: 0, allDeptMinutes: 0 }));
-    if (!perfByDayWorker.has(d)) perfByDayWorker.set(d, new Map());
-    return e;
-  };
-  const perfWorker = (d: string, w: string) => {
-    const m = perfByDayWorker.get(d)!;
-    let e = m.get(w);
-    if (!e) m.set(w, (e = { workingMinutes: 0, productionMinutes: 0, allDeptMinutes: 0 }));
-    return e;
-  };
-
-  for (const r of wheSec.rows) {
-    const d = dayKey(r.date);
-    if (!d) continue;
-    const mins = Math.round(num(r.hours) * 60);
-    const dayEntry = perfDay(d);
-    dayEntry.allDeptMinutes += mins;
-    if (r.workerId) perfWorker(d, r.workerId).allDeptMinutes += mins;
-    if (!productionDepts.has(r.departmentCode ?? "")) continue;
-    dayEntry.workingMinutes += mins;
-    if (r.workerId) {
-      perfWorkerIds.add(r.workerId);
-      perfWorker(d, r.workerId).workingMinutes += mins;
-    }
-  }
-
-  let perfCards = 0;
-  let perfMeasuredCards = 0;
-  for (const jc of jcSec.rows) {
-    const d = dayKey(jc.completedDate);
-    if (!d) continue;
-    perfCards++;
-    const actual = jc.actualMinutes == null ? null : num(jc.actualMinutes);
-    // A populated actual that EQUALS the standard is a copied estimate, not a
-    // measurement — the repo's established provenance test.
-    if (actual !== null && actual > 0 && actual !== num(jc.estMinutes)) perfMeasuredCards++;
-
-    const wipQty = num(jc.wipQty);
-    // Day total credits the card ONCE, regardless of how many workers are on it.
-    perfDay(d).productionMinutes += jcMinutesTotal(
-      actual ?? num(jc.estMinutes), jc.departmentCode, wipQty,
-    );
-
-    // Per-worker share is keyed on est ?? actual (note the order — it differs
-    // from the day total on purpose; mirrors department-performance.ts).
-    const jcMins = num(jc.estMinutes) || (actual ?? 0);
-    const pieces = picsByJc.get(jc.id) ?? [];
-    const perWorker = new Map<string, number>();
-    if (pieces.length > 0) {
-      const perPiece = (jc.departmentCode ?? "") === "FAB_CUT"
-        ? jcMinutesTotal(jcMins, jc.departmentCode, wipQty) / Math.max(1, pieces.length)
-        : jcMins;
-      for (const s of pieces) {
-        const picCount = (s.pic1 ? 1 : 0) + (s.pic2 ? 1 : 0);
-        const share = perPiece / Math.max(1, picCount);
-        if (s.pic1) perWorker.set(s.pic1, (perWorker.get(s.pic1) ?? 0) + share);
-        if (s.pic2) perWorker.set(s.pic2, (perWorker.get(s.pic2) ?? 0) + share);
-      }
-    } else {
-      const picCount = (jc.pic1Id ? 1 : 0) + (jc.pic2Id ? 1 : 0);
-      const share = jcMinutesTotal(jcMins, jc.departmentCode, wipQty) / Math.max(1, picCount);
-      if (jc.pic1Id) perWorker.set(jc.pic1Id, share);
-      if (jc.pic2Id) perWorker.set(jc.pic2Id, share);
-    }
-    for (const [wid, raw] of perWorker) {
-      perfWorkerIds.add(wid);
-      perfWorker(d, wid).productionMinutes += Math.round(raw);
-    }
-  }
-
-  const perfDays = [...perfByDay.values()]
-    .map((e) => ({
-      ...e,
-      workers: [...(perfByDayWorker.get(e.date) ?? new Map()).entries()]
-        .map(([workerId, v]) => ({ workerId, ...v })),
-    }))
-    .sort((a, b) => (a.date < b.date ? -1 : 1));
+  // Per-day production vs working minutes, overall and per worker. Lives in
+  // lib/workforce-perf.ts so the Department efficiency KPI runs the same code.
+  const { perfDays, perfCards, perfMeasuredCards } = buildPerfDays({
+    whe: wheSec.rows,
+    jobCards: jcSec.rows,
+    pics: picsSec.rows,
+    productionDepts,
+  });
 
   // ---- Delivery ---------------------------------------------------------
   const deliverySec = await section("delivery", () =>

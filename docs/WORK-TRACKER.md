@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-06**: branch `feat/kpi-department-efficiency` (DEV-36 part 3 to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-06**: branch `fix/kpi-remove-floor-workers` (to `staging`) updated the DEV-36 part 2 entry below: floor workers removed again.
 > **Last verified: 2026-10-06**: branch `feat/kpi-efficiency-multi-dept` (DEV-36 part 2 to `staging`) added below (its entry is the newest), and closed item 5 of the DEV-36 entry (staging check).
 > **Last verified: 2026-10-06**: branch `feat/kpi-efficiency-department` (DEV-36 to `staging`) added below (its entry is the newest).
@@ -149,6 +150,15 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-06 — 🔵 DEV-36 part 3: Department efficiency KPI (branch `feat/kpi-department-efficiency` → `staging`)
+
+Owner ask: an office lead (for example R&D or Upholstery) is scored on their own department's efficiency as Dashboard Experimental > People > Efficiency shows it, as a separate KPI card; Production time efficiency stays as it is. Owner chose: same grouping as the dashboard (each worker's home department), called Department efficiency, several departments combined.
+
+1. 🔵 New KPI `department_efficiency`: the Efficiency tab's figure for the month, for the workers whose home department is one of the assigned departments; none = whole floor. Same scoring bands as Production time efficiency.
+2. 🔵 The dashboard's per-day maths moved unchanged from `dashboard-prototype.ts` into `src/api/lib/workforce-perf.ts`; the route and the KPI both call it (500 random data sets compared old against new before the move was kept).
+3. 🔵 Library: picking Department efficiency shows one chip per department, any number ticked.
+4. ⬜ Check on the staging site after merge, against the Efficiency tab for the same department and month.
 
 ## 2026-10-06 — 🔵 DEV-36 part 2: several departments, and floor workers as KPI holders (branch `feat/kpi-efficiency-multi-dept` → `staging`)
 
