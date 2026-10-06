@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-07**: branch `feat/dev36-kpi-department-to-main` (DEV-36 staging to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-07**: branch `feat/dev37-kpi-self-view-to-main` (DEV-37 staging to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-07**: branch `fix/rm-uom-bottle-main` (DEV-20 follow-up to `main`, BUG-2026-10-07-262) added below (its entry is the newest).
 > **Last verified: 2026-10-06**: branch `feat/pay-card-main` (to `main`, BUG-2026-10-06-259) added below (its entry is the newest).
@@ -98,6 +99,17 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-07 — ⬜ DEV-36: department option on the efficiency KPIs (branch `feat/dev36-kpi-department-to-main` → `main`)
+
+Reporter ask (Violet, DEV-36): pick a department when assigning the Production Time Efficiency KPI, keep Overall, and score only that department when one is picked. Owner decision on 2026-10-06: the holders are office staff (for example the R&D or Upholstery lead), not floor workers. Same four changes as #712, #714, #715 and #716 on `staging`, cherry-picked onto `main` in order.
+
+1. 🔵 Production time efficiency takes one or more departments (each whole or Sofa / Bedframe), pooled into one figure, stored in `kpi_assignments.scope` (runtime self-applied by `ensureKpiTables`). Nothing ticked = Overall, unchanged.
+2. 🔵 New Department efficiency KPI: the Dashboard Experimental > Employees efficiency figure for the workers whose home department is ticked; none = whole floor. The dashboard's per-day maths moved unchanged into `src/api/lib/workforce-perf.ts` so both run the same code.
+3. 🔵 The floor-worker half of #714 is not here (#715 took it back on staging): KPIs go to login accounts only, no worker app card.
+4. 🔵 Staging check 2026-10-07, September 2026 data, 11 of 11 passed: several departments pooled (Fabric Cutting + Fabric Sewing 107.3% from 108,817 min on 1,690 h), Overall unchanged (91%), worker route gone (404), Department efficiency equal to the dashboard for Upholstery (66.1%), Framing (62.1%), Upholstery + Framing (64.0%) and the whole floor (93.3%, the Overall Efficiency tile), bad scopes refused, test assignments removed. Part 1 was checked 2026-10-06 (10 of 10).
+5. Notes, not blocking: the card names departments by code (`FAB_CUT + FAB_SEW`); the Efficiency tab's department ledger "Factory total" (90.7% in September) only sums workers with a department, so it reads lower than the Overall Efficiency tile (93.3%) that the whole-floor KPI follows; phones are sent to `/m`, which has no KPI page (as before).
+6. ⬜ After deploy: Super Admin check on prod (Library pickers, one scoped assignment, card figure against the dashboard), then remove the test assignment.
 
 ## 2026-10-07 — ⬜ DEV-37: every staff login sees their own KPI card, view only (branch `feat/dev37-kpi-self-view-to-main` → `main`)
 

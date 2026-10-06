@@ -167,30 +167,35 @@ export default function KpiPage() {
   // one figure. Empty = Overall; entries are "FAB_CUT" or "FAB_CUT:SOFA".
   // Everyone assigned in one go shares it.
   const [effScopes, setEffScopes] = useState<string[]>([]);
+  // Department efficiency: the departments whose workers it scores, pooled.
+  // Empty = the whole floor. Department codes only, no Sofa / Bedframe.
+  const [deptEffScopes, setDeptEffScopes] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
   const { data: deptResp } = useCachedJson<{
     data?: Array<{ code: string; name: string; sequence: number; isProduction: boolean }>;
   }>(isSuperAdmin && tab === "library" ? "/api/departments" : "");
-  const prodDepts = useMemo(
-    () =>
-      (deptResp?.data ?? [])
-        .filter((d) => d.isProduction)
-        .sort((a, b) => a.sequence - b.sequence),
+  const allDepts = useMemo(
+    () => [...(deptResp?.data ?? [])].sort((a, b) => a.sequence - b.sequence),
     [deptResp],
   );
-  const scopeLabel = (v: string) =>
+  const prodDepts = useMemo(() => allDepts.filter((d) => d.isProduction), [allDepts]);
+  /** "FAB_CUT:SOFA,R_AND_D" → readable names. Only production_efficiency says "(all)". */
+  const scopeLabel = (v: string, kpiKey = "production_efficiency") =>
     v
       .split(",")
       .map((entry) => {
         const [code, cat] = entry.split(":");
-        const name = prodDepts.find((d) => d.code === code)?.name ?? code;
-        return cat ? `${name} ${cat === "SOFA" ? "Sofa" : "Bedframe"}` : `${name} (all)`;
+        const name = allDepts.find((d) => d.code === code)?.name ?? code;
+        if (cat) return `${name} ${cat === "SOFA" ? "Sofa" : "Bedframe"}`;
+        return kpiKey === "production_efficiency" ? `${name} (all)` : name;
       })
       .join(", ");
   const toggleScope = (v: string) =>
     setEffScopes((cur) => (cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v]));
+  const toggleDeptEff = (v: string) =>
+    setDeptEffScopes((cur) => (cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v]));
 
   const lib = libResp?.data ?? [];
   const pickedDefs = lib.filter((k) => picked.has(k.key));
@@ -221,7 +226,12 @@ export default function KpiPage() {
               target: def.defaultTarget,
               weight: weightOf(def),
               isActive: true,
-              scope: def.key === "production_efficiency" ? effScopes.join(",") : undefined,
+              scope:
+                def.key === "production_efficiency"
+                  ? effScopes.join(",")
+                  : def.key === "department_efficiency"
+                    ? deptEffScopes.join(",")
+                    : undefined,
             })),
           }),
         });
@@ -231,6 +241,7 @@ export default function KpiPage() {
       setMsg(`Assigned ${pickedDefs.length} KPI(s) to ${people.length} person(s).`);
       setPicked(new Set());
       setEffScopes([]);
+      setDeptEffScopes([]);
       invalidateCachePrefix("/api/kpi");
     } catch (e) {
       setMsg(e instanceof Error ? e.message : "Save failed");
@@ -462,7 +473,7 @@ export default function KpiPage() {
                         k.assignedTo.map((a) => (
                           <span key={a.userId} className="inline-flex items-center rounded-full bg-[#EDE7DA] pl-2 text-[10px] text-[#5A5550]">
                             {a.name}
-                            {a.scope && <span className="ml-1 text-[#8A8178]">· {scopeLabel(a.scope)}</span>}
+                            {a.scope && <span className="ml-1 text-[#8A8178]">· {scopeLabel(a.scope, k.key)}</span>}
                             <button
                               type="button"
                               onClick={() => unassign(k, a)}
@@ -654,6 +665,47 @@ export default function KpiPage() {
                         })}
                       </div>
                     ))}
+                  </div>
+                </div>
+              )}
+              {pickedDefs.some((k) => k.key === "department_efficiency") && (
+                <div className="mt-3 text-[11.5px]">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <b>Department efficiency: departments</b>
+                    {deptEffScopes.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setDeptEffScopes([])}
+                        className="shrink-0 text-[11px] text-[#6B5C32] underline decoration-dotted"
+                      >
+                        Back to whole floor
+                      </button>
+                    )}
+                  </div>
+                  <span className="block text-[#9CA3AF]">
+                    {deptEffScopes.length
+                      ? `Scored on the workers of ${scopeLabel(deptEffScopes.join(","), "department_efficiency")}, combined, as Dashboard Experimental shows it.`
+                      : "Nothing ticked: the whole floor. Tick one or more departments to score only their workers, combined."}
+                  </span>
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {allDepts.map((d) => {
+                      const on = deptEffScopes.includes(d.code);
+                      return (
+                        <button
+                          key={d.code}
+                          type="button"
+                          aria-pressed={on}
+                          onClick={() => toggleDeptEff(d.code)}
+                          className={`rounded-full border px-2.5 py-0.5 text-[11px] ${
+                            on
+                              ? "border-[#6B5C32] bg-[#6B5C32] text-white"
+                              : "border-[#E2DDD8] text-[#5A5550] hover:bg-[#FBF8F2]"
+                          }`}
+                        >
+                          {d.name}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               )}
