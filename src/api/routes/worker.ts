@@ -2063,6 +2063,7 @@ type PayslipRow = {
   otPhHours?: number | null;
   advanceDeductionSen?: number | null;
   advance_deduction_sen?: number | null;
+  status?: string | null;
 };
 
 app.get("/payslips", async (c) => {
@@ -2117,7 +2118,8 @@ app.get("/payslips", async (c) => {
       // The suffix retires snapshots built before a fix to what history
       // carries (":adv" the salary advance, ":late" the late charge priced
       // from a per-day worker's day rate, ":daily" the per-day fields on the
-      // current month and on each past month), so no cached month hides one.
+      // current month, ":past" each past month's status), so no cached month
+      // hides one.
       cacheKey: `${workerId}:${snapPeriod}:adv:late:daily:past`,
     },
     async (db) => {
@@ -2129,7 +2131,7 @@ app.get("/payslips", async (c) => {
     // day for the current month and then, once payroll ran, only a bare Net —
     // which is exactly the moment they most want to check it (owner 2026-08-02:
     // 「他们的迟到、OT、请假等等，全部都可以在 MyPay 那一边呈现出来」).
-    `SELECT id, employeeId, period, basicSalarySen, totalOtSen, allowancesSen,
+    `SELECT id, employeeId, period, status, basicSalarySen, totalOtSen, allowancesSen,
             grossPaySen, netPaySen, epfEmployeeSen, socsoEmployeeSen,
             eisEmployeeSen, pcbSen, pcb_status, absentDays, absenceDeductionSen,
             otWeekdayHours, otSundayHours, otPhHours, advance_deduction_sen
@@ -2248,6 +2250,8 @@ app.get("/payslips", async (c) => {
     // showed Net below Gross with nothing in between to explain the gap.
     advanceDeductionSen: Number(r.advanceDeductionSen ?? r.advance_deduction_sen ?? 0) || 0,
     advanceDays: advancesByPeriod.get(r.period) ?? [],
+    // DRAFT until the office approves it; the per-day card tags it Estimate.
+    status: r.status ?? null,
   }));
 
   // Live current-month estimate, computed by the shared labor engine —
@@ -2447,6 +2451,10 @@ app.get("/payslips", async (c) => {
     /* unreadable → treated as not finalised, which is the safe direction */
   }
 
+  // Same test the engine uses: DAILY with no day rate is paid as monthly.
+  const isDailyPaid =
+    payWorker?.payMode === "DAILY" && Number(payWorker?.dailyRateSen) > 0;
+
       return {
         current: {
           period,
@@ -2475,12 +2483,9 @@ app.get("/payslips", async (c) => {
           payslipStatus,
           // Per-day people get their own card on My Pay: "N days @ RM X/day"
           // instead of a RM 0.00 basic. dailyRateSen is the engine's day rate,
-          // so the card prices the same days payroll does.
-          // Same test the engine uses: DAILY with no day rate is paid as monthly.
-          payMode:
-            payWorker?.payMode === "DAILY" && Number(payWorker?.dailyRateSen) > 0
-              ? "DAILY"
-              : "MONTHLY",
+          // so the card prices the same days payroll does. Past months use the
+          // same card, rebuilt from their stored payslip (pay.tsx).
+          payMode: isDailyPaid ? "DAILY" : "MONTHLY",
           dailyRateSen: labor.payrollDailyRateSen,
           // Cash already collected this month (recovered from this month's pay,
           // same rule as payroll). Display only until the payslip is generated.

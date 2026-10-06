@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-06**: branch `feat/daily-pay-card-past-months` (to `staging`) closed item 3 of the per-day card entry below.
 > **Last verified: 2026-10-06**: branch `feat/daily-pay-card` (to `staging`, BUG-2026-10-06-259) added below (its entry is the newest).
 > **Last verified: 2026-10-05**: branch `feat/topbar-profile` (to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-05**: branch `fix/worker-pay-advance-line` (to `staging`) added below (its entry is the newest).
@@ -151,7 +152,7 @@ Owner ask: a per-day worker (RM 85 / day) sees "Basic: RM 0.00" with no reason, 
 
 1. 🔵 `GET /api/worker/payslips` prices the current month with the worker's pay mode and day rate, and returns `payMode`, `dailyRateSen`, `advanceSen`.
 2. 🔵 New `DailyPayCard` on My Pay for a per-day worker's current month: Net pay, Earnings, Deductions, Summary. Labels in all four worker languages.
-3. ⬜ Finished months for per-day workers (needs a days-worked figure per payslip).
+3. 🔵 Finished months use the same card, rebuilt from the stored payslip (branch `feat/daily-pay-card-past-months` → `staging`, which also brings main's BUG-2026-10-05-258 late-rate fix over).
 4. ⬜ Check on the staging site as OSC-001 after merge (needs October hours keyed for them on staging).
 
 ## 2026-10-05 — 🔵 Top-right Profile menu works, profile picture synced (branch `feat/topbar-profile` → `staging`)
