@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-06**: branch `feat/dev37-kpi-office-self-view` (DEV-37 to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-06**: branch `feat/kpi-efficiency-department` (DEV-36 to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-06**: branch `feat/pay-card-all-workers` (to `staging`) added item 5 (monthly workers) of the per-day card entry below.
 > **Last verified: 2026-10-06**: branch `feat/daily-pay-card-past-months` (to `staging`) closed item 3 of the per-day card entry below.
@@ -147,6 +148,16 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-06 — ⬜ DEV-37: every staff login can open their own KPI card (branch `feat/dev37-kpi-office-self-view` → `staging`)
+
+Reporter ask (Violet, DEV-37): office staff log in and see their own assigned KPIs, never anyone else's. Confirmed on WhatsApp 2026-10-06: office staff (ERP logins, not the worker portal), every staff will have their own account, only Super Admin assigns, "just open the module for them to view, but only their own KPI".
+
+1. 🔵 `/kpi` becomes a self-service page for every ERP login: no `kpi:read` gate on the route or the menu. The cross-user API was already Super Admin only and `/api/kpi/me` never takes a user id, so the gate only hid the menu.
+2. 🔵 The `kpi` resource goes from `ALL_RESOURCES` / Office's exclusion / `NAV_RESOURCE`, so the per-user permission editor no longer shows a box that does nothing.
+3. 🔵 Guard test `tests/kpi-self-service.test.mjs`: menu + route stay open for every role (code roles and an empty permission set), every KPI route except `/me`, `/checklist` and `/survey` GET still calls `requireSuperAdmin`, those take the user from the session, and the page fetches the people lists only for a Super Admin.
+4. ⬜ Browser check with a non-admin login: not done locally, the only `.dev.vars` on this machine points at production.
+5. ⬜ Check on the staging site after merge with a non-admin login.
 
 ## 2026-10-06 — 🔵 DEV-36: Production time efficiency KPI by department (branch `feat/kpi-efficiency-department` → `staging`)
 
