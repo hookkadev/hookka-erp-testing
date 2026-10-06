@@ -540,15 +540,11 @@ export const DASHBOARD_ROUTES: RouteObject[] = [
     // Owner 2026-08-05: everyone has the console; each role sees only its own
     // agents (AGENTS_BY_ROLE in src/api/lib/role-policy.ts, applied by
     // /api/agents/status). The CONTROLS behind it are still SUPER_ADMIN.
-    // KPI — the page itself is self-service (/api/kpi/me never takes a user
-    // id), so the gate here only decides who sees the menu entry. Every
-    // cross-user route re-checks SUPER_ADMIN on the server.
+    // KPI — every login's own card, so no gate (DEV-37: "open the module for
+    // them to view, but only their own KPI"). /api/kpi/me never takes a user
+    // id, and every cross-user route re-checks SUPER_ADMIN on the server.
     path: '/kpi',
-    element: (
-      <RequirePermission resource="kpi" action="read">
-        <S><KpiPage /></S>
-      </RequirePermission>
-    ),
+    element: <S><KpiPage /></S>,
   },
   {
     path: '/agents',

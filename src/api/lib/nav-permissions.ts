@@ -75,7 +75,9 @@ export const NAV_RESOURCE: Record<string, string> = {
   // tooling screen is not part of reading a price list; it needs its own gate.
   "/cnc-templates": "cnc-templates",
   "/agents": "agent-console",
-  "/kpi": "kpi",
+  // "/kpi" has no row on purpose (DEV-37, 2026-10-06): every login opens their
+  // own card there. What is not theirs is refused by requireSuperAdmin on each
+  // /api/kpi route, so a gate here would only hide a person's own KPIs.
   "/bom": "bom",
   "/maintenance/sofa-combos": "sofa-combos",
 
