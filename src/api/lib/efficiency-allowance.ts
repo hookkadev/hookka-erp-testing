@@ -104,16 +104,39 @@ const jcProdMinutesSql = (scopeSql = "") => `
    GROUP BY wid
 `;
 
+/** One production department, optionally one product category (SOFA / BEDFRAME). */
+export type EfficiencyScopePart = { dept: string; category?: string };
+
 /**
- * Narrows efficiency to one production department, optionally one product
- * category (SOFA / BEDFRAME). Used by the KPI module's department option
- * (DEV-36). Omitted = the whole floor, exactly as before.
+ * Narrows efficiency to one or more departments, pooled into one figure. Used
+ * by the KPI module's department option (DEV-36). Omitted or empty = the whole
+ * floor, exactly as before.
  */
-export type EfficiencyScope = { dept: string; category?: string };
+export type EfficiencyScope = EfficiencyScopePart[];
 
 /** Job cards whose production order is in the scope's category. */
 const PO_IN_CATEGORY =
   "productionOrderId IN (SELECT id FROM production_orders WHERE itemCategory = ?)";
+
+/**
+ * ` AND (a OR b ...)` over the scope parts, "" when unscoped. A row filter, so
+ * overlapping parts ("FAB_CUT" and "FAB_CUT:SOFA") never count a row twice.
+ */
+function scopeFilter(
+  scope: EfficiencyScope | undefined,
+  deptCol: string,
+  categorySql: string,
+): { sql: string; binds: unknown[] } {
+  if (!scope?.length) return { sql: "", binds: [] };
+  const binds: unknown[] = [];
+  const ors = scope.map((p) => {
+    binds.push(p.dept);
+    if (!p.category) return `${deptCol} = ?`;
+    binds.push(p.category);
+    return `(${deptCol} = ? AND ${categorySql})`;
+  });
+  return { sql: ` AND (${ors.join(" OR ")})`, binds };
+}
 
 /**
  * Approved EXTRA-PRODUCTION-TIME minutes per worker for [periodStart, periodEnd]
@@ -142,16 +165,11 @@ export async function computeApprovedAddProdMinutesByWorker(
   // A category scope can only place a claim through its job card, so a claim
   // with no job card is left out of a SOFA / BEDFRAME figure rather than
   // guessed into one.
-  let scopeSql = "";
-  const scopeBinds: unknown[] = [];
-  if (scope) {
-    scopeSql += " AND department_code = ?";
-    scopeBinds.push(scope.dept);
-    if (scope.category) {
-      scopeSql += ` AND job_card_id IN (SELECT id FROM job_cards WHERE ${PO_IN_CATEGORY})`;
-      scopeBinds.push(scope.category);
-    }
-  }
+  const { sql: scopeSql, binds: scopeBinds } = scopeFilter(
+    scope,
+    "department_code",
+    `job_card_id IN (SELECT id FROM job_cards WHERE ${PO_IN_CATEGORY})`,
+  );
   try {
     const res = await db
       .prepare(
@@ -181,9 +199,9 @@ export async function computeApprovedAddProdMinutesByWorker(
  * (inclusive YYYY-MM-DD). Returns one entry per worker seen in either the
  * job-card or working-hour data for the window.
  *
- * With a scope, both sides of the ratio are narrowed to it: job cards of that
- * department (and category, via the production order), approved extra time in
- * that department, and hours keyed to that department (and category).
+ * With a scope, both sides of the ratio are narrowed to it: job cards of its
+ * departments (and categories, via the production order), approved extra time
+ * in them, and hours keyed to them (and their categories).
  */
 export async function computeMonthlyEfficiencyByWorker(
   db: DbLike,
@@ -191,22 +209,8 @@ export async function computeMonthlyEfficiencyByWorker(
   periodEnd: string,
   scope?: EfficiencyScope,
 ): Promise<Map<string, WorkerMonthlyEfficiency>> {
-  let jcScopeSql = "";
-  let wheScopeSql = "";
-  const jcScopeBinds: unknown[] = [];
-  const wheScopeBinds: unknown[] = [];
-  if (scope) {
-    jcScopeSql += " AND departmentCode = ?";
-    wheScopeSql += " AND departmentCode = ?";
-    jcScopeBinds.push(scope.dept);
-    wheScopeBinds.push(scope.dept);
-    if (scope.category) {
-      jcScopeSql += ` AND ${PO_IN_CATEGORY}`;
-      wheScopeSql += " AND category = ?";
-      jcScopeBinds.push(scope.category);
-      wheScopeBinds.push(scope.category);
-    }
-  }
+  const { sql: jcScopeSql, binds: jcScopeBinds } = scopeFilter(scope, "departmentCode", PO_IN_CATEGORY);
+  const { sql: wheScopeSql, binds: wheScopeBinds } = scopeFilter(scope, "departmentCode", "category = ?");
 
   // 1. Which departments count toward the efficiency denominator. Truthy
   //    isProduction (1 / true) only — same test the Overview uses.
