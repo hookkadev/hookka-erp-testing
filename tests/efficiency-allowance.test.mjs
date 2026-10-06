@@ -263,3 +263,101 @@ test("payslips loads the per-worker bonus config from the workers table", () => 
     assert.ok(workerSelect.includes(col), `the worker SELECT must pull ${col}`);
   }
 });
+
+// ── DEV-36: department scope ────────────────────────────────────────────────
+
+// Records every query and its binds so the filters can be checked, and answers
+// with canned rows like mockDb above.
+function recordingDb(rows) {
+  const seen = [];
+  return {
+    seen,
+    prepare(sql) {
+      return {
+        bind(...binds) {
+          seen.push({ sql, binds });
+          return { all: () => mockDb(rows).prepare(sql).bind().all() };
+        },
+      };
+    },
+  };
+}
+
+const SCOPE_ROWS = {
+  depts: [{ code: "FAB_CUT", isProduction: 1 }],
+  jc: [{ workerId: "W1", productionMinutes: 240 }],
+  whe: [{ workerId: "W1", departmentCode: "FAB_CUT", date: "2026-06-01", hours: 8 }],
+};
+
+test("no scope: the queries carry no department or category filter", async () => {
+  const db = recordingDb(SCOPE_ROWS);
+  await eff.computeMonthlyEfficiencyByWorker(db, "2026-06-01", "2026-06-30");
+  for (const q of db.seen) {
+    for (const f of ["departmentCode = ?", "department_code = ?", "itemCategory", "category = ?"]) {
+      assert.ok(!q.sql.includes(f), q.sql);
+    }
+  }
+  const jc = db.seen.find((q) => q.sql.includes("contrib_min"));
+  assert.deepEqual(jc.binds, ["2026-06-01", "2026-06-30", "2026-06-01", "2026-06-30"]);
+});
+
+test("department + category scope narrows job cards, extra time and hours", async () => {
+  const db = recordingDb(SCOPE_ROWS);
+  const m = await eff.computeMonthlyEfficiencyByWorker(db, "2026-06-01", "2026-06-30", {
+    dept: "FAB_CUT",
+    category: "SOFA",
+  });
+  assert.equal(m.get("W1").pct, 50);
+
+  const jc = db.seen.find((q) => q.sql.includes("contrib_min"));
+  // Both PIC halves get the same filter, in bind order.
+  assert.equal(jc.sql.split("AND departmentCode = ?").length - 1, 2);
+  assert.equal(jc.sql.split("itemCategory = ?").length - 1, 2);
+  assert.deepEqual(jc.binds, [
+    "2026-06-01", "2026-06-30", "FAB_CUT", "SOFA",
+    "2026-06-01", "2026-06-30", "FAB_CUT", "SOFA",
+  ]);
+
+  const ap = db.seen.find((q) => q.sql.includes("worker_nonprod_requests"));
+  assert.ok(ap.sql.includes("department_code = ?"), ap.sql);
+  assert.ok(ap.sql.includes("job_card_id IN"), ap.sql);
+  assert.deepEqual(ap.binds, ["2026-06-01", "2026-06-30", "FAB_CUT", "SOFA"]);
+
+  const whe = db.seen.find((q) => q.sql.includes("FROM working_hour_entries"));
+  assert.ok(whe.sql.includes("departmentCode = ? AND category = ?"), whe.sql);
+
+  // Every column the new filters name must survive the camelCase translation.
+  const { translateSql } = await import(
+    pathToFileURL(resolve(process.cwd(), "src/api/lib/supabase-compat.ts")).href
+  );
+  for (const q of db.seen) {
+    const out = translateSql(q.sql);
+    for (const col of ["departmentCode", "productionOrderId", "itemCategory"]) {
+      assert.ok(!out.includes(col), `${col} left untranslated in: ${out}`);
+    }
+  }
+  assert.deepEqual(whe.binds, ["2026-06-01", "2026-06-30", "FAB_CUT", "SOFA"]);
+});
+
+test("department-only scope adds no category filter", async () => {
+  const db = recordingDb(SCOPE_ROWS);
+  await eff.computeMonthlyEfficiencyByWorker(db, "2026-06-01", "2026-06-30", { dept: "FAB_CUT" });
+  for (const q of db.seen) {
+    for (const f of ["itemCategory", "category = ?", "job_card_id IN"]) assert.ok(!q.sql.includes(f), q.sql);
+  }
+  const whe = db.seen.find((q) => q.sql.includes("FROM working_hour_entries"));
+  assert.deepEqual(whe.binds, ["2026-06-01", "2026-06-30", "FAB_CUT"]);
+});
+
+test("parseEfficiencyScope: Overall, department, department + category, junk", async () => {
+  const { parseEfficiencyScope } = await import(
+    pathToFileURL(resolve(process.cwd(), "src/api/lib/kpi-metrics.ts")).href
+  );
+  assert.equal(parseEfficiencyScope(""), null);
+  assert.equal(parseEfficiencyScope(null), null);
+  assert.deepEqual(parseEfficiencyScope("fab_cut"), { dept: "FAB_CUT" });
+  assert.deepEqual(parseEfficiencyScope("FAB_CUT:SOFA"), { dept: "FAB_CUT", category: "SOFA" });
+  assert.equal(parseEfficiencyScope("FAB_CUT:CHAIR"), null);
+  assert.equal(parseEfficiencyScope("FAB_CUT:SOFA:X"), null);
+  assert.equal(parseEfficiencyScope("FAB CUT"), null);
+});

@@ -66,7 +66,7 @@ type LibItem = {
   current: number | null; evidence: string;
   editableRules?: string[];
   penaltyPerPct?: number; earlyStepPct?: number; earlyBonusPerStep?: number; earlyMaxBonus?: number;
-  assignedTo: Array<{ userId: string; name: string; role: string }>;
+  assignedTo: Array<{ userId: string; name: string; role: string; scope?: string }>;
 };
 type PersonRow = {
   userId: string; name: string; email: string; role: string;
@@ -163,8 +163,30 @@ export default function KpiPage() {
   // KPI. Five KPIs sharing one number is not a weighting.
   const [kpiWeights, setKpiWeights] = useState<Record<string, number>>({});
   const [chosenPeople, setChosenPeople] = useState<Set<string>>(new Set());
+  // DEV-36: which department production_efficiency is scored on. "" = Overall,
+  // else "FAB_CUT" or "FAB_CUT:SOFA". Everyone assigned in one go shares it.
+  const [effScope, setEffScope] = useState("");
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+
+  const { data: deptResp } = useCachedJson<{
+    data?: Array<{ code: string; name: string; sequence: number; isProduction: boolean }>;
+  }>(isSuperAdmin && tab === "library" ? "/api/departments" : "");
+  const scopeOptions = useMemo(() => {
+    const out = [{ value: "", label: "Overall (whole floor)" }];
+    const depts = (deptResp?.data ?? [])
+      .filter((d) => d.isProduction)
+      .sort((a, b) => a.sequence - b.sequence);
+    for (const d of depts) {
+      out.push(
+        { value: d.code, label: `${d.name} (all)` },
+        { value: `${d.code}:SOFA`, label: `${d.name} Sofa` },
+        { value: `${d.code}:BEDFRAME`, label: `${d.name} Bedframe` },
+      );
+    }
+    return out;
+  }, [deptResp]);
+  const scopeLabel = (v: string) => scopeOptions.find((o) => o.value === v)?.label ?? v;
 
   const lib = libResp?.data ?? [];
   const pickedDefs = lib.filter((k) => picked.has(k.key));
@@ -195,6 +217,7 @@ export default function KpiPage() {
               target: def.defaultTarget,
               weight: weightOf(def),
               isActive: true,
+              scope: def.key === "production_efficiency" ? effScope : undefined,
             })),
           }),
         });
@@ -203,6 +226,7 @@ export default function KpiPage() {
       }
       setMsg(`Assigned ${pickedDefs.length} KPI(s) to ${people.length} person(s).`);
       setPicked(new Set());
+      setEffScope("");
       invalidateCachePrefix("/api/kpi");
     } catch (e) {
       setMsg(e instanceof Error ? e.message : "Save failed");
@@ -434,6 +458,7 @@ export default function KpiPage() {
                         k.assignedTo.map((a) => (
                           <span key={a.userId} className="inline-flex items-center rounded-full bg-[#EDE7DA] pl-2 text-[10px] text-[#5A5550]">
                             {a.name}
+                            {a.scope && <span className="ml-1 text-[#8A8178]">· {scopeLabel(a.scope)}</span>}
                             <button
                               type="button"
                               onClick={() => unassign(k, a)}
@@ -577,6 +602,23 @@ export default function KpiPage() {
                   <span className="text-[10px] text-[#9CA3AF]">wt</span>
                 </div>
               ))}
+              {pickedDefs.some((k) => k.key === "production_efficiency") && (
+                <label className="block mt-3 text-[11.5px]">
+                  <b>Production time efficiency: department</b>
+                  <span className="block text-[#9CA3AF]">
+                    Overall scores the whole floor. A department scores only its own job cards and hours, and everyone picked below shares that figure.
+                  </span>
+                  <select
+                    value={effScope}
+                    onChange={(e) => setEffScope(e.target.value)}
+                    className="mt-1 w-full rounded border border-[#E2DDD8] bg-white px-2 py-1 text-[11.5px]"
+                  >
+                    {scopeOptions.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
             </CardContent>
             {pickedDefs.length > 0 && (
               <div className="border-t border-[#E2DDD8] bg-[#FAF9F7] px-4 py-3">
