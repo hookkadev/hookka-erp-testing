@@ -303,15 +303,14 @@ test("no scope: the queries carry no department or category filter", async () =>
 
 test("department + category scope narrows job cards, extra time and hours", async () => {
   const db = recordingDb(SCOPE_ROWS);
-  const m = await eff.computeMonthlyEfficiencyByWorker(db, "2026-06-01", "2026-06-30", {
-    dept: "FAB_CUT",
-    category: "SOFA",
-  });
+  const m = await eff.computeMonthlyEfficiencyByWorker(db, "2026-06-01", "2026-06-30", [
+    { dept: "FAB_CUT", category: "SOFA" },
+  ]);
   assert.equal(m.get("W1").pct, 50);
 
   const jc = db.seen.find((q) => q.sql.includes("contrib_min"));
   // Both PIC halves get the same filter, in bind order.
-  assert.equal(jc.sql.split("AND departmentCode = ?").length - 1, 2);
+  assert.equal(jc.sql.split("(departmentCode = ? AND productionOrderId IN").length - 1, 2);
   assert.equal(jc.sql.split("itemCategory = ?").length - 1, 2);
   assert.deepEqual(jc.binds, [
     "2026-06-01", "2026-06-30", "FAB_CUT", "SOFA",
@@ -341,12 +340,40 @@ test("department + category scope narrows job cards, extra time and hours", asyn
 
 test("department-only scope adds no category filter", async () => {
   const db = recordingDb(SCOPE_ROWS);
-  await eff.computeMonthlyEfficiencyByWorker(db, "2026-06-01", "2026-06-30", { dept: "FAB_CUT" });
+  await eff.computeMonthlyEfficiencyByWorker(db, "2026-06-01", "2026-06-30", [{ dept: "FAB_CUT" }]);
   for (const q of db.seen) {
     for (const f of ["itemCategory", "category = ?", "job_card_id IN"]) assert.ok(!q.sql.includes(f), q.sql);
   }
   const whe = db.seen.find((q) => q.sql.includes("FROM working_hour_entries"));
   assert.deepEqual(whe.binds, ["2026-06-01", "2026-06-30", "FAB_CUT"]);
+});
+
+test("several departments are OR-ed into one filter, binds in order", async () => {
+  const db = recordingDb(SCOPE_ROWS);
+  await eff.computeMonthlyEfficiencyByWorker(db, "2026-06-01", "2026-06-30", [
+    { dept: "FAB_CUT", category: "SOFA" },
+    { dept: "FAB_SEW" },
+  ]);
+  const whe = db.seen.find((q) => q.sql.includes("FROM working_hour_entries"));
+  assert.ok(
+    whe.sql.includes(" AND ((departmentCode = ? AND category = ?) OR departmentCode = ?)"),
+    whe.sql,
+  );
+  assert.deepEqual(whe.binds, ["2026-06-01", "2026-06-30", "FAB_CUT", "SOFA", "FAB_SEW"]);
+  const jc = db.seen.find((q) => q.sql.includes("contrib_min"));
+  assert.deepEqual(jc.binds, [
+    "2026-06-01", "2026-06-30", "FAB_CUT", "SOFA", "FAB_SEW",
+    "2026-06-01", "2026-06-30", "FAB_CUT", "SOFA", "FAB_SEW",
+  ]);
+  const ap = db.seen.find((q) => q.sql.includes("worker_nonprod_requests"));
+  assert.deepEqual(ap.binds, ["2026-06-01", "2026-06-30", "FAB_CUT", "SOFA", "FAB_SEW"]);
+});
+
+test("an empty department list is Overall", async () => {
+  const db = recordingDb(SCOPE_ROWS);
+  await eff.computeMonthlyEfficiencyByWorker(db, "2026-06-01", "2026-06-30", []);
+  const jc = db.seen.find((q) => q.sql.includes("contrib_min"));
+  assert.deepEqual(jc.binds, ["2026-06-01", "2026-06-30", "2026-06-01", "2026-06-30"]);
 });
 
 test("parseEfficiencyScope: Overall, department, department + category, junk", async () => {
@@ -355,9 +382,20 @@ test("parseEfficiencyScope: Overall, department, department + category, junk", a
   );
   assert.equal(parseEfficiencyScope(""), null);
   assert.equal(parseEfficiencyScope(null), null);
-  assert.deepEqual(parseEfficiencyScope("fab_cut"), { dept: "FAB_CUT" });
-  assert.deepEqual(parseEfficiencyScope("FAB_CUT:SOFA"), { dept: "FAB_CUT", category: "SOFA" });
+  assert.deepEqual(parseEfficiencyScope("fab_cut"), [{ dept: "FAB_CUT" }]);
+  assert.deepEqual(parseEfficiencyScope("FAB_CUT:SOFA"), [{ dept: "FAB_CUT", category: "SOFA" }]);
   assert.equal(parseEfficiencyScope("FAB_CUT:CHAIR"), null);
   assert.equal(parseEfficiencyScope("FAB_CUT:SOFA:X"), null);
   assert.equal(parseEfficiencyScope("FAB CUT"), null);
+});
+
+test("parseEfficiencyScope: a comma list, de-duplicated, any bad entry refuses all", async () => {
+  const { parseEfficiencyScope, formatEfficiencyScope } = await import(
+    pathToFileURL(resolve(process.cwd(), "src/api/lib/kpi-metrics.ts")).href
+  );
+  const sc = parseEfficiencyScope("FAB_CUT:SOFA, fab_sew ,FAB_CUT:SOFA");
+  assert.deepEqual(sc, [{ dept: "FAB_CUT", category: "SOFA" }, { dept: "FAB_SEW" }]);
+  assert.equal(formatEfficiencyScope(sc), "FAB_CUT:SOFA,FAB_SEW");
+  assert.equal(parseEfficiencyScope("FAB_CUT,FAB_SEW:CHAIR"), null);
+  assert.equal(parseEfficiencyScope("FAB_CUT,"), null);
 });

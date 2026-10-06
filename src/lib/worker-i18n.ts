@@ -1036,6 +1036,26 @@ const dict: Dict = {
     my: 'ထွက်ရန်',
   },
 
+  // ---- My KPI (Me page, DEV-36) ----
+  'kpi.title': { en: 'My KPI', ms: 'KPI Saya', zh: '我的 KPI', my: 'ကျွန်ုပ်၏ KPI' },
+  'kpi.efficiency': {
+    en: 'Production time efficiency',
+    ms: 'Kecekapan masa pengeluaran',
+    zh: '生产时间效率',
+    my: 'ထုတ်လုပ်ချိန် စွမ်းဆောင်ရည်',
+  },
+  'kpi.efficiencyShort': { en: 'Efficiency', ms: 'Kecekapan', zh: '效率', my: 'စွမ်းဆောင်ရည်' },
+  'kpi.target': { en: 'Target', ms: 'Sasaran', zh: '目标', my: 'ပစ်မှတ်' },
+  'kpi.points': { en: 'Points', ms: 'Mata', zh: '得分', my: 'အမှတ်' },
+  'kpi.departments': { en: 'Departments', ms: 'Jabatan', zh: '部门', my: 'ဌာနများ' },
+  'kpi.overall': { en: 'Whole floor', ms: 'Seluruh kilang', zh: '全厂', my: 'စက်ရုံတစ်ခုလုံး' },
+  'kpi.noData': {
+    en: 'No figure yet this month',
+    ms: 'Belum ada angka bulan ini',
+    zh: '本月暂无数据',
+    my: 'ယခုလ ဒေတာ မရှိသေးပါ',
+  },
+
   // ---- Non-production hours ----
   'nonprod.title': {
     en: 'Non-production hours',

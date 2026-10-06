@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-06**: branch `feat/kpi-efficiency-multi-dept` (DEV-36 part 2 to `staging`) added below (its entry is the newest), and closed item 5 of the DEV-36 entry (staging check).
 > **Last verified: 2026-10-06**: branch `feat/kpi-efficiency-department` (DEV-36 to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-06**: branch `feat/pay-card-all-workers` (to `staging`) added item 5 (monthly workers) of the per-day card entry below.
 > **Last verified: 2026-10-06**: branch `feat/daily-pay-card-past-months` (to `staging`) closed item 3 of the per-day card entry below.
@@ -148,6 +149,17 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
+## 2026-10-06 — 🔵 DEV-36 part 2: several departments, and floor workers as KPI holders (branch `feat/kpi-efficiency-multi-dept` → `staging`)
+
+Owner ask: tick several departments for one Production time efficiency assignment, and assign it to floor workers in those departments (the ticket's "assign to individual workers within that department"). Owner chose one combined score across the ticked departments, and worker records (not login accounts) as holders.
+
+1. 🔵 Several departments per assignment, stored as a comma list in `kpi_assignments.scope`; minutes and hours are pooled across them. Nothing ticked = Overall.
+2. 🔵 Floor workers can hold production_efficiency (only that KPI). The Library lists workers in the ticked departments.
+3. 🔵 Library chips, People tab and the card show workers as holders.
+4. 🔵 Worker phone app: the worker's own KPI on the Me page, in all four languages.
+5. 🔵 One figure per department set per page load, so the People tab does not slow down with many workers.
+6. ⬜ Check on the staging site after merge.
+
 ## 2026-10-06 — 🔵 DEV-36: Production time efficiency KPI by department (branch `feat/kpi-efficiency-department` → `staging`)
 
 Owner ask (DEV-36, marked Done but never built): pick a department when assigning the Production time efficiency KPI, keep Overall, and score only that department's production when one is picked. Owner chose a team score: everyone assigned to a department gets that department's figure.
@@ -156,7 +168,7 @@ Owner ask (DEV-36, marked Done but never built): pick a department when assignin
 2. 🔵 The efficiency figure is filtered to that department (and type) through the same per-worker function the payslip uses. Overall stays as it is.
 3. 🔵 The Library chips show which department each person is scored on.
 4. Not done, by design: the people list is not filtered by department (KPIs go to login accounts, which have no link to worker records), and there is no month settling yet, so nothing past can change.
-5. ⬜ Check on the staging site after merge.
+5. 🔵 Checked on the staging site 2026-10-06 after #712 merged: 10 of 10 cases passed (picker, chip, scoped card, Overall unchanged, refusals, phone width, clean-up). Data finding: September Fabric Cutting hours were mostly keyed as Bedframe or with no type, so a Sofa-only score reads far above 100%; a department-only score is not affected.
 
 ## 2026-10-06 — 🔵 Worker My Pay: a card for per-day workers (branch `feat/daily-pay-card` → `staging`, BUG-2026-10-06-259)
 
