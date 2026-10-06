@@ -6,6 +6,7 @@ import { useToast } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { resolveWipTokens, type BomVariantContext } from "@/api/lib/bom-wip-breakdown";
 import { withProductCategory } from "./bom-category";
+import { removeWipLevel, moveWipNode, canMoveWipNode } from "@/lib/wip-tree-ops";
 import type {
   MaterialScaling,
   MaterialScalingDimension,
@@ -2991,6 +2992,8 @@ function WipNodeDetail({
   onAddChild,
   onRemove,
   onMove,
+  canMoveUp = true,
+  canMoveDown = true,
   onWrap,
   product,
 }: {
@@ -3017,6 +3020,8 @@ function WipNodeDetail({
   onAddChild: (wi: number, path: number[]) => void;
   onRemove: (wi: number, path: number[]) => void;
   onMove: (wi: number, path: number[], dir: -1 | 1) => void;
+  canMoveUp?: boolean;
+  canMoveDown?: boolean;
   /** Wrap this sub-WIP inside a new parent. Absent for top-level nodes. */
   onWrap?: (wi: number, path: number[]) => void;
 }) {
@@ -3045,8 +3050,8 @@ function WipNodeDetail({
           )}
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-1">
-          <button onClick={() => onMove(wi, path, -1)} className="px-1.5 py-1 text-xs text-gray-500 hover:bg-gray-100 rounded" title="Move up">↑</button>
-          <button onClick={() => onMove(wi, path, 1)} className="px-1.5 py-1 text-xs text-gray-500 hover:bg-gray-100 rounded" title="Move down">↓</button>
+          <button onClick={() => onMove(wi, path, -1)} disabled={!canMoveUp} className="px-1.5 py-1 text-xs text-gray-500 hover:bg-gray-100 rounded disabled:opacity-30 disabled:cursor-not-allowed" title="Move up (swaps with the level above when there is no sibling)">↑</button>
+          <button onClick={() => onMove(wi, path, 1)} disabled={!canMoveDown} className="px-1.5 py-1 text-xs text-gray-500 hover:bg-gray-100 rounded disabled:opacity-30 disabled:cursor-not-allowed" title="Move down (swaps with the level below when there is no sibling)">↓</button>
           {/* Insert a NEW parent above this node — only meaningful for a
               sub-WIP, since a top-level component has no parent to wrap into. */}
           {onWrap && path.length > 0 && (
@@ -3059,7 +3064,7 @@ function WipNodeDetail({
             </button>
           )}
           <button onClick={() => onAddChild(wi, path)} className="px-2 py-1 text-xs rounded bg-[#E0EDF0] text-[#3E6570] hover:bg-[#A8CAD2]">+ Sub-WIP</button>
-          <button onClick={() => onRemove(wi, path)} className="px-1.5 py-1 text-[#9A3A2D] hover:bg-[#F9E1DA] rounded" title="Delete">
+          <button onClick={() => onRemove(wi, path)} className="px-1.5 py-1 text-[#9A3A2D] hover:bg-[#F9E1DA] rounded" title="Delete this level only (the levels below move up)">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
           </button>
         </div>
@@ -3392,9 +3397,6 @@ function EditBOMDialog({
       },
     ]);
   }
-  function removeWIP(i: number) {
-    setWipComponents((prev) => prev.filter((_, idx) => idx !== i));
-  }
   function updateWIP(i: number, field: string, value: string | number | MaterialScaling[] | undefined) {
     setWipComponents((prev) =>
       prev.map((w, idx) => (idx === i ? { ...w, [field]: value } : w))
@@ -3514,15 +3516,6 @@ function EditBOMDialog({
     );
   }
 
-  function removeSubWIPAtPath(wi: number, path: number[], si: number) {
-    setWipComponents((prev) =>
-      prev.map((w, idx) => idx !== wi ? w : updateAtPath(w, path, (node) => ({
-        ...node,
-        children: (node.children || []).filter((_, i) => i !== si),
-      })))
-    );
-  }
-
   function updateSubWIPAtPath(wi: number, path: number[], field: string, value: string | number | MaterialScaling[] | undefined) {
     setWipComponents((prev) =>
       prev.map((w, idx) => idx !== wi ? w : updateAtPath(w, path, (node) => ({ ...node, [field]: value })))
@@ -3553,18 +3546,6 @@ function EditBOMDialog({
       }))
     );
   }
-  // Move a sub-WIP among its siblings (the children[] of the node at path).
-  function moveSubWIPAtPath(wi: number, path: number[], si: number, dir: -1 | 1) {
-    setWipComponents((prev) =>
-      prev.map((w, idx) => idx !== wi ? w : updateAtPath(w, path, (node) => {
-        const list = [...(node.children || [])];
-        const j = si + dir;
-        if (si < 0 || si >= list.length || j < 0 || j >= list.length) return node;
-        [list[si], list[j]] = [list[j], list[si]];
-        return { ...node, children: list };
-      }))
-    );
-  }
   // Wrap sibling si inside a new empty parent WIP (an upstream grouping level),
   // so a new stage can be inserted ABOVE an existing one in the hierarchy.
   function wrapSubWIPAtPath(wi: number, path: number[], si: number) {
@@ -3588,16 +3569,6 @@ function EditBOMDialog({
         return { ...node, children: next };
       }))
     );
-  }
-  // Move a top-level (L1) WIP component among the roots.
-  function moveWIP(wi: number, dir: -1 | 1) {
-    setWipComponents((prev) => {
-      const j = wi + dir;
-      if (wi < 0 || wi >= prev.length || j < 0 || j >= prev.length) return prev;
-      const next = [...prev];
-      [next[wi], next[j]] = [next[j], next[wi]];
-      return next;
-    });
   }
   // Move a process within a top-level (L1) WIP component's processes[].
   function moveWIPProcess(wi: number, pi: number, dir: -1 | 1) {
@@ -3729,17 +3700,24 @@ function EditBOMDialog({
   const nSelectMaterialAuto = (wi: number, path: number[], mi: number, kind: "FABRIC" | "LEG") =>
     isRoot(path) ? setMaterialAutoDetect(wi, mi, kind) : setMaterialAutoDetectAtPath(wi, path, mi, kind);
 
-  /** Remove a node wherever it sits; clears selection so the pane can't point
-   *  at something that no longer exists. */
+  /** Delete ONLY this level — its children move up into its slot (owner
+   *  2026-10-06: deleting a middle level used to wipe everything below it).
+   *  Clears selection so the pane can't point at something that moved. */
   const nRemove = (wi: number, path: number[]) => {
-    if (isRoot(path)) removeWIP(wi);
-    else removeSubWIPAtPath(wi, path.slice(0, -1), path[path.length - 1]);
+    setWipComponents((prev) => removeWipLevel(prev, wi, path));
     setSelectedWipKey(null);
   };
+  /** ↑/↓: sibling swap, or — when there is no sibling that way, as in a
+   *  linear L2→L3→L4 chain — swap levels with the parent / child. The right
+   *  pane follows the node to its new slot. */
   const nMove = (wi: number, path: number[], dir: -1 | 1) => {
-    if (isRoot(path)) moveWIP(wi, dir);
-    else moveSubWIPAtPath(wi, path.slice(0, -1), path[path.length - 1], dir);
+    const moved = moveWipNode(wipComponents, wi, path, dir);
+    if (!moved) return;
+    setWipComponents(moved.roots);
+    setSelectedWipKey(wipRowKey(moved.at.wi, moved.at.path));
   };
+  const nCanMove = (wi: number, path: number[], dir: -1 | 1) =>
+    canMoveWipNode(wipComponents, wi, path, dir);
 
   function selectMaterial(wi: number, mi: number, rm: RawMaterialOption) {
     setWipComponents((prev) =>
@@ -4054,6 +4032,8 @@ function EditBOMDialog({
                       onAddChild={(wi, path) => addSubWIPAtPath(wi, path)}
                       onRemove={nRemove}
                       onMove={nMove}
+                      canMoveUp={nCanMove(sel.wi, sel.path, -1)}
+                      canMoveDown={nCanMove(sel.wi, sel.path, 1)}
                       onWrap={(wi, path) =>
                         wrapSubWIPAtPath(wi, path.slice(0, -1), path[path.length - 1])
                       }
