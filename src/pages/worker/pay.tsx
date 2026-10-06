@@ -16,6 +16,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { useT } from "@/lib/worker-i18n";
 import { workerFetch } from "@/layouts/WorkerLayout";
+import PayCard, { liveMonthCard, payslipCard } from "./pay-card";
 
 // ---------- helpers ----------
 function rm(sen: number | undefined): string {
@@ -62,6 +63,11 @@ type PayData = {
     otDays?: Array<{ date: string; hours: number }>;
     lateDays?: Array<{ date: string; hours: number }>;
     payslipStatus?: string;
+    // Per-day workers (no monthly basic): PayCard names the day rate instead.
+    payMode?: "DAILY" | "MONTHLY";
+    dailyRateSen?: number;
+    advanceSen?: number;
+    advanceDays?: Array<{ date: string; amountSen: number; note: string }>;
   };
   history: Array<{
     absentDays?: number;
@@ -82,6 +88,7 @@ type PayData = {
     taxSen?: number;
     advanceDeductionSen?: number;
     advanceDays?: Array<{ date: string; amountSen: number; note: string }>;
+    status?: string;
   }>;
 };
 type PayslipRow = PayData["history"][number];
@@ -139,6 +146,7 @@ function asPayslipRow(v: unknown): PayslipRow | null {
           }))
           .filter((d) => d.date)
       : [],
+    status: asString(v.status) ?? undefined,
   };
 }
 
@@ -206,6 +214,19 @@ function asPayData(v: unknown): PayData | null {
       otDays,
       lateDays,
       payslipStatus: typeof v.current.payslipStatus === "string" ? v.current.payslipStatus : "NONE",
+      payMode: v.current.payMode === "DAILY" ? "DAILY" : "MONTHLY",
+      dailyRateSen: asNumber(v.current.dailyRateSen) ?? 0,
+      advanceSen: asNumber(v.current.advanceSen) ?? 0,
+      advanceDays: Array.isArray(v.current.advanceDays)
+        ? v.current.advanceDays
+            .filter(isRecord)
+            .map((d) => ({
+              date: String(d.date ?? ""),
+              amountSen: asNumber(d.amountSen) ?? 0,
+              note: asString(d.note) ?? "",
+            }))
+            .filter((d) => d.date)
+        : [],
     },
     history: v.history
       .map(asPayslipRow)
@@ -327,6 +348,26 @@ export default function WorkerPayPage() {
   const selected = period ?? pay.current.period;
   const isCurrent = selected === pay.current.period;
   const slip = pay.history.find((p) => p.period === selected) ?? null;
+  // One card for every worker and month: Net, Earnings, Deductions, Summary.
+  // A month whose lines would not add up to payroll's figure keeps the old
+  // card (see pay-card.tsx).
+  const penaltySen = penalties
+    .filter((p) => p.payrollPeriod === selected && p.status === "DEDUCTED")
+    .reduce((s, p) => s + p.deductedSen, 0);
+  const card = isCurrent
+    ? liveMonthCard({ ...pay.current, periodLabel: monthLabel(selected) }, t)
+    : slip
+      ? payslipCard(
+          slip,
+          {
+            periodLabel: monthLabel(selected),
+            payMode: pay.current.payMode,
+            dailyRateSen: pay.current.dailyRateSen,
+            penaltySen,
+          },
+          t,
+        )
+      : null;
 
   return (
     <div className="space-y-4 pt-2">
@@ -347,7 +388,13 @@ export default function WorkerPayPage() {
         </select>
       </div>
 
-      {isCurrent ? (
+      {card ? (
+        <PayCard t={t} card={card}>
+          {isCurrent && isFinalised(pay.current) && (
+            <SavePayslipButton period={pay.current.period} />
+          )}
+        </PayCard>
+      ) : isCurrent ? (
         <CurrentMonthBreakdown current={pay.current} t={t} />
       ) : slip ? (
         <FinalisedBreakdown slip={slip} t={t} />
@@ -420,6 +467,60 @@ function PenaltyCard({ penalties, t }: { penalties: WorkerPenalty[]; t: Translat
   );
 }
 
+// A month is only a DOCUMENT once the office has approved it. Until then the
+// figures move as attendance comes in, so the phone shows them as an estimate
+// and offers nothing to save — a worker holding a mid-month PDF that later
+// changed is exactly the argument this whole screen exists to prevent
+// (owner 2026-08-01: 只有 approved 才能 print).
+function isFinalised(c: PayData["current"]): boolean {
+  return c.payslipStatus === "APPROVED" || c.payslipStatus === "PAID";
+}
+
+function SavePayslipButton({ period }: { period: string }) {
+  const [payslipBusy, setPayslipBusy] = useState(false);
+  const openPayslip = async () => {
+    // Fetch the DATA and render with the same generatePayslipHTML the office
+    // prints — one document, two entry points. Opening the API URL directly
+    // would have downloaded JSON.
+    setPayslipBusy(true);
+    try {
+      const res = await workerFetch(`/api/worker/payslip/${encodeURIComponent(period)}`);
+      const body = (await res.json()) as { success?: boolean; error?: string; data?: unknown };
+      if (!res.ok || !body.success || !body.data) {
+        alert(body.error || "Could not open the payslip.");
+        return;
+      }
+      const { generatePayslipHTML } = await import("@/lib/generate-payslip-pdf");
+      const html = generatePayslipHTML(
+        body.data as Parameters<typeof generatePayslipHTML>[0],
+      );
+      const w = window.open("", "_blank");
+      if (!w) {
+        alert("Please allow pop-ups to save your payslip.");
+        return;
+      }
+      w.document.write(html);
+      w.document.close();
+      w.focus();
+    } catch {
+      alert("Could not reach the server.");
+    } finally {
+      setPayslipBusy(false);
+    }
+  };
+  return (
+    <button
+      type="button"
+      onClick={openPayslip}
+      disabled={payslipBusy}
+      className="mt-3 w-full rounded-lg bg-white/10 py-2.5 text-sm font-semibold text-white active:bg-white/20 disabled:opacity-50"
+    >
+      {payslipBusy ? "Opening…" : "Save payslip as PDF"}
+    </button>
+  );
+}
+
+// The old cards below are the fallback for a month PayCard cannot rebuild.
 // Current (in-progress) month — a LIVE estimate. Every line is itemised so the
 // worker can see how the gross is built; Absent / OT rows tap open to the dates.
 function CurrentMonthBreakdown({
@@ -448,43 +549,7 @@ function CurrentMonthBreakdown({
       Number.isInteger(d.hours) ? d.hours : d.hours.toFixed(1)
     }h`,
   }));
-  // A month is only a DOCUMENT once the office has approved it. Until then the
-  // figures move as attendance comes in, so the phone shows them as an estimate
-  // and offers nothing to save — a worker holding a mid-month PDF that later
-  // changed is exactly the argument this whole screen exists to prevent
-  // (owner 2026-08-01: 只有 approved 才能 print).
-  const finalised = c.payslipStatus === "APPROVED" || c.payslipStatus === "PAID";
-  const [payslipBusy, setPayslipBusy] = useState(false);
-  const openPayslip = async () => {
-    // Fetch the DATA and render with the same generatePayslipHTML the office
-    // prints — one document, two entry points. Opening the API URL directly
-    // would have downloaded JSON.
-    setPayslipBusy(true);
-    try {
-      const res = await workerFetch(`/api/worker/payslip/${encodeURIComponent(c.period)}`);
-      const body = (await res.json()) as { success?: boolean; error?: string; data?: unknown };
-      if (!res.ok || !body.success || !body.data) {
-        alert(body.error || "Could not open the payslip.");
-        return;
-      }
-      const { generatePayslipHTML } = await import("@/lib/generate-payslip-pdf");
-      const html = generatePayslipHTML(
-        body.data as Parameters<typeof generatePayslipHTML>[0],
-      );
-      const w = window.open("", "_blank");
-      if (!w) {
-        alert("Please allow pop-ups to save your payslip.");
-        return;
-      }
-      w.document.write(html);
-      w.document.close();
-      w.focus();
-    } catch {
-      alert("Could not reach the server.");
-    } finally {
-      setPayslipBusy(false);
-    }
-  };
+  const finalised = isFinalised(c);
   return (
     <div className="bg-[#1F1D1B] text-white rounded-xl p-4">
       <p className="text-[11px] text-[#B0AAA3]">
@@ -493,16 +558,7 @@ function CurrentMonthBreakdown({
       <p className="text-4xl font-bold tracking-tight mt-1">
         {rm(c.estimatedGrossSen)}
       </p>
-      {finalised && (
-        <button
-          type="button"
-          onClick={openPayslip}
-          disabled={payslipBusy}
-          className="mt-3 w-full rounded-lg bg-white/10 py-2.5 text-sm font-semibold text-white active:bg-white/20 disabled:opacity-50"
-        >
-          {payslipBusy ? "Opening…" : "Save payslip as PDF"}
-        </button>
-      )}
+      {finalised && <SavePayslipButton period={c.period} />}
 
       <div className="mt-4 pt-4 border-t border-white/10 space-y-2 text-sm">
         <Row label={t("pay.fullSalary")} value={rm(c.fullSalarySen)} />

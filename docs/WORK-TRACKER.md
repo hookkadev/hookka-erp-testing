@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-06**: branch `feat/pay-card-main` (to `main`, BUG-2026-10-06-259) added below (its entry is the newest).
 > **Last verified: 2026-10-05**: fill job cards stuck at 0 minutes (#696, BUG-2026-10-05-256) closed ✅ with its prod run.
 > **Last verified: 2026-10-05**: branch `fix/worker-pay-late-daily-rate` (to `main`, BUG-2026-10-05-258) added below (its entry is the newest).
 > **Last verified: 2026-10-05**: branch `fix/worker-pay-advance-line-main` (to `main`, BUG-2026-10-05-257) added below (its entry is the newest).
@@ -95,6 +96,14 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-06 — 🔵 Worker My Pay: one card for every worker and month (branch `feat/pay-card-main` → `main`, BUG-2026-10-06-259)
+
+Owner ask: redesign My Pay so a per-day worker's pay explains itself (no "Basic RM 0.00"), deductions come after earnings, and every worker and month uses the same card. Staging has it through #707 to #710; this brings it to main.
+
+1. 🔵 `GET /api/worker/payslips` prices the current month with the worker's pay mode and day rate, and returns `payMode`, `dailyRateSen`, `advanceSen`, `advanceDays`, plus each past month's `status`.
+2. 🔵 `src/pages/worker/pay-card.tsx` on My Pay for every worker and month: Net pay, Earnings (monthly salary or N days @ day rate, less absent and late, plus OT and allowances = the payslip's Gross), Deductions, Summary. Labels in all four worker languages.
+3. ⬜ Check on production after deploy (read and write path).
 
 ## 2026-10-05 — 🔵 Worker My Pay shows a per-day worker's late charge (branch `fix/worker-pay-late-daily-rate` → `main`, then `staging`, BUG-2026-10-05-258)
 
