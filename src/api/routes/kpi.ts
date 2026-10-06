@@ -45,7 +45,6 @@ import {
   checklistProgress,
   surveyMean,
   manualRating,
-  type MetricResult,
 } from "../lib/kpi-metrics";
 import {
   newSurveyToken,
@@ -57,14 +56,6 @@ const app = new Hono<Env>();
 
 const ctxGet = (c: Context<Env>, k: string): string =>
   (c as unknown as { get: (k: string) => string | undefined }).get(k) ?? "";
-
-/**
- * DEV-36: a KPI holder is a login account (`user-…`) or a floor worker
- * (`worker-…`). Both live in kpi_assignments.user_id; the id prefix says which.
- * Workers hold production_efficiency only.
- */
-const isWorkerId = (id: string): boolean => id.startsWith("worker-");
-const WORKER_KPI = "production_efficiency";
 
 /** YYYY-MM, defaulting to the current month. */
 function periodOf(c: Context<Env>): string {
@@ -138,8 +129,6 @@ interface CardLine {
   points: number | null;
   evidence: string;
   sampleSize: number;
-  /** production_efficiency only: the departments it is scored on ("" = Overall). */
-  scope?: string;
 }
 
 /**
@@ -174,18 +163,7 @@ async function loadPayout(c: Context<Env>, userId: string): Promise<PayoutSettin
   };
 }
 
-/**
- * `memo` shares computed figures across many cards in one request (the People
- * tab): everyone on the same KPI, month and scope gets the same number, so it
- * is worked out once.
- */
-export async function buildCard(
-  c: Context<Env>,
-  userId: string,
-  role: string,
-  period: string,
-  memo?: Map<string, Promise<MetricResult>>,
-) {
+async function buildCard(c: Context<Env>, userId: string, role: string, period: string) {
   await ensureKpiTables(c.var.DB);
   const orgId = getOrgId(c);
 
@@ -266,7 +244,7 @@ export async function buildCard(
           ? await surveyMean(c, userId, def.key, period)
           : def.scoring === "MANUAL"
             ? await manualRating(c, period, userId, def.key)
-            : await memoMetric(c, def.key, period, a.scope, memo);
+            : await computeMetric(c, def.key, period, a.scope);
     const att =
       m.actual === null ? null : attainment(def, Number(a.target), m.actual, m.earlyPct);
     lines.push({
@@ -280,7 +258,6 @@ export async function buildCard(
       attainment: att,
       points: att === null ? null : Math.round((att / 100) * Number(a.weight) * 10) / 10,
       evidence: m.detail, sampleSize: m.sampleSize,
-      scope: a.scope ?? "",
     });
   }
 
@@ -327,20 +304,6 @@ export async function buildCard(
   };
 }
 
-function memoMetric(
-  c: Context<Env>,
-  key: string,
-  period: string,
-  scope: string | null,
-  memo?: Map<string, Promise<MetricResult>>,
-): Promise<MetricResult> {
-  if (!memo) return computeMetric(c, key, period, scope);
-  const k = `${key}|${period}|${scope ?? ""}`;
-  let p = memo.get(k);
-  if (!p) memo.set(k, (p = computeMetric(c, key, period, scope)));
-  return p;
-}
-
 // ---- My own card ----------------------------------------------------------
 app.get("/me", async (c) => {
   const userId = ctxGet(c, "userId");
@@ -355,15 +318,11 @@ app.get("/users/:id", async (c) => {
   const denied = requireSuperAdmin(c);
   if (denied) return denied;
   const id = c.req.param("id");
-  const u = isWorkerId(id)
-    ? await c.var.DB.prepare(`SELECT id, 'WORKER' AS role FROM workers WHERE id = ?`)
-        .bind(id)
-        .first<{ id: string; role: string }>()
-    : await c.var.DB.prepare(
-        "SELECT id, role FROM users WHERE id = ?",
-      )
-        .bind(id)
-        .first<{ id: string; role: string }>();
+  const u = await c.var.DB.prepare(
+    "SELECT id, role FROM users WHERE id = ?",
+  )
+    .bind(id)
+    .first<{ id: string; role: string }>();
   if (!u) return c.json({ success: false, error: "User not found" }, 404);
   const data = await buildCard(c, String(u.id), String(u.role).toUpperCase(), periodOf(c));
   return c.json({ success: true, data });
@@ -737,36 +696,25 @@ app.get("/library", async (c) => {
   const orgId = getOrgId(c);
 
   const holders = await c.var.DB.prepare(
-    `SELECT a.kpiKey, a.scope, a.userId AS "userId", u.email, u.displayName, u.role,
-            w.name AS "workerName"
+    `SELECT a.kpiKey, a.scope, u.id AS "userId", u.email, u.displayName, u.role
        FROM kpi_assignments a
-       LEFT JOIN users u ON u.id = a.userId
-       LEFT JOIN workers w ON w.id = a.userId
-      WHERE a.orgId = ? AND a.isActive = TRUE
-        AND (u.id IS NOT NULL OR w.id IS NOT NULL)`,
+       JOIN users u ON u.id = a.userId
+      WHERE a.orgId = ? AND a.isActive = TRUE`,
   )
     .bind(orgId)
     .all<{
       kpiKey: string; scope: string | null; userId: string;
-      email: string | null; displayName: string | null; role: string | null;
-      workerName: string | null;
+      email: string; displayName: string | null; role: string;
     }>();
 
-  const byKpi = new Map<
-    string,
-    Array<{ userId: string; name: string; role: string; scope: string; kind: "USER" | "WORKER" }>
-  >();
+  const byKpi = new Map<string, Array<{ userId: string; name: string; role: string; scope: string }>>();
   for (const h of holders.results ?? []) {
     const list = byKpi.get(String(h.kpiKey)) ?? [];
-    const worker = isWorkerId(String(h.userId));
     list.push({
       userId: String(h.userId),
-      name: worker
-        ? String(h.workerName ?? h.userId)
-        : h.displayName || String(h.email).split("@")[0],
-      role: worker ? "WORKER" : String(h.role ?? ""),
+      name: h.displayName || String(h.email).split("@")[0],
+      role: String(h.role ?? ""),
       scope: h.scope ?? "",
-      kind: worker ? "WORKER" : "USER",
     });
     byKpi.set(String(h.kpiKey), list);
   }
@@ -848,32 +796,6 @@ app.get("/people", async (c) => {
     `SELECT id, email, displayName, role FROM users
       WHERE role IS NOT NULL AND role <> '' ORDER BY role, email`,
   ).all<{ id: string; email: string; displayName: string | null; role: string }>();
-  // Floor workers appear only when they hold a KPI; there are too many to list
-  // every one with a dash.
-  const workers = await c.var.DB.prepare(
-    `SELECT DISTINCT w.id, w.name, w.empNo AS "empNo"
-       FROM kpi_assignments a
-       JOIN workers w ON w.id = a.userId
-      WHERE a.orgId = ? AND a.isActive = TRUE
-      ORDER BY w.name`,
-  )
-    .bind(getOrgId(c))
-    .all<{ id: string; name: string; empNo: string | null }>();
-  const holders = [
-    ...(users.results ?? []).map((u) => ({
-      id: String(u.id),
-      name: u.displayName || String(u.email).split("@")[0],
-      email: String(u.email),
-      role: String(u.role).toUpperCase(),
-    })),
-    ...(workers.results ?? []).map((w) => ({
-      id: String(w.id),
-      name: String(w.name),
-      email: String(w.empNo ?? ""),
-      role: "WORKER",
-    })),
-  ];
-  const memo = new Map<string, Promise<MetricResult>>();
 
   // Owner 2026-08-06 asked for the previous month alongside. A score with no
   // comparison says nothing about whether anything is being fixed — 22 after a
@@ -883,19 +805,19 @@ app.get("/people", async (c) => {
   const prevPeriod = `${prevDate.getUTCFullYear()}-${String(prevDate.getUTCMonth() + 1).padStart(2, "0")}`;
 
   const out = [];
-  for (const u of holders) {
-    const role = u.role;
-    const card = await buildCard(c, u.id, role, period, memo);
+  for (const u of users.results ?? []) {
+    const role = String(u.role).toUpperCase();
+    const card = await buildCard(c, String(u.id), role, period);
     // Only pay for the second computation when there is something to compare.
     const prev = card.lines.length
-      ? await buildCard(c, u.id, role, prevPeriod, memo)
+      ? await buildCard(c, String(u.id), role, prevPeriod)
       : null;
     // Only people who actually carry KPIs are interesting here; the rest are
     // listed with a dash so it is obvious nobody was skipped.
     out.push({
-      userId: u.id,
-      name: u.name,
-      email: u.email,
+      userId: String(u.id),
+      name: u.displayName || String(u.email).split("@")[0],
+      email: String(u.email),
       role,
       kpiCount: card.lines.length,
       score: card.score,
@@ -1023,29 +945,6 @@ app.put("/kpi/:kpiKey/assignees", async (c) => {
   const orgId = getOrgId(c);
   const actor = ctxGet(c, "userId");
 
-  // DEV-36: a floor worker (`userId` = "worker-…") may hold this KPI only, and
-  // only while ACTIVE. Taking one off (isActive false) is always allowed, so a
-  // worker who has since resigned can still be removed.
-  const workerIds = rows.map((r) => String(r.userId)).filter(isWorkerId);
-  if (workerIds.length) {
-    if (kpiKey !== WORKER_KPI) {
-      return c.json({ success: false, error: `Floor workers can only hold Production time efficiency` }, 400);
-    }
-    const res = await c.var.DB.prepare(
-      `SELECT id, status FROM workers WHERE id IN (${workerIds.map(() => "?").join(", ")})`,
-    )
-      .bind(...workerIds)
-      .all<{ id: string; status: string }>();
-    const status = new Map((res.results ?? []).map((w) => [String(w.id), String(w.status)]));
-    for (const r of rows) {
-      const id = String(r.userId);
-      if (!isWorkerId(id) || r.isActive === false) continue;
-      if (status.get(id) !== "ACTIVE") {
-        return c.json({ success: false, error: `Worker not found or not active: ${id}` }, 400);
-      }
-    }
-  }
-
   // DEV-36: a department scope, production_efficiency only: one or more
   // departments, stored as "FAB_CUT,FAB_SEW:SOFA". An unknown or non-production
   // department is refused here; stored, it would only ever score "no hours
@@ -1058,7 +957,7 @@ app.put("/kpi/:kpiKey/assignees", async (c) => {
       scopes.set(String(r.userId), null);
       continue;
     }
-    if (kpiKey !== WORKER_KPI) {
+    if (kpiKey !== "production_efficiency") {
       return c.json({ success: false, error: `${def.label} has no department option` }, 400);
     }
     const sc = parseEfficiencyScope(raw);
