@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// do-auto-invoice-empty-guard.test.mjs — BUG-2026-10-07-264.
+// do-auto-invoice-empty-guard.test.mjs — BUG-2026-10-07-266.
 //
 // DO-2610-013 was marked DELIVERED twice, 0.6 s apart (a double click). Both
 // requests read the billing state before either had committed, so both went on

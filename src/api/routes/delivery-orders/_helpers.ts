@@ -1717,7 +1717,7 @@ export async function buildDoDeliveredSoAndInvoice(
       soIds,
     );
 
-    // BUG-2026-10-07-264 — the same "nothing to invoice" refusal the manual
+    // BUG-2026-10-07-266 — the same "nothing to invoice" refusal the manual
     // POST /api/invoices has always made (invoices.ts). Without it, two
     // DELIVERED requests 0.6 s apart (a double click, DO-2610-013) both passed
     // the billing gate above before either committed; the second then read the

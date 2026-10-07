@@ -1,6 +1,7 @@
 # Bug History
 
-> **Last verified: 2026-10-07**: newest entry BUG-2026-10-07-264 (branch `fix/empty-auto-invoice-guard`, to main; 263 is on `staging`).
+> **Last verified: 2026-10-07**: newest entry BUG-2026-10-07-266 (branch `fix/empty-auto-invoice-guard`, to main; 263 and 264 are staging's, 265 is main's).
+> **Last verified: 2026-10-07**: newest entry BUG-2026-10-07-265 (branch `perf/production-dept-tab-cache-main`, to main; 263 and 264 are staging's).
 > **Last verified: 2026-10-07**: newest entry BUG-2026-10-07-262 (branch `fix/rm-uom-bottle-main`, to main).
 > **Last verified: 2026-10-06**: newest entry BUG-2026-10-06-261 (branch `fix/bom-wip-delete-move`, to main); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-06**: newest entry BUG-2026-10-06-260 (branch `fix/production-overview-scrollbar`, to main; no open PR holds 260); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
@@ -79,7 +80,7 @@ Entries themselves stay newest-first.
 
 ---
 
-## BUG-2026-10-07-264 — A double-clicked Delivered posted a second, empty invoice (RM 0, no lines) and the customer was emailed that one `delivery-orders` 🔵
+## BUG-2026-10-07-266 — A double-clicked Delivered posted a second, empty invoice (RM 0, no lines) and the customer was emailed that one `delivery-orders` 🔵
 
 🔵 Fixed on `fix/empty-auto-invoice-guard` (to `main`). Report (Violet, WhatsApp, with the PDF): Houzs Century received INV-2610-021 with no lines and RM 0.00.
 
@@ -92,6 +93,20 @@ Entries themselves stay newest-first.
 **Data.** INV-2610-021 is still live on prod; void it (PUT status CANCELLED) and resend the DO's invoice email so INV-2610-020 goes out. Read from the code, not run: voiding it releases nothing (no lines), DO-2610-013 stays INVOICED (both lines billed by 020) and its SOs stay INVOICED (020 is live).
 
 **Guard.** `tests/do-auto-invoice-empty-guard.test.mjs` replays the losing request against a book whose reads change underneath it (first billing read pre-commit, later reads see INV-2610-020): no invoice statements, and SOs and DO finish INVOICED. Fails on the old code (it goes on to `nextInvoiceNo`). `npm test` 5264 pass / 0 fail, strict typecheck clean.
+
+---
+
+## BUG-2026-10-07-265 — Production dept pages downloaded the whole sheet again on every tab switch `production-orders` `ui-frontend` 🟡
+
+🟡 Fix on `perf/production-dept-tab-cache-main` (to `main`; the same change is #734 on `staging`). Reported by the owner, 2026-10-07.
+
+**Measured on staging.** Each dept sheet (`/api/production-orders?fields=minimal&dept=X&excludeCompleted=true`) is 1,168-1,333 orders, 5.7-7.0 MB decoded, 0.4-2.6 s. With the page visible, 10 s on Fab Sew, then back to Fab Cut with replies delayed 5 s: Fab Cut's saved copy was gone and the page showed "(loading…)" for 5.4 s. A cold dept page also sent a today-dated request that was aborted ~30 ms later.
+
+**Cause.** (1) The 8 s poll and the come-back-to-the-window refresh call `fetchOrders`, which called `invalidateCachePrefix("/api/production-orders")`: every dept's saved copy (and other browser tabs', via the broadcast) was wiped every 8 s. (2) A 6-7 MB body can be over the localStorage quota, so `writeCache` could fail silently. (3) The F1.1 "today" seed called `setUrlBatch` from a `useLayoutEffect` declared before `useUrlBatch()`; react-router's `navigate()` ignores calls until its own layout effect has run, so the seed was a silent no-op and only cost the extra request.
+
+**Fix.** `fetchOrders` refetches the sheet and the overdue chips without invalidating; the stock-PO create path invalidates first. `cached-fetch.ts` keeps a body that localStorage refuses in memory (up to 9 entries, ~6 MB heap each, measured), cleared by every invalidation path. The dead seed is removed; dept pages keep loading every open order (owner's choice). Same test, new code: 0.55 s, no "(loading…)".
+
+**Guard.** `tests/production-dept-tab-cache.test.mjs`.
 
 ---
 
