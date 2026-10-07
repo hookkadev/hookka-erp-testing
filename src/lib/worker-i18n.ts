@@ -842,11 +842,11 @@ const dict: Dict = {
     zh: '员工明细仪表板',
     my: 'ဝန်ထမ်း အသေးစိတ် ဒက်ရှ်ဘုတ်',
   },
-  'home.workingHours': {
-    en: 'Working Hours',
-    ms: 'Jam Kerja',
-    zh: '工作时数',
-    my: 'အလုပ်နာရီ',
+  'home.productionHours': {
+    en: 'Production Hours',
+    ms: 'Jam Pengeluaran',
+    zh: '生产工时',
+    my: 'ထုတ်လုပ်နာရီ',
   },
   'home.productionTime': {
     en: 'Production Time',
