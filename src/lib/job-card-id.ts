@@ -45,7 +45,7 @@ export const DEPT_CODE2: Record<string, string> = {
   FOAM: "04",
   FRAMING: "05",
   WEBBING: "06",
-  // FIBRE (owner 2026-10-07) sits just before UPHOLSTERY; free code "15",
+  // FIBRE (owner 2026-10-07) sits just after FOAM; free code "15",
   // same identity-not-sequence rule as FOAM_CUTTING.
   FIBRE: "15",
   UPHOLSTERY: "07",

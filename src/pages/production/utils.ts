@@ -6,10 +6,10 @@ export const DEPARTMENTS = [
   { name: "Fab Sew",    code: "FAB_SEW" },
   { name: "Foam Cutting", code: "FOAM_CUTTING" },
   { name: "Foam Bonding", code: "FOAM" },
+  { name: "Fibre", code: "FIBRE" },
   { name: "Wood Cut",   code: "WOOD_CUT" },
   { name: "Framing",    code: "FRAMING" },
   { name: "Webbing",    code: "WEBBING" },
-  { name: "Fibre", code: "FIBRE" },
   { name: "Upholstery", code: "UPHOLSTERY" },
   { name: "Packing",    code: "PACKING" },
 ] as const;

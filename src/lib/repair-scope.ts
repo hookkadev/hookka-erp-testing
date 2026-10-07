@@ -50,9 +50,9 @@ export const REPAIR_DEPT_CODES = [
   "WOOD_CUT",
   "FOAM_CUTTING",
   "FOAM",
+  "FIBRE",
   "FRAMING",
   "WEBBING",
-  "FIBRE",
   "UPHOLSTERY",
   "PACKING",
 ] as const;
@@ -64,9 +64,9 @@ export const REPAIR_DEPT_LABELS: Record<RepairDeptCode, string> = {
   WOOD_CUT: "Wood Cutting",
   FOAM_CUTTING: "Foam Cutting",
   FOAM: "Foam Bonding",
+  FIBRE: "Fibre",
   FRAMING: "Framing",
   WEBBING: "Webbing",
-  FIBRE: "Fibre",
   UPHOLSTERY: "Upholstery",
   PACKING: "Packing",
 };

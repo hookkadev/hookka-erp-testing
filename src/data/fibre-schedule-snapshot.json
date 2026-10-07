@@ -4,7 +4,7 @@
   "sheets": {
     "Summary & Notes": [
       ["Fibre - Day-by-Day Schedule"],
-      ["Fibre is a production stage that runs immediately before Upholstery."],
+      ["Fibre is a production stage that runs immediately after Foam Bonding."],
       [""],
       ["A dedicated forward-capacity schedule for Fibre is not built yet."],
       ["Until it lands, this page shows the saved snapshot (empty) and the live Recalculate button is inert."]

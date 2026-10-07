@@ -15,11 +15,11 @@ INSERT INTO departments (id, code, name, shortName, sequence, color, workingHour
 -- displays as "Foam Bonding".
 INSERT INTO departments (id, code, name, shortName, sequence, color, workingHoursPerDay, isProduction) VALUES ('dept-14', 'FOAM_CUTTING', 'Foam Cutting', 'Foam Cut', 4, '#A78BFA', 9, 1);
 INSERT INTO departments (id, code, name, shortName, sequence, color, workingHoursPerDay, isProduction) VALUES ('dept-4', 'FOAM', 'Foam Bonding', 'Foam Bonding', 5, '#8B5CF6', 9, 1);
-INSERT INTO departments (id, code, name, shortName, sequence, color, workingHoursPerDay, isProduction) VALUES ('dept-5', 'FRAMING', 'Framing', 'Framing', 6, '#F97316', 9, 1);
-INSERT INTO departments (id, code, name, shortName, sequence, color, workingHoursPerDay, isProduction) VALUES ('dept-6', 'WEBBING', 'Webbing', 'Webbing', 7, '#10B981', 9, 1);
--- FIBRE (owner 2026-10-07): production stage immediately before UPHOLSTERY.
--- UPHOLSTERY and every dept after it are shifted +1 in sequence.
-INSERT INTO departments (id, code, name, shortName, sequence, color, workingHoursPerDay, isProduction) VALUES ('dept-15', 'FIBRE', 'Fibre', 'Fibre', 8, '#84CC16', 9, 1);
+-- FIBRE (owner 2026-10-07): production stage immediately after FOAM (Foam
+-- Bonding). FRAMING and every dept after it are shifted +1 in sequence.
+INSERT INTO departments (id, code, name, shortName, sequence, color, workingHoursPerDay, isProduction) VALUES ('dept-15', 'FIBRE', 'Fibre', 'Fibre', 6, '#84CC16', 9, 1);
+INSERT INTO departments (id, code, name, shortName, sequence, color, workingHoursPerDay, isProduction) VALUES ('dept-5', 'FRAMING', 'Framing', 'Framing', 7, '#F97316', 9, 1);
+INSERT INTO departments (id, code, name, shortName, sequence, color, workingHoursPerDay, isProduction) VALUES ('dept-6', 'WEBBING', 'Webbing', 'Webbing', 8, '#10B981', 9, 1);
 INSERT INTO departments (id, code, name, shortName, sequence, color, workingHoursPerDay, isProduction) VALUES ('dept-7', 'UPHOLSTERY', 'Upholstery', 'Upholstery', 9, '#F43F5E', 9, 1);
 INSERT INTO departments (id, code, name, shortName, sequence, color, workingHoursPerDay, isProduction) VALUES ('dept-8', 'PACKING', 'Packing', 'Packing', 10, '#06B6D4', 9, 1);
 INSERT INTO departments (id, code, name, shortName, sequence, color, workingHoursPerDay, isProduction) VALUES ('dept-9', 'WAREHOUSING', 'Warehousing', 'Warehouse', 11, '#14B8A6', 9, 0);
