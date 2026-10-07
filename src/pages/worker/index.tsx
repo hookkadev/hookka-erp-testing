@@ -1327,16 +1327,15 @@ export default function WorkerHomePage() {
         </div>
       )}
 
-      {/* How Efficiency % is worked out. The worked line uses minutes, not the
-          1-decimal hours above, so it checks out on a calculator. */}
+      {/* How Efficiency % is worked out, with the tiles' own hour figures. */}
       {hist && (hist.totals.prodDeptMinutes ?? 0) >= 30 && (
         <div className="-mt-1 text-xs text-[#5A5550] text-center break-words">
           <p>
             {t("home.efficiencyPct")} = {t("home.productionHours")} ÷ {t("home.productionTime")} × 100
           </p>
           <p className="tabular-nums">
-            {(hist.totals.effProductionMinutes ?? 0).toLocaleString()} min ÷{" "}
-            {(hist.totals.prodDeptMinutes ?? 0).toLocaleString()} min × 100 ={" "}
+            {mins2hrs(hist.totals.effProductionMinutes ?? 0)} ÷{" "}
+            {mins2hrs(hist.totals.prodDeptMinutes ?? 0)} × 100 ={" "}
             {hist.totals.efficiencyPct}%
           </p>
         </div>
