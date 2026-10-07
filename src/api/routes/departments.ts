@@ -147,6 +147,44 @@ async function ensureFoamCuttingDept(c: Context<Env>): Promise<void> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Runtime self-apply for the FIBRE department (owner 2026-10-07).
+//
+// FIBRE is a production stage placed immediately BEFORE UPHOLSTERY in the line
+// order. Same reasoning as ensureFoamCuttingDept: migrations are inert on
+// deploy, so the row reaches prod only through this awaited, idempotent apply.
+//
+// The insert is guarded by NOT EXISTS on the write path (never a cached read),
+// and the sequence shift runs only when that insert actually added the row, so
+// a stale read or a second concurrent GET cannot shift the line order twice.
+// ---------------------------------------------------------------------------
+async function ensureFibreDept(c: Context<Env>): Promise<void> {
+  try {
+    const uph = await c.var.DB.prepare(
+      "SELECT sequence FROM departments WHERE code = 'UPHOLSTERY'",
+    ).first<{ sequence: number }>();
+    const uphSeq = uph?.sequence ?? 8;
+    const res = await c.var.DB.prepare(
+      `INSERT INTO departments (id, code, name, shortName, sequence, color, workingHoursPerDay, isProduction)
+       SELECT ?, 'FIBRE', 'Fibre', 'Fibre', ?, '#84CC16', 9, 1
+        WHERE NOT EXISTS (SELECT 1 FROM departments WHERE code = 'FIBRE')`,
+    )
+      .bind(genId(), uphSeq)
+      .run();
+    if ((res.meta?.changes ?? 0) === 1) {
+      // Shift UPHOLSTERY and everything after it up by one so FIBRE holds
+      // UPHOLSTERY's old slot. Relative order of every other dept is kept.
+      await c.var.DB.prepare(
+        "UPDATE departments SET sequence = sequence + 1 WHERE sequence >= ? AND code <> 'FIBRE'",
+      )
+        .bind(uphSeq)
+        .run();
+    }
+  } catch (e) {
+    console.warn("[departments] ensureFibreDept failed:", e);
+  }
+}
+
 // Code is used as a soft FK in workers.departmentCode (and historical rows),
 // so we lock it to uppercase + underscores to match the existing seed
 // convention (FAB_CUT, R_AND_D, etc.). Numeric chars allowed for future-
@@ -156,9 +194,10 @@ const CODE_PATTERN = /^[A-Z][A-Z0-9_]*$/;
 // GET /api/departments
 app.get("/", async (c) => {
   // Runtime self-apply — reaches existing prod because migrations are inert on
-  // deploy. Awaited BEFORE the read so the new FOAM_CUTTING row + FOAM relabel
+  // deploy. Awaited BEFORE the read so the new FOAM_CUTTING / FIBRE rows + FOAM relabel
   // are in the returned set.
   await ensureFoamCuttingDept(c);
+  await ensureFibreDept(c);
   const res = await c.var.DB.prepare(
     "SELECT * FROM departments ORDER BY sequence",
   ).all<DepartmentRow>();

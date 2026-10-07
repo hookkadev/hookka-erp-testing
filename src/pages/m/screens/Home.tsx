@@ -231,7 +231,7 @@ function todayISO(): string {
 // eight production departments count toward the denominator.
 const PROD_DEPTS = new Set([
   "FAB_CUT", "FAB_SEW", "WOOD_CUT", "FOAM_CUTTING", "FOAM",
-  "FRAMING", "WEBBING", "UPHOLSTERY", "PACKING",
+  "FRAMING", "WEBBING", "FIBRE", "UPHOLSTERY", "PACKING",
 ]);
 const DEPT_LABEL: Record<string, string> = {
   FAB_CUT: "Fabric Cutting",
@@ -241,6 +241,7 @@ const DEPT_LABEL: Record<string, string> = {
   FOAM: "Foam Bonding",
   FRAMING: "Framing",
   WEBBING: "Webbing",
+  FIBRE: "Fibre",
   UPHOLSTERY: "Upholstery",
   PACKING: "Packing",
 };

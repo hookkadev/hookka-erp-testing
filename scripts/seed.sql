@@ -17,13 +17,16 @@ INSERT INTO departments (id, code, name, shortName, sequence, color, workingHour
 INSERT INTO departments (id, code, name, shortName, sequence, color, workingHoursPerDay, isProduction) VALUES ('dept-4', 'FOAM', 'Foam Bonding', 'Foam Bonding', 5, '#8B5CF6', 9, 1);
 INSERT INTO departments (id, code, name, shortName, sequence, color, workingHoursPerDay, isProduction) VALUES ('dept-5', 'FRAMING', 'Framing', 'Framing', 6, '#F97316', 9, 1);
 INSERT INTO departments (id, code, name, shortName, sequence, color, workingHoursPerDay, isProduction) VALUES ('dept-6', 'WEBBING', 'Webbing', 'Webbing', 7, '#10B981', 9, 1);
-INSERT INTO departments (id, code, name, shortName, sequence, color, workingHoursPerDay, isProduction) VALUES ('dept-7', 'UPHOLSTERY', 'Upholstery', 'Upholstery', 8, '#F43F5E', 9, 1);
-INSERT INTO departments (id, code, name, shortName, sequence, color, workingHoursPerDay, isProduction) VALUES ('dept-8', 'PACKING', 'Packing', 'Packing', 9, '#06B6D4', 9, 1);
-INSERT INTO departments (id, code, name, shortName, sequence, color, workingHoursPerDay, isProduction) VALUES ('dept-9', 'WAREHOUSING', 'Warehousing', 'Warehouse', 10, '#14B8A6', 9, 0);
-INSERT INTO departments (id, code, name, shortName, sequence, color, workingHoursPerDay, isProduction) VALUES ('dept-10', 'REPAIR', 'Repair', 'Repair', 11, '#EAB308', 9, 0);
-INSERT INTO departments (id, code, name, shortName, sequence, color, workingHoursPerDay, isProduction) VALUES ('dept-11', 'MAINTENANCE', 'Maintenance', 'Maint', 12, '#64748B', 9, 0);
-INSERT INTO departments (id, code, name, shortName, sequence, color, workingHoursPerDay, isProduction) VALUES ('dept-12', 'PRODUCTION_SHORTFALL', 'Production Shortfall', 'Shortfall', 13, '#DC2626', 9, 0);
-INSERT INTO departments (id, code, name, shortName, sequence, color, workingHoursPerDay, isProduction) VALUES ('dept-13', 'R_AND_D', 'R&D', 'R&D', 14, '#0EA5E9', 9, 0);
+-- FIBRE (owner 2026-10-07): production stage immediately before UPHOLSTERY.
+-- UPHOLSTERY and every dept after it are shifted +1 in sequence.
+INSERT INTO departments (id, code, name, shortName, sequence, color, workingHoursPerDay, isProduction) VALUES ('dept-15', 'FIBRE', 'Fibre', 'Fibre', 8, '#84CC16', 9, 1);
+INSERT INTO departments (id, code, name, shortName, sequence, color, workingHoursPerDay, isProduction) VALUES ('dept-7', 'UPHOLSTERY', 'Upholstery', 'Upholstery', 9, '#F43F5E', 9, 1);
+INSERT INTO departments (id, code, name, shortName, sequence, color, workingHoursPerDay, isProduction) VALUES ('dept-8', 'PACKING', 'Packing', 'Packing', 10, '#06B6D4', 9, 1);
+INSERT INTO departments (id, code, name, shortName, sequence, color, workingHoursPerDay, isProduction) VALUES ('dept-9', 'WAREHOUSING', 'Warehousing', 'Warehouse', 11, '#14B8A6', 9, 0);
+INSERT INTO departments (id, code, name, shortName, sequence, color, workingHoursPerDay, isProduction) VALUES ('dept-10', 'REPAIR', 'Repair', 'Repair', 12, '#EAB308', 9, 0);
+INSERT INTO departments (id, code, name, shortName, sequence, color, workingHoursPerDay, isProduction) VALUES ('dept-11', 'MAINTENANCE', 'Maintenance', 'Maint', 13, '#64748B', 9, 0);
+INSERT INTO departments (id, code, name, shortName, sequence, color, workingHoursPerDay, isProduction) VALUES ('dept-12', 'PRODUCTION_SHORTFALL', 'Production Shortfall', 'Shortfall', 14, '#DC2626', 9, 0);
+INSERT INTO departments (id, code, name, shortName, sequence, color, workingHoursPerDay, isProduction) VALUES ('dept-13', 'R_AND_D', 'R&D', 'R&D', 15, '#0EA5E9', 9, 0);
 
 -- ========================================================
 -- Customers + delivery hubs

@@ -26,6 +26,7 @@ export const DEPT_ORDER = [
   "FOAM",
   "FRAMING",
   "WEBBING",
+  "FIBRE",
   "UPHOLSTERY",
   "PACKING",
 ] as const;
@@ -35,6 +36,9 @@ export const DEPT_ORDER = [
 // days to the sequence (the cut happens within Foam Bonding's day), keeping the
 // BEDFRAME footprint at the 11-day total the header comment describes. When the
 // owner later gives its own throughput, bump this off 0.
+//
+// FIBRE (owner 2026-10-07) sits immediately before UPHOLSTERY. Also 0 until the
+// owner gives a real figure; Planning > Lead Times edits it without a deploy.
 const DEFAULT_LEAD_DAYS: LeadTimeMap = {
   BEDFRAME: {
     FAB_CUT: 1,
@@ -44,6 +48,7 @@ const DEFAULT_LEAD_DAYS: LeadTimeMap = {
     FOAM: 1,
     FRAMING: 2,
     WEBBING: 1,
+    FIBRE: 0,
     UPHOLSTERY: 2,
     PACKING: 1,
   },
@@ -55,6 +60,7 @@ const DEFAULT_LEAD_DAYS: LeadTimeMap = {
     FOAM: 1,
     FRAMING: 2,
     WEBBING: 1,
+    FIBRE: 0,
     UPHOLSTERY: 2,
     PACKING: 1,
   },

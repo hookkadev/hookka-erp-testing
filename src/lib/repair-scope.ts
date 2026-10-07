@@ -52,6 +52,7 @@ export const REPAIR_DEPT_CODES = [
   "FOAM",
   "FRAMING",
   "WEBBING",
+  "FIBRE",
   "UPHOLSTERY",
   "PACKING",
 ] as const;
@@ -65,6 +66,7 @@ export const REPAIR_DEPT_LABELS: Record<RepairDeptCode, string> = {
   FOAM: "Foam Bonding",
   FRAMING: "Framing",
   WEBBING: "Webbing",
+  FIBRE: "Fibre",
   UPHOLSTERY: "Upholstery",
   PACKING: "Packing",
 };

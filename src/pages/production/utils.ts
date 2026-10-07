@@ -9,6 +9,7 @@ export const DEPARTMENTS = [
   { name: "Wood Cut",   code: "WOOD_CUT" },
   { name: "Framing",    code: "FRAMING" },
   { name: "Webbing",    code: "WEBBING" },
+  { name: "Fibre", code: "FIBRE" },
   { name: "Upholstery", code: "UPHOLSTERY" },
   { name: "Packing",    code: "PACKING" },
 ] as const;
