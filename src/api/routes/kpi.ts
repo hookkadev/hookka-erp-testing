@@ -40,6 +40,8 @@ import {
 } from "../lib/kpi-catalog";
 import {
   computeMetric,
+  parseEfficiencyScope,
+  formatEfficiencyScope,
   checklistProgress,
   surveyMean,
   manualRating,
@@ -66,6 +68,8 @@ interface AssignmentRow {
   target: number;
   weight: number;
   isActive: boolean;
+  /** production_efficiency only: the department it is scored on. Empty = Overall. */
+  scope: string | null;
 }
 
 async function loadAssignments(
@@ -73,7 +77,7 @@ async function loadAssignments(
   userId: string,
 ): Promise<Map<string, AssignmentRow>> {
   const res = await c.var.DB.prepare(
-    `SELECT kpiKey, target, weight, isActive FROM kpi_assignments
+    `SELECT kpiKey, target, weight, isActive, scope FROM kpi_assignments
       WHERE userId = ? AND orgId = ?`,
   )
     .bind(userId, getOrgId(c))
@@ -246,7 +250,7 @@ async function buildCard(c: Context<Env>, userId: string, role: string, period: 
           ? await surveyMean(c, userId, def.key, period)
           : def.scoring === "MANUAL"
             ? await manualRating(c, period, userId, def.key)
-            : await computeMetric(c, def.key, period);
+            : await computeMetric(c, def.key, period, a.scope);
     const att =
       m.actual === null ? null : attainment(def, Number(a.target), m.actual, m.earlyPct);
     lines.push({
@@ -699,21 +703,25 @@ app.get("/library", async (c) => {
   const orgId = getOrgId(c);
 
   const holders = await c.var.DB.prepare(
-    `SELECT a.kpiKey, u.id AS "userId", u.email, u.displayName, u.role
+    `SELECT a.kpiKey, a.scope, u.id AS "userId", u.email, u.displayName, u.role
        FROM kpi_assignments a
        JOIN users u ON u.id = a.userId
       WHERE a.orgId = ? AND a.isActive = TRUE`,
   )
     .bind(orgId)
-    .all<{ kpiKey: string; userId: string; email: string; displayName: string | null; role: string }>();
+    .all<{
+      kpiKey: string; scope: string | null; userId: string;
+      email: string; displayName: string | null; role: string;
+    }>();
 
-  const byKpi = new Map<string, Array<{ userId: string; name: string; role: string }>>();
+  const byKpi = new Map<string, Array<{ userId: string; name: string; role: string; scope: string }>>();
   for (const h of holders.results ?? []) {
     const list = byKpi.get(String(h.kpiKey)) ?? [];
     list.push({
       userId: String(h.userId),
       name: h.displayName || String(h.email).split("@")[0],
       role: String(h.role ?? ""),
+      scope: h.scope ?? "",
     });
     byKpi.set(String(h.kpiKey), list);
   }
@@ -932,7 +940,9 @@ app.put("/kpi/:kpiKey/assignees", async (c) => {
   const def = kpiByKey(kpiKey);
   if (!def) return c.json({ success: false, error: `Unknown KPI: ${kpiKey}` }, 400);
 
-  let body: { assignees?: Array<{ userId: string; target: number; weight?: number; isActive?: boolean }> };
+  let body: {
+    assignees?: Array<{ userId: string; target: number; weight?: number; isActive?: boolean; scope?: string }>;
+  };
   try {
     body = (await c.req.json()) as typeof body;
   } catch {
@@ -941,6 +951,44 @@ app.put("/kpi/:kpiKey/assignees", async (c) => {
   const rows = Array.isArray(body.assignees) ? body.assignees : [];
   const orgId = getOrgId(c);
   const actor = ctxGet(c, "userId");
+
+  // DEV-36: a department scope, one or more departments stored as
+  // "FAB_CUT,FAB_SEW:SOFA". production_efficiency takes production departments,
+  // each optionally Sofa / Bedframe; department_efficiency takes any department
+  // (an R&D lead is scored on R&D's workers) and no type, because the dashboard
+  // it mirrors has none. Anything else is refused here; stored, it would only
+  // ever score "no hours logged" and look like a bad month.
+  const scopes = new Map<string, string | null>();
+  let allDepts: Array<{ code: string; isProduction: number | boolean | null }> | null = null;
+  for (const r of rows) {
+    const raw = String(r.scope ?? "").trim();
+    if (!raw) {
+      scopes.set(String(r.userId), null);
+      continue;
+    }
+    if (kpiKey !== "production_efficiency" && kpiKey !== "department_efficiency") {
+      return c.json({ success: false, error: `${def.label} has no department option` }, 400);
+    }
+    const sc = parseEfficiencyScope(raw);
+    if (!allDepts) {
+      const res = await c.var.DB.prepare(`SELECT code, isProduction FROM departments`)
+        .bind()
+        .all<{ code: string; isProduction: number | boolean | null }>();
+      allDepts = res.results ?? [];
+    }
+    const allowed = new Set(
+      allDepts
+        .filter((d) => kpiKey === "department_efficiency" || d.isProduction)
+        .map((d) => String(d.code)),
+    );
+    if (!sc || !sc.length || sc.some((p) => !allowed.has(p.dept))) {
+      return c.json({ success: false, error: `Unknown department: ${raw}` }, 400);
+    }
+    if (kpiKey === "department_efficiency" && sc.some((p) => p.category)) {
+      return c.json({ success: false, error: `${def.label} has no Sofa / Bedframe split` }, 400);
+    }
+    scopes.set(String(r.userId), formatEfficiencyScope(sc));
+  }
 
   for (const r of rows) {
     const target = Number(r.target);
@@ -953,17 +1001,18 @@ app.put("/kpi/:kpiKey/assignees", async (c) => {
       return c.json({ success: false, error: `${r.userId}: weight must be 0–100` }, 400);
     }
     await c.var.DB.prepare(
-      `INSERT INTO kpi_assignments (id, userId, kpiKey, target, weight, isActive, assignedBy, orgId)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO kpi_assignments (id, userId, kpiKey, target, weight, isActive, assignedBy, orgId, scope)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (userId, kpiKey) DO UPDATE
          SET target = EXCLUDED.target, weight = EXCLUDED.weight,
              isActive = EXCLUDED.isActive, assignedBy = EXCLUDED.assignedBy,
-             updatedAt = NOW()`,
+             scope = EXCLUDED.scope, updatedAt = NOW()`,
     )
       .bind(
         `kpia_${r.userId}_${kpiKey}`,
         String(r.userId), kpiKey, target, weight,
         r.isActive !== false, actor, orgId,
+        scopes.get(String(r.userId)) ?? null,
       )
       .run();
   }

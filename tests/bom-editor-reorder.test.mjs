@@ -37,28 +37,8 @@ function componentBody(name) {
   return src.slice(start, after === -1 ? undefined : after);
 }
 
-// ===========================================================================
-// SubWIPTree — the shared recursive renderer gains process-move support.
-// ===========================================================================
-
-test("SubWIPTree accepts onMoveProcessUp/onMoveProcessDown props", () => {
-  const body = componentBody("SubWIPTree");
-  assert.match(body, /onMoveProcessUp\?: \(path: number\[\], pi: number\) => void;/);
-  assert.match(body, /onMoveProcessDown\?: \(path: number\[\], pi: number\) => void;/);
-});
-
-test("SubWIPTree renders ↑/↓ on process rows + passes the props down recursively", () => {
-  const body = componentBody("SubWIPTree");
-  // Guarded render (only when the callback is supplied) on a process row.
-  assert.match(body, /onMoveProcessUp && \([\s\S]*?onMoveProcessUp\(childPath, pi\)/);
-  assert.match(body, /onMoveProcessDown\(childPath, pi\)/);
-  // Disabled at the list boundary (can't move the first up / last down).
-  assert.match(body, /disabled=\{pi === 0\}/);
-  assert.match(body, /disabled=\{pi === sub\.processes\.length - 1\}/);
-  // Threaded into the recursive child so nested levels get it too.
-  assert.match(body, /onMoveProcessUp=\{onMoveProcessUp\}/);
-  assert.match(body, /onMoveProcessDown=\{onMoveProcessDown\}/);
-});
+// SubWIPTree (the old recursive renderer) was deleted 2026-10-07 once
+// MasterTemplatesDialog moved to the two-pane editor; its pins went with it.
 
 // ===========================================================================
 // EditBOMDialog — the owner's editor. Previously had NO reorder at all.
@@ -91,8 +71,9 @@ test("EditBOMDialog routes every reorder through its depth-agnostic adapters", (
   assert.match(body, /nMove = \(wi: number, path: number\[\], dir: -1 \| 1\)/);
   // One depth-agnostic helper serves roots and nested nodes alike.
   assert.match(body, /moveWipNode\(wipComponents, wi, path, dir\)/);
-  // "+ Above" (insert a parent level) survived the rework.
-  assert.match(body, /wrapSubWIPAtPath\(wi, path\.slice\(0, -1\), path\[path\.length - 1\]\)/);
+  // "+ Above" (insert a parent level) survived the rework, offered on
+  // sub-WIPs only: Edit BOM has no top-level wrap.
+  assert.match(body, /onWrap=\{sel\.path\.length > 0 \? \(wi, path\) =>\s*wrapSubWIPAtPath\(wi, path\.slice\(0, -1\), path\[path\.length - 1\]\)/);
 });
 
 test("the detail pane renders ↑/↓ for both processes and the node itself", () => {
@@ -104,8 +85,8 @@ test("the detail pane renders ↑/↓ for both processes and the node itself", (
   // Boundary-guarded, so the first process can't move up nor the last down.
   assert.match(body, /disabled=\{pi === 0\}/);
   assert.match(body, /disabled=\{pi === node\.processes\.length - 1\}/);
-  // "+ Above" only offered where a parent can exist.
-  assert.match(body, /onWrap && path\.length > 0/);
+  // "+ Above" renders whenever the caller passes onWrap.
+  assert.match(body, /\{onWrap && \(/);
 });
 
 test("reorder swaps are pure element swaps and boundary-guarded", () => {
@@ -116,13 +97,29 @@ test("reorder swaps are pure element swaps and boundary-guarded", () => {
 });
 
 // ===========================================================================
-// MasterTemplatesDialog — already had WIP move/wrap; gains process move.
+// MasterTemplatesDialog — 2026-10-07 it got Edit BOM's L1 / WIP tabs and the
+// same two-pane WIP editor (WipTreeCard + WipNodeDetail), replacing the long
+// page that rendered the recursive SubWIPTree.
 // ===========================================================================
 
-test("MasterTemplatesDialog gains process reorder (nested + L1)", () => {
+test("MasterTemplatesDialog keeps process reorder (nested + L1)", () => {
   const body = componentBody("MasterTemplatesDialog");
   assert.match(body, /function moveProcessAtPath\b/);
   assert.match(body, /function moveL1Process\b/);
-  assert.match(body, /onMoveProcessUp=\{\(path, pi\) => moveProcessAtPath\(wi, path, pi, -1\)\}/);
+  assert.match(body, /onMoveProcess=\{moveProcessAtPath\}/);
   assert.match(body, /moveL1Process\(i, -1\)/);
+});
+
+test("MasterTemplatesDialog uses the two-pane WIP editor with depth-agnostic adapters", () => {
+  const body = componentBody("MasterTemplatesDialog");
+  assert.match(body, /<WipTreeCard/);
+  assert.match(body, /<WipNodeDetail/);
+  assert.match(body, /L1 Processes \(FG\)/);
+  // Move / remove use the same tree helpers as Edit BOM; wrap serves both
+  // the top level and nested nodes.
+  assert.match(body, /moveWipNode\(current\.wipItems, wi, path, dir\)/);
+  assert.match(body, /canMoveUp=\{canMoveWipNode\(current\.wipItems, sel\.wi, sel\.path, -1\)\}/);
+  assert.match(body, /removeWipLevel\(prev\.wipItems, wi, path\)/);
+  assert.match(body, /if \(path\.length === 0\) wrapWIPAt\(wi\);/);
+  assert.match(body, /onWrap=\{nWrap\}/);
 });
