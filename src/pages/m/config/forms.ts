@@ -1641,6 +1641,7 @@ const WH_DEPT_OPTS: SelectOption[] = [
   { value: "WOOD_CUT", label: "Wood Cut" },
   { value: "FRAMING", label: "Framing" },
   { value: "WEBBING", label: "Webbing" },
+  { value: "FIBRE", label: "Fibre" },
   { value: "UPHOLSTERY", label: "Upholstery" },
   { value: "PACKING", label: "Packing" },
   { value: "WAREHOUSING", label: "Warehousing" },

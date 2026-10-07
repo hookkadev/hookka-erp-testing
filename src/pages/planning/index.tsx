@@ -143,6 +143,7 @@ const DEPARTMENTS = [
   { id: "dept-4", code: "FOAM", name: "Foam Bonding", shortName: "Foam Bonding", color: "#8B5CF6" },
   { id: "dept-5", code: "FRAMING", name: "Framing", shortName: "Framing", color: "#F97316" },
   { id: "dept-6", code: "WEBBING", name: "Webbing", shortName: "Webbing", color: "#10B981" },
+  { id: "dept-15", code: "FIBRE", name: "Fibre", shortName: "Fibre", color: "#84CC16" },
   { id: "dept-7", code: "UPHOLSTERY", name: "Upholstery", shortName: "Upholstery", color: "#F43F5E" },
   { id: "dept-8", code: "PACKING", name: "Packing", shortName: "Packing", color: "#06B6D4" },
 ];
@@ -159,6 +160,7 @@ const DEPT_DRILL_ROUTE: Record<string, string> = {
   FOAM: "/planning/dept/foam-bonding",
   FRAMING: "/planning/dept/framing",
   WEBBING: "/planning/dept/webbing",
+  FIBRE: "/planning/dept/fibre",
   UPHOLSTERY: "/planning/dept/upholstery",
   PACKING: "/planning/dept/packing",
 };
@@ -253,6 +255,7 @@ const TRACKER_DEPARTMENTS = [
   { name: "Foam Bonding", code: "FOAM",    color: "#8B5CF6" },
   { name: "Framing",   code: "FRAMING",    color: "#F97316" },
   { name: "Webbing",   code: "WEBBING",    color: "#10B981" },
+  { name: "Fibre",     code: "FIBRE",      color: "#84CC16" },
   { name: "Upholstery",code: "UPHOLSTERY", color: "#F43F5E" },
   { name: "Packing",   code: "PACKING",    color: "#06B6D4" },
 ];
@@ -803,6 +806,7 @@ export default function PlanningPage() {
     { code: "FOAM",       label: "Foam Bonding" },
     { code: "WOOD_CUT",   label: "Wood Cutting" },
     { code: "FRAMING",    label: "Framing" },
+    { code: "FIBRE",      label: "Fibre" },
     { code: "UPHOLSTERY", label: "Upholstery" },
     { code: "PACKING",    label: "Packing" },
     { code: "WEBBING",    label: "Webbing" },
@@ -3246,6 +3250,7 @@ const PROPOSAL_DEPT_LABEL: Record<string, string> = {
   WEBBING: "Webbing",
   FOAM_CUTTING: "Foam Cutting",
   FOAM: "Foam Bonding",
+  FIBRE: "Fibre",
   UPHOLSTERY: "Upholstery",
   PACKING: "Packing",
 };
