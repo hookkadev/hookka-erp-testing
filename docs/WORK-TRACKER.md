@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-07**: branch `fix/rm-uom-bottle-main` (DEV-20 follow-up to `main`, BUG-2026-10-07-262) added below (its entry is the newest).
 > **Last verified: 2026-10-06**: branch `feat/pay-card-main` (to `main`, BUG-2026-10-06-259) added below (its entry is the newest).
 > **Last verified: 2026-10-05**: fill job cards stuck at 0 minutes (#696, BUG-2026-10-05-256) closed ✅ with its prod run.
 > **Last verified: 2026-10-05**: branch `fix/worker-pay-late-daily-rate` (to `main`, BUG-2026-10-05-258) added below (its entry is the newest).
@@ -96,6 +97,13 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-07 — 🔵 DEV-20 follow-up: one unit list for raw materials (branch `fix/rm-uom-bottle-main` → `main`, BUG-2026-10-07-262)
+
+Owner asks: BOTTLE was refused on save for item group MAINTENA; a mistyped unit must be removable; the per-category Allowed UOMs confuses people, so take it out and give a way to add a new unit instead.
+1. 🔵 RM Settings: the per-category Allowed UOMs section is gone; a global Units section adds a unit (e.g. BOTTLE) for every category, and × deletes one added by mistake. Built-in units stay.
+2. 🔵 Every RM unit dropdown and the save check use that one list.
+3. ⬜ Check on the live site after deploy.
 
 ## 2026-10-06 — 🔵 Worker My Pay: one card for every worker and month (branch `feat/pay-card-main` → `main`, BUG-2026-10-06-259)
 
