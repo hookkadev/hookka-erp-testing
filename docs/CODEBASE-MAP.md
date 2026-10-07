@@ -1,5 +1,6 @@
 # Hookka ERP — Codebase Map (the single authoritative map)
 
+> **Last verified: 2026-10-07 on branch `feat/master-bom-two-pane` (to `staging`)**: the `src/pages/bom.tsx` section ranges and the two-pane BOM editor gotcha (Master BOM Templates now shares it), read from `src/pages/bom.tsx`. Nothing else re-checked.
 > **Last verified: 2026-10-07 on branch `fix/sales-transfer-credit-block` (to `staging`, BUG-2026-10-07-263)**: the Delivery & Consignment credit gate gotcha (UI callers, override holders, `ready-planning?fresh=1`), read from `src/pages/sales/index.tsx`, `src/api/routes/delivery-orders.ts` and the staging role permissions. Nothing else re-checked.
 > **Last verified: 2026-10-06 on branch `feat/dev37-kpi-checklist-admin-only` (to `staging`, DEV-37)**: the KPI row (checklist ticks Super Admin only, read-only for staff), read from `src/api/routes/kpi.ts` and `src/pages/kpi/index.tsx`. Nothing else re-checked.
 > **Last verified: 2026-10-06 on branch `feat/dev37-kpi-office-self-view` (to `staging`, DEV-37)**: the KPI row (every login opens `/kpi`, no `kpi:read` gate), read from `src/dashboard-routes.tsx`, `src/api/lib/nav-permissions.ts` and `src/api/routes/kpi.ts`. Nothing else re-checked.
@@ -753,13 +754,13 @@ authoritative current detail.** New here? Start with [ONBOARDING-PATH.md](ONBOAR
   - WIPNode (recursive BOM tree node) — L1230-1494
   - BOMTreeView (template tree render, L1 + WIP) — L1495-1855
   - CreateBOMDialog — L1856-2435
-  - CollapsibleGroup / SubWIPTree — L2436-2773 (still used by MasterTemplatesDialog; EditBOMDialog no longer renders it)
-  - flattenWipTree / wipNodeAt / depthBar — L2774-2971 (two-pane tree helpers)
-  - WipNodeDetail (right pane — edits ONE node at any depth) — L2972-3191
-  - EditBOMDialog (L1 tab + two-pane WIP tab) — L3192-4078
-  - MasterTemplatesDialog (Bedframe/Sofa/Accessory tabs + copy-from) — L4079-5215
-  - BatchEditMaterialsDialog — L5216-6303
-  - BOMManagementPage (default export — page shell, tabs, list) — L6304-6787
+  - CollapsibleGroup — L2436-2501 (the old recursive SubWIPTree was deleted 2026-10-07; nothing renders it now)
+  - flattenWipTree / WipTreeCard / wipNodeAt — L2503-2731 (two-pane tree helpers, shared by Edit BOM and Master Templates)
+  - WipNodeDetail (right pane — edits ONE node at any depth; "+ Above" shows only when the caller passes onWrap) — L2732-2951
+  - EditBOMDialog (L1 tab + two-pane WIP tab) — L2952-3838
+  - MasterTemplatesDialog (Bedframe/Sofa/Accessory tabs + copy-from, then the same L1 / two-pane WIP tabs as Edit BOM) — L3839-4941
+  - BatchEditMaterialsDialog — L4942-6029
+  - BOMManagementPage (default export — page shell, tabs, list) — L6030-6513
   - (ProductionTimesDialog and DeptPivotCategoryDialog were removed 2026-08-01.)
 
 **Gotchas**
@@ -777,7 +778,7 @@ authoritative current detail.** New here? Start with [ONBOARDING-PATH.md](ONBOAR
 - camelCase DB columns: most at-risk WIP/production cols are dual-keyed (r.camelCase ?? r.snake_case); db-pg toCamel can't recover folded-lowercase camelCase. New columns snake_case; a camelCase write column needs a `column-rename-map.json` entry.
 - `bom_templates.category` can only hold BEDFRAME / SOFA, so an ACCESSORY product's BOM is stored as BEDFRAME. Read category from the product row: `withProductCategory` (`src/pages/bom-category.ts`) on the BOM page, `COALESCE(p.category, bt.category)` in `wip-times-core.ts` (BUG-2026-10-01-237).
 - BOM process minutes are TYPED IN on every BOM process row (`MinutesInput`, bom.tsx) or bulk-edited on WIP Times (wip-times.tsx/route); both write `bom_templates.wipComponents` / `l1Processes` and feed productionCostRatePerMinuteSen in the PO cost cascade. The CAT 1-14 dropdown and its Production Times matrix lookup were removed 2026-10-05 (owner); old rows keep their stored `category`, new rows save `""`, and `production-order-builder.ts` no longer stamps `"CAT 1"` on job cards (the dept+category job-card resync in `bom.ts` skips empty categories). Pins: `tests/bom-manual-minutes.test.mjs`.
-- EditBOMDialog's WIP tab is TWO-PANE (2026-08-03): `flattenWipTree` turns the recursive tree into indented rows on the left (selection + collapse, addressed by a `wi.path` key), and `WipNodeDetail` edits the SELECTED node on the right at full width. It replaced an inline recursive render inside a fixed 720px dialog, where each nesting level stole ~20px and the category select clipped to "CAT 3" by level 3, with four clashing background fills stacked inside one another. Depth now reads as a 3px left colour bar. The dialog is `w-[min(1160px,95vw)]` and the WIP tab owns its own scrolling (the body switches to `overflow-hidden` so each pane scrolls independently). Because ONE detail pane serves every depth, EditBOMDialog carries depth-agnostic adapters (`nUpdate`, `nAddProcess`, `nMove`, …) that dispatch on `path.length === 0` between the `xxxWIP(wi,…)` and `xxxAtPath(wi,path,…)` handler families — BOTH families are still live and must stay in sync. MasterTemplatesDialog still uses the old recursive `SubWIPTree`. Pins: `tests/bom-editor-reorder.test.mjs`.
+- EditBOMDialog's WIP tab is TWO-PANE (2026-08-03): `flattenWipTree` turns the recursive tree into indented rows on the left (selection + collapse, addressed by a `wi.path` key), and `WipNodeDetail` edits the SELECTED node on the right at full width. It replaced an inline recursive render inside a fixed 720px dialog, where each nesting level stole ~20px and the category select clipped to "CAT 3" by level 3, with four clashing background fills stacked inside one another. Since 2026-10-01 the left tree is layered colour cards (`WipTreeCard`, one tint per level) rather than flat rows. The dialog is `w-[min(1360px,96vw)]` and the WIP tab owns its own scrolling (the body switches to `overflow-hidden` so each pane scrolls independently). Because ONE detail pane serves every depth, EditBOMDialog carries depth-agnostic adapters (`nUpdate`, `nAddProcess`, `nMove`, …) that dispatch on `path.length === 0` between the `xxxWIP(wi,…)` and `xxxAtPath(wi,path,…)` handler families — BOTH families are still live and must stay in sync. MasterTemplatesDialog uses the same layout since 2026-10-07 (L1 / WIP tabs, `WipTreeCard` tree on the left, `WipNodeDetail` on the right); its handlers are all path-based already, so its adapters only cover remove / move / wrap, and it alone can wrap a top-level WIP. Pins: `tests/bom-editor-reorder.test.mjs`.
 - Sofa combo pricing is BACKEND-unified (`applySofaCombos`) wired into sales-orders POST/PUT — production reads the priced SO; don't re-price in the production layer.
 - CNC hierarchy (Model→Size/Seat→Files) is DERIVED on the frontend; cnc_templates has no category column (from products.category) and total_height doubles as sofa seat size. No migration for the hierarchy.
 - `production_orders_list_snapshot` is a denormalized snapshot for fast list reads — writes to production_orders must keep it in sync.

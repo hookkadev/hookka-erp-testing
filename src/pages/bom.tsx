@@ -2500,246 +2500,6 @@ function CollapsibleGroup({
   );
 }
 
-// ---------- Recursive Sub-WIP Tree ----------
-function SubWIPTree({
-  children,
-  wi,
-  path,
-  onAdd,
-  onRemove,
-  onUpdate,
-  onUpdateSegments,
-  onAddProcess,
-  onRemoveProcess,
-  onUpdateProcess,
-  onAddMaterial,
-  onRemoveMaterial,
-  onSelectMaterial,
-  onSelectMaterialAutoDetect,
-  onUpdateMaterial,
-  onWrap,
-  onMoveUp,
-  onMoveDown,
-  onMoveProcessUp,
-  onMoveProcessDown,
-  fabricOptions,
-  variantCategories,
-  rawMaterials,
-  depth = 0,
-}: {
-  children: WIPComponent[];
-  wi: number;
-  path: number[];
-  onAdd: (path: number[]) => void;
-  onRemove: (path: number[], si: number) => void;
-  onUpdate: (path: number[], field: string, value: string | number | MaterialScaling[] | undefined) => void;
-  onUpdateSegments: (path: number[], segs: CodeSegment[]) => void;
-  onAddProcess: (path: number[]) => void;
-  onRemoveProcess: (path: number[], pi: number) => void;
-  onUpdateProcess: (path: number[], pi: number, field: string, value: string | number | MaterialScaling[] | undefined) => void;
-  onAddMaterial: (path: number[]) => void;
-  onRemoveMaterial: (path: number[], mi: number) => void;
-  onSelectMaterial: (path: number[], mi: number, rm: RawMaterialOption) => void;
-  onSelectMaterialAutoDetect: (path: number[], mi: number, kind: "FABRIC" | "LEG") => void;
-  onUpdateMaterial: (path: number[], mi: number, field: string, value: string | number | MaterialScaling[] | undefined) => void;
-  onWrap?: (path: number[], si: number) => void;
-  onMoveUp?: (path: number[], si: number) => void;
-  onMoveDown?: (path: number[], si: number) => void;
-  onMoveProcessUp?: (path: number[], pi: number) => void;
-  onMoveProcessDown?: (path: number[], pi: number) => void;
-  fabricOptions: string[];
-  variantCategories: VariantCategoryInfo[];
-  rawMaterials: RawMaterialOption[];
-  depth?: number;
-}) {
-  const colors = [
-    { border: "border-[#D1B7D0]", bg: "bg-[#F1E6F0]", label: "text-[#6B4A6D]", btn: "bg-[#D1B7D0] text-[#6B4A6D] hover:bg-[#D1B7D0]" },
-    { border: "border-[#E8B786]", bg: "bg-[#FBE4CE]", label: "text-[#B8601A]", btn: "bg-[#E8B786] text-[#B8601A] hover:bg-[#E8B786]" },
-    { border: "border-emerald-300", bg: "bg-emerald-100", label: "text-emerald-800", btn: "bg-emerald-300 text-emerald-900 hover:bg-emerald-400" },
-    { border: "border-[#E8B2A1]", bg: "bg-[#F9E1DA]", label: "text-[#9A3A2D]", btn: "bg-[#E8B2A1] text-[#9A3A2D] hover:bg-[#E8B2A1]" },
-  ];
-  const c = colors[depth % colors.length];
-
-  return (
-    <>
-      <div className="flex items-center justify-between mt-2">
-        <span className={`text-xs font-medium ${c.label}`}>
-          {depth === 0 ? "Sub-WIP Components" : `Sub-WIP (Level ${depth + 1})`}
-        </span>
-        <button onClick={() => onAdd(path)} className={`text-[10px] px-1.5 py-0.5 rounded ${c.btn}`}>+ Sub-WIP</button>
-      </div>
-      {children.map((sub, si) => {
-        const childPath = [...path, si];
-        return (
-          <div key={sub.id} className={`ml-3 ${c.border} border rounded-lg ${c.bg} p-2 space-y-1.5`}>
-            <div className="flex items-center gap-2">
-              <select value={sub.wipType} onChange={(e) => onUpdate(childPath, "wipType", e.target.value)} className={`text-xs ${c.border} border rounded px-1.5 py-1 bg-white`}>
-                {Object.entries(WIP_TYPE_LABELS).map(([k, v]) => (<option key={k} value={k}>{v.label}</option>))}
-              </select>
-              <input type="number" onFocus={(e) => e.currentTarget.select()} value={sub.quantity} onChange={(e) => onUpdate(childPath, "quantity", parseInt(e.target.value) || 1)} className={`text-xs ${c.border} border rounded px-1.5 py-1 w-12 bg-white`} min={1} />
-              <span className="text-[10px] text-gray-500">PCS</span>
-              {onWrap && (
-                <button
-                  onClick={() => onWrap(path, si)}
-                  className={`ml-auto text-[10px] px-1.5 py-0.5 rounded ${c.btn}`}
-                  title="Wrap this sub-WIP inside a new parent (upstream)"
-                >
-                  + Above
-                </button>
-              )}
-              {onMoveUp && (
-                <button
-                  onClick={() => onMoveUp(path, si)}
-                  disabled={si === 0}
-                  className={`text-[10px] px-1.5 py-0.5 rounded ${c.btn} disabled:opacity-30 disabled:cursor-not-allowed ${onWrap ? "" : "ml-auto"}`}
-                  title="Move up"
-                >
-                  ↑
-                </button>
-              )}
-              {onMoveDown && (
-                <button
-                  onClick={() => onMoveDown(path, si)}
-                  disabled={si === children.length - 1}
-                  className={`text-[10px] px-1.5 py-0.5 rounded ${c.btn} disabled:opacity-30 disabled:cursor-not-allowed`}
-                  title="Move down"
-                >
-                  ↓
-                </button>
-              )}
-              <button onClick={() => onRemove(path, si)} className={`text-[#9A3A2D] hover:text-[#7A2E24] ${onWrap || onMoveUp || onMoveDown ? "" : "ml-auto"}`}>
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-              </button>
-            </div>
-            <div className="ml-1">
-              <WIPCodeBuilder
-                segments={sub.codeSegments || (sub.wipCode ? [{ type: "word" as const, value: sub.wipCode }] : [{ type: "word" as const, value: "" }])}
-                onChange={(segs) => onUpdateSegments(childPath, segs)}
-                fabricOptions={fabricOptions}
-                variantCategories={variantCategories}
-              />
-            </div>
-
-            {/* Processes */}
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-[#3E6570]">Processes</span>
-              <button onClick={() => onAddProcess(childPath)} className="text-[10px] px-1.5 py-0.5 bg-[#E0EDF0] text-[#3E6570] rounded hover:bg-[#A8CAD2]">+ Process</button>
-            </div>
-            {sub.processes.map((p, pi) => (
-              <div key={pi} className="flex items-center gap-2 bg-white rounded px-2 py-1.5">
-                <select value={p.deptCode} onChange={(e) => onUpdateProcess(childPath, pi, "deptCode", e.target.value)} className="text-xs border border-gray-200 rounded px-1.5 py-1 bg-white">
-                  {DEPT_ORDER.map((d) => (<option key={d} value={d}>{DEPT_LABELS[d]}</option>))}
-                </select>
-                <MinutesInput value={p.minutes} onChange={(m) => onUpdateProcess(childPath, pi, "minutes", m)} className="text-xs text-gray-700 bg-white border border-gray-200 rounded px-1.5 py-1 w-14 text-center tabular-nums" />
-                <span className="text-[10px] text-gray-400">min</span>
-                {onMoveProcessUp && (
-                  <button onClick={() => onMoveProcessUp(childPath, pi)} disabled={pi === 0} className="ml-auto text-[10px] px-1.5 py-0.5 bg-[#E0EDF0] text-[#3E6570] rounded hover:bg-[#A8CAD2] disabled:opacity-30 disabled:cursor-not-allowed" title="Move process up">↑</button>
-                )}
-                {onMoveProcessDown && (
-                  <button onClick={() => onMoveProcessDown(childPath, pi)} disabled={pi === sub.processes.length - 1} className={`text-[10px] px-1.5 py-0.5 bg-[#E0EDF0] text-[#3E6570] rounded hover:bg-[#A8CAD2] disabled:opacity-30 disabled:cursor-not-allowed ${onMoveProcessUp ? "" : "ml-auto"}`} title="Move process down">↓</button>
-                )}
-                <button onClick={() => onRemoveProcess(childPath, pi)} className={`text-[#9A3A2D] hover:text-[#7A2E24] ${onMoveProcessUp || onMoveProcessDown ? "" : "ml-auto"}`}>
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                </button>
-              </div>
-            ))}
-
-            {/* Raw Materials */}
-            <div className="flex items-center justify-between mt-1">
-              <span className="text-xs font-medium text-[#4F7C3A]">Raw Materials</span>
-              <button onClick={() => onAddMaterial(childPath)} className="text-[10px] px-1.5 py-0.5 bg-[#EEF3E4] text-[#4F7C3A] rounded hover:bg-[#C6DBA8]">+ Material</button>
-            </div>
-            {(sub.materials || []).map((m, mi) => (
-              <div key={mi} className="bg-white rounded">
-                <div className="flex items-center gap-2 px-2 py-1.5">
-                  {m.autoDetect ? (
-                    <div className="flex items-center gap-1.5 flex-1">
-                      <span className="text-[10px] px-1.5 py-0.5 bg-[#E0EDF0] text-[#3E6570] rounded font-medium border border-[#A8CAD2] whitespace-nowrap">
-                        {m.autoDetect === "FABRIC" ? "Fabric from order" : "Leg from order"}
-                      </span>
-                      <span className="text-[10px] text-gray-400 italic">
-                        {m.autoDetect === "FABRIC" ? "SO item fabricCode" : "SO item legHeightInches"}
-                      </span>
-                    </div>
-                  ) : (
-                    <RawMaterialSelect
-                      value={m.code ? `${m.code}` : ""}
-                      materials={rawMaterials}
-                      onSelect={(rm) => onSelectMaterial(childPath, mi, rm)}
-                      onSelectAutoDetect={(kind) => onSelectMaterialAutoDetect(childPath, mi, kind)}
-                    />
-                  )}
-                  <input type="number" onFocus={(e) => e.currentTarget.select()} value={m.qty} onChange={(e) => onUpdateMaterial(childPath, mi, "qty", parseFloat(e.target.value) || 0)} className="text-xs border border-gray-200 rounded px-1.5 py-1 w-14" />
-                  <input type="number" onFocus={(e) => e.currentTarget.select()} value={m.wastePct ?? ""} onChange={(e) => onUpdateMaterial(childPath, mi, "wastePct", parseFloat(e.target.value) || 0)} placeholder="0" title="Wastage % — cut / bulk materials (fabric / foam / wood) have offcut + defect waste; leave 0 for discrete parts (screws / legs / mechanism)" className="text-xs border border-gray-200 rounded px-1.5 py-1 w-12" />
-                  <span className="text-[10px] text-gray-400 whitespace-nowrap" title="Wastage % — cut / bulk materials (fabric / foam / wood) have offcut + defect waste; leave 0 for discrete parts (screws / legs / mechanism)">% waste</span>
-                  <span className="text-[10px] text-gray-400 w-8">{m.unit || "PCS"}</span>
-                  {materialHasKit(m) && (
-                    <span className="text-[10px] text-[#1D4ED8] whitespace-nowrap" title="This SKU has a Component Kit — its bound screws/parts are auto-added to consumption. Manage them on the Component Kits page.">+ kit</span>
-                  )}
-                  {isFillerMaterial(m, rawMaterials) && (
-                    <span className="flex items-center gap-0.5 text-[10px] text-[#B8601A] whitespace-nowrap" title="Cut size in INCHES (length × width) — consumes cutArea ÷ sheetArea of a sheet">
-                      cut
-                      <input type="number" placeholder="L" onFocus={(e) => e.currentTarget.select()} value={m.cutLengthIn ?? ""} onChange={(e) => onUpdateMaterial(childPath, mi, "cutLengthIn", parseFloat(e.target.value) || 0)} className="w-11 border border-[#E8B786] rounded px-1 py-0.5" />
-                      ×
-                      <input type="number" placeholder="W" onFocus={(e) => e.currentTarget.select()} value={m.cutWidthIn ?? ""} onChange={(e) => onUpdateMaterial(childPath, mi, "cutWidthIn", parseFloat(e.target.value) || 0)} className="w-11 border border-[#E8B786] rounded px-1 py-0.5" />
-                      in
-                    </span>
-                  )}
-                  <button onClick={() => onRemoveMaterial(childPath, mi)} className="text-[#9A3A2D] hover:text-[#7A2E24]">
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                  </button>
-                </div>
-                <MaterialScalingEditor
-                  scaling={m.scaling}
-                  unit={m.unit || "PCS"}
-                  isCut={isFillerMaterial(m, rawMaterials)}
-                  onChange={(s) => onUpdateMaterial(childPath, mi, "scaling", s)}
-                />
-              </div>
-            ))}
-            {(sub.materials || []).length === 0 && (
-              <p className="text-[10px] text-gray-400 pl-2">No materials added</p>
-            )}
-
-            {/* Recursive children */}
-            <SubWIPTree
-              children={sub.children || []}
-              wi={wi}
-              path={childPath}
-              onAdd={onAdd}
-              onRemove={onRemove}
-              onUpdate={onUpdate}
-              onUpdateSegments={onUpdateSegments}
-              onAddProcess={onAddProcess}
-              onRemoveProcess={onRemoveProcess}
-              onUpdateProcess={onUpdateProcess}
-              onAddMaterial={onAddMaterial}
-              onRemoveMaterial={onRemoveMaterial}
-              onSelectMaterial={onSelectMaterial}
-              onSelectMaterialAutoDetect={onSelectMaterialAutoDetect}
-              onUpdateMaterial={onUpdateMaterial}
-              onWrap={onWrap}
-              onMoveUp={onMoveUp}
-              onMoveDown={onMoveDown}
-              onMoveProcessUp={onMoveProcessUp}
-              onMoveProcessDown={onMoveProcessDown}
-              fabricOptions={fabricOptions}
-              variantCategories={variantCategories}
-              rawMaterials={rawMaterials}
-              depth={depth + 1}
-            />
-          </div>
-        );
-      })}
-      {children.length === 0 && (
-        <p className="text-[10px] text-gray-400 pl-2">
-          {depth === 0 ? "No sub-WIP components" : "No nested sub-WIP"}
-        </p>
-      )}
-    </>
-  );
-}
-
 // ---------- WIP tree flattening (two-pane editor) ----------
 //
 // The WIP editor used to render the whole tree INLINE and recursively, so each
@@ -3017,7 +2777,7 @@ function WipNodeDetail({
   onAddChild: (wi: number, path: number[]) => void;
   onRemove: (wi: number, path: number[]) => void;
   onMove: (wi: number, path: number[], dir: -1 | 1) => void;
-  /** Wrap this sub-WIP inside a new parent. Absent for top-level nodes. */
+  /** Wrap this node inside a new parent. Absent when the node cannot be wrapped. */
   onWrap?: (wi: number, path: number[]) => void;
 }) {
   // One grid template shared by the header row and every process row, so the
@@ -3047,9 +2807,9 @@ function WipNodeDetail({
         <div className="ml-auto flex shrink-0 items-center gap-1">
           <button onClick={() => onMove(wi, path, -1)} className="px-1.5 py-1 text-xs text-gray-500 hover:bg-gray-100 rounded" title="Move up">↑</button>
           <button onClick={() => onMove(wi, path, 1)} className="px-1.5 py-1 text-xs text-gray-500 hover:bg-gray-100 rounded" title="Move down">↓</button>
-          {/* Insert a NEW parent above this node — only meaningful for a
-              sub-WIP, since a top-level component has no parent to wrap into. */}
-          {onWrap && path.length > 0 && (
+          {/* Insert a NEW parent above this node. The caller leaves onWrap
+              out where it cannot wrap (Edit BOM's top-level components). */}
+          {onWrap && (
             <button
               onClick={() => onWrap(wi, path)}
               className="px-2 py-1 text-xs rounded bg-[#F1E6F0] text-[#6B4A6D] hover:bg-[#D1B7D0]"
@@ -4054,9 +3814,9 @@ function EditBOMDialog({
                       onAddChild={(wi, path) => addSubWIPAtPath(wi, path)}
                       onRemove={nRemove}
                       onMove={nMove}
-                      onWrap={(wi, path) =>
+                      onWrap={sel.path.length > 0 ? (wi, path) =>
                         wrapSubWIPAtPath(wi, path.slice(0, -1), path[path.length - 1])
-                      }
+                      : undefined}
                     />
                   )}
                 </div>
@@ -4107,6 +3867,11 @@ function MasterTemplatesDialog({
   const [editMode, setEditMode] = useState(true);
   // Copy-from picker popover state.
   const [showCopyPicker, setShowCopyPicker] = useState(false);
+  // Same L1 / WIP split and two-pane WIP editor as Edit BOM, so switching
+  // between L1 and a deep sub-WIP is a click instead of a long scroll.
+  const [section, setSection] = useState<"l1" | "wip">("l1");
+  const [selectedWipKey, setSelectedWipKey] = useState<string | null>(null);
+  const [collapsedWip, setCollapsedWip] = useState<Set<string>>(new Set());
 
   // Variant categories depend on tab — used by WIPCodeBuilder for master-level
   // placeholders that get resolved to actual product variants at apply time.
@@ -4159,6 +3924,8 @@ function MasterTemplatesDialog({
     load();
     setDeletedIds([]);
     setTab("BEDFRAME");
+    setSection("l1");
+    setSelectedWipKey(null);
     setEditMode(true);
     // Re-sync when D1 hydration lands after the dialog is already open so
     // the edit lists reflect authoritative D1 data, not fallback defaults.
@@ -4540,6 +4307,24 @@ function MasterTemplatesDialog({
     }));
   }
 
+  // Depth-agnostic adapters for WipNodeDetail: path=[] is a top-level WIP.
+  function nRemove(wi: number, path: number[]) {
+    if (path.length === 0) removeWIP(wi);
+    else removeSubWIPAtPath(wi, path.slice(0, -1), path[path.length - 1]);
+    setSelectedWipKey(null);
+  }
+  function nMove(wi: number, path: number[], dir: -1 | 1) {
+    if (path.length === 0) {
+      if (dir < 0) moveWIPUp(wi);
+      else moveWIPDown(wi);
+    } else if (dir < 0) moveSubWIPUpAtPath(wi, path.slice(0, -1), path[path.length - 1]);
+    else moveSubWIPDownAtPath(wi, path.slice(0, -1), path[path.length - 1]);
+  }
+  function nWrap(wi: number, path: number[]) {
+    if (path.length === 0) wrapWIPAt(wi);
+    else wrapSubWIPAtPath(wi, path.slice(0, -1), path[path.length - 1]);
+  }
+
   async function handleSave() {
     const now = new Date().toISOString();
     // Persist every template in all lists, plus pending deletions. We await
@@ -4584,7 +4369,8 @@ function MasterTemplatesDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-white rounded-xl shadow-xl w-[760px] max-h-[88vh] flex flex-col">
+      {/* Definite height on the WIP section so both panes scroll (see EditBOMDialog). */}
+      <div className={`bg-white rounded-xl shadow-xl w-[min(1360px,96vw)] flex flex-col ${section === "wip" ? "h-[90vh]" : "max-h-[90vh]"}`}>
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[#E2DDD8]">
           <div>
@@ -4599,7 +4385,7 @@ function MasterTemplatesDialog({
         </div>
 
         {/* Tab selector */}
-        <div className="px-6 py-3 border-b border-[#E2DDD8] flex items-center justify-between">
+        <div className="px-6 py-3 border-b border-[#E2DDD8] flex flex-wrap items-center justify-between gap-2">
           <div className="flex gap-2">
             <button
               onClick={() => setTab("BEDFRAME")}
@@ -4726,7 +4512,7 @@ function MasterTemplatesDialog({
           </div>
 
           {/* Inline label + moduleKey editor for the selected template. */}
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <label className="text-[10px] text-gray-500 uppercase tracking-wide">Label</label>
             <input
               value={current?.label || ""}
@@ -4741,7 +4527,7 @@ function MasterTemplatesDialog({
               onChange={(e) => updateTemplateMeta("moduleKey", e.target.value)}
               disabled={!editMode}
               placeholder={tab === "SOFA" ? "matches Product.sizeCode (e.g. 1A(LHF))" : tab === "ACCESSORY" ? "(optional — accessory sub-type)" : "(leave blank — used as fallback)"}
-              className="text-xs border border-[#E2DDD8] rounded px-2 py-1 bg-white flex-1 disabled:bg-gray-50"
+              className="text-xs border border-[#E2DDD8] rounded px-2 py-1 bg-white flex-1 min-w-[12rem] disabled:bg-gray-50"
             />
             {current?.isDefault && (
               <span className="text-[10px] text-[#9C6F1E] bg-[#FAEFCB] border border-[#E8D597] rounded px-2 py-1">
@@ -4751,9 +4537,26 @@ function MasterTemplatesDialog({
           </div>
         </div>
 
+        {/* L1 / WIP selector, same as Edit BOM */}
+        <div className="px-6 py-3 border-b border-[#E2DDD8] flex gap-2">
+          <button
+            onClick={() => setSection("l1")}
+            className={`px-3 py-1.5 text-xs font-medium rounded-md ${section === "l1" ? "bg-[#6B5C32] text-white" : "bg-[#FAF9F7] text-gray-600 hover:bg-[#E2DDD8]"}`}
+          >
+            L1 Processes (FG)
+          </button>
+          <button
+            onClick={() => setSection("wip")}
+            className={`px-3 py-1.5 text-xs font-medium rounded-md ${section === "wip" ? "bg-[#6B5C32] text-white" : "bg-[#FAF9F7] text-gray-600 hover:bg-[#E2DDD8]"}`}
+          >
+            WIP Components ({current.wipItems.length})
+          </button>
+        </div>
+
         {/* Body */}
-        <div className="flex-1 overflow-y-auto px-6 py-4">
-          <div className={`space-y-5 ${!editMode ? "[&_input]:pointer-events-none [&_select]:pointer-events-none [&_button]:pointer-events-none opacity-70" : ""}`}>
+        <div className={`flex-1 min-h-0 ${section === "wip" ? "overflow-hidden" : "overflow-y-auto px-6 py-4"} ${!editMode ? "[&_input]:pointer-events-none [&_select]:pointer-events-none [&_button]:pointer-events-none opacity-70" : ""}`}>
+          {section === "l1" && (
+          <div className="space-y-5">
           {/* L1 Processes */}
           <div>
             <div className="flex items-center justify-between">
@@ -4834,175 +4637,98 @@ function MasterTemplatesDialog({
             </div>
           </div>
 
-          {/* WIP items */}
-          <div className="pt-4 border-t border-[#E2DDD8]">
-            <div className="flex items-center justify-between">
-              <label className="text-sm font-medium text-[#111827]">WIP Items</label>
-              <button onClick={addWIP} className="text-xs px-2 py-1 bg-[#6B5C32] text-white rounded hover:bg-[#5A4D2A]">+ Add WIP</button>
-            </div>
-            <div className="space-y-4 mt-2">
-              {current.wipItems.map((w, wi) => (
-                <div key={w.id || wi} className="border border-[#A8CAD2] rounded-lg bg-[#E0EDF0] p-3 space-y-2">
-                  {/* WIP header */}
-                  <div className="flex items-center gap-2">
-                    <select value={w.wipType} onChange={(e) => updateWIPAtPath(wi, [], "wipType", e.target.value)} className="text-sm border border-[#A8CAD2] rounded px-2 py-1 bg-white">
-                      {Object.entries(WIP_TYPE_LABELS).map(([k, v]) => (<option key={k} value={k}>{v.label}</option>))}
-                    </select>
-                    <input type="number" onFocus={(e) => e.currentTarget.select()} value={w.quantity} onChange={(e) => updateWIPAtPath(wi, [], "quantity", parseInt(e.target.value) || 1)} className="text-sm border border-[#A8CAD2] rounded px-2 py-1 w-16 bg-white" min={1} />
-                    <span className="text-xs text-gray-500">PCS</span>
+          </div>
+          )}
+
+          {section === "wip" && (() => {
+            const rows = flattenWipTree(current.wipItems, new Set());
+            const sel = rows.find((r) => r.key === selectedWipKey) ?? rows[0] ?? null;
+            const node = sel ? wipNodeAt(current.wipItems, sel.wi, sel.path) : null;
+            const toggle = (key: string) =>
+              setCollapsedWip((prev) => {
+                const next = new Set(prev);
+                if (next.has(key)) next.delete(key);
+                else next.add(key);
+                return next;
+              });
+            // Master templates have no product; a category-only stand-in makes
+            // the tree show sofa or bedframe sample values instead of raw tokens.
+            const sampleProduct = { category: tab } as Product;
+            return (
+              <div className="grid h-full grid-cols-1 grid-rows-[auto_minmax(0,1fr)] md:grid-rows-[minmax(0,1fr)] md:grid-cols-[minmax(320px,400px)_minmax(0,1fr)]">
+                {/* ── Structure ── */}
+                <div className="flex min-h-0 max-h-[40vh] md:max-h-none flex-col border-b md:border-b-0 md:border-r border-[#E2DDD8] bg-gradient-to-b from-[#FAF9F7] to-[#F3EFE8]">
+                  <div className="flex items-center justify-between px-3 py-2.5 border-b border-[#E2DDD8]">
+                    <span className="text-xs font-medium text-[#6B7280]">
+                      WIP Components ({current.wipItems.length})
+                    </span>
                     <button
-                      onClick={() => wrapWIPAt(wi)}
-                      className="ml-auto text-[10px] px-1.5 py-0.5 bg-[#A8CAD2] text-[#3E6570] rounded hover:bg-[#8FB4BD]"
-                      title="Wrap this WIP inside a new parent (upstream)"
+                      onClick={addWIP}
+                      className="text-xs px-2 py-1 bg-[#6B5C32] text-white rounded hover:bg-[#5A4D2A]"
                     >
-                      + Above
-                    </button>
-                    <button
-                      onClick={() => moveWIPUp(wi)}
-                      disabled={wi === 0}
-                      className="text-[10px] px-1.5 py-0.5 bg-[#A8CAD2] text-[#3E6570] rounded hover:bg-[#8FB4BD] disabled:opacity-30 disabled:cursor-not-allowed"
-                      title="Move up"
-                    >
-                      ↑
-                    </button>
-                    <button
-                      onClick={() => moveWIPDown(wi)}
-                      disabled={wi === current.wipItems.length - 1}
-                      className="text-[10px] px-1.5 py-0.5 bg-[#A8CAD2] text-[#3E6570] rounded hover:bg-[#8FB4BD] disabled:opacity-30 disabled:cursor-not-allowed"
-                      title="Move down"
-                    >
-                      ↓
-                    </button>
-                    <button onClick={() => removeWIP(wi)} className="p-1 hover:bg-[#F9E1DA] rounded text-[#9A3A2D]">
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                      + Add
                     </button>
                   </div>
+                  <div className="min-h-0 flex-1 overflow-y-auto p-2.5 space-y-2">
+                    {current.wipItems.length === 0 && (
+                      <p className="px-2 py-6 text-center text-xs text-gray-400">
+                        No WIP items yet.
+                      </p>
+                    )}
+                    {current.wipItems.map((root, wi) => (
+                      <WipTreeCard
+                        key={root.id ?? wi}
+                        node={root}
+                        wi={wi}
+                        path={[]}
+                        depth={0}
+                        product={sampleProduct}
+                        selectedKey={sel?.key ?? null}
+                        collapsed={collapsedWip}
+                        onSelect={setSelectedWipKey}
+                        onToggle={toggle}
+                      />
+                    ))}
+                  </div>
+                </div>
 
-                  {/* WIP Code builder */}
-                  <div className="bg-white border border-[#A8CAD2] rounded-md p-2">
-                    <p className="text-[10px] font-semibold text-[#3E6570] uppercase tracking-wide mb-1">WIP Code (Word + Variant combination)</p>
-                    <WIPCodeBuilder
-                      segments={w.codeSegments || [{ type: "word" as const, value: "" }]}
-                      onChange={(segs) => updateWIPSegmentsAtPath(wi, [], segs)}
+                {/* ── Detail ── */}
+                <div className="min-h-0 overflow-y-auto px-5 py-4">
+                  {!node || !sel ? (
+                    <p className="py-16 text-center text-sm text-gray-400">
+                      Select a component on the left to edit it.
+                    </p>
+                  ) : (
+                    <WipNodeDetail
+                      node={node}
+                      wi={sel.wi}
+                      path={sel.path}
+                      depth={sel.depth}
+                      product={sampleProduct}
                       fabricOptions={fabricOptions}
                       variantCategories={variantCategories}
+                      rawMaterials={rawMaterials}
+                      onUpdate={updateWIPAtPath}
+                      onUpdateSegments={updateWIPSegmentsAtPath}
+                      onAddProcess={addProcessAtPath}
+                      onRemoveProcess={removeProcessAtPath}
+                      onUpdateProcess={updateProcessAtPath}
+                      onMoveProcess={moveProcessAtPath}
+                      onAddMaterial={addMaterialAtPath}
+                      onRemoveMaterial={removeMaterialAtPath}
+                      onUpdateMaterial={updateMaterialAtPath}
+                      onSelectMaterial={selectMaterialAtPath}
+                      onSelectMaterialAuto={setMaterialAutoDetectAtPath}
+                      onAddChild={addSubWIPAtPath}
+                      onRemove={nRemove}
+                      onMove={nMove}
+                      onWrap={nWrap}
                     />
-                    <div className="text-[10px] text-gray-400 mt-1">
-                      Code preview: <span className="font-mono text-gray-600">{buildWipCode(w.codeSegments || []) || "(empty — fills from variant at apply time)"}</span>
-                    </div>
-                  </div>
-
-                  {/* Processes */}
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-medium text-[#3E6570]">Processes</span>
-                    <button onClick={() => addProcessAtPath(wi, [])} className="text-[10px] px-1.5 py-0.5 bg-[#E0EDF0] text-[#3E6570] rounded hover:bg-[#A8CAD2]">+ Process</button>
-                  </div>
-                  {w.processes.map((p, pi) => (
-                    <div key={pi} className="flex items-center gap-2 bg-white rounded px-2 py-1.5">
-                      <select value={p.deptCode} onChange={(e) => updateProcessAtPath(wi, [], pi, "deptCode", e.target.value)} className="text-xs border border-gray-200 rounded px-1.5 py-1 bg-white">
-                        {DEPT_ORDER.map((d) => (<option key={d} value={d}>{DEPT_LABELS[d]}</option>))}
-                      </select>
-                      <MinutesInput value={p.minutes} onChange={(m) => updateProcessAtPath(wi, [], pi, "minutes", m)} className="text-xs text-gray-700 bg-white border border-gray-200 rounded px-1.5 py-1 w-14 text-center tabular-nums" />
-                      <span className="text-[10px] text-gray-400">min</span>
-                      <button onClick={() => removeProcessAtPath(wi, [], pi)} className="ml-auto text-[#9A3A2D] hover:text-[#7A2E24]">
-                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                      </button>
-                    </div>
-                  ))}
-                  {w.processes.length === 0 && (
-                    <p className="text-[10px] text-gray-400 pl-2">No processes added</p>
                   )}
-
-                  {/* Materials */}
-                  <div className="flex items-center justify-between mt-2">
-                    <span className="text-xs font-medium text-[#4F7C3A]">Raw Materials</span>
-                    <button onClick={() => addMaterialAtPath(wi, [])} className="text-[10px] px-1.5 py-0.5 bg-[#EEF3E4] text-[#4F7C3A] rounded hover:bg-[#C6DBA8]">+ Material</button>
-                  </div>
-                  {(w.materials || []).map((m, mi) => (
-                    <div key={mi} className="bg-white rounded">
-                      <div className="flex items-center gap-2 px-2 py-1.5">
-                        {m.autoDetect ? (
-                          <div className="flex items-center gap-1.5 flex-1">
-                            <span className="text-[10px] px-1.5 py-0.5 bg-[#E0EDF0] text-[#3E6570] rounded font-medium border border-[#A8CAD2] whitespace-nowrap">
-                              {m.autoDetect === "FABRIC" ? "Fabric from order" : "Leg from order"}
-                            </span>
-                            <span className="text-[10px] text-gray-400 italic">
-                              {m.autoDetect === "FABRIC" ? "SO item fabricCode" : "SO item legHeightInches"}
-                            </span>
-                          </div>
-                        ) : (
-                          <RawMaterialSelect
-                            value={m.code ? `${m.code}` : ""}
-                            materials={rawMaterials}
-                            onSelect={(rm) => selectMaterialAtPath(wi, [], mi, rm)}
-                          />
-                        )}
-                        <select
-                          value={m.autoDetect || "NONE"}
-                          onChange={(e) => setMaterialAutoDetectAtPath(wi, [], mi, e.target.value as "FABRIC" | "LEG" | "NONE")}
-                          className="text-[10px] border border-gray-200 rounded px-1 py-1 bg-white"
-                          title="Auto-detect mode"
-                        >
-                          <option value="NONE">Manual</option>
-                          <option value="FABRIC">Auto: Fabric</option>
-                          <option value="LEG">Auto: Leg</option>
-                        </select>
-                        <input type="number" onFocus={(e) => e.currentTarget.select()} value={m.qty} onChange={(e) => updateMaterialAtPath(wi, [], mi, "qty", parseFloat(e.target.value) || 0)} className="text-xs border border-gray-200 rounded px-1.5 py-1 w-14" />
-                        <input type="number" onFocus={(e) => e.currentTarget.select()} value={m.wastePct ?? ""} onChange={(e) => updateMaterialAtPath(wi, [], mi, "wastePct", parseFloat(e.target.value) || 0)} placeholder="0" title="Wastage % — cut / bulk materials (fabric / foam / wood) have offcut + defect waste; leave 0 for discrete parts (screws / legs / mechanism)" className="text-xs border border-gray-200 rounded px-1.5 py-1 w-12" />
-                        <span className="text-[10px] text-gray-400 whitespace-nowrap" title="Wastage % — cut / bulk materials (fabric / foam / wood) have offcut + defect waste; leave 0 for discrete parts (screws / legs / mechanism)">% waste</span>
-                        <span className="text-[10px] text-gray-400 w-8">{m.unit || "PCS"}</span>
-                        <button onClick={() => removeMaterialAtPath(wi, [], mi)} className="text-[#9A3A2D] hover:text-[#7A2E24]">
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                        </button>
-                      </div>
-                      <MaterialScalingEditor
-                        scaling={m.scaling}
-                        unit={m.unit || "PCS"}
-                        isCut={isFillerMaterial(m, rawMaterials)}
-                        onChange={(s) => updateMaterialAtPath(wi, [], mi, "scaling", s)}
-                      />
-                    </div>
-                  ))}
-                  {(w.materials || []).length === 0 && (
-                    <p className="text-[10px] text-gray-400 pl-2">No materials added</p>
-                  )}
-
-                  {/* Sub-WIP Components (unlimited nesting) */}
-                  <SubWIPTree
-                    children={w.children || []}
-                    wi={wi}
-                    path={[]}
-                    onAdd={(path) => addSubWIPAtPath(wi, path)}
-                    onRemove={(path, si) => removeSubWIPAtPath(wi, path, si)}
-                    onUpdate={(path, field, value) => updateWIPAtPath(wi, path, field, value)}
-                    onUpdateSegments={(path, segs) => updateWIPSegmentsAtPath(wi, path, segs)}
-                    onAddProcess={(path) => addProcessAtPath(wi, path)}
-                    onRemoveProcess={(path, pi) => removeProcessAtPath(wi, path, pi)}
-                    onUpdateProcess={(path, pi, field, value) => updateProcessAtPath(wi, path, pi, field, value)}
-                    onAddMaterial={(path) => addMaterialAtPath(wi, path)}
-                    onRemoveMaterial={(path, mi) => removeMaterialAtPath(wi, path, mi)}
-                    onSelectMaterial={(path, mi, rm) => selectMaterialAtPath(wi, path, mi, rm)}
-                    onSelectMaterialAutoDetect={(path, mi, kind) => setMaterialAutoDetectAtPath(wi, path, mi, kind)}
-                    onUpdateMaterial={(path, mi, field, value) => updateMaterialAtPath(wi, path, mi, field, value)}
-                    onWrap={(path, si) => wrapSubWIPAtPath(wi, path, si)}
-                    onMoveUp={(path, si) => moveSubWIPUpAtPath(wi, path, si)}
-                    onMoveDown={(path, si) => moveSubWIPDownAtPath(wi, path, si)}
-                    onMoveProcessUp={(path, pi) => moveProcessAtPath(wi, path, pi, -1)}
-                    onMoveProcessDown={(path, pi) => moveProcessAtPath(wi, path, pi, 1)}
-                    fabricOptions={fabricOptions}
-                    variantCategories={variantCategories}
-                    rawMaterials={rawMaterials}
-                  />
                 </div>
-              ))}
-              {current.wipItems.length === 0 && (
-                <div className="text-center py-8 text-sm text-gray-400 bg-[#FAF9F7] rounded-lg border border-dashed border-[#E2DDD8]">
-                  No WIP items. Click &ldquo;+ Add WIP&rdquo; to add one.
-                </div>
-              )}
-            </div>
-          </div>
-          </div>
+              </div>
+            );
+          })()}
         </div>
 
         {/* Footer */}
