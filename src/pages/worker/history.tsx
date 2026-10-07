@@ -46,6 +46,8 @@ type DailyRow = {
   productionMinutes: number;
   /** DEV-31: the day's Working Hours rows by department (office-grid split). */
   deptHours: DeptHours[];
+  /** Production Hours: the day's hours in production departments only. */
+  prodDeptMinutes?: number;
 };
 type AttRow = {
   date: string;
@@ -178,7 +180,7 @@ export default function WorkerHistoryPage() {
   );
 }
 
-// Per-day table: Date / Working / Production / Eff%, with the punch line
+// Per-day table: Date / Working / Production / Std duration / Eff%, with the punch line
 // (in → out · OT · Late) under any day that has a punch — identical facts to
 // the office Working Hours + Attendance views.
 function DailyAttendanceCard({ hist, t }: { hist: MonthHistory; t: Translate }) {
@@ -191,16 +193,20 @@ function DailyAttendanceCard({ hist, t }: { hist: MonthHistory; t: Translate }) 
         </p>
       </div>
       <div className="px-4 pb-2">
-        <div className="grid grid-cols-[auto_1fr_1fr_1fr] gap-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-[#8A8680] border-b border-[#E5E0DB]">
+        <div className="grid grid-cols-[auto_1fr_1fr_1fr_1fr] gap-2 py-2 text-[10px] font-semibold uppercase tracking-wide text-[#8A8680] border-b border-[#E5E0DB]">
           <span>{t("pay.colDate")}</span>
           <span className="text-right">{t("home.colWorkingHrs")}</span>
           <span className="text-right">{t("home.colProductionHrs")}</span>
+          <span className="text-right">{t("home.colStdDuration")}</span>
           <span className="text-right">{t("home.efficiencyPct")}</span>
         </div>
         {hist.daily.map((r) => {
+          // Same formula as the Home tiles: Standard Production Duration ÷
+          // Production Hours (production departments only).
+          const prodHrsMins = r.prodDeptMinutes ?? 0;
           const eff =
-            r.workingMinutes > 0
-              ? Math.round((r.productionMinutes / r.workingMinutes) * 100)
+            prodHrsMins > 0
+              ? Math.round((r.productionMinutes / prodHrsMins) * 100)
               : null;
           const effTone =
             eff == null
@@ -215,10 +221,13 @@ function DailyAttendanceCard({ hist, t }: { hist: MonthHistory; t: Translate }) 
           );
           return (
             <div key={r.date} className="py-2.5 border-b border-[#F0ECE9] last:border-b-0">
-              <div className="grid grid-cols-[auto_1fr_1fr_1fr] gap-3 text-sm items-center">
+              <div className="grid grid-cols-[auto_1fr_1fr_1fr_1fr] gap-2 text-sm items-center">
                 <span className="font-medium text-[#1F1D1B]">{fmtDay(r.date)}</span>
                 <span className="tabular-nums text-right font-semibold">
                   {mins2hrs(r.workingMinutes)}
+                </span>
+                <span className="tabular-nums text-right font-semibold">
+                  {mins2hrs(prodHrsMins)}
                 </span>
                 <span className="tabular-nums text-right font-semibold text-[#3E6570]">
                   {mins2hrs(r.productionMinutes)}
