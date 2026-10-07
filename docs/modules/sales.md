@@ -1,5 +1,6 @@
 # Sales — Module Guide
 
+> **Last verified: 2026-10-07** (branch `fix/bug06-do-duplicate-guard-main`, BUG-2026-09-30-223): "Transfer to Delivery Order" sends the SO's ready production orders (`/api/delivery-orders/ready-planning`), not hand-built `items`. Anchors shifted: `SalesPage` :195, `aggregateServiceOrderProgress` :98, `soStageLabel` :165. Nothing else re-checked.
 > **Last verified: 2026-10-05** (branch `feat/so-empty-wip-flag-main`): Create SO warns on a line whose product has an empty BOM WIP tab, and confirm is blocked for it (`findEmptyWipProducts` `sales-orders/_helpers.ts:489`, wrapped by `findIncompleteBomProducts`; `GET /empty-wip`). Anchors re-derived: `CopyFromSourceModal` :2409, `LineItemCard` :3037, `app.post("/")` :1732, `/:id/confirm` :2517, `app.put("/:id")` :3119, `_helpers.ts` :591 / :788 / :1298. Nothing else re-checked.
 
 > **Last verified: 2026-09-29** (CopyFromSourceModal / LineItemCard anchors moved to 2390 / 3016 by BUG-2026-09-29-211; the sales-orders.ts line count below is stale, it measured 5,853 on 2026-09-29. Other create.tsx anchors as re-derived 2026-09-23 after BUG-2026-09-23-183; rest as of 2026-08-19) against `src/api/routes/sales-orders.ts` (**5,733** lines),
@@ -31,7 +32,7 @@ Owns the customer-facing order lifecycle: **Sales Orders** (SO) and their line i
 
 ## Entry points
 - Pages
-  - `/sales` → `src/pages/sales/index.tsx:172` (`SalesPage` — SO list, dual-mode SO vs service-order)
+  - `/sales` → `src/pages/sales/index.tsx:195` (`SalesPage` — SO list, dual-mode SO vs service-order)
   - `/sales/create` → `src/pages/sales/create.tsx:213` (`CreateSalesOrderPage`; OCR/scan-PO lands here)
   - `/sales/:id` → `src/pages/sales/detail.tsx:338` (`SalesOrderDetailPage`; linked POs/JCs/DOs/invoices)
   - `/sales/:id/edit` → `src/pages/sales/edit.tsx` (Edit SO; re-runs sofa-combo on save)
@@ -68,9 +69,9 @@ Owns the customer-facing order lifecycle: **Sales Orders** (SO) and their line i
 ## Key functions / sections (locate-to-function)
 | Symbol / section | file:line | Role |
 |---|---|---|
-| `SalesPage` | `src/pages/sales/index.tsx:172` | SO list main; service-order-mode flag, filters, tabs |
-| `aggregateServiceOrderProgress` | `src/pages/sales/index.tsx:75` | Rolls linked-PO progress into a service-order stage |
-| `soStageLabel` | `src/pages/sales/index.tsx:142` | Maps SO status → display stage label |
+| `SalesPage` | `src/pages/sales/index.tsx:195` | SO list main; service-order-mode flag, filters, tabs |
+| `aggregateServiceOrderProgress` | `src/pages/sales/index.tsx:98` | Rolls linked-PO progress into a service-order stage |
+| `soStageLabel` | `src/pages/sales/index.tsx:165` | Maps SO status → display stage label |
 | `CreateSalesOrderPageWrapper` | `src/pages/sales/create.tsx:205` | Default export; providers shell |
 | `CreateSalesOrderPage` | `src/pages/sales/create.tsx:213` | Main create form (parties, items, totals) |
 | `CopyFromSourceModal` | `src/pages/sales/create.tsx:2409` | 2-step copy-draft picker |

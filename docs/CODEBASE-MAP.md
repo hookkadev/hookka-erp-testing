@@ -1,5 +1,6 @@
 # Hookka ERP — Codebase Map (the single authoritative map)
 
+> **Last verified: 2026-10-07 on branch `fix/bug06-do-duplicate-guard-main` (to `main`, BUG-2026-09-30-223)**: the `sales/index.tsx` (2229) and `consignment/index.tsx` (1069) line counts, re-measured. Nothing else re-checked.
 > **Last verified: 2026-10-07 on branch `feat/dev37-kpi-self-view-to-main` (to `main`, DEV-37)**: the KPI row (every login opens `/kpi`, no `kpi:read` gate; checklist ticks Super Admin only), read from `src/dashboard-routes.tsx`, `src/api/lib/nav-permissions.ts`, `src/api/routes/kpi.ts` and `src/pages/kpi/index.tsx`. Nothing else re-checked.
 > **Last verified: 2026-10-06 on branch `fix/production-overview-scrollbar` (to `main`)**: the `production/index.tsx` row only (the Grid's single scroll box and sticky header), read from `src/pages/production/index.tsx`; its `reuseUnchanged` anchor (1139) is above the edit and did not move.
 > **Last verified: 2026-10-06 on branch `feat/kpi-delivery-rules-orders-main` (to `main`)**: the KPI drill-down row (`late-to-customer?all=1` returns every order with a LATE / EARLY / ON_TIME status; the card lists them inline), read from the code. Same change as staging #694. Nothing else re-checked.
@@ -264,11 +265,11 @@ authoritative current detail.** New here? Start with [ONBOARDING-PATH.md](ONBOAR
 
 | Frontend page | API route | Primary tables | Tests |
 |---|---|---|---|
-| `src/pages/sales/index.tsx` — SO list (2181), dual-mode SO vs service-order | `src/api/routes/sales-orders.ts` — 5,865 lines (re-measured 2026-09-23; create POST now WARNS, not 409s, on a repeated customer PO/SO ref — BUG-2026-09-23-185) (+ `sales-orders/_helpers.ts`, 1,462); SO CRUD + status cascades + snapshot | `sales_orders` / `sales_order_items` / `so_status_changes` | `tests/sofa-combo.test.mjs` |
+| `src/pages/sales/index.tsx` — SO list (2229), dual-mode SO vs service-order | `src/api/routes/sales-orders.ts` — 5,865 lines (re-measured 2026-09-23; create POST now WARNS, not 409s, on a repeated customer PO/SO ref — BUG-2026-09-23-185) (+ `sales-orders/_helpers.ts`, 1,462); SO CRUD + status cascades + snapshot | `sales_orders` / `sales_order_items` / `so_status_changes` | `tests/sofa-combo.test.mjs` |
 | `src/pages/sales/create.tsx` — Create SO (3796, re-measured 2026-10-05); OCR/scan-PO lands here; per-line warning when the product’s BOM WIP tab is empty (`GET /api/sales-orders/empty-wip`) | `src/api/routes/consignment-orders.ts` — CO CRUD + co_status_changes (2815) | `consignment_orders` / `consignment_order_items` / `co_status_changes` | `tests/so-category.test.mjs` |
 | `src/pages/sales/detail.tsx` — SO detail (1819); linked POs/JCs/DOs/invoices; Customer PO number opens the original PO inline | `src/api/routes/consignment-notes.ts` — CN (DO-equiv) dispatch/delivered (2152) | `consignment_notes` / `consignment_items` | |
 | `src/pages/sales/edit.tsx` — Edit SO (1634); re-runs sofa-combo on save; unit price + build-up via `@/lib/pricing` | `src/api/routes/consignments.ts` — legacy/shared reads (536) | `sofa_combo_rules` / `customer_products` / `price_overrides` | |
-| `src/pages/consignment/index.tsx` — CO list (1197) | `src/api/routes/sofa-combos.ts` — sofa_combo_rules CRUD (650) | `cost_ledger` / `production_orders` / `job_cards` / `fg_units` | |
+| `src/pages/consignment/index.tsx` — CO list (1069) | `src/api/routes/sofa-combos.ts` — sofa_combo_rules CRUD (650) | `cost_ledger` / `production_orders` / `job_cards` / `fg_units` | |
 | `src/pages/consignment/create.tsx` — Create CO (1782) | `src/api/routes/historical-sales.ts` — read-only history (128) | `delivery_orders` / `delivery_order_items` / `invoices` / `invoice_items` | |
 | `src/pages/consignment/edit.tsx` — Edit CO (1142); unit price + build-up via `@/lib/pricing` | | `sales_orders_archive` / `sales_order_items_archive` / `sales_orders_list_snapshot` | |
 | `src/pages/consignment/detail.tsx` — CO detail (1568); DO-parity P2 | | | |
