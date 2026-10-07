@@ -90,7 +90,7 @@ Entries themselves stay newest-first.
 
 **Fix.** `buildDoDeliveredSoAndInvoice` (`src/api/routes/delivery-orders/_helpers.ts`) stops before allocating an invoice number when there is nothing to bill: no header, lines, A/R bump, ledger legs or draw-down. If the DO is fully billed by then (the race), it still pushes the SO -> INVOICED bumps (guarded on `status = 'DELIVERED'`) and DO -> INVOICED, because the same batch carries the stale SO -> DELIVERED and DO DELIVERED updates that would otherwise undo the winner's status. The double click itself is not blocked; it is now harmless.
 
-**Data.** INV-2610-021 is still live on prod; void it (PUT status CANCELLED) and resend the DO's invoice email so INV-2610-020 goes out. Read from the code, not run: voiding it releases nothing (no lines), DO-2610-013 stays INVOICED (both lines billed by 020) and its SOs stay INVOICED (020 is live).
+**Data.** The only invoice email for DO-2610-013 in `outbox_emails` is INV-2610-021 (06:53:17 UTC, operation@houzscentury.com); INV-2610-020 was never sent. INV-2610-021 voided on prod 2026-10-07 via `PUT /api/invoices/inv-4cb42a2b {status: CANCELLED}` (Super Admin). Measured after: 021 CANCELLED, 020 SENT RM 915.00, DO-2610-013 INVOICED, SO-2609-355 and SO-2609-387 INVOICED. Resend of the DO's invoice email (so 020 goes out) left to Violet.
 
 **Guard.** `tests/do-auto-invoice-empty-guard.test.mjs` replays the losing request against a book whose reads change underneath it (first billing read pre-commit, later reads see INV-2610-020): no invoice statements, and SOs and DO finish INVOICED. Fails on the old code (it goes on to `nextInvoiceNo`). `npm test` 5264 pass / 0 fail, strict typecheck clean.
 
