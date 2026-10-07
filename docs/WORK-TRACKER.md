@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-07**: branch `fix/bug06-do-duplicate-guard-main` (BUG-06 to `main`, BUG-2026-09-30-223) added below (its entry is the newest).
 > **Last verified: 2026-10-07**: branch `feat/dev37-kpi-self-view-to-main` (DEV-37 staging to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-07**: branch `fix/rm-uom-bottle-main` (DEV-20 follow-up to `main`, BUG-2026-10-07-262) added below (its entry is the newest).
 > **Last verified: 2026-10-06**: branch `feat/pay-card-main` (to `main`, BUG-2026-10-06-259) added below (its entry is the newest).
@@ -98,6 +99,15 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-07 — 🔵 BUG-06: Transfer / Convert duplicate guard to main (branch `fix/bug06-do-duplicate-guard-main` → `main`, BUG-2026-09-30-223)
+
+Ask: BUG-06 was finished and tested on staging (2026-09-30, #593); bring it to production. PR #448 (all of T-006) was closed for conflicts, so only the BUG-06 pieces come over, as patches onto `main`.
+1. 🔵 Server: DO create guards every production order in `productionOrderIds` and `items`; an SO-linked create with none is refused.
+2. 🔵 Sales "Transfer to Delivery Order" sends the SO's ready production orders.
+3. 🔵 Consignment "Transfer to Delivery Order" (same refused shape, could never succeed) becomes "Create Consignment Note".
+4. 🔵 Tests: the two BUG-06 files pass on main. Not brought over: the T-006 R2 to R10 work and the client Idempotency-Key (staging only).
+5. ⬜ After deploy: check on prod that a second transfer of the same SO is refused.
 
 ## 2026-10-07 — ⬜ DEV-37: every staff login sees their own KPI card, view only (branch `feat/dev37-kpi-self-view-to-main` → `main`)
 
