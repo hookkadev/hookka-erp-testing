@@ -1,0 +1,19 @@
+{
+  "generatedAt": "2026-10-07",
+  "department": "Fibre",
+  "sheets": {
+    "Summary & Notes": [
+      ["Fibre - Day-by-Day Schedule"],
+      ["Fibre is a production stage that runs immediately before Upholstery."],
+      [""],
+      ["A dedicated forward-capacity schedule for Fibre is not built yet."],
+      ["Until it lands, this page shows the saved snapshot (empty) and the live Recalculate button is inert."]
+    ],
+    "Fibre Calendar": [
+      ["Fill Date", "Lane", "SO ID", "Model", "Item", "Pieces", "Mins", "Customer DD", "Upstream"]
+    ],
+    "By Day": [
+      ["Date", "Day", "Lane", "SOs that day", "SOs", "Fill h", "Cap h"]
+    ]
+  }
+}

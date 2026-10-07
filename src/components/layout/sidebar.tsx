@@ -124,6 +124,7 @@ const navigationGroups: NavGroup[] = [
         { name: "Wood Cut", href: "/production/wood-cut", icon: Axe },
         { name: "Framing", href: "/production/framing", icon: Frame },
         { name: "Webbing", href: "/production/webbing", icon: Grid3x3 },
+        { name: "Fibre", href: "/production/fibre", icon: Layers },
         { name: "Upholstery", href: "/production/upholstery", icon: Sofa },
         { name: "Packing", href: "/production/packing", icon: Package },
       ]},
@@ -618,6 +619,7 @@ export function Sidebar({
       href === "/production/wood-cut" ||
       href === "/production/framing" ||
       href === "/production/webbing" ||
+      href === "/production/fibre" ||
       href === "/production/upholstery" ||
       href === "/production/packing"
     ) {

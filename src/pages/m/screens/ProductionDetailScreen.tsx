@@ -32,6 +32,7 @@ const DEPTS: { code: string; label: string }[] = [
   { code: "WOOD_CUT", label: "Wood Cut" },
   { code: "FRAMING", label: "Framing" },
   { code: "WEBBING", label: "Webbing" },
+  { code: "FIBRE", label: "Fibre" },
   { code: "UPHOLSTERY", label: "Upholstery" },
   { code: "PACKING", label: "Packing" },
 ];

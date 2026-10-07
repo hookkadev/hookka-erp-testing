@@ -449,6 +449,7 @@ const SEED_DEPARTMENTS: DepartmentLite[] = [
   { id: "dept-4",  code: "FOAM",                 name: "Foam Bonding",         isProduction: true },
   { id: "dept-5",  code: "FRAMING",              name: "Framing",              isProduction: true },
   { id: "dept-6",  code: "WEBBING",              name: "Webbing",              isProduction: true },
+  { id: "dept-15", code: "FIBRE",                name: "Fibre",                isProduction: true },
   { id: "dept-7",  code: "UPHOLSTERY",           name: "Upholstery",           isProduction: true },
   { id: "dept-8",  code: "PACKING",              name: "Packing",              isProduction: true },
   { id: "dept-9",  code: "WAREHOUSING",          name: "Warehousing",          isProduction: false },

@@ -87,6 +87,7 @@ const PRODUCTION_DEPTS = [
   { code: "FOAM", name: "Foam Bonding" },
   { code: "FRAMING", name: "Framing" },
   { code: "WEBBING", name: "Webbing" },
+  { code: "FIBRE", name: "Fibre" },
   { code: "UPHOLSTERY", name: "Upholstery" },
   { code: "PACKING", name: "Packing" },
 ];

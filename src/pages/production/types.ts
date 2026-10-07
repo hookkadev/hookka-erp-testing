@@ -235,6 +235,7 @@ export type DeptRow = {
   sched_FOAM_CUTTING: DeptSched;
   sched_FRAMING: DeptSched;
   sched_WEBBING: DeptSched;
+  sched_FIBRE: DeptSched;
   sched_UPHOLSTERY: DeptSched;
   sched_PACKING: DeptSched;
 };
