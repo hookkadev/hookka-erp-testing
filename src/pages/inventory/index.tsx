@@ -36,9 +36,8 @@ import {
   DEFAULT_MATERIAL_VARIANTS,
   materialVariantCode,
   materialVariantDescription,
-  uomOptionsFor,
+  rmUnitsFrom,
   wholeUomsFrom,
-  type UomOptions,
 } from "@/lib/material-variants";
 // Stock Breakdown — the per-item right-hand drawer (lots, movements with a
 // derived running balance, and FIFO COGS). One component for FG / WIP / RM.
@@ -1306,20 +1305,12 @@ export default function InventoryPage() {
   function catVariants(cat: string): string[] {
     return rmVariantsAll[cat] ?? DEFAULT_MATERIAL_VARIANTS[cat] ?? [];
   }
-  // Allowed UOMs per category (DEV-20) — edited in RM Settings, read by every
-  // RM form below, enforced again by the raw-materials route.
-  const rmUomOpts = useMemo<UomOptions>(
-    () => (variantsCfg?.uomOptions as UomOptions | undefined) ?? {},
-    [variantsCfg],
-  );
-  // Add RM: the UOM is derived, never stale — switching to a group that does
-  // not allow the picked unit falls to that group's first one. Memoized: the
-  // React Compiler otherwise treats the call as a possible mutation and skips
-  // the page's other memos.
-  const rmFormUomChoices = useMemo(
-    () => uomOptionsFor(rmForm.itemGroup, rmUomOpts),
-    [rmForm.itemGroup, rmUomOpts],
-  );
+  // RM units (DEV-20) — built-ins plus the ones added in RM Settings, the same
+  // for every category; read by every RM form below, enforced again by the
+  // raw-materials route. Memoized: the React Compiler otherwise treats the
+  // call as a possible mutation and skips the page's other memos.
+  const rmUnits = useMemo(() => rmUnitsFrom(variantsCfg), [variantsCfg]);
+  const rmFormUomChoices = rmUnits;
   const rmFormUom = rmFormUomChoices.includes(rmForm.baseUOM) ? rmForm.baseUOM : rmFormUomChoices[0];
   // Units whose balance cannot be typed as a fraction here (all categories).
   const rmWholeUoms = useMemo(() => wholeUomsFrom(variantsCfg?.wholeUoms), [variantsCfg]);
@@ -1328,15 +1319,19 @@ export default function InventoryPage() {
     setVariantsCfg((prev) => ({ ...(prev ?? {}), wholeUoms: next }) as VariantsConfig);
     patchVariantsConfig({ wholeUoms: next });
   }
-  function toggleCatUom(cat: string, uom: string) {
-    const cur = rmUomOpts[cat] ?? [];
-    const list = cur.includes(uom) ? cur.filter((x) => x !== uom) : [...cur, uom];
-    // An emptied list is dropped so the group falls back to every unit.
-    const next = Object.fromEntries(
-      Object.entries({ ...rmUomOpts, [cat]: list }).filter(([, v]) => v.length > 0),
-    );
-    setVariantsCfg((prev) => ({ ...(prev ?? {}), uomOptions: next }) as VariantsConfig);
-    patchVariantsConfig({ uomOptions: next });
+  // Saves the added units (built-ins are never stored) and clears the retired
+  // per-category lists, whose units rmUnitsFrom has already carried over. A
+  // deleted unit also leaves the whole-number list.
+  function saveRmUnits(units: string[]) {
+    const extraUoms = units.filter((u) => !ALL_RM_UOMS.includes(u));
+    const wholeUoms = rmWholeUoms.filter((u) => ALL_RM_UOMS.includes(u) || extraUoms.includes(u));
+    setVariantsCfg((prev) => ({ ...(prev ?? {}), extraUoms, uomOptions: {}, wholeUoms }) as VariantsConfig);
+    patchVariantsConfig({ extraUoms, uomOptions: {}, wholeUoms });
+  }
+  function addRmUnit() {
+    const u = matCatNewUom.trim().toUpperCase();
+    if (u && !rmUnits.includes(u)) saveRmUnits([...rmUnits, u]);
+    setMatCatNewUom("");
   }
   function addVariantToCat(cat: string, val: string) {
     const v = val.trim();
@@ -2021,7 +2016,7 @@ export default function InventoryPage() {
     { key: "id", label: "ID", hidden: true },
     { key: "itemCode", label: "Item Code", required: true, example: "PC151-01", help: "Unique item code" },
     { key: "description", label: "Description", required: true, example: "Fabric PC151-01 Grey" },
-    { key: "baseUOM", label: "Base UOM", required: true, example: "MTR", help: "One of the item group's allowed UOMs (set in RM Settings)." },
+    { key: "baseUOM", label: "Base UOM", required: true, example: "MTR", help: "One of the units in RM Settings → Units." },
     { key: "itemGroup", label: "Item Group", required: true, example: "FABRIC", help: "FABRIC / PLYWOOD / FOAM etc." },
     { key: "balanceQty", label: "Balance Qty", type: "number", example: 0 },
     { key: "isActive", label: "Active", type: "boolean", example: "TRUE" },
@@ -2867,30 +2862,23 @@ export default function InventoryPage() {
                     </div>
                   </div>
 
-                  {/* Allowed UOMs (DEV-20) — narrows the UOM dropdown on Add /
-                      Edit / Batch Edit for this category; the API rejects any
-                      other unit. None ticked = every unit allowed. */}
+                  {/* Units (DEV-20) — GLOBAL, not per category. Every unit
+                      here is offered on Add / Edit / Batch Edit for every
+                      category; the API rejects any other. Built-ins stay. */}
                   <div className="pt-3 border-t border-[#E2DDD8]">
                     <div className="text-xs text-[#6B7280] mb-1.5">
-                      Allowed UOMs for <span className="font-mono text-[#1F1D1B]">{matCatSel}</span>{" "}
-                      <span className="text-[#9CA3AF]">(click to allow / remove; none selected = every unit allowed)</span>
+                      Units <span className="text-[#1F1D1B] font-medium">(all categories)</span>{" "}
+                      <span className="text-[#9CA3AF]">(add a unit the list is missing, e.g. BOTTLE; × deletes one added by mistake)</span>
                     </div>
                     <div className="flex flex-wrap gap-2 mb-2">
-                      {[...new Set([...ALL_RM_UOMS, ...(rmUomOpts[matCatSel] ?? [])])].map((u) => {
-                        const on = (rmUomOpts[matCatSel] ?? []).includes(u);
-                        return (
-                          <button
-                            key={u}
-                            type="button"
-                            aria-pressed={on}
-                            onClick={() => toggleCatUom(matCatSel, u)}
-                            className={`inline-flex items-center gap-1.5 border rounded px-2.5 py-1 text-sm font-mono ${on ? "border-[#6B5C32] bg-[#F4EFE3] text-[#1F1D1B]" : "border-[#E2DDD8] bg-white text-gray-500 hover:bg-[#FAF9F7]"}`}
-                          >
-                            <span className={`w-4 h-4 flex-shrink-0 rounded-sm border flex items-center justify-center ${on ? "bg-[#6B5C32] border-[#6B5C32] text-white" : "border-gray-300"}`}>{on ? <Check className="w-3 h-3" /> : null}</span>
-                            {u}
-                          </button>
-                        );
-                      })}
+                      {rmUnits.map((u) => (
+                        <span key={u} className="inline-flex items-center gap-1.5 border border-[#E2DDD8] rounded px-2.5 py-1 text-sm bg-[#FAF9F7]">
+                          <span className="font-mono">{u}</span>
+                          {!ALL_RM_UOMS.includes(u) && (
+                            <button type="button" onClick={() => saveRmUnits(rmUnits.filter((x) => x !== u))} className="text-[#9A3A2D]/50 hover:text-[#9A3A2D]" title={`Delete ${u}`} aria-label={`Delete ${u}`}><X className="w-3 h-3" /></button>
+                          )}
+                        </span>
+                      ))}
                     </div>
                     <div className="flex gap-2">
                       <input
@@ -2899,22 +2887,16 @@ export default function InventoryPage() {
                         onKeyDown={(e) => {
                           if (e.key !== "Enter") return;
                           e.preventDefault();
-                          const u = matCatNewUom.trim();
-                          if (u && !(rmUomOpts[matCatSel] ?? []).includes(u)) toggleCatUom(matCatSel, u);
-                          setMatCatNewUom("");
+                          addRmUnit();
                         }}
-                        className="flex-1 border border-[#E2DDD8] rounded px-3 py-1.5 text-sm focus:border-[#6B5C32] focus:outline-none"
-                        placeholder="Another unit (e.g. SHEET)"
+                        className="flex-1 min-w-0 border border-[#E2DDD8] rounded px-3 py-1.5 text-sm focus:border-[#6B5C32] focus:outline-none"
+                        placeholder="New unit (e.g. BOTTLE)"
                       />
                       <Button
                         variant="outline"
                         size="sm"
                         disabled={!matCatNewUom.trim()}
-                        onClick={() => {
-                          const u = matCatNewUom.trim();
-                          if (u && !(rmUomOpts[matCatSel] ?? []).includes(u)) toggleCatUom(matCatSel, u);
-                          setMatCatNewUom("");
-                        }}
+                        onClick={addRmUnit}
                       >
                         <Plus className="h-4 w-4" /> Add
                       </Button>
@@ -2947,7 +2929,7 @@ export default function InventoryPage() {
                       <span className="text-[#9CA3AF]">(stock qty typed on this page cannot be a fraction, e.g. no 2.5 BOX)</span>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      {[...new Set([...ALL_RM_UOMS, ...Object.values(rmUomOpts).flat(), ...rmWholeUoms])].map((u) => {
+                      {[...new Set([...rmUnits, ...rmWholeUoms])].map((u) => {
                         const on = rmWholeUoms.includes(u);
                         return (
                           <button
@@ -3326,10 +3308,10 @@ export default function InventoryPage() {
                     title={Number(editRM.balanceQty) !== 0 ? "Locked: this material has stock counted in its current unit" : undefined}
                     className="w-full h-[34px] rounded border border-[#E2DDD8] px-3 text-sm disabled:bg-[#FAF9F7] disabled:text-[#6B7280]"
                   >
-                    {!uomOptionsFor(editRMForm.itemGroup, rmUomOpts).includes(editRMForm.baseUOM) && editRMForm.baseUOM && (
+                    {!rmUnits.includes(editRMForm.baseUOM) && editRMForm.baseUOM && (
                       <option value={editRMForm.baseUOM}>{editRMForm.baseUOM}</option>
                     )}
-                    {uomOptionsFor(editRMForm.itemGroup, rmUomOpts).map(u => <option key={u} value={u}>{u}</option>)}
+                    {rmUnits.map(u => <option key={u} value={u}>{u}</option>)}
                   </select>
                 </div>
                 <div>
@@ -3612,7 +3594,7 @@ export default function InventoryPage() {
         onClose={() => setShowBatchEditRM(false)}
         rawMaterials={liveRawMaterials}
         itemGroups={RM_ITEM_GROUPS}
-        uomOptions={rmUomOpts}
+        units={rmUnits}
         onSaved={(updated) => {
           setLiveRawMaterials(updated);
           invalidateCachePrefix("/api/raw-materials");
@@ -3668,19 +3650,16 @@ function BatchEditRMDialog({
   onClose,
   rawMaterials,
   itemGroups,
-  uomOptions,
+  units,
   onSaved,
 }: {
   open: boolean;
   onClose: () => void;
   rawMaterials: RawMaterial[];
   itemGroups: string[];
-  uomOptions: UomOptions;
+  units: string[];
   onSaved: (next: RawMaterial[]) => void;
 }) {
-  // Bulk fill spans groups, so it offers every unit; the API rejects a row
-  // whose group does not allow it and the failure toast names the reason.
-  const allUoms = [...new Set([...ALL_RM_UOMS, ...Object.values(uomOptions).flat()])];
   const { toast } = useToast();
   const [search, setSearch] = useState("");
   const [groupFilter, setGroupFilter] = useState<string>("ALL");
@@ -3970,7 +3949,7 @@ function BatchEditRMDialog({
                     className="flex-1 border border-[#E2DDD8] rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-[#6B5C32]"
                   >
                     <option value="">Pick UOM...</option>
-                    {allUoms.map((u) => <option key={u} value={u}>{u}</option>)}
+                    {units.map((u) => <option key={u} value={u}>{u}</option>)}
                   </select>
                 )}
                 {bulkField === "isActive" && (
@@ -4106,10 +4085,10 @@ function BatchEditRMDialog({
                               pendingByRm.get(r.id)?.baseUOM !== undefined ? "border-[#4F7C3A] font-semibold text-[#4F7C3A]" : "border-[#E2DDD8]"
                             }`}
                           >
-                            {!uomOptionsFor(eff.itemGroup, uomOptions).includes(eff.baseUOM) && eff.baseUOM && (
+                            {!units.includes(eff.baseUOM) && eff.baseUOM && (
                               <option value={eff.baseUOM}>{eff.baseUOM}</option>
                             )}
-                            {uomOptionsFor(eff.itemGroup, uomOptions).map((u) => <option key={u} value={u}>{u}</option>)}
+                            {units.map((u) => <option key={u} value={u}>{u}</option>)}
                           </select>
                         </td>
                         <td className="px-3 py-2 text-center">

@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-07**: newest entry BUG-2026-10-07-262 (branch `fix/rm-uom-bottle-main`, to main).
 > **Last verified: 2026-10-06**: newest entry BUG-2026-10-06-261 (branch `fix/bom-wip-delete-move`, to main); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-06**: newest entry BUG-2026-10-06-260 (branch `fix/production-overview-scrollbar`, to main; no open PR holds 260); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-06**: newest entry BUG-2026-10-06-259 (branch `feat/pay-card-main`, to main; the same fix reached staging through #707 to #710); a log, so "verified" means the entry matches the code on its branch.
@@ -74,6 +75,18 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-10-07-262 — Raw material save refused BOTTLE: "not allowed for item group MAINTENA" `inventory` 🔵
+
+🔵 Fixed on `fix/rm-uom-bottle-main` (to `main`). Report (owner, screenshot): saving a raw material in group MAINTENA with UOM BOTTLE fails with `UOM "BOTTLE" is not allowed for item group MAINTENA. Allowed: PCS, MTR, ROLL, BOX, CTN, SET, KG, LITER, PAIR, UNIT`.
+
+**Cause (from the code; the live RM Settings data is UNMEASURED).** DEV-20 gave each item group its own Allowed UOMs list. A group with no list got only the 10 built-in units, while a unit typed in under another group (BOTTLE) was offered by Batch Edit's set-all picker and then refused by `raw-materials.ts` on save.
+
+**Fix (owner's call: per-category lists are confusing, take them out).** One unit list for every category: `rmUnitsFrom` = `ALL_RM_UOMS` plus kv `variants-config.extraUoms` (plus any unit still sitting in the retired `uomOptions`, so nothing typed before is lost). RM Settings' per-category "Allowed UOMs" section is replaced by a global "Units" section: add a unit, × deletes an added one (also from the whole-number list); built-ins have no ×. Saving the list writes `extraUoms` and clears `uomOptions`. Add RM, Edit RM, Batch Edit and the route (POST, PUT on a unit change, bulk import) all use that list. The stock lock on a unit change and the whole-number units are unchanged.
+
+**Guard.** `tests/rm-uom-options.test.mjs` (the unit list, legacy `uomOptions` units carried over, a malformed blob adds nothing, no item group in the route's unit check).
 
 ---
 
