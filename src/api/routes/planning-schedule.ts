@@ -104,6 +104,51 @@ function normalizeCard(r: FabCutRawRow): CutCard {
   };
 }
 
+// DEV-08: which open-pillow SOs carry a sofa/bedframe in ANY state, so a
+// pillow whose sofa is already made is planned as behind, not as standalone.
+// A held main item does not pull its pillows forward. undefined on failure.
+async function loadSoIdsWithMainItem(db: D1Database): Promise<Set<string> | undefined> {
+  return db
+    .prepare(
+      `SELECT DISTINCT COALESCE(m.companySOId, m.salesOrderId) AS main_so_id
+         FROM production_orders m
+        WHERE m.itemCategory IN ('SOFA', 'BEDFRAME')
+          AND m.status NOT IN ('CANCELLED', 'ON_HOLD')
+          AND COALESCE(m.companySOId, m.salesOrderId) IN (
+                SELECT COALESCE(a.companySOId, a.salesOrderId)
+                  FROM production_orders a
+                 WHERE a.itemCategory = 'ACCESSORY'
+                   AND a.status NOT IN ('COMPLETED', 'CANCELLED'))`,
+    )
+    .all<{ mainSoId?: string | null; main_so_id?: string | null }>()
+    .then(
+      (r) =>
+        new Set(
+          (r.results ?? [])
+            .map((x) => (x.mainSoId ?? x.main_so_id ?? "").trim())
+            .filter(Boolean),
+        ),
+    )
+    .catch((e) => {
+      console.warn("[planning] main-item SO lookup failed, deriving from WAITING cards:", e);
+      return undefined;
+    });
+}
+
+/**
+ * DEV-08 rule A (Violet 2026-10-01): mark each pillow cut card whose SO has a
+ * sofa/bedframe with whether that main item is still waiting to be cut.
+ */
+function tagPillowCuts(cuts: { card: CutCard; soId: string }[], soIdsWithMainItem: Set<string>): void {
+  const mainWaitingCut = new Set(
+    cuts.filter((c) => c.card.lane !== "ACCESSORY" && c.soId).map((c) => c.soId),
+  );
+  for (const { card, soId } of cuts) {
+    if (card.lane !== "ACCESSORY" || !soId || !soIdsWithMainItem.has(soId)) continue;
+    card.mainItem = mainWaitingCut.has(soId) ? "WAITING_CUT" : "CUT";
+  }
+}
+
 app.get("/schedule/fabric-cutting", async (c) => {
   const db = c.var.DB;
   // orgId is read for tenant-scope parity with the other read endpoints; the
@@ -140,12 +185,18 @@ app.get("/schedule/fabric-cutting", async (c) => {
   const raw = res.results ?? [];
 
   const cards: CutCard[] = [];
+  const cuts: { card: CutCard; soId: string }[] = [];
   for (const r of raw) {
     if (EXCLUDED_ORDER_STATUSES.has((r.orderStatus ?? "").toUpperCase())) continue;
     const lane = (r.itemCategory ?? "").toUpperCase();
     if (!LANE_CATEGORIES.has(lane as Lane)) continue;
-    cards.push(normalizeCard(r));
+    const card = normalizeCard(r);
+    cards.push(card);
+    cuts.push({ card, soId: (r.companySOId ?? r.salesOrderId ?? "").trim() });
   }
+  // Same pillow rule as the chain, so this sheet never disagrees with it.
+  const soIdsWithMainItem = await loadSoIdsWithMainItem(db);
+  if (soIdsWithMainItem) tagPillowCuts(cuts, soIdsWithMainItem);
 
   const config = await loadCapacityConfig(db);
   const { holidays, startDate, generatedAt } = await loadCalendarWindow(db);
@@ -366,6 +417,7 @@ interface LoadedChainInputs {
   generatedAt: string;
   /** Measured minutes/day per department; undefined = use the constants. */
   dailyBudgetByDept?: Record<string, number>;
+  soIdsWithMainItem?: Set<string>;
 }
 
 // ONE batched load of every WAITING production card + order + SO dates,
@@ -418,6 +470,7 @@ async function loadChainInputs(db: D1Database): Promise<LoadedChainInputs> {
   const freezeEnd = fmtLocalIso(freezeEndDate);
 
   const cutCards: CutCard[] = [];
+  const cutSo: { card: CutCard; soId: string }[] = [];
   const chainCards: ChainCard[] = [];
   const meta = new Map<CutCard | ChainCard, CardJcMeta>();
   for (const r of raw) {
@@ -444,6 +497,7 @@ async function loadChainInputs(db: D1Database): Promise<LoadedChainInputs> {
           expectedDd: (r.hookkaExpectedDD ?? "").slice(0, 10) || null,
         };
         cutCards.push(card);
+        cutSo.push({ card, soId: (r.companySOId ?? r.salesOrderId ?? "").trim() });
         meta.set(card, jcMeta);
       }
       continue;
@@ -455,6 +509,14 @@ async function loadChainInputs(db: D1Database): Promise<LoadedChainInputs> {
     chainCards.push(card);
     meta.set(card, jcMeta);
   }
+
+  const soIdsWithMainItem = await loadSoIdsWithMainItem(db);
+  // On a failed lookup, fall back to SOs whose main item is still WAITING.
+  const mainWaiting = [
+    ...cutSo.filter((c) => c.card.lane !== "ACCESSORY").map((c) => c.soId),
+    ...chainCards.filter((c) => c.lane !== "ACCESSORY").map((c) => c.soId),
+  ].filter(Boolean);
+  tagPillowCuts(cutSo, soIdsWithMainItem ?? new Set(mainWaiting));
 
   const config = await loadCapacityConfig(db);
   const { holidays, startDate, generatedAt } = await loadCalendarWindow(db);
@@ -477,6 +539,7 @@ async function loadChainInputs(db: D1Database): Promise<LoadedChainInputs> {
     startDate,
     generatedAt,
     dailyBudgetByDept,
+    soIdsWithMainItem,
   };
 }
 
@@ -491,8 +554,16 @@ export async function computeDeptSchedule(
   const which = DEPT_SLUGS[slug];
   if (!which) return null;
 
-  const { cutCards, chainCards, config, holidays, startDate, generatedAt, dailyBudgetByDept } =
-    await loadChainInputs(db);
+  const {
+    cutCards,
+    chainCards,
+    config,
+    holidays,
+    startDate,
+    generatedAt,
+    dailyBudgetByDept,
+    soIdsWithMainItem,
+  } = await loadChainInputs(db);
 
   const out = computeChain({
     cutCards,
@@ -502,6 +573,7 @@ export async function computeDeptSchedule(
     startDate,
     generatedAt,
     dailyBudgetByDept,
+    soIdsWithMainItem,
   });
 
   return out[which];
@@ -549,6 +621,7 @@ export async function computeChainWithAssignments(db: D1Database): Promise<{
     startDate,
     generatedAt,
     dailyBudgetByDept,
+    soIdsWithMainItem,
   } = await loadChainInputs(db);
 
   const assignments: EngineAssignment[] = [];
@@ -560,6 +633,7 @@ export async function computeChainWithAssignments(db: D1Database): Promise<{
     startDate,
     generatedAt,
     dailyBudgetByDept,
+    soIdsWithMainItem,
     collect: (a) => {
       const m = meta.get(a.card);
       if (!m) return;

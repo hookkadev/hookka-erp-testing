@@ -1,5 +1,7 @@
 # Planning — Module Guide
 
+> **Last verified: 2026-10-01** (branch `feat/dev08-pillow-follows-sofa`): the engine anchors (`computeChainWithAssignments`, `GET /schedule/:dept`, `computeChain`, `scheduleCutting` / `runCutting`) re-derived and the DEV-08 pillow gotcha added. Nothing else re-checked.
+
 > **Last verified: 2026-08-14** (branch `docs/docs-vs-code-audit`) — corrected against the
 > source by the prose audit; the row(s) touched here are itemised in
 > [`docs/DOCS-VS-CODE-AUDIT.md`](../DOCS-VS-CODE-AUDIT.md). Only the claims listed there were
@@ -57,10 +59,10 @@ Owns production **planning, scheduling, MRP and lead times** — the read-mostly
 | `TABS` def | `src/pages/planning/index.tsx:198` | capacity · loading · leadtimes · tracker · proposals |
 | `ScheduleProposalsTab` | `src/pages/planning/index.tsx:3253` | Proposals list + approve/reject UI |
 | `DrilldownModal` | `src/pages/planning/index.tsx:3563` | Per-cell schedule drilldown |
-| `computeChainWithAssignments` | `src/api/routes/planning-schedule.ts:538` | Phase-2 chain engine with per-(card,day) assignment collector |
-| `GET /schedule/:dept` | `src/api/routes/planning-schedule.ts:611` | Per-dept daily schedule data (`fabric-cutting` special at `:107`) |
-| `computeChain` | `src/api/lib/planning-chain.ts:2418` | Pure chain engine; takes OPTIONAL `collect` callback |
-| `scheduleCutting` / `runCutting` | `src/api/lib/planning-scheduler.ts:972 / 631` | Cutting-queue scheduler snapshot |
+| `computeChainWithAssignments` | `src/api/routes/planning-schedule.ts:610` | Phase-2 chain engine with per-(card,day) assignment collector |
+| `GET /schedule/:dept` | `src/api/routes/planning-schedule.ts:685` | Per-dept daily schedule data (`fabric-cutting` special at `:107`) |
+| `computeChain` | `src/api/lib/planning-chain.ts:2468` | Pure chain engine; takes OPTIONAL `collect` callback |
+| `scheduleCutting` / `runCutting` | `src/api/lib/planning-scheduler.ts:988 / 647` | Cutting-queue scheduler snapshot |
 | `loadCapacityConfig` / `mergeCapacityConfig` | `src/api/lib/planning-capacity.ts:405 / 317` | Per-dept capacity config from `kv_config` |
 | `loadLeadTimes` / `leadDaysFor` | `src/api/lib/lead-times.ts:107 / 147` | Lead-time load + per-category day lookup |
 | `loadHookkaDDBuffer` / `hookkaDDBufferFor` | `src/api/lib/lead-times.ts:193 / 220` | DD-buffer load + lookup |
@@ -81,6 +83,7 @@ Owns production **planning, scheduling, MRP and lead times** — the read-mostly
 - **`PlanningPage` is one 4,060-line file** with TAB-gated render blocks selected by the `activeTab` string, not separate files — edit the matching block.
 - **Capacity Loading uses working-day windows** (Mon–Sat, Sundays excluded): 14 past / 21 future days (constants just above `TABS`, `index.tsx:~195`), not calendar days.
 - **Planning never mutates Production.** `production-orders.ts` (3,903 lines) + `production-orders/_helpers.ts` (5,799) are Production-owned; Planning only READS them. Grep targeted handlers, never read the whole file.
+- **Pillows follow their sofa (DEV-08 rule B, Violet 2026-10-01).** In `runSewing` an ACCESSORY group on an SO that carries a sofa/bedframe is due by that main item's last sew day (main item already past sewing or done → due now); `soIdsWithMainItem` (loaded in `loadChainInputs`) is what tells "sofa done" from "no sofa". On Packing the SO's ACCESSORY cards ride the sofa (else bedframe) pack unit as `PackUnit.acc`; a pillow-only SO is still not on the Packing schedule. **Cutting (rule A, Violet 2026-10-01):** `CutCard.mainItem` (set by `tagPillowCuts` in the route, on BOTH the chain loader and the standalone `/schedule/fabric-cutting`) cuts such a pillow on the sofa's `modelLeadDays` while the sofa waits to be cut, or at once (`floor = day1`, sorted first) once the sofa is cut; buckets are split by `mainItem` so pillow-only orders stay just in time. Measured on staging 2026-10-01: the binding constraint is then ACCESSORY sew capacity (240 min/day), not priority. Tests: `tests/planning-pillow-follows-sofa.test.mjs`.
 - **Root-level `*.xlsx` and `scripts/*.py`** (`build_*_xlsx.py`, `dept_flow_scheduler.py`) are throwaway export/planning-data tooling, NOT part of this module — ignore them.
 
 ## Common tasks (mini-playbook)

@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-07**: branch `feat/dev08-pillow-follows-sofa-to-main` (DEV-08 staging to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-07**: branch `fix/empty-auto-invoice-guard` (to `main`, BUG-2026-10-07-266) added below (its entry is the newest).
 > **Last verified: 2026-10-07**: branch `perf/production-dept-tab-cache-main` (#734 to `main`, BUG-2026-10-07-265) added below (its entry is the newest).
 > **Last verified: 2026-10-07**: branch `feat/dev39-kpi-view-calculation-to-main` (DEV-39 staging to `main`) added below (its entry is the newest).
@@ -103,6 +104,16 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
+## 2026-10-07 — 🔵 DEV-08: pillows cut, sewn and packed with their sofa (Violet, High) (branch `feat/dev08-pillow-follows-sofa-to-main` → `main`)
+
+Violet chose the rules (WhatsApp 2026-10-01): B, a pillow is finished before its sofa is packed; A, a pillow is cut together with its sofa. #653 on `staging` (commit `b4ee5283`), cherry-picked onto `main`. The SO-status half (BUG-2026-10-01-241) is already on `main` (#652).
+
+1. 🔵 Cutting: `CutCard.mainItem` (`planning-scheduler.ts`), set by `tagPillowCuts` in `planning-schedule.ts` on both the chain loader and `/schedule/fabric-cutting`. Sofa still waiting to be cut → pillow uses `modelLeadDays`; sofa already cut → pillow cut on day 1, sorted first. Pillow-only orders stay just in time.
+2. 🔵 Sewing: `runSewing` dues a pillow by its main item's last sew day (now, if the main item is past sewing).
+3. 🔵 Packing: ACCESSORY PACKING cards ride the sofa (else bedframe) pack unit as `PackUnit.acc`.
+4. 🔵 `tests/planning-pillow-follows-sofa.test.mjs` (9 cases).
+5. ✅ Verified on staging 2026-10-02 in the browser (read-only): Packing shows SO-2609-021 / -223 pillows under their sofa; Fabric Cutting puts their pillows at Accessory A1-A4 on day 1.
+6. ⬜ Canary on this PR (prod data, view only): the same two pages.
 ## 2026-10-07 — 🔵 No empty auto-invoice on a double-clicked Delivered (branch `fix/empty-auto-invoice-guard` → `main`, BUG-2026-10-07-266)
 
 Reporter ask (Violet, WhatsApp): the customer received INV-2610-021 with no details. Cause: Delivered was clicked twice on DO-2610-013; the second request posted a RM 0 invoice with no lines, and the email sent that one.
