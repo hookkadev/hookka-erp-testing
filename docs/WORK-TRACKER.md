@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-07**: branch `fix/empty-auto-invoice-guard` (to `main`, BUG-2026-10-07-264) added below (its entry is the newest).
 > **Last verified: 2026-10-07**: branch `feat/dev39-kpi-view-calculation-to-main` (DEV-39 staging to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-07**: branch `feat/dev36-kpi-department-to-main` (DEV-36 staging to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-07**: branch `feat/dev37-kpi-self-view-to-main` (DEV-37 staging to `main`) added below (its entry is the newest).
@@ -100,6 +101,13 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-07 — 🔵 No empty auto-invoice on a double-clicked Delivered (branch `fix/empty-auto-invoice-guard` → `main`, BUG-2026-10-07-264)
+
+Reporter ask (Violet, WhatsApp): the customer received INV-2610-021 with no details. Cause: Delivered was clicked twice on DO-2610-013; the second request posted a RM 0 invoice with no lines, and the email sent that one.
+1. 🔵 Auto-invoice on Delivered skips when there is nothing left to bill, and keeps the SOs and DO at INVOICED. Regression test added.
+2. ⬜ Prod data: void INV-2610-021, then Resend invoice email on DO-2610-013 so INV-2610-020 goes out (Samuel).
+3. ⬜ After deploy: mark a test DO Delivered and check one invoice; no prod double-click test.
 
 ## 2026-10-07 — ⬜ DEV-39: View calculation on each KPI in My KPI (branch `feat/dev39-kpi-view-calculation-to-main` → `main`)
 
