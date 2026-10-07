@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-07**: branch `feat/dev39-kpi-view-calculation-to-main` (DEV-39 staging to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-07**: branch `feat/dev37-kpi-self-view-to-main` (DEV-37 staging to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-07**: branch `fix/rm-uom-bottle-main` (DEV-20 follow-up to `main`, BUG-2026-10-07-262) added below (its entry is the newest).
 > **Last verified: 2026-10-06**: branch `feat/pay-card-main` (to `main`, BUG-2026-10-06-259) added below (its entry is the newest).
@@ -98,6 +99,15 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-07 — ⬜ DEV-39: View calculation on each KPI in My KPI (branch `feat/dev39-kpi-view-calculation-to-main` → `main`)
+
+Reporter ask (Violet, DEV-39): the employee clicks "View Calculation" on each KPI and sees how the result is worked out. Laphii's #698 on `staging` (commit `b9c26a7f`), cherry-picked onto `main`; Laphii asked Samuel to confirm before it goes to main. Code merged clean; main's docs kept, this entry added.
+
+1. 🔵 `buildCard` in `src/api/routes/kpi.ts` sends `purpose` / `definition` / `measurement` on all three line branches (settled, unavailable, live). They were typed on the page but never sent.
+2. 🔵 My KPI card: a "View calculation" toggle per KPI shows why, what is counted, the formula, the steps, then this person's measured value, score out of 100, `score × weight ÷ 100 = points`, and points ÷ total weight × 100 = the month's score. All server numbers; nothing recomputed in the browser. `gateFailed` is always false on main, so the last line always adds up.
+3. 🔵 Guard in `tests/kpi-module.test.mjs`: every `lines.push` in `buildCard` carries the three fields; the page shows `l.formula`.
+4. ⬜ After deploy: Violet opens My KPI with a staff login and checks one KPI's calculation against its number.
 
 ## 2026-10-07 — ⬜ DEV-37: every staff login sees their own KPI card, view only (branch `feat/dev37-kpi-self-view-to-main` → `main`)
 
