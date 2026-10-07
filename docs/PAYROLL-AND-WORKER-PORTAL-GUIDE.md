@@ -1,5 +1,7 @@
 # Payroll & Worker Portal — Explanation Guide
 
+> **Last verified: 2026-10-07** (branch `feat/worker-home-eff-formula`) — the Home performance tiles bullet (Production Hours / Production Time / Efficiency %), read from `src/pages/worker/index.tsx` and the `/history` handler in `src/api/routes/worker.ts`. Nothing else re-checked.
+
 > **Last verified: 2026-10-01** (branch `feat/dev31-worker-dept-hours`) — the Home / Scan / My Pay bullets about department hours (DEV-31), read from `src/pages/worker/dept-day-card.tsx`, `src/pages/worker/pay.tsx`, `src/api/routes/worker.ts`. Nothing else re-checked.
 
 > **Last verified: 2026-08-14** (branch `docs/docs-vs-code-audit`) — corrected against the
@@ -57,6 +59,13 @@ Workers log in with their employee PIN at `/worker`. Pages:
   clock-in) and the hours so far in each department, worked out the same way
   punch-out will save them (pay rules first, then split by scan time). After
   punch-out it shows the saved Working Hours rows instead.
+- The performance block (From / To dates) shows three tiles, **Production
+  Hours**, **Production Time** and **Efficiency %**, read as a formula: hours
+  credited from finished job cards (plus approved extra production time)
+  divided by hours logged in production departments. A line under the tiles
+  spells it out with the same hours (e.g. 30.8 ÷ 41.8 × 100 = 73.8%). The
+  percentage is the office efficiency figure, worked out before the hours are
+  rounded, so a calculator on the shown hours can be 0.1% off.
 
 ### Scan
 - Shop-floor job-card scanning (Fab Cut / Fab Sew stickers). Not pay-related.
