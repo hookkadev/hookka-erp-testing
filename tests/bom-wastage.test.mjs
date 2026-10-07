@@ -23,15 +23,15 @@ test("WIPMaterial carries an optional wastePct", () => {
   assert.match(f, /type WIPMaterial = \{[^}]*wastePct\?: number/);
 });
 
-test("every material row (all 6 editor contexts) has a wastage % input", () => {
+test("every material row (all 4 editor contexts) has a wastage % input", () => {
   const f = read("src/pages/bom.tsx");
   const inputs = f.match(/"wastePct", parseFloat\(e\.target\.value\) \|\| 0\)/g) ?? [];
-  assert.equal(inputs.length, 6, `expected a waste input at all 6 material-row sites, found ${inputs.length}`);
+  // 4 since 2026-10-07: Master BOM Templates uses the shared WipNodeDetail row.
+  assert.equal(inputs.length, 4, `expected a waste input at all 4 material-row sites, found ${inputs.length}`);
   // each keeps its own site-correct update handler
   assert.match(f, /updateWIPMaterial\(wi, mi, "wastePct"/);
-  assert.match(f, /onUpdateMaterial\(childPath, mi, "wastePct"/);
+  assert.match(f, /onUpdateMaterial\(wi, path, mi, "wastePct"/);
   assert.match(f, /updateL1Material\(i, "wastePct"/);
-  assert.match(f, /updateMaterialAtPath\(wi, \[\], mi, "wastePct"/);
   // value binds to the material's wastePct (blank when absent → shows placeholder 0)
   assert.match(f, /value=\{m\.wastePct \?\? ""\}/);
 });
