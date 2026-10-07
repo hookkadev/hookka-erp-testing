@@ -14,7 +14,6 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { ensureFibreDept } from "../src/api/routes/departments.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -131,7 +130,14 @@ test("label maps: every dept picker lists FIBRE", () => {
 // Behaviour: run ensureFibreDept against a real (SQLite, in-memory) departments
 // table. Covers a fresh DB, a DB left with FIBRE in the first version's spot
 // (immediately before UPHOLSTERY, staging 2026-10-07), and repeat runs.
+// node:sqlite needs Node 22.13+; CI runs Node 20, so these skip there and run
+// locally.
 // ---------------------------------------------------------------------------
+let DatabaseSync = null;
+try {
+  ({ DatabaseSync } = await import("node:sqlite"));
+} catch {}
+const sqliteSkip = DatabaseSync ? false : "node:sqlite is not available on this Node version";
 const LINE = ["FAB_CUT", "FAB_SEW", "WOOD_CUT", "FOAM_CUTTING", "FOAM", "FRAMING", "WEBBING", "UPHOLSTERY", "PACKING", "WAREHOUSING"];
 const EXPECTED = ["FAB_CUT", "FAB_SEW", "WOOD_CUT", "FOAM_CUTTING", "FOAM", "FIBRE", "FRAMING", "WEBBING", "UPHOLSTERY", "PACKING", "WAREHOUSING"];
 
@@ -158,7 +164,7 @@ function makeDb(codes) {
   return { db, order, seqs };
 }
 
-test("ensureFibreDept: fresh DB gets FIBRE right after FOAM, once", async () => {
+test("ensureFibreDept: fresh DB gets FIBRE right after FOAM, once", { skip: sqliteSkip }, async () => {
   const t = makeDb(LINE);
   await ensureFibreDept(t.db);
   await ensureFibreDept(t.db);
@@ -166,7 +172,7 @@ test("ensureFibreDept: fresh DB gets FIBRE right after FOAM, once", async () => 
   assert.deepEqual(t.seqs(), EXPECTED.map((_, i) => i + 1), "no gaps or ties");
 });
 
-test("ensureFibreDept: FIBRE left before UPHOLSTERY is moved to right after FOAM, once", async () => {
+test("ensureFibreDept: FIBRE left before UPHOLSTERY is moved to right after FOAM, once", { skip: sqliteSkip }, async () => {
   const old = [...LINE];
   old.splice(old.indexOf("UPHOLSTERY"), 0, "FIBRE");
   const t = makeDb(old);
@@ -176,7 +182,7 @@ test("ensureFibreDept: FIBRE left before UPHOLSTERY is moved to right after FOAM
   assert.deepEqual(t.seqs(), EXPECTED.map((_, i) => i + 1), "no gaps or ties");
 });
 
-test("ensureFibreDept: an admin-chosen FIBRE position elsewhere is left alone", async () => {
+test("ensureFibreDept: an admin-chosen FIBRE position elsewhere is left alone", { skip: sqliteSkip }, async () => {
   const custom = [...LINE];
   custom.splice(custom.indexOf("PACKING") + 1, 0, "FIBRE");
   const t = makeDb(custom);
