@@ -1,5 +1,8 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-07**: branch `chore/sync-staging-from-main-1007` (staging<-main merge): both trackers merged, main-only entries added, entry below.
+> **Last verified: 2026-10-07**: branch `feat/dev37-kpi-self-view-to-main` (DEV-37 staging to `main`) added below (its entry is the newest).
+> **Last verified: 2026-10-07**: branch `fix/rm-uom-bottle-main` (DEV-20 follow-up to `main`, BUG-2026-10-07-262) added below (its entry is the newest).
 > **Last verified: 2026-10-07**: branch `fix/sales-transfer-credit-block` (to `staging`, BUG-2026-10-07-263) added below (its entry is the newest).
 > **Last verified: 2026-10-06**: branch `feat/dev37-kpi-checklist-admin-only` (DEV-37 to `staging`) added item 6 of the DEV-37 entry below.
 > **Last verified: 2026-10-06**: branch `feat/dev37-kpi-office-self-view` (DEV-37 to `staging`) added below (its entry is the newest).
@@ -166,6 +169,15 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
+## 2026-10-07 — 🔵 Sync `staging` from `main` (branch `chore/sync-staging-from-main-1007` → `staging`)
+
+13 `main` commits merged into `staging` (331 staging-only kept). Conflicts: 2 code/test files, 1 add/add test, 6 docs.
+1. 🔵 BOM editor (`bom.tsx`, `tests/bom-editor-reorder.test.mjs`): #729's version, which is main's #722 tree helpers (delete one level, ↑/↓ swap levels in a chain) plus the Master BOM two-pane layout staging already had from #728. Nothing staging-only was in the diff.
+2. 🔵 `tests/kpi-self-service.test.mjs`: staging's stricter `/api/departments` check (the DEV-36 picker is on staging).
+3. 🔵 Docs: logs and stamps unioned, one copy of each entry, no bug id collisions. `API.md` regenerated; bom, production and inventory anchors re-measured on the merged files.
+
+`npm test` 5555 pass / 1 fail / 3 skipped. The failure is `customer-scope-sql` ("the Planning and Pending-Delivery tabs narrow too"), which fails the same way on `origin/staging` before this merge. tsc not run locally.
+
 ## 2026-10-07 — 🔵 Customer credit control (BUG-34): staging test run + Sales transfer box fix (branch `fix/sales-transfer-credit-block` → `staging`, BUG-2026-10-07-263)
 
 1. ✅ Ran the 36 credit control test cases on the staging site (TEST COMPANY plus test orders for SL HOME DESIGN, RX HOMICE, SOON, The Conts; all test DOs, invoices, SOs, packing list and consignment notes cancelled or returned afterwards, customer terms and limits restored). 33 pass, 1 fail (CC-31), 2 skipped (CC-10 cannot occur: every payment path sets PAID at full payment; CC-36 needs prod).
@@ -242,6 +254,22 @@ Owner ask: make the top-right Profile item actually work and sync the profile pi
 3. 🔵 Anyone can change or remove their OWN photo there (owner decision 2026-10-05). `PUT /api/org-chart/photo` skips the `users:update` check only when the person key is the caller's own user.
 4. 🔵 A photo change from the Org Chart or User Management updates the header without a reload.
 5. ⬜ Check on the staging site after merge.
+## 2026-10-07 — ⬜ DEV-37: every staff login sees their own KPI card, view only (branch `feat/dev37-kpi-self-view-to-main` → `main`)
+
+Reporter ask (Violet, DEV-37, confirmed on WhatsApp 2026-10-06): office staff log in to the ERP and see their own assigned KPIs, never anyone else's; only Super Admin assigns; "super admin only can tick. staff can view only". Same two changes as #719 and #721 on `staging`, cherry-picked onto `main` (DEV-36's department scope stays on staging).
+
+1. 🔵 `/kpi` has no `kpi:read` gate on the route or the menu; every ERP login opens their own card. `kpi` leaves `ALL_RESOURCES`, Office's exclusion and `NAV_RESOURCE`.
+2. 🔵 `PUT /api/kpi/checklist/:kpiKey` is Super Admin only; staff see the boxes read-only. No KPI in the catalogue is a checklist today, so nobody's card changes from this half.
+3. 🔵 Guard `tests/kpi-self-service.test.mjs`. Its `/api/departments` check is conditional: the Library's department picker is staging-only until DEV-36 reaches main.
+4. 🔵 Staging: deployed 2026-10-06, Super Admin side checked (KPI menu and three tabs, `kpi` gone from the permission catalogue, new checklist text in the KPI bundle). Non-admin side not checked there.
+5. ⬜ After deploy: Super Admin check on prod, then Violet checks with a staff login (KPI in the menu, only her own card, no Library / People).
+
+## 2026-10-07 — 🔵 DEV-20 follow-up: one unit list for raw materials (branch `fix/rm-uom-bottle-main` → `main`, BUG-2026-10-07-262)
+
+Owner asks: BOTTLE was refused on save for item group MAINTENA; a mistyped unit must be removable; the per-category Allowed UOMs confuses people, so take it out and give a way to add a new unit instead.
+1. 🔵 RM Settings: the per-category Allowed UOMs section is gone; a global Units section adds a unit (e.g. BOTTLE) for every category, and × deletes one added by mistake. Built-in units stay.
+2. 🔵 Every RM unit dropdown and the save check use that one list.
+3. ⬜ Check on the live site after deploy.
 
 ## 2026-10-06 — 🔵 Worker My Pay: one card for every worker and month (branch `feat/pay-card-main` → `main`, BUG-2026-10-06-259)
 

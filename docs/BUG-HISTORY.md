@@ -1,7 +1,11 @@
 # Bug History
 
+> **Last verified: 2026-10-07** (branch `chore/sync-staging-from-main-1007`, staging<-main merge): both logs merged, one copy of each entry. No id collisions: 260 to 262 are main's, 263 is staging's.
 > **Last verified: 2026-10-07**: newest entry BUG-2026-10-07-263 (branch `fix/sales-transfer-credit-block`, to staging; 260 to 262 are taken on `main`).
 > **Last verified: 2026-10-06** (branch `chore/sync-staging-from-main-1006`, staging<-main merge): both logs merged, one copy of each entry. No id collisions: 253, 257, 258 and 259 are the same bugs on both sides (257 and 259 take main's copy, which adds its main PR note). Main's 251, 254, 255 and 256 are added.
+> **Last verified: 2026-10-07**: newest entry BUG-2026-10-07-262 (branch `fix/rm-uom-bottle-main`, to main).
+> **Last verified: 2026-10-06**: newest entry BUG-2026-10-06-261 (branch `fix/bom-wip-delete-move`, to main); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
+> **Last verified: 2026-10-06**: newest entry BUG-2026-10-06-260 (branch `fix/production-overview-scrollbar`, to main; no open PR holds 260); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-06**: newest entry BUG-2026-10-06-259 (branch `feat/pay-card-main`, to main; the same fix reached staging through #707 to #710); a log, so "verified" means the entry matches the code on its branch.
 > **Last verified: 2026-10-05**: BUG-2026-10-05-256 flipped to 🟢 with its measured prod run (#696).
 > **Last verified: 2026-10-05**: newest entry BUG-2026-10-05-258 (branch `fix/worker-pay-late-daily-rate`, to main then staging).
@@ -126,6 +130,44 @@ Entries themselves stay newest-first.
 **Guard.** `tests/customer-credit-gate.test.mjs` "Sales transfer box shows the credit dialog and reads a fresh ready list".
 
 ---
+
+## BUG-2026-10-07-262 — Raw material save refused BOTTLE: "not allowed for item group MAINTENA" `inventory` 🔵
+
+🔵 Fixed on `fix/rm-uom-bottle-main` (to `main`). Report (owner, screenshot): saving a raw material in group MAINTENA with UOM BOTTLE fails with `UOM "BOTTLE" is not allowed for item group MAINTENA. Allowed: PCS, MTR, ROLL, BOX, CTN, SET, KG, LITER, PAIR, UNIT`.
+
+**Cause (from the code; the live RM Settings data is UNMEASURED).** DEV-20 gave each item group its own Allowed UOMs list. A group with no list got only the 10 built-in units, while a unit typed in under another group (BOTTLE) was offered by Batch Edit's set-all picker and then refused by `raw-materials.ts` on save.
+
+**Fix (owner's call: per-category lists are confusing, take them out).** One unit list for every category: `rmUnitsFrom` = `ALL_RM_UOMS` plus kv `variants-config.extraUoms` (plus any unit still sitting in the retired `uomOptions`, so nothing typed before is lost). RM Settings' per-category "Allowed UOMs" section is replaced by a global "Units" section: add a unit, × deletes an added one (also from the whole-number list); built-ins have no ×. Saving the list writes `extraUoms` and clears `uomOptions`. Add RM, Edit RM, Batch Edit and the route (POST, PUT on a unit change, bulk import) all use that list. The stock lock on a unit change and the whole-number units are unchanged.
+
+**Guard.** `tests/rm-uom-options.test.mjs` (the unit list, legacy `uomOptions` units carried over, a malformed blob adds nothing, no item group in the route's unit check).
+
+---
+
+## BUG-2026-10-06-261 — BOM editor: deleting a middle WIP level wiped every level below it, and ↑/↓ did nothing in a single chain `ui-frontend` 🟡
+
+🟡 Fixed on `fix/bom-wip-delete-move` (to `main`). Report (owner, with a screenshot of a sofa base chain L2 → L7, one component per level): "I only want to delete the middle level, it won't delete; and moving up/down doesn't work."
+
+**Cause.** Both in `EditBOMDialog` (`src/pages/bom.tsx`, the WIP Components tab). (1) Delete called `removeSubWIPAtPath`, which `filter`ed the node out of its parent's `children`, so its whole subtree went with it: deleting L4 also removed L5, L6 and L7. The master-template editor already kept the children ("promote"), the product editor did not. (2) ↑/↓ called `moveSubWIPAtPath` / `moveWIP`, which only swap a node with a SIBLING. In a linear chain every level is an only child, so both buttons were silent no-ops.
+
+**Fix.** New pure module `src/lib/wip-tree-ops.ts`. `removeWipLevel` removes only the selected level and splices its children into its place (roots too). `moveWipNode` keeps the sibling swap and, when there is no sibling that way, swaps LEVELS: ↑ swaps with the parent, ↓ with the first child (content moves, tree shape and each slot's children stay). The right pane follows the moved node, and ↑/↓ are disabled when `canMoveWipNode` says nothing can move (the first root going up, a leaf with no next sibling going down). The four old handlers are gone.
+
+**Verified.** `tests/bom-wip-tree-ops.test.mjs` 8/8 on the six-level chain (delete L4 → L2 L3 L5 L6 L7; L4 ↑ → L2 L4 L3 …; L4 ↓ → L2 L3 L5 L4 …; sibling swap unchanged; boundaries). `npm test` 5243 pass, strict typecheck and eslint clean. Not yet seen in the live dialog: needs a deploy, then open a BOM with a chain, delete a middle level and press ↑/↓.
+
+**Guard.** `tests/bom-wip-tree-ops.test.mjs` (new module, so it cannot run on the old code); `tests/bom-editor-reorder.test.mjs` pins now point at `moveWipNode`.
+
+
+## BUG-2026-10-06-260 — Production Overview Grid: the up/down scrollbar only showed after scrolling all the way right `ui-frontend` 🟢
+
+🟢 Fixed on `fix/production-overview-scrollbar` (to `main`). Report (owner, with screenshots): on the Production tab's Grid view the table's scrollbar only appears once you have scrolled horizontally to the end, so nothing tells you the table scrolls.
+
+**Cause.** The Grid was two nested scroll boxes. The outer one scrolled left and right only; the inner body (`OverviewVirtualRows`) scrolled up and down only but was given the full table width (`minWidth: overviewMinWidth`). A scrollbar sits on its own box's right edge, so the up/down scrollbar was drawn at the table's far right, off screen until the outer box was scrolled all the way across.
+
+**Fix.** `src/pages/production/index.tsx`: the Grid body is now one `overflow-auto` box with no table-width minimum, so both scrollbars sit on its visible edges. The header row moved into that box (`overviewHeaderRow`, passed through a new `header` prop on `OverviewVirtualRows`) and is `sticky top-0`, so it stays on top while the rows scroll. The empty-grid case keeps the header in a plain side-scroll box. Filter pop-ups are portaled to `<body>` and re-anchor on any scroll, so the new box does not clip them.
+
+**Verified.** A stand-alone page with the old and the new nesting at 1000px wide and a 2200px table: old, the up/down scrollbar sat at x=2200 (off screen); new, at x=1000 (the visible edge), with the side scrollbar still there and the header still at the top after scrolling down. Not yet seen on the live page: needs a deploy, then Production, Grid, check both scrollbars show before scrolling.
+
+**Guard.** `tests/production-overview-scrollbar.test.mjs` (fails on the old code 3 of 3).
+
 
 ## BUG-2026-10-06-259 — Worker My Pay: a per-day worker's current month priced as a RM 0 monthly salary `payroll` 🟢
 

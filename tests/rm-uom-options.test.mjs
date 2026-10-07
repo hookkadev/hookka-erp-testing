@@ -1,6 +1,7 @@
 // ---------------------------------------------------------------------------
-// rm-uom-options.test.mjs — DEV-20: per-category allowed UOMs for raw
-// materials, and the lock that stops a unit change under existing quantities.
+// rm-uom-options.test.mjs — DEV-20: the raw-material unit list (built-ins plus
+// units added in RM Settings), and the lock that stops a unit change under
+// existing quantities.
 //
 // Every RM quantity (balanceQty, rm_batches, open PO lines, BOM qtyPerUnit) is
 // a bare number read in the material's baseUOM. Nothing converts on a change,
@@ -17,21 +18,19 @@ const read = (p) => readFileSync(resolve(process.cwd(), p), "utf8").replace(/\r\
 const mv = await load("src/lib/material-variants.ts");
 const locks = await load("src/api/lib/lock-helpers.ts");
 
-test("uomOptionsFor: configured group narrows, unconfigured / empty falls back to every unit", () => {
-  const opts = { "B.M-FABR": ["MTR", "ROLL"], EMPTY: [] };
-  assert.deepEqual(mv.uomOptionsFor("B.M-FABR", opts), ["MTR", "ROLL"]);
-  assert.deepEqual(mv.uomOptionsFor(" B.M-FABR ", opts), ["MTR", "ROLL"]);
-  assert.deepEqual(mv.uomOptionsFor("PLYWOOD", opts), mv.ALL_RM_UOMS);
-  assert.deepEqual(mv.uomOptionsFor("EMPTY", opts), mv.ALL_RM_UOMS);
-  assert.deepEqual(mv.uomOptionsFor("B.M-FABR", null), mv.ALL_RM_UOMS);
+test("rmUnitsFrom: built-ins plus added units, one list for every category", () => {
+  assert.deepEqual(mv.rmUnitsFrom(null), mv.ALL_RM_UOMS);
+  assert.deepEqual(mv.rmUnitsFrom({ extraUoms: [" bottle ", "PCS", ""] }), [...mv.ALL_RM_UOMS, "BOTTLE"]);
+  // A unit typed into a retired per-category list still counts.
+  assert.deepEqual(mv.rmUnitsFrom({ uomOptions: { CHEMICAL: ["BOTTLE", "LITER"] } }), [...mv.ALL_RM_UOMS, "BOTTLE"]);
+  assert.deepEqual(mv.rmUnitsFrom({ extraUoms: "BOTTLE", uomOptions: "x" }), mv.ALL_RM_UOMS, "malformed blob never adds units");
 });
 
-test("isUomAllowed: rejects an off-list unit, ignores case (legacy 'mtr' rows)", () => {
-  const opts = { "B.M-FABR": ["MTR", "ROLL"] };
-  assert.equal(mv.isUomAllowed("B.M-FABR", "MTR", opts), true);
-  assert.equal(mv.isUomAllowed("B.M-FABR", " mtr ", opts), true);
-  assert.equal(mv.isUomAllowed("B.M-FABR", "PCS", opts), false);
-  assert.equal(mv.isUomAllowed("PLYWOOD", "PCS", opts), true);
+test("isUomAllowed: any unit on the list, whatever the category; ignores case (legacy 'mtr' rows)", () => {
+  const units = mv.rmUnitsFrom({ extraUoms: ["BOTTLE"] });
+  assert.equal(mv.isUomAllowed("BOTTLE", units), true);
+  assert.equal(mv.isUomAllowed(" mtr ", units), true);
+  assert.equal(mv.isUomAllowed("SHEET", units), false);
 });
 
 test("sameUom: case / whitespace is not a unit change", () => {
@@ -105,7 +104,9 @@ test("route wiring: create / edit / import all enforce the rules", () => {
   const put = src.slice(src.indexOf('app.put("/:id"'), src.indexOf('app.delete("/:id"'));
   const bulk = src.slice(src.indexOf('app.post("/bulk-import"'));
 
-  assert.match(post, /isUomAllowed\(itemGroup, baseUOM, uomOpts\)/);
+  assert.match(post, /isUomAllowed\(baseUOM, units\)/);
+  // The unit list is the same for every category: no item group in the check.
+  assert.doesNotMatch(src, /isUomAllowed\([^)]*[iI]temGroup/);
   assert.match(put, /checkRawMaterialUomLocked\(c\.var\.DB, existing\)/);
   // The PUT checks run before the UPDATE is built.
   assert.ok(put.indexOf("checkRawMaterialUomLocked") < put.indexOf("UPDATE raw_materials SET"));

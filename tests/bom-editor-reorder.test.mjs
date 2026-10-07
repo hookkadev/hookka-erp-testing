@@ -48,10 +48,10 @@ test("EditBOMDialog defines every reorder handler", () => {
   const body = componentBody("EditBOMDialog");
   for (const fn of [
     "moveProcessAtPath", // nested process (甲)
-    "moveSubWIPAtPath",  // nested WIP among siblings (乙)
     "wrapSubWIPAtPath",  // insert a parent level above (乙)
-    "moveWIP",           // top-level WIP reorder
     "moveWIPProcess",    // top-level process reorder (甲)
+    // WIP node ↑/↓ moved to the pure moveWipNode() in src/lib/wip-tree-ops.ts
+    // (2026-10-06) — pinned behaviourally in bom-wip-tree-ops.test.mjs.
   ]) {
     assert.match(body, new RegExp(`function ${fn}\\b`), `${fn} must exist in EditBOMDialog`);
   }
@@ -69,8 +69,8 @@ test("EditBOMDialog routes every reorder through its depth-agnostic adapters", (
   // the two depths silently loses the affordance.
   assert.match(body, /nMoveProcess[\s\S]*?moveWIPProcess\(wi, pi, dir\)[\s\S]*?moveProcessAtPath\(wi, path, pi, dir\)/);
   assert.match(body, /nMove = \(wi: number, path: number\[\], dir: -1 \| 1\)/);
-  assert.match(body, /moveWIP\(wi, dir\)/);
-  assert.match(body, /moveSubWIPAtPath\(wi, path\.slice\(0, -1\), path\[path\.length - 1\], dir\)/);
+  // One depth-agnostic helper serves roots and nested nodes alike.
+  assert.match(body, /moveWipNode\(wipComponents, wi, path, dir\)/);
   // "+ Above" (insert a parent level) survived the rework, offered on
   // sub-WIPs only: Edit BOM has no top-level wrap.
   assert.match(body, /onWrap=\{sel\.path\.length > 0 \? \(wi, path\) =>\s*wrapSubWIPAtPath\(wi, path\.slice\(0, -1\), path\[path\.length - 1\]\)/);
@@ -115,10 +115,11 @@ test("MasterTemplatesDialog uses the two-pane WIP editor with depth-agnostic ada
   assert.match(body, /<WipTreeCard/);
   assert.match(body, /<WipNodeDetail/);
   assert.match(body, /L1 Processes \(FG\)/);
-  // Move / remove / wrap must serve both the top level and nested nodes.
-  assert.match(body, /if \(dir < 0\) moveWIPUp\(wi\);/);
-  assert.match(body, /moveSubWIPDownAtPath\(wi, path\.slice\(0, -1\), path\[path\.length - 1\]\)/);
+  // Move / remove use the same tree helpers as Edit BOM; wrap serves both
+  // the top level and nested nodes.
+  assert.match(body, /moveWipNode\(current\.wipItems, wi, path, dir\)/);
+  assert.match(body, /canMoveUp=\{canMoveWipNode\(current\.wipItems, sel\.wi, sel\.path, -1\)\}/);
+  assert.match(body, /removeWipLevel\(prev\.wipItems, wi, path\)/);
   assert.match(body, /if \(path\.length === 0\) wrapWIPAt\(wi\);/);
-  assert.match(body, /if \(path\.length === 0\) removeWIP\(wi\);/);
   assert.match(body, /onWrap=\{nWrap\}/);
 });
