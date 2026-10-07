@@ -1297,16 +1297,16 @@ export default function WorkerHomePage() {
       {/* KPI row */}
       {hist && (
         <div className="grid grid-cols-3 gap-2">
-          {/* Production Time (hours logged in production departments) and
-              Production Hours (credited job-card minutes) are the two halves
-              of Efficiency %: middle ÷ left = right. */}
-          <Kpi
-            label={t("home.productionTime")}
-            value={mins2hrs(hist.totals.prodDeptMinutes ?? 0)}
-          />
+          {/* Production Hours (credited job-card minutes) ÷ Production Time
+              (hours logged in production departments) = Efficiency %, read
+              left to right. */}
           <Kpi
             label={t("home.productionHours")}
             value={mins2hrs(hist.totals.effProductionMinutes ?? 0)}
+          />
+          <Kpi
+            label={t("home.productionTime")}
+            value={mins2hrs(hist.totals.prodDeptMinutes ?? 0)}
           />
           <Kpi
             label={t("home.efficiencyPct")}
@@ -1324,6 +1324,20 @@ export default function WorkerHomePage() {
                     : "bad"
             }
           />
+        </div>
+      )}
+
+      {/* How Efficiency % is worked out, with the tiles' own hour figures. */}
+      {hist && (hist.totals.prodDeptMinutes ?? 0) >= 30 && (
+        <div className="-mt-1 text-xs text-[#5A5550] text-center break-words">
+          <p>
+            {t("home.efficiencyPct")} = {t("home.productionHours")} ÷ {t("home.productionTime")} × 100
+          </p>
+          <p className="tabular-nums">
+            {mins2hrs(hist.totals.effProductionMinutes ?? 0)} ÷{" "}
+            {mins2hrs(hist.totals.prodDeptMinutes ?? 0)} × 100 ={" "}
+            {hist.totals.efficiencyPct}%
+          </p>
         </div>
       )}
 
