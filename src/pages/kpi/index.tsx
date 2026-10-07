@@ -18,6 +18,7 @@
 // ---------------------------------------------------------------------------
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { LineChart, Line as ChartLine, XAxis, YAxis, Tooltip, ReferenceLine, ResponsiveContainer } from "recharts";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCachedJson, invalidateCachePrefix } from "@/lib/cached-fetch";
@@ -42,6 +43,7 @@ type Line = {
   target: number; weight: number;
   actual: number | null; attainment: number | null; points: number | null;
   evidence: string;
+  daily?: Array<{ date: string; pct: number }>;
 };
 type CardData = {
   period: string; locked: boolean; lines: Line[];
@@ -1111,7 +1113,10 @@ export default function KpiPage() {
                         ) : (
                           <p className="text-[12px] text-[#5A5550] mt-1.5 font-medium">{l.evidence}</p>
                         )}
-                        {l.drillPath && l.key !== "customer_delivery_date" && (
+                        {/* department_efficiency: the holder usually cannot open
+                            Dashboard Experimental, so the card draws its daily
+                            line below instead of linking to it. */}
+                        {l.drillPath && l.key !== "customer_delivery_date" && l.key !== "department_efficiency" && (
                           // The card's month travels with the link. Without it
                           // the target page opens "all of them, ever", which is
                           // a different set from the one this row counted —
@@ -1163,6 +1168,20 @@ export default function KpiPage() {
                         </button>
                       </div>
                     </div>
+
+                    {(l.daily?.length ?? 0) > 0 && (
+                      <div className="mt-3 h-40 w-full select-none [&_*]:outline-none">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={l.daily} margin={{ top: 6, right: 8, bottom: 0, left: 0 }}>
+                            <XAxis dataKey="date" tickFormatter={(d: string) => d.slice(8)} tick={{ fontSize: 10, fill: "#9CA3AF" }} axisLine={{ stroke: "#E2DDD8" }} tickLine={false} />
+                            <YAxis tick={{ fontSize: 10, fill: "#9CA3AF" }} axisLine={false} tickLine={false} width={38} unit="%" domain={[0, "auto"]} />
+                            <Tooltip formatter={(v) => [`${v}%`, "Efficiency"]} contentStyle={{ fontSize: 11 }} />
+                            <ReferenceLine y={l.target} stroke="#9CA3AF" strokeDasharray="4 3" label={{ value: `${l.target}% target`, fontSize: 10, fill: "#9CA3AF", position: "insideTopRight" }} />
+                            <ChartLine type="monotone" dataKey="pct" stroke="#6B5C32" strokeWidth={1.75} dot={{ r: 2.5 }} isAnimationActive={false} />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    )}
 
                     {/* DEV-39: the person being measured asked to see how each
                         result is worked out. The rules come from the catalogue;
