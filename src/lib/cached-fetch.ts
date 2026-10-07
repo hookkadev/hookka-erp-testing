@@ -15,10 +15,10 @@
 // `invalidateCachePrefix` so the next read doesn't serve the stale entry
 // indefinitely. The TTL is a safety net, not the primary freshness guarantee.
 //
-// Storage limits: localStorage is 5–10 MB per origin. The whole ERP payload
-// runs ~2–3 MB so we're fine. If a write fails (quota / disabled storage),
-// we swallow the error and fall through to a plain fetch — cache is an
-// optimisation, not load-bearing.
+// Storage limits: localStorage is 5–10 MB per origin. A body that does not fit
+// (the /production sheets are 6-12 MB) is kept in memory instead (memCache),
+// so it survives a tab switch but not a page reload. Cache is an optimisation,
+// not load-bearing.
 // ---------------------------------------------------------------------------
 import { useCallback, useEffect, useRef, useState } from "react";
 import { buildTraceparent } from "./trace";
@@ -72,8 +72,23 @@ export function peekCache<T>(url: string): T | null {
   return readCache<T>(url)?.data ?? null;
 }
 
+// Bodies too big for localStorage. The /production dept sheets are 6-7 MB
+// decoded and the Overview ~12 MB (measured on staging 2026-10-07), over the
+// ~5 MB quota, so their writes always failed and every tab switch downloaded
+// them again. They are kept here instead, for the life of this browser tab.
+// Up to MEM_CACHE_MAX bodies are held as parsed objects, ~6 MB of heap per
+// dept sheet (measured), so ~60 MB at most. Lower it if tablets run short.
+const memCache = new Map<string, CacheEntry<unknown>>();
+const MEM_CACHE_MAX = 9;
+
+function dropMemPrefix(prefix: string): void {
+  for (const k of [...memCache.keys()]) if (k.startsWith(prefix)) memCache.delete(k);
+}
+
 function readCache<T>(url: string): CacheEntry<T> | null {
   if (typeof window === "undefined") return null;
+  const mem = memCache.get(url);
+  if (mem) return mem as CacheEntry<T>;
   try {
     const raw = window.localStorage.getItem(storageKey(url));
     if (!raw) return null;
@@ -87,12 +102,18 @@ function readCache<T>(url: string): CacheEntry<T> | null {
 
 function writeCache<T>(url: string, data: T): void {
   if (typeof window === "undefined") return;
+  const entry: CacheEntry<T> = { data, fetchedAt: Date.now() };
+  memCache.delete(url);
   try {
-    const entry: CacheEntry<T> = { data, fetchedAt: Date.now() };
     window.localStorage.setItem(storageKey(url), JSON.stringify(entry));
   } catch {
-    // Quota exceeded, storage disabled, or data not serialisable. Cache is
-    // best-effort — drop silently so the component still renders fresh data.
+    // Quota exceeded, storage disabled, or data not serialisable. Keep it in
+    // memory instead (see memCache) so a revisit still paints instantly.
+    try { window.localStorage.removeItem(storageKey(url)); } catch { /* ignore */ }
+    memCache.set(url, entry);
+    if (memCache.size > MEM_CACHE_MAX) {
+      memCache.delete(memCache.keys().next().value as string);
+    }
   }
 }
 
@@ -162,9 +183,11 @@ if (typeof window !== "undefined" && typeof BroadcastChannel !== "undefined") {
       // Drop the localStorage entry on this tab too — sender already did it
       // on theirs. Then notify any mounted hooks on this tab to refetch.
       if (msg.kind === "url") {
+        memCache.delete(msg.url);
         try { window.localStorage.removeItem(storageKey(msg.url)); } catch { /* ignore */ }
         notifyInvalidation(msg.url);
       } else if (msg.kind === "prefix") {
+        dropMemPrefix(msg.prefix);
         try {
           const full = storageKey(msg.prefix);
           const toRemove: string[] = [];
@@ -190,6 +213,7 @@ function broadcast(msg: InvalidateMessage): void {
 
 export function invalidateCache(url: string): void {
   if (typeof window === "undefined") return;
+  memCache.delete(url);
   try {
     window.localStorage.removeItem(storageKey(url));
   } catch {
@@ -201,6 +225,7 @@ export function invalidateCache(url: string): void {
 
 export function invalidateCachePrefix(prefix: string): void {
   if (typeof window === "undefined") return;
+  dropMemPrefix(prefix);
   try {
     const full = storageKey(prefix);
     const toRemove: string[] = [];
@@ -218,6 +243,7 @@ export function invalidateCachePrefix(prefix: string): void {
 
 export function clearAllCache(): void {
   if (typeof window === "undefined") return;
+  memCache.clear();
   try {
     const toRemove: string[] = [];
     for (let i = 0; i < window.localStorage.length; i++) {

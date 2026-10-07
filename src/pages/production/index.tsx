@@ -676,12 +676,8 @@ export default function ProductionPage({
   // render waterfall (~280ms cold-start cost) before the main fetch
   // could fire.
   //
-  // After F1: we ALWAYS return true for dept mode. The cold-start today
-  // fallback (effectiveDueFrom/effectiveDueTo below) ensures the fetch
-  // URL has from/to on the very first render, so we no longer need to
-  // gate. The first-mount seed useEffect still runs (writes today to
-  // the URL for shareable / refresh-safe deep links) but it's a
-  // background concern now, not on the fetch critical path.
+  // After F1: we ALWAYS return true. The today seed itself was removed on
+  // 2026-10-07 (see the "No today date seed" note below).
   // Always true now — see comment above. Kept as state-shaped for minimal
   // diff with surrounding code that reads `datesSeeded` directly.
   // eslint-disable-next-line @typescript-eslint/no-unused-vars -- setDatesSeeded retained for future flip if needed; intentionally unused after F1
@@ -1024,55 +1020,12 @@ export default function ProductionPage({
   }, [fltDueTo]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
-  // F1 cold-start today fallback (2026-05-11).
-  //
-  // Problem: on a cold cold dept-page mount with no from/to in the URL,
-  // the legacy flow was:
-  //   render 1 → seed useEffect fires setUrlBatch(today, today) → state
-  //   update → render 2 → datesSeeded-flip useEffect fires → render 3
-  //   → useCachedJson sees the new URL → orders fetch fires.
-  //
-  // Net result: ~280ms of React work between bundle ready and the first
-  // orders fetch firing — pure waterfall, no useful concurrency.
-  //
-  // Fix: before the seed useEffect lands, the fetch URL uses today as the
-  // EFFECTIVE date filter. The URL state (fltDueFrom/fltDueTo) is still
-  // empty on render 1 — we only inject today into the fetch URL string.
-  // The seed useEffect later updates the URL state to match, which is a
-  // no-op as far as the fetch is concerned (same URL string, useCachedJson
-  // skips the duplicate). isColdStartRef gates this to ONLY render 1 of
-  // each mount so that a user CLEARING the date filter post-mount still
-  // gets the "show all history" semantic (open-ended fetch URL) — matches
-  // the pre-F1 behavior the L591-596 doc-block was guarding.
-  // F1.1 (2026-05-12) — atomic ref-flip + URL-seed (single layoutEffect).
-  //
-  // Background: the original F1 used two separate effects — a
-  // useLayoutEffect to flip isColdStartRef and a regular useEffect to
-  // call setUrlBatch. Between the two, there's a render window where
-  // ref.current === false but fltDueFrom/fltDueTo are still '' (URL
-  // hasn't been re-read by useUrlState yet). useColdStartTodayFallback
-  // evaluates false in that window, effectiveDueFrom/To collapse to '',
-  // and useCachedJson fires a SECOND fetch against the bare URL
-  // (`?fields=minimal&dept=X` — no date filter). On Foam / Fab Cut this
-  // showed up as 3 production-orders network calls per cold mount
-  // (todayed → unbounded → todayed), the middle one wasting ~280ms.
-  //
-  // Fix: combine the ref-flip and the URL-seed into ONE useLayoutEffect
-  // so React processes them atomically before the next render commits.
-  // The old standalone seed useEffect below has been removed too.
-  const isColdStartRef = useRef(true);
-  useLayoutEffect(() => {
-    isColdStartRef.current = false;
-    if (mode === "dept" && !fltDueFrom && !fltDueTo) {
-      const today = todayISO();
-      setUrlBatch({ from: today, to: today });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot first-mount cold-start handler; deps frozen on purpose
-  }, []);
-  const useColdStartTodayFallback =
-    mode === "dept" && isColdStartRef.current && !fltDueFrom && !fltDueTo;
-  const effectiveDueFrom = useColdStartTodayFallback ? todayISO() : fltDueFrom;
-  const effectiveDueTo = useColdStartTodayFallback ? todayISO() : fltDueTo;
+  // No today date seed on dept pages (removed 2026-10-07). The F1/F1.1 seed
+  // (2026-05-11/12) wrote today into the URL from a layout effect that ran
+  // before the router's navigate() was live, so it was a silent no-op: dept
+  // pages have always shown every open order, and the seed only fired one
+  // dated request per open that was aborted a moment later. The owner chose
+  // to keep "everything" as the default (2026-10-07).
 
   // dueQueryFrag/baseUrl/ordersResp moved here from earlier in the file
   // to satisfy the TDZ for fltDueFrom/fltDueTo (declared just above).
@@ -1089,8 +1042,8 @@ export default function ProductionPage({
   const serverCatFrag =
     fltCategory.length === 1 ? `&cat=${encodeURIComponent(fltCategory[0])}` : "";
   const dueQueryFrag =
-    (effectiveDueFrom ? `&dueFrom=${encodeURIComponent(effectiveDueFrom)}` : "") +
-    (effectiveDueTo ? `&dueTo=${encodeURIComponent(effectiveDueTo)}` : "");
+    (fltDueFrom ? `&dueFrom=${encodeURIComponent(fltDueFrom)}` : "") +
+    (fltDueTo ? `&dueTo=${encodeURIComponent(fltDueTo)}` : "");
   // Wei Siang 2026-05-14: Clear All v2 — first version wiped sessionStorage
   // but the DataGrid's defaultExcludedValues useEffect re-applied the
   // "hide COMPLETED/TRANSFERRED" Status filter on remount, so the user
@@ -1262,18 +1215,8 @@ export default function ProductionPage({
   // setters race under React 18 batching — see useUrlBatch jsdoc.
   const setUrlBatch = useUrlBatch();
 
-  // First-mount seed: MOVED into the F1.1 ref-flip useLayoutEffect above
-  // (search for "isColdStartRef"). Splitting them produced an intermediate
-  // render where ref=false but URL state empty → a spurious unbounded
-  // fetch. See the comment block at the consolidated layoutEffect for the
-  // full diagnosis.
-
-  // Datesseeded-flip useEffect removed in F1 (2026-05-11). `datesSeeded`
-  // now initialises to `true` unconditionally — see the cold-start today
-  // fallback (`effectiveDueFrom` / `effectiveDueTo`) just below the
-  // useUrlState calls above. The seed useEffect above still writes today
-  // to the URL state for shareable / refresh-safe deep links; it just no
-  // longer gates the fetch.
+  // Datesseeded-flip useEffect removed in F1 (2026-05-11); `datesSeeded` is
+  // always `true`. The today seed is gone too (2026-10-07).
 
   // Overview-matrix-only sort + filter state. Persisted to localStorage so
   // the operator's column preferences (e.g. "sort by Customer asc, hide
@@ -1906,10 +1849,17 @@ export default function ProductionPage({
     { count: number; which: "schedule" | "total" } | null
   >(null);
 
+  // Refetch the sheet and the overdue chips. It used to also call
+  // invalidateCachePrefix("/api/production-orders"), and the 8 s poll and the
+  // come-back-to-the-window refresh both run through here, so every dept's
+  // saved copy was wiped every 8 s (other browser tabs too, via the broadcast)
+  // and each tab switch downloaded the whole sheet again (owner 2026-10-07).
+  // The server's KV version already makes each refetch fresh. After a real
+  // edit, invalidate first, as the write paths in this file do.
   const fetchOrders = useCallback(() => {
-    invalidateCachePrefix("/api/production-orders");
     refreshOrders();
-  }, [refreshOrders]);
+    refreshOverdueCounts();
+  }, [refreshOrders, refreshOverdueCounts]);
 
   // Pending JC PATCHes (optimistic). Any JC ID in this set has an in-flight
   // server write that hasn't confirmed yet — the cache merger below skips
@@ -9914,7 +9864,10 @@ export default function ProductionPage({
       <CreateStockPODialog
         open={stockDialogOpen}
         onClose={() => setStockDialogOpen(false)}
-        onCreated={fetchOrders}
+        onCreated={() => {
+          invalidateCachePrefix("/api/production-orders");
+          fetchOrders();
+        }}
       />
 
       {/* Mark-as-Sent prompt shown at print time — a system-styled replacement
@@ -10045,6 +9998,7 @@ export default function ProductionPage({
             // The upstream cards belong to other departments and other rows,
             // so an optimistic patch here would leave half the grid stale.
             // Refetch — it is one request and it is the only honest picture.
+            invalidateCachePrefix("/api/production-orders");
             fetchOrders();
           } catch (err) {
             toast.error(`Unlock failed: ${err instanceof Error ? err.message : String(err)}`);

@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-07**: branch `perf/production-dept-tab-cache` (to `staging`, BUG-2026-10-07-265) added below (its entry is the newest).
 > **Last verified: 2026-10-07**: branch `chore/sync-staging-from-main-1007` (staging<-main merge): both trackers merged, main-only entries added, entry below.
 > **Last verified: 2026-10-07**: branch `feat/dev37-kpi-self-view-to-main` (DEV-37 staging to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-07**: branch `fix/rm-uom-bottle-main` (DEV-20 follow-up to `main`, BUG-2026-10-07-262) added below (its entry is the newest).
@@ -168,6 +169,15 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-07 — 🔵 Production dept pages (Fab Cut to Packing): faster loads, tab switches use the saved copy (branch `perf/production-dept-tab-cache` → `staging`, BUG-2026-10-07-265)
+
+Owner: improve the load time from Fab Cut to Packing, "everything is load all"; and "why when I swap between tabs it needs to keep loading over and over again, I should just cache it".
+
+1. ✅ Measured on staging: each dept page loads every open order, ~1,200-1,300 orders, 6-7 MB decoded, 0.4-2.6 s per load. The "today" date filter the page was built with never reached the URL (a no-op since 2026-05-12). Owner chose to KEEP loading everything (2026-10-07), so the dead seed and its wasted first request are removed instead of fixed.
+2. ✅ Tab switch re-downloaded the sheet: the 8 s poll's `fetchOrders` wiped every dept's saved copy, and a 6-7 MB sheet never fit in localStorage anyway. `fetchOrders` no longer invalidates (edits still do), and `cached-fetch.ts` keeps bodies too big for localStorage in memory.
+3. 🔵 The list endpoint itself hung 25-45 s on staging at times (PATCH too) while overdue-counts answered in 0.1 s. That is #733's BUG-2026-10-07-264 (runtime DDL + shared promise memo); this branch does not touch it.
+4. 🔵 Staging check after deploy: switch Fab Cut → Fab Sew → Fab Cut, rows show at once with no "(loading…)". Prod: UNMEASURED.
 
 ## 2026-10-07 — 🔵 Sync `staging` from `main` (branch `chore/sync-staging-from-main-1007` → `staging`)
 

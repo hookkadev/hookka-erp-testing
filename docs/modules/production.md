@@ -1,5 +1,6 @@
 # Production & BOM — Module Guide
 
+> **Last verified: 2026-10-07** (branch `perf/production-dept-tab-cache`, to `staging`): the `filteredOrders` (:2964) and FG-sticker (:5717 / :5676) anchors, after the dead today seed was removed from `index.tsx`.
 > **Last verified: 2026-10-07** (branch `chore/sync-staging-from-main-1007`, staging<-main merge): the `bom.tsx` anchors (`BOMManagementPage` :5957, `EditBOMDialog` :2957, `MasterTemplatesDialog` :3819) re-measured on the merged file; the `ProductionPage` / `filteredOrders` / `loadFgStickers` / `packingStickerUrl` anchors keep staging's (632 / 3014 / 5767 / 5726, re-checked). Nothing else re-checked.
 > **Last verified: 2026-10-07** (branch `feat/master-bom-two-pane`, to `staging`): the `bom.tsx` anchors (`BOMManagementPage` :6030, `EditBOMDialog` :2952, `MasterTemplatesDialog` :3839) and the 6,513-line count, read from `src/pages/bom.tsx` after Master BOM Templates moved to the two-pane layout and `SubWIPTree` was deleted. Nothing else re-checked.
 > **Last verified: 2026-10-06** (branch `chore/sync-staging-from-main-1006`, staging<-main merge): `bom.tsx` anchors take main's (:6304 / :3192 / :4079, the merged file is main's); `ProductionPage` :632, `filteredOrders` :3014, `loadFgStickers` / `packingStickerUrl` :5767 / :5726 re-measured on the merged file. Nothing else re-checked.
@@ -83,8 +84,8 @@ Owns the shop floor: a **dept-tabbed WIP board** (one production_order per confi
 | Symbol / section | file:line | Role |
 |---|---|---|
 | `ProductionPage` | `src/pages/production/index.tsx:632` | WIP board; every column/row branches on `activeTab` |
-| `filteredOrders` (memo) | `src/pages/production/index.tsx:3014` | Dept-narrow + overdue-set grid filter |
-| `loadFgStickers` / `packingStickerUrl` | `src/pages/production/index.tsx:5767 / 5726` | FG sticker set (immediate paint → /p/ token upgrade) |
+| `filteredOrders` (memo) | `src/pages/production/index.tsx:2964` | Dept-narrow + overdue-set grid filter |
+| `loadFgStickers` / `packingStickerUrl` | `src/pages/production/index.tsx:5717 / 5676` | FG sticker set (immediate paint → /p/ token upgrade) |
 | `BOMManagementPage` | `src/pages/bom.tsx:5957` | BOM page shell (tabs, list) |
 | `EditBOMDialog` / `MasterTemplatesDialog` | `src/pages/bom.tsx:2957 / 3819` | L1+WIP editor / master variants |
 | `rowToPO` | `production-orders/_helpers.ts:905` | PO row → API shape (dual-keyed reads) |
