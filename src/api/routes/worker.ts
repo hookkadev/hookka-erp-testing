@@ -1544,7 +1544,8 @@ app.get("/history", async (c) => {
       orgId: DEFAULT_ORG_ID,
       // v2: daily[] rows carry deptHours (DEV-31) — older snapshots lack it.
       // v3: totals carry prodDeptMinutes + effProductionMinutes.
-      cacheKey: `v3:${workerId}:${fromStr}:${toStr}`,
+      // v4: daily[] rows carry prodDeptMinutes.
+      cacheKey: `v4:${workerId}:${fromStr}:${toStr}`,
     },
     async (db) => {
 
@@ -1571,6 +1572,15 @@ app.get("/history", async (c) => {
   // DEV-31: the same rows per department, so the phone shows the split the
   // office sees on Working Hours (one total per day hid it).
   const deptNames = await loadDeptNames(db);
+  // Production Hours per day: the same production-dept rows the Efficiency %
+  // denominator counts (departments.isProduction).
+  const prodDeptRes = await db
+    .prepare("SELECT code, isProduction FROM departments")
+    .all<{ code: string; isProduction: number | boolean | null }>();
+  const prodDeptCodes = new Set(
+    (prodDeptRes.results ?? []).filter((d) => d.isProduction).map((d) => String(d.code).toUpperCase()),
+  );
+  const prodDeptMinutesByDate = new Map<string, number>();
   const deptHoursByDate = new Map<
     string,
     Array<{ departmentCode: string; name: string; category: string | null; hours: number }>
@@ -1581,6 +1591,7 @@ app.get("/history", async (c) => {
     const mins = Math.round((Number(r.hours) || 0) * 60);
     wheMinutesByDate.set(d, (wheMinutesByDate.get(d) ?? 0) + mins);
     const code = String(r.departmentCode ?? r.departmentcode ?? r.department_code ?? "").toUpperCase();
+    if (prodDeptCodes.has(code)) prodDeptMinutesByDate.set(d, (prodDeptMinutesByDate.get(d) ?? 0) + mins);
     const hours = Number(r.hours) || 0;
     if (!code || hours <= 0) continue;
     const list = deptHoursByDate.get(d) ?? [];
@@ -1944,7 +1955,11 @@ app.get("/history", async (c) => {
   }
   const daily = Array.from(dailyMap.values())
     .sort((a, b) => a.date.localeCompare(b.date))
-    .map((d) => ({ ...d, deptHours: deptHoursByDate.get(d.date) ?? [] }));
+    .map((d) => ({
+      ...d,
+      deptHours: deptHoursByDate.get(d.date) ?? [],
+      prodDeptMinutes: prodDeptMinutesByDate.get(d.date) ?? 0,
+    }));
 
   // workedMinutes / overtimeMinutes — split per date once we know which side
   // (working_hour_entries vs attendance clock-time) wins. Per-date split:
@@ -2013,7 +2028,7 @@ app.get("/history", async (c) => {
     addProdMinutes: addProdTotalMin,
     efficiencyPct,
     // The two halves of efficiencyPct itself, so the phone can show
-    // Production Time (prod-dept hours) and Production Hours (credited minutes)
+    // Production Hours (prod-dept hours) and Standard Production Duration (credited minutes)
     // that divide to exactly the Efficiency % beside them.
     prodDeptMinutes: Math.round((myEff?.prodHours ?? 0) * 60),
     effProductionMinutes: myEff?.prodMinutes ?? 0,

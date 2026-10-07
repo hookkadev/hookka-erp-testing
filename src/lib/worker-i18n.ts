@@ -842,17 +842,29 @@ const dict: Dict = {
     zh: '员工明细仪表板',
     my: 'ဝန်ထမ်း အသေးစိတ် ဒက်ရှ်ဘုတ်',
   },
+  'home.workingHours': {
+    en: 'Working Hours',
+    ms: 'Jam Kerja',
+    zh: '工作时数',
+    my: 'အလုပ်နာရီ',
+  },
   'home.productionHours': {
     en: 'Production Hours',
     ms: 'Jam Pengeluaran',
     zh: '生产工时',
     my: 'ထုတ်လုပ်နာရီ',
   },
-  'home.productionTime': {
-    en: 'Production Time',
-    ms: 'Masa Pengeluaran',
-    zh: '生产时间',
-    my: 'ထုတ်လုပ်ချိန်',
+  'home.stdProductionDuration': {
+    en: 'Standard Production Duration',
+    ms: 'Tempoh Pengeluaran Standard',
+    zh: '标准生产时长',
+    my: 'စံထုတ်လုပ်ချိန်',
+  },
+  'home.colStdDuration': {
+    en: 'Std prod duration',
+    ms: 'Tempoh std',
+    zh: '标准时长',
+    my: 'စံချိန်',
   },
   'home.efficiencyPct': {
     en: 'Efficiency %',

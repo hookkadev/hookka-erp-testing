@@ -1296,17 +1296,22 @@ export default function WorkerHomePage() {
 
       {/* KPI row */}
       {hist && (
-        <div className="grid grid-cols-3 gap-2">
-          {/* Production Hours (credited job-card minutes) ÷ Production Time
-              (hours logged in production departments) = Efficiency %, read
-              left to right. */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {/* Working Hours (all departments) · Production Hours (production
+              departments only) · Standard Production Duration (BOM minutes
+              credited from job cards). Efficiency % = Standard Production
+              Duration ÷ Production Hours. */}
           <Kpi
-            label={t("home.productionHours")}
-            value={mins2hrs(hist.totals.effProductionMinutes ?? 0)}
+            label={t("home.workingHours")}
+            value={mins2hrs(hist.totals.workedMinutes)}
           />
           <Kpi
-            label={t("home.productionTime")}
+            label={t("home.productionHours")}
             value={mins2hrs(hist.totals.prodDeptMinutes ?? 0)}
+          />
+          <Kpi
+            label={t("home.stdProductionDuration")}
+            value={mins2hrs(hist.totals.effProductionMinutes ?? 0)}
           />
           <Kpi
             label={t("home.efficiencyPct")}
@@ -1331,7 +1336,7 @@ export default function WorkerHomePage() {
       {hist && (hist.totals.prodDeptMinutes ?? 0) >= 30 && (
         <div className="-mt-1 text-xs text-[#5A5550] text-center break-words">
           <p>
-            {t("home.efficiencyPct")} = {t("home.productionHours")} ÷ {t("home.productionTime")} × 100
+            {t("home.efficiencyPct")} = {t("home.stdProductionDuration")} ÷ {t("home.productionHours")} × 100
           </p>
           <p className="tabular-nums">
             {mins2hrs(hist.totals.effProductionMinutes ?? 0)} ÷{" "}
