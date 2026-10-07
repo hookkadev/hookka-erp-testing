@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-07**: branch `feat/kpi-dept-efficiency-daily-chart` (DEV-36 follow-up to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-07**: branch `chore/sync-staging-from-main-1007` (staging<-main merge): both trackers merged, main-only entries added, entry below.
 > **Last verified: 2026-10-07**: branch `feat/dev37-kpi-self-view-to-main` (DEV-37 staging to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-07**: branch `fix/rm-uom-bottle-main` (DEV-20 follow-up to `main`, BUG-2026-10-07-262) added below (its entry is the newest).
@@ -168,6 +169,15 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-07 — ⬜ DEV-36 follow-up: daily efficiency chart on the Department efficiency KPI card (branch `feat/kpi-dept-efficiency-daily-chart` → `staging`)
+
+Owner ask: the department leads holding Department efficiency cannot open Dashboard Experimental, so the card's "See the list" link leads nowhere for them. Show the graph on their own card instead, for the departments ticked when the KPI was assigned. Owner picked the Daily efficiency line, on Department efficiency only. The department pick is a scoring scope, not an access limit: nothing else on the site is narrowed by it.
+
+1. 🔵 `dailyEfficiencyPct` in `src/api/lib/workforce-perf.ts`: `poolEfficiencyPct` one day at a time, the same points the page's Daily efficiency chart draws. `departmentEfficiency` returns them as `daily`; `buildCard` passes them on the `/me` line. A settled month serves its snapshot, which has no daily points, so no chart there.
+2. 🔵 My KPI card: a small line chart (day of month, %, dashed target line) under the Department efficiency line; its "See the list" link is hidden.
+3. 🔵 Test: `tests/workforce-perf.test.mjs` requires the card's points to equal the page's daily line for one department, another, and the whole floor.
+4. ⬜ Staging check after deploy: a holder login sees the chart for their departments, figures match Dashboard Experimental's Daily efficiency with the same department picked.
 
 ## 2026-10-07 — 🔵 Sync `staging` from `main` (branch `chore/sync-staging-from-main-1007` → `staging`)
 

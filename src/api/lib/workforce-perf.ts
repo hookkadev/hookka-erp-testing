@@ -194,3 +194,22 @@ export function poolEfficiencyPct(
   }
   return { pct: w > 0 ? (prod / w) * 100 : null, workingMinutes: w, productionMinutes: prod, days };
 }
+
+/**
+ * The Efficiency tab's "Daily efficiency" line: poolEfficiencyPct one day at a
+ * time, rounded to 0.1 as the chart shows it. Days with no working minutes are
+ * left out. Drawn on the Department efficiency KPI card.
+ */
+export function dailyEfficiencyPct(
+  perfDays: readonly PerfDay[],
+  workerIds: ReadonlySet<string> | null,
+  inPeriod: (date: string) => boolean,
+): Array<{ date: string; pct: number }> {
+  return [...new Set(perfDays.map((d) => d.date))]
+    .filter(inPeriod)
+    .sort()
+    .flatMap((date) => {
+      const p = poolEfficiencyPct(perfDays, workerIds, (d) => d === date).pct;
+      return p === null ? [] : [{ date, pct: Math.round(p * 10) / 10 }];
+    });
+}
