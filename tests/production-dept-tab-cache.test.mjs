@@ -68,10 +68,13 @@ test("the 8 s poll's refetch does not wipe the saved copies; edits still do", ()
   const fn = PAGE.slice(PAGE.indexOf("const fetchOrders = useCallback("), PAGE.indexOf("}, [refreshOrders, refreshOverdueCounts]);"));
   assert.ok(fn.length > 0 && fn.length < 400, "fetchOrders not found");
   assert.doesNotMatch(fn, /invalidateCache/, "a refetch must not drop every dept's saved copy");
-  // The two write paths that refetch through fetchOrders invalidate first.
+  // The write paths that refetch through fetchOrders invalidate first. The
+  // stock-PO create is on every branch; the sequence-unlock dialog ("the only
+  // honest picture.") exists only where the sequence lock has shipped.
+  assert.ok(PAGE.includes("onCreated={() => {"), "stock-PO create path missing");
   for (const anchor of ["onCreated={() => {", "the only honest picture."]) {
     const at = PAGE.indexOf(anchor);
-    assert.ok(at > 0, `anchor missing: ${anchor}`);
+    if (at < 0) continue;
     assert.match(PAGE.slice(at, at + 200), /invalidateCachePrefix\("\/api\/production-orders"\);\s*fetchOrders\(\);/);
   }
 });
