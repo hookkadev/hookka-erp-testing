@@ -26,7 +26,9 @@ test("no CAT dropdown or matrix lookup left on the BOM page", () => {
 
 test("every process row edits minutes through MinutesInput", () => {
   const inputs = bom.match(/<MinutesInput value=\{p\.minutes\} onChange=\{\(m\) => [^}]*"minutes", m\)\}/g) || [];
-  assert.equal(inputs.length, 7);
+  // 5 since 2026-10-07: Master BOM Templates edits WIP rows through the shared
+  // WipNodeDetail, so its own root-WIP row and SubWIPTree's row are gone.
+  assert.equal(inputs.length, 5);
   assert.doesNotMatch(bom, /<span className="[^"]*">\{p\.minutes\}<\/span>/);
 });
 
