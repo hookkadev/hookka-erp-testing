@@ -55,6 +55,7 @@ import {
 // of the simplified branded fallback. buildSimpleTablePdf stays the ULTIMATE
 // fallback if the unified render ever throws on Workers.
 import { getOrCreateQrToken, qrScanUrl } from "../lib/do-qr-token";
+import { freshReads } from "../lib/worker-perf";
 import { parseStatusList, startOfMonthMYT } from "../../lib/delivery-list-filters";
 // Company office number — the driver-contact fallback on dispatch notices
 // (owner rule: no driver phone on file → give the company's number).
@@ -552,9 +553,15 @@ app.get("/linked-po-ids", async (c) => {
 // ---------------------------------------------------------------------------
 async function loadDeliveryReadyPlanning(
   c: Context<Env>,
+  // fresh: a caller about to act on one order (the Sales "Transfer to Delivery
+  // Order" box) must not get the serve-stale copy, which still showed a
+  // just-finished order as not ready. It skips serve-stale and reads past
+  // Hyperdrive's query cache (freshReads), so a stale snapshot is rebuilt
+  // before the answer. The Delivery page keeps serve-stale for its speed.
+  fresh = false,
 ): Promise<{ ready: ReadyPORow[]; planning: ReadyPORow[] }> {
   const orgId = getOrgId(c);
-  const db = c.var.DB;
+  const db = fresh ? freshReads(c.var.DB) : c.var.DB;
 
   // Runtime self-apply — migration files are inert on deploy, so the snapshot
   // table must be created here (awaited) before withSnapshot reads/writes it.
@@ -727,7 +734,7 @@ async function loadDeliveryReadyPlanning(
     compute,
     "",
     c,
-    { staleWhileRevalidate: true },
+    { staleWhileRevalidate: !fresh },
   );
   return data;
 }
@@ -735,7 +742,8 @@ async function loadDeliveryReadyPlanning(
 app.get("/ready-planning", async (c) => {
   const denied = await requirePermission(c, "delivery-orders", "read");
   if (denied) return denied;
-  return c.json({ success: true, ...(await loadDeliveryReadyPlanning(c)) });
+  const fresh = c.req.query("fresh") === "1";
+  return c.json({ success: true, ...(await loadDeliveryReadyPlanning(c, fresh)) });
 });
 
 // ---------------------------------------------------------------------------
