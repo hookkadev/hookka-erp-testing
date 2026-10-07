@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // Planning > Fibre department drill-in.
 //
-// Fibre is a production stage placed immediately BEFORE Upholstery (owner
+// Fibre is a production stage placed immediately AFTER Foam Bonding (owner
 // 2026-10-07), so the floor can track and schedule fibre filling on its own
 // department.
 //
@@ -60,7 +60,7 @@ export default function FibreDeptPage() {
   return (
     <DepartmentSchedulePage
       departmentName="Fibre"
-      subtitle="Fibre filling, the stage before upholstery"
+      subtitle="Fibre filling, the stage after foam bonding"
       upstream={[{ label: "Foam Bonding", route: "/planning/dept/foam-bonding" }]}
       icon={<Layers className="h-4 w-4 text-[#84CC16]" />}
       accentColor="#84CC16"

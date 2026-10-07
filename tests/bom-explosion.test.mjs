@@ -481,6 +481,7 @@ test("breakBomIntoWips: WIP with no processes falls back to wipType default chai
     "WOOD_CUT",
     "FOAM_CUTTING",
     "FOAM",
+    "FIBRE",
     "FRAMING",
     "WEBBING",
     "UPHOLSTERY",
