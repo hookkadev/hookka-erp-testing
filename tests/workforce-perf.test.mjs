@@ -11,7 +11,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildPerfDays, poolEfficiencyPct } from "../src/api/lib/workforce-perf.ts";
+import { buildPerfDays, poolEfficiencyPct, dailyEfficiencyPct } from "../src/api/lib/workforce-perf.ts";
 import { filterSlice } from "../src/pages/dashboards/employee-filter.ts";
 import { overallEfficiencyPct } from "../src/pages/dashboards/dashboard-shared-lib.ts";
 
@@ -79,4 +79,21 @@ test("the dashboard route builds its figures with the shared function", () => {
   const src = readFileSync("src/api/routes/dashboard-prototype.ts", "utf8");
   assert.ok(src.includes("buildPerfDays({"), "dashboard-prototype.ts must call buildPerfDays");
   assert.ok(!src.includes("perfByDayWorker"), "the inline copy must not come back");
+});
+
+// The card's chart must plot what the page's "Daily efficiency" line plots
+// (DailyEfficiencyCard in EmployeesInsights.tsx: production ÷ working per day
+// of the filtered slice, days with no working minutes dropped, 0.1 rounding).
+test("daily line: the KPI card's points equal the page's Daily efficiency chart", () => {
+  for (const dept of ["UPHOLSTERY", "FAB_CUT", ""]) {
+    const slice = filterSlice({ workers, attendance: [], performance: { byDay: perfDays } }, dept, "");
+    const pageLine = slice.performance.byDay
+      .filter((d) => d.date.startsWith("2026-09") && d.workingMinutes > 0)
+      .sort((a, b) => (a.date < b.date ? -1 : 1))
+      .map((d) => ({ date: d.date, pct: Math.round((d.productionMinutes / d.workingMinutes) * 1000) / 10 }));
+    const ids = dept ? new Set(workers.filter((w) => w.dept === dept).map((w) => w.id)) : null;
+    assert.deepEqual(dailyEfficiencyPct(perfDays, ids, (d) => d.startsWith("2026-09")), pageLine, dept || "whole floor");
+  }
+  // October hours never leak into a September line.
+  assert.ok(dailyEfficiencyPct(perfDays, null, (d) => d.startsWith("2026-09")).every((p) => p.date.startsWith("2026-09")));
 });

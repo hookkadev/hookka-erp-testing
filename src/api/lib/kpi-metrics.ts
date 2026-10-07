@@ -32,6 +32,7 @@ import {
 import {
   buildPerfDays,
   poolEfficiencyPct,
+  dailyEfficiencyPct,
   type PerfWheRow,
   type PerfJcRow,
   type PerfPicRow,
@@ -80,6 +81,8 @@ export interface MetricResult {
   detail: string;
   /** customer_delivery_date only — % shipped before the promised date. */
   earlyPct?: number;
+  /** department_efficiency only: the same pool per day, for the card's chart. */
+  daily?: Array<{ date: string; pct: number }>;
 }
 
 const EMPTY: MetricResult = { actual: null, sampleSize: 0, detail: "No data" };
@@ -835,9 +838,11 @@ export async function departmentEfficiency(
     return { actual: null, sampleSize: 0, detail: `No production hours clocked${where} this month` };
   }
   const h = (min: number) => Math.round(min / 60).toLocaleString();
+  const daily = dailyEfficiencyPct(perfDays, workerIds, (d) => d.startsWith(period));
   return {
     actual: Math.round(r.pct * 10) / 10,
     sampleSize: r.days,
+    daily,
     detail: `${h(r.productionMinutes)} production hours on ${h(r.workingMinutes)} clocked hours over ${r.days} days${where}`,
   };
 }

@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-08**: branch `feat/kpi-dept-efficiency-daily-chart-main` (to `main`, DEV-36) added below (its entry is the newest).
 > **Last verified: 2026-10-08**: branch `feat/editable-wip-types-main-v2` (staging #752 to `main`, second try after #753 was reverted by #754) updated the entry below.
 > **Last verified: 2026-10-08**: branch `feat/editable-wip-types-main` (staging #752 to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-08**: branch `fix/kpi-delivery-rules-main` (to `main`) (BUG-2026-10-08-267) added below (its entry is the newest).
@@ -106,6 +107,14 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-08 — 🟡 DEV-36 follow-up to `main`: daily efficiency chart on the Department efficiency KPI card (branch `feat/kpi-dept-efficiency-daily-chart-main` → `main`)
+
+Owner ask: every KPI change made on staging goes to main. This was the only KPI commit on staging not yet on `main` (checked 2026-10-08 against `main`'s log; the delivery KPI work reached `main` in #750). Owner ask, from staging: the department leads holding Department efficiency cannot open Dashboard Experimental, so the card's "See the list" link leads nowhere for them; the card draws the Daily efficiency line itself, for the departments ticked at assignment.
+
+1. 🔵 Staging commit cherry-picked: `dailyEfficiencyPct` in `src/api/lib/workforce-perf.ts`, `daily` on the `/me` line, the chart on My KPI, the link hidden. Code applied cleanly; doc conflicts taken from `main` and rewritten here.
+2. 🔵 `tests/workforce-perf.test.mjs` (card points equal the page's daily line) passes on the `main` tree.
+3. ⬜ Production check after deploy: a Department efficiency holder sees the chart for their departments.
 
 ## 2026-10-08 — 🔵 Editable BOM WIP types and variant fields to `main` (branch `feat/editable-wip-types-main` → `main`, same change as staging #752)
 
