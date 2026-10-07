@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-07**: newest entry BUG-2026-10-07-264 (branch `fix/production-list-ddl-lock`, to staging).
 > **Last verified: 2026-10-07** (branch `chore/sync-staging-from-main-1007`, staging<-main merge): both logs merged, one copy of each entry. No id collisions: 260 to 262 are main's, 263 is staging's.
 > **Last verified: 2026-10-07**: newest entry BUG-2026-10-07-263 (branch `fix/sales-transfer-credit-block`, to staging; 260 to 262 are taken on `main`).
 > **Last verified: 2026-10-06** (branch `chore/sync-staging-from-main-1006`, staging<-main merge): both logs merged, one copy of each entry. No id collisions: 253, 257, 258 and 259 are the same bugs on both sides (257 and 259 take main's copy, which adds its main PR note). Main's 251, 254, 255 and 256 are added.
@@ -114,6 +115,20 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-10-07-264 — Production sheets stuck on "loading…" (Foam Bonding most reported): a no-op runtime ALTER froze every list read, and the 8 s poll aborted each retry `production-orders` `infrastructure` 🟡
+
+🟡 Fix on `fix/production-list-ddl-lock` (to `staging`). Reported by floor users through Samuel, 2026-10-07: pressing into a Production page, Foam Bonding most of all, sometimes never loads.
+
+**Measured on staging, 2026-10-07.** `/production/foam` showed "Foam Bonding — Production Sheet (loading…)", 0 records. The list read `GET /api/production-orders?fields=minimal&dept=FOAM&excludeCompleted=true` was aborted at 8002 ms, re-sent, aborted again at 8001 ms, and so on. The same read sent from the console with no client timeout did not answer in over ten minutes; WOOD_CUT and a today-only FOAM read hung the same way, while `/api/departments` (217 ms), `/api/auth/me` (171 ms), `/api/sales-orders/stats` (460 ms) and `overdue-counts` (174 ms) answered normally. `/api/admin/health/slow-sql?range=24h`, slowest statement on `/api/production-orders`: `ALTER TABLE production_orders_list_snapshot ADD COLUMN IF NOT EXISTS source_rows BIGINT`, 6 hits, avg 10.5 s, p95 25 s. Prod: UNMEASURED.
+
+**Cause.** (1) Runtime DDL on the read path: `writeSnapshot` → `ensureSourceRowsColumn` and the list handler's `ensurePendingMigrations` send `ALTER TABLE … IF NOT EXISTS` on `production_orders_list_snapshot`, `job_cards`, `sales_orders`, `production_orders` once per isolate. Postgres takes ACCESS EXCLUSIVE before it checks IF NOT EXISTS; while the ALTER waits behind a running query, every new read of the table queues behind the ALTER. (2) `ensurePendingMigrations` memoised the in-flight promise (BUG-CLASSES C9): every list read in the isolate awaited the one request that started it, and that request could be aborted. (3) `/production`'s 8 s poll calls `refresh()`, which aborts a read still in flight and starts another, so a read slower than 8 s never lands, and each abandoned read keeps running on the database.
+
+**Fix.** `runSelfApply` and `ensureSourceRowsColumn` ask `information_schema.columns` / `pg_indexes` first (no table lock) and send no DDL when the schema already matches; unknown statement shapes or a failed probe run the DDL exactly as before. Statements go through `translateSql` first so `distributedAt` is checked as `distributed_at`. `ensurePendingMigrations` (production-orders) memoises a boolean set after the round lands. The `/production` poll and tab-return refetch skip while `isInflight(ordersUrl)`.
+
+**Guard.** `tests/production-list-ddl-lock.test.mjs` (fails with the catalog check removed); `tests/self-apply-retry.test.mjs` accepts the boolean-after-round memo.
 
 ---
 

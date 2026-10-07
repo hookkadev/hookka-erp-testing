@@ -201,7 +201,11 @@ for (const [file, table] of HELPERS) {
 
   test(`${file.split("/").pop()} — writes the count and compares it`, () => {
     const src = readFileSync(file, "utf8");
-    assert.match(src, /ensureSourceRowsColumn\(db(?: as never)?, /, "write ensures the column");
+    assert.match(
+      src,
+      /ensureSourceRowsColumn\((?:freshReads\(db\)|db)(?: as never)?, /,
+      "write ensures the column",
+    );
     assert.match(src, /source_rows = EXCLUDED\.source_rows/, "write stores the count");
     assert.match(src, /sourceRows: pickSourceRows\(row\)/, "read extracts the count");
     assert.match(src, /currentRows\?: number \| null/, "freshness accepts the count");

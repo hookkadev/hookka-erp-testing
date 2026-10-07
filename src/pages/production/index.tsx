@@ -24,7 +24,7 @@ import { packingRackScanUrl } from "@/api/lib/jobcard-qr-token";
 // fully synchronously when a callback is passed (see jobCardQrDataUrl below).
 import JsBarcode from "jsbarcode";
 import { QRImg } from "@/components/qr-img";
-import { useCachedJson, invalidateCachePrefix, isUnknownOutcome } from "@/lib/cached-fetch";
+import { useCachedJson, invalidateCachePrefix, isUnknownOutcome, isInflight } from "@/lib/cached-fetch";
 // useTimeout — P4.3 effect-replacement (still referenced at L2386+).
 import { useTimeout } from "@/lib/scheduler";
 import { useToast } from "@/components/ui/toast";
@@ -2003,12 +2003,15 @@ export default function ProductionPage({
       if (document.visibilityState !== "visible") return;
       if (pendingJcPatchesRef.current.size > 0) return;
       if (draftsRef.current.size > 0) return;
+      // A cold read can outlast the interval; refreshing now would abort it and
+      // start over, so it never lands (BUG-2026-10-07-264).
+      if (ordersUrl && isInflight(ordersUrl)) return;
       lastFetchAtRef.current = Date.now();
       fetchOrders();
     };
     const id = setInterval(tick, POLL_INTERVAL_MS);
     return () => clearInterval(id);
-  }, [fetchOrders]);
+  }, [fetchOrders, ordersUrl]);
 
   // Warn the operator if they try to leave the page with unsaved drafts in
   // the buffer (closing tab, navigating away, hitting back). Modern browsers
@@ -2038,6 +2041,7 @@ export default function ProductionPage({
       // almost never fired, so the sheet sat stale. 3s still de-bounces rapid tab
       // flips; in-flight PATCHes are already skipped above, drafts via fetchOrders.
       if (Date.now() - lastFetchAtRef.current < 3_000) return;
+      if (ordersUrl && isInflight(ordersUrl)) return;
       lastFetchAtRef.current = Date.now();
       fetchOrders();
     };
@@ -2045,7 +2049,7 @@ export default function ProductionPage({
     return () => {
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [fetchOrders]);
+  }, [fetchOrders, ordersUrl]);
 
   // Sync cached orders response into local state so optimistic PATCHes keep
   // working. When refetch lands while an optimistic PATCH is still in-flight

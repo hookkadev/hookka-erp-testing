@@ -395,6 +395,15 @@ function joinInflight<T>(url: string, reuseUnchanged = false): Promise<T> {
   return promise;
 }
 
+/**
+ * True while a read of `url` is still on the wire. A poll must check this:
+ * `refresh()` on a URL that is in flight aborts it and starts over, so a poll
+ * faster than the response never lets it land (BUG-2026-10-07-264).
+ */
+export function isInflight(url: string): boolean {
+  return inflight.has(url);
+}
+
 function releaseInflight(url: string): void {
   const entry = inflight.get(url);
   if (!entry) return;

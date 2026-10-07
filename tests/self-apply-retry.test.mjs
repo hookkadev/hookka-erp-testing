@@ -175,9 +175,13 @@ test("every converted site drops its memo when the round fails", async () => {
     if (f.endsWith("self-apply.ts")) continue;
     const src = readFileSync(f, "utf8");
     if (!src.includes("runSelfApply(")) continue;
-    // Either the explicit memoizeSelfApply wrapper, or the IIFE's .catch reset.
+    // Either the explicit memoizeSelfApply wrapper, the IIFE's .catch reset,
+    // or a boolean set only AFTER the awaited round (C9's preferred shape — a
+    // throw skips the assignment, so the next request retries).
     const guarded =
-      src.includes("memoizeSelfApply(") || /\)\(\)\.catch\(\(err\) => \{/.test(src);
+      src.includes("memoizeSelfApply(") ||
+      /\)\(\)\.catch\(\(err\) => \{/.test(src) ||
+      /await runSelfApply\([^;]*\);\s*\n\s*\w+ = true;/.test(src);
     if (!guarded) missing.push(f);
   }
   assert.deepEqual(

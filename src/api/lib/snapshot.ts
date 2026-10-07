@@ -31,6 +31,7 @@ import {
   getMaxSourceUpdatedAt as probeMaxSourceUpdatedAt,
   getSourceSignature,
 } from "./snapshot-freshness";
+import { selfApplyAlreadyDone } from "./self-apply";
 
 // Re-exported: four routes (working-hour-entries x2, department-performance,
 // job-cards) import the whole snapshot module and need the signature probe from
@@ -181,10 +182,15 @@ export async function ensureSourceRowsColumn(
 ): Promise<boolean> {
   if (_rowsColReady.has(tableName)) return true;
   if (_rowsColFailed.has(tableName)) return false;
+  const ddl = `ALTER TABLE ${tableName} ADD COLUMN IF NOT EXISTS source_rows BIGINT`;
+  // A no-op ALTER still queues for ACCESS EXCLUSIVE on a table every list read
+  // touches (BUG-2026-10-07-264) — ask the catalog first.
+  if (await selfApplyAlreadyDone(db, [ddl])) {
+    _rowsColReady.add(tableName);
+    return true;
+  }
   try {
-    await db
-      .prepare(`ALTER TABLE ${tableName} ADD COLUMN IF NOT EXISTS source_rows BIGINT`)
-      .run();
+    await db.prepare(ddl).run();
     _rowsColReady.add(tableName);
     return true;
   } catch (e) {

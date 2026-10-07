@@ -110,108 +110,109 @@ import {
 // Added 2026-05-07: distributedAt on job_cards — the dept sheet needs a
 // per-JC "Sent to floor" tick that survives sessions/devices so operators
 // stop double-printing the same sheet.
-export let pendingMigrations: Promise<void> | null = null;
-export function ensurePendingMigrations(db: D1Database): Promise<void> {
-  if (pendingMigrations) return pendingMigrations;
-  pendingMigrations = (async () => {
-    const stmts = [
-      "ALTER TABLE job_cards ADD COLUMN IF NOT EXISTS distributedAt TEXT",
-      // ON HOLD reason columns (BUG-2026-06-24-008). The production list READ
-      // joins sales_orders / consignment_orders and SELECTs
-      // hold_reason/held_by/held_at (attachCustomerSO). Those columns are added
-      // by the SO/CO WRITE path's own ensure — but the production read's cold
-      // recompute can run BEFORE any SO/CO write has created them on this DB,
-      // so the recompute 500s ("column hold_reason does not exist"). It stayed
-      // hidden while the stale snapshot was served (never recomputed); forcing a
-      // recompute exposed it. Ensure them on the READ path too. TEXT for all
-      // three is type-safe (IF NOT EXISTS no-ops if the SO/CO ensure already
-      // created them; a timestamp string stores fine in TEXT).
-      "ALTER TABLE sales_orders ADD COLUMN IF NOT EXISTS hold_reason TEXT",
-      "ALTER TABLE sales_orders ADD COLUMN IF NOT EXISTS held_by TEXT",
-      "ALTER TABLE sales_orders ADD COLUMN IF NOT EXISTS held_at TEXT",
-      "ALTER TABLE consignment_orders ADD COLUMN IF NOT EXISTS hold_reason TEXT",
-      "ALTER TABLE consignment_orders ADD COLUMN IF NOT EXISTS held_by TEXT",
-      "ALTER TABLE consignment_orders ADD COLUMN IF NOT EXISTS held_at TEXT",
-      // Undo for a cancel (owner 2026-08-04: "i silap cancel" — "reverse 或者
-      // undo 这样的意思，不是吗？这样不是比较简单吗？").
-      //
-      // Cancel used to be a one-way door purely because it was LOSSY: the
-      // cascade overwrote every in-flight job card's status with 'CANCELLED'
-      // and nothing recorded what it had been, so even an admin could not put
-      // the floor back the way it was. Remembering the prior status makes the
-      // reverse exact instead of a guess — which is the whole difference
-      // between an undo and a second, different mistake.
-      //
-      // Also `pre_hold_status`: the SO detail page has always read
-      // `order.preHoldStatus` to decide where Resume goes, but nothing ever
-      // wrote it, so an IN_PRODUCTION order put on hold resumed to CONFIRMED —
-      // silently moved BACKWARDS a stage.
-      "ALTER TABLE production_orders ADD COLUMN IF NOT EXISTS pre_cancel_status TEXT",
-      "ALTER TABLE job_cards ADD COLUMN IF NOT EXISTS pre_cancel_status TEXT",
-      "ALTER TABLE sales_orders ADD COLUMN IF NOT EXISTS pre_cancel_status TEXT",
-      "ALTER TABLE sales_orders ADD COLUMN IF NOT EXISTS pre_hold_status TEXT",
-      // BUG-2026-05-12 (FOAM 326 cleanup): WIP cascade idempotency log. Every
-      // call to applyWipInventoryChange first INSERTs into this table with
-      // ON CONFLICT DO NOTHING; if no row was inserted the cascade
-      // short-circuits. Atomic, concurrent-safe, catches the cross-session
-      // replay case BUG-005 misses (backfill scripts, retries, migration
-      // imports re-firing the cascade on already-final-state JCs).
-      //
-      // org_id is TEXT (not UUID) to match the multi-tenant skeleton from
-      // migration 0049 — every Hookka table uses TEXT 'hookka' as the tenant
-      // scope. The initial deploy on 2026-05-12 declared this as UUID by
-      // mistake, which caused every INSERT to fail silently (caught + logged
-      // as warning, so cascade still ran but without the idempotency guard
-      // active). The ALTER fixes any existing-with-wrong-type rows in place.
-      `CREATE TABLE IF NOT EXISTS wip_cascade_log (
-         id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-         org_id      TEXT NOT NULL,
-         job_card_id TEXT NOT NULL,
-         from_status TEXT,
-         to_status   TEXT NOT NULL,
-         source      TEXT NOT NULL,
-         applied_at  TIMESTAMPTZ NOT NULL DEFAULT now()
-       )`,
-      // Fix prior-deploy mistake — flip org_id from UUID to TEXT if needed.
-      // ALTER ... USING is idempotent: re-running when already TEXT is a no-op.
-      `ALTER TABLE wip_cascade_log
-         ALTER COLUMN org_id TYPE TEXT USING org_id::text`,
-      // FIX B (2026-08-08): the ticket is an OCCURRENCE, not a transition.
-      // `attempt` counts how many times this exact (from → to) has already
-      // been applied to this card, so a card that was completed, reverted and
-      // completed again claims a NEW ticket instead of colliding with its own
-      // first one. Existing rows default to 0 and are already unique on
-      // (org, jc, from, to), so the new indexes build over live data with no
-      // backfill. `seq` gives the log a total order — "what was the last thing
-      // we did to this card?" is the whole replay test, and two rows written
-      // inside one transaction share `applied_at`.
-      "ALTER TABLE wip_cascade_log ADD COLUMN IF NOT EXISTS attempt INTEGER NOT NULL DEFAULT 0",
-      "ALTER TABLE wip_cascade_log ADD COLUMN IF NOT EXISTS seq BIGSERIAL",
-      // The old keys are what swallowed the second completion — they must GO,
-      // not merely be joined by the new ones, or the collision survives.
-      "DROP INDEX IF EXISTS uniq_wip_cascade_log_transition",
-      "DROP INDEX IF EXISTS uniq_wip_cascade_log_initial",
-      // NULL from_status is treated distinct by Postgres uniqueness, so the
-      // index is partial — one for the common (from, to) pair, one for the
-      // initial-emission case.
-      `CREATE UNIQUE INDEX IF NOT EXISTS uniq_wip_cascade_log_occurrence
-         ON wip_cascade_log (org_id, job_card_id, from_status, to_status, attempt)
-         WHERE from_status IS NOT NULL`,
-      `CREATE UNIQUE INDEX IF NOT EXISTS uniq_wip_cascade_log_occurrence_initial
-         ON wip_cascade_log (org_id, job_card_id, to_status, attempt)
-         WHERE from_status IS NULL`,
-      `CREATE INDEX IF NOT EXISTS idx_wip_cascade_log_jc
-         ON wip_cascade_log (org_id, job_card_id, applied_at DESC)`,
-    ];
-    await runSelfApply(db, "production-orders", stmts);
-  })().catch((err) => {
-    // A FAILED round must not be remembered as done — otherwise one
-    // transient blip leaves the column unapplied for the life of this
-    // isolate. Dropping the memo lets the next request retry.
-    pendingMigrations = null;
-    throw err;
-  });
-  return pendingMigrations;
+//
+// A BOOLEAN memo, not the in-flight promise (BUG-CLASSES C9, BUG-2026-10-07-264):
+// this runs at the top of the list READ, and a shared pending promise holds the
+// socket of the request that created it. When the 8 s poll aborted that request
+// while its ALTER waited on a lock, every later list read in the isolate awaited
+// it with no end. Each request now does its own (cheap, lock-free) catalog check
+// until one round lands.
+let migrationsApplied = false;
+export async function ensurePendingMigrations(db: D1Database): Promise<void> {
+  if (migrationsApplied) return;
+  const stmts = [
+    "ALTER TABLE job_cards ADD COLUMN IF NOT EXISTS distributedAt TEXT",
+    // ON HOLD reason columns (BUG-2026-06-24-008). The production list READ
+    // joins sales_orders / consignment_orders and SELECTs
+    // hold_reason/held_by/held_at (attachCustomerSO). Those columns are added
+    // by the SO/CO WRITE path's own ensure — but the production read's cold
+    // recompute can run BEFORE any SO/CO write has created them on this DB,
+    // so the recompute 500s ("column hold_reason does not exist"). It stayed
+    // hidden while the stale snapshot was served (never recomputed); forcing a
+    // recompute exposed it. Ensure them on the READ path too. TEXT for all
+    // three is type-safe (IF NOT EXISTS no-ops if the SO/CO ensure already
+    // created them; a timestamp string stores fine in TEXT).
+    "ALTER TABLE sales_orders ADD COLUMN IF NOT EXISTS hold_reason TEXT",
+    "ALTER TABLE sales_orders ADD COLUMN IF NOT EXISTS held_by TEXT",
+    "ALTER TABLE sales_orders ADD COLUMN IF NOT EXISTS held_at TEXT",
+    "ALTER TABLE consignment_orders ADD COLUMN IF NOT EXISTS hold_reason TEXT",
+    "ALTER TABLE consignment_orders ADD COLUMN IF NOT EXISTS held_by TEXT",
+    "ALTER TABLE consignment_orders ADD COLUMN IF NOT EXISTS held_at TEXT",
+    // Undo for a cancel (owner 2026-08-04: "i silap cancel" — "reverse 或者
+    // undo 这样的意思，不是吗？这样不是比较简单吗？").
+    //
+    // Cancel used to be a one-way door purely because it was LOSSY: the
+    // cascade overwrote every in-flight job card's status with 'CANCELLED'
+    // and nothing recorded what it had been, so even an admin could not put
+    // the floor back the way it was. Remembering the prior status makes the
+    // reverse exact instead of a guess — which is the whole difference
+    // between an undo and a second, different mistake.
+    //
+    // Also `pre_hold_status`: the SO detail page has always read
+    // `order.preHoldStatus` to decide where Resume goes, but nothing ever
+    // wrote it, so an IN_PRODUCTION order put on hold resumed to CONFIRMED —
+    // silently moved BACKWARDS a stage.
+    "ALTER TABLE production_orders ADD COLUMN IF NOT EXISTS pre_cancel_status TEXT",
+    "ALTER TABLE job_cards ADD COLUMN IF NOT EXISTS pre_cancel_status TEXT",
+    "ALTER TABLE sales_orders ADD COLUMN IF NOT EXISTS pre_cancel_status TEXT",
+    "ALTER TABLE sales_orders ADD COLUMN IF NOT EXISTS pre_hold_status TEXT",
+    // BUG-2026-05-12 (FOAM 326 cleanup): WIP cascade idempotency log. Every
+    // call to applyWipInventoryChange first INSERTs into this table with
+    // ON CONFLICT DO NOTHING; if no row was inserted the cascade
+    // short-circuits. Atomic, concurrent-safe, catches the cross-session
+    // replay case BUG-005 misses (backfill scripts, retries, migration
+    // imports re-firing the cascade on already-final-state JCs).
+    //
+    // org_id is TEXT (not UUID) to match the multi-tenant skeleton from
+    // migration 0049 — every Hookka table uses TEXT 'hookka' as the tenant
+    // scope. The initial deploy on 2026-05-12 declared this as UUID by
+    // mistake, which caused every INSERT to fail silently (caught + logged
+    // as warning, so cascade still ran but without the idempotency guard
+    // active). The ALTER fixes any existing-with-wrong-type rows in place.
+    `CREATE TABLE IF NOT EXISTS wip_cascade_log (
+       id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+       org_id      TEXT NOT NULL,
+       job_card_id TEXT NOT NULL,
+       from_status TEXT,
+       to_status   TEXT NOT NULL,
+       source      TEXT NOT NULL,
+       applied_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+     )`,
+    // Fix prior-deploy mistake — flip org_id from UUID to TEXT if needed.
+    // ALTER ... USING is idempotent: re-running when already TEXT is a no-op.
+    `ALTER TABLE wip_cascade_log
+       ALTER COLUMN org_id TYPE TEXT USING org_id::text`,
+    // FIX B (2026-08-08): the ticket is an OCCURRENCE, not a transition.
+    // `attempt` counts how many times this exact (from → to) has already
+    // been applied to this card, so a card that was completed, reverted and
+    // completed again claims a NEW ticket instead of colliding with its own
+    // first one. Existing rows default to 0 and are already unique on
+    // (org, jc, from, to), so the new indexes build over live data with no
+    // backfill. `seq` gives the log a total order — "what was the last thing
+    // we did to this card?" is the whole replay test, and two rows written
+    // inside one transaction share `applied_at`.
+    "ALTER TABLE wip_cascade_log ADD COLUMN IF NOT EXISTS attempt INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE wip_cascade_log ADD COLUMN IF NOT EXISTS seq BIGSERIAL",
+    // The old keys are what swallowed the second completion — they must GO,
+    // not merely be joined by the new ones, or the collision survives.
+    "DROP INDEX IF EXISTS uniq_wip_cascade_log_transition",
+    "DROP INDEX IF EXISTS uniq_wip_cascade_log_initial",
+    // NULL from_status is treated distinct by Postgres uniqueness, so the
+    // index is partial — one for the common (from, to) pair, one for the
+    // initial-emission case.
+    `CREATE UNIQUE INDEX IF NOT EXISTS uniq_wip_cascade_log_occurrence
+       ON wip_cascade_log (org_id, job_card_id, from_status, to_status, attempt)
+       WHERE from_status IS NOT NULL`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS uniq_wip_cascade_log_occurrence_initial
+       ON wip_cascade_log (org_id, job_card_id, to_status, attempt)
+       WHERE from_status IS NULL`,
+    `CREATE INDEX IF NOT EXISTS idx_wip_cascade_log_jc
+       ON wip_cascade_log (org_id, job_card_id, applied_at DESC)`,
+  ];
+  // Throws on a real failure, so the flag stays false and the next request
+  // retries.
+  await runSelfApply(db, "production-orders", stmts);
+  migrationsApplied = true;
 }
 
 // Local helper — push one JC row to the matching dept tab on the live

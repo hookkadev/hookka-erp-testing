@@ -227,8 +227,9 @@ async function writeWorkerSnapshot(
   builtFrom: string,
   sourceRows: number | null = null,
 ): Promise<void> {
-  // Schema work on the WRITE only.
-  const withRows = await ensureSourceRowsColumn(db as never, tableName);
+  // Schema work on the WRITE only. Its catalog check reads through freshReads
+  // so nothing on the worker-history rebuild goes through Hyperdrive's cache.
+  const withRows = await ensureSourceRowsColumn(freshReads(db) as never, tableName);
   await db
     .prepare(
       withRows

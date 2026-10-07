@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-07**: branch `fix/production-list-ddl-lock` (to `staging`, BUG-2026-10-07-264) added below (its entry is the newest).
 > **Last verified: 2026-10-07**: branch `chore/sync-staging-from-main-1007` (staging<-main merge): both trackers merged, main-only entries added, entry below.
 > **Last verified: 2026-10-07**: branch `feat/dev37-kpi-self-view-to-main` (DEV-37 staging to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-07**: branch `fix/rm-uom-bottle-main` (DEV-20 follow-up to `main`, BUG-2026-10-07-262) added below (its entry is the newest).
@@ -168,6 +169,15 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-07 — 🔵 Production sheets stuck on "loading…", worst on Foam Bonding (branch `fix/production-list-ddl-lock` → `staging`, BUG-2026-10-07-264)
+
+Reporter ask (Samuel, users on the floor): pressing into a Production page, Foam Bonding most of all, sometimes never loads.
+
+1. 🔵 Backend: runtime DDL off the hot path. `runSelfApply` and `ensureSourceRowsColumn` read the catalog first and skip the `ALTER` when the schema already matches; `ensurePendingMigrations` (production-orders) memoises a boolean, not the in-flight promise.
+2. 🔵 Frontend: the `/production` 8 s poll and the tab-return refetch skip while the orders read is still in flight, instead of aborting it and starting over.
+3. ⬜ Staging check after deploy: `/production/foam` loads, and `ALTER TABLE production_orders_list_snapshot` drops out of `/api/admin/health/slow-sql`.
+4. ⬜ Prod slow-sql check: UNMEASURED (staging only so far).
 
 ## 2026-10-07 — 🔵 Sync `staging` from `main` (branch `chore/sync-staging-from-main-1007` → `staging`)
 

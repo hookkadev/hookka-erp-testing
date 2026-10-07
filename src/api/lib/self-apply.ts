@@ -40,6 +40,7 @@
 // clearer message. The only thing that changes is that the next request gets
 // another chance.
 // ---------------------------------------------------------------------------
+import { translateSql } from "./supabase-compat";
 
 /** Errors these statements are WRITTEN to produce — re-running is the normal case. */
 const BENIGN =
@@ -68,6 +69,117 @@ function runnableFor(stmt: Partial<Runnable> & Partial<Bindable>): Runnable {
   throw new Error("self-apply: prepared statement can neither run() nor bind()");
 }
 
+// ---------------------------------------------------------------------------
+// Read the catalog BEFORE running DDL (BUG-2026-10-07-264).
+//
+// `ALTER TABLE … ADD COLUMN IF NOT EXISTS` is not free when the column exists:
+// Postgres takes the ACCESS EXCLUSIVE lock first and checks second. While it
+// waits behind any running query on that table, every NEW query on the table
+// queues behind IT. Every isolate boot ran these on the hottest tables
+// (production_orders_list_snapshot, job_cards, sales_orders), so one slow list
+// read froze every Production sheet. Staging slow-sql, 24 h to 2026-10-07: the
+// no-op `ALTER TABLE production_orders_list_snapshot ADD COLUMN IF NOT EXISTS
+// source_rows` averaged 10.5 s, p95 25 s, and `/api/production-orders` hung for
+// over 10 minutes while every other endpoint answered in under 0.5 s.
+//
+// information_schema / pg_indexes reads take no lock on the table. Only the
+// statement shapes below are understood; anything else (or a failed probe)
+// returns false and the DDL runs exactly as before.
+// ---------------------------------------------------------------------------
+type SchemaCheck =
+  | { kind: "column"; table: string; column: string; type?: string }
+  | { kind: "table"; table: string }
+  | { kind: "index"; name: string; present: boolean };
+
+export function parseSelfApplyStmt(sql: string): SchemaCheck | null {
+  // translateSql first: the adapter maps camelCase names through
+  // column-rename-map.json (distributedAt -> distributed_at) before Postgres
+  // sees them, so the catalog must be asked about the same names.
+  const s = translateSql(sql).replace(/\s+/g, " ").trim();
+  let m = /^ALTER TABLE (\w+) ADD COLUMN IF NOT EXISTS (\w+)/i.exec(s);
+  if (m) return { kind: "column", table: m[1], column: m[2] };
+  m = /^ALTER TABLE (\w+) ALTER COLUMN (\w+) TYPE (\w+)(?: USING [\w:.]+)?$/i.exec(s);
+  if (m) return { kind: "column", table: m[1], column: m[2], type: m[3] };
+  m = /^CREATE TABLE IF NOT EXISTS (\w+)/i.exec(s);
+  if (m) return { kind: "table", table: m[1] };
+  m = /^CREATE (?:UNIQUE )?INDEX IF NOT EXISTS (\w+)/i.exec(s);
+  if (m) return { kind: "index", name: m[1], present: true };
+  m = /^DROP INDEX IF EXISTS (\w+)$/i.exec(s);
+  if (m) return { kind: "index", name: m[1], present: false };
+  return null;
+}
+
+type Probe = {
+  prepare(sql: string): {
+    bind?(...args: unknown[]): {
+      all?(): Promise<{ results?: Record<string, unknown>[] }>;
+    };
+  };
+};
+
+/** True only when EVERY statement is understood and already satisfied. */
+export async function selfApplyAlreadyDone(
+  db: unknown,
+  stmts: string[],
+): Promise<boolean> {
+  const checks = stmts.map(parseSelfApplyStmt);
+  if (checks.length === 0 || checks.some((c) => c === null)) return false;
+  const tables = new Set<string>();
+  const indexes = new Set<string>();
+  for (const c of checks as SchemaCheck[]) {
+    if (c.kind === "index") indexes.add(c.name.toLowerCase());
+    else tables.add(c.table.toLowerCase());
+  }
+  // A plain read may be answered from Hyperdrive's cache (BUG-CLASSES C29).
+  // Safe here: these statements only ever ADD, so a stale answer can only say
+  // "missing", and that just runs the DDL as before.
+  const query = async (sql: string, binds: string[]) => {
+    const stmt = (db as Probe).prepare(sql).bind?.(...binds);
+    if (!stmt || typeof stmt.all !== "function") throw new Error("probe needs bind().all()");
+    return (await stmt.all()).results ?? [];
+  };
+  try {
+    const cols = new Map<string, string>();
+    if (tables.size > 0) {
+      const t = [...tables];
+      const rows = await query(
+        `SELECT table_name, column_name, data_type
+           FROM information_schema.columns
+          WHERE table_schema = 'public'
+            AND table_name IN (${t.map(() => "?").join(",")})`,
+        t,
+      );
+      for (const r of rows) {
+        const table = String(r.tableName ?? r.table_name ?? "").toLowerCase();
+        const col = String(r.columnName ?? r.column_name ?? "").toLowerCase();
+        cols.set(`${table}.${col}`, String(r.dataType ?? r.data_type ?? "").toLowerCase());
+      }
+    }
+    const idx = new Set<string>();
+    if (indexes.size > 0) {
+      const i = [...indexes];
+      const rows = await query(
+        `SELECT indexname FROM pg_indexes
+          WHERE schemaname = 'public' AND indexname IN (${i.map(() => "?").join(",")})`,
+        i,
+      );
+      for (const r of rows) idx.add(String(r.indexname ?? r.indexName ?? "").toLowerCase());
+    }
+    return (checks as SchemaCheck[]).every((c) => {
+      if (c.kind === "index") return idx.has(c.name.toLowerCase()) === c.present;
+      if (c.kind === "table") {
+        const prefix = `${c.table.toLowerCase()}.`;
+        return [...cols.keys()].some((k) => k.startsWith(prefix));
+      }
+      const type = cols.get(`${c.table.toLowerCase()}.${c.column.toLowerCase()}`);
+      if (type === undefined) return false;
+      return c.type === undefined || type === c.type.toLowerCase();
+    });
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Run one module's self-applied DDL.
  *
@@ -85,6 +197,7 @@ export async function runSelfApply(
   label: string,
   stmts: string[],
 ): Promise<void> {
+  if (await selfApplyAlreadyDone(db, stmts)) return;
   const failures: { sql: string; msg: string }[] = [];
   for (const sql of stmts) {
     try {
