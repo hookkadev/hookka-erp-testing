@@ -158,6 +158,10 @@ type HistoryData = {
     // period, in minutes. 0 when the worker has no approved extra-time claims.
     addProdMinutes?: number;
     efficiencyPct: number;
+    // Efficiency % = effProductionMinutes ÷ prodDeptMinutes (hours logged in
+    // production departments). Optional: an older cached response lacks them.
+    prodDeptMinutes?: number;
+    effProductionMinutes?: number;
   };
 };
 // ---------- helpers ----------
@@ -1293,22 +1297,25 @@ export default function WorkerHomePage() {
       {/* KPI row */}
       {hist && (
         <div className="grid grid-cols-3 gap-2">
-          <Kpi
-            label={t("home.workingHours")}
-            value={mins2hrs(hist.totals.workedMinutes)}
-          />
+          {/* Production Time (hours logged in production departments) and
+              Production Hours (credited job-card minutes) are the two halves
+              of Efficiency %: middle ÷ left = right. */}
           <Kpi
             label={t("home.productionTime")}
-            value={mins2hrs(hist.totals.productionMinutes)}
+            value={mins2hrs(hist.totals.prodDeptMinutes ?? 0)}
+          />
+          <Kpi
+            label={t("home.productionHours")}
+            value={mins2hrs(hist.totals.effProductionMinutes ?? 0)}
           />
           <Kpi
             label={t("home.efficiencyPct")}
             // Under 30 logged minutes the ratio is meaningless noise (a 1-min
             // test punch against real production minutes printed 16000%) —
             // show a dash until there's a real base.
-            value={hist.totals.workedMinutes < 30 ? "—" : `${hist.totals.efficiencyPct}%`}
+            value={(hist.totals.prodDeptMinutes ?? 0) < 30 ? "—" : `${hist.totals.efficiencyPct}%`}
             tone={
-              hist.totals.workedMinutes < 30
+              (hist.totals.prodDeptMinutes ?? 0) < 30
                 ? "warn"
                 : hist.totals.efficiencyPct >= 80
                   ? "good"

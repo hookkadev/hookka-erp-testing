@@ -1543,7 +1543,8 @@ app.get("/history", async (c) => {
       ] as const,
       orgId: DEFAULT_ORG_ID,
       // v2: daily[] rows carry deptHours (DEV-31) — older snapshots lack it.
-      cacheKey: `v2:${workerId}:${fromStr}:${toStr}`,
+      // v3: totals carry prodDeptMinutes + effProductionMinutes.
+      cacheKey: `v3:${workerId}:${fromStr}:${toStr}`,
     },
     async (db) => {
 
@@ -2011,6 +2012,11 @@ app.get("/history", async (c) => {
     // Extra production time credited to the numerator this period (display).
     addProdMinutes: addProdTotalMin,
     efficiencyPct,
+    // The two halves of efficiencyPct itself, so the phone can show
+    // Production Time (prod-dept hours) and Production Hours (credited minutes)
+    // that divide to exactly the Efficiency % beside them.
+    prodDeptMinutes: Math.round((myEff?.prodHours ?? 0) * 60),
+    effProductionMinutes: myEff?.prodMinutes ?? 0,
   };
 
       return {
