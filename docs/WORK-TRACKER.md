@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-07**: branch `perf/production-dept-tab-cache-main` (#734 to `main`, BUG-2026-10-07-265) added below (its entry is the newest).
 > **Last verified: 2026-10-07**: branch `feat/dev39-kpi-view-calculation-to-main` (DEV-39 staging to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-07**: branch `feat/dev36-kpi-department-to-main` (DEV-36 staging to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-07**: branch `feat/dev37-kpi-self-view-to-main` (DEV-37 staging to `main`) added below (its entry is the newest).
@@ -100,6 +101,14 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-07 — 🔵 Production dept pages (Fab Cut to Packing): tab switches use the saved copy (branch `perf/production-dept-tab-cache-main` → `main`, BUG-2026-10-07-265)
+
+Same change as #734 (to `staging`), brought to `main`. Owner: improve the load time from Fab Cut to Packing; "why when I swap between tabs it needs to keep loading over and over again, I should just cache it".
+
+1. ✅ Measured on staging: each dept page loads every open order, ~1,200-1,300 orders, 6-7 MB decoded, 0.4-2.6 s per load. The "today" date seed never reached the URL (a no-op since 2026-05-12); owner chose to keep loading everything, so the dead seed and its wasted first request are removed.
+2. ✅ The 8 s poll's `fetchOrders` wiped every dept's saved copy, so every tab switch downloaded again. `fetchOrders` no longer invalidates (the stock-PO create path invalidates first), and `cached-fetch.ts` keeps bodies too big for localStorage in memory. The staging-only sequence-unlock dialog is not on `main`, so its caller is not part of this branch.
+3. 🔵 Check on prod after deploy: Fab Cut → Fab Sew → Fab Cut shows rows at once with no "(loading…)". Prod: UNMEASURED.
 
 ## 2026-10-07 — ⬜ DEV-39: View calculation on each KPI in My KPI (branch `feat/dev39-kpi-view-calculation-to-main` → `main`)
 

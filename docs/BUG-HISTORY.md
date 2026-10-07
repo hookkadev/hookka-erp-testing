@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-07**: newest entry BUG-2026-10-07-265 (branch `perf/production-dept-tab-cache-main`, to main; 263 and 264 are staging's).
 > **Last verified: 2026-10-07**: newest entry BUG-2026-10-07-262 (branch `fix/rm-uom-bottle-main`, to main).
 > **Last verified: 2026-10-06**: newest entry BUG-2026-10-06-261 (branch `fix/bom-wip-delete-move`, to main); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-06**: newest entry BUG-2026-10-06-260 (branch `fix/production-overview-scrollbar`, to main; no open PR holds 260); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
@@ -75,6 +76,20 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-10-07-265 — Production dept pages downloaded the whole sheet again on every tab switch `production-orders` `ui-frontend` 🟡
+
+🟡 Fix on `perf/production-dept-tab-cache-main` (to `main`; the same change is #734 on `staging`). Reported by the owner, 2026-10-07.
+
+**Measured on staging.** Each dept sheet (`/api/production-orders?fields=minimal&dept=X&excludeCompleted=true`) is 1,168-1,333 orders, 5.7-7.0 MB decoded, 0.4-2.6 s. With the page visible, 10 s on Fab Sew, then back to Fab Cut with replies delayed 5 s: Fab Cut's saved copy was gone and the page showed "(loading…)" for 5.4 s. A cold dept page also sent a today-dated request that was aborted ~30 ms later.
+
+**Cause.** (1) The 8 s poll and the come-back-to-the-window refresh call `fetchOrders`, which called `invalidateCachePrefix("/api/production-orders")`: every dept's saved copy (and other browser tabs', via the broadcast) was wiped every 8 s. (2) A 6-7 MB body can be over the localStorage quota, so `writeCache` could fail silently. (3) The F1.1 "today" seed called `setUrlBatch` from a `useLayoutEffect` declared before `useUrlBatch()`; react-router's `navigate()` ignores calls until its own layout effect has run, so the seed was a silent no-op and only cost the extra request.
+
+**Fix.** `fetchOrders` refetches the sheet and the overdue chips without invalidating; the stock-PO create path invalidates first. `cached-fetch.ts` keeps a body that localStorage refuses in memory (up to 9 entries, ~6 MB heap each, measured), cleared by every invalidation path. The dead seed is removed; dept pages keep loading every open order (owner's choice). Same test, new code: 0.55 s, no "(loading…)".
+
+**Guard.** `tests/production-dept-tab-cache.test.mjs`.
 
 ---
 

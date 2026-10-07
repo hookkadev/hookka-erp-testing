@@ -1,5 +1,7 @@
 # Performance & Correctness Backlog
 
+> **Last verified: 2026-10-07** (branch `perf/production-dept-tab-cache`) — only the `/production` row of the client-search table: dept sheets measured on staging, tab switch now served from the saved copy.
+
 > **Last verified: 2026-09-23** (branch `fix/production-auto-load`) — only the `/production` row of the
 > client-search table: the page no longer starts empty; it fetches on mount (payload measured on prod).
 
@@ -208,7 +210,7 @@ match), but the cost scales with the table:
 | `/sales` | **2,215 KB decoded**, 4,480 ms on the first keystroke | **YES** — pg_trgm, `?search=` returns 164 matches in **172 ms** and already includes `total` |
 | `/procurement` | 0.16 MB / 113 ms (only 165 POs) | no |
 | `/procurement/grn` | not measured | no |
-| `/production` | loads every production order on mount since 2026-09-23 (the "Load all" gate was removed). **Measured on prod 2026-09-23:** 1,426 orders, 584 KB on the wire / 11.8 MB decoded, ~0.26 s. Its 8 s poll now reuses an unchanged body (was ~350 ms of main-thread blocking per poll); Overview scroll no longer re-renders the page | no |
+| `/production` | loads every production order on mount since 2026-09-23 (the "Load all" gate was removed). **Measured on prod 2026-09-23:** 1,426 orders, 584 KB on the wire / 11.8 MB decoded, ~0.26 s. Its 8 s poll now reuses an unchanged body (was ~350 ms of main-thread blocking per poll); Overview scroll no longer re-renders the page. **Dept pages, staging 2026-10-07:** 1,168-1,333 orders, 5.7-7.0 MB decoded, 0.4-2.6 s each; a tab switch used to re-download (the poll wiped the saved copies and the body is over the localStorage quota), now it paints from `cached-fetch.ts` `memCache` | no |
 
 `/sales` is the only one that currently hurts. **The trap before swapping in the
 server search:** the client matches **17 visible columns**, the server matches 5 —
