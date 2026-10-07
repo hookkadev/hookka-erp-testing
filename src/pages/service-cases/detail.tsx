@@ -85,9 +85,9 @@ const PRODUCTION_DEPTS = [
   { code: "WOOD_CUT", name: "Wood Cutting" },
   { code: "FOAM_CUTTING", name: "Foam Cutting" },
   { code: "FOAM", name: "Foam Bonding" },
+  { code: "FIBRE", name: "Fibre" },
   { code: "FRAMING", name: "Framing" },
   { code: "WEBBING", name: "Webbing" },
-  { code: "FIBRE", name: "Fibre" },
   { code: "UPHOLSTERY", name: "Upholstery" },
   { code: "PACKING", name: "Packing" },
 ];
