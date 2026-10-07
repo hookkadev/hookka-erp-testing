@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-07**: branch `feat/dev37-kpi-self-view-to-main` (DEV-37 staging to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-07**: branch `fix/rm-uom-bottle-main` (DEV-20 follow-up to `main`, BUG-2026-10-07-262) added below (its entry is the newest).
 > **Last verified: 2026-10-06**: branch `feat/pay-card-main` (to `main`, BUG-2026-10-06-259) added below (its entry is the newest).
 > **Last verified: 2026-10-05**: fill job cards stuck at 0 minutes (#696, BUG-2026-10-05-256) closed ✅ with its prod run.
@@ -97,6 +98,16 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-07 — ⬜ DEV-37: every staff login sees their own KPI card, view only (branch `feat/dev37-kpi-self-view-to-main` → `main`)
+
+Reporter ask (Violet, DEV-37, confirmed on WhatsApp 2026-10-06): office staff log in to the ERP and see their own assigned KPIs, never anyone else's; only Super Admin assigns; "super admin only can tick. staff can view only". Same two changes as #719 and #721 on `staging`, cherry-picked onto `main` (DEV-36's department scope stays on staging).
+
+1. 🔵 `/kpi` has no `kpi:read` gate on the route or the menu; every ERP login opens their own card. `kpi` leaves `ALL_RESOURCES`, Office's exclusion and `NAV_RESOURCE`.
+2. 🔵 `PUT /api/kpi/checklist/:kpiKey` is Super Admin only; staff see the boxes read-only. No KPI in the catalogue is a checklist today, so nobody's card changes from this half.
+3. 🔵 Guard `tests/kpi-self-service.test.mjs`. Its `/api/departments` check is conditional: the Library's department picker is staging-only until DEV-36 reaches main.
+4. 🔵 Staging: deployed 2026-10-06, Super Admin side checked (KPI menu and three tabs, `kpi` gone from the permission catalogue, new checklist text in the KPI bundle). Non-admin side not checked there.
+5. ⬜ After deploy: Super Admin check on prod, then Violet checks with a staff login (KPI in the menu, only her own card, no Library / People).
 
 ## 2026-10-07 — 🔵 DEV-20 follow-up: one unit list for raw materials (branch `fix/rm-uom-bottle-main` → `main`, BUG-2026-10-07-262)
 

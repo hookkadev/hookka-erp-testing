@@ -76,10 +76,15 @@ test("the own-card routes take the user from the session, not the request", () =
 test("a non-admin page asks only for its own card", () => {
   const page = read("src/pages/kpi/index.tsx");
   // Everything that lists other people is fetched only for a Super Admin.
-  for (const url of ['"/api/users"', "`/api/kpi/library", "`/api/kpi/people", '"/api/departments"']) {
+  for (const url of ['"/api/users"', "`/api/kpi/library", "`/api/kpi/people"]) {
     const at = page.indexOf(url);
     assert.ok(at > 0, `${url} not found`);
     assert.match(page.slice(at - 60, at), /isSuperAdmin/, `${url} must only load for a Super Admin`);
+  }
+  // The Library's department picker (DEV-36) is on staging before main.
+  const dept = page.indexOf('"/api/departments"');
+  if (dept > 0) {
+    assert.match(page.slice(dept - 60, dept), /isSuperAdmin/, "/api/departments must only load for a Super Admin");
   }
   assert.match(page, /`\/api\/kpi\/me\?period=\$\{period\}`/);
 });
