@@ -1717,6 +1717,46 @@ export async function buildDoDeliveredSoAndInvoice(
       soIds,
     );
 
+    // BUG-2026-10-07-266 — the same "nothing to invoice" refusal the manual
+    // POST /api/invoices has always made (invoices.ts). Without it, two
+    // DELIVERED requests 0.6 s apart (a double click, DO-2610-013) both passed
+    // the billing gate above before either committed; the second then read the
+    // lines the first had just drawn down and posted INV-2610-021 at RM 0 with
+    // no lines — and the delivered email attaches the NEWEST live invoice, so
+    // the customer got the empty one. The losing request still has to leave the
+    // SOs and the DO at INVOICED: its own batch carries SO→DELIVERED and the
+    // DO's DELIVERED update from the stale read, which would otherwise undo the
+    // winner's status bumps.
+    if (invItems.length === 0 && computedTotal === 0) {
+      const after = await loadDoBillingState(db, doRow.id);
+      if (after.fullyInvoiced) {
+        for (const sid of soBillable) {
+          statements.push(
+            db
+              .prepare(
+                "UPDATE sales_orders SET status = 'INVOICED', updated_at = ? WHERE id = ? AND status = 'DELIVERED'",
+              )
+              .bind(now, sid),
+          );
+        }
+        statements.push(
+          db
+            .prepare(
+              "UPDATE delivery_orders SET status = 'INVOICED', overdue = 'INVOICED', updated_at = ? WHERE id = ?",
+            )
+            .bind(now, doRow.id),
+        );
+      }
+      return {
+        statements,
+        rebuildInvoiceInsert: null,
+        invoiceStmtIdx: -1,
+        createdInvoice: false,
+        invoiceTotalSen: 0,
+        soAdvanced,
+      };
+    }
+
     const invId = genInvoiceId();
     const invoiceNo = await nextInvoiceNo(db);
     // Invoice date = the DISPATCH date (when goods physically left), not the

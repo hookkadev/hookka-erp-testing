@@ -1,5 +1,6 @@
 # Production & BOM — Module Guide
 
+> **Last verified: 2026-10-07** (branch `perf/production-dept-tab-cache-main`, to `main`): the `filteredOrders` (:2894) and FG-sticker (:5607 / :5566) anchors, after the dead today seed was removed from `index.tsx`.
 > **Last verified: 2026-10-07** (branch `feat/master-bom-two-pane-main`, to `main`): the `bom.tsx` anchors (`BOMManagementPage` :5957, `EditBOMDialog` :2957, `MasterTemplatesDialog` :3819), read from `src/pages/bom.tsx` after Master BOM Templates moved to the two-pane layout and `SubWIPTree` was deleted. Nothing else re-checked.
 > **Last verified: 2026-10-05** (branch `fix/bom-master-template-accessory`): only the `bom-master-templates.ts` line count, read from the file. Nothing else re-checked.
 >
@@ -65,8 +66,8 @@ Owns the shop floor: a **dept-tabbed WIP board** (one production_order per confi
 | Symbol / section | file:line | Role |
 |---|---|---|
 | `ProductionPage` | `src/pages/production/index.tsx:627` | WIP board; every column/row branches on `activeTab` |
-| `filteredOrders` (memo) | `src/pages/production/index.tsx:2944` | Dept-narrow + overdue-set grid filter |
-| `loadFgStickers` / `packingStickerUrl` | `src/pages/production/index.tsx:5665 / 5624` | FG sticker set (immediate paint → /p/ token upgrade) |
+| `filteredOrders` (memo) | `src/pages/production/index.tsx:2894` | Dept-narrow + overdue-set grid filter |
+| `loadFgStickers` / `packingStickerUrl` | `src/pages/production/index.tsx:5607 / 5566` | FG sticker set (immediate paint → /p/ token upgrade) |
 | `BOMManagementPage` | `src/pages/bom.tsx:5957` | BOM page shell (tabs, list) |
 | `EditBOMDialog` / `MasterTemplatesDialog` | `src/pages/bom.tsx:2957 / 3819` | L1+WIP editor / master variants |
 | `rowToPO` | `production-orders/_helpers.ts:905` | PO row → API shape (dual-keyed reads) |

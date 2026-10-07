@@ -1,5 +1,7 @@
 # Bug History
 
+> **Last verified: 2026-10-07**: newest entry BUG-2026-10-07-266 (branch `fix/empty-auto-invoice-guard`, to main; 263 and 264 are staging's, 265 is main's).
+> **Last verified: 2026-10-07**: newest entry BUG-2026-10-07-265 (branch `perf/production-dept-tab-cache-main`, to main; 263 and 264 are staging's).
 > **Last verified: 2026-10-07**: newest entry BUG-2026-10-07-262 (branch `fix/rm-uom-bottle-main`, to main).
 > **Last verified: 2026-10-06**: newest entry BUG-2026-10-06-261 (branch `fix/bom-wip-delete-move`, to main); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-06**: newest entry BUG-2026-10-06-260 (branch `fix/production-overview-scrollbar`, to main; no open PR holds 260); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
@@ -75,6 +77,36 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-10-07-266 — A double-clicked Delivered posted a second, empty invoice (RM 0, no lines) and the customer was emailed that one `delivery-orders` 🔵
+
+🔵 Fixed on `fix/empty-auto-invoice-guard` (to `main`). Report (Violet, WhatsApp, with the PDF): Houzs Century received INV-2610-021 with no lines and RM 0.00.
+
+**Measured on prod (read-only, 2026-10-07).** DO-2610-013 has two live invoices: INV-2610-020 created 06:53:07.420 UTC with both lines (1013-(Q) RM 305 + 1005(HF)(W)-(Q) RM 610 = RM 915.00), and INV-2610-021 created 06:53:08.121 with zero `invoice_items`, total 0, status SENT. `audit_events` holds two `LOADED -> DELIVERED` updates on the DO from the same user, 06:53:08.559 and 06:53:09.126, both with `before = LOADED`. Both DO lines carry `invoiced_qty = 1`. INV-2610-021 is the only live invoice on prod with no lines, and DO-2610-013 the only DO with more than one live invoice.
+
+**Cause.** No status claim on the DO update, so both requests ran `buildDoDeliveredSoAndInvoice`. The second read `loadDoBillingState` before the first committed (not fully invoiced, so it went on), then `computeDoInvoiceLines` read the DO lines after the commit: every line had nothing left and the SO fallbacks are off for a DO already drawn on, so it returned no lines and RM 0. The auto path inserted the invoice anyway. The manual `POST /api/invoices` has refused exactly this case (`invItems.length === 0 && computedTotal === 0` -> 409) since partial billing landed; the auto path never got the same check. The delivered email attaches the newest live invoice for the DO, so the customer got the empty one and never got INV-2610-020.
+
+**Fix.** `buildDoDeliveredSoAndInvoice` (`src/api/routes/delivery-orders/_helpers.ts`) stops before allocating an invoice number when there is nothing to bill: no header, lines, A/R bump, ledger legs or draw-down. If the DO is fully billed by then (the race), it still pushes the SO -> INVOICED bumps (guarded on `status = 'DELIVERED'`) and DO -> INVOICED, because the same batch carries the stale SO -> DELIVERED and DO DELIVERED updates that would otherwise undo the winner's status. The double click itself is not blocked; it is now harmless.
+
+**Data.** The only invoice email for DO-2610-013 in `outbox_emails` is INV-2610-021 (06:53:17 UTC, operation@houzscentury.com); INV-2610-020 was never sent. INV-2610-021 voided on prod 2026-10-07 via `PUT /api/invoices/inv-4cb42a2b {status: CANCELLED}` (Super Admin). Measured after: 021 CANCELLED, 020 SENT RM 915.00, DO-2610-013 INVOICED, SO-2609-355 and SO-2609-387 INVOICED. Resend of the DO's invoice email (so 020 goes out) left to Violet.
+
+**Guard.** `tests/do-auto-invoice-empty-guard.test.mjs` replays the losing request against a book whose reads change underneath it (first billing read pre-commit, later reads see INV-2610-020): no invoice statements, and SOs and DO finish INVOICED. Fails on the old code (it goes on to `nextInvoiceNo`). `npm test` 5264 pass / 0 fail, strict typecheck clean.
+
+---
+
+## BUG-2026-10-07-265 — Production dept pages downloaded the whole sheet again on every tab switch `production-orders` `ui-frontend` 🟡
+
+🟡 Fix on `perf/production-dept-tab-cache-main` (to `main`; the same change is #734 on `staging`). Reported by the owner, 2026-10-07.
+
+**Measured on staging.** Each dept sheet (`/api/production-orders?fields=minimal&dept=X&excludeCompleted=true`) is 1,168-1,333 orders, 5.7-7.0 MB decoded, 0.4-2.6 s. With the page visible, 10 s on Fab Sew, then back to Fab Cut with replies delayed 5 s: Fab Cut's saved copy was gone and the page showed "(loading…)" for 5.4 s. A cold dept page also sent a today-dated request that was aborted ~30 ms later.
+
+**Cause.** (1) The 8 s poll and the come-back-to-the-window refresh call `fetchOrders`, which called `invalidateCachePrefix("/api/production-orders")`: every dept's saved copy (and other browser tabs', via the broadcast) was wiped every 8 s. (2) A 6-7 MB body can be over the localStorage quota, so `writeCache` could fail silently. (3) The F1.1 "today" seed called `setUrlBatch` from a `useLayoutEffect` declared before `useUrlBatch()`; react-router's `navigate()` ignores calls until its own layout effect has run, so the seed was a silent no-op and only cost the extra request.
+
+**Fix.** `fetchOrders` refetches the sheet and the overdue chips without invalidating; the stock-PO create path invalidates first. `cached-fetch.ts` keeps a body that localStorage refuses in memory (up to 9 entries, ~6 MB heap each, measured), cleared by every invalidation path. The dead seed is removed; dept pages keep loading every open order (owner's choice). Same test, new code: 0.55 s, no "(loading…)".
+
+**Guard.** `tests/production-dept-tab-cache.test.mjs`.
 
 ---
 

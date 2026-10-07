@@ -1,6 +1,8 @@
 # Hookka ERP — Work Tracker
 
 > **Last verified: 2026-10-07**: branch `feat/dev08-pillow-follows-sofa-to-main` (DEV-08 staging to `main`) added below (its entry is the newest).
+> **Last verified: 2026-10-07**: branch `fix/empty-auto-invoice-guard` (to `main`, BUG-2026-10-07-266) added below (its entry is the newest).
+> **Last verified: 2026-10-07**: branch `perf/production-dept-tab-cache-main` (#734 to `main`, BUG-2026-10-07-265) added below (its entry is the newest).
 > **Last verified: 2026-10-07**: branch `feat/dev39-kpi-view-calculation-to-main` (DEV-39 staging to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-07**: branch `feat/dev36-kpi-department-to-main` (DEV-36 staging to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-07**: branch `feat/dev37-kpi-self-view-to-main` (DEV-37 staging to `main`) added below (its entry is the newest).
@@ -112,6 +114,20 @@ Violet chose the rules (WhatsApp 2026-10-01): B, a pillow is finished before its
 4. 🔵 `tests/planning-pillow-follows-sofa.test.mjs` (9 cases).
 5. ✅ Verified on staging 2026-10-02 in the browser (read-only): Packing shows SO-2609-021 / -223 pillows under their sofa; Fabric Cutting puts their pillows at Accessory A1-A4 on day 1.
 6. ⬜ Canary on this PR (prod data, view only): the same two pages.
+## 2026-10-07 — 🔵 No empty auto-invoice on a double-clicked Delivered (branch `fix/empty-auto-invoice-guard` → `main`, BUG-2026-10-07-266)
+
+Reporter ask (Violet, WhatsApp): the customer received INV-2610-021 with no details. Cause: Delivered was clicked twice on DO-2610-013; the second request posted a RM 0 invoice with no lines, and the email sent that one.
+1. 🔵 Auto-invoice on Delivered skips when there is nothing left to bill, and keeps the SOs and DO at INVOICED. Regression test added.
+2. 🔵 Prod data: INV-2610-021 voided 2026-10-07 (measured: 021 CANCELLED, 020 SENT, DO and both SOs INVOICED). ⬜ Violet: Resend invoice email on DO-2610-013 so INV-2610-020 goes out.
+3. ⬜ After deploy: mark a test DO Delivered and check one invoice; no prod double-click test.
+
+## 2026-10-07 — 🔵 Production dept pages (Fab Cut to Packing): tab switches use the saved copy (branch `perf/production-dept-tab-cache-main` → `main`, BUG-2026-10-07-265)
+
+Same change as #734 (to `staging`), brought to `main`. Owner: improve the load time from Fab Cut to Packing; "why when I swap between tabs it needs to keep loading over and over again, I should just cache it".
+
+1. ✅ Measured on staging: each dept page loads every open order, ~1,200-1,300 orders, 6-7 MB decoded, 0.4-2.6 s per load. The "today" date seed never reached the URL (a no-op since 2026-05-12); owner chose to keep loading everything, so the dead seed and its wasted first request are removed.
+2. ✅ The 8 s poll's `fetchOrders` wiped every dept's saved copy, so every tab switch downloaded again. `fetchOrders` no longer invalidates (the stock-PO create path invalidates first), and `cached-fetch.ts` keeps bodies too big for localStorage in memory. The staging-only sequence-unlock dialog is not on `main`, so its caller is not part of this branch.
+3. 🔵 Check on prod after deploy: Fab Cut → Fab Sew → Fab Cut shows rows at once with no "(loading…)". Prod: UNMEASURED.
 
 ## 2026-10-07 — ⬜ DEV-39: View calculation on each KPI in My KPI (branch `feat/dev39-kpi-view-calculation-to-main` → `main`)
 
