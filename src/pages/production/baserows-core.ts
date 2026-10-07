@@ -427,7 +427,7 @@ export const buildBaseRows = (
               return `${o.divanHeightInches}" Divan-${o.sizeLabel || o.sizeCode || ""}`;
             }
             // HB-producing depts
-            if (["FAB_CUT", "FAB_SEW", "FOAM_CUTTING", "FOAM", "UPHOLSTERY", "PACKING"].includes(jc.departmentCode) && totalH > 0) {
+            if (["FAB_CUT", "FAB_SEW", "FOAM_CUTTING", "FOAM", "FIBRE", "UPHOLSTERY", "PACKING"].includes(jc.departmentCode) && totalH > 0) {
               return `${o.productCode}-HB${totalH}"`;
             }
           }
@@ -561,6 +561,7 @@ export const buildBaseRows = (
               sched_WOOD_CUT:   buildSchedAgg(o.jobCards.filter((j) => j.departmentCode === "WOOD_CUT"),   today, o.id),
               sched_FRAMING:    buildSchedAgg(o.jobCards.filter((j) => j.departmentCode === "FRAMING"),    today, o.id),
               sched_WEBBING:    buildSchedAgg(o.jobCards.filter((j) => j.departmentCode === "WEBBING"),    today, o.id),
+              sched_FIBRE: buildSchedAgg(o.jobCards.filter((j) => j.departmentCode === "FIBRE"), today, o.id),
               sched_UPHOLSTERY: buildSchedAgg(o.jobCards.filter((j) => j.departmentCode === "UPHOLSTERY"), today, o.id),
               sched_PACKING:    buildSchedAgg(o.jobCards.filter((j) => j.departmentCode === "PACKING"),    today, o.id),
             }
@@ -572,6 +573,7 @@ export const buildBaseRows = (
               sched_WOOD_CUT:   buildSched(picker("WOOD_CUT"),   today, o.id, poJobCards),
               sched_FRAMING:    buildSched(picker("FRAMING"),    today, o.id, poJobCards),
               sched_WEBBING:    buildSched(picker("WEBBING"),    today, o.id, poJobCards),
+              sched_FIBRE: buildSched(picker("FIBRE"), today, o.id, poJobCards),
               sched_UPHOLSTERY: buildSched(picker("UPHOLSTERY"), today, o.id, poJobCards),
               sched_PACKING:    buildSched(picker("PACKING"),    today, o.id, poJobCards),
             }),

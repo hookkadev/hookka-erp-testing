@@ -124,6 +124,7 @@ const PlanningWoodCutting = lazy(() => import('./pages/planning/dept/wood-cuttin
 const PlanningFraming = lazy(() => import('./pages/planning/dept/framing'))
 const PlanningFoamCutting = lazy(() => import('./pages/planning/dept/foam-cutting'))
 const PlanningFoamBonding = lazy(() => import('./pages/planning/dept/foam-bonding'))
+const PlanningFibre = lazy(() => import('./pages/planning/dept/fibre'))
 const PlanningUpholstery = lazy(() => import('./pages/planning/dept/upholstery'))
 const PlanningPacking = lazy(() => import('./pages/planning/dept/packing'))
 const PlanningWebbing = lazy(() => import('./pages/planning/dept/webbing'))
@@ -298,6 +299,7 @@ export const DASHBOARD_ROUTES: RouteObject[] = [
   { path: '/production/wood-cut', element: <S><ProductionDeptPage /></S> },
   { path: '/production/framing', element: <S><ProductionDeptPage /></S> },
   { path: '/production/webbing', element: <S><ProductionDeptPage /></S> },
+  { path: '/production/fibre', element: <S><ProductionDeptPage /></S> },
   { path: '/production/upholstery', element: <S><ProductionDeptPage /></S> },
   { path: '/production/packing', element: <S><ProductionDeptPage /></S> },
   // /production/:id PO-detail route deleted (2026-04-26, user request).
@@ -463,6 +465,7 @@ export const DASHBOARD_ROUTES: RouteObject[] = [
   { path: '/planning/dept/framing', element: <S><PlanningFraming /></S> },
   { path: '/planning/dept/foam-cutting', element: <S><PlanningFoamCutting /></S> },
   { path: '/planning/dept/foam-bonding', element: <S><PlanningFoamBonding /></S> },
+  { path: '/planning/dept/fibre', element: <S><PlanningFibre /></S> },
   { path: '/planning/dept/upholstery', element: <S><PlanningUpholstery /></S> },
   { path: '/planning/dept/packing', element: <S><PlanningPacking /></S> },
   { path: '/planning/dept/webbing', element: <S><PlanningWebbing /></S> },
@@ -641,6 +644,7 @@ const ROUTE_CHUNK_LOADERS: Record<string, () => Promise<unknown>> = {
   '/production/wood-cut': () => import('./pages/production/dept'),
   '/production/framing': () => import('./pages/production/dept'),
   '/production/webbing': () => import('./pages/production/dept'),
+  '/production/fibre': () => import('./pages/production/dept'),
   '/production/upholstery': () => import('./pages/production/dept'),
   '/production/packing': () => import('./pages/production/dept'),
   '/production/scan': () => import('./pages/production/scan'),
@@ -653,6 +657,7 @@ const ROUTE_CHUNK_LOADERS: Record<string, () => Promise<unknown>> = {
   '/planning/dept/framing': () => import('./pages/planning/dept/framing'),
   '/planning/dept/foam-cutting': () => import('./pages/planning/dept/foam-cutting'),
   '/planning/dept/foam-bonding': () => import('./pages/planning/dept/foam-bonding'),
+  '/planning/dept/fibre': () => import('./pages/planning/dept/fibre'),
   '/planning/dept/upholstery': () => import('./pages/planning/dept/upholstery'),
   '/planning/dept/packing': () => import('./pages/planning/dept/packing'),
   '/planning/dept/webbing': () => import('./pages/planning/dept/webbing'),

@@ -115,11 +115,12 @@ const DEPT_COLORS: Record<string, string> = {
   FOAM: "#8B5CF6",
   FRAMING: "#F97316",
   WEBBING: "#10B981",
+  FIBRE: "#84CC16",
   UPHOLSTERY: "#F43F5E",
   PACKING: "#06B6D4",
 };
 
-const DEPT_ORDER = ["FAB_CUT", "FAB_SEW", "WOOD_CUT", "FOAM_CUTTING", "FOAM", "FRAMING", "WEBBING", "UPHOLSTERY", "PACKING"];
+const DEPT_ORDER = ["FAB_CUT", "FAB_SEW", "WOOD_CUT", "FOAM_CUTTING", "FOAM", "FIBRE", "FRAMING", "WEBBING", "UPHOLSTERY", "PACKING"];
 
 // Labels MUST cover every code in DEPT_ORDER — the process-dept <select> renders
 // DEPT_ORDER and looks each code up here, so a missing entry shipped a BLANK
@@ -134,6 +135,7 @@ const DEPT_LABELS: Record<string, string> = {
   FOAM: "Foam Bonding",
   FRAMING: "Framing",
   WEBBING: "Webbing",
+  FIBRE: "Fibre",
   UPHOLSTERY: "Upholstery",
   PACKING: "Packing",
 };

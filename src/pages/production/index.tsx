@@ -154,7 +154,7 @@ function jobCardBarcodeDataUrl(token: string): string {
 const OVERVIEW_FIXED_COLS = ["soId", "product", "customer", "customerPO", "specialOrder", "qty", "customerDD", "ourExpectedDD"] as const;
 const OVERVIEW_DEFAULT_WIDTHS: Record<string, number> = {
   soId: 120, product: 220, customer: 110, customerPO: 120, specialOrder: 130, qty: 50, customerDD: 104, ourExpectedDD: 118,
-  FAB_CUT: 108, FAB_SEW: 108, FOAM_CUTTING: 108, FOAM: 108, WOOD_CUT: 108, FRAMING: 108, WEBBING: 108, UPHOLSTERY: 108, PACKING: 108,
+  FAB_CUT: 108, FAB_SEW: 108, FOAM_CUTTING: 108, FOAM: 108, FIBRE: 108, WOOD_CUT: 108, FRAMING: 108, WEBBING: 108, UPHOLSTERY: 108, PACKING: 108,
 };
 const OVERVIEW_COLW_STORAGE = "prod-overview-colwidths-v1";
 // Width (px) of the leading multi-select checkbox gutter prepended to the

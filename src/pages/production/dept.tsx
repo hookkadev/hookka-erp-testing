@@ -3,7 +3,7 @@
 //
 // Thin wrapper around the shared ProductionPage component with mode="dept".
 // The URL segment is the dept code in kebab-case (fab-cut, fab-sew, foam,
-// wood-cut, framing, webbing, upholstery, packing). We map it back to the
+// wood-cut, framing, webbing, fibre, upholstery, packing). We map it back to the
 // UPPER_SNAKE_CASE code the backend + sheet logic expect.
 //
 // Benefits over the old all-tabs-in-one page:
@@ -30,6 +30,7 @@ const VALID_DEPTS = new Set([
   "WOOD_CUT",
   "FRAMING",
   "WEBBING",
+  "FIBRE",
   "UPHOLSTERY",
   "PACKING",
 ]);

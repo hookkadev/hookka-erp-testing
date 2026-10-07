@@ -45,6 +45,9 @@ export const DEPT_CODE2: Record<string, string> = {
   FOAM: "04",
   FRAMING: "05",
   WEBBING: "06",
+  // FIBRE (owner 2026-10-07) sits just after FOAM; free code "15",
+  // same identity-not-sequence rule as FOAM_CUTTING.
+  FIBRE: "15",
   UPHOLSTERY: "07",
   PACKING: "08",
 };
@@ -55,7 +58,7 @@ export function deptCode2(deptCode: string): string {
   return DEPT_CODE2[deptCode] ?? deptCode;
 }
 // Reverse of deptCode2 for the 2-digit production codes ("07" → "UPHOLSTERY").
-// Returns null for anything that isn't one of the 8 mapped codes, so the scanner
+// Returns null for anything that isn't one of the mapped codes, so the scanner
 // can tell a real token's dept segment from noise.
 export function deptFromCode2(code2: string): string | null {
   return CODE2_DEPT[code2] ?? null;

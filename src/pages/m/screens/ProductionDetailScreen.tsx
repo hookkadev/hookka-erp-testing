@@ -29,6 +29,7 @@ const DEPTS: { code: string; label: string }[] = [
   { code: "FAB_SEW", label: "Fab Sew" },
   { code: "FOAM_CUTTING", label: "Foam Cutting" },
   { code: "FOAM", label: "Foam Bonding" },
+  { code: "FIBRE", label: "Fibre" },
   { code: "WOOD_CUT", label: "Wood Cut" },
   { code: "FRAMING", label: "Framing" },
   { code: "WEBBING", label: "Webbing" },
