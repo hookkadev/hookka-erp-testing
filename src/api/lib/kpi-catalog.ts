@@ -421,6 +421,40 @@ export const KPI_CATALOG: KpiDef[] = [
     roles: ["PRODUCTION", "QA"],
   },
   {
+    // DEV-36, owner 2026-10-06: an office lead (R&D, Upholstery …) is scored
+    // on their own department's efficiency as Dashboard Experimental shows it.
+    // Kept apart from production_efficiency, which stays the payslip figure.
+    key: "department_efficiency",
+    label: "Department efficiency",
+    detail: "The Dashboard Experimental efficiency for the departments you are assigned. 100% is the norm",
+    shape: "RATIO",
+    direction: "HIGHER_IS_BETTER",
+    unit: "%",
+    scoring: "AUTO",
+    curve: "EFFICIENCY_BANDS",
+    efficiencyFloorPct: 80,
+    efficiencyFloorScore: 60,
+    efficiencyZeroPct: 75,
+    purpose:
+      "A department lead answers for how well their people's paid hours turn into finished work. This is the number they already watch on Dashboard Experimental, so the score never comes as a surprise.",
+    definition:
+      "For the workers whose home department is one of the assigned departments: the production time their completed job cards earned, divided by the hours they clocked in production departments, as a percentage. It is the same figure Dashboard Experimental > People > Efficiency shows for those departments and month.",
+    measurement: [
+      "Workers: everyone whose home department (on their worker record) is one of the assigned departments. With no department assigned, the whole floor.",
+      "Production time: each completed or transferred job card in the month, valued at its standard time and shared between the people on it.",
+      "Clocked time: hours those workers logged against production departments that day. Days with no clocked hours are left out.",
+      "Efficiency % = production time ÷ clocked time × 100, over the whole month.",
+      "Scored like Production time efficiency: 100% or better scores the full 100, 80% is the floor and scores 60, and 75% or under scores 0.",
+    ],
+    formula:
+      "100% → 100 pts · 90% → 80 · 80% → 60 (the floor) · 78% → 36 · 75% or below → 0",
+    defaultTarget: 100,
+    defaultWeight: 30,
+    available: true,
+    drillPath: "/dashboard-experimental?tab=people&sub=efficiency&month={period}",
+    roles: ["OFFICE", "PRODUCTION", "QA"],
+  },
+  {
     key: "service_case_resolution",
     label: "Service cases closed inside 7 days",
     detail: "Average days from a case being raised to it being closed",
