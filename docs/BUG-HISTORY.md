@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-07**: newest entry BUG-2026-10-07-263 (branch `fix/sales-transfer-credit-block`, to staging; 260 to 262 are taken on `main`).
 > **Last verified: 2026-10-06** (branch `chore/sync-staging-from-main-1006`, staging<-main merge): both logs merged, one copy of each entry. No id collisions: 253, 257, 258 and 259 are the same bugs on both sides (257 and 259 take main's copy, which adds its main PR note). Main's 251, 254, 255 and 256 are added.
 > **Last verified: 2026-10-06**: newest entry BUG-2026-10-06-259 (branch `feat/pay-card-main`, to main; the same fix reached staging through #707 to #710); a log, so "verified" means the entry matches the code on its branch.
 > **Last verified: 2026-10-05**: BUG-2026-10-05-256 flipped to 🟢 with its measured prod run (#696).
@@ -109,6 +110,20 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-10-07-263 — Sales "Transfer to Delivery Order" box: credit block shown as "Failed to create Delivery Order", and "Nothing ready" for a finished order `sales` `delivery-orders` 🟡
+
+🟡 Fix on `fix/sales-transfer-credit-block` (to `staging`). Found by the credit control test run on staging (case CC-31), 2026-10-07.
+
+**Measured on staging.** Sales Orders › right-click SO-2610-007 (SL HOME DESIGN, 2 overdue invoices) › Transfer to Delivery Order, as Super Admin. (1) The box said "Ready to deliver 0 item(s)" although all 3 production orders were COMPLETED; a console GET of `/api/delivery-orders/ready-planning` at the same time listed them, and the box listed them after a reload. (2) Create DO: `POST /api/delivery-orders` returned 409 `PAYMENT_OVERDUE` with the invoice list and `overrideAllowed: true`; the page showed only "Failed to create Delivery Order. Please try again."
+
+**Cause.** (2) `fetchJson` throws `FetchJsonError` on every non-2xx, and the button's bare `catch {}` in `src/pages/sales/index.tsx` showed a fixed line, dropping the reason, the invoice list and the override. Only the Delivery page was wired to `askCreditOverride` in BUG-34. (1) `GET /ready-planning` uses `withSnapshot(..., { staleWhileRevalidate: true })`: the first read after a change gets the old snapshot while the rebuild runs in the background, and the freshness probe can also be answered from Hyperdrive's query cache (BUG-CLASSES C29). The box was the first reader after the orders were finished.
+
+**Fix.** The Create DO button uses the Delivery page's dialog: on a credit block it calls `askCreditOverride` and re-sends with `creditOverride: { reason }`; any other server error shows the server's message. `GET /ready-planning?fresh=1` skips serve-stale and reads through `freshReads`, so a stale snapshot is rebuilt before the answer; the Sales box asks with `fresh=1`. The Delivery page keeps serve-stale (its speed), so its own short lag is unchanged. Not changed: the phone New Delivery Order form and the DO detail "Load & Generate DO" show the reason but still have no override (owner to decide).
+
+**Guard.** `tests/customer-credit-gate.test.mjs` "Sales transfer box shows the credit dialog and reads a fresh ready list".
 
 ---
 

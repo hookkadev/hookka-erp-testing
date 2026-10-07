@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-07**: branch `fix/sales-transfer-credit-block` (to `staging`, BUG-2026-10-07-263) added below (its entry is the newest).
 > **Last verified: 2026-10-06**: branch `feat/dev37-kpi-checklist-admin-only` (DEV-37 to `staging`) added item 6 of the DEV-37 entry below.
 > **Last verified: 2026-10-06**: branch `feat/dev37-kpi-office-self-view` (DEV-37 to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-06**: branch `chore/sync-staging-from-main-1006` (staging<-main merge): both trackers merged, main-only entries added, entries on both sides kept once in staging's wording. Sync entry added below.
@@ -164,6 +165,12 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-07 — 🔵 Customer credit control (BUG-34): staging test run + Sales transfer box fix (branch `fix/sales-transfer-credit-block` → `staging`, BUG-2026-10-07-263)
+
+1. ✅ Ran the 36 credit control test cases on the staging site (TEST COMPANY plus test orders for SL HOME DESIGN, RX HOMICE, SOON, The Conts; all test DOs, invoices, SOs, packing list and consignment notes cancelled or returned afterwards, customer terms and limits restored). 33 pass, 1 fail (CC-31), 2 skipped (CC-10 cannot occur: every payment path sets PAID at full payment; CC-36 needs prod).
+2. 🔵 CC-31 fix: the Sales "Transfer to Delivery Order" box now shows the credit dialog with the override, and asks `ready-planning?fresh=1` so a just-finished order is not shown as "Nothing ready". Staging check after deploy pending.
+3. 🟡 Owner decisions found by the run: OFFICE and SALES roles can override today (`delivery-orders:*` includes `credit-override`), not only admins; term "CASH" counts as one month, not COD; the phone New DO form and the DO detail "Load & Generate DO" have no override; invoice due dates disagree (stored "+30 days" on older and consignment invoices vs the block's calendar-month rule; PDFs print "NET 30" for every customer). Prod count of customers that would be blocked is UNMEASURED.
 
 ## 2026-10-06 — ⬜ DEV-37: every staff login can open their own KPI card (branch `feat/dev37-kpi-office-self-view` → `staging`)
 
