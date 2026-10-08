@@ -135,6 +135,8 @@ interface CardLine {
   points: number | null;
   evidence: string;
   sampleSize: number;
+  /** department_efficiency only: efficiency per day, drawn on the card. */
+  daily?: Array<{ date: string; pct: number }>;
 }
 
 /**
@@ -266,7 +268,7 @@ async function buildCard(c: Context<Env>, userId: string, role: string, period: 
       actual: m.actual,
       attainment: att,
       points: att === null ? null : Math.round((att / 100) * Number(a.weight) * 10) / 10,
-      evidence: m.detail, sampleSize: m.sampleSize,
+      evidence: m.detail, sampleSize: m.sampleSize, daily: m.daily,
     });
   }
 
