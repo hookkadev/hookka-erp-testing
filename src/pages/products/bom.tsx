@@ -8,8 +8,6 @@ import {
 } from "@/lib/cached-fetch";
 import { RecordLoadError } from "@/components/ui/record-load-error";
 import type { MaterialScaling } from "@/api/lib/material-scaling";
-import { buildWipTypes } from "@/lib/wip-types";
-import { getVariantsConfigSync } from "@/lib/kv-config";
 
 // ---------- Types ----------
 // Mirrors the master BOMTemplate shape exposed by /api/bom/templates.
@@ -107,6 +105,15 @@ const DEPT_ORDER = [
   "PACKING",
 ];
 
+const WIP_TYPE_LABELS: Record<WIPType, { label: string; color: string }> = {
+  HEADBOARD: { label: "Headboard", color: "#7C3AED" },
+  DIVAN: { label: "Divan", color: "#0891B2" },
+  SOFA_BASE: { label: "Sofa Base", color: "#059669" },
+  SOFA_CUSHION: { label: "Back Cushion", color: "#D97706" },
+  SOFA_ARMREST: { label: "Sofa Armrest", color: "#DC2626" },
+  SOFA_HEADREST: { label: "Sofa Headrest", color: "#7C3AED" },
+};
+
 // Level color palette — mirrors the /bom editor so this read-only view
 // lines up visually with what the user sees when they push master templates.
 const WIP_LEVEL_COLORS = [
@@ -203,7 +210,7 @@ function WIPNode({
 }) {
   const [expanded, setExpanded] = useState(true);
   const wipStyle =
-    buildWipTypes(getVariantsConfigSync()?.wipTypes)[wip.wipType] || { label: wip.wipType, color: "#6B7280" };
+    WIP_TYPE_LABELS[wip.wipType] || { label: wip.wipType, color: "#6B7280" };
   const totalMin = wip.processes.reduce((s, p) => s + p.minutes, 0);
   const displayCode = resolveSegments(wip.codeSegments, product) || wip.wipCode;
   const children = wip.children || [];

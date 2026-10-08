@@ -12,8 +12,6 @@ import { Plus, Trash2, Check, Calendar, History, Pencil, FileDown, Loader2, X as
 import { verifiedSave, formatMismatchError } from "@/lib/verified-save";
 import { useNavGuard } from "@/lib/use-nav-guard";
 import { familyOf } from "@/lib/product-family";
-import { DEFAULT_EXTRA_WIP_TYPES } from "@/lib/wip-types";
-import { BOM_PRODUCT_TYPES, VARIANT_FIELDS, DEFAULT_VARIANT_FIELDS } from "@/lib/bom-variant-fields";
 import { MasterPriceHistoryDialog } from "./MasterPriceHistoryDialog";
 import { BatchImportDialog, type ImportColumn } from "@/components/ui/batch-import-dialog";
 import { exportImportRows } from "@/components/ui/batch-import-dialog";
@@ -910,8 +908,7 @@ type MaintenanceListKey =
   | "sofaLegHeights"
   | "sofaSpecials"
   | "sofaSizes"
-  | "sofaCompartments"
-  | "wipTypes";
+  | "sofaCompartments";
 
 // BedframeSize (code · label · dimensions) + the seed catalogs live in
 // @/lib/fg-variants (shared with the Add FG bulk-generate flow so they can't
@@ -945,12 +942,6 @@ type MaintenanceConfig = {
   // Sofa compartment pool (1A(LHF), 1A(RHF), 1NA, 2A(LHF)…) — the codes a sofa
   // model can be split into. Add FG bulk-generate lists these to tick per model.
   sofaCompartments: string[];
-  // Extra BOM WIP types (e.g. Sandback) on top of the six built-ins; see
-  // src/lib/wip-types.ts.
-  wipTypes: string[];
-  // BOM code-builder variant fields per product type; see
-  // src/lib/bom-variant-fields.ts.
-  bomVariantFields: Record<string, string[]>;
 };
 
 // Variants live in D1 under kv_config('variants-config'); see src/lib/kv-config.ts.
@@ -1027,8 +1018,6 @@ const DEFAULT_MAINTENANCE_CONFIG: MaintenanceConfig = {
   ],
   sofaSizes: FALLBACK_SOFA_SEAT_HEIGHTS,
   sofaCompartments: DEFAULT_SOFA_COMPARTMENTS,
-  wipTypes: DEFAULT_EXTRA_WIP_TYPES,
-  bomVariantFields: DEFAULT_VARIANT_FIELDS,
 };
 
 // Numeric seat sizes for the SOFA price columns, from the Maintenance config.
@@ -1055,7 +1044,7 @@ function sofaHeightsFromConfig(cfg: MaintenanceConfig): string[] {
   });
 }
 
-type MaintenanceTab = MaintenanceListKey | "fabrics" | "bomVariantFields";
+type MaintenanceTab = MaintenanceListKey | "fabrics";
 
 type FabricTrackingItem = {
   id: string;
@@ -1078,8 +1067,6 @@ const MAINTENANCE_TABS: { key: MaintenanceTab; label: string; description: strin
   { key: "sofaLegHeights", label: "Leg Heights", description: "Sofa leg height options with surcharge pricing", priced: true, section: "Sofa" },
   { key: "sofaSpecials", label: "Specials", description: "Sofa special order options with surcharge pricing", priced: true, section: "Sofa" },
   { key: "sofaCompartments", label: "Compartments", description: "Sofa compartment pool (1A(LHF), 1A(RHF), 1NA, 2A(LHF)…). Add FG bulk generate ticks which a model offers.", section: "Sofa" },
-  { key: "wipTypes", label: "WIP Types", description: "Extra WIP component types for the BOM type dropdown (e.g. Sandback). Headboard, Divan, Sofa Base, Back Cushion, Sofa Armrest and Sofa Headrest are always included. An extra type follows the departments set in its BOM.", section: "BOM" },
-  { key: "bomVariantFields", label: "Variant Fields", description: "Variant fields each product type offers in the BOM WIP code builder. Each field is filled in from the sales order.", section: "BOM" },
   { key: "fabrics", label: "Fabrics", description: "Fabric price tier assignment — determines Price 1 or Price 2 for bedframe pricing", section: "Common" },
 ];
 
@@ -1125,10 +1112,6 @@ function parseMaintenanceConfig(parsed: VariantsConfig | null): MaintenanceConfi
       sofaSpecials: ensurePriced(parsed.sofaSpecials, DEFAULT_MAINTENANCE_CONFIG.sofaSpecials),
       sofaSizes: ensureStrings(parsed.sofaSizes, DEFAULT_MAINTENANCE_CONFIG.sofaSizes),
       sofaCompartments: ensureStrings(parsed.sofaCompartments, DEFAULT_MAINTENANCE_CONFIG.sofaCompartments),
-      wipTypes: ensureStrings(parsed.wipTypes, DEFAULT_MAINTENANCE_CONFIG.wipTypes),
-      bomVariantFields: Object.fromEntries(
-        BOM_PRODUCT_TYPES.map(({ key }) => [key, ensureStrings(parsed.bomVariantFields?.[key], DEFAULT_VARIANT_FIELDS[key])]),
-      ),
     };
   } catch {
     return DEFAULT_MAINTENANCE_CONFIG;
@@ -1311,7 +1294,6 @@ function MaintenanceView() {
   // per-compartment Default BOM + Unit M3 controls (owner 2026-07-11), so it
   // gets its own render branch rather than the bare string editor.
   const isSofaCompartmentsTab = tab === "sofaCompartments";
-  const isVariantFieldsTab = tab === "bomVariantFields";
   const currentStringList = !isFabricsTab && !isPricedTab && !isBedframeSizesTab && !isSofaCompartmentsTab ? (config[tab as MaintenanceListKey] as string[]) : [];
   const currentPricedList = !isFabricsTab && isPricedTab ? (config[tab as MaintenanceListKey] as PricedOption[]) : [];
   const currentBedframeSizes = isBedframeSizesTab ? config.bedframeSizes : [];
@@ -1408,16 +1390,6 @@ function MaintenanceView() {
         [k]: (prev[k] as string[]).map((o, i) => i === idx ? newVal : o),
       }));
     }
-  }
-
-  // Tick / untick one BOM variant field for one product type.
-  function toggleVariantField(type: string, field: string, on: boolean) {
-    if (!editMode) return;
-    setConfig(prev => {
-      const cur = prev.bomVariantFields[type] ?? [];
-      const next = on ? [...cur.filter(f => f !== field), field] : cur.filter(f => f !== field);
-      return { ...prev, bomVariantFields: { ...prev.bomVariantFields, [type]: next } };
-    });
   }
 
   // Bedframe Sizes inline editor — update one field (code / label / dimensions)
@@ -1652,7 +1624,7 @@ function MaintenanceView() {
                 >
                   {t.label}
                   <span className="ml-1.5 text-[10px] text-gray-400 font-normal">
-                    ({(() => { if (t.key === "fabrics") return fabricsList.length; if (t.key === "bomVariantFields") return BOM_PRODUCT_TYPES.length; const list = config[t.key as MaintenanceListKey]; return Array.isArray(list) ? list.length : 0; })()})
+                    ({(() => { if (t.key === "fabrics") return fabricsList.length; const list = config[t.key as MaintenanceListKey]; return Array.isArray(list) ? list.length : 0; })()})
                   </span>
                 </button>
               </div>
@@ -1663,30 +1635,7 @@ function MaintenanceView() {
         <div className="p-6">
           <p className="text-sm text-gray-500 mb-4">{meta.description}</p>
 
-          {isVariantFieldsTab ? (
-            /* ── BOM Variant Fields: one tick row per product type ── */
-            <div className="space-y-3">
-              {BOM_PRODUCT_TYPES.map((pt) => (
-                <div key={pt.key} className="rounded-md border border-[#E2DDD8] p-3">
-                  <div className="text-sm font-medium text-[#111827] mb-2">{pt.label}</div>
-                  <div className="flex flex-wrap gap-x-4 gap-y-2">
-                    {VARIANT_FIELDS.map((f) => (
-                      <label key={f.category} className="inline-flex items-center gap-1.5 text-sm text-gray-700">
-                        <input
-                          type="checkbox"
-                          disabled={!editMode}
-                          checked={config.bomVariantFields[pt.key]?.includes(f.category) ?? false}
-                          onChange={(e) => toggleVariantField(pt.key, f.category, e.target.checked)}
-                          className="accent-[#6B5C32]"
-                        />
-                        {f.label}
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : isFabricsTab ? (
+          {isFabricsTab ? (
             /* ── Fabrics Tab ── */
             <div className="space-y-3">
               <div className="relative">
