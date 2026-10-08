@@ -8,7 +8,8 @@ import { resolveWipTokens, type BomVariantContext } from "@/api/lib/bom-wip-brea
 import { withProductCategory } from "./bom-category";
 import { removeWipLevel, moveWipNode, canMoveWipNode } from "@/lib/wip-tree-ops";
 import { BUILT_IN_WIP_TYPES, buildWipTypes, type WipTypeStyle } from "@/lib/wip-types";
-import { fetchVariantsConfig } from "@/lib/kv-config";
+import { fetchVariantsConfig, getVariantsConfigSync } from "@/lib/kv-config";
+import { variantFieldsFor } from "@/lib/bom-variant-fields";
 import type {
   MaterialScaling,
   MaterialScalingDimension,
@@ -1896,20 +1897,7 @@ function CreateBOMDialog({
     const sel = products.find((p) => p.code === selectedCode);
     if (!sel) return [{ category: "SIZE", label: "Size" }, { category: "FABRIC", label: "Fabric" }];
     const cat = (sel as Product & { category?: string }).category;
-    if (cat === "BEDFRAME") return [
-      { category: "PRODUCT_CODE", label: "Product Code" }, { category: "SIZE", label: "Size" },
-      { category: "DIVAN_HEIGHT", label: "Divan Height" }, { category: "LEG_HEIGHT", label: "Leg Height" },
-      { category: "TOTAL_HEIGHT", label: "Total Height" },
-      { category: "FABRIC", label: "Fabric" }, { category: "SPECIAL", label: "Special" },
-    ];
-    if (cat === "SOFA") return [
-      { category: "PRODUCT_CODE", label: "Product Code" },
-      { category: "MODEL", label: "Model" },
-      { category: "SEAT_SIZE", label: "Seat Size" },
-      { category: "MODULE", label: "Module" }, { category: "FABRIC", label: "Fabric" },
-      { category: "SPECIAL", label: "Special" },
-    ];
-    return [{ category: "PRODUCT_CODE", label: "Product Code" }, { category: "SIZE", label: "Size" }, { category: "FABRIC", label: "Fabric" }];
+    return variantFieldsFor(cat, getVariantsConfigSync()?.bomVariantFields);
   }, [products, selectedCode]);
 
   const selected = products.find((p) => p.code === selectedCode);
@@ -3855,31 +3843,8 @@ function MasterTemplatesDialog({
 
   // Variant categories depend on tab — used by WIPCodeBuilder for master-level
   // placeholders that get resolved to actual product variants at apply time.
-  const variantCategories: VariantCategoryInfo[] = tab === "BEDFRAME"
-    ? [
-        { category: "PRODUCT_CODE", label: "Product Code" },
-        { category: "SIZE", label: "Size" },
-        { category: "DIVAN_HEIGHT", label: "Divan Height" },
-        { category: "LEG_HEIGHT", label: "Leg Height" },
-        { category: "TOTAL_HEIGHT", label: "Total Height" },
-        { category: "FABRIC", label: "Fabric" },
-        { category: "SPECIAL", label: "Special" },
-      ]
-    : tab === "SOFA"
-    ? [
-        { category: "PRODUCT_CODE", label: "Product Code" },
-        { category: "MODEL", label: "Model" },
-        { category: "SEAT_SIZE", label: "Seat Size" },
-        { category: "MODULE", label: "Module" },
-        { category: "FABRIC", label: "Fabric" },
-        { category: "SPECIAL", label: "Special" },
-      ]
-    : [
-        // ACCESSORY — pillows etc.; minimal variant set.
-        { category: "PRODUCT_CODE", label: "Product Code" },
-        { category: "SIZE", label: "Size" },
-        { category: "FABRIC", label: "Fabric" },
-      ];
+  // Ticked per product type in Products > Maintenance (bom-variant-fields.ts).
+  const variantCategories: VariantCategoryInfo[] = variantFieldsFor(tab, getVariantsConfigSync()?.bomVariantFields);
 
   /* eslint-disable react-hooks/set-state-in-effect -- mirror master-template cache + seed default selection when edit dialog opens */
   useEffect(() => {
@@ -6159,32 +6124,7 @@ export default function BOMManagementPage() {
       { category: "FABRIC", label: "Fabric" },
     ];
     const cat = (selectedProduct as Product & { category?: string }).category;
-    if (cat === "BEDFRAME") {
-      return [
-        { category: "PRODUCT_CODE", label: "Product Code" },
-        { category: "SIZE", label: "Size" },
-        { category: "DIVAN_HEIGHT", label: "Divan Height" },
-        { category: "LEG_HEIGHT", label: "Leg Height" },
-        { category: "TOTAL_HEIGHT", label: "Total Height" },
-        { category: "FABRIC", label: "Fabric" },
-        { category: "SPECIAL", label: "Special" },
-      ];
-    }
-    if (cat === "SOFA") {
-      return [
-        { category: "PRODUCT_CODE", label: "Product Code" },
-        { category: "MODEL", label: "Model" },
-        { category: "SEAT_SIZE", label: "Seat Size" },
-        { category: "MODULE", label: "Module" },
-        { category: "FABRIC", label: "Fabric" },
-        { category: "SPECIAL", label: "Special" },
-      ];
-    }
-    return [
-      { category: "PRODUCT_CODE", label: "Product Code" },
-      { category: "SIZE", label: "Size" },
-      { category: "FABRIC", label: "Fabric" },
-    ];
+    return variantFieldsFor(cat, getVariantsConfigSync()?.bomVariantFields);
   }, [selectedProduct]);
 
   if (loading) {
