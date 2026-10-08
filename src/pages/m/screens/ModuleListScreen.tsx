@@ -18,6 +18,7 @@ import { useCachedJson, invalidateCachePrefix } from "@/lib/cached-fetch";
 import { MobileHeader, DocCard, StatusPill, FormSheet, ScanSheet, ScanPOSheet } from "../components";
 import { newSalesOrderSpec, type SOCreatePrefill } from "../config/forms";
 import { SubTabs } from "../components/SubTabs";
+import { ChipTabs } from "../components/ChipTabs";
 import { FilterSheet } from "../components/FilterSheet";
 import { M } from "../theme";
 import { type ModuleConfig, type ActiveFilter, type DataSource, type RawRow } from "../config/types";
@@ -208,6 +209,10 @@ export function ModuleListScreen({ config }: { config: ModuleConfig }) {
   // Invoice / Announcements / Mail). null = this module has no mobile create.
   const [createSpec, setCreateSpec] = useState<FormSpec | null>(null);
   const canCreate = createSpecFor(config.slug) != null;
+  // Delivery + Procurement use the same top section as Sales Orders:
+  // header → search/actions → chip tabs. Every other module keeps the
+  // original order (SubTabs above the search row).
+  const salesTop = config.slug === "delivery" || config.slug === "procurement";
 
   // Per-source filter + sort state (keyed by source url so switching tab groups
   // keeps each group's own filters).
@@ -375,18 +380,27 @@ export function ModuleListScreen({ config }: { config: ModuleConfig }) {
         }
       />
 
-      <SubTabs
-        tabs={allTabs}
-        active={activeTab}
-        onChange={setActiveTab}
-        counts={tabCounts}
-      />
+      {salesTop ? null : (
+        <SubTabs
+          tabs={allTabs}
+          active={activeTab}
+          onChange={setActiveTab}
+          counts={tabCounts}
+        />
+      )}
 
       {/* Search + Filter bar — design source: white pill (radius 12, border
           #E2DDD8) + a square sliders button that dots when filters are active.
           gap 7px + 40px buttons so the row fits in 380px even on Sales (which
           has the most buttons: Search + ScanQR + ScanPO + Filter + Select). */}
-      <div style={{ display: "flex", gap: 7, padding: "12px 18px 6px", minWidth: 0 }}>
+      <div
+        style={{
+          display: "flex",
+          gap: 7,
+          padding: salesTop ? "12px 18px 4px" : "12px 18px 6px",
+          minWidth: 0,
+        }}
+      >
         <div
           style={{
             flex: 1,
@@ -422,7 +436,7 @@ export function ModuleListScreen({ config }: { config: ModuleConfig }) {
           onClick={() => setScanOpen(true)}
           aria-label="Scan QR code"
           style={{
-            width: 40,
+            width: salesTop ? 44 : 40,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -496,7 +510,7 @@ export function ModuleListScreen({ config }: { config: ModuleConfig }) {
           }}
           aria-label={selectMode ? "Exit select mode" : "Select multiple"}
           style={{
-            width: 40,
+            width: salesTop ? 44 : 40,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -512,6 +526,15 @@ export function ModuleListScreen({ config }: { config: ModuleConfig }) {
           <ListChecks size={19} strokeWidth={1.75} />
         </button>
       </div>
+
+      {salesTop ? (
+        <ChipTabs
+          tabs={allTabs}
+          active={activeTab}
+          onChange={setActiveTab}
+          counts={tabCounts}
+        />
+      ) : null}
 
       {/* Optional bespoke panel above the list (e.g. Employees → Pending
           requests on the Attendance tab). */}
