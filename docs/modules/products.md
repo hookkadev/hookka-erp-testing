@@ -1,5 +1,6 @@
 # Products & MDM — Module Guide
 
+> **Last verified: 2026-10-08** (branch `fix/bom-module-guide-anchors`, to `staging`): the `src/pages/products/index.tsx` anchors (`ProductsPage` :2076, `VariantEditorDialog` :663, `MaintenanceView` :1147, `CustomerAssignmentsSection` :481, `ProductionConfig` / `CategoryBadge` :388 / :375), read from the file after #752 added the WIP Types and Variant Fields Maintenance tabs. Nothing else re-checked.
 > **Last verified: 2026-09-21** — `products.ts` handler anchors re-derived after the bulk-import BOM-materials change (`pushMaterials`, +27 lines); bulk import now also writes `bom_components` from the 9 material-usage columns (`PRODUCT_BULK_MATERIALS`).
 > **Last verified: 2026-10-05** (branch `fix/bom-master-template-accessory`): the `bom-master-templates.ts` anchors (line count, PUT `/:id`, bulk PUT), read from the file; it now accepts ACCESSORY (BUG-2026-10-05-255). Nothing else re-checked.
 >
@@ -55,7 +56,7 @@ Money is integer sen; many product columns are legacy camelCase.
 
 ## Entry points
 - **Pages** (all under `/products`, one page hosts three views)
-  - `/products` → `src/pages/products/index.tsx:2025` (`ProductsPage`; `viewMode` = `skuMaster|catalog|maintenance`)
+  - `/products` → `src/pages/products/index.tsx:2076` (`ProductsPage`; `viewMode` = `skuMaster|catalog|maintenance`)
   - `/products/:id/bom` → `src/pages/products/bom.tsx:462` (`BOMPage` — Master BOM Templates editor; also reached via `?sku=` from sales/consignment)
   - `/products/:id/documents` → `src/pages/products/documents.tsx:92` (`ProductDocumentsPage` — production docs per variant)
   - Catalog is NOT a route — `ProductCatalog` (`src/pages/products/catalog.tsx:138`) renders inline as `viewMode==="catalog"`
@@ -92,11 +93,11 @@ Money is integer sen; many product columns are legacy camelCase.
 ## Key functions / sections (locate-to-function)
 | Symbol / section | file:line | Role |
 |---|---|---|
-| `ProductsPage` (default export) | `src/pages/products/index.tsx:2025` | 3-way view host; `viewMode` state just below |
-| `VariantEditorDialog` | `src/pages/products/index.tsx:654` | Add/edit a product variant |
-| `MaintenanceView` | `src/pages/products/index.tsx:1130` | Maintenance-config view (Edit/Save/Cancel) |
-| `CustomerAssignmentsSection` | `src/pages/products/index.tsx:472` | Per-customer SKU assignment (expand row) |
-| `ProductionConfig` / `CategoryBadge` | `src/pages/products/index.tsx:379 / 366` | Per-dept config display helpers |
+| `ProductsPage` (default export) | `src/pages/products/index.tsx:2076` | 3-way view host; `viewMode` state just below |
+| `VariantEditorDialog` | `src/pages/products/index.tsx:663` | Add/edit a product variant |
+| `MaintenanceView` | `src/pages/products/index.tsx:1147` | Maintenance-config view (Edit/Save/Cancel) |
+| `CustomerAssignmentsSection` | `src/pages/products/index.tsx:481` | Per-customer SKU assignment (expand row) |
+| `ProductionConfig` / `CategoryBadge` | `src/pages/products/index.tsx:388 / 375` | Per-dept config display helpers |
 | `ProductCatalog` | `src/pages/products/catalog.tsx:138` | Model-based photo grid (inline catalog view) |
 | `rowToProduct` | `src/api/routes/products.ts:166` | Re-nests children + parses JSON columns on read |
 | `app.post("/")` / `app.put("/:id")` | `src/api/routes/products.ts:590 / 970` | Product create / edit (full-replace children) |
