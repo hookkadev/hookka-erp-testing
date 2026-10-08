@@ -1,5 +1,6 @@
 # Products & MDM — Module Guide
 
+> **Last verified: 2026-10-08** (branch `feat/bom-variant-fields-list-main`, to `main`): `src/pages/products/index.tsx` anchors re-derived after the Variant Fields / WIP Types list rows (`ProductsPage` :2152, `MaintenanceView` :1149, modular photo fetch :3047). Nothing else re-checked.
 > **Last verified: 2026-10-08** (branch `feat/editable-wip-types-main-v2`, to `main`): the `src/pages/products/index.tsx` anchors (`ProductsPage` :2074, `VariantEditorDialog` :661, `MaintenanceView` :1145, `CustomerAssignmentsSection` :479, `ProductionConfig` / `CategoryBadge` :386 / :373), read from the file after the WIP Types and Variant Fields Maintenance tabs were added. Nothing else re-checked.
 > **Last verified: 2026-10-05** (branch `fix/bom-master-template-accessory`): the `bom-master-templates.ts` anchors (line count, PUT `/:id`, bulk PUT), read from the file; it now accepts ACCESSORY (BUG-2026-10-05-255). Nothing else re-checked.
 >
@@ -55,7 +56,7 @@ Money is integer sen; many product columns are legacy camelCase.
 
 ## Entry points
 - **Pages** (all under `/products`, one page hosts three views)
-  - `/products` → `src/pages/products/index.tsx:2074` (`ProductsPage`; `viewMode` = `skuMaster|catalog|maintenance`)
+  - `/products` → `src/pages/products/index.tsx:2152` (`ProductsPage`; `viewMode` = `skuMaster|catalog|maintenance`)
   - `/products/:id/bom` → `src/pages/products/bom.tsx:462` (`BOMPage` — Master BOM Templates editor; also reached via `?sku=` from sales/consignment)
   - `/products/:id/documents` → `src/pages/products/documents.tsx:92` (`ProductDocumentsPage` — production docs per variant)
   - Catalog is NOT a route — `ProductCatalog` (`src/pages/products/catalog.tsx:138`) renders inline as `viewMode==="catalog"`
@@ -92,9 +93,9 @@ Money is integer sen; many product columns are legacy camelCase.
 ## Key functions / sections (locate-to-function)
 | Symbol / section | file:line | Role |
 |---|---|---|
-| `ProductsPage` (default export) | `src/pages/products/index.tsx:2074` | 3-way view host; `viewMode` state just below |
+| `ProductsPage` (default export) | `src/pages/products/index.tsx:2152` | 3-way view host; `viewMode` state just below |
 | `VariantEditorDialog` | `src/pages/products/index.tsx:661` | Add/edit a product variant |
-| `MaintenanceView` | `src/pages/products/index.tsx:1145` | Maintenance-config view (Edit/Save/Cancel) |
+| `MaintenanceView` | `src/pages/products/index.tsx:1149` | Maintenance-config view (Edit/Save/Cancel) |
 | `CustomerAssignmentsSection` | `src/pages/products/index.tsx:479` | Per-customer SKU assignment (expand row) |
 | `ProductionConfig` / `CategoryBadge` | `src/pages/products/index.tsx:386 / 373` | Per-dept config display helpers |
 | `ProductCatalog` | `src/pages/products/catalog.tsx:138` | Model-based photo grid (inline catalog view) |
@@ -117,7 +118,7 @@ Money is integer sen; many product columns are legacy camelCase.
 - **Two separate price tables.** Master price lives in `product_prices` (`MasterPriceHistoryDialog`); per-customer overrides in `customer_product_prices`. Reconcile BOTH when changing pricing; a future master change is surfaced to inherited customers as `masterPending`.
 - **maintenance-config & master price are APPEND-ONLY effective-dated.** Edits create NEW rows; the resolver picks newest `WHERE effective_from <= today`. Never UPDATE-in-place. The POST endpoint is `/changes` (not `/history` despite older header comments).
 - **`/api/bom/templates` MUST stay declared before `/:id`** or Hono's first-match router swallows `"templates"` as an `:id` param (`bom.ts:9`). The templates LIST response is ~1.95 MB — `rowToTemplateListItem` (`:87`) trims it; don't send full rows.
-- **Catalog tiles are AUTO-DERIVED** from each distinct `baseModel` in `products` (no dedicated table); `baseProductCode` splits on the first dash (`index.tsx:36`). Modular photos go through `/api/files?resourceType=modular` (`index.tsx:2901`, `catalog.tsx:29`), not a products column. Note the read path: `GET /api/files/:id/download` **302-redirects** to a signed Supabase URL (`files.ts:446`); only the `/stream` proxy fallback (`:485`) sets `Content-Disposition: attachment` itself (`:503`). `<img>` renders either way — browsers ignore the disposition on subresource loads — so don't "fix" it.
+- **Catalog tiles are AUTO-DERIVED** from each distinct `baseModel` in `products` (no dedicated table); `baseProductCode` splits on the first dash (`index.tsx:36`). Modular photos go through `/api/files?resourceType=modular` (`index.tsx:3047`, `catalog.tsx:29`), not a products column. Note the read path: `GET /api/files/:id/download` **302-redirects** to a signed Supabase URL (`files.ts:446`); only the `/stream` proxy fallback (`:485`) sets `Content-Disposition: attachment` itself (`:503`). `<img>` renders either way — browsers ignore the disposition on subresource loads — so don't "fix" it.
 - **MDM is DETECTION-ONLY.** `merge`/`dismiss` just close the flag (set `status`); the real record merge happens in the existing customer/supplier UI. Detection-run is admin-gated to stop non-admins flooding the queue.
 - **camelCase columns need a `column-rename-map.json` entry** (`basePriceSen`, `seatHeightPrices`, `effectiveFrom`, …) or the write 400s "Invalid request body". Prefer snake_case for NEW columns; read dual-keyed `r.camelCase ?? r.snake_case`.
 - **`index.tsx` is a 5,316-line single page** — three views share one `ProductsPage` (`:2025`); `MaintenanceView` (`:1130`) and `VariantEditorDialog` (`:654`) are large sub-components ABOVE the default export, not separate files.

@@ -1,6 +1,7 @@
 # Hookka ERP — Work Tracker
 
 > **Last verified: 2026-10-08**: branch `feat/bom-variant-fields-list-main` (to `main`) added below (its entry is the newest).
+> **Last verified: 2026-10-08**: branch `feat/kpi-dept-efficiency-daily-chart-main` (to `main`, DEV-36) added below (its entry is the newest).
 > **Last verified: 2026-10-08**: branch `feat/editable-wip-types-main-v2` (staging #752 to `main`, second try after #753 was reverted by #754) updated the entry below.
 > **Last verified: 2026-10-08**: branch `feat/editable-wip-types-main` (staging #752 to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-08**: branch `fix/kpi-delivery-rules-main` (to `main`) (BUG-2026-10-08-267) added below (its entry is the newest).
