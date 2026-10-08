@@ -1047,9 +1047,12 @@ export default function DashboardBPage() {
   // Completed, Worker Efficiency). All-time keeps each widget's original
   // rolling phrase; a selected month shows the month string.
   const revTitle = isAllTime ? "Revenue — last 12 weeks" : `Revenue — ${period}`;
-  const capacityWindowLabel = isAllTime ? "7-day avg" : `${period} avg`;
-  const capacityDrillTitle = isAllTime
-    ? "Daily Capacity — Past 7 Working Days"
+  // All-time and the current month average the last 14 working days; a past
+  // month averages its own working days (owner 2026-10-08).
+  const capacityRolling = isAllTime || isCurrentMonth;
+  const capacityWindowLabel = capacityRolling ? "14-day avg" : `${period} avg`;
+  const capacityDrillTitle = capacityRolling
+    ? "Daily Capacity — Past 14 Working Days"
     : `Daily Capacity — ${period}`;
   const completedDrillTitle = isAllTime
     ? "Completed — last 7 days"
@@ -1419,7 +1422,7 @@ export default function DashboardBPage() {
                 onClick={() => {
                   if (!prod?.capacityDays) return;
                   const days = prod.capacityDays;
-                  // 7-day average capacity per worker — avg daily capacity
+                  // Average capacity per worker — avg daily capacity
                   // ÷ avg workers/day. Days with zero credited workers are
                   // left out so they don't distort the average.
                   const wDays = days.filter((d) => (d.workers ?? 0) > 0);
@@ -2553,7 +2556,7 @@ export default function DashboardBPage() {
                       />
                     )}
                   </div>
-                  <span className="w-12 text-right text-xs font-semibold text-[#DC2626] tabular-nums" title={showDays == null ? "No completions in the last 7 working days — queue can't be sized in days" : undefined}>
+                  <span className="w-12 text-right text-xs font-semibold text-[#DC2626] tabular-nums" title={showDays == null ? "No completions in the last 14 working days — queue can't be sized in days" : undefined}>
                     {showDays == null ? "stalled" : `${showDays.toFixed(1)}d`}
                   </span>
                 </div>

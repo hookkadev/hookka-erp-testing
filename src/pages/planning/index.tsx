@@ -180,7 +180,10 @@ const HOURS_PER_DAY = 9;
 // days, Mon-Sat); shortened to 7 so the average reflects more
 // recent production reality. Pull out as a single constant so a
 // future "make this configurable per-dept" lands in one place.
-const ROLLING_WINDOW_DAYS = 7;
+// Back to 14 on 2026-10-08 (owner), together with the dashboard's Plant
+// Load card (ROLLING_DAYS in api/routes/dashboard-overview.ts) so both
+// pages show the same capacity.
+const ROLLING_WINDOW_DAYS = 14;
 
 // Wei Siang 2026-05-15: Capacity Loading chart window. Operator
 // asked for ~21 days total split as "past production" + "future
@@ -2555,7 +2558,7 @@ export default function PlanningPage() {
                                 style={{ height: `${barHeightPct}%` }}
                               />
                               {/* 100% reference: a tick at the height
-                                  that = 7-day capacity on this dept's
+                                  that = 14-day capacity on this dept's
                                   own scale. Adjacent ticks line up into
                                   a continuous dashed rule across the
                                   whole chart. */}

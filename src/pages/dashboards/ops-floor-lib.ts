@@ -4,13 +4,15 @@
 // (overdue, due-soon) keys by job-card departmentCode ("FAB_CUT"), while
 // /api/dashboard/overview (backlog) keys by display name ("Fabric Cutting").
 // This table mirrors DEPARTMENTS in src/api/routes/dashboard-overview.ts
-// (~line 994) — same codes, same names, same floor order. A code not listed
+// (~line 1000) — same codes, same names, same floor order. A code not listed
 // here is shown as-is, after the listed ones.
 export const DEPT_FLOOR = [
   ["FAB_CUT", "Fabric Cutting"],
   ["FAB_SEW", "Fabric Sewing"],
   ["WOOD_CUT", "Wood Cutting"],
+  ["FOAM_CUTTING", "Foam Cutting"],
   ["FOAM", "Foam Bonding"],
+  ["FIBRE", "Fibre"],
   ["FRAMING", "Framing"],
   ["WEBBING", "Webbing"],
   ["UPHOLSTERY", "Upholstery"],

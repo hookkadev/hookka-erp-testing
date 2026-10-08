@@ -25,6 +25,8 @@ import {
 import {
   writeStateSnapshot,
   readStateSnapshotForMonth,
+  readFrozenMonth,
+  freezeMonth,
   type DashboardStateMetrics,
 } from "../lib/dashboard-state-snapshot";
 
@@ -139,10 +141,35 @@ app.get("/", async (c) => {
     }
   }
 
+  // A finished month is frozen: served exactly as first stored, never
+  // recomputed (owner 2026-10-08, see freezeMonth). Only the month list is
+  // read fresh, so the month picker still offers months added after the
+  // freeze.
+  if (isPastMonth) {
+    const frozen = await readFrozenMonth(c.var.DB, orgId, period);
+    if (frozen) {
+      const monthRows = await c.var.DB
+        .prepare(
+          `SELECT DISTINCT substr(so.companySODate::text, 1, 7) AS "ym"
+             FROM sales_orders so
+             JOIN sales_order_items si ON si.salesOrderId = so.id
+            WHERE so.orgId = ? AND so.status NOT IN ('DRAFT','CANCELLED','ON_HOLD')
+              AND so.companySODate IS NOT NULL`,
+        )
+        .bind(orgId)
+        .all<{ ym: string }>();
+      const salesMonths = (monthRows.results ?? [])
+        .map((r) => r.ym)
+        .sort((a, b) => b.localeCompare(a));
+      return c.json({ success: true, ...frozen, salesMonths });
+    }
+  }
+
+  // v24 (2026-10-08): capacity window 7 → 14 working days, Foam Cutting row.
   // v23 (2026-08-14, BUG-2026-08-13-142): payload gained `customerConcentration`.
   // A pre-fix body has no such key, and the card would render "—" until the 60s
   // TTL rolled; bumping the version makes that window zero.
-  const data = await cached(c, `dashboard:overview:${orgId}:v23:${period}`, 60, async () => {
+  const data = await cached(c, `dashboard:overview:${orgId}:v24:${period}`, 60, async () => {
     const db = c.var.DB;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -187,7 +214,7 @@ app.get("/", async (c) => {
     // `period` is already validated as "YYYY-MM" or "all" (line ~56).
     //   - All-time            → bounds unused (each widget keeps its own
     //                           rolling window: last 12 weeks / 7 days /
-    //                           7 working days).
+    //                           14 working days).
     //   - Current month       → [1st .. TODAY]. Owner request 2026-06-10
     //                           ("今天明明已经是 10 号了,为什么还没有呈现 10 号
     //                           的数据") — the chart/list must include the
@@ -244,54 +271,48 @@ app.get("/", async (c) => {
       }
     }
 
-    // Rolling 7 most-recent COMPLETE working days (Mon-Sat, EXCLUDING
+    // Rolling 14 most-recent COMPLETE working days (Mon-Sat, EXCLUDING
     // Sundays AND public holidays), ending YESTERDAY — same window the
-    // Planning page uses. This ALWAYS drives the Backlog "days of queue"
-    // figure (`backlogDays`), which is a point-in-time state metric and is
-    // therefore NOT re-scoped by the selected month. `guard` caps the
-    // walk-back so a malformed holiday list can never spin.
-    const rolling7Days: string[] = [];
+    // Planning page uses (ROLLING_WINDOW_DAYS there). Owner 2026-10-08 moved
+    // it from 7 to 14 days. Drives Daily Capacity for All-time and the
+    // current month, and every department's own capacity in the backlog
+    // table. `guard` caps the walk-back so a malformed holiday list can
+    // never spin.
+    const ROLLING_DAYS = 14;
+    const rollingDays: string[] = [];
     {
       const cur = new Date(today);
       cur.setDate(cur.getDate() - 1);
       let guard = 0;
-      while (rolling7Days.length < 7 && guard < 130) {
+      while (rollingDays.length < ROLLING_DAYS && guard < 130) {
         guard++;
         const iso = fmtISO(cur);
-        if (cur.getDay() !== 0 && !holidaySet.has(iso)) rolling7Days.push(iso);
+        if (cur.getDay() !== 0 && !holidaySet.has(iso)) rollingDays.push(iso);
         cur.setDate(cur.getDate() - 1);
       }
     }
-    const rolling7Set = new Set(rolling7Days);
+    const rollingSet = new Set(rollingDays);
 
     // Daily-Capacity widget window (Mon-Sat, EXCLUDING Sundays AND public
     // holidays). The widget's average divisor is `windowDays.length`.
-    //   - All-time / current behaviour → identical to the rolling 7 above.
-    //   - A selected month → every working day in that month within
-    //     [monthScope.start .. monthScope.end] (end already clamped to
-    //     yesterday for the current month). Divisor becomes that month's
-    //     working-day COUNT, not a hardcoded 7.
+    //   - All-time / current month → the rolling 14 above. The current month
+    //     used to average its own days so far, which on the 2nd of the month
+    //     was one day of output (owner 2026-10-08).
+    //   - A PAST month → every working day in that month. Divisor becomes
+    //     that month's working-day COUNT.
     let windowDays: string[];
-    if (monthScope) {
+    if (monthScope && isPastMonth) {
       windowDays = [];
-      // Capacity averaging counts COMPLETE days only: the in-progress today is
-      // excluded (it deflated the month average all day long — owner audit
-      // 2026-07-11). monthScope.end itself stays "today" because the Completed
-      // widgets DO want today's completions; only this divisor window differs.
-      const capEnd =
-        monthScope.end === fmtISO(new Date(today)) && !isPastMonth
-          ? fmtISO(new Date(new Date(today).getTime() - 24 * 60 * 60 * 1000))
-          : monthScope.end;
       const cur = new Date(`${monthScope.start}T00:00:00`);
       let guard = 0;
-      while (fmtISO(cur) <= capEnd && guard < 40) {
+      while (fmtISO(cur) <= monthScope.end && guard < 40) {
         guard++;
         const iso = fmtISO(cur);
         if (cur.getDay() !== 0 && !holidaySet.has(iso)) windowDays.push(iso);
         cur.setDate(cur.getDate() + 1);
       }
     } else {
-      windowDays = rolling7Days;
+      windowDays = rollingDays;
     }
     const windowSet = new Set(windowDays);
 
@@ -932,7 +953,7 @@ app.get("/", async (c) => {
 
     // ---- Production ----
     let capacityMin = 0; // capacity over the Daily-Capacity widget window
-    let capacityMin7 = 0; // capacity over the rolling 7 working days (Backlog)
+    let capacityMinRolling = 0; // capacity over the rolling 14 working days
     const capByDay = new Map<string, number>();
     // Distinct workers (PIC1/PIC2 ids) credited on the job cards COMPLETED
     // each day — the denominator for the per-worker capacity figure in the
@@ -946,9 +967,9 @@ app.get("/", async (c) => {
       const done = jc.status === "COMPLETED" || jc.status === "TRANSFERRED";
       if (done && jc.completedDate) {
         const mins = jcMinutesTotal(jc.actualMinutes ?? jc.estMinutes ?? 0, jc);
-        // Backlog "days of queue" always uses the rolling 7-working-day
-        // capacity — it is a point-in-time state metric, never re-scoped.
-        if (rolling7Set.has(jc.completedDate)) capacityMin7 += mins;
+        // Rolling capacity — the backlog-days fallback below when the
+        // selected window has no output yet.
+        if (rollingSet.has(jc.completedDate)) capacityMinRolling += mins;
         if (windowSet.has(jc.completedDate)) {
           capacityMin += mins;
           capByDay.set(
@@ -968,20 +989,17 @@ app.get("/", async (c) => {
       // headline backlog now derives from backlogGrandMin — the per-dept,
       // PO-filtered SOFA+BEDFRAME total — so gauge == drill-down == Planning.)
     }
-    // Widget divisor = the window's working-day count (7 for all-time /
-    // current; the month's working days for a selected month). Guard the
-    // empty-window case (e.g. the 1st of the current month, no complete day
-    // yet) so we never divide by zero.
+    // Widget divisor = the window's working-day count (14 for all-time /
+    // current month; the month's working days for a past month). Guarded so
+    // an empty window never divides by zero.
     const capacityDivisor = windowDays.length || 1;
     const dailyCapacityMin = Math.round(capacityMin / capacityDivisor);
-    // Backlog days uses the rolling-7 capacity (state metric — unchanged by
-    // the month selector). Divisor stays a fixed 7. The headline DAYS figure
-    // itself is derived BELOW from backlogGrandMin (the per-dept, PO-filtered
-    // SOFA+BEDFRAME total) so gauge == drill-down == Planning — the old
-    // all-JC numerator made the gauge read higher than both (9.4d vs 9.1d,
-    // owner tally audit 2026-07-11).
+    // The headline DAYS figure is derived BELOW from backlogGrandMin (the
+    // per-dept, PO-filtered SOFA+BEDFRAME total) so gauge == drill-down ==
+    // Planning — the old all-JC numerator made the gauge read higher than
+    // both (9.4d vs 9.1d, owner tally audit 2026-07-11).
     // Daily Capacity drill-down: the widget window's working days, oldest
-    // first (rolling 7 for all-time / current; the month for a selection).
+    // first (rolling 14 for all-time / current; the month for a past month).
     const capacityDays = [...windowDays]
       .sort((a, b) => a.localeCompare(b))
       .map((date) => ({
@@ -995,7 +1013,11 @@ app.get("/", async (c) => {
       { code: "FAB_CUT", name: "Fabric Cutting" },
       { code: "FAB_SEW", name: "Fabric Sewing" },
       { code: "WOOD_CUT", name: "Wood Cutting" },
+      // Was missing until 2026-10-08 (BUG-2026-10-08-269): its backlog fell
+      // out of the headline total and its "stalled" flag never showed.
+      { code: "FOAM_CUTTING", name: "Foam Cutting" },
       { code: "FOAM", name: "Foam Bonding" },
+      { code: "FIBRE", name: "Fibre" },
       { code: "FRAMING", name: "Framing" },
       { code: "WEBBING", name: "Webbing" },
       { code: "UPHOLSTERY", name: "Upholstery" },
@@ -1015,7 +1037,7 @@ app.get("/", async (c) => {
         if (
           (r.jcStatus === "COMPLETED" || r.jcStatus === "TRANSFERRED") &&
           r.completedDate &&
-          rolling7Set.has(r.completedDate)
+          rollingSet.has(r.completedDate)
         ) {
           windowTotal += jcMinutesTotal(r.actualMinutes ?? r.estMinutes ?? 0, jc);
         }
@@ -1048,7 +1070,7 @@ app.get("/", async (c) => {
             bedframeMin += m;
         }
       }
-      // Per-dept capacity keeps its own rolling-7 basis: it is that dept's
+      // Per-dept capacity keeps its own rolling-14 basis: it is that dept's
       // OWN recent throughput, which is the only sensible denominator for a
       // per-dept queue, and no plant-wide capacity figure is printed beside
       // this table to contradict it. The HEADLINE gauge is different — it sits
@@ -1056,7 +1078,7 @@ app.get("/", async (c) => {
       // it now does. Flagged rather than unified: making both use the month
       // would divide a bottleneck dept by three days of its own output and
       // swing the bottleneck ranking on the 1st of every month.
-      const dailyCapMin = Math.round(windowTotal / 7);
+      const dailyCapMin = Math.round(windowTotal / ROLLING_DAYS);
       const totalMin = sofaMin + bedframeMin;
       // Div-zero guard (owner audit 2026-07-11): a dept with backlog but ZERO
       // completions in the rolling window used to divide by 1 MINUTE, showing
@@ -1091,11 +1113,13 @@ app.get("/", async (c) => {
     // 1,433 ÷ 190 is 7.5, not 9.1. Both halves were individually right and the
     // pair was nonsense, with the gap moving whenever the month selector did.
     //
-    // Falls back to rolling-7 when the selected window has no capacity yet (a
-    // month one working day old), so an early-month view still shows a number
-    // instead of dividing by zero.
+    // Falls back to the rolling 14 when the selected window has no capacity
+    // (a past month with no output), so it still shows a number instead of
+    // dividing by zero.
     const backlogDailyCapacityMin =
-      dailyCapacityMin > 0 ? dailyCapacityMin : Math.round(capacityMin7 / 7);
+      dailyCapacityMin > 0
+        ? dailyCapacityMin
+        : Math.round(capacityMinRolling / ROLLING_DAYS);
     const backlogDays =
       backlogDailyCapacityMin > 0
         ? Math.round((backlogGrandMin / backlogDailyCapacityMin) * 10) / 10
@@ -2056,7 +2080,7 @@ app.get("/", async (c) => {
           // the live backlogByDept shape (sofa/bedframe split per department).
           // We also pull cards COMPLETED *within the month* to rebuild each
           // department's daily capacity for that month (mirrors the live
-          // per-dept `windowTotal/7`, but scoped to the month's own throughput
+          // per-dept `windowTotal / ROLLING_DAYS`, but scoped to the month's own throughput
           // ÷ the month's working-day count).
           const reconRows =
             (
@@ -2308,6 +2332,13 @@ app.get("/", async (c) => {
   // be recorded as today). All-time and the current month both qualify.
   if (!isPastMonth) {
     captureTodayState(data as Record<string, unknown>);
+  } else {
+    try {
+      await freezeMonth(c.var.DB, orgId, period, data as Record<string, unknown>);
+    } catch (e) {
+      // Not frozen this time; the next view of the month tries again.
+      console.warn("[dashboard-month-frozen] freeze failed:", e);
+    }
   }
 
   return c.json({ success: true, ...data });

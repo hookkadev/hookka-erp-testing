@@ -1,6 +1,7 @@
 # Bug History
 
-> **Last verified: 2026-10-08**: newest entry BUG-2026-10-08-267 (branch `fix/kpi-delivered-last-leg-myt`, to `staging`; 264 to 266 are taken on other branches); a log, so "verified" means the entry matches the code on its branch.
+> **Last verified: 2026-10-08**: newest entry BUG-2026-10-08-269 (branch `feat/plant-load-14d`, to `staging`; 268 is taken on another branch).
+> **Last verified: 2026-10-08**: entry BUG-2026-10-08-267 (branch `fix/kpi-delivered-last-leg-myt`, to `staging`; 264 to 266 are taken on other branches); a log, so "verified" means the entry matches the code on its branch.
 > **Last verified: 2026-10-07** (branch `chore/sync-staging-from-main-1007`, staging<-main merge): both logs merged, one copy of each entry. No id collisions: 260 to 262 are main's, 263 is staging's.
 > **Last verified: 2026-10-07**: newest entry BUG-2026-10-07-263 (branch `fix/sales-transfer-credit-block`, to staging; 260 to 262 are taken on `main`).
 > **Last verified: 2026-10-06** (branch `chore/sync-staging-from-main-1006`, staging<-main merge): both logs merged, one copy of each entry. No id collisions: 253, 257, 258 and 259 are the same bugs on both sides (257 and 259 take main's copy, which adds its main PR note). Main's 251, 254, 255 and 256 are added.
@@ -115,6 +116,18 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-10-08-269 — Plant Load backlog left out Foam Cutting (and Fibre) `dashboard` `production` 🟡
+
+🟡 Fix on `feat/plant-load-14d` (to `staging`).
+
+**Measured, read-only on prod, 2026-10-08.** The dashboard's Plant Load card and its department backlog table walk their own department list in `dashboard-overview.ts`. That list had 8 departments; Planning's has 10. Open job cards on Foam Cutting (132 sofa cards, 23h) were left out of the headline backlog (card showed 4,440h, the real total is 4,464h), and Foam Cutting has had no completions in the last 14 working days, so its "stalled" flag never showed. Fibre had no open work, so no figure moved for it.
+
+**Fix.** Foam Cutting and Fibre added to `DEPARTMENTS` in `dashboard-overview.ts`, and to its mirror `DEPT_FLOOR` in `src/pages/dashboards/ops-floor-lib.ts` (the Operations board joins two feeds through it; without it Foam Cutting would show as two rows).
+
+**Guard.** `tests/dashboard-plant-load-14d.test.mjs` requires the dashboard list, the Planning list and the Operations board list to hold the same codes in the same order. Same shape as C4: several copies of one list, only some of them updated.
 
 ---
 

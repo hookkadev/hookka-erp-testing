@@ -31,6 +31,8 @@
 // many times in one day overwrites the same row).
 // ---------------------------------------------------------------------------
 
+import { isBenignSelfApplyError, memoizeSelfApply, runSelfApply } from "./self-apply";
+
 // The state-metric payload we persist and restore. Mirrors the matching
 // fields the dashboard read route builds, so a restored snapshot drops
 // straight back into the response shape (incl. the drill-down sub-objects).
@@ -145,4 +147,74 @@ export async function readStateSnapshotForMonth(
     metrics,
     capturedAt: row.capturedAt,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Frozen past months (owner 2026-10-08: "dashboard data should keep per
+// month so when juggling between months it is dead set, not recalculated").
+//
+// The first time a FINISHED month is opened, its whole overview payload is
+// stored here and every later view of that month serves the stored copy.
+// The current month and the all-time view are never frozen.
+//
+// Known limit: the freeze happens on that first view, usually the 1st or
+// 2nd of the next month. A job card closed or corrected after that never
+// shows in the frozen month. `frozen_at` records when it happened.
+//
+// No schema work on the READ (see readSnapshot in dashboard-snapshot.ts: DDL
+// per read took production down on 2026-08-02). A missing table on the read
+// just means "not frozen yet"; the write creates it.
+// ---------------------------------------------------------------------------
+const FROZEN_DDL = `CREATE TABLE IF NOT EXISTS dashboard_month_frozen (
+  org_id    TEXT NOT NULL,
+  period    TEXT NOT NULL,
+  data      JSONB NOT NULL,
+  frozen_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (org_id, period)
+)`;
+let frozenTablePromise: Promise<void> | null = null;
+
+export async function readFrozenMonth(
+  db: D1Database,
+  orgId: string,
+  period: string,
+): Promise<Record<string, unknown> | null> {
+  let row: { data: unknown } | null;
+  try {
+    row = await db
+      .prepare(`SELECT data FROM dashboard_month_frozen WHERE org_id = ? AND period = ?`)
+      .bind(orgId, period)
+      .first<{ data: unknown }>();
+  } catch (e) {
+    if (!isBenignSelfApplyError(e)) throw e;
+    return null; // table not created yet
+  }
+  if (!row) return null;
+  return typeof row.data === "string"
+    ? (JSON.parse(row.data) as Record<string, unknown>)
+    : (row.data as Record<string, unknown>);
+}
+
+/** Store a past month once. A second writer racing the first is a no-op. */
+export async function freezeMonth(
+  db: D1Database,
+  orgId: string,
+  period: string,
+  data: Record<string, unknown>,
+): Promise<void> {
+  await memoizeSelfApply(
+    () => frozenTablePromise,
+    (p) => {
+      frozenTablePromise = p;
+    },
+    () => runSelfApply(db, "dashboard_month_frozen", [FROZEN_DDL]),
+  );
+  await db
+    .prepare(
+      `INSERT INTO dashboard_month_frozen (org_id, period, data)
+       VALUES (?, ?, ?)
+       ON CONFLICT (org_id, period) DO NOTHING`,
+    )
+    .bind(orgId, period, JSON.stringify(data))
+    .run();
 }
