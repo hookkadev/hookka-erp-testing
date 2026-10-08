@@ -138,7 +138,7 @@ test("the Planning and Pending-Delivery tabs narrow too", () => {
   const rpHandler = src.slice(src.indexOf('app.get("/ready-planning"'));
   assert.match(
     rpHandler.slice(0, rpHandler.indexOf("\n});") + 4),
-    /loadDeliveryReadyPlanning\(c\)/,
+    /loadDeliveryReadyPlanning\(c[,)]/,
     "ready-planning no longer routes through the narrowing assembly",
   );
   assert.match(rp, /rpPoScope/, "ready-planning does not narrow its production orders");
