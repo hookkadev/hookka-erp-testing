@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-08**: branch `fix/kpi-delivered-last-leg-myt` (to `staging`, BUG-2026-10-08-267) added below (its entry is the newest).
 > **Last verified: 2026-10-07**: branch `feat/kpi-dept-efficiency-daily-chart` (DEV-36 follow-up to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-07**: branch `chore/sync-staging-from-main-1007` (staging<-main merge): both trackers merged, main-only entries added, entry below.
 > **Last verified: 2026-10-07**: branch `feat/dev37-kpi-self-view-to-main` (DEV-37 staging to `main`) added below (its entry is the newest).
@@ -169,6 +170,18 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-08 — 🟡 On-time delivery KPI judged on the delivered date, last delivery, Malaysia date (branch `fix/kpi-delivered-last-leg-myt` → `staging`, stacked on #748, BUG-2026-10-08-267)
+
+Owner ask: the KPI must follow the 2026-08-14 rule the Hookka Report already uses (delivered date vs the customer date, once per sales order, judged on its last delivery), and both must take the Malaysia date of the timestamp, not the UTC one. Owner answers 2026-10-08: an overdue order not fully delivered stays out (as in the report); keep the early bonus and the urgent rule by extending the shared code; build on top of #748.
+
+1. 🔵 One shared Malaysia-date SQL helper in `src/api/lib/on-time-delivery.ts`, used for the report and the KPI. Formats measured read-only on staging and prod first.
+2. 🔵 The KPI and its drill-down list read the shared on-time code (late %, early %, urgent late), so the card, the list and the Hookka Report agree.
+3. 🔵 The order list shows the last delivered date; the KPI page reads the new field.
+4. 🔵 Catalog wording (detail, definition, measurement) rewritten for the delivered-date, last-delivery rule.
+5. 🔵 Tests: last leg late, 07:00 MYT the day after, delivered on the day, part-delivered, and the card and list agree.
+6. 🔵 BUG-HISTORY entry, CODEBASE-MAP kpi-metrics row, API.md, stamps.
+7. ⬜ Staging check after deploy.
 
 ## 2026-10-07 — ⬜ DEV-36 follow-up: daily efficiency chart on the Department efficiency KPI card (branch `feat/kpi-dept-efficiency-daily-chart` → `staging`)
 

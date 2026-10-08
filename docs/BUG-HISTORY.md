@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-08**: newest entry BUG-2026-10-08-267 (branch `fix/kpi-delivered-last-leg-myt`, to `staging`; 264 to 266 are taken on other branches); a log, so "verified" means the entry matches the code on its branch.
 > **Last verified: 2026-10-07** (branch `chore/sync-staging-from-main-1007`, staging<-main merge): both logs merged, one copy of each entry. No id collisions: 260 to 262 are main's, 263 is staging's.
 > **Last verified: 2026-10-07**: newest entry BUG-2026-10-07-263 (branch `fix/sales-transfer-credit-block`, to staging; 260 to 262 are taken on `main`).
 > **Last verified: 2026-10-06** (branch `chore/sync-staging-from-main-1006`, staging<-main merge): both logs merged, one copy of each entry. No id collisions: 253, 257, 258 and 259 are the same bugs on both sides (257 and 259 take main's copy, which adds its main PR note). Main's 251, 254, 255 and 256 are added.
@@ -114,6 +115,20 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-10-08-267 — On-time delivery KPI scored the first dispatch, not the last delivery, on the UTC date `kpi` `delivery` `C21` 🟡
+
+🟡 Fix on `fix/kpi-delivered-last-leg-myt` (to `staging`, stacked on #748). The owner's rule (2026-08-14, BUG-2026-08-13-140): on time means the date the goods were DELIVERED against `sales_orders.customer_delivery_date`, once per sales order, judged on its LAST delivery.
+
+**Measured, read-only, 2026-10-08.** The KPI had its own query (2026-08-06), older than that rule, and was never moved onto it. (1) It scored `dispatched_at`, not `delivered_at`. (2) It took the FIRST dispatch (MIN), so a part-delivered order whose first lorry left on time counted as on time however late the last one arrived. (3) It took the date as `substr(x, 1, 10)`, the UTC date of a `toISOString()` value, and so did the Hookka Report's shared module: a delivery at 07:00 MYT on the 5th read as the 4th. Formats checked on staging and production first: every non-null `delivered_at` / `dispatched_at` is ISO with a Z, no plain dates, no blanks. Production, August: the old KPI said 31 late of 295 shipped (10.5%); the shared rule says 49 late of 267 fully delivered (18.4%). September: 66 of 337 (19.6%) against 130 of 364 (35.7%). The Malaysia date moves 1 of 549 production deliveries today (staff record deliveries in working hours), none in August or September, so almost all of the change is (1) and (2).
+
+**Fix.** `on-time-delivery.ts` gains `mytDateSql` / `mytYmd` (the one place the Malaysia conversion lives), `collectOnTimeOrders` (the rows, with an optional customer-scope clause) and `judgeOnTimeRow` (EARLY / ON_TIME / LATE / NOT_DELIVERED / NO_CUSTOMER_DATE); `summarizeOnTimeRows` now also counts `early`. The KPI (`customerDeliveryLate`) and its order list (`lateToCustomerOrders`, GET /api/sales-orders/late-to-customer) read those rows and that verdict, so the card, the list, the Hookka Report and Dashboard Experimental's on-time figure cannot disagree. List rows carry `deliveredOn` instead of `shippedOn`. An order past its promised date but not fully delivered stays out until its last delivery, as in the report (owner, 2026-10-08). The early bonus and the urgent-order rule keep working on the delivered date.
+
+**Guard.** `tests/on-time-delivery.test.mjs`: last lorry late = late, 07:00 MYT the day after = late, 23:59 MYT on the day = on time, part-delivered left out, the KPI's late % equals the list's late rows. `tests/kpi-drilldown.test.mjs` requires both to read `collectOnTimeOrders`; `tests/kpi-sql-identifiers.test.mjs` now scans `on-time-delivery.ts`.
+
+**Not in this fix.** Other metrics still take the UTC date with `substr(x, 1, 10)`, for example `documentsStuck` (dispatch to invoice) in `kpi-metrics.ts`.
 
 ---
 

@@ -1416,7 +1416,7 @@ const daysBetween = (a: string, b: string) =>
 
 /**
  * The delivery KPI's orders, opened in place on the card. Tap the summary line
- * and every order shipped that month is listed with its Late / Early / On time
+ * and every order fully delivered that month is listed with its Late / Early / On time
  * tag, filterable by tag. Same query as the score, so the counts match it.
  */
 function DeliveryOrderList({ period, evidence, urgentDays }: {
@@ -1427,7 +1427,7 @@ function DeliveryOrderList({ period, evidence, urgentDays }: {
   const { data, loading, error } = useCachedJson<{
     data?: Array<{
       id: string; companySOId: string | null; customerName: string | null;
-      customerDeliveryDate: string | null; shippedOn: string | null; status: DeliveryStatus;
+      customerDeliveryDate: string | null; deliveredOn: string | null; status: DeliveryStatus;
       leadDays: number | null;
     }>;
   }>(open ? `/api/sales-orders/late-to-customer?period=${period}&all=1` : "");
@@ -1455,7 +1455,7 @@ function DeliveryOrderList({ period, evidence, urgentDays }: {
           ) : error ? (
             <p className="p-3 text-[11.5px] text-[#9A3A2D]">Could not load the orders: {error}</p>
           ) : rows.length === 0 ? (
-            <p className="p-3 text-[11.5px] text-[#9CA3AF]">No orders shipped in {period}.</p>
+            <p className="p-3 text-[11.5px] text-[#9CA3AF]">No orders fully delivered in {period}.</p>
           ) : (
             <>
               <div className="flex flex-wrap gap-1.5 border-b border-[#E2DDD8] p-2">
@@ -1477,8 +1477,8 @@ function DeliveryOrderList({ period, evidence, urgentDays }: {
               <ul className="max-h-80 overflow-y-auto divide-y divide-[#EFEBE4]">
                 {shown.map((r) => {
                   const diff =
-                    r.customerDeliveryDate && r.shippedOn
-                      ? daysBetween(r.customerDeliveryDate, r.shippedOn)
+                    r.customerDeliveryDate && r.deliveredOn
+                      ? daysBetween(r.customerDeliveryDate, r.deliveredOn)
                       : 0;
                   return (
                     <li key={r.id} className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-3 py-2 text-[11.5px]">
@@ -1487,7 +1487,7 @@ function DeliveryOrderList({ period, evidence, urgentDays }: {
                       </Link>
                       <span className="min-w-0 flex-1 truncate text-[#3A3733]">{r.customerName || "—"}</span>
                       <span className="text-[#9CA3AF] tabular-nums">
-                        promised {r.customerDeliveryDate ?? "—"} · shipped {r.shippedOn ?? "—"}
+                        promised {r.customerDeliveryDate ?? "—"} · delivered {r.deliveredOn ?? "—"}
                       </span>
                       {urgentDays != null && r.leadDays != null && r.leadDays <= urgentDays && (
                         <span
