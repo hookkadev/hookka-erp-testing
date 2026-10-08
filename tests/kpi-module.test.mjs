@@ -12,6 +12,7 @@ import { resolve } from "node:path";
 import {
   KPI_CATALOG, GATE_FAIL_CAP, attainment, kpiByKey, kpisForRole, withRules,
 } from "../src/api/lib/kpi-catalog.ts";
+import { weightedLatePct } from "../src/api/lib/kpi-metrics.ts";
 
 const ROUTE = readFileSync(resolve(process.cwd(), "src/api/routes/kpi.ts"), "utf8");
 
@@ -117,6 +118,25 @@ test("late deliveries cost points, early ones win some back, never past 100", ()
   assert.equal(d.penaltyPerPct, 10, "the catalogue entry itself is not mutated");
   assert.equal(withRules(kpiByKey("setup_completeness"), { penaltyPerPct: 5 }).penaltyPerPct, undefined,
     "a KPI with no editable rules ignores them");
+});
+
+test("a late urgent order counts as part of a late order", () => {
+  // Owner 2026-10-08: ordered 1/10, promised 7/10 is urgent; late counts half.
+  const d = kpiByKey("customer_delivery_date");
+  assert.equal(d.urgentDays, 7);
+  assert.equal(d.urgentLatePct, 50);
+  // 31 late of 295, 10 of them urgent: 21 + 10 × 0.5 = 26 → 8.8%.
+  assert.equal(weightedLatePct(295, 31, 10, 50), 8.8);
+  assert.equal(weightedLatePct(295, 31, 0, 50), 10.5, "no urgent orders, no change");
+  assert.equal(weightedLatePct(100, 4, 4, 0), 0, "0% excuses late urgent orders fully");
+  assert.equal(weightedLatePct(100, 4, 4, 100), 4, "100% counts them like any other");
+
+  const r = withRules(d, { urgentDays: 3, urgentLatePct: 25 });
+  assert.ok(r.measurement.some((m) => /within 3 days .* counts as 25% of a late order/.test(m)));
+
+  const metrics = readFileSync(resolve(process.cwd(), "src/api/lib/kpi-metrics.ts"), "utf8");
+  assert.match(metrics, /customerDeliveryLate\(c, period, def\)/, "the saved rules reach the metric");
+  assert.match(ROUTE, /computeMetric\(c, def\.key, period, a\.scope, def\)/);
 });
 
 test("invoicing lag costs 10 points per document-day", () => {

@@ -166,6 +166,13 @@ export interface KpiDef {
   earlyStepPct?: number;
   earlyBonusPerStep?: number;
   earlyMaxBonus?: number;
+  /**
+   * PENALTY_PER_PCT only — an order promised within `urgentDays` of its order
+   * date is urgent, and a late urgent order counts as `urgentLatePct`% of a
+   * late one: the customer gave us less time (owner 2026-10-08).
+   */
+  urgentDays?: number;
+  urgentLatePct?: number;
   /** PENALTY_PER_UNIT only — points lost per whole unit of the actual. */
   penaltyPerUnit?: number;
   /**
@@ -225,7 +232,9 @@ export const GATE_FAIL_CAP = 60;
  * here has no editable rules.
  */
 export const EDITABLE_RULES = {
-  customer_delivery_date: ["penaltyPerPct", "earlyStepPct", "earlyBonusPerStep", "earlyMaxBonus"],
+  customer_delivery_date: [
+    "penaltyPerPct", "earlyStepPct", "earlyBonusPerStep", "earlyMaxBonus", "urgentDays", "urgentLatePct",
+  ],
 } as const satisfies Record<string, ReadonlyArray<keyof KpiDef>>;
 
 export type RuleField = (typeof EDITABLE_RULES)[keyof typeof EDITABLE_RULES][number];
@@ -240,7 +249,7 @@ export function editableRules(key: string): readonly RuleField[] {
  * describe a rule different from the one that scored it.
  */
 function deliveryText(
-  per: number, step: number, bonus: number, max: number,
+  per: number, step: number, bonus: number, max: number, urgentDays: number, urgentPct: number,
 ): Pick<KpiDef, "detail" | "formula" | "measurement"> {
   const zeroAt = per > 0 ? Math.round((100 / per) * 10) / 10 : null;
   const earlyLine =
@@ -256,6 +265,7 @@ function deliveryText(
       "Take the date promised to the customer on the sales order. Our own internal estimate is never used.",
       "Find the first dispatch date across every delivery order carrying that order's production.",
       "Late % = orders dispatched after the promised date ÷ orders dispatched that month × 100. Early % is the same for orders dispatched before it; shipped on the day is neither.",
+      `An urgent order is one promised within ${urgentDays} days of its order date. If it ships late it counts as ${urgentPct}% of a late order, because the customer gave us less time.`,
       `Score starts at 100 and loses ${per} points per 1% late` +
         (zeroAt !== null ? `: 0% → 100, 1% → ${Math.max(0, 100 - per)}, ${zeroAt}% or worse → 0.` : "."),
       earlyLine,
@@ -277,7 +287,8 @@ export function withRules(def: KpiDef, rules?: KpiRules): KpiDef {
     if (rules[f] != null && Number.isFinite(v)) d[f] = v;
   }
   if (d.key === "customer_delivery_date") {
-    Object.assign(d, deliveryText(d.penaltyPerPct!, d.earlyStepPct!, d.earlyBonusPerStep!, d.earlyMaxBonus!));
+    Object.assign(d, deliveryText(d.penaltyPerPct!, d.earlyStepPct!, d.earlyBonusPerStep!, d.earlyMaxBonus!,
+      d.urgentDays!, d.urgentLatePct!));
   }
   return d;
 }
@@ -286,7 +297,7 @@ export const KPI_CATALOG: KpiDef[] = [
   {
     key: "customer_delivery_date",
     label: "On-time delivery to the customer's promised date",
-    ...deliveryText(10, 10, 1, 5),
+    ...deliveryText(10, 10, 1, 5, 7, 50),
     shape: "RATIO",
     direction: "LOWER_IS_BETTER",
     unit: "%",
@@ -297,6 +308,9 @@ export const KPI_CATALOG: KpiDef[] = [
     earlyStepPct: 10,
     earlyBonusPerStep: 1,
     earlyMaxBonus: 5,
+    // Owner 2026-10-08: ordered 1/10, promised 7/10 is urgent; late counts half.
+    urgentDays: 7,
+    urgentLatePct: 50,
     purpose:
       "A late delivery is the one failure the customer always notices. Everything else in the factory can slip; this is the promise we made.",
     definition:

@@ -126,6 +126,8 @@ interface CardLine {
   available: boolean;
   blockedBy?: string;
   drillPath?: string;
+  /** Delivery KPI only — so the order list can tag urgent orders. */
+  urgentDays?: number;
   target: number;
   weight: number;
   actual: number | null;
@@ -250,7 +252,7 @@ async function buildCard(c: Context<Env>, userId: string, role: string, period: 
           ? await surveyMean(c, userId, def.key, period)
           : def.scoring === "MANUAL"
             ? await manualRating(c, period, userId, def.key)
-            : await computeMetric(c, def.key, period, a.scope);
+            : await computeMetric(c, def.key, period, a.scope, def);
     const att =
       m.actual === null ? null : attainment(def, Number(a.target), m.actual, m.earlyPct);
     lines.push({
@@ -259,7 +261,7 @@ async function buildCard(c: Context<Env>, userId: string, role: string, period: 
       purpose: def.purpose, definition: def.definition, measurement: def.measurement,
       surveyQuestions: def.surveyQuestions, ratingGuide: def.ratingGuide,
       shape: def.shape, unit: def.unit, available: true,
-      drillPath: def.drillPath,
+      drillPath: def.drillPath, urgentDays: def.urgentDays,
       target: Number(a.target), weight: Number(a.weight),
       actual: m.actual,
       attainment: att,
@@ -733,7 +735,7 @@ app.get("/library", async (c) => {
     // The company-level current value, so a target can be set against reality
     // rather than against a guess.
     const m = def.available
-      ? await computeMetric(c, def.key, period)
+      ? await computeMetric(c, def.key, period, null, def)
       : { actual: null, sampleSize: 0, detail: def.blockedBy ?? "" };
     data.push({
       ...def,

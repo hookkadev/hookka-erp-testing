@@ -20,7 +20,7 @@
 // ---------------------------------------------------------------------------
 import type { Context } from "hono";
 import type { Env } from "../worker";
-import { kpiByKey } from "./kpi-catalog";
+import { kpiByKey, type KpiDef } from "./kpi-catalog";
 import { getOrgId } from "./tenant";
 import {
   buildPerfDays,
@@ -122,6 +122,21 @@ const IS_LATE = `f.shipped_on > substr(so.customerDeliveryDate::text, 1, 10)`;
 /** …and left before it. Shipped on the day is neither late nor early. */
 const IS_EARLY = `f.shipped_on < substr(so.customerDeliveryDate::text, 1, 10)`;
 
+/** Days the customer gave us: promised date − order date. NULL with no order date. */
+const LEAD_DAYS = `(substr(so.customerDeliveryDate::text, 1, 10)::date
+       - NULLIF(substr(so.companySODate::text, 1, 10), '')::date)`;
+
+/**
+ * Late %, with a late URGENT order (promised within the urgent window of its
+ * order date) counting as `urgentLatePct`% of a late one. Owner 2026-10-08.
+ */
+export function weightedLatePct(
+  shipped: number, late: number, urgentLate: number, urgentLatePct: number,
+): number {
+  const counted = late - urgentLate * (1 - urgentLatePct / 100);
+  return Math.round((counted / shipped) * 1000) / 10;
+}
+
 /**
  * GATE — orders dispatched in the period, later than the customer's date.
  *
@@ -132,30 +147,40 @@ const IS_EARLY = `f.shipped_on < substr(so.customerDeliveryDate::text, 1, 10)`;
 export async function customerDeliveryLate(
   c: Context<Env>,
   period: string,
+  rules: Pick<KpiDef, "urgentDays" | "urgentLatePct"> = kpiByKey("customer_delivery_date")!,
 ): Promise<MetricResult> {
   const { start, end } = periodBounds(period);
+  const urgentDays = Math.floor(Number(rules.urgentDays ?? 7));
+  const urgentLatePct = Number(rules.urgentLatePct ?? 50);
   const row = await c.var.DB.prepare(
     `${FIRST_DISPATCH_CTE}
      SELECT COUNT(*) AS shipped,
             COALESCE(SUM(CASE WHEN ${IS_LATE} THEN 1 ELSE 0 END), 0) AS late,
+            COALESCE(SUM(CASE WHEN ${IS_LATE} AND ${LEAD_DAYS} <= ? THEN 1 ELSE 0 END), 0) AS urgent_late,
             COALESCE(SUM(CASE WHEN ${IS_EARLY} THEN 1 ELSE 0 END), 0) AS early
        ${DISPATCHED_IN_PERIOD}`,
   )
-    .bind(start, end)
-    .first<{ shipped: number; late: number; early: number }>();
+    .bind(urgentDays, start, end)
+    .first<{ shipped: number; late: number; urgent_late: number; early: number }>();
 
   const shipped = Number(row?.shipped) || 0;
   const late = Number(row?.late) || 0;
+  const urgentLate = Number(row?.urgent_late) || 0;
   const early = Number(row?.early) || 0;
   if (shipped === 0) return EMPTY;
   // Reported as a PERCENTAGE, not a count: 9 late out of 41 and 9 out of 400
   // are different failures, and the scoring curve is per percentage point.
-  const pct = Math.round((late / shipped) * 1000) / 10;
+  const pct = weightedLatePct(shipped, late, urgentLate, urgentLatePct);
   const earlyPct = Math.round((early / shipped) * 1000) / 10;
   return {
     actual: pct,
     sampleSize: shipped,
-    detail: `${late} late, ${early} early of ${shipped} shipped (${pct}% late, ${earlyPct}% early)`,
+    detail:
+      `${late} late` +
+      (urgentLate > 0
+        ? ` (${urgentLate} urgent at ${urgentLatePct}%, so ${Math.round((late - urgentLate * (1 - urgentLatePct / 100)) * 10) / 10} counted)`
+        : "") +
+      `, ${early} early of ${shipped} shipped (${pct}% late, ${earlyPct}% early)`,
     earlyPct,
   };
 }
@@ -168,6 +193,8 @@ export interface LateOrderRow {
   customerDeliveryDate: string | null;
   shippedOn: string | null;
   status: "LATE" | "EARLY" | "ON_TIME";
+  /** Promised date − order date, in days. The card tags it urgent against the rule. */
+  leadDays: number | null;
 }
 
 /**
@@ -203,6 +230,7 @@ export async function lateToCustomerOrders(
             so.customerName AS "customerName",
             substr(so.customerDeliveryDate::text, 1, 10) AS "customerDeliveryDate",
             f.shipped_on AS "shippedOn",
+            ${LEAD_DAYS} AS "leadDays",
             CASE WHEN ${IS_LATE} THEN 'LATE'
                  WHEN ${IS_EARLY} THEN 'EARLY'
                  ELSE 'ON_TIME' END AS "status"
@@ -892,10 +920,12 @@ export async function computeMetric(
   key: string,
   period: string,
   scope?: string | null,
+  /** The KPI with the company's saved rules applied (`withRules`). */
+  def?: KpiDef,
 ): Promise<MetricResult> {
   switch (key) {
     case "customer_delivery_date":
-      return customerDeliveryLate(c, period);
+      return customerDeliveryLate(c, period, def);
     case "setup_completeness":
       return setupCompleteness(c);
     case "documents_not_stuck":
