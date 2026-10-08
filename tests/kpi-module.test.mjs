@@ -114,7 +114,7 @@ test("late deliveries cost points, early ones win some back, never past 100", ()
   assert.equal(attainment(withRules(d, { penaltyPerPct: 0 }), 0, 50), 100, "0 is a real setting, not a fallback to 10");
   assert.match(r.detail, /costs 5 points/);
   assert.match(r.formula, /× 5/);
-  assert.ok(r.measurement.some((m) => /Every 20% of orders shipped early wins back 2 point/.test(m)));
+  assert.ok(r.measurement.some((m) => /Every 20% of orders delivered early wins back 2 point/.test(m)));
   assert.equal(d.penaltyPerPct, 10, "the catalogue entry itself is not mutated");
   assert.equal(withRules(kpiByKey("setup_completeness"), { penaltyPerPct: 5 }).penaltyPerPct, undefined,
     "a KPI with no editable rules ignores them");

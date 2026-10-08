@@ -248,13 +248,13 @@ test("the drill-down list runs the metric's own SQL, not a copy of it", () => {
   // Two hand-written copies agree on the day they are written. The card would
   // then say 11 and the list would show 14, and the number loses its
   // authority — which is the whole reason the link exists.
-  for (const frag of ["FIRST_DISPATCH_CTE", "DISPATCHED_IN_PERIOD", "IS_LATE", "IS_EARLY"]) {
-    const uses = METRICS.match(new RegExp(`\\$\\{${frag}\\}`, "g")) ?? [];
-    assert.ok(
-      uses.length >= 2,
-      `${frag} must be interpolated by BOTH the metric and its drill-down (found ${uses.length})`,
-    );
-  }
+  // Since BUG-2026-10-08-267 the delivery KPI and its list both read the rows
+  // of on-time-delivery.ts (the Hookka Report's own query) and judge them with
+  // its one verdict function.
+  const reads = METRICS.match(/await collectOnTimeOrders\(c\.var\.DB, start, end/g) ?? [];
+  assert.ok(reads.length >= 2, `the metric and its drill-down must both read collectOnTimeOrders (found ${reads.length})`);
+  assert.ok((METRICS.match(/judgeOnTimeRow\(r\)/g) ?? []).length >= 2,
+    "the metric and the list must judge each row with the shared verdict");
   // Same for the four setup checks.
   for (const f of ["price", "volume", "fabric", "bom"]) {
     const uses = METRICS.match(
@@ -265,9 +265,8 @@ test("the drill-down list runs the metric's own SQL, not a copy of it", () => {
       `SETUP_FIELD_SQL.${f} must be shared by the count and the list (found ${uses.length})`,
     );
   }
-  // And no second copy of the join was left behind.
-  const cteCopies = METRICS.match(/WITH first_dispatch AS \(/g) ?? [];
-  assert.equal(cteCopies.length, 1, "there must be exactly one first-dispatch CTE");
+  // And no copy of the old first-dispatch join was left behind.
+  assert.equal((METRICS.match(/first_dispatch/g) ?? []).length, 0, "the first-dispatch query must be gone");
 });
 
 test("the drill-down endpoints are row-scoped in SQL and sit before /:id", () => {
