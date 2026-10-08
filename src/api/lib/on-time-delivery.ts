@@ -58,7 +58,39 @@
 //
 // `coveragePct` is judged ÷ (judged + both exclusions). `onTimePct` is null,
 // never 0 or 100, when nothing is judgeable.
+//
+// THE DATE IS THE MALAYSIA DATE (BUG-2026-10-08-267). `delivered_at` is TEXT
+// holding `new Date().toISOString()`, i.e. UTC. Its first 10 characters are the
+// UTC date, so a delivery at 07:00 MYT on the 5th read as the 4th: on time when
+// it was a day late, and a delivery early on the 1st fell into last month.
+// `mytDateSql` / `mytYmd` are the one place that conversion lives.
+//
+// The on-time delivery KPI (kpi-metrics.ts) reads the same rows through
+// `collectOnTimeOrders` and the same verdict through `judgeOnTimeRow`, so the
+// KPI card, its order list and the Hookka Report cannot disagree.
 // ---------------------------------------------------------------------------
+
+/**
+ * The Malaysia (UTC+8) calendar date of a stored timestamp column, as SQL
+ * giving YYYY-MM-DD. Measured 2026-10-08, read-only, staging and prod: every
+ * non-null `delivered_at` / `dispatched_at` is ISO with a Z; no plain dates, no
+ * blanks. NULLIF still keeps a blank from failing the cast.
+ */
+export function mytDateSql(col: string): string {
+  return `to_char(NULLIF(${col}::text, '')::timestamptz AT TIME ZONE 'Asia/Kuala_Lumpur', 'YYYY-MM-DD')`;
+}
+
+/**
+ * The same conversion in JS. A full timestamp becomes its Malaysia date; a
+ * plain YYYY-MM-DD (what the SQL above already returns) is kept as it is.
+ */
+export function mytYmd(value: string): string {
+  const v = value.trim();
+  if (!v.includes("T")) return v.slice(0, 10);
+  const t = Date.parse(v);
+  if (!Number.isFinite(t)) return v.slice(0, 10);
+  return new Date(t + 8 * 3_600_000).toISOString().slice(0, 10);
+}
 
 /** The narrow DB surface this module needs (matches compliance-report.ts). */
 export interface DbLike {
@@ -77,6 +109,8 @@ export interface OnTimeDelivery {
   judged: number;
   onTime: number;
   late: number;
+  /** Delivered BEFORE the customer's date. A part of `onTime`, for the KPI's early bonus. */
+  early: number;
   /** Delivered, but the SO has no customer-committed date to score against. */
   excludedNoCustomerDate: number;
   /** Has a delivery in the window but is not fully delivered yet. */
@@ -97,6 +131,7 @@ export const EMPTY_ON_TIME: OnTimeDelivery = {
   judged: 0,
   onTime: 0,
   late: 0,
+  early: 0,
   excludedNoCustomerDate: 0,
   excludedNotDelivered: 0,
   coveragePct: null,
@@ -105,36 +140,52 @@ export const EMPTY_ON_TIME: OnTimeDelivery = {
     "delivered_at vs the customer's delivery date, per sales order (last delivery counts)",
 };
 
-interface OnTimeRow {
+export interface OnTimeRow {
   soId: string;
   customerDeliveryDate: string | null;
   lastDeliveredOn: string | null;
   openLegs: number | string | null;
+  /** For the KPI's order list and its urgent test; the report ignores them. */
+  companySOId?: string | null;
+  customerId?: string | null;
+  customerName?: string | null;
+  orderDate?: string | null;
   /** dual-key: the pg shim camelCases, but never assume it */
   so_id?: string;
   customer_delivery_date?: string | null;
   last_delivered_on?: string | null;
   open_legs?: number | string | null;
+  company_so_id?: string | null;
+  customer_id?: string | null;
+  customer_name?: string | null;
+  order_date?: string | null;
 }
 
+export type OnTimeVerdict = "EARLY" | "ON_TIME" | "LATE" | "NOT_DELIVERED" | "NO_CUSTOMER_DATE";
+
 /**
- * On-time delivery for [startYmd, endYmd], bucketed by the SO's LAST delivery.
+ * Every sales order whose LAST delivery (Malaysia date) fell in
+ * [startYmd, endYmd], with what is needed to judge it.
  *
  * An SO enters the population when at least one of its non-cancelled DOs was
  * delivered inside the window. `open_legs` counts its non-cancelled DOs that
  * carry no `delivered_at` — across the WHOLE order, not just the window, so a
  * part-delivery cannot qualify on a window technicality.
+ *
+ * `scope` is the row-level customer filter for the KPI's order list
+ * (customer-scope.ts), applied in SQL; the report passes none.
  */
-export async function collectOnTimeDelivery(
+export async function collectOnTimeOrders(
   db: DbLike,
   startYmd: string,
   endYmd: string,
-): Promise<OnTimeDelivery> {
+  scope: { clause: string; binds: string[] } = { clause: "", binds: [] },
+): Promise<OnTimeRow[]> {
   const res = await db
     .prepare(
       `WITH so_delivery AS (
          SELECT po.salesOrderId AS so_id,
-                MAX(substr(d.deliveredAt::text, 1, 10)) AS last_delivered_on,
+                MAX(${mytDateSql("d.deliveredAt")}) AS last_delivered_on,
                 SUM(CASE WHEN d.deliveredAt IS NULL OR d.deliveredAt::text = ''
                          THEN 1 ELSE 0 END) AS open_legs
            FROM delivery_orders d
@@ -147,17 +198,61 @@ export async function collectOnTimeDelivery(
        SELECT s.so_id AS "soId",
               substr(so.customerDeliveryDate::text, 1, 10) AS "customerDeliveryDate",
               s.last_delivered_on AS "lastDeliveredOn",
-              s.open_legs AS "openLegs"
+              s.open_legs AS "openLegs",
+              so.companySOId AS "companySOId",
+              so.customerId AS "customerId",
+              so.customerName AS "customerName",
+              substr(so.companySODate::text, 1, 10) AS "orderDate"
          FROM so_delivery s
          JOIN sales_orders so ON so.id = s.so_id
         WHERE s.last_delivered_on IS NOT NULL
           AND s.last_delivered_on >= ?
-          AND s.last_delivered_on <= ?`,
+          AND s.last_delivered_on <= ?${scope.clause ? ` AND ${scope.clause}` : ""}
+        ORDER BY s.last_delivered_on DESC, s.so_id DESC`,
     )
-    .bind(startYmd, endYmd)
+    .bind(startYmd, endYmd, ...scope.binds)
     .all<OnTimeRow>();
+  return res.results ?? [];
+}
 
-  return summarizeOnTimeRows(res.results ?? []);
+/**
+ * On-time delivery for [startYmd, endYmd], bucketed by the SO's LAST delivery.
+ * The Hookka Report's figure.
+ */
+export async function collectOnTimeDelivery(
+  db: DbLike,
+  startYmd: string,
+  endYmd: string,
+): Promise<OnTimeDelivery> {
+  return summarizeOnTimeRows(await collectOnTimeOrders(db, startYmd, endYmd));
+}
+
+/** The customer's date and the last delivery's Malaysia date for one row. */
+export function onTimeDates(r: OnTimeRow): { due: string; delivered: string } {
+  return {
+    due: String(r.customerDeliveryDate ?? r.customer_delivery_date ?? "").slice(0, 10).trim(),
+    delivered: mytYmd(String(r.lastDeliveredOn ?? r.last_delivered_on ?? "")),
+  };
+}
+
+/**
+ * The verdict for one sales order. The report's summary and the KPI's order
+ * list both call this, so a row can only ever land on one side.
+ */
+export function judgeOnTimeRow(r: OnTimeRow): OnTimeVerdict {
+  const openLegs = Number(r.openLegs ?? r.open_legs ?? 0) || 0;
+  // Still going out. Not late — not yet judgeable at all.
+  if (openLegs > 0) return "NOT_DELIVERED";
+  const { due, delivered } = onTimeDates(r);
+  if (!due) return "NO_CUSTOMER_DATE";
+  // Defensive: the query cannot produce this (last_delivered_on is NOT NULL
+  // there), but an empty string would otherwise compare as "on time".
+  if (!delivered) return "NOT_DELIVERED";
+  // Both are YYYY-MM-DD, so a string compare IS a date compare. Delivering ON
+  // the promised day is ON TIME — the customer asked for that date, not for
+  // the day before it.
+  if (delivered > due) return "LATE";
+  return delivered < due ? "EARLY" : "ON_TIME";
 }
 
 /**
@@ -167,37 +262,19 @@ export async function collectOnTimeDelivery(
 export function summarizeOnTimeRows(rows: OnTimeRow[]): OnTimeDelivery {
   let onTime = 0;
   let late = 0;
+  let early = 0;
   let excludedNoCustomerDate = 0;
   let excludedNotDelivered = 0;
 
   for (const r of rows) {
-    const openLegs = Number(r.openLegs ?? r.open_legs ?? 0) || 0;
-    if (openLegs > 0) {
-      // Still going out. Not late — not yet judgeable at all.
-      excludedNotDelivered += 1;
-      continue;
+    const v = judgeOnTimeRow(r);
+    if (v === "NOT_DELIVERED") excludedNotDelivered += 1;
+    else if (v === "NO_CUSTOMER_DATE") excludedNoCustomerDate += 1;
+    else if (v === "LATE") late += 1;
+    else {
+      onTime += 1;
+      if (v === "EARLY") early += 1;
     }
-    const due = String(r.customerDeliveryDate ?? r.customer_delivery_date ?? "")
-      .slice(0, 10)
-      .trim();
-    const delivered = String(r.lastDeliveredOn ?? r.last_delivered_on ?? "")
-      .slice(0, 10)
-      .trim();
-    if (!due) {
-      excludedNoCustomerDate += 1;
-      continue;
-    }
-    if (!delivered) {
-      // Defensive: the query cannot produce this (last_delivered_on is NOT
-      // NULL there), but an empty string would otherwise compare as "on time".
-      excludedNotDelivered += 1;
-      continue;
-    }
-    // Both are YYYY-MM-DD, so a string compare IS a date compare. Delivering ON
-    // the promised day is ON TIME — the customer asked for that date, not for
-    // the day before it.
-    if (delivered <= due) onTime += 1;
-    else late += 1;
   }
 
   const judged = onTime + late;
@@ -211,6 +288,7 @@ export function summarizeOnTimeRows(rows: OnTimeRow[]): OnTimeDelivery {
     judged,
     onTime,
     late,
+    early,
     excludedNoCustomerDate,
     excludedNotDelivered,
     coveragePct: pct1(judged, population),

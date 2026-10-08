@@ -32,8 +32,15 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import {
   summarizeOnTimeRows,
+  judgeOnTimeRow,
+  mytYmd,
+  mytDateSql,
   EMPTY_ON_TIME,
 } from "../src/api/lib/on-time-delivery.ts";
+import {
+  deliveryMetric,
+  deliveryOrderRows,
+} from "../src/api/lib/kpi-metrics.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "..");
@@ -86,20 +93,41 @@ test("delivering ON the promised day is ON TIME", () => {
   assert.equal(r.onTimePct, 100);
 });
 
-test("a full ISO timestamp is compared on its date part only", () => {
-  // deliveredAt is a timestamp; customer_delivery_date is a day. Comparing the
-  // raw strings would make "2026-08-10T18:00:00Z" > "2026-08-10" — late, for a
-  // delivery that arrived on the promised day.
-  const r = summarizeOnTimeRows([
-    {
-      soId: "a",
-      customerDeliveryDate: "2026-08-10",
-      lastDeliveredOn: "2026-08-10T18:00:00.000Z",
-      openLegs: 0,
-    },
+test("a full ISO timestamp is judged on its MALAYSIA date", () => {
+  // BUG-2026-10-08-267. deliveredAt is a UTC timestamp; customer_delivery_date
+  // is a Malaysia day. This test used to call 18:00Z on the 10th "on time" by
+  // reading the UTC date — but that is 02:00 on the 11th in Malaysia, a day
+  // late. 15:59Z is 23:59 MYT, still the promised day.
+  const at = (iso) => summarizeOnTimeRows([
+    { soId: "a", customerDeliveryDate: "2026-08-10", lastDeliveredOn: iso, openLegs: 0 },
   ]);
-  assert.equal(r.late, 0, "an evening arrival on the promised day is on time");
-  assert.equal(r.onTime, 1);
+  assert.equal(at("2026-08-10T15:59:00.000Z").onTime, 1, "23:59 MYT on the promised day is on time");
+  assert.equal(at("2026-08-10T18:00:00.000Z").late, 1, "02:00 MYT the next day is late");
+  assert.equal(at("2026-08-10T23:00:00.000Z").late, 1, "07:00 MYT the day after the promised date is late");
+});
+
+test("mytYmd and mytDateSql turn a UTC timestamp into the Malaysia date", () => {
+  assert.equal(mytYmd("2026-08-04T23:00:00.000Z"), "2026-08-05", "07:00 MYT on the 5th");
+  assert.equal(mytYmd("2026-08-31T16:30:00.000Z"), "2026-09-01", "00:30 MYT on the 1st is next month");
+  assert.equal(mytYmd("2026-08-10"), "2026-08-10", "a plain date is already a date");
+  const sql = mytDateSql("d.deliveredAt");
+  assert.match(sql, /AT TIME ZONE 'Asia\/Kuala_Lumpur'/);
+  assert.match(sql, /NULLIF\(d\.deliveredAt::text, ''\)::timestamptz/);
+});
+
+test("early is delivered BEFORE the promised day; on the day is on time, not early", () => {
+  const r = summarizeOnTimeRows([
+    row({ soId: "a", due: "2026-08-10", delivered: "2026-08-08" }),
+    row({ soId: "b", due: "2026-08-10", delivered: "2026-08-10" }),
+    row({ soId: "c", due: "2026-08-10", delivered: "2026-08-11" }),
+  ]);
+  assert.equal(r.early, 1);
+  assert.equal(r.onTime, 2, "early is a part of on time, as the report has always counted it");
+  assert.equal(r.late, 1);
+  assert.deepEqual(
+    ["a", "b", "c"].map((id, i) => judgeOnTimeRow(row({ soId: id, due: "2026-08-10", delivered: ["2026-08-08", "2026-08-10", "2026-08-11"][i] }))),
+    ["EARLY", "ON_TIME", "LATE"],
+  );
 });
 
 // ===========================================================================
@@ -172,8 +200,86 @@ test("an empty period publishes nulls, not a perfect score", () => {
 });
 
 // ===========================================================================
+// The on-time delivery KPI — the same rows, the same verdict (BUG-2026-10-08-267)
+// ===========================================================================
+
+const RULES = { urgentDays: 7, urgentLatePct: 100 };
+
+test("KPI: an order whose last lorry was late is late, however the first one went", () => {
+  // The old KPI took the FIRST dispatch. The shared rows carry the LAST
+  // delivery (MAX in the query, pinned below), so this order is judged on 14/8.
+  const m = deliveryMetric(
+    [row({ soId: "a", due: "2026-08-10", delivered: "2026-08-14" })],
+    RULES,
+  );
+  assert.equal(m.actual, 100);
+  assert.match(m.detail, /^1 late, 0 early of 1 delivered/);
+});
+
+test("KPI: a part-delivered order is left out, not judged on its first lorry", () => {
+  const m = deliveryMetric(
+    [
+      row({ soId: "a", due: "2026-08-10", delivered: "2026-08-02", openLegs: 1 }),
+      row({ soId: "b", due: "2026-08-10", delivered: "2026-08-09" }),
+    ],
+    RULES,
+  );
+  assert.equal(m.sampleSize, 1, "only the fully delivered order is judged");
+  assert.equal(m.actual, 0);
+  assert.equal(deliveryMetric([row({ due: "2026-08-10", delivered: "2026-08-02", openLegs: 1 })], RULES).actual,
+    null, "nothing judged is no figure, not 0%");
+});
+
+test("KPI: the late % and the order list agree, row for row", () => {
+  const rows = [
+    row({ soId: "a", due: "2026-08-10", delivered: "2026-08-08" }),
+    row({ soId: "b", due: "2026-08-10", delivered: "2026-08-10" }),
+    row({ soId: "c", due: "2026-08-10", delivered: "2026-08-10T23:00:00.000Z" }),
+    row({ soId: "d", due: "2026-08-05", delivered: "2026-08-12" }),
+    row({ soId: "e", due: "2026-08-10", delivered: "2026-08-12", openLegs: 1 }),
+    row({ soId: "f", due: null, delivered: "2026-08-12" }),
+  ];
+  const m = deliveryMetric(rows, RULES);
+  const late = deliveryOrderRows(rows, false);
+  const all = deliveryOrderRows(rows, true);
+  assert.deepEqual(late.map((r) => r.id), ["c", "d"], "c landed 07:00 MYT on the 11th");
+  assert.equal(all.length, m.sampleSize, "the full list is exactly what was judged");
+  assert.equal(m.actual, Math.round((late.length / all.length) * 1000) / 10);
+  assert.equal(all.find((r) => r.id === "c").deliveredOn, "2026-08-11", "the list shows the Malaysia date");
+  assert.deepEqual(all.map((r) => r.status), ["EARLY", "ON_TIME", "LATE", "LATE"]);
+});
+
+test("KPI: a late urgent order counts as the editable share", () => {
+  const rows = [
+    { ...row({ soId: "a", due: "2026-08-10", delivered: "2026-08-12" }), orderDate: "2026-08-04" },
+    { ...row({ soId: "b", due: "2026-08-20", delivered: "2026-08-22" }), orderDate: "2026-08-01" },
+    row({ soId: "c", due: "2026-08-20", delivered: "2026-08-19" }),
+    row({ soId: "d", due: "2026-08-20", delivered: "2026-08-19" }),
+  ];
+  assert.equal(deliveryMetric(rows, RULES).actual, 50, "100%: urgent counts in full");
+  const half = deliveryMetric(rows, { urgentDays: 7, urgentLatePct: 50 });
+  assert.equal(half.actual, 37.5, "a (6 days' notice) counts half: 1.5 of 4");
+  assert.match(half.detail, /1 urgent at 50%, so 1\.5 counted/);
+  assert.equal(deliveryOrderRows(rows, false)[0].leadDays, 6);
+});
+
+// ===========================================================================
 // STRUCTURAL — the wiring, which no behavioural test can reach
 // ===========================================================================
+
+test("the shared query takes the LAST delivery's Malaysia date", () => {
+  const mod = stripComments(read(MOD));
+  assert.match(mod, /MAX\(\$\{mytDateSql\("d\.deliveredAt"\)\}\) AS last_delivered_on/,
+    "MAX = the last delivery, on the Malaysia date");
+  assert.doesNotMatch(mod, /substr\(d\.deliveredAt/, "the UTC date slice is gone");
+});
+
+test("the KPI and its order list read the shared rows, not their own SQL", () => {
+  const metrics = stripComments(read("src/api/lib/kpi-metrics.ts"));
+  assert.match(metrics, /deliveryMetric\(await collectOnTimeOrders\(c\.var\.DB, start, end\), rules\)/);
+  assert.match(metrics, /deliveryOrderRows\(await collectOnTimeOrders\(c\.var\.DB, start, end, scope\), all\)/);
+  assert.doesNotMatch(metrics, /first_dispatch|FIRST_DISPATCH/, "no first-dispatch query left");
+});
 
 test("the report no longer scores our own internal target", () => {
   const agg = stripComments(read(AGG));

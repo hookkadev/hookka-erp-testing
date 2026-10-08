@@ -158,7 +158,7 @@ export interface KpiDef {
   penaltyPerPct?: number;
   /**
    * PENALTY_PER_PCT only — the early-delivery bonus. Every `earlyStepPct` of
-   * orders shipped before the promised date earns `earlyBonusPerStep` points,
+   * orders delivered before the promised date earns `earlyBonusPerStep` points,
    * up to `earlyMaxBonus`. The bonus only wins back late points: the score
    * never goes above 100 (owner 2026-10-05). Late points stop at 0 before the
    * bonus is added (owner 2026-10-08).
@@ -254,18 +254,19 @@ function deliveryText(
   const zeroAt = per > 0 ? Math.round((100 / per) * 10) / 10 : null;
   const earlyLine =
     bonus > 0 && max > 0
-      ? `Every ${step}% of orders shipped early wins back ${bonus} point(s), up to ${max}, added after the late points (even at 0). The score never goes above 100.`
+      ? `Every ${step}% of orders delivered early wins back ${bonus} point(s), up to ${max}, added after the late points (even at 0). The score never goes above 100.`
       : "Shipping early earns nothing extra.";
   return {
-    detail: `Every 1% of orders shipped late costs ${per} points`,
+    detail: `Every 1% of orders delivered late costs ${per} points`,
     formula:
       `100 − (late % × ${per}), never below 0, + early bonus, capped at 100.` +
       (zeroAt !== null ? ` ${zeroAt}% late or worse scores 0 before the bonus, and the bonus still counts.` : ""),
     measurement: [
       "Take the date promised to the customer on the sales order. Our own internal estimate is never used.",
-      "Find the first dispatch date across every delivery order carrying that order's production.",
-      "Late % = orders dispatched after the promised date ÷ orders dispatched that month × 100. Early % is the same for orders dispatched before it; shipped on the day is neither.",
-      `An urgent order is one promised within ${urgentDays} days of its order date. If it ships late it counts as ${urgentPct}% of a late order, because the customer gave us less time.`,
+      "Find the date the goods were DELIVERED, on the Malaysia calendar. An order sent in several deliveries is judged on its LAST one, because the customer has their order only when the last piece arrives.",
+      "An order still waiting for any of its deliveries is left out until it is fully delivered. It counts in the month its last delivery arrives.",
+      "Late % = orders delivered after the promised date ÷ orders fully delivered that month × 100. Early % is the same for orders delivered before it; delivered on the day is neither.",
+      `An urgent order is one promised within ${urgentDays} days of its order date. If it is delivered late it counts as ${urgentPct}% of a late order, because the customer gave us less time.`,
       `Score starts at 100 and loses ${per} points per 1% late` +
         (zeroAt !== null ? `: 0% → 100, 1% → ${Math.max(0, 100 - per)}, ${zeroAt}% or worse → 0.` : "."),
       earlyLine,
@@ -315,14 +316,14 @@ export const KPI_CATALOG: KpiDef[] = [
     purpose:
       "A late delivery is the one failure the customer always notices. Everything else in the factory can slip; this is the promise we made.",
     definition:
-      "The PERCENTAGE of sales orders shipped in the month whose first dispatch left after the date promised to that customer. Counted once per order, not per delivery note — a customer promised one date was let down once, however many trips it took.",
+      "The PERCENTAGE of sales orders fully delivered in the month whose LAST delivery arrived after the date promised to that customer. Counted once per order, not per delivery note — a customer promised one date was let down once, however many trips it took.",
     defaultTarget: 0,
     defaultWeight: 30,
     available: true,
     // Opens the Sales list narrowed to the orders this % was computed from,
     // for this month. The id set comes from
-    // GET /api/sales-orders/late-to-customer, which shares its SQL with
-    // `customerDeliveryLate`.
+    // GET /api/sales-orders/late-to-customer, which reads the same rows and
+    // verdict as `customerDeliveryLate` (on-time-delivery.ts).
     drillPath: "/sales?filter=late-to-customer&period={period}",
     roles: ["OFFICE", "SALES"],
   },
@@ -629,7 +630,7 @@ export function attainment(
     >,
   target: number,
   actual: number,
-  /** PENALTY_PER_PCT only — % of orders shipped early, for the bonus. */
+  /** PENALTY_PER_PCT only — % of orders delivered early, for the bonus. */
   earlyPct?: number | null,
 ): number {
   if (!Number.isFinite(actual)) return 0;
