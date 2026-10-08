@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-08**: branch `feat/editable-wip-types-main` (staging #752 to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-08**: branch `fix/kpi-delivery-rules-main` (to `main`) (BUG-2026-10-08-267) added below (its entry is the newest).
 > **Last verified: 2026-10-07**: branch `feat/dev08-pillow-follows-sofa-to-main` (DEV-08 staging to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-07**: branch `fix/empty-auto-invoice-guard` (to `main`, BUG-2026-10-07-266) added below (its entry is the newest).
@@ -104,6 +105,15 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-08 — 🔵 Editable BOM WIP types and variant fields to `main` (branch `feat/editable-wip-types-main` → `main`, same change as staging #752)
+
+Owner ask: the BOM editor's WIP type dropdown and the code-builder variant fields were hard-coded; Sandback had no type and Accessory could not use Model. Both commits copied from staging #752; the code diff is identical.
+
+1. 🔵 `src/lib/wip-types.ts`: six fixed built-ins plus extra names from Products > Maintenance > BOM > WIP Types (`variants-config.wipTypes`); extras default to Sandback. An extra type follows the departments in its BOM.
+2. 🔵 `src/lib/bom-variant-fields.ts`: variant fields ticked per product type in Maintenance > BOM > Variant Fields (`variants-config.bomVariantFields`); Accessory offers Model by default. Only the ten known fields.
+3. 🔵 Tests: `tests/wip-types.test.mjs`, `tests/bom-variant-fields.test.mjs`.
+4. ⬜ Prod check after deploy: Sandback in the Master BOM Template type dropdown, saved and reloaded; Accessory code builder offers Model.
 
 ## 2026-10-08 — 🟡 On-time delivery KPI to `main`: no-negative late points, urgent orders, delivered date on the last delivery (branch `fix/kpi-delivery-rules-main` → `main`, BUG-2026-10-08-267)
 
