@@ -7,6 +7,8 @@ import { useConfirm } from "@/components/ui/confirm-dialog";
 import { resolveWipTokens, type BomVariantContext } from "@/api/lib/bom-wip-breakdown";
 import { withProductCategory } from "./bom-category";
 import { removeWipLevel, moveWipNode, canMoveWipNode } from "@/lib/wip-tree-ops";
+import { BUILT_IN_WIP_TYPES, buildWipTypes, type WipTypeStyle } from "@/lib/wip-types";
+import { fetchVariantsConfig } from "@/lib/kv-config";
 import type {
   MaterialScaling,
   MaterialScalingDimension,
@@ -67,7 +69,8 @@ type WIPComponent = {
   id: string;
   wipCode: string;
   codeSegments?: CodeSegment[];
-  wipType: "HEADBOARD" | "DIVAN" | "SOFA_BASE" | "SOFA_CUSHION" | "SOFA_ARMREST" | "SOFA_HEADREST";
+  // A built-in type or an extra one from Maintenance (see wip-types.ts).
+  wipType: string;
   quantity: number;
   processes: BOMProcess[];
   materials?: WIPMaterial[];
@@ -190,14 +193,9 @@ function MinutesInput({ value, onChange, className }: { value: number; onChange:
   );
 }
 
-const WIP_TYPE_LABELS: Record<string, { label: string; color: string }> = {
-  HEADBOARD: { label: "Headboard", color: "#7C3AED" },
-  DIVAN: { label: "Divan", color: "#0891B2" },
-  SOFA_BASE: { label: "Sofa Base", color: "#059669" },
-  SOFA_CUSHION: { label: "Back Cushion", color: "#D97706" },
-  SOFA_ARMREST: { label: "Sofa Armrest", color: "#DC2626" },
-  SOFA_HEADREST: { label: "Sofa Headrest", color: "#7C3AED" },
-};
+// Module-level like KIT_PARENT_CODES: the page load below refills it with the
+// built-ins plus the extra types saved in Maintenance, then re-renders.
+const WIP_TYPE_LABELS: Record<string, WipTypeStyle> = { ...BUILT_IN_WIP_TYPES };
 
 type VariantCategoryInfo = { category: string; label: string };
 
@@ -5981,7 +5979,7 @@ export default function BOMManagementPage() {
   useEffect(() => {
     async function load() {
       try {
-        const [pData, tData, invData, kitData] = await Promise.all([
+        const [pData, tData, invData, kitData, variantsCfg] = await Promise.all([
           cachedFetchJson<{ success?: boolean; data?: unknown }>("/api/products"),
           cachedFetchJson<{ success?: boolean; data?: unknown }>("/api/bom/templates"),
           // perf 2026-08-13 (BUG-2026-08-13-021): `?buckets=rawMaterials` — only
@@ -5989,7 +5987,12 @@ export default function BOMManagementPage() {
           // fetched separately on the line above.
           cachedFetchJson<{ success?: boolean; data?: { rawMaterials?: unknown[] } }>("/api/inventory?buckets=rawMaterials"),
           cachedFetchJson<{ success?: boolean; data?: { parentCode?: string }[] }>("/api/component-boms"),
+          fetchVariantsConfig(),
         ]);
+
+        // Refill the WIP type dropdown list before setTemplates re-renders.
+        for (const k of Object.keys(WIP_TYPE_LABELS)) delete WIP_TYPE_LABELS[k];
+        Object.assign(WIP_TYPE_LABELS, buildWipTypes(variantsCfg?.wipTypes));
 
         // Populate the reusable-kit hint set (module-level; see materialHasKit).
         if (kitData && kitData.success && Array.isArray(kitData.data)) {

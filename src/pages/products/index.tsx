@@ -12,6 +12,7 @@ import { Plus, Trash2, Check, Calendar, History, Pencil, FileDown, Loader2, X as
 import { verifiedSave, formatMismatchError } from "@/lib/verified-save";
 import { useNavGuard } from "@/lib/use-nav-guard";
 import { familyOf } from "@/lib/product-family";
+import { DEFAULT_EXTRA_WIP_TYPES } from "@/lib/wip-types";
 import { MasterPriceHistoryDialog } from "./MasterPriceHistoryDialog";
 import { BatchImportDialog, type ImportColumn } from "@/components/ui/batch-import-dialog";
 import { exportImportRows } from "@/components/ui/batch-import-dialog";
@@ -908,7 +909,8 @@ type MaintenanceListKey =
   | "sofaLegHeights"
   | "sofaSpecials"
   | "sofaSizes"
-  | "sofaCompartments";
+  | "sofaCompartments"
+  | "wipTypes";
 
 // BedframeSize (code · label · dimensions) + the seed catalogs live in
 // @/lib/fg-variants (shared with the Add FG bulk-generate flow so they can't
@@ -942,6 +944,9 @@ type MaintenanceConfig = {
   // Sofa compartment pool (1A(LHF), 1A(RHF), 1NA, 2A(LHF)…) — the codes a sofa
   // model can be split into. Add FG bulk-generate lists these to tick per model.
   sofaCompartments: string[];
+  // Extra BOM WIP types (e.g. Sandback) on top of the six built-ins; see
+  // src/lib/wip-types.ts.
+  wipTypes: string[];
 };
 
 // Variants live in D1 under kv_config('variants-config'); see src/lib/kv-config.ts.
@@ -1018,6 +1023,7 @@ const DEFAULT_MAINTENANCE_CONFIG: MaintenanceConfig = {
   ],
   sofaSizes: FALLBACK_SOFA_SEAT_HEIGHTS,
   sofaCompartments: DEFAULT_SOFA_COMPARTMENTS,
+  wipTypes: DEFAULT_EXTRA_WIP_TYPES,
 };
 
 // Numeric seat sizes for the SOFA price columns, from the Maintenance config.
@@ -1067,6 +1073,7 @@ const MAINTENANCE_TABS: { key: MaintenanceTab; label: string; description: strin
   { key: "sofaLegHeights", label: "Leg Heights", description: "Sofa leg height options with surcharge pricing", priced: true, section: "Sofa" },
   { key: "sofaSpecials", label: "Specials", description: "Sofa special order options with surcharge pricing", priced: true, section: "Sofa" },
   { key: "sofaCompartments", label: "Compartments", description: "Sofa compartment pool (1A(LHF), 1A(RHF), 1NA, 2A(LHF)…). Add FG bulk generate ticks which a model offers.", section: "Sofa" },
+  { key: "wipTypes", label: "WIP Types", description: "Extra WIP component types for the BOM type dropdown (e.g. Sandback). Headboard, Divan, Sofa Base, Back Cushion, Sofa Armrest and Sofa Headrest are always included. An extra type follows the departments set in its BOM.", section: "BOM" },
   { key: "fabrics", label: "Fabrics", description: "Fabric price tier assignment — determines Price 1 or Price 2 for bedframe pricing", section: "Common" },
 ];
 
@@ -1112,6 +1119,7 @@ function parseMaintenanceConfig(parsed: VariantsConfig | null): MaintenanceConfi
       sofaSpecials: ensurePriced(parsed.sofaSpecials, DEFAULT_MAINTENANCE_CONFIG.sofaSpecials),
       sofaSizes: ensureStrings(parsed.sofaSizes, DEFAULT_MAINTENANCE_CONFIG.sofaSizes),
       sofaCompartments: ensureStrings(parsed.sofaCompartments, DEFAULT_MAINTENANCE_CONFIG.sofaCompartments),
+      wipTypes: ensureStrings(parsed.wipTypes, DEFAULT_MAINTENANCE_CONFIG.wipTypes),
     };
   } catch {
     return DEFAULT_MAINTENANCE_CONFIG;

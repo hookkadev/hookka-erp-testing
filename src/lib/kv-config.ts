@@ -535,6 +535,8 @@ export type VariantsConfig = {
   // Add FG bulk-generate catalogs (owner 2026-07-11).
   bedframeSizes?: unknown[];
   sofaCompartments?: string[];
+  // Extra BOM WIP type names (src/lib/wip-types.ts); the six built-ins are implied.
+  wipTypes?: string[];
   // Add RM bulk-generate: raw-material category (itemGroup) → variant suffixes.
   materialVariants?: Record<string, string[]>;
   // FILLER (sponge) area-based consumption: per item-group DEFAULT sheet size
