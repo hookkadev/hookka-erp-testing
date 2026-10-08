@@ -297,7 +297,7 @@ export const KPI_CATALOG: KpiDef[] = [
   {
     key: "customer_delivery_date",
     label: "On-time delivery to the customer's promised date",
-    ...deliveryText(10, 10, 1, 5, 7, 50),
+    ...deliveryText(10, 10, 1, 5, 7, 100),
     shape: "RATIO",
     direction: "LOWER_IS_BETTER",
     unit: "%",
@@ -308,9 +308,10 @@ export const KPI_CATALOG: KpiDef[] = [
     earlyStepPct: 10,
     earlyBonusPerStep: 1,
     earlyMaxBonus: 5,
-    // Owner 2026-10-08: ordered 1/10, promised 7/10 is urgent; late counts half.
+    // Owner 2026-10-08: ordered 1/10, promised 7/10 is urgent. A late one counts
+    // in full by default; Super Admin can lower it from the Library.
     urgentDays: 7,
-    urgentLatePct: 50,
+    urgentLatePct: 100,
     purpose:
       "A late delivery is the one failure the customer always notices. Everything else in the factory can slip; this is the promise we made.",
     definition:
