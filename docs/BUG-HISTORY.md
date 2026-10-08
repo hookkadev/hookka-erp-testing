@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-08**: BUG-2026-10-08-269 got a follow-up, the ÷9 rule seeded from 2026-10-01 (branch `fix/ot-hourly-rate-display`, to `main`, second commit of #759).
 > **Last verified: 2026-10-08**: newest entry BUG-2026-10-08-269 (branch `fix/ot-hourly-rate-display`, to `main`); a log, so "verified" means the entry matches the code on its branch.
 > **Last verified: 2026-10-08**: newest entry BUG-2026-10-08-268 (branch `fix/worker-pwa-ios-start-url`, to main); a log, so "verified" means the entry matches the code on its branch.
 > **Last verified: 2026-10-08**: newest entry BUG-2026-10-08-267 (branch `fix/kpi-delivery-rules-main` (to `main`); the same entry is on staging's #749); a log, so "verified" means the entry matches the code on its branch.
@@ -98,6 +99,8 @@ Entries themselves stay newest-first.
 **Guard.** `tests/pay-rules.test.mjs`: `payrollHourRateSen` rounds (944, 876, 850), and the owner's two sums under "hours only" (per day RM 85, 4h weekday OT = 5,664 sen; monthly RM 2,050 = 5,256 sen). `tests/labor-engine.test.mjs` figures moved to the rounded ANN rate (1132 sen).
 
 **Not in this fix.** The department labour-cost tabs in `employees.tsx` (`otBaseRateSen = salary / monthDays / stdHours`) price OT cost with their own unrounded ÷hours rate and ignore per-day pay; they are an allocation, bridged to payroll on the Labor Cost screen, and were left as they are. The row label assumes the ÷26 day divisor (the default mode); under "calendar days" or "working days" it would still print "/ 26". Class: none fits exactly; nearest is C18 (one figure computed in two places, only one maintained).
+
+**Follow-up, same day: the ÷9 rule itself** (second commit of #759). The owner confirmed salary ÷ 26 ÷ 9, lunch not counted. Git history: ÷9 was the rule from the first engine (22 May) to 8 Jun; `acc0208a` (9 Jun, the owner's salary sheet, "the /10 = the 08:00-18:00 shift span") and `f830d0c8` / `815471d2` (11 Jun, "hours + lunch") moved pay to ÷10, and a rule saved from 2026-07-01 keeps "hours + lunch". A saved rule beats `DEFAULT_PAY_RULES`, so changing the default would have re-priced only May and June. `seedHoursOnlyRule` (`pay-rules-store.ts`, run once per isolate from `ensurePayRuleVersions`) inserts one row, id `prv-owner-20261008-hours-only`, from 2026-10-01, copying the rules in force on that date and switching only `hourRateDivisorMode` to `hoursOnly`. It reads through a batch (C29), skips when hours-only is already in force on 2026-10-01, uses `ON CONFLICT (id) DO NOTHING`, and wipes `worker_payslips_snapshot` / `worker_history_snapshot` when it inserts. Lunch (60 min) stays: it still sets the 9h day, when OT starts and the punch-clock lunch window. Not measured: whether a site already has a rule dated after 2026-10-01 that says "hours + lunch" (it would take over from its date), and plain reads of the rules can serve the pre-seed list for up to 60 s after deploy. Guard: `tests/pay-rule-hours-only-seed.test.mjs` (HR fields copied, one insert across two concurrent runs, September ÷10 vs October RM 26.28).
 
 ---
 

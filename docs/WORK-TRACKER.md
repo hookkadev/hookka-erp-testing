@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-08**: branch `fix/ot-hourly-rate-display` (to `main`, second commit of #759) closed item 5 of the hourly-rate entry below (the ÷9 rule is seeded from 2026-10-01).
 > **Last verified: 2026-10-08**: branch `fix/ot-hourly-rate-display` (to `main`, BUG-2026-10-08-269) added below (its entry is the newest).
 > **Last verified: 2026-10-08**: branch `feat/kpi-dept-efficiency-daily-chart-main` (to `main`, DEV-36) added below (its entry is the newest).
 > **Last verified: 2026-10-08**: branch `feat/editable-wip-types-main-v2` (staging #752 to `main`, second try after #753 was reverted by #754) updated the entry below.
@@ -117,7 +118,7 @@ Owner ask: the expanded payroll row showed "2 hrs x RM 8.76 x 1.5 = RM 23.65" fo
 2. 🔵 The payslip hourly rate shown on the payroll row comes from that rate (it divided by the hours alone, ignoring the pay-rule mode).
 3. 🔵 The expanded row label shows the real sum: day rate (salary / days, or the daily rate) / the divisor the pay rules give.
 4. 🔵 Tests: the owner's two figures under hours-only (5664 and 5256 sen), and the existing engine test updated to the rounded rate.
-5. 🟡 The ÷9 rule itself is a setting, not code. Date not given yet.
+5. 🔵 The ÷9 rule (owner confirmed salary ÷ 26 ÷ 9): the saved 2026-07-01 rule says "hours + lunch" and beats the code default, so a dated rule is needed. Owner chose to have the deploy add it rather than schedule it by hand: `seedHoursOnlyRule` (`src/api/lib/pay-rules-store.ts`) writes one row "from 2026-10-01, hours only", copying every other field in force on that date, once. September and earlier keep ÷10. Second commit of #759. Test: `tests/pay-rule-hours-only-seed.test.mjs`. Fallback if the owner asks for it: drop the lunch from `payrollHourDivisor` (`pay-rules.ts`, one line) so every month, past ones included, prices at ÷hours.
 6. ⬜ Check on production after deploy (this goes to `main` directly; staging gets it through the usual staging<-main sync).
 
 ## 2026-10-08 — 🟡 DEV-36 follow-up to `main`: daily efficiency chart on the Department efficiency KPI card (branch `feat/kpi-dept-efficiency-daily-chart-main` → `main`)
