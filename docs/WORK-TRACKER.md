@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-08**: branch `fix/ot-hourly-rate-display` (to `staging`, BUG-2026-10-08-269) added below (its entry is the newest).
 > **Last verified: 2026-10-08**: branch `fix/bom-module-guide-anchors` (to `staging`) added item 5b to the editable WIP types entry below.
 > **Last verified: 2026-10-08**: branch `feat/editable-wip-types` (to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-08**: branch `fix/kpi-delivered-last-leg-myt` (to `staging`, BUG-2026-10-08-267) added below (its entry is the newest).
@@ -172,6 +173,17 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-08 — 🔵 Payroll hourly rate: one rounded rate, and the OT line adds up (branch `fix/ot-hourly-rate-display` → `staging`, BUG-2026-10-08-269)
+
+Owner ask: the expanded payroll row showed "4 hrs x RM 9.44 x 1.5 = RM 51.00" for a daily-paid worker (day rate RM 85). The page divided by 9 hours, the engine by 9 + 1h lunch, so the line did not add up. Owner ruling 2026-10-08: the hourly rate is day rate / working hours, lunch NOT included (85/9 = 9.44, 2050/26/9 = 8.76), and it is rounded to the sen before multiplying, like a calculator (9.44 x 1.5 x 4 = 56.64).
+
+1. 🔵 One shared hourly rate, rounded to the sen (`payrollHourRateSen` in `src/lib/pay-rules.ts`), used by the engine (OT pay, short-hour dock), the payslip routes, the worker pay routes and the labour-cost recon bridges.
+2. 🔵 The payslip hourly rate shown on the payroll row comes from that rate (it divided by the hours alone, ignoring the pay-rule mode).
+3. 🔵 The expanded row label shows the real sum: day rate (salary / days, or the daily rate) / the divisor the pay rules give.
+4. 🔵 Tests: the owner's two figures under hours-only (5664 and 5256 sen), and the existing engine test updated to the rounded rate.
+5. 🟡 The ÷9 rule itself is a setting, not code: Pay Rules (Maintenance), schedule "Worker's hours only (÷9)" from the date it should apply. Date not given yet.
+6. ⬜ Staging check after deploy.
 
 ## 2026-10-08 — 🔵 Editable BOM WIP types, Sandback first (branch `feat/editable-wip-types` → `staging`)
 

@@ -42,7 +42,7 @@
 import {
   resolvePayRulesAsOf,
   payrollDayRateSen,
-  payrollHourDivisor,
+  payrollHourRateSen,
   type PayRuleVersion,
   type PayRulesConfig,
 } from "./pay-rules";
@@ -696,10 +696,11 @@ export function computeMonthlyLabor(
   // daily hours + lunch (9h + 1h = ÷10; 7.5h → ÷8.5); mode can switch it to
   // hours-only or a fixed number. No hours set → rateHoursPerDay fallback.
   // Lunch is effective-dated, so the divisor resolves per date like the rest.
-  const hourDivisorAt = (cfg: PayRulesConfig): number =>
-    payrollHourDivisor(workingHoursPerDay, cfg);
-  const otBaseHourlyRateSen =
-    payrollDailyRateSen / hourDivisorAt(cfgMonthEnd); // ÷26 ÷ day-span, before the day multiplier
+  // The rate is rounded to the sen before any hours multiply it (owner
+  // 2026-10-08: the payslip must add up on a calculator).
+  const hourRateAt = (cfg: PayRulesConfig): number =>
+    payrollHourRateSen(payrollDailyRateSen, workingHoursPerDay, cfg);
+  const otBaseHourlyRateSen = hourRateAt(cfgMonthEnd); // ÷26 ÷ day-span, before the day multiplier
   const otHourlyRateSen = otBaseHourlyRateSen * otMultiplier; // weekday OT rate (÷26÷10×mult) — back-compat
   // Unified ÷26 (owner 2026-06-11): the late/short hourly rate uses the SAME
   // ÷26 base as OT (was ÷calendar÷10).
@@ -731,7 +732,7 @@ export function computeMonthlyLabor(
     const [py, pm, pd] = date.split("-").map(Number);
     const pdow = new Date(py, (pm || 1) - 1, pd || 1).getDay();
     const cfg = rulesAt(date);
-    const base = payrollDailyRateSen / hourDivisorAt(cfg);
+    const base = hourRateAt(cfg);
     if (pdow === 0) {
       otSundayPayExact += h * base * cfg.sundayOtMultiplier;
     } else if (holidaySet.has(date)) {

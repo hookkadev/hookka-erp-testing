@@ -17,6 +17,7 @@ import {
   toAttendanceRules,
   payrollDayRateSen,
   payrollHourDivisor,
+  payrollHourRateSen,
   DEFAULT_PAY_RULES,
   minToHhmm,
   type PayRuleVersion,
@@ -4847,7 +4848,7 @@ function DepartmentLaborTab({
               0,
               Math.round((dockH * S) / actualWorkingDays / owStd) -
                 Math.round(
-                  (dockH * dockDayRate) / payrollHourDivisor(ow?.workingHoursPerDay, cfgDeptEnd),
+                  dockH * payrollHourRateSen(dockDayRate, ow?.workingHoursPerDay, cfgDeptEnd),
                 ),
             );
           }
@@ -6761,7 +6762,9 @@ function RuleDraftExplainer({ d }: { d: Record<string, string> }) {
       : hourMode === "hoursOnly"
         ? "the worker's daily hours (9h worker → ÷9)"
         : `the worker's daily hours + ${lunchH}h lunch (9h worker → ÷${9 + lunchH})`;
-  const hourRate = dayRate / Math.max(1, hourDiv);
+  // Rounded to the sen like the engine (payrollHourRateSen), so the example
+  // multiplies the same rate a payslip does.
+  const hourRate = Math.round((dayRate / Math.max(1, hourDiv)) * 100) / 100;
   const grace = Number(d.lateGraceMin) || 0;
   const block = Math.max(1, Number(d.lateBlockMin) || 15);
   const sun = Number(d.sundayOtMultiplier) || 2;
@@ -6807,14 +6810,13 @@ function RuleDraftExplainer({ d }: { d: Record<string, string> }) {
 function PayrollTab({ workers }: { workers: Worker[] }) {
   const { toast } = useToast();
   const { confirm, confirmDialog } = useConfirm();
-  // Per-worker contracted hours, for the payslip "Hourly Rate" formula label.
-  // The rate itself is already computed from each worker's real hours; only the
-  // "(26 x 9)" divisor text was hardcoded and lied for anyone not on 9h/day
-  // (e.g. ANN at 7.5). Look the hours up by employeeId so the label matches the
-  // number shown. BUG-2026-07-17-012.
-  const hoursByWorkerId = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const w of workers) if (w.id) m.set(w.id, w.workingHoursPerDay);
+  // Per-worker hours / pay mode, for the payslip "Hourly Rate" formula label.
+  // The "(26 x 9)" divisor text was hardcoded and lied for anyone not on 9h/day
+  // (e.g. ANN at 7.5, BUG-2026-07-17-012), and later for everyone: it left the
+  // lunch hour out while the engine put it in (BUG-2026-10-08-269).
+  const workerById = useMemo(() => {
+    const m = new Map<string, Worker>();
+    for (const w of workers) if (w.id) m.set(w.id, w);
     return m;
   }, [workers]);
   const now = new Date();
@@ -7374,6 +7376,22 @@ function PayrollTab({ workers }: { workers: Worker[] }) {
   };
 
   const fmtSen = (sen: number) => `RM ${(sen / 100).toFixed(2)}`;
+  // The sum behind the "Hourly Rate" figure, as the engine did it: the day rate
+  // (salary ÷ days, or a per-day person's agreed rate) ÷ the hour divisor the
+  // month-end pay rules give (lunch in or out per the mode). A per-day person
+  // used to read "RM 0.00 / (26 x 9)".
+  const hourlyRateFormula = (r: PayslipData): string => {
+    const w = workerById.get(r.employeeId);
+    const [py, pm] = period.split("-").map(Number);
+    const cfg = resolvePayRulesAsOf(
+      payRuleVersionList,
+      `${period}-${String(new Date(py, pm, 0).getDate()).padStart(2, "0")}`,
+    );
+    const div = Number(payrollHourDivisor(w?.workingHoursPerDay, cfg).toFixed(2));
+    return w && isDailyPaidWorker(w)
+      ? `${fmtSen(w.dailyRateSen ?? 0)}/day / ${div}`
+      : `${fmtSen(r.basicSalary)} / ${r.workingDays} / ${div}`;
+  };
   // OT hours for DISPLAY. The payslip stores them in an INTEGER column, so a
   // real 0.15h of overtime is stored as 0 and the panel printed the nonsense
   // "0 hrs x RM 13.59 x 1.5 = RM 3.06" (owner 2026-08-01: 「OT 可是0hours？」).
@@ -7504,7 +7522,8 @@ function PayrollTab({ workers }: { workers: Worker[] }) {
         : cfg.hourRateDivisorMode === "hoursOnly"
           ? "the worker's daily hours (9h worker → ÷9)"
           : `the worker's daily hours + ${lunchTxt} lunch (9h worker → ÷${9 + lunchH})`;
-    const hourRate = dayRate / Math.max(1, hourDiv);
+    // Rounded to the sen like the engine (payrollHourRateSen).
+    const hourRate = Math.round((dayRate / Math.max(1, hourDiv)) * 100) / 100;
     const rm = (v: number) => `RM${v.toFixed(2)}`;
     const grace = cfg.lateGraceMin;
     const block = cfg.lateBlockMin;
@@ -7860,7 +7879,7 @@ function PayrollTab({ workers }: { workers: Worker[] }) {
                                 <h4 className="text-xs font-semibold text-[#6B5C32] uppercase tracking-wide">OT Calculation</h4>
                                 <div className="text-xs space-y-1 text-[#374151] bg-white rounded-lg p-3 border border-[#E2DDD8]">
                                   <p className="text-[#6B7280]">
-                                    Hourly Rate: {fmtSen(r.basicSalary)} / ({r.workingDays} x {hoursByWorkerId.get(r.employeeId) ?? 9}) = <span className="font-semibold text-[#1F1D1B]">{fmtSen(r.hourlyRate)}/hr</span>
+                                    Hourly Rate: {hourlyRateFormula(r)} = <span className="font-semibold text-[#1F1D1B]">{fmtSen(r.hourlyRate)}/hr</span>
                                   </p>
                                   <hr className="border-[#E2DDD8]" />
                                   <p>
@@ -9400,7 +9419,7 @@ function LaborCostTab({
         { workingDaysPerMonth: wDays, calendarDays: calDays, workingDaysInMonth: aWD },
         cfgDock,
       );
-      const dockSen = Math.round((h * dockDayRate) / payrollHourDivisor(w?.workingHoursPerDay, cfgDock));
+      const dockSen = Math.round(h * payrollHourRateSen(dockDayRate, w?.workingHoursPerDay, cfgDock));
       const adj = Math.max(0, costEquivalentSen - dockSen);
       if (adj > 0) m.set(p.id, adj);
     }

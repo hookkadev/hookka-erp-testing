@@ -246,6 +246,20 @@ export function payrollHourDivisor(
   );
 }
 
+/** The payroll HOUR rate in whole sen: day rate ÷ the hour divisor, rounded
+ *  to the sen BEFORE it is multiplied by any hours. Owner 2026-10-08: the
+ *  payslip must add up on a calculator — RM85 ÷ 9 = 9.44, 9.44 × 1.5 × 4 =
+ *  56.64 (the unrounded 9.4444 gave 56.67). Every OT, late and short-hour
+ *  figure reads this one rate, so the engine, the payslip line and the recon
+ *  bridges can never price the same hour differently. */
+export function payrollHourRateSen(
+  dayRateSen: number,
+  workingHoursPerDay: number | null | undefined,
+  cfg: PayRulesConfig,
+): number {
+  return Math.round(dayRateSen / payrollHourDivisor(workingHoursPerDay, cfg));
+}
+
 /** Adapter to the attendance-rules engine's config shape. */
 export function toAttendanceRules(cfg: PayRulesConfig): {
   startMin: number;

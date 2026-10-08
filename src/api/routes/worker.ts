@@ -54,7 +54,7 @@ import {
   computeLiveDeptDay,
 } from "../lib/punch-autofill";
 import { loadPayRuleVersions } from "../lib/pay-rules-store";
-import { resolvePayRulesAsOf, toAttendanceRules, payrollHourDivisor } from "../../lib/pay-rules";
+import { resolvePayRulesAsOf, toAttendanceRules, payrollHourRateSen } from "../../lib/pay-rules";
 import { computeAttendanceDay, hhmmToMinutes, otMinutesAtLeastMinimum } from "../../lib/attendance-rules";
 import {
   rowToMinimalPO,
@@ -2193,7 +2193,7 @@ app.get("/payslips", async (c) => {
         },
         cfg,
       );
-      const hourRate = dayRate / payrollHourDivisor(Number(wRow.workingHoursPerDay) || 0, cfg);
+      const hourRate = payrollHourRateSen(dayRate, Number(wRow.workingHoursPerDay) || 0, cfg);
       lateSenByPeriod.set(per, (lateSenByPeriod.get(per) ?? 0) + Math.round(h * hourRate));
     }
   } catch (e) {
@@ -2628,7 +2628,7 @@ async function buildWorkerDayDetail(
     },
     cfg,
   );
-  const hourRate = dayRate / payrollHourDivisor(hoursPerDay, cfg);
+  const hourRate = payrollHourRateSen(dayRate, hoursPerDay, cfg);
   const lateDays: Array<{ date: string; hours: number }> = [];
   let shortHourDeductionSen = 0;
   for (const d of dedRes.results ?? []) {

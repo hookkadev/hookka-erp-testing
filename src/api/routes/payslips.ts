@@ -38,7 +38,7 @@ import {
   // used to call it twice, straight from basicSalarySen, and both calls read 0
   // for an outsourced person. The day rate now comes from
   // labor-engine's workerPayrollDayRateSen, which knows about pay mode.
-  payrollHourDivisor,
+  payrollHourRateSen,
   type PayRulesConfig,
 } from "../../lib/pay-rules";
 import { loadPayRuleVersions } from "../lib/pay-rules-store";
@@ -694,7 +694,7 @@ app.get("/", async (c) => {
             },
             cfg,
           );
-          const hourRate = dayRate / payrollHourDivisor(Number(w.workingHoursPerDay) || 0, cfg);
+          const hourRate = payrollHourRateSen(dayRate, Number(w.workingHoursPerDay) || 0, cfg);
           lateSenByWorker.set(
             d.workerId,
             (lateSenByWorker.get(d.workerId) ?? 0) + Math.round(h * hourRate),
@@ -963,10 +963,14 @@ app.get("/projected", async (c) => {
     // total the payslip and every YTD reads. They come off after it.
     const advanceSen = totalAdvanceSen(advancesByWorker.get(worker.id));
     const penaltySen = penaltySenByWorker.get(worker.id) ?? 0;
-    const hourlyRate =
-      worker.workingHoursPerDay > 0
-        ? Math.round(labor.payrollDailyRateSen / worker.workingHoursPerDay)
-        : 0;
+    // The SAME rounded rate the engine priced the OT with (month-end rules,
+    // lunch per the pay-rule mode). It used to divide by the hours alone, so
+    // under "hours + lunch" the row read "4 hrs x RM 9.44 x 1.5 = RM 51.00".
+    const hourlyRate = payrollHourRateSen(
+      labor.payrollDailyRateSen,
+      worker.workingHoursPerDay,
+      statutoryRules,
+    );
     // Build the SAME camelCase shape rowToPayslip returns — but in-memory.
     // Day-typed OT (owner spec 2026-06-10): weekday / Sunday / public-holiday
     // buckets — hours rounded for the INTEGER columns; money is the engine's
@@ -1376,15 +1380,17 @@ app.post("/", async (c) => {
       const bankName = paymentMethod === "CASH" ? null : (worker.bankName ?? null);
       const bankAccount = paymentMethod === "CASH" ? "" : (worker.bankAccount ?? "");
 
-      // Base hourly rate (full salary ÷ 26 ÷ hours/day) for the payslip's
+      // Base hourly rate (day rate ÷ the hour divisor, rounded to the sen —
+      // the same rate the engine priced the OT with) for the payslip's
       // OT-calculation display, day-typed (owner spec 2026-06-10): the engine
       // splits OT into weekday / Sunday / public-holiday buckets. Hours are
       // rounded for the INTEGER columns; the money is the engine's exact
       // per-bucket pay (otWeekdayPaySen / otSundayPaySen / otHolidayPaySen).
-      const hourlyRate =
-        worker.workingHoursPerDay > 0
-          ? Math.round(labor.payrollDailyRateSen / worker.workingHoursPerDay)
-          : 0;
+      const hourlyRate = payrollHourRateSen(
+        labor.payrollDailyRateSen,
+        worker.workingHoursPerDay,
+        statutoryRules,
+      );
 
       const id = await nextPayslipId(c.var.DB, period);
       await c.var.DB.prepare(
@@ -1670,7 +1676,7 @@ app.get("/:id", async (c) => {
       { workingDaysPerMonth: Number(payslip.workingDays) || 26, calendarDays: 30, workingDaysInMonth: 26 },
       cfg,
     );
-    const hourRate = dayRate / payrollHourDivisor(workingHoursPerDay, cfg);
+    const hourRate = payrollHourRateSen(dayRate, workingHoursPerDay, cfg);
     for (const d of ded.results ?? []) {
       const h = Number(d.hours) || 0;
       if (h <= 0) continue;
