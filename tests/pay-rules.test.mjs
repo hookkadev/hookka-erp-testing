@@ -55,7 +55,8 @@ test("normalizePayRules: missing/garbage fields fall back per-field", () => {
 test("engine: mid-month Sunday-multiplier change applies PER DATE", () => {
   // ANN (RM2,650 / 26 days / 8h / 1.5x). May 2026: Sundays 10 + 17. A version
   // raises Sunday OT from 2x to 2.5x effective 2026-05-15 — the 10th pays 2x,
-  // the 17th pays 2.5x. Base hour = 265000/26/9 (her 8h + 1h lunch span).
+  // the 17th pays 2.5x. Base hour = 265000/26/9 (her 8h + 1h lunch span),
+  // rounded to the sen before the hours multiply it.
   const worker = { basicSalarySen: 265_000, workingDaysPerMonth: 26, workingHoursPerDay: 8, otMultiplier: 1.5 };
   const days = [
     { date: "2026-05-10", hours: 4 }, // Sunday before the change
@@ -67,7 +68,7 @@ test("engine: mid-month Sunday-multiplier change applies PER DATE", () => {
     publicHolidays: [], absenceThroughDay: 31,
     payRuleVersions: versions,
   });
-  const base = 265_000 / 26 / 9;
+  const base = Math.round(265_000 / 26 / 9);
   assert.equal(r.otSundayHours, 8);
   assert.equal(r.payroll.otSundayPaySen, Math.round(4 * base * 2 + 4 * base * 2.5));
   // Without versions: both Sundays at the default 2x.
@@ -89,10 +90,10 @@ test("hourly divisor = the worker's day span (hours + lunch); rateHoursPerDay on
       year: 2026, month: 5, days, publicHolidays: [], absenceThroughDay: 4,
     });
   const day = 265_000 / 26;
-  const r9 = run(9); // 11h − 9h std = 2h OT at ÷(9+1)
-  assert.equal(r9.payroll.otPaySen, Math.round(2 * (day / 10) * 1.5));
+  const r9 = run(9); // 11h − 9h std = 2h OT at ÷(9+1), rate rounded to the sen
+  assert.equal(r9.payroll.otPaySen, Math.round(2 * Math.round(day / 10) * 1.5));
   const r75 = run(7.5); // 11h − 7.5h std = 3.5h OT at ÷(7.5+1)
-  assert.equal(r75.payroll.otPaySen, Math.round(3.5 * (day / 8.5) * 1.5));
+  assert.equal(r75.payroll.otPaySen, Math.round(3.5 * Math.round(day / 8.5) * 1.5));
   const r0h = run(0); // no hours set → no weekday OT threshold, fallback ÷10 idle
   assert.equal(r0h.payroll.otPaySen, 0);
   // The short-hour dock uses the same span: 1h docked at ÷8.5 vs ÷10.
@@ -184,4 +185,31 @@ test("toAttendanceRules: a 15-min grace version makes 08:12 on-time", () => {
   assert.equal(d0.shortfallMin, 0);
   const strict = pr.toAttendanceRules(pr.normalizePayRules({ lateGraceMin: 10, lateBlockMin: 1 }));
   assert.equal(att.computeAttendanceDay(8 * 60 + 12, 18 * 60, strict).shortfallMin, 12);
+});
+
+// Owner 2026-10-08: the hourly rate is day rate ÷ working hours (lunch NOT
+// counted, the "hours only" mode) and it is rounded to the sen BEFORE the hours
+// multiply it, so the payslip adds up on a calculator. These two figures are the
+// owner's own sums; if either moves, a payslip line stops adding up.
+test("payrollHourRateSen rounds the hour rate to the sen", () => {
+  const hoursOnly = { ...pr.DEFAULT_PAY_RULES, hourRateDivisorMode: "hoursOnly" };
+  assert.equal(pr.payrollHourRateSen(8_500, 9, hoursOnly), 944); // 85 / 9 = 9.444
+  assert.equal(pr.payrollHourRateSen(205_000 / 26, 9, hoursOnly), 876); // 78.846 / 9 = 8.761
+  assert.equal(pr.payrollHourRateSen(8_500, 9, pr.DEFAULT_PAY_RULES), 850); // 85 / (9 + 1h lunch)
+});
+
+test("owner's sums: 4h weekday OT = 9.44 x 1.5 x 4 = RM56.64 (per day) and 8.76 x 1.5 x 4 = RM52.56 (monthly)", () => {
+  const versions = [v("2026-10-01", { hourRateDivisorMode: "hoursOnly" })];
+  // Tue 6 + Wed 7 Oct 2026, 11h each against a 9h day = 2h weekday OT each.
+  const days = [{ date: "2026-10-06", hours: 11 }, { date: "2026-10-07", hours: 11 }];
+  const run = (worker) => labor.computeMonthlyLabor({
+    worker: { workingDaysPerMonth: 26, workingHoursPerDay: 9, otMultiplier: 1.5, ...worker },
+    year: 2026, month: 10, days, publicHolidays: [], absenceThroughDay: 31,
+    payRuleVersions: versions,
+  });
+  const daily = run({ basicSalarySen: 0, payMode: "DAILY", dailyRateSen: 8_500 });
+  assert.equal(daily.otWeekdayHours, 4);
+  assert.equal(daily.payroll.otWeekdayPaySen, 5_664); // not 5667 (the unrounded 9.4444)
+  const monthly = run({ basicSalarySen: 205_000 });
+  assert.equal(monthly.payroll.otWeekdayPaySen, 5_256);
 });

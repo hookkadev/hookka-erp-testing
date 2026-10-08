@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-08**: branch `fix/ot-hourly-rate-display` (to `main`, BUG-2026-10-08-269) added below (its entry is the newest).
 > **Last verified: 2026-10-08**: branch `feat/kpi-dept-efficiency-daily-chart-main` (to `main`, DEV-36) added below (its entry is the newest).
 > **Last verified: 2026-10-08**: branch `feat/editable-wip-types-main-v2` (staging #752 to `main`, second try after #753 was reverted by #754) updated the entry below.
 > **Last verified: 2026-10-08**: branch `feat/editable-wip-types-main` (staging #752 to `main`) added below (its entry is the newest).
@@ -107,6 +108,17 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-08 — 🔵 Payroll hourly rate: one rounded rate, and the OT line adds up (branch `fix/ot-hourly-rate-display` → `main`, BUG-2026-10-08-269)
+
+Owner ask: the expanded payroll row showed "2 hrs x RM 8.76 x 1.5 = RM 23.65" for a RM 2,050 worker (and "4 hrs x RM 9.44 x 1.5 = RM 51.00" for a RM 85/day one). The page divided by 9 hours, the engine by 9 + 1h lunch, so the line did not add up. Owner ruling 2026-10-08: the hourly rate is day rate / working hours, lunch NOT included (2050/26/9 = 8.76, 85/9 = 9.44), and it is rounded to the sen before multiplying, like a calculator (8.76 x 1.5 x 2 = 26.28).
+
+1. 🔵 One shared hourly rate, rounded to the sen (`payrollHourRateSen` in `src/lib/pay-rules.ts`), used by the engine (OT pay, short-hour dock), the payslip routes, the worker pay routes and the labour-cost recon bridges.
+2. 🔵 The payslip hourly rate shown on the payroll row comes from that rate (it divided by the hours alone, ignoring the pay-rule mode).
+3. 🔵 The expanded row label shows the real sum: day rate (salary / days, or the daily rate) / the divisor the pay rules give.
+4. 🔵 Tests: the owner's two figures under hours-only (5664 and 5256 sen), and the existing engine test updated to the rounded rate.
+5. 🟡 The ÷9 rule itself is a setting, not code. Date not given yet.
+6. ⬜ Check on production after deploy (this goes to `main` directly; staging gets it through the usual staging<-main sync).
 
 ## 2026-10-08 — 🟡 DEV-36 follow-up to `main`: daily efficiency chart on the Department efficiency KPI card (branch `feat/kpi-dept-efficiency-daily-chart-main` → `main`)
 

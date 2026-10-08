@@ -1,5 +1,6 @@
 # Employees & Payroll — Module Guide
 
+> **Last verified: 2026-10-08** (branch `fix/ot-hourly-rate-display`, to `main`, BUG-2026-10-08-269): the hourly-rate rule in Gotchas (one rounded rate, `payrollHourRateSen`) and the `PayrollTab` / `LaborCostTab` / `LeaveManagementTab` / `AttendanceTab` / `EmployeesPage` anchors re-derived from the source. Nothing else re-checked.
 > **Last verified: 2026-10-02** (branch `feat/dev31-worker-dept-hours-main`): DEV-31 to main, the `worker.ts` / `punch-autofill.ts` / `dept-scan-split.ts` anchors re-read on the merged tree. Nothing else re-checked.
 > **Last verified: 2026-10-01** (branch `fix/worker-history-snapshot-stale`): `POST /clock` / `POST /dept-scan` anchors re-derived after worker.ts grew 5 lines (BUG-2026-10-01-245). Nothing else re-checked.
 
@@ -61,15 +62,15 @@ Owns the whole workforce lifecycle: the **employee master** (workers + effective
 ## Key functions / sections (locate-to-function)
 | Symbol / section | file:line | Role |
 |---|---|---|
-| `EmployeesPage` (shell + tab switch) | `src/pages/employees.tsx:11747` | 9-tab admin host (default export, at file tail) |
+| `EmployeesPage` (shell + tab switch) | `src/pages/employees.tsx:11767` | 9-tab admin host (default export, at file tail) |
 | `WorkingHoursTab` | `src/pages/employees.tsx:1032` | Tab 1 — flat working-hours grid |
 | `EmployeeMasterTab` | `src/pages/employees.tsx:2427` | Tab 2 — worker master + salary |
 | `EfficiencyOverviewTab` | `src/pages/employees.tsx:3886` | Tab 3 — efficiency overview |
 | `DepartmentLaborTab` | `src/pages/employees.tsx:4451` | Dept labor cost breakdown |
 | `EmployeeDetailTab` | `src/pages/employees.tsx:5430` | Tab 4 — guard-unmounted detail |
-| `PayrollTab` | `src/pages/employees.tsx:6806` | Tab 5 — payroll drafts |
-| `LaborCostTab` | `src/pages/employees.tsx:8735` | Tab 5b — labor cost + DepartmentsManager |
-| `LeaveManagementTab` / `AttendanceTab` | `src/pages/employees.tsx:10381 / 11515` | Leave + attendance tabs |
+| `PayrollTab` | `src/pages/employees.tsx:6810` | Tab 5 — payroll drafts |
+| `LaborCostTab` | `src/pages/employees.tsx:8755` | Tab 5b — labor cost + DepartmentsManager |
+| `LeaveManagementTab` / `AttendanceTab` | `src/pages/employees.tsx:10401 / 11535` | Leave + attendance tabs |
 | `computeMonthlyLabor` | `src/lib/labor-engine.ts:557` | THE payroll + cost engine (both divisors) |
 | `effectiveSalarySenForMonth` / `salaryAsOfSen` | `src/lib/labor-engine.ts:408 / 382` | Day-weighted effective salary |
 | `countElapsedWorkingDays` | `src/lib/labor-engine.ts:135` | Cost-side divisor (real Mon–Sat − holidays) |
@@ -92,7 +93,7 @@ Owns the whole workforce lifecycle: the **employee master** (workers + effective
 ## Gotchas
 - **A salary advance is neither an earning nor a statutory deduction.** `netPay = gross − totalDeductions − advance`, and `totalDeductionsSen` stays statutory-only — folding advances into it would inflate every YTD and statutory report. The advance is subtracted AFTER the statutory block, in both `payslips.ts POST /` and `GET /projected` (one shared helper, so the finalised slip and the estimate cannot disagree). Net pay is deliberately NOT clamped at zero: drawing more than the month earns shows a negative net pay (a debt) rather than silently writing the difference off. Approving a period settles its advances (locking edit/delete); reverting to DRAFT unlocks them.
 - **A worker penalty is neither an earning nor a statutory deduction** — same rule as the advance: `netPay = gross − totalDeductions − advance − penalty`, not clamped, `totalDeductionsSen` stays statutory-only. The payroll month lives on each LINE, not the header, so a multi-worker penalty can post for one worker and roll for another. A penalty approved after the month's drafts were generated is not in them until Regenerate, and approval of that month is refused (409) until it is.
-- **Two divisors, both in `labor-engine.ts`, never revert either.** Pay side = ÷26 (`workingDaysPerMonth`) for absence, late/short docks, OT base; hourly = ÷26 ÷ the worker's DAY SPAN (daily hours + lunch, e.g. 9h→÷10). Cost side = ÷ ACTUAL Mon–Sat working days minus holidays (`countElapsedWorkingDays:135` → `costingDailyRateSen:706`). NEVER revert to fixed-26 or ÷calendar. (Note: `src/lib/costing.ts` is a *different* rate — per-minute product costing, not the payroll divisor.)
+- **Two divisors, both in `labor-engine.ts`, never revert either.** Pay side = ÷26 (`workingDaysPerMonth`) for absence, late/short docks, OT base; hourly = day rate ÷ the hour divisor from the pay rules (`payrollHourDivisor`: hours + lunch, hours only, or a fixed number), ROUNDED TO THE SEN before any hours multiply it (`payrollHourRateSen` in `src/lib/pay-rules.ts`, owner 2026-10-08: the payslip must add up on a calculator). Every OT, late and short-hour figure (engine, payslip routes, worker pay routes, recon bridges) reads that one helper; never divide by `payrollHourDivisor` inline again. Cost side = ÷ ACTUAL Mon–Sat working days minus holidays (`countElapsedWorkingDays:135` → `costingDailyRateSen:719`). NEVER revert to fixed-26 or ÷calendar. (Note: `src/lib/costing.ts` is a *different* rate — per-minute product costing, not the payroll divisor.)
 - **Day-typed OT must stay byte-identical for weekday-only.** OT splits weekday(1.5×)/Sunday(2×)/holiday(3×) inline in `computeMonthlyLabor` (`labor-engine.ts:557`); premium routes to the dept line, not Overhead. Holidays from `kv_config['public_holidays']`.
 - **Three screens reconcile to the sen.** Payroll / Dept Labor / Labor Cost tie out via `roundSen` + `distributeRoundSen` (largest-remainder, `src/lib/utils.ts`); leftover sen → largest-fraction dept. Don't add per-screen ad-hoc plugs.
 - **Salary is effective-dated** (`worker_salary_history`, mig 0153) — never read one "current" salary; use `GET /salary/effective`. Join/resign does NO proration; unworked working days dock ÷26 as absences.
