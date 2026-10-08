@@ -537,6 +537,8 @@ export type VariantsConfig = {
   sofaCompartments?: string[];
   // Extra BOM WIP type names (src/lib/wip-types.ts); the six built-ins are implied.
   wipTypes?: string[];
+  // BOM code-builder variant fields ticked per product type (src/lib/bom-variant-fields.ts).
+  bomVariantFields?: Record<string, string[]>;
   // Add RM bulk-generate: raw-material category (itemGroup) → variant suffixes.
   materialVariants?: Record<string, string[]>;
   // FILLER (sponge) area-based consumption: per item-group DEFAULT sheet size

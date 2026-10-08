@@ -180,7 +180,8 @@ Owner ask: the WIP component type dropdown in the BOM editor (Master BOM Templat
 2. 🔵 BOM page: the type list is refilled from saved settings on page load, so every type dropdown and label shows the extras. The read-only product BOM page (`products/bom.tsx`) uses the same list for its labels. Inventory WIP pages still show an extra type by its code (SANDBACK); they fall back to the raw code, nothing is dropped.
 3. 🔵 Products > Maintenance > BOM > WIP Types: the existing string-list editor, saved with the rest of the maintenance config.
 4. 🔵 Test: `tests/wip-types.test.mjs`.
-5. ⬜ Staging check after deploy: add Sandback in Maintenance, pick it in a Master BOM Template, save, reload.
+5. 🔵 Follow-up ask, same branch: the code-builder variant fields per product type (three copies in bom.tsx) are now ticked in Products > Maintenance > BOM > Variant Fields (`src/lib/bom-variant-fields.ts`, `variants-config.bomVariantFields`). Owner wants Model on Accessory: it is ticked by default. Only the ten known fields can be ticked, because each is filled in from the sales order. Test: `tests/bom-variant-fields.test.mjs`.
+6. ⬜ Staging check after deploy: add Sandback in Maintenance, pick it in a Master BOM Template, save, reload; the Accessory code builder offers Model.
 
 ## 2026-10-08 — 🟡 On-time delivery KPI judged on the delivered date, last delivery, Malaysia date (branch `fix/kpi-delivered-last-leg-myt` → `staging`, stacked on #748, BUG-2026-10-08-267)
 
