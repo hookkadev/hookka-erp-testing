@@ -7390,7 +7390,7 @@ function PayrollTab({ workers }: { workers: Worker[] }) {
     const div = Number(payrollHourDivisor(w?.workingHoursPerDay, cfg).toFixed(2));
     return w && isDailyPaidWorker(w)
       ? `${fmtSen(w.dailyRateSen ?? 0)}/day / ${div}`
-      : `${fmtSen(r.basicSalary)} / ${r.workingDays} / ${div}`;
+      : `${fmtSen(r.basicSalary)} / (${r.workingDays} x ${div})`;
   };
   // OT hours for DISPLAY. The payslip stores them in an INTEGER column, so a
   // real 0.15h of overtime is stored as 0 and the panel printed the nonsense
