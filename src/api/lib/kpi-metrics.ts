@@ -20,8 +20,15 @@
 // ---------------------------------------------------------------------------
 import type { Context } from "hono";
 import type { Env } from "../worker";
-import { kpiByKey } from "./kpi-catalog";
+import { kpiByKey, type KpiDef } from "./kpi-catalog";
 import { getOrgId } from "./tenant";
+import {
+  collectOnTimeOrders,
+  judgeOnTimeRow,
+  onTimeDates,
+  summarizeOnTimeRows,
+  type OnTimeRow,
+} from "./on-time-delivery";
 import {
   buildPerfDays,
   poolEfficiencyPct,
@@ -86,78 +93,87 @@ export function periodBounds(period: string): { start: string; end: string } {
 }
 
 // ---------------------------------------------------------------------------
-// The delivery-date predicate, written ONCE.
+// On-time delivery to the customer's promised date.
 //
-// The KPI card reports a number and its "See the list →" link has to open
-// exactly the orders that number counted. Two hand-written copies of this join
-// would agree on the day they were written and quietly diverge afterwards —
-// the card would say 11 and the list would show 14, and at that point nobody
-// believes either. So the CTE, the FROM/WHERE and the "is it late" test are
-// string constants shared by the metric and by its drill-down list below.
+// Owner's rule (2026-08-14): the date the goods were DELIVERED against
+// `sales_orders.customer_delivery_date`, once per sales order, judged on its
+// LAST delivery, on the Malaysia date. It lives in on-time-delivery.ts, which
+// the Hookka Report already uses. The KPI, its order list and the report all
+// read the same rows (`collectOnTimeOrders`) and the same verdict
+// (`judgeOnTimeRow`), so the card cannot say 11 while the list shows 14.
+//
+// Until BUG-2026-10-08-267 this file had its own query: the FIRST DISPATCH,
+// on the UTC date. A part-delivered order whose first lorry left on time
+// counted as on time however late the last one arrived.
 // ---------------------------------------------------------------------------
 
-/** First dispatch per sales order, via the only join path that resolves. */
-const FIRST_DISPATCH_CTE = `WITH first_dispatch AS (
-       SELECT po.salesOrderId AS so_id,
-              MIN(substr(d.dispatchedAt::text, 1, 10)) AS shipped_on
-         FROM delivery_orders d
-         JOIN delivery_order_items di ON di.deliveryOrderId = d.id
-         JOIN production_orders po ON po.id = di.productionOrderId
-        WHERE d.status <> 'CANCELLED'
-          AND d.dispatchedAt IS NOT NULL AND d.dispatchedAt <> ''
-          AND po.salesOrderId IS NOT NULL AND po.salesOrderId <> ''
-        GROUP BY po.salesOrderId
-     )`;
-
-/** Orders whose first dispatch fell inside the period. Binds: start, end. */
-const DISPATCHED_IN_PERIOD = `FROM first_dispatch f
-       JOIN sales_orders so ON so.id = f.so_id
-      WHERE f.shipped_on >= ? AND f.shipped_on <= ?
-        AND so.customerDeliveryDate IS NOT NULL
-        AND so.customerDeliveryDate <> ''`;
-
-/** …and left after the date promised to the customer. */
-const IS_LATE = `f.shipped_on > substr(so.customerDeliveryDate::text, 1, 10)`;
-
-/** …and left before it. Shipped on the day is neither late nor early. */
-const IS_EARLY = `f.shipped_on < substr(so.customerDeliveryDate::text, 1, 10)`;
+/** Promised date − order date, in whole days. Null with no order date. */
+export function leadDays(r: OnTimeRow): number | null {
+  const due = onTimeDates(r).due;
+  const ordered = String(r.orderDate ?? r.order_date ?? "").slice(0, 10).trim();
+  if (!due || !ordered) return null;
+  const d = Math.round((Date.parse(due) - Date.parse(ordered)) / 86_400_000);
+  return Number.isFinite(d) ? d : null;
+}
 
 /**
- * GATE — orders dispatched in the period, later than the customer's date.
- *
- * Counted at SALES ORDER level, not per delivery order: a customer who was
- * promised one date and received three deliveries was let down once, not
- * three times. The first dispatch is what counts.
+ * Late %, with a late URGENT order (promised within the urgent window of its
+ * order date) counting as `urgentLatePct`% of a late one. Owner 2026-10-08.
+ */
+export function weightedLatePct(
+  judged: number, late: number, urgentLate: number, urgentLatePct: number,
+): number {
+  const counted = late - urgentLate * (1 - urgentLatePct / 100);
+  return Math.round((counted / judged) * 1000) / 10;
+}
+
+/**
+ * The KPI figure from the shared rows. Pure, so the tests can hold it and the
+ * order list to the same rows.
+ */
+export function deliveryMetric(
+  rows: OnTimeRow[],
+  rules: Pick<KpiDef, "urgentDays" | "urgentLatePct">,
+): MetricResult {
+  const urgentDays = Math.floor(Number(rules.urgentDays ?? 7));
+  const urgentLatePct = Number(rules.urgentLatePct ?? 100);
+  const s = summarizeOnTimeRows(rows);
+  if (s.judged === 0) return EMPTY;
+  const urgentLate = rows.filter((r) => {
+    if (judgeOnTimeRow(r) !== "LATE") return false;
+    const lead = leadDays(r);
+    return lead !== null && lead <= urgentDays;
+  }).length;
+  // Reported as a PERCENTAGE, not a count: 9 late out of 41 and 9 out of 400
+  // are different failures, and the scoring curve is per percentage point.
+  const pct = weightedLatePct(s.judged, s.late, urgentLate, urgentLatePct);
+  const earlyPct = Math.round((s.early / s.judged) * 1000) / 10;
+  return {
+    actual: pct,
+    sampleSize: s.judged,
+    detail:
+      `${s.late} late` +
+      (urgentLate > 0 && urgentLatePct < 100
+        ? ` (${urgentLate} urgent at ${urgentLatePct}%, so ${Math.round((s.late - urgentLate * (1 - urgentLatePct / 100)) * 10) / 10} counted)`
+        : "") +
+      `, ${s.early} early of ${s.judged} delivered (${pct}% late, ${earlyPct}% early)`,
+    earlyPct,
+  };
+}
+
+/**
+ * Sales orders fully delivered in the period (last delivery, Malaysia date),
+ * later than the customer's date. Counted once per SALES ORDER: a customer
+ * promised one date and sent three lorries was let down once, not three times.
+ * An order not fully delivered yet is left out until its last delivery lands.
  */
 export async function customerDeliveryLate(
   c: Context<Env>,
   period: string,
+  rules: Pick<KpiDef, "urgentDays" | "urgentLatePct"> = kpiByKey("customer_delivery_date")!,
 ): Promise<MetricResult> {
   const { start, end } = periodBounds(period);
-  const row = await c.var.DB.prepare(
-    `${FIRST_DISPATCH_CTE}
-     SELECT COUNT(*) AS shipped,
-            COALESCE(SUM(CASE WHEN ${IS_LATE} THEN 1 ELSE 0 END), 0) AS late,
-            COALESCE(SUM(CASE WHEN ${IS_EARLY} THEN 1 ELSE 0 END), 0) AS early
-       ${DISPATCHED_IN_PERIOD}`,
-  )
-    .bind(start, end)
-    .first<{ shipped: number; late: number; early: number }>();
-
-  const shipped = Number(row?.shipped) || 0;
-  const late = Number(row?.late) || 0;
-  const early = Number(row?.early) || 0;
-  if (shipped === 0) return EMPTY;
-  // Reported as a PERCENTAGE, not a count: 9 late out of 41 and 9 out of 400
-  // are different failures, and the scoring curve is per percentage point.
-  const pct = Math.round((late / shipped) * 1000) / 10;
-  const earlyPct = Math.round((early / shipped) * 1000) / 10;
-  return {
-    actual: pct,
-    sampleSize: shipped,
-    detail: `${late} late, ${early} early of ${shipped} shipped (${pct}% late, ${earlyPct}% early)`,
-    earlyPct,
-  };
+  return deliveryMetric(await collectOnTimeOrders(c.var.DB, start, end), rules);
 }
 
 export interface LateOrderRow {
@@ -166,15 +182,41 @@ export interface LateOrderRow {
   customerId: string | null;
   customerName: string | null;
   customerDeliveryDate: string | null;
-  shippedOn: string | null;
+  /** The last delivery's Malaysia date. */
+  deliveredOn: string | null;
   status: "LATE" | "EARLY" | "ON_TIME";
+  /** Promised date − order date, in days. The card tags it urgent against the rule. */
+  leadDays: number | null;
+}
+
+/**
+ * The judged orders as list rows: LATE only, or every judged order with `all`.
+ * Orders the metric left out (not fully delivered, no customer date) are not
+ * listed, so the LATE rows ARE the card's late count.
+ */
+export function deliveryOrderRows(rows: OnTimeRow[], all: boolean): LateOrderRow[] {
+  const out: LateOrderRow[] = [];
+  for (const r of rows) {
+    const v = judgeOnTimeRow(r);
+    if (v !== "LATE" && v !== "EARLY" && v !== "ON_TIME") continue;
+    if (!all && v !== "LATE") continue;
+    const { due, delivered } = onTimeDates(r);
+    out.push({
+      id: String(r.soId ?? r.so_id),
+      companySOId: r.companySOId ?? r.company_so_id ?? null,
+      customerId: r.customerId ?? r.customer_id ?? null,
+      customerName: r.customerName ?? r.customer_name ?? null,
+      customerDeliveryDate: due,
+      deliveredOn: delivered,
+      status: v,
+      leadDays: leadDays(r),
+    });
+  }
+  return out;
 }
 
 /**
  * The ORDERS behind `customerDeliveryLate` — the "See the list →" drill-down.
- *
- * Same CTE, same period bounds, same lateness test as the metric, so the list
- * length is the metric's `late` count by construction and not by coincidence.
  *
  * `scope` is the row-level customer filter (src/api/lib/customer-scope.ts). A
  * salesperson may not see another salesperson's orders even when those orders
@@ -183,9 +225,8 @@ export interface LateOrderRow {
  * the browser is the point: a client-side filter over a full payload has
  * already shipped the rows.
  *
- * `all` returns every order the metric counted (late, early and on time),
- * each tagged with its status by the same two tests. The KPI card lists them
- * inline so a person can see which order fell on which side.
+ * `all` returns every order the metric judged (late, early and on time). The
+ * KPI card lists them inline so a person can see which order fell on which side.
  */
 export async function lateToCustomerOrders(
   c: Context<Env>,
@@ -194,25 +235,7 @@ export async function lateToCustomerOrders(
   all = false,
 ): Promise<LateOrderRow[]> {
   const { start, end } = periodBounds(period);
-  const scopeClause = scope.clause ? ` AND ${scope.clause}` : "";
-  const res = await c.var.DB.prepare(
-    `${FIRST_DISPATCH_CTE}
-     SELECT so.id AS "id",
-            so.companySOId AS "companySOId",
-            so.customerId AS "customerId",
-            so.customerName AS "customerName",
-            substr(so.customerDeliveryDate::text, 1, 10) AS "customerDeliveryDate",
-            f.shipped_on AS "shippedOn",
-            CASE WHEN ${IS_LATE} THEN 'LATE'
-                 WHEN ${IS_EARLY} THEN 'EARLY'
-                 ELSE 'ON_TIME' END AS "status"
-       ${DISPATCHED_IN_PERIOD}${all ? "" : `
-        AND ${IS_LATE}`}${scopeClause}
-      ORDER BY f.shipped_on DESC, so.id DESC`,
-  )
-    .bind(start, end, ...scope.binds)
-    .all<LateOrderRow>();
-  return res.results ?? [];
+  return deliveryOrderRows(await collectOnTimeOrders(c.var.DB, start, end, scope), all);
 }
 
 /**
@@ -458,10 +481,10 @@ async function invoiceLag(
   const today = new Date().toISOString().slice(0, 10);
   const asAt = today < end ? today : end;
 
-  // DISPATCH, in the owner's word — the day the goods left. `dispatchedAt` is
-  // the field the on-time-delivery KPI already scores against, so the two
-  // cannot disagree about when a shipment happened. `deliveredAt` is the
-  // fallback for older rows that only carry the arrival date.
+  // DISPATCH, in the owner's word — the day the goods left. (The on-time
+  // delivery KPI scores the delivered date instead, BUG-2026-10-08-267.)
+  // `deliveredAt` is the fallback for older rows that only carry the arrival
+  // date. Still the UTC date: not part of that fix.
   const res = await c.var.DB.prepare(
     `SELECT d.id AS "id",
             substr(COALESCE(NULLIF(d.dispatchedAt::text, ''), d.deliveredAt::text), 1, 10) AS "dispatched",
@@ -892,10 +915,12 @@ export async function computeMetric(
   key: string,
   period: string,
   scope?: string | null,
+  /** The KPI with the company's saved rules applied (`withRules`). */
+  def?: KpiDef,
 ): Promise<MetricResult> {
   switch (key) {
     case "customer_delivery_date":
-      return customerDeliveryLate(c, period);
+      return customerDeliveryLate(c, period, def);
     case "setup_completeness":
       return setupCompleteness(c);
     case "documents_not_stuck":

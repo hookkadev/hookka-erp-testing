@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-08**: branch `fix/kpi-delivery-rules-main` (to `main`) (BUG-2026-10-08-267) added below (its entry is the newest).
 > **Last verified: 2026-10-07**: branch `feat/dev08-pillow-follows-sofa-to-main` (DEV-08 staging to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-07**: branch `fix/empty-auto-invoice-guard` (to `main`, BUG-2026-10-07-266) added below (its entry is the newest).
 > **Last verified: 2026-10-07**: branch `perf/production-dept-tab-cache-main` (#734 to `main`, BUG-2026-10-07-265) added below (its entry is the newest).
@@ -103,6 +104,14 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-08 — 🟡 On-time delivery KPI to `main`: no-negative late points, urgent orders, delivered date on the last delivery (branch `fix/kpi-delivery-rules-main` → `main`, BUG-2026-10-08-267)
+
+Owner ask: PR to main. Staging #748 (late points floor at 0 before the early bonus; urgent orders count as an editable share of a late order, default 100%) and #749 (the KPI judged on the delivered date, last delivery, Malaysia date, through the shared on-time code) cherry-picked onto `main`. The code matches the staging branches except for staging-only features (the department efficiency daily chart).
+
+1. 🔵 Four commits cherry-picked; code conflicts none, doc conflicts taken from `main` and the entries rewritten here.
+2. 🔵 KPI, on-time, drill-down, dashboard and report tests pass on the `main` tree.
+3. ⬜ Production check after deploy: the delivery KPI card for 2026-08 shows 49 late of 267 delivered (measured read-only 2026-10-08), "Show orders" says delivered, and the Sales late-to-customer list loads.
 
 ## 2026-10-07 — 🔵 DEV-08: pillows cut, sewn and packed with their sofa (Violet, High) (branch `feat/dev08-pillow-follows-sofa-to-main` → `main`)
 
