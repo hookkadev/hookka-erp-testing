@@ -7,6 +7,8 @@
 // variants-config.wipTypes. An extra type has no fixed rules: its departments
 // come from the BOM's own processes.
 
+import { bomProductType } from "./bom-variant-fields";
+
 export type WipTypeStyle = { label: string; color: string };
 
 export const BUILT_IN_WIP_TYPES: Record<string, WipTypeStyle> = {
@@ -39,4 +41,12 @@ export function buildWipTypes(extraNames: unknown): Record<string, WipTypeStyle>
     if (code && !out[code]) out[code] = { label: n.trim(), color: EXTRA_COLOR };
   }
   return out;
+}
+
+// Which product types (BEDFRAME / SOFA / ACCESSORY) may use a WIP type, ticked
+// in Maintenance and saved in variants-config.wipTypeProducts by type code. A
+// code with no saved list is allowed for every product type.
+export function wipTypeAllowed(code: string, category: string | undefined, saved: unknown): boolean {
+  const list = (saved as Record<string, unknown> | null | undefined)?.[code];
+  return !Array.isArray(list) || list.includes(bomProductType(category));
 }

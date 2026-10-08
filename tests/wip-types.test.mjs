@@ -4,7 +4,7 @@
 // ---------------------------------------------------------------------------
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildWipTypes, wipTypeCode, BUILT_IN_WIP_TYPES } from "../src/lib/wip-types.ts";
+import { buildWipTypes, wipTypeCode, wipTypeAllowed, BUILT_IN_WIP_TYPES } from "../src/lib/wip-types.ts";
 
 const BUILT_IN = Object.keys(BUILT_IN_WIP_TYPES);
 
@@ -25,4 +25,15 @@ test("extras append after built-ins; blanks, junk and clashes are skipped", () =
   assert.deepEqual(Object.keys(t), [...BUILT_IN, "SANDBACK", "BACK_REST"]);
   assert.equal(t.SANDBACK.label, "Sandback");
   assert.equal(t.DIVAN.label, "Divan");
+});
+
+test("product types allowed per WIP type: unsaved code allows all; other categories read ACCESSORY", () => {
+  const saved = { HEADBOARD: ["BEDFRAME"], SANDBACK: [] };
+  assert.equal(wipTypeAllowed("HEADBOARD", "BEDFRAME", saved), true);
+  assert.equal(wipTypeAllowed("HEADBOARD", "SOFA", saved), false);
+  assert.equal(wipTypeAllowed("SANDBACK", "BEDFRAME", saved), false);
+  assert.equal(wipTypeAllowed("DIVAN", "SOFA", saved), true);
+  assert.equal(wipTypeAllowed("DIVAN", "SOFA", undefined), true);
+  assert.equal(wipTypeAllowed("HEADBOARD", "PILLOW", { HEADBOARD: ["ACCESSORY"] }), true);
+  assert.equal(wipTypeAllowed("HEADBOARD", undefined, { HEADBOARD: ["SOFA"] }), false);
 });

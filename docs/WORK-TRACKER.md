@@ -1,6 +1,6 @@
 # Hookka ERP — Work Tracker
 
-> **Last verified: 2026-10-08**: branch `feat/kpi-dept-efficiency-daily-chart-main` (to `main`, DEV-36) added below (its entry is the newest).
+> **Last verified: 2026-10-08**: branch `feat/bom-variant-fields-list-main` (to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-08**: branch `feat/editable-wip-types-main-v2` (staging #752 to `main`, second try after #753 was reverted by #754) updated the entry below.
 > **Last verified: 2026-10-08**: branch `feat/editable-wip-types-main` (staging #752 to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-08**: branch `fix/kpi-delivery-rules-main` (to `main`) (BUG-2026-10-08-267) added below (its entry is the newest).
@@ -107,6 +107,13 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-08 — 🔵 BOM Variant Fields and WIP Types as lists with product-type ticks, to main (branch `feat/bom-variant-fields-list-main` → `main`)
+
+Same change as staging #762.
+
+1. 🔵 Products > Maintenance > BOM > Variant Fields: one row per field, each with Bedframe / Sofa / Accessory ticks. Same saved data as before.
+2. 🔵 Products > Maintenance > BOM > WIP Types: the six built-ins (fixed) then the added types, each with Bedframe / Sofa / Accessory ticks (`variants-config.wipTypeProducts`, all ticked until changed). The BOM editor type dropdowns only offer types ticked for the product type, keeping a row's current type. Test: `tests/wip-types.test.mjs`.
 
 ## 2026-10-08 — 🟡 DEV-36 follow-up to `main`: daily efficiency chart on the Department efficiency KPI card (branch `feat/kpi-dept-efficiency-daily-chart-main` → `main`)
 
