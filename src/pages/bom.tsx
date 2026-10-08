@@ -7,9 +7,6 @@ import { useConfirm } from "@/components/ui/confirm-dialog";
 import { resolveWipTokens, type BomVariantContext } from "@/api/lib/bom-wip-breakdown";
 import { withProductCategory } from "./bom-category";
 import { removeWipLevel, moveWipNode, canMoveWipNode } from "@/lib/wip-tree-ops";
-import { BUILT_IN_WIP_TYPES, buildWipTypes, type WipTypeStyle } from "@/lib/wip-types";
-import { fetchVariantsConfig, getVariantsConfigSync } from "@/lib/kv-config";
-import { variantFieldsFor } from "@/lib/bom-variant-fields";
 import type {
   MaterialScaling,
   MaterialScalingDimension,
@@ -70,8 +67,7 @@ type WIPComponent = {
   id: string;
   wipCode: string;
   codeSegments?: CodeSegment[];
-  // A built-in type or an extra one from Maintenance (see wip-types.ts).
-  wipType: string;
+  wipType: "HEADBOARD" | "DIVAN" | "SOFA_BASE" | "SOFA_CUSHION" | "SOFA_ARMREST" | "SOFA_HEADREST";
   quantity: number;
   processes: BOMProcess[];
   materials?: WIPMaterial[];
@@ -194,9 +190,14 @@ function MinutesInput({ value, onChange, className }: { value: number; onChange:
   );
 }
 
-// Module-level like KIT_PARENT_CODES: the page load below refills it with the
-// built-ins plus the extra types saved in Maintenance, then re-renders.
-const WIP_TYPE_LABELS: Record<string, WipTypeStyle> = { ...BUILT_IN_WIP_TYPES };
+const WIP_TYPE_LABELS: Record<string, { label: string; color: string }> = {
+  HEADBOARD: { label: "Headboard", color: "#7C3AED" },
+  DIVAN: { label: "Divan", color: "#0891B2" },
+  SOFA_BASE: { label: "Sofa Base", color: "#059669" },
+  SOFA_CUSHION: { label: "Back Cushion", color: "#D97706" },
+  SOFA_ARMREST: { label: "Sofa Armrest", color: "#DC2626" },
+  SOFA_HEADREST: { label: "Sofa Headrest", color: "#7C3AED" },
+};
 
 type VariantCategoryInfo = { category: string; label: string };
 
@@ -1897,7 +1898,20 @@ function CreateBOMDialog({
     const sel = products.find((p) => p.code === selectedCode);
     if (!sel) return [{ category: "SIZE", label: "Size" }, { category: "FABRIC", label: "Fabric" }];
     const cat = (sel as Product & { category?: string }).category;
-    return variantFieldsFor(cat, getVariantsConfigSync()?.bomVariantFields);
+    if (cat === "BEDFRAME") return [
+      { category: "PRODUCT_CODE", label: "Product Code" }, { category: "SIZE", label: "Size" },
+      { category: "DIVAN_HEIGHT", label: "Divan Height" }, { category: "LEG_HEIGHT", label: "Leg Height" },
+      { category: "TOTAL_HEIGHT", label: "Total Height" },
+      { category: "FABRIC", label: "Fabric" }, { category: "SPECIAL", label: "Special" },
+    ];
+    if (cat === "SOFA") return [
+      { category: "PRODUCT_CODE", label: "Product Code" },
+      { category: "MODEL", label: "Model" },
+      { category: "SEAT_SIZE", label: "Seat Size" },
+      { category: "MODULE", label: "Module" }, { category: "FABRIC", label: "Fabric" },
+      { category: "SPECIAL", label: "Special" },
+    ];
+    return [{ category: "PRODUCT_CODE", label: "Product Code" }, { category: "SIZE", label: "Size" }, { category: "FABRIC", label: "Fabric" }];
   }, [products, selectedCode]);
 
   const selected = products.find((p) => p.code === selectedCode);
@@ -3843,8 +3857,31 @@ function MasterTemplatesDialog({
 
   // Variant categories depend on tab — used by WIPCodeBuilder for master-level
   // placeholders that get resolved to actual product variants at apply time.
-  // Ticked per product type in Products > Maintenance (bom-variant-fields.ts).
-  const variantCategories: VariantCategoryInfo[] = variantFieldsFor(tab, getVariantsConfigSync()?.bomVariantFields);
+  const variantCategories: VariantCategoryInfo[] = tab === "BEDFRAME"
+    ? [
+        { category: "PRODUCT_CODE", label: "Product Code" },
+        { category: "SIZE", label: "Size" },
+        { category: "DIVAN_HEIGHT", label: "Divan Height" },
+        { category: "LEG_HEIGHT", label: "Leg Height" },
+        { category: "TOTAL_HEIGHT", label: "Total Height" },
+        { category: "FABRIC", label: "Fabric" },
+        { category: "SPECIAL", label: "Special" },
+      ]
+    : tab === "SOFA"
+    ? [
+        { category: "PRODUCT_CODE", label: "Product Code" },
+        { category: "MODEL", label: "Model" },
+        { category: "SEAT_SIZE", label: "Seat Size" },
+        { category: "MODULE", label: "Module" },
+        { category: "FABRIC", label: "Fabric" },
+        { category: "SPECIAL", label: "Special" },
+      ]
+    : [
+        // ACCESSORY — pillows etc.; minimal variant set.
+        { category: "PRODUCT_CODE", label: "Product Code" },
+        { category: "SIZE", label: "Size" },
+        { category: "FABRIC", label: "Fabric" },
+      ];
 
   /* eslint-disable react-hooks/set-state-in-effect -- mirror master-template cache + seed default selection when edit dialog opens */
   useEffect(() => {
@@ -5944,7 +5981,7 @@ export default function BOMManagementPage() {
   useEffect(() => {
     async function load() {
       try {
-        const [pData, tData, invData, kitData, variantsCfg] = await Promise.all([
+        const [pData, tData, invData, kitData] = await Promise.all([
           cachedFetchJson<{ success?: boolean; data?: unknown }>("/api/products"),
           cachedFetchJson<{ success?: boolean; data?: unknown }>("/api/bom/templates"),
           // perf 2026-08-13 (BUG-2026-08-13-021): `?buckets=rawMaterials` — only
@@ -5952,12 +5989,7 @@ export default function BOMManagementPage() {
           // fetched separately on the line above.
           cachedFetchJson<{ success?: boolean; data?: { rawMaterials?: unknown[] } }>("/api/inventory?buckets=rawMaterials"),
           cachedFetchJson<{ success?: boolean; data?: { parentCode?: string }[] }>("/api/component-boms"),
-          fetchVariantsConfig(),
         ]);
-
-        // Refill the WIP type dropdown list before setTemplates re-renders.
-        for (const k of Object.keys(WIP_TYPE_LABELS)) delete WIP_TYPE_LABELS[k];
-        Object.assign(WIP_TYPE_LABELS, buildWipTypes(variantsCfg?.wipTypes));
 
         // Populate the reusable-kit hint set (module-level; see materialHasKit).
         if (kitData && kitData.success && Array.isArray(kitData.data)) {
@@ -6124,7 +6156,32 @@ export default function BOMManagementPage() {
       { category: "FABRIC", label: "Fabric" },
     ];
     const cat = (selectedProduct as Product & { category?: string }).category;
-    return variantFieldsFor(cat, getVariantsConfigSync()?.bomVariantFields);
+    if (cat === "BEDFRAME") {
+      return [
+        { category: "PRODUCT_CODE", label: "Product Code" },
+        { category: "SIZE", label: "Size" },
+        { category: "DIVAN_HEIGHT", label: "Divan Height" },
+        { category: "LEG_HEIGHT", label: "Leg Height" },
+        { category: "TOTAL_HEIGHT", label: "Total Height" },
+        { category: "FABRIC", label: "Fabric" },
+        { category: "SPECIAL", label: "Special" },
+      ];
+    }
+    if (cat === "SOFA") {
+      return [
+        { category: "PRODUCT_CODE", label: "Product Code" },
+        { category: "MODEL", label: "Model" },
+        { category: "SEAT_SIZE", label: "Seat Size" },
+        { category: "MODULE", label: "Module" },
+        { category: "FABRIC", label: "Fabric" },
+        { category: "SPECIAL", label: "Special" },
+      ];
+    }
+    return [
+      { category: "PRODUCT_CODE", label: "Product Code" },
+      { category: "SIZE", label: "Size" },
+      { category: "FABRIC", label: "Fabric" },
+    ];
   }, [selectedProduct]);
 
   if (loading) {
