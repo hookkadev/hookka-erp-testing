@@ -82,7 +82,9 @@ function mockDb({ existingDock = null, lockedCount = 0, workerHours = null, logg
       return stmt(sql);
     },
     async batch(stmts) {
-      calls.batches++;
+      // Count only batches that write. A batch of SELECTs is the fresh-read
+      // idiom (BUG-CLASSES C29), e.g. the pay-rule seed reading the rules.
+      if (stmts.some((s) => /^\s*(INSERT|UPDATE|DELETE)/i.test(s.__sql))) calls.batches++;
       for (const s of stmts) {
         if (s.__sql.startsWith("INSERT"))
           calls.inserts.push({ sql: s.__sql, bound: s.bound() });

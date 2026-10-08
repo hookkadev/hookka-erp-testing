@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-08**: branch `fix/pay-rule-hours-only-oct` (to `staging`, stacked on #759) closed item 5 of the hourly-rate entry below (the ÷9 rule is seeded from 2026-10-01).
 > **Last verified: 2026-10-08**: branch `fix/ot-hourly-rate-display` (to `staging`, BUG-2026-10-08-269) added below (its entry is the newest).
 > **Last verified: 2026-10-08**: branch `fix/bom-module-guide-anchors` (to `staging`) added item 5b to the editable WIP types entry below.
 > **Last verified: 2026-10-08**: branch `feat/editable-wip-types` (to `staging`) added below (its entry is the newest).
@@ -182,7 +183,7 @@ Owner ask: the expanded payroll row showed "4 hrs x RM 9.44 x 1.5 = RM 51.00" fo
 2. 🔵 The payslip hourly rate shown on the payroll row comes from that rate (it divided by the hours alone, ignoring the pay-rule mode).
 3. 🔵 The expanded row label shows the real sum: day rate (salary / days, or the daily rate) / the divisor the pay rules give.
 4. 🔵 Tests: the owner's two figures under hours-only (5664 and 5256 sen), and the existing engine test updated to the rounded rate.
-5. 🟡 The ÷9 rule itself is a setting, not code: Pay Rules (Maintenance), schedule "Worker's hours only (÷9)" from the date it should apply. Date not given yet.
+5. 🔵 The ÷9 rule (owner confirmed salary ÷ 26 ÷ 9): the saved 2026-07-01 rule says "hours + lunch" and beats the code default, so a dated rule is needed. Owner chose to have the deploy add it rather than schedule it by hand: `seedHoursOnlyRule` (`src/api/lib/pay-rules-store.ts`) writes one row "from 2026-10-01, hours only", copying every other field in force on that date, once. September and earlier keep ÷10. Branch `fix/pay-rule-hours-only-oct`, stacked on #759. Test: `tests/pay-rule-hours-only-seed.test.mjs`. Fallback if the owner asks for it: drop the lunch from `payrollHourDivisor` (`pay-rules.ts`, one line) so every month, past ones included, prices at ÷hours.
 6. ⬜ Staging check after deploy.
 
 ## 2026-10-08 — 🔵 Editable BOM WIP types, Sandback first (branch `feat/editable-wip-types` → `staging`)
