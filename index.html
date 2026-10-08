@@ -8,22 +8,19 @@
     <!-- PWA — TWO installable apps share this shell:
            • Office ERP (default): black-bg / white-logo icon, theme raisin.
            • Worker portal (/worker): white-bg / black-logo icon, theme olive.
-         Default tags below are the office ERP; the inline script swaps them to
-         the worker set when the page is under /worker, so each "Add to Home
-         Screen" gets its own icon. Service worker registers from src/main.tsx. -->
-    <link rel="manifest" href="/manifest-erp.webmanifest" />
-    <meta name="theme-color" content="#1F1D1B" />
-    <link rel="apple-touch-icon" href="/pwa-icon-erp-192.png" />
+         The inline script writes ONE set of tags, picked by path, so each "Add
+         to Home Screen" gets its own icon and start page. It must not ship the
+         office tags and swap them afterwards: iPhone Safari took the swapped icon
+         but the office start page, so the worker app opened at /m (BUG-2026-10-08-268).
+         Service worker registers from src/main.tsx. -->
     <script>
       (function () {
-        if (location.pathname.indexOf("/worker") === 0) {
-          var m = document.querySelector('link[rel="manifest"]');
-          if (m) m.href = "/manifest.webmanifest";
-          var a = document.querySelector('link[rel="apple-touch-icon"]');
-          if (a) a.href = "/pwa-icon-192.png";
-          var t = document.querySelector('meta[name="theme-color"]');
-          if (t) t.setAttribute("content", "#6B5C32");
-        }
+        var w = location.pathname.indexOf("/worker") === 0;
+        document.write(
+          '<link rel="manifest" href="' + (w ? "/manifest.webmanifest" : "/manifest-erp.webmanifest") + '" />' +
+          '<meta name="theme-color" content="' + (w ? "#6B5C32" : "#1F1D1B") + '" />' +
+          '<link rel="apple-touch-icon" href="' + (w ? "/pwa-icon-192.png" : "/pwa-icon-erp-192.png") + '" />'
+        );
       })();
     </script>
     <meta name="apple-mobile-web-app-capable" content="yes" />

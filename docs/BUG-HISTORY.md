@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-08**: newest entry BUG-2026-10-08-268 (branch `fix/worker-pwa-ios-start-url`, to main); a log, so "verified" means the entry matches the code on its branch.
 > **Last verified: 2026-10-08**: newest entry BUG-2026-10-08-267 (branch `fix/kpi-delivery-rules-main` (to `main`); the same entry is on staging's #749); a log, so "verified" means the entry matches the code on its branch.
 > **Last verified: 2026-10-07**: newest entry BUG-2026-10-07-266 (branch `fix/empty-auto-invoice-guard`, to main; 263 and 264 are staging's, 265 is main's).
 > **Last verified: 2026-10-07**: newest entry BUG-2026-10-07-265 (branch `perf/production-dept-tab-cache-main`, to main; 263 and 264 are staging's).
@@ -78,6 +79,18 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-10-08-268 — Worker app added to an iPhone home screen opened the office app at /m `pwa` `worker` 🟡
+
+🟡 Fix on `fix/worker-pwa-ios-start-url` (to `main`). Report (owner, 2026-10-08): Add to Home Screen from erp.hookka.com/worker on an iPhone gave the white worker icon, but opening it went to /m.
+
+**Evidence.** Live erp.hookka.com/worker serves the shell with the office manifest (`/manifest-erp.webmanifest`, start page `/m`) and the office icon in the markup; an inline script then swapped the manifest, icon and theme colour to the worker set. Both manifests are right on prod (`/manifest.webmanifest` has start page `/worker`). The saved app had the swapped white icon but the office start page, so Safari took the icon after the swap and the manifest from before it. Not reproduced here (no iPhone); white icon plus /m is the user's observation.
+
+**Fix.** `index.html` no longer ships the office tags. The inline script picks one set by path (`/worker...` gets the worker manifest, icon and colour; everything else the office set) and writes it once with `document.write`, so there is no earlier manifest left to keep.
+
+**Not verified.** Needs an iPhone: delete the old worker icon, open erp.hookka.com/worker in Safari, Add to Home Screen, open it. Android reads icon and start page from the same manifest, so it was not affected.
 
 ---
 
