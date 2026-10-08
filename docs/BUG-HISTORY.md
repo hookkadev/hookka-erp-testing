@@ -1,5 +1,7 @@
 # Bug History
 
+> **Last verified: 2026-10-08**: BUG-2026-10-08-269 got a follow-up, the ÷9 rule seeded from 2026-10-01 (branch `fix/ot-hourly-rate-display`, to `main`, second commit of #759).
+> **Last verified: 2026-10-08**: newest entry BUG-2026-10-08-269 (branch `fix/ot-hourly-rate-display`, to `main`); a log, so "verified" means the entry matches the code on its branch.
 > **Last verified: 2026-10-08**: newest entry BUG-2026-10-08-268 (branch `fix/worker-pwa-ios-start-url`, to main); a log, so "verified" means the entry matches the code on its branch.
 > **Last verified: 2026-10-08**: newest entry BUG-2026-10-08-267 (branch `fix/kpi-delivery-rules-main` (to `main`); the same entry is on staging's #749); a log, so "verified" means the entry matches the code on its branch.
 > **Last verified: 2026-10-07**: newest entry BUG-2026-10-07-266 (branch `fix/empty-auto-invoice-guard`, to main; 263 and 264 are staging's, 265 is main's).
@@ -79,6 +81,26 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-10-08-269 — Payroll row: "4 hrs x RM 9.44 x 1.5 = RM 51.00", the hourly rate shown was not the rate paid `payroll` `employees` 🟡
+
+🟡 Fix on `fix/ot-hourly-rate-display` (to `main`). Reported 2026-10-08 from the expanded payroll row of a per-day worker (RM 85 a day, 9h day, 2h OT on 6 and 7 Oct).
+
+**Cause, read from the code.** The engine prices OT at day rate ÷ `payrollHourDivisor`, which under the default "hours + lunch" mode is 9 + 1 = 10: 85 ÷ 10 = 8.50, 4 × 8.50 × 1.5 = RM 51.00. The `hourlyRate` stored on the payslip and shown on the row was computed separately in `payslips.ts` (projected and generate) as day rate ÷ `workingHoursPerDay`, lunch left out: 85 ÷ 9 = 9.44. So the line multiplied 9.44 but printed the engine's 51.00. The label also read "RM 0.00 / (26 x 9)" for a per-day person, and every monthly worker's row overstated the rate the same way (RM 2,050: shown 8.76, paid at 7.88). The pay rule mode in force on staging and production was not queried; the RM 51.00 on the report fits "hours + lunch" and nothing else.
+
+**Owner ruling, 2026-10-08.** The hourly rate is day rate ÷ working hours, lunch NOT counted (85 ÷ 9 = 9.44, 2,050 ÷ 26 ÷ 9 = 8.76), and it is rounded to the sen before it is multiplied, like a calculator (9.44 × 1.5 × 4 = 56.64, not the unrounded 56.67). The lunch part is a pay-rule setting (Pay Rules › schedule "Worker's hours only (÷9)" from a date), not code; the rounding is code.
+
+**Fix.** `payrollHourRateSen` in `src/lib/pay-rules.ts` = round(day rate ÷ `payrollHourDivisor`). Every place that priced an hour now reads it: the engine (`otBaseHourlyRateSen` and the per-date OT loop, so OT pay and the short-hour dock), the payslip late/short detail (`payslips.ts`, two places) and the payslip `hourlyRate` (projected and generate, now with the month-end rules), the worker's own pay routes (`worker.ts`, two places), and the two labour-cost recon bridges in `employees.tsx`. The row label shows the real sum: "RM 85.00/day / 9" for a per-day person, "RM 2050.00 / (26 x 9)" for a monthly one, salary ÷ (working days × hours), with the divisor the rules give.
+
+**Effect on money.** Rounding the rate moves an OT or late figure by at most half a sen per hour × the multiplier (ANN, May fixture: OT 25,481 → 25,470 sen). It is not effective-dated: any month recomputed from now on (projected payroll, a regenerated draft, the worker pay view) uses the rounded rate. Stored payslips keep their stored money; ones already stored also keep their old `hourlyRateSen`, so their row can still show a rate that does not match their OT. Prod impact (how many open drafts move, by how much) is UNMEASURED.
+
+**Guard.** `tests/pay-rules.test.mjs`: `payrollHourRateSen` rounds (944, 876, 850), and the owner's two sums under "hours only" (per day RM 85, 4h weekday OT = 5,664 sen; monthly RM 2,050 = 5,256 sen). `tests/labor-engine.test.mjs` figures moved to the rounded ANN rate (1132 sen).
+
+**Not in this fix.** The department labour-cost tabs in `employees.tsx` (`otBaseRateSen = salary / monthDays / stdHours`) price OT cost with their own unrounded ÷hours rate and ignore per-day pay; they are an allocation, bridged to payroll on the Labor Cost screen, and were left as they are. The row label assumes the ÷26 day divisor (the default mode); under "calendar days" or "working days" it would still print "/ 26". Class: none fits exactly; nearest is C18 (one figure computed in two places, only one maintained).
+
+**Follow-up, same day: the ÷9 rule itself** (second commit of #759). The owner confirmed salary ÷ 26 ÷ 9, lunch not counted. Git history: ÷9 was the rule from the first engine (22 May) to 8 Jun; `acc0208a` (9 Jun, the owner's salary sheet, "the /10 = the 08:00-18:00 shift span") and `f830d0c8` / `815471d2` (11 Jun, "hours + lunch") moved pay to ÷10, and a rule saved from 2026-07-01 keeps "hours + lunch". A saved rule beats `DEFAULT_PAY_RULES`, so changing the default would have re-priced only May and June. `seedHoursOnlyRule` (`pay-rules-store.ts`, run once per isolate from `ensurePayRuleVersions`) inserts one row, id `prv-owner-20261008-hours-only`, from 2026-10-01, copying the rules in force on that date and switching only `hourRateDivisorMode` to `hoursOnly`. It reads through a batch (C29), skips when hours-only is already in force on 2026-10-01, uses `ON CONFLICT (id) DO NOTHING`, and wipes `worker_payslips_snapshot` / `worker_history_snapshot` when it inserts. Lunch (60 min) stays: it still sets the 9h day, when OT starts and the punch-clock lunch window. Not measured: whether a site already has a rule dated after 2026-10-01 that says "hours + lunch" (it would take over from its date), and plain reads of the rules can serve the pre-seed list for up to 60 s after deploy. Guard: `tests/pay-rule-hours-only-seed.test.mjs` (HR fields copied, one insert across two concurrent runs, September ÷10 vs October RM 26.28).
 
 ---
 
