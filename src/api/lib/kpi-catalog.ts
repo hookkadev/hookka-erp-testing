@@ -160,7 +160,8 @@ export interface KpiDef {
    * PENALTY_PER_PCT only — the early-delivery bonus. Every `earlyStepPct` of
    * orders shipped before the promised date earns `earlyBonusPerStep` points,
    * up to `earlyMaxBonus`. The bonus only wins back late points: the score
-   * never goes above 100 (owner 2026-10-05).
+   * never goes above 100 (owner 2026-10-05). Late points stop at 0 before the
+   * bonus is added (owner 2026-10-08).
    */
   earlyStepPct?: number;
   earlyBonusPerStep?: number;
@@ -244,13 +245,13 @@ function deliveryText(
   const zeroAt = per > 0 ? Math.round((100 / per) * 10) / 10 : null;
   const earlyLine =
     bonus > 0 && max > 0
-      ? `Every ${step}% of orders shipped early wins back ${bonus} point(s), up to ${max}. The score never goes above 100.`
+      ? `Every ${step}% of orders shipped early wins back ${bonus} point(s), up to ${max}, added after the late points (even at 0). The score never goes above 100.`
       : "Shipping early earns nothing extra.";
   return {
     detail: `Every 1% of orders shipped late costs ${per} points`,
     formula:
-      `100 − (late % × ${per}) + early bonus, capped at 100.` +
-      (zeroAt !== null ? ` ${zeroAt}% late scores nothing before the bonus.` : ""),
+      `100 − (late % × ${per}), never below 0, + early bonus, capped at 100.` +
+      (zeroAt !== null ? ` ${zeroAt}% late or worse scores 0 before the bonus, and the bonus still counts.` : ""),
     measurement: [
       "Take the date promised to the customer on the sales order. Our own internal estimate is never used.",
       "Find the first dispatch date across every delivery order carrying that order's production.",
@@ -632,7 +633,9 @@ export function attainment(
             Math.floor(early / step + 1e-9) * (Number(def.earlyBonusPerStep) || 0),
           )
         : 0;
-    return Math.max(0, Math.min(100, Math.round((100 - actual * per + bonus) * 10) / 10));
+    // The late part stops at 0 before the bonus is added, so 10.5% late with
+    // a full bonus scores the bonus, not 0 (owner 2026-10-08).
+    return Math.min(100, Math.round((Math.max(0, 100 - actual * per) + bonus) * 10) / 10);
   }
   // Same shape, but the actual is a COUNT (document-days late) rather than a
   // percentage, so nothing is normalised by a denominator first.
