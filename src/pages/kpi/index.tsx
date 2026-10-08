@@ -39,7 +39,7 @@ type Line = {
   ratingGuide?: string[]; surveyScale?: string[];
   purpose?: string; definition?: string; measurement?: string[];
   shape: "GATE" | "RATIO"; unit: "%" | "count" | "score";
-  available: boolean; blockedBy?: string; drillPath?: string;
+  available: boolean; blockedBy?: string; drillPath?: string; urgentDays?: number;
   target: number; weight: number;
   actual: number | null; attainment: number | null; points: number | null;
   evidence: string;
@@ -68,6 +68,7 @@ type LibItem = {
   current: number | null; evidence: string;
   editableRules?: string[];
   penaltyPerPct?: number; earlyStepPct?: number; earlyBonusPerStep?: number; earlyMaxBonus?: number;
+  urgentDays?: number; urgentLatePct?: number;
   assignedTo: Array<{ userId: string; name: string; role: string; scope?: string }>;
 };
 type PersonRow = {
@@ -1109,7 +1110,7 @@ export default function KpiPage() {
                           )}
                         </div>
                         {l.key === "customer_delivery_date" ? (
-                          <DeliveryOrderList period={period} evidence={l.evidence} />
+                          <DeliveryOrderList period={period} evidence={l.evidence} urgentDays={l.urgentDays} />
                         ) : (
                           <p className="text-[12px] text-[#5A5550] mt-1.5 font-medium">{l.evidence}</p>
                         )}
@@ -1418,13 +1419,16 @@ const daysBetween = (a: string, b: string) =>
  * and every order shipped that month is listed with its Late / Early / On time
  * tag, filterable by tag. Same query as the score, so the counts match it.
  */
-function DeliveryOrderList({ period, evidence }: { period: string; evidence: string }) {
+function DeliveryOrderList({ period, evidence, urgentDays }: {
+  period: string; evidence: string; urgentDays?: number;
+}) {
   const [open, setOpen] = useState(false);
   const [show, setShow] = useState<DeliveryStatus | "ALL">("ALL");
   const { data, loading, error } = useCachedJson<{
     data?: Array<{
       id: string; companySOId: string | null; customerName: string | null;
       customerDeliveryDate: string | null; shippedOn: string | null; status: DeliveryStatus;
+      leadDays: number | null;
     }>;
   }>(open ? `/api/sales-orders/late-to-customer?period=${period}&all=1` : "");
   const rows = data?.data ?? [];
@@ -1485,6 +1489,14 @@ function DeliveryOrderList({ period, evidence }: { period: string; evidence: str
                       <span className="text-[#9CA3AF] tabular-nums">
                         promised {r.customerDeliveryDate ?? "—"} · shipped {r.shippedOn ?? "—"}
                       </span>
+                      {urgentDays != null && r.leadDays != null && r.leadDays <= urgentDays && (
+                        <span
+                          title={`Promised ${r.leadDays} day(s) after the order date`}
+                          className="rounded-full bg-[#FBEFD5] px-2 py-0.5 text-[10.5px] font-semibold text-[#8A5A00]"
+                        >
+                          Urgent
+                        </span>
+                      )}
                       <span className={`rounded-full px-2 py-0.5 text-[10.5px] font-semibold ${DELIVERY_STATUS[r.status].cls}`}>
                         {DELIVERY_STATUS[r.status].label}
                         {diff !== 0 && ` ${Math.abs(diff)}d`}
@@ -1512,6 +1524,8 @@ function DeliveryRulesEditor({ item }: { item: LibItem }) {
     earlyStepPct: String(item.earlyStepPct ?? 10),
     earlyBonusPerStep: String(item.earlyBonusPerStep ?? 1),
     earlyMaxBonus: String(item.earlyMaxBonus ?? 5),
+    urgentDays: String(item.urgentDays ?? 7),
+    urgentLatePct: String(item.urgentLatePct ?? 100),
   });
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
@@ -1560,6 +1574,10 @@ function DeliveryRulesEditor({ item }: { item: LibItem }) {
         Win back{num("earlyBonusPerStep", "Bonus points per step")}point(s) for every
         {num("earlyStepPct", "Early % per step")}% shipped early, up to
         {num("earlyMaxBonus", "Most bonus points")}points. The score never goes above 100.
+      </p>
+      <p className="text-[11.5px] text-[#3A3733] leading-loose">
+        An order promised within{num("urgentDays", "Urgent order days")}days of its order date is urgent.
+        If it ships late it counts as{num("urgentLatePct", "Late urgent order counts as percent")}% of a late order.
       </p>
       <div className="flex flex-wrap items-center gap-2">
         <button
