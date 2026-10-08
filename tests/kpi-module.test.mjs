@@ -101,6 +101,9 @@ test("late deliveries cost points, early ones win some back, never past 100", ()
   assert.equal(attainment(d, 0, 3, 39.9), 73, "steps round down");
   assert.equal(attainment(d, 0, 5, 60), 55, "the bonus stops at its maximum");
   assert.equal(attainment(d, 0, 17.5, 0), 0);
+  // Owner 2026-10-08: late points stop at 0, then the bonus is added on top.
+  assert.equal(attainment(d, 0, 10.5, 87.1), 5, "no negative late points eating the bonus");
+  assert.equal(attainment(d, 0, 30, 20), 2);
   assert.equal(attainment(d, 0, 2), 80, "no early figure is no bonus");
 
   // Saved company rules replace the numbers AND the wording the card shows.
