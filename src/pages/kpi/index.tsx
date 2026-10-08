@@ -1525,7 +1525,7 @@ function DeliveryRulesEditor({ item }: { item: LibItem }) {
     earlyBonusPerStep: String(item.earlyBonusPerStep ?? 1),
     earlyMaxBonus: String(item.earlyMaxBonus ?? 5),
     urgentDays: String(item.urgentDays ?? 7),
-    urgentLatePct: String(item.urgentLatePct ?? 50),
+    urgentLatePct: String(item.urgentLatePct ?? 100),
   });
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");

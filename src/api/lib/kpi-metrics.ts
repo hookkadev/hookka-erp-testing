@@ -154,7 +154,7 @@ export async function customerDeliveryLate(
 ): Promise<MetricResult> {
   const { start, end } = periodBounds(period);
   const urgentDays = Math.floor(Number(rules.urgentDays ?? 7));
-  const urgentLatePct = Number(rules.urgentLatePct ?? 50);
+  const urgentLatePct = Number(rules.urgentLatePct ?? 100);
   const row = await c.var.DB.prepare(
     `${FIRST_DISPATCH_CTE}
      SELECT COUNT(*) AS shipped,
@@ -180,7 +180,7 @@ export async function customerDeliveryLate(
     sampleSize: shipped,
     detail:
       `${late} late` +
-      (urgentLate > 0
+      (urgentLate > 0 && urgentLatePct < 100
         ? ` (${urgentLate} urgent at ${urgentLatePct}%, so ${Math.round((late - urgentLate * (1 - urgentLatePct / 100)) * 10) / 10} counted)`
         : "") +
       `, ${early} early of ${shipped} shipped (${pct}% late, ${earlyPct}% early)`,

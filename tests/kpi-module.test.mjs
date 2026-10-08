@@ -121,10 +121,11 @@ test("late deliveries cost points, early ones win some back, never past 100", ()
 });
 
 test("a late urgent order counts as part of a late order", () => {
-  // Owner 2026-10-08: ordered 1/10, promised 7/10 is urgent; late counts half.
+  // Owner 2026-10-08: ordered 1/10, promised 7/10 is urgent; a late one counts in
+  // full by default, and the share is editable.
   const d = kpiByKey("customer_delivery_date");
   assert.equal(d.urgentDays, 7);
-  assert.equal(d.urgentLatePct, 50);
+  assert.equal(d.urgentLatePct, 100);
   // 31 late of 295, 10 of them urgent: 21 + 10 × 0.5 = 26 → 8.8%.
   assert.equal(weightedLatePct(295, 31, 10, 50), 8.8);
   assert.equal(weightedLatePct(295, 31, 0, 50), 10.5, "no urgent orders, no change");
