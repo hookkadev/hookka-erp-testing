@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-08**: branch `feat/editable-wip-types-main-v2` (staging #752 to `main`, second try after #753 was reverted by #754) updated the entry below.
 > **Last verified: 2026-10-08**: branch `feat/editable-wip-types-main` (staging #752 to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-08**: branch `fix/kpi-delivery-rules-main` (to `main`) (BUG-2026-10-08-267) added below (its entry is the newest).
 > **Last verified: 2026-10-07**: branch `feat/dev08-pillow-follows-sofa-to-main` (DEV-08 staging to `main`) added below (its entry is the newest).
@@ -113,6 +114,7 @@ Owner ask: the BOM editor's WIP type dropdown and the code-builder variant field
 1. 🔵 `src/lib/wip-types.ts`: six fixed built-ins plus extra names from Products > Maintenance > BOM > WIP Types (`variants-config.wipTypes`); extras default to Sandback. An extra type follows the departments in its BOM.
 2. 🔵 `src/lib/bom-variant-fields.ts`: variant fields ticked per product type in Maintenance > BOM > Variant Fields (`variants-config.bomVariantFields`); Accessory offers Model by default. Only the ten known fields.
 3. 🔵 Tests: `tests/wip-types.test.mjs`, `tests/bom-variant-fields.test.mjs`.
+3b. 🔵 #753 merged, then was reverted (#754): the full suite failed `tests/docs-module-guide-anchors.test.mjs`, because four line anchors in `docs/modules/production.md` and `docs/modules/products.md` no longer named their symbol after the line shifts. Re-landed on `feat/editable-wip-types-main-v2` with every anchor into `bom.tsx` and `products/index.tsx` re-derived. Full suite run locally: 5311 tests, 0 failed.
 4. ⬜ Prod check after deploy: Sandback in the Master BOM Template type dropdown, saved and reloaded; Accessory code builder offers Model.
 
 ## 2026-10-08 — 🟡 On-time delivery KPI to `main`: no-negative late points, urgent orders, delivered date on the last delivery (branch `fix/kpi-delivery-rules-main` → `main`, BUG-2026-10-08-267)
