@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-08**: branch `fix/bom-module-guide-anchors` (to `staging`) added item 5b to the editable WIP types entry below.
 > **Last verified: 2026-10-08**: branch `feat/editable-wip-types` (to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-08**: branch `fix/kpi-delivered-last-leg-myt` (to `staging`, BUG-2026-10-08-267) added below (its entry is the newest).
 > **Last verified: 2026-10-07**: branch `feat/kpi-dept-efficiency-daily-chart` (DEV-36 follow-up to `staging`) added below (its entry is the newest).
@@ -181,6 +182,7 @@ Owner ask: the WIP component type dropdown in the BOM editor (Master BOM Templat
 3. 🔵 Products > Maintenance > BOM > WIP Types: the existing string-list editor, saved with the rest of the maintenance config.
 4. 🔵 Test: `tests/wip-types.test.mjs`.
 5. 🔵 Follow-up ask, same branch: the code-builder variant fields per product type (three copies in bom.tsx) are now ticked in Products > Maintenance > BOM > Variant Fields (`src/lib/bom-variant-fields.ts`, `variants-config.bomVariantFields`). Owner wants Model on Accessory: it is ticked by default. Only the ten known fields can be ticked, because each is filled in from the sales order. Test: `tests/bom-variant-fields.test.mjs`.
+5b. 🔵 #752 broke `tests/docs-module-guide-anchors.test.mjs`: line anchors in `docs/modules/production.md` and `docs/modules/products.md` stopped naming their symbol after the line shifts (the same failure got the `main` copy #753 reverted). Re-derived on branch `fix/bom-module-guide-anchors`.
 6. ⬜ Staging check after deploy: add Sandback in Maintenance, pick it in a Master BOM Template, save, reload; the Accessory code builder offers Model.
 
 ## 2026-10-08 — 🟡 On-time delivery KPI judged on the delivered date, last delivery, Malaysia date (branch `fix/kpi-delivered-last-leg-myt` → `staging`, stacked on #748, BUG-2026-10-08-267)
