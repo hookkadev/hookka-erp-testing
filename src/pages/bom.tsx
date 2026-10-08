@@ -7,7 +7,7 @@ import { useConfirm } from "@/components/ui/confirm-dialog";
 import { resolveWipTokens, type BomVariantContext } from "@/api/lib/bom-wip-breakdown";
 import { withProductCategory } from "./bom-category";
 import { removeWipLevel, moveWipNode, canMoveWipNode } from "@/lib/wip-tree-ops";
-import { BUILT_IN_WIP_TYPES, buildWipTypes, type WipTypeStyle } from "@/lib/wip-types";
+import { BUILT_IN_WIP_TYPES, buildWipTypes, wipTypeAllowed, type WipTypeStyle } from "@/lib/wip-types";
 import { fetchVariantsConfig, getVariantsConfigSync } from "@/lib/kv-config";
 import { variantFieldsFor } from "@/lib/bom-variant-fields";
 import type {
@@ -2255,7 +2255,7 @@ function CreateBOMDialog({
                         onChange={(e) => updateWIP(wi, "wipType", e.target.value)}
                         className="text-sm border border-[#A8CAD2] rounded px-2 py-1 bg-white"
                       >
-                        {Object.entries(WIP_TYPE_LABELS).map(([k, v]) => (
+                        {Object.entries(WIP_TYPE_LABELS).filter(([k]) => k === w.wipType || wipTypeAllowed(k, selected?.category, getVariantsConfigSync()?.wipTypeProducts)).map(([k, v]) => (
                           <option key={k} value={k}>{v.label}</option>
                         ))}
                       </select>
@@ -2825,7 +2825,7 @@ function WipNodeDetail({
           onChange={(e) => onUpdate(wi, path, "wipType", e.target.value)}
           className="text-sm border border-[#E2DDD8] rounded px-2.5 py-1.5 bg-white"
         >
-          {Object.entries(WIP_TYPE_LABELS).map(([k, v]) => (<option key={k} value={k}>{v.label}</option>))}
+          {Object.entries(WIP_TYPE_LABELS).filter(([k]) => k === node.wipType || wipTypeAllowed(k, product?.category, getVariantsConfigSync()?.wipTypeProducts)).map(([k, v]) => (<option key={k} value={k}>{v.label}</option>))}
         </select>
         <input
           type="number"
