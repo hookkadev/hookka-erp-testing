@@ -1,7 +1,7 @@
 # Hookka ERP — Work Tracker
 
 > **Last verified: 2026-10-08**: branch `fix/bom-module-guide-anchors` (to `staging`) added item 5b to the editable WIP types entry below.
-> **Last verified: 2026-10-08**: branch `feat/editable-wip-types` (to `staging`) added below (its entry is the newest).
+> **Last verified: 2026-10-08**: branch `feat/bom-variant-fields-list` (to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-08**: branch `fix/kpi-delivered-last-leg-myt` (to `staging`, BUG-2026-10-08-267) added below (its entry is the newest).
 > **Last verified: 2026-10-07**: branch `feat/kpi-dept-efficiency-daily-chart` (DEV-36 follow-up to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-07**: branch `chore/sync-staging-from-main-1007` (staging<-main merge): both trackers merged, main-only entries added, entry below.
@@ -172,6 +172,11 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-08 — 🔵 BOM Variant Fields and WIP Types as lists with product-type ticks (branch `feat/bom-variant-fields-list` → `staging`)
+
+1. 🔵 Products > Maintenance > BOM > Variant Fields: one row per field (like the Leg Heights list), each with Bedframe / Sofa / Accessory ticks. Same saved data as before.
+2. 🔵 Products > Maintenance > BOM > WIP Types: shows all types, the six built-ins (fixed) then the added ones, each with Bedframe / Sofa / Accessory ticks (`variants-config.wipTypeProducts`, all ticked until changed). The BOM editor type dropdowns only offer types ticked for the product type, keeping a row's current type. Test: `tests/wip-types.test.mjs`.
 
 ## 2026-10-08 — 🔵 Editable BOM WIP types, Sandback first (branch `feat/editable-wip-types` → `staging`)
 

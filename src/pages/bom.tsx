@@ -7,7 +7,7 @@ import { useConfirm } from "@/components/ui/confirm-dialog";
 import { resolveWipTokens, type BomVariantContext } from "@/api/lib/bom-wip-breakdown";
 import { withProductCategory } from "./bom-category";
 import { removeWipLevel, moveWipNode, canMoveWipNode } from "@/lib/wip-tree-ops";
-import { BUILT_IN_WIP_TYPES, buildWipTypes, type WipTypeStyle } from "@/lib/wip-types";
+import { BUILT_IN_WIP_TYPES, buildWipTypes, wipTypeAllowed, type WipTypeStyle } from "@/lib/wip-types";
 import { fetchVariantsConfig, getVariantsConfigSync } from "@/lib/kv-config";
 import { variantFieldsFor } from "@/lib/bom-variant-fields";
 import type {
@@ -197,6 +197,12 @@ function MinutesInput({ value, onChange, className }: { value: number; onChange:
 // Module-level like KIT_PARENT_CODES: the page load below refills it with the
 // built-ins plus the extra types saved in Maintenance, then re-renders.
 const WIP_TYPE_LABELS: Record<string, WipTypeStyle> = { ...BUILT_IN_WIP_TYPES };
+
+// A new WIP row starts on the usual type, unless Maintenance unticked it for
+// this product type; then on the first type that is allowed.
+function allowedWipType(preferred: string, category: string | undefined): string {
+  return [preferred, ...Object.keys(WIP_TYPE_LABELS)].find((k) => wipTypeAllowed(k, category, getVariantsConfigSync()?.wipTypeProducts)) ?? preferred;
+}
 
 type VariantCategoryInfo = { category: string; label: string };
 
@@ -1939,7 +1945,7 @@ function CreateBOMDialog({
   }
 
   function addWIPComponent() {
-    const wipType = selected?.category === "SOFA" ? "SOFA_BASE" : "DIVAN";
+    const wipType = allowedWipType(selected?.category === "SOFA" ? "SOFA_BASE" : "DIVAN", selected?.category);
     const isBedframe = selected?.category === "BEDFRAME";
     // Auto-populate code segments from product data
     const autoSegments: CodeSegment[] = [];
@@ -2255,7 +2261,7 @@ function CreateBOMDialog({
                         onChange={(e) => updateWIP(wi, "wipType", e.target.value)}
                         className="text-sm border border-[#A8CAD2] rounded px-2 py-1 bg-white"
                       >
-                        {Object.entries(WIP_TYPE_LABELS).map(([k, v]) => (
+                        {Object.entries(WIP_TYPE_LABELS).filter(([k]) => k === w.wipType || wipTypeAllowed(k, selected?.category, getVariantsConfigSync()?.wipTypeProducts)).map(([k, v]) => (
                           <option key={k} value={k}>{v.label}</option>
                         ))}
                       </select>
@@ -2825,7 +2831,7 @@ function WipNodeDetail({
           onChange={(e) => onUpdate(wi, path, "wipType", e.target.value)}
           className="text-sm border border-[#E2DDD8] rounded px-2.5 py-1.5 bg-white"
         >
-          {Object.entries(WIP_TYPE_LABELS).map(([k, v]) => (<option key={k} value={k}>{v.label}</option>))}
+          {Object.entries(WIP_TYPE_LABELS).filter(([k]) => k === node.wipType || wipTypeAllowed(k, product?.category, getVariantsConfigSync()?.wipTypeProducts)).map(([k, v]) => (<option key={k} value={k}>{v.label}</option>))}
         </select>
         <input
           type="number"
@@ -3111,7 +3117,7 @@ function EditBOMDialog({
   }
 
   function addWIPComponent() {
-    const wipType = product.category === "SOFA" ? "SOFA_BASE" : "DIVAN";
+    const wipType = allowedWipType(product.category === "SOFA" ? "SOFA_BASE" : "DIVAN", product.category);
     const isBedframe = product.category === "BEDFRAME";
     // Auto-populate code segments from product data
     const autoSegments: CodeSegment[] = [];
@@ -3212,7 +3218,7 @@ function EditBOMDialog({
   }
   // --- Recursive Sub-WIP helpers using path-based updates ---
   function makeAutoSegments(): CodeSegment[] {
-    const wipType = product.category === "SOFA" ? "SOFA_BASE" : "DIVAN";
+    const wipType = allowedWipType(product.category === "SOFA" ? "SOFA_BASE" : "DIVAN", product.category);
     const isBedframe = product.category === "BEDFRAME";
     const segs: CodeSegment[] = [];
     if (product.code) segs.push({ type: "variant", variantCategory: "PRODUCT_CODE", value: product.code });
@@ -3246,7 +3252,7 @@ function EditBOMDialog({
   function addSubWIPAtPath(wi: number, path: number[]) {
     const autoSegs = makeAutoSegments();
     const autoMats = makeAutoMaterials();
-    const wipType = product.category === "SOFA" ? "SOFA_BASE" : "DIVAN";
+    const wipType = allowedWipType(product.category === "SOFA" ? "SOFA_BASE" : "DIVAN", product.category);
     setWipComponents((prev) =>
       prev.map((w, idx) => idx !== wi ? w : updateAtPath(w, path, (node) => ({
         ...node,
@@ -4048,11 +4054,12 @@ function MasterTemplatesDialog({
   function makeEmptyWIP(category: BOMCategory): WIPComponent {
     // Accessory has no canonical WIP type — fall back to SOFA_BASE just as a
     // neutral placeholder if a user adds a WIP to an accessory master template.
-    const wipType = (
+    const wipType = allowedWipType(
       category === "BEDFRAME" ? "DIVAN"
       : category === "SOFA" ? "SOFA_BASE"
-      : "SOFA_BASE"
-    ) as WIPComponent["wipType"];
+      : "SOFA_BASE",
+      category,
+    );
     // Seed default code segments: {PRODUCT_CODE from order} + WIP-type word
     // (e.g. "DIVAN", "HEADBOARD"). The user can then add size / heights /
     // fabric segments as needed.
