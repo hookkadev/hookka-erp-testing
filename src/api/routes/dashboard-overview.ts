@@ -294,9 +294,13 @@ app.get("/", async (c) => {
           ? new Date(`${monthScope.lastDay}T00:00:00`)
           : new Date(new Date(today).getTime() - 24 * 60 * 60 * 1000);
       let guard = 0;
+      // Compare view on a month: the window never reaches into the month
+      // before (owner 2026-10-09), so it can hold fewer than ROLLING_DAYS.
+      const clipStart = windowOverride && monthScope ? monthScope.start : null;
       while (rollingDays.length < ROLLING_DAYS && guard < 130) {
         guard++;
         const iso = fmtISO(cur);
+        if (clipStart && iso < clipStart) break;
         if (cur.getDay() !== 0 && !holidaySet.has(iso)) rollingDays.push(iso);
         cur.setDate(cur.getDate() - 1);
       }
@@ -1088,7 +1092,7 @@ app.get("/", async (c) => {
       // it now does. Flagged rather than unified: making both use the month
       // would divide a bottleneck dept by three days of its own output and
       // swing the bottleneck ranking on the 1st of every month.
-      const dailyCapMin = Math.round(windowTotal / ROLLING_DAYS);
+      const dailyCapMin = Math.round(windowTotal / (rollingDays.length || 1));
       const totalMin = sofaMin + bedframeMin;
       // Div-zero guard (owner audit 2026-07-11): a dept with backlog but ZERO
       // completions in the rolling window used to divide by 1 MINUTE, showing
@@ -1129,7 +1133,7 @@ app.get("/", async (c) => {
     const backlogDailyCapacityMin =
       dailyCapacityMin > 0
         ? dailyCapacityMin
-        : Math.round(capacityMinRolling / ROLLING_DAYS);
+        : Math.round(capacityMinRolling / (rollingDays.length || 1));
     const backlogDays =
       backlogDailyCapacityMin > 0
         ? Math.round((backlogGrandMin / backlogDailyCapacityMin) * 10) / 10

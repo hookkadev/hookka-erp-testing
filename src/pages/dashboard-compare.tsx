@@ -3,118 +3,139 @@
 // side by side, to judge the 2026-10-08 switch to 14 days.
 //
 // STAGING ONLY: lives on the `staging` branch, never PR this into main.
-// Both panels read /api/dashboard/overview with capacityWindow=7 / 14, which
-// the route answers without touching any stored copy. The month picker: "Up
-// to yesterday" is today's state; a finished month is its month-end state,
-// with both windows ending on that month's last day.
-// Both charts of a kind share one scale so the bars can be compared by eye.
+// Both columns read /api/dashboard/overview with capacityWindow=7 / 14, which
+// the route answers without touching any stored copy. Month picker: "Up to
+// yesterday" is today's state; a month keeps both windows INSIDE that month
+// (owner 2026-10-09: nothing carried over from the month before), ending on
+// its last day, or yesterday for the current month.
+// Each column: the Plant Load card, the Department Backlog bars and the daily
+// production chart. Bars and charts of a kind share one scale across columns.
 // ============================================================
 import { useState } from "react";
 import { Bar, BarChart, CartesianGrid, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Card, CardContent } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { useCachedJson } from "@/lib/cached-fetch";
+import { PlantLoadCard } from "@/pages/dashboards/DashboardWidgets";
+import { deptBacklogRows, type DeptBacklog } from "@/pages/dashboards/dashboard-widgets-lib";
+import { daysTone } from "@/pages/dashboards/ops-floor-lib";
+import { AMBER, GREEN, RED, type Period } from "@/pages/dashboards/dashboard-shared-lib";
 
-type DeptRow = { dept: string; totalMin: number; dailyCapMin: number; backlogDays: number | null };
 type Overview = {
   salesMonths?: string[];
   stateSnapshot?: { source: "live" | "snapshot" | "reconstructed"; asOf: string | null };
   production?: {
     dailyCapacityMin: number;
     backlogDays: number;
-    backlogGrandMin: number;
     capacityDays: { date: string; minutes: number; workers?: number }[];
-    backlogByDept: DeptRow[];
+    backlogByDept: DeptBacklog[];
   };
 };
+type Prod = NonNullable<Overview["production"]>;
 
 const CUR_YM = new Date().toISOString().slice(0, 7);
 const h = (min: number | null | undefined) => `${Math.round((min ?? 0) / 60).toLocaleString()}h`;
 const INK = "#6B5C32";
-const GOLD = "#C5A85C";
+const SOFA = "#A8A29E";
+const TONE = { red: RED, amber: AMBER, green: GREEN } as const;
 
-function Panel({
-  label,
-  prod,
-  loading,
-  dayMax,
-  deptMax,
-}: {
-  label: string;
-  prod: Overview["production"] | undefined;
-  loading: boolean;
-  dayMax: number;
-  deptMax: number;
-}) {
-  const range = prod?.capacityDays.length
-    ? `${prod.capacityDays[0].date.slice(5)} to ${prod.capacityDays[prod.capacityDays.length - 1].date.slice(5)}`
-    : "";
-  if (!prod) {
-    return (
-      <Card className="min-w-0">
-        <CardContent className="p-5 text-sm text-[#6B7280]">{loading ? "Loading…" : "Could not load the dashboard data."}</CardContent>
-      </Card>
-    );
-  }
-  const days = [...prod.capacityDays]
-    .sort((a, b) => a.date.localeCompare(b.date))
-    .map((d) => ({ day: d.date.slice(5), hours: Math.round(d.minutes / 60) }));
-  const depts = prod.backlogByDept.map((d) => ({ dept: d.dept, days: d.backlogDays ?? 0, stalled: d.backlogDays == null }));
+function DeptBacklog({ prod, mx }: { prod: Prod; mx: number }) {
+  const { rows } = deptBacklogRows(prod.backlogByDept, true, true);
+  const sorted = [...rows].sort((a, b) => (b.showDays ?? Infinity) - (a.showDays ?? Infinity));
   return (
     <Card className="min-w-0">
-      <CardContent className="p-4 sm:p-5 space-y-5">
-        <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-          <h2 className="text-base font-bold text-[#1F1D1B]">{label}</h2>
-          {range && <span className="text-xs text-[#9CA3AF] tabular-nums">{range}</span>}
+      <CardContent className="p-4 sm:p-5">
+        <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
+          <h3 className="text-sm font-bold text-[#1F1D1B]">Department Backlog</h3>
+          <span className="flex gap-3 text-xs text-[#5A5550]">
+            <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{ background: SOFA }} />Sofa</span>
+            <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{ background: INK }} />Bedframe</span>
+          </span>
         </div>
-        <div className="grid grid-cols-3 gap-2 sm:gap-3 text-center">
-          {[
-            ["Daily capacity", h(prod.dailyCapacityMin)],
-            ["Queue", `${prod.backlogDays.toLocaleString()}d`],
-            ["Backlog", h(prod.backlogGrandMin)],
-          ].map(([k, v]) => (
-            <div key={k} className="rounded-lg bg-[#F7F4EF] px-2 py-2 min-w-0">
-              <p className="text-[10px] uppercase tracking-wider text-[#9CA3AF] truncate">{k}</p>
-              <p className="text-base sm:text-lg font-bold tabular-nums text-[#1F1D1B]">{v}</p>
+        <div className="space-y-2.5">
+          {sorted.map(({ d, sofaDays, bedDays, showDays }) => (
+            <div key={d.dept} className="grid grid-cols-[minmax(0,6.5rem)_minmax(0,1fr)_3rem] items-center gap-2 text-xs">
+              <span className="truncate text-[#1F1D1B]">{d.dept}</span>
+              <span className="flex h-2 min-w-0 overflow-hidden rounded-full bg-[#F5F2ED]" title={`${h(d.totalMin)} queued · ${h(d.dailyCapMin)}/day`}>
+                <span style={{ width: `${(sofaDays / mx) * 100}%`, background: SOFA }} />
+                <span style={{ width: `${(bedDays / mx) * 100}%`, background: INK }} />
+              </span>
+              <span className="text-right font-semibold tabular-nums" style={{ color: TONE[daysTone(showDays)] }}>
+                {showDays == null ? "stalled" : `${showDays.toFixed(1)}d`}
+              </span>
             </div>
           ))}
         </div>
-        <div>
-          <p className="text-xs font-semibold text-[#5A5550] mb-1">Production hours per working day</p>
-          <div className="h-52">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={days} margin={{ top: 16, right: 8, left: -16, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E5E0D8" vertical={false} />
-                <XAxis dataKey="day" tick={{ fontSize: 10, fill: "#A39E93" }} interval="preserveStartEnd" />
-                <YAxis domain={[0, dayMax]} tick={{ fontSize: 10, fill: "#A39E93" }} />
-                <Tooltip formatter={(v) => [`${v}h`, "Production"]} />
-                <ReferenceLine
-                  y={Math.round(prod.dailyCapacityMin / 60)}
-                  stroke={GOLD}
-                  strokeDasharray="4 3"
-                  label={{ value: `avg ${h(prod.dailyCapacityMin)}`, position: "insideTopRight", fontSize: 10, fill: INK }}
-                />
-                <Bar dataKey="hours" fill={INK} radius={[3, 3, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-        <div>
-          <p className="text-xs font-semibold text-[#5A5550] mb-1">Queue days by department</p>
-          <div style={{ height: Math.max(160, depts.length * 26) }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={depts} layout="vertical" margin={{ top: 0, right: 16, left: 8, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E5E0D8" horizontal={false} />
-                <XAxis type="number" domain={[0, deptMax]} tick={{ fontSize: 10, fill: "#A39E93" }} />
-                <YAxis type="category" dataKey="dept" width={96} tick={{ fontSize: 10, fill: "#5A5550" }} />
-                <Tooltip formatter={(v, _n, item) => [item.payload.stalled ? "stalled (no output)" : `${v}d`, "Queue"]} />
-                <Bar dataKey="days" fill={GOLD} radius={[0, 3, 3, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function DailyChart({ prod, dayMax }: { prod: Prod; dayMax: number }) {
+  const days = [...prod.capacityDays]
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map((d) => ({ day: d.date.slice(5), hours: Math.round(d.minutes / 60) }));
+  return (
+    <Card className="min-w-0">
+      <CardContent className="p-4 sm:p-5">
+        <h3 className="text-sm font-bold text-[#1F1D1B] mb-2">Production hours per working day</h3>
+        <div className="h-52">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={days} margin={{ top: 16, right: 8, left: -16, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#E5E0D8" vertical={false} />
+              <XAxis dataKey="day" tick={{ fontSize: 10, fill: "#A39E93" }} interval="preserveStartEnd" />
+              <YAxis domain={[0, dayMax]} tick={{ fontSize: 10, fill: "#A39E93" }} />
+              <Tooltip formatter={(v) => [`${v}h`, "Production"]} />
+              <ReferenceLine
+                y={Math.round(prod.dailyCapacityMin / 60)}
+                stroke="#C5A85C"
+                strokeDasharray="4 3"
+                label={{ value: `avg ${h(prod.dailyCapacityMin)}`, position: "insideTopRight", fontSize: 10, fill: INK }}
+              />
+              <Bar dataKey="hours" fill={INK} radius={[3, 3, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function Column({
+  win,
+  period,
+  res,
+  dayMax,
+  deptMax,
+}: {
+  win: 7 | 14;
+  period: Period;
+  res: { data: Overview | null; loading: boolean };
+  dayMax: number;
+  deptMax: number;
+}) {
+  const prod = res.data?.production;
+  const cd = prod?.capacityDays ?? [];
+  return (
+    <div className="min-w-0 space-y-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+        <h2 className="text-base font-bold text-[#1F1D1B]">{win}-day window</h2>
+        {cd.length > 0 && (
+          <span className="text-xs text-[#6B7280] tabular-nums">
+            {cd.length} working day{cd.length === 1 ? "" : "s"} · {cd[0].date.slice(5)} to {cd[cd.length - 1].date.slice(5)}
+          </span>
+        )}
+      </div>
+      <PlantLoadCard period={period} capacityWindow={win} />
+      {prod ? (
+        <>
+          <DeptBacklog prod={prod} mx={deptMax} />
+          <DailyChart prod={prod} dayMax={dayMax} />
+        </>
+      ) : (
+        <p className="text-sm text-[#6B7280]">{res.loading ? "Loading…" : "Could not load the dashboard data."}</p>
+      )}
+    </div>
   );
 }
 
@@ -129,11 +150,14 @@ export default function DashboardCompare() {
   const state = r14.data?.stateSnapshot;
   const p7 = r7.data?.production;
   const p14 = r14.data?.production;
+  const widgetPeriod: Period = period === "all" ? { mode: "ytd", month: CUR_YM } : { mode: "monthly", month: period };
 
   const allDays = [...(p7?.capacityDays ?? []), ...(p14?.capacityDays ?? [])].map((d) => d.minutes / 60);
   const dayMax = Math.ceil(Math.max(50, ...allDays) / 50) * 50;
-  const allDept = [...(p7?.backlogByDept ?? []), ...(p14?.backlogByDept ?? [])].map((d) => d.backlogDays ?? 0);
-  const deptMax = Math.ceil(Math.max(5, ...allDept) / 5) * 5;
+  const deptDays = [p7, p14].flatMap((p) =>
+    p ? deptBacklogRows(p.backlogByDept, true, true).rows.map((r) => r.showDays ?? 0) : [],
+  );
+  const deptMax = Math.max(1, ...deptDays);
 
   const by14 = new Map((p14?.backlogByDept ?? []).map((d) => [d.dept, d]));
   const rows = (p7?.backlogByDept ?? [])
@@ -157,28 +181,33 @@ export default function DashboardCompare() {
             className="h-9 rounded-md border border-[#E2DDD8] bg-white px-2 text-sm"
           >
             <option value="all">Up to yesterday</option>
+            <option value={CUR_YM}>{CUR_YM} (this month so far)</option>
             {pastMonths.map((m) => (
               <option key={m} value={m}>
-                End of {m}
+                {m}
               </option>
             ))}
           </select>
         }
       />
-      {period !== "all" && state && (
+      {period !== "all" && (
         <p className="text-xs text-[#5A5550]">
-          Backlog at the end of {period}:{" "}
-          {state.source === "snapshot"
-            ? `saved snapshot of ${state.asOf}`
-            : state.source === "reconstructed"
-              ? "estimated from job cards (no snapshot was saved that month)"
-              : "today's live figure (no history for that month)"}
-          . Both panels divide the same backlog; only the capacity window differs.
+          Both windows stay inside {period}: they count back from {period === CUR_YM ? "yesterday" : "its last day"} and stop
+          at the 1st, so a window can hold fewer working days than its name.
+          {state && state.source !== "live" && (
+            <>
+              {" "}Backlog at month end:{" "}
+              {state.source === "snapshot"
+                ? `saved snapshot of ${state.asOf}`
+                : "estimated from job cards (no snapshot was saved that month)"}
+              .
+            </>
+          )}
         </p>
       )}
       <div className="grid gap-4 lg:grid-cols-2">
-        <Panel label="Last 7 working days" prod={p7} loading={r7.loading} dayMax={dayMax} deptMax={deptMax} />
-        <Panel label="Last 14 working days (live)" prod={p14} loading={r14.loading} dayMax={dayMax} deptMax={deptMax} />
+        <Column win={7} period={widgetPeriod} res={r7} dayMax={dayMax} deptMax={deptMax} />
+        <Column win={14} period={widgetPeriod} res={r14} dayMax={dayMax} deptMax={deptMax} />
       </div>
       {p7 && p14 && (
         <Card>
