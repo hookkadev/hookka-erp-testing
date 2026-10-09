@@ -1,6 +1,7 @@
 # Hookka ERP — Codebase Map (the single authoritative map)
 
 > **Last verified: 2026-10-09 on branch `feat/dev63-creditor-aging-trade-finance` (to `staging`)**: the Trade finance row (bank charges, DEV-63), read from `src/lib/trade-finance.ts`, `src/api/routes/accounting.ts` and `src/pages/accounting/tabs/TradeFinanceBlock.tsx`. Nothing else re-checked.
+> **Last verified: 2026-10-09 on branch `feat/dev64-price-list-default-column` (to `staging`)**: the `src/pages/customers.tsx` row (line count) and the per-customer prices gotcha (sofa seat columns follow Maintenance Sizes), read from `CustomerProductsPanel` in that file. Nothing else re-checked.
 > **Last verified: 2026-10-09 on branch `feat/compare-fabric-cost-tab` (to `staging`)**: the month-awareness gotcha's staging Dashboard Compare sentence (fabric cost tab), read from `src/pages/dashboard-compare.tsx` and `src/api/routes/dashboard-overview.ts`. Nothing else re-checked.
 > **Last verified: 2026-10-09 on branch `feat/dashboard-month-static-kpis` (to `staging`)**: the dashboard-state-snapshot.ts row and the month-awareness gotcha (daily Pending Delivery / Outstanding save, `stateKpis`), read from `src/api/lib/dashboard-state-snapshot.ts`. Nothing else re-checked.
 > **Last verified: 2026-10-08 on branch `feat/plant-load-14d` (to `staging`)**: the dashboard-state-snapshot.ts row and the month-awareness gotcha (frozen past months, 14-day capacity window, department list), read from `src/api/routes/dashboard-overview.ts` and `src/api/lib/dashboard-state-snapshot.ts`. Nothing else re-checked.
@@ -1006,7 +1007,7 @@ that proves those locks can actually go red.
 
 | Frontend page | API route | Primary tables | Tests |
 |---|---|---|---|
-| `src/pages/customers.tsx` — customer hub, nested pricing/maintenance/combos (4473) | `src/api/routes/customers.ts` — customer CRUD (795) | `customers` / `customer_products` / `customer_product_prices` | `tests/customer-notify.test.mjs` |
+| `src/pages/customers.tsx` — customer hub, nested pricing/maintenance/combos (4491) | `src/api/routes/customers.ts` — customer CRUD (795) | `customers` / `customer_products` / `customer_product_prices` | `tests/customer-notify.test.mjs` |
 | `src/pages/settings/Users.tsx` — Users/Org/Mailbox tabs, SUPER_ADMIN-gated (2922) | `src/api/routes/customer-products.ts` — per-customer pricing + bulk (1122) | `customer_hubs` / `delivery_hubs` | `tests/hub-cascade-completeness.test.mjs` |
 | `src/pages/settings/index.tsx` — settings shell | `src/api/routes/customer-maintenance.ts` — snapshot mirror (185) | `maintenance_config_history` / `sofa_combo_rules` | `tests/service-hub-chain.test.mjs` |
 | `src/pages/settings/EmailReports.tsx` — per-report on/off, recipients, send times, send-test (SUPER_ADMIN) | `src/api/routes/reports.ts` — `/settings` GET/PUT, `internal/due-trigger`; `src/api/lib/report-settings.ts` | `kv_config` (`daily_report_settings`, `daily_report_last_sent`) | `tests/report-settings.test.mjs` |
@@ -1052,7 +1053,7 @@ that proves those locks can actually go red.
 - Two separate auth systems: auth.ts/auth-oauth/auth-totp (office users) vs worker-auth.ts (factory workers) — NOT interchangeable; worker-auth has a 'default-protect' invariant with its own test.
 - camelCase/snake_case: read paths dual-key (r.effectiveFrom ?? r.effective_from ?? r.effectivefrom); any new camelCase WRITE column needs a `column-rename-map.json` entry or it 400s. Prefer snake_case.
 - Sofa combo pricing is BACKEND-unified via `applySofaCombos` wired into sales-orders POST/PUT — do NOT re-implement combo math in customers.tsx or maintenance/sofa-combos.tsx; those are config editors only.
-- Per-customer product prices (customer_products/customer_product_prices) shadow master product_prices; customers.tsx CustomerProductsPanel intentionally MIRRORS the Products page bulk-edit dirtyEdits pattern — keep in sync, don't fork.
+- Per-customer product prices (customer_products/customer_product_prices) shadow master product_prices; customers.tsx CustomerProductsPanel intentionally MIRRORS the Products page bulk-edit dirtyEdits pattern — keep in sync, don't fork. Its Sofa seat columns come from `useSofaSeatHeights()` (Maintenance Sizes, named sizes like DEFAULT included) — never a hard-coded height list (DEV-64).
 - Customer hubs feed the DO/Service hub chain (delivery_hubs, customer_hubs); hub-cascade-completeness + service-hub-chain tests guard the cascade — editing hub routes can break downstream delivery/consignment integrity.
 - Hub deletions are EXPLICIT-ONLY (BUG-2026-07-27-002, `tests/hub-wipe-guard.test.mjs`): customers.ts PUT deletes only ids named in `body.deletedHubIds` and UPSERTs the rest — never reintroduce the replace-diff (it let stale-tab saves wipe hubs). Hub INSERT inherits the customer's org; hub state pickers include SGR (canonical Selangor, `malaysia-states.ts`); scan-PO create shows a confirm gate before creating hub-less SOs.
 - /api/files (files.ts) serves customer, product-doc and modular uploads with attachment disposition but `<img src=.../download>` still renders — shared endpoint, don't special-case per resourceType.

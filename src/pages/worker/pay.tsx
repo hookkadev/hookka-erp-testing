@@ -477,6 +477,7 @@ function isFinalised(c: PayData["current"]): boolean {
 }
 
 function SavePayslipButton({ period }: { period: string }) {
+  const t = useT();
   const [payslipBusy, setPayslipBusy] = useState(false);
   const openPayslip = async () => {
     // Fetch the DATA and render with the same generatePayslipHTML the office
@@ -496,14 +497,14 @@ function SavePayslipButton({ period }: { period: string }) {
       );
       const w = window.open("", "_blank");
       if (!w) {
-        alert("Please allow pop-ups to save your payslip.");
+        alert(t("pay.allowPopups"));
         return;
       }
       w.document.write(html);
       w.document.close();
       w.focus();
     } catch {
-      alert("Could not reach the server.");
+      alert(t("common.serverUnreachable"));
     } finally {
       setPayslipBusy(false);
     }
@@ -613,7 +614,7 @@ function CurrentMonthBreakdown({
 function FinalisedBreakdown({ slip, t }: { slip: PayslipRow; t: Translate }) {
   return (
     <div className="bg-[#1F1D1B] text-white rounded-xl p-4">
-      <p className="text-[11px] text-[#B0AAA3]">Net pay</p>
+      <p className="text-[11px] text-[#B0AAA3]">{t("pay.netPay")}</p>
       <p className="text-4xl font-bold tracking-tight mt-1">
         {rm(slip.netSen ?? slip.grossSen)}
       </p>
