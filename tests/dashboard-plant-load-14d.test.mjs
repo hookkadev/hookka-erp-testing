@@ -24,7 +24,7 @@ test("capacity window is 14 working days on the dashboard and Planning", () => {
   assert.match(OVERVIEW, /const ROLLING_DAYS = windowOverride \?\? 14;/);
   assert.match(OVERVIEW, /Math\.round\(windowTotal \/ ROLLING_DAYS\)/);
   // Only a past month averages its own days; the current month is rolling.
-  assert.match(OVERVIEW, /if \(monthScope && isPastMonth\) \{\n\s+windowDays = \[\];/);
+  assert.match(OVERVIEW, /if \(monthScope && isPastMonth && !windowOverride\) \{\n\s+windowDays = \[\];/);
   assert.match(PLANNING, /const ROLLING_WINDOW_DAYS = 14;/);
 });
 
@@ -89,11 +89,20 @@ test("route reads the frozen copy only for past months and freezes after compute
 // Staging Dashboard Compare: capacityWindow=7 must never read or write a
 // stored copy, or the old 7-day numbers would leak into the real dashboard.
 test("the 7-day compare view reads and writes no stored copy", () => {
-  assert.match(OVERVIEW, /const windowOverride = c\.req\.query\("capacityWindow"\) === "7" \? 7 : null;/);
+  assert.match(OVERVIEW, /const windowOverride = cwRaw === "7" \? 7 : cwRaw === "14" \? 14 : null;/);
   // snapshot read + snapshot write-back
   assert.equal((OVERVIEW.match(/if \(period === "all" && !windowOverride\) \{/g) ?? []).length, 2);
-  // its own 60s cache key
-  assert.match(OVERVIEW, /:w\$\{windowOverride \?\? 14\}`/);
+  // its own 60s cache key, never the normal view's (a compare 14 differs from
+  // the normal view on a past month)
+  assert.match(OVERVIEW, /\$\{windowOverride \? `:cmp\$\{windowOverride\}` : ""\}`/);
   // no daily state capture, no freeze
   assert.match(OVERVIEW, /if \(windowOverride\) \{\n\s+\/\/ Compare view: nothing stored\.\n\s+\} else if \(!isPastMonth\) \{\n\s+captureTodayState/);
+});
+
+// Compare view with a finished month: both windows end on the month's last
+// day, and the saved month-end backlog is divided again by each window.
+test("compare view on a past month uses windows ending at month end", () => {
+  assert.match(OVERVIEW, /windowOverride && isPastMonth && monthScope\n\s+\? new Date\(`\$\{monthScope\.lastDay\}T00:00:00`\)/);
+  assert.match(OVERVIEW, /if \(monthScope && isPastMonth && !windowOverride\) \{/);
+  assert.match(OVERVIEW, /if \(windowOverride\) \{\n\s+const capByDept = new Map\(backlogByDept\.map/);
 });
