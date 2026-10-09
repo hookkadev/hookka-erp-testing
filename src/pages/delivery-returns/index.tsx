@@ -93,6 +93,7 @@ export default function DeliveryReturnsPage() {
       key: "reference",
       label: "Ref",
       width: "110px",
+      exportValue: (row) => row.items?.[0]?.reference || "",
       render: (_v, row) => row.items?.[0]?.reference || "—",
     },
     {
@@ -100,6 +101,7 @@ export default function DeliveryReturnsPage() {
       label: "Type",
       width: "150px",
       sortable: true,
+      exportValue: (row) => (row.returnType ? (TYPE_LABEL[row.returnType] ?? row.returnType) : ""),
       render: (_v, row) =>
         row.returnType ? (TYPE_LABEL[row.returnType] ?? row.returnType) : "—",
     },
@@ -107,6 +109,7 @@ export default function DeliveryReturnsPage() {
       key: "problem",
       label: "Problem",
       width: "160px",
+      exportValue: (row) => row.items?.[0]?.problem || "",
       render: (_v, row) => row.items?.[0]?.problem || "—",
     },
     {
@@ -114,6 +117,7 @@ export default function DeliveryReturnsPage() {
       label: "Status",
       width: "150px",
       sortable: true,
+      exportValue: (row) => STATUS_LABEL[row.status] ?? row.status,
       render: (_v, row) => (
         <Badge variant="status" status={row.status}>
           {STATUS_LABEL[row.status] ?? row.status}
@@ -170,6 +174,7 @@ export default function DeliveryReturnsPage() {
         keyField="id"
         loading={loading}
         gridId="delivery-returns"
+        exportName="delivery-returns"
         onRowClick={(row) => navigate(`/delivery-returns/${row.id}`)}
         emptyMessage="No delivery returns yet."
       />

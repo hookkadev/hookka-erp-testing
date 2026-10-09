@@ -16,8 +16,11 @@ import {
   ShoppingCart,
   ArrowDownUp,
   Filter,
+  Download,
 } from "lucide-react";
 import type { MaterialRequirement, MRPRun } from "@/types";
+import { exportWorkbookXlsx } from "@/lib/export-report";
+import { buildMrpRequirementsAoa, buildMrpFabricAoa } from "@/lib/mrp-export";
 
 type Tab = "DASHBOARD" | "REQUIREMENTS" | "FABRIC";
 type StatusFilter = "ALL" | "SUFFICIENT" | "LOW" | "SHORTAGE";
@@ -107,6 +110,7 @@ export default function MRPPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
   const [sortDesc, setSortDesc] = useState(true);
   const [horizon, setHorizon] = useState<Horizon>("all");
+  const { toast } = useToast();
 
   const { data: mrpResp, loading } = useCachedJson<{
     success?: boolean;
@@ -183,10 +187,18 @@ export default function MRPPage() {
     fabricCategories.includes(r.materialCategory)
   );
 
+  const exportWorkbook = () => {
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kuala_Lumpur" });
+    exportWorkbookXlsx(`mrp-${today}.xlsx`, [
+      { name: "Material Requirements", aoa: buildMrpRequirementsAoa(filteredRequirements) },
+      { name: "Fabric Planning", aoa: buildMrpFabricAoa(fabricData, fabricRequirements) },
+    ]).catch((e) => toast.error(`Export failed: ${e instanceof Error ? e.message : String(e)}`));
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-[#1F1D1B] flex items-center gap-2">
             <Layers className="h-7 w-7 text-[#6B5C32]" />
@@ -196,7 +208,7 @@ export default function MRPPage() {
             Plan material needs based on active production orders and BOM
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           {/* Planning Horizon Selector */}
           <div className="flex items-center gap-1 bg-[#F0ECE9] rounded-lg p-0.5">
             {HORIZONS.map((h) => (
@@ -229,6 +241,15 @@ export default function MRPPage() {
                 Run MRP
               </>
             )}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={exportWorkbook}
+            disabled={requirements.length === 0 && fabricData.length === 0}
+            title="Download the Material Requirements and Fabric Planning tabs as one Excel file"
+          >
+            <Download className="h-4 w-4" />
+            Export Excel
           </Button>
         </div>
       </div>

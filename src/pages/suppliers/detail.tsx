@@ -498,6 +498,8 @@ export default function SupplierDetailPage() {
       width: "120px",
       align: "right",
       sortable: true,
+      exportValue: (row: SkuBinding) =>
+        row.currency !== "MYR" ? `${row.unitPrice / 100} ${row.currency}` : row.unitPrice / 100,
       render: (_val: unknown, row: SkuBinding) => (
         <span className="text-[#1F1D1B]">
           {formatCurrency(row.unitPrice)} {row.currency !== "MYR" ? row.currency : ""}
@@ -518,6 +520,7 @@ export default function SupplierDetailPage() {
       label: "Main",
       width: "80px",
       sortable: true,
+      exportValue: (row: SkuBinding) => (row.isMainSupplier ? "Main" : ""),
       render: (_val: unknown, row: SkuBinding) =>
         row.isMainSupplier ? (
           <Badge className="bg-green-50 text-green-800 border-green-300">Main</Badge>
@@ -807,6 +810,7 @@ export default function SupplierDetailPage() {
                   data={skus}
                   keyField="id"
                   gridId="supplier-detail-sku-mappings"
+                  exportName={["supplier-sku-prices", supplier.code].filter(Boolean).join("-")}
                   onDoubleClick={(row) => {
                     setEditingSKU(bindingToSKU(row));
                     setShowSKUForm(true);

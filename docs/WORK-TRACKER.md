@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-09**: branch `feat/batch-exports-from-houzs` (to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-09**: branch `feat/dev64-price-list-default-column` (DEV-64 to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-09**: branch `fix/worker-i18n-popups-and-date` (to `staging`, then `main`) added below (in progress, its entry is the newest).
 > **Last verified: 2026-10-09**: branch `feat/dashboard-month-static-kpis` (to `staging`) added below (its entry is the newest).
@@ -176,6 +177,17 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-09 — 🔵 Batch exports brought over from the Houzs ERP comparison (branch `feat/batch-exports-from-houzs` → `staging`)
+
+Owner asks: compare batch import/export with the Houzs ERP repo (finance tabs and modules only one system has are out of scope), then build the exports first and leave imports for later. Owner picked: the MRP workbook covers both tabs; list exports use only the ticked rows when any are ticked.
+
+1. 🔵 Shared grid Export uses only the ticked rows when any are ticked (`data-grid.tsx`).
+2. 🔵 Export switched on for Suppliers, Fabrics, Delivery Returns and a supplier's SKU price list.
+3. 🔵 MRP page: one Excel workbook with a Material Requirements sheet and a Fabric Planning sheet, matching the screen.
+4. ⚪ Per-line Excel (Detail Listing) for Delivery Return, Purchase Invoice and Purchase Return. Separate PR.
+5. 🟡 One merged PDF of ticked Delivery Orders, Delivery Returns and Purchase Returns. Needs owner: Purchase Returns has no PDF layout yet, and ticked DOs already print as one PDF behind a packing-list cover.
+6. ⚪ Imports (fabrics, supplier prices, PO line updates) parked by the owner until exports are done.
 
 ## 2026-10-09 — 🔵 DEV-63: Bank charges column on the Trade Finance aging block (branch `feat/dev63-creditor-aging-trade-finance` → `staging`)
 

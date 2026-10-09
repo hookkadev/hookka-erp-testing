@@ -1,5 +1,7 @@
 # Reports & Analytics — Module Guide
 
+> **Last verified: 2026-10-09** (branch `feat/batch-exports-from-houzs`): the `export-report.ts` anchors re-derived (`exportReportPdf` :96) after `exportWorkbookXlsx` (:69, several sheets in one file) was added. Nothing else re-checked.
+
 > **Last verified: 2026-10-02** (branch `chore/sync-staging-from-main-1002`, staging<-main merge): every `reports.ts` anchor and its line count (1093) re-derived on the merged file (main added the first-run `seedLastSent`). Nothing else re-checked.
 
 > **Last verified: 2026-10-02** (branch `feat/schedule-dept-share-table`): `schedule-overdue-report.ts` line count (804) and anchor (509), the Schedule email department summary, summary-only email and full-list filter note only. Nothing else re-checked.
@@ -91,7 +93,8 @@ Two unrelated report worlds share the name **Reports**:
 | `GET /` (list) / `POST /` (create) | `src/api/routes/forecasts.ts:55 / 80` | `forecast_entries` CRUD |
 | `GET /` (overview) | `src/api/routes/dashboard-overview.ts:49` | Consolidated dashboard payload |
 | `buildReportHTML` / `printReport` | `src/lib/print-report.ts:218 / 339` | Shared WYSIWYG print engine |
-| `exportReportCsv/Xlsx/Pdf` | `src/lib/export-report.ts:27 / 41 / 82` | Shared export helpers |
+| `exportReportCsv/Xlsx/Pdf` | `src/lib/export-report.ts:27 / 41 / 96` | Shared export helpers |
+| `exportWorkbookXlsx` | `src/lib/export-report.ts:69` | Several sheets in one .xlsx (the MRP workbook) |
 
 ## Gotchas
 - **The Reports hub and `/api/reports/*` do NOT share data.** `reports.tsx` tabs fetch source-module list APIs and aggregate client-side; only `daily-report.tsx` consumes `/api/reports/compliance.json`. Don't expect matching shapes.
