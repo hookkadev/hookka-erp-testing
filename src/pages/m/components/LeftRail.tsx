@@ -29,6 +29,8 @@ import {
   LogOut,
   Moon,
   Sun,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { M } from "../theme";
@@ -67,7 +69,13 @@ function isActive(itemPath: string, pathname: string): boolean {
   return pathname.startsWith(itemPath);
 }
 
-export function LeftRail() {
+export function LeftRail({
+  compact = false,
+  onToggle,
+}: {
+  compact?: boolean;
+  onToggle: () => void;
+}) {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const { isNavAllowed } = usePermissions();
@@ -85,14 +93,14 @@ export function LeftRail() {
   return (
     <nav
       style={{
-        width: 198,
+        width: compact ? 72 : 198,
         flex: "none",
         height: "100dvh",
         background: "#F3EEE6",
         borderRight: "1px solid #E4DDD0",
         display: "flex",
         flexDirection: "column",
-        padding: "14px 11px",
+        padding: compact ? "14px 8px" : "14px 11px",
         position: "sticky",
         top: 0,
       }}
@@ -102,8 +110,10 @@ export function LeftRail() {
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 9,
-          padding: "4px 8px 12px",
+          flexDirection: compact ? "column" : "row",
+          gap: compact ? 8 : 9,
+          justifyContent: compact ? "center" : "space-between",
+          padding: compact ? "4px 0 8px" : "4px 0 12px 8px",
         }}
       >
         <span
@@ -122,9 +132,52 @@ export function LeftRail() {
         >
           H
         </span>
-        <span style={{ fontSize: 14, fontWeight: 700, color: M.raisin }}>
-          Hookka
-        </span>
+        {compact ? null : (
+          <span style={{ flex: 1, fontSize: 14, fontWeight: 700, color: M.raisin }}>
+            Hookka
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-label={compact ? "Expand navigation rail" : "Collapse navigation rail"}
+          aria-expanded={!compact}
+          title={compact ? "Expand navigation rail" : "Collapse navigation rail"}
+          style={{
+            width: 44,
+            height: 44,
+            flex: "none",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 0,
+            border: "none",
+            background: "transparent",
+            color: "#8A8270",
+            cursor: "pointer",
+            outline: "2px solid transparent",
+            outlineOffset: 2,
+            WebkitTapHighlightColor: "transparent",
+          }}
+          onMouseEnter={(event) => {
+            event.currentTarget.style.color = "#5A5346";
+          }}
+          onMouseLeave={(event) => {
+            event.currentTarget.style.color = "#8A8270";
+          }}
+          onFocus={(event) => {
+            event.currentTarget.style.outlineColor = "#8A8270";
+          }}
+          onBlur={(event) => {
+            event.currentTarget.style.outlineColor = "transparent";
+          }}
+        >
+          {compact ? (
+            <PanelLeftOpen size={18} strokeWidth={1.75} aria-hidden />
+          ) : (
+            <PanelLeftClose size={18} strokeWidth={1.75} aria-hidden />
+          )}
+        </button>
       </div>
 
       {/* Scrollable rail body — sections + items. */}
@@ -140,6 +193,9 @@ export function LeftRail() {
         {ENTRIES.map((e, i) => {
           if (e.kind === "item" && e.navGate && !isNavAllowed(e.navGate)) return null;
           if (e.kind === "section") {
+            if (compact) {
+              return <div key={`sec-${i}`} aria-hidden style={{ height: i === 0 ? 4 : 10 }} />;
+            }
             return (
               <div
                 key={`sec-${i}`}
@@ -162,11 +218,15 @@ export function LeftRail() {
             <button
               key={e.key}
               onClick={() => navigate(e.path)}
+              aria-label={e.label}
+              title={compact ? e.label : undefined}
               style={{
                 display: "flex",
                 alignItems: "center",
-                gap: 11,
-                padding: "7px 11px",
+                gap: compact ? 0 : 11,
+                justifyContent: compact ? "center" : "flex-start",
+                minHeight: compact ? 44 : undefined,
+                padding: compact ? "7px" : "7px 11px",
                 borderRadius: 10,
                 cursor: "pointer",
                 marginBottom: 1,
@@ -183,7 +243,7 @@ export function LeftRail() {
                 strokeWidth={1.75}
                 color={act ? "#fff" : "#8A8270"}
               />
-              <span
+              {compact ? null : <span
                 style={{
                   fontSize: 13,
                   fontWeight: act ? 700 : 500,
@@ -191,22 +251,23 @@ export function LeftRail() {
                 }}
               >
                 {e.label}
-              </span>
+              </span>}
             </button>
           );
         })}
       </div>
 
       {/* Dark/Light mode toggle — CHANGELOG: "Fold 版在左栏底部". */}
-      <ThemeModeRow />
+      <ThemeModeRow compact={compact} />
 
       {/* Account footer — avatar · name · role · log-out. */}
       <div
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 10,
-          padding: "11px 10px 4px",
+          gap: compact ? 6 : 10,
+          flexDirection: compact ? "column" : "row",
+          padding: compact ? "11px 0 4px" : "11px 10px 4px",
           marginTop: 8,
           borderTop: "1px solid #E4DDD0",
         }}
@@ -228,7 +289,7 @@ export function LeftRail() {
         >
           {initials}
         </span>
-        <div style={{ flex: 1, minWidth: 0 }}>
+        {compact ? null : <div style={{ flex: 1, minWidth: 0 }}>
           <div
             style={{
               fontSize: 12,
@@ -244,7 +305,7 @@ export function LeftRail() {
           {role ? (
             <div style={{ fontSize: 10, color: M.muted }}>{role}</div>
           ) : null}
-        </div>
+        </div>}
         <button
           onClick={() => {
             clearAuth();
@@ -257,7 +318,12 @@ export function LeftRail() {
             background: "transparent",
             border: "none",
             cursor: "pointer",
+            width: compact ? 44 : undefined,
+            height: compact ? 44 : undefined,
             padding: 4,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
             WebkitTapHighlightColor: "transparent",
           }}
         >
@@ -268,7 +334,7 @@ export function LeftRail() {
   );
 }
 
-function ThemeModeRow() {
+function ThemeModeRow({ compact = false }: { compact?: boolean }) {
   const { mode, toggle } = useMobileThemeMode();
   return (
     <button
@@ -278,8 +344,10 @@ function ThemeModeRow() {
         width: "100%",
         display: "flex",
         alignItems: "center",
-        gap: 8,
-        padding: "8px 10px",
+        gap: compact ? 0 : 8,
+        justifyContent: compact ? "center" : "flex-start",
+        minHeight: 44,
+        padding: compact ? "8px" : "8px 10px",
         background: "transparent",
         border: "none",
         cursor: "pointer",
@@ -306,10 +374,10 @@ function ThemeModeRow() {
           <Sun size={14} color="#9C6F1E" strokeWidth={1.9} />
         )}
       </span>
-      <span style={{ flex: 1, fontSize: 12, color: M.raisin, fontWeight: 600, textAlign: "left" }}>
+      {compact ? null : <span style={{ flex: 1, fontSize: 12, color: M.raisin, fontWeight: 600, textAlign: "left" }}>
         {mode === "dark" ? "Dark" : "Light"}
-      </span>
-      <span
+      </span>}
+      {compact ? null : <span
         style={{
           width: 32,
           height: 18,
@@ -331,7 +399,7 @@ function ThemeModeRow() {
             transition: "left .18s",
           }}
         />
-      </span>
+      </span>}
     </button>
   );
 }
