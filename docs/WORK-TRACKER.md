@@ -1,6 +1,7 @@
 # Hookka ERP — Work Tracker
 
 > **Last verified: 2026-10-09**: branch `docs/outsourced-ot-box-next-time` (to `main`) added item 7 (outsourced staff OT box, next time) to the hourly-rate entry below.
+> **Last verified: 2026-10-08**: branch `feat/bom-variant-fields-list-main` (to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-08**: branch `fix/ot-hourly-rate-display` (to `main`, second commit of #759) closed item 5 of the hourly-rate entry below (the ÷9 rule is seeded from 2026-10-01).
 > **Last verified: 2026-10-08**: branch `fix/ot-hourly-rate-display` (to `main`, BUG-2026-10-08-269) added below (its entry is the newest).
 > **Last verified: 2026-10-08**: branch `feat/kpi-dept-efficiency-daily-chart-main` (to `main`, DEV-36) added below (its entry is the newest).
@@ -110,6 +111,13 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-08 — 🔵 BOM Variant Fields and WIP Types as lists with product-type ticks, to main (branch `feat/bom-variant-fields-list-main` → `main`)
+
+Same change as staging #762.
+
+1. 🔵 Products > Maintenance > BOM > Variant Fields: one row per field, each with Bedframe / Sofa / Accessory ticks. Same saved data as before.
+2. 🔵 Products > Maintenance > BOM > WIP Types: the six built-ins (fixed) then the added types, each with Bedframe / Sofa / Accessory ticks (`variants-config.wipTypeProducts`, all ticked until changed). The BOM editor type dropdowns only offer types ticked for the product type, keeping a row's current type. Test: `tests/wip-types.test.mjs`.
 
 ## 2026-10-08 — 🔵 Payroll hourly rate: one rounded rate, and the OT line adds up (branch `fix/ot-hourly-rate-display` → `main`, BUG-2026-10-08-269)
 

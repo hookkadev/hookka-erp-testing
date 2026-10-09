@@ -34,10 +34,14 @@ export const DEFAULT_VARIANT_FIELDS: Record<string, string[]> = {
   ACCESSORY: ["PRODUCT_CODE", "MODEL", "SIZE", "FABRIC"],
 };
 
-// A type that is not BEDFRAME or SOFA reads the ACCESSORY list. A type with
-// no saved list uses its default; a saved empty list stays empty.
+// A product category that is not BEDFRAME or SOFA counts as ACCESSORY.
+export function bomProductType(category: string | undefined): string {
+  return category === "BEDFRAME" || category === "SOFA" ? category : "ACCESSORY";
+}
+
+// A type with no saved list uses its default; a saved empty list stays empty.
 export function variantFieldsFor(category: string | undefined, saved: unknown): VariantField[] {
-  const key = category === "BEDFRAME" || category === "SOFA" ? category : "ACCESSORY";
+  const key = bomProductType(category);
   const list = (saved as Record<string, unknown> | null | undefined)?.[key];
   const ticked = new Set(Array.isArray(list) ? list : DEFAULT_VARIANT_FIELDS[key]);
   return VARIANT_FIELDS.filter((f) => ticked.has(f.category));
