@@ -177,6 +177,17 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
+## 2026-10-09 — 🔵 DEV-63: Bank charges column on the Trade Finance aging block (branch `feat/dev63-creditor-aging-trade-finance` → `staging`)
+
+Ticket DEV-63 (reporter Ain): "in creditor aging for supplier that we pay through trade finance, they have column for interest. so can help me include another column of bank charges".
+
+1. 🔵 `PUT /api/accounting/trade-finance/draw-bank-charge {drawSourceId, bankChargeSen, date?}` — the twin of draw-interest: delta-posts `tf_bank_charge` legs under `tfbc-<date>-<draw>` (DR 900-B001 BANK CHARGES / CR the TF account), so the charge joins the draw's outstanding and the identity line. `ensureTfBankChargeAccount` creates 900-B001 only if missing and refuses the post if the code is some other account (same guard as BUG-2026-09-29-196).
+2. 🔵 `deriveDraws` returns `bankChargeSen`; `tfChargeKind` classifies both charge families; `tfInterestDrawId` strips `tfint-` and `tfbc-`. Principal = amount − interest − bank charges. doc-date: `tf_bank_charge` self-dates from its sourceId.
+3. 🔵 GL drill / Cash Flow ("Bank charges by <lender>") / cash-flow drill treat `tf_bank_charge` like `tf_interest`; voiding a draw with bank charges refuses (TF_DRAW_HAS_INTEREST, copy now says "interest or bank charges").
+4. 🔵 UI: `TradeFinanceBlock.tsx` Bank charges input column beside Interest, with a total.
+5. ✅ Reporter ruling (Ain, 2026-10-09 WhatsApp): the bank charges are part of what we owe Houzs Century, and keying them by hand is fine — so they join the draw's outstanding, as built.
+6. ⬜ Staging check after deploy.
+
 ## 2026-10-09 — 🔵 DEV-64: customer price list shows every Maintenance sofa size, DEFAULT included (branch `feat/dev64-price-list-default-column` → `staging`)
 
 Reporter ask (Siti, DEV-64 "price list"): "can add column default for the customer price".
