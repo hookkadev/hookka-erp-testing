@@ -981,6 +981,7 @@ export default function SupplierMaintenancePage() {
       {
         key: "purchaseOrgCode",
         label: "Purchase Company",
+        exportValue: (row: Supplier) => row.purchaseOrgCode || "HOOKKA",
         width: "140px",
         sortable: true,
         render: (_val: unknown, row: Supplier) => {
@@ -1283,6 +1284,7 @@ export default function SupplierMaintenancePage() {
           onDoubleClick={(row) => navigate(`/suppliers/${row.id}`)}
           selectable
           onSelectionChange={setSelectedSuppliers}
+          exportName="suppliers"
           emptyMessage="No suppliers found."
           stickyHeader
           maxHeight="calc(100vh - 420px)"

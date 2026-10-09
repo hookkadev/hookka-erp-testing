@@ -65,7 +65,21 @@ export async function exportReportXlsx(
 
 // Optional per-row styling for the PDF (owner 2026-07-09: doc rows and
 // subtotal rows looked identical, party sections had no visible boundary).
-export type PdfRowKind = "section" | "subtotal" | "grand" | undefined;
+/** Several sheets in one .xlsx (e.g. one per tab of a page). */
+export async function exportWorkbookXlsx(
+  filename: string,
+  sheets: { name: string; aoa: Aoa }[],
+): Promise<void> {
+  const XLSX = await import("xlsx");
+  const wb = XLSX.utils.book_new();
+  for (const s of sheets) {
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(s.aoa), s.name.slice(0, 31) || "Sheet");
+  }
+  const out = XLSX.write(wb, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
+  downloadBlob(new Blob([out], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), filename);
+}
+
+export type PdfRowKind ="section" | "subtotal" | "grand" | undefined;
 export type PdfExportOpts = {
   /** Format numeric cells as 1,392.50 (default true — these are money reports). */
   formatNumbers?: boolean;

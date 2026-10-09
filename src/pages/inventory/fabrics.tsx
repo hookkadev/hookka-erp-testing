@@ -370,6 +370,7 @@ function InventoryTab({
         // Sort keys via filterAccessor so "Price 1/2/3" order naturally.
         filterAccessor: (f) =>
           (f.sofaPriceTier ?? f.priceTier ?? "PRICE_2").replace("PRICE_", ""),
+        exportValue: (f) => TIER_LABEL[(f.sofaPriceTier ?? f.priceTier ?? "PRICE_2") as keyof typeof TIER_LABEL],
         render: (_v, f) => {
           const saved = f.sofaPriceTier ?? f.priceTier ?? "PRICE_2";
           return editMode ? (
@@ -391,6 +392,7 @@ function InventoryTab({
         sortable: true,
         filterAccessor: (f) =>
           (f.bedframePriceTier ?? f.priceTier ?? "PRICE_2").replace("PRICE_", ""),
+        exportValue: (f) => TIER_LABEL[(f.bedframePriceTier ?? f.priceTier ?? "PRICE_2") as keyof typeof TIER_LABEL],
         render: (_v, f) => {
           const saved = f.bedframePriceTier ?? f.priceTier ?? "PRICE_2";
           return editMode ? (
@@ -645,6 +647,7 @@ function InventoryTab({
         data={fabrics}
         keyField="id"
         gridId="fabric-inventory"
+        exportName="fabrics"
         emptyMessage="No fabrics found"
         stickyHeader
         virtualize={fabrics.length > 100}
