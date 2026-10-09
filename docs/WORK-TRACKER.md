@@ -114,6 +114,15 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
+## 2026-10-09 — 🔵 DEV-63: Bank charges column on the Trade Finance aging block, to main (branch `feat/dev63-bank-charges-to-main` → `main`)
+
+Same change as staging #779 (merged 2026-10-09), cherry-picked onto `main`. Ticket DEV-63 (reporter Ain): add a bank charges column beside interest in the creditor aging's trade-finance section. Ain's ruling (2026-10-09 WhatsApp): the bank charges are owed to Houzs Century and are keyed by hand, so they join the draw's outstanding.
+
+1. 🔵 `PUT /api/accounting/trade-finance/draw-bank-charge` delta-posts `tf_bank_charge` legs under `tfbc-<date>-<draw>` (DR 900-B001 BANK CHARGES / CR the TF account); 900-B001 is created only if missing, and the post is refused if the code is some other account.
+2. 🔵 `deriveDraws` returns `bankChargeSen`; GL drill / Cash Flow / cash-flow drill treat `tf_bank_charge` like `tf_interest`; voiding a draw with bank charges refuses.
+3. 🔵 UI: `TradeFinanceBlock.tsx` Bank charges input column beside Interest, with a total.
+4. ⬜ Prod check after deploy: key bank charges on one draw, then confirm the outstanding, the identity line and the 900-B001 ledger. Whether 900-B001 exists on prod today is UNMEASURED.
+
 ## 2026-10-09 — 🔵 Stock take priced at the latest purchase; Cash Flow office salaries (owner「这个是9月的closing stock … 只是价钱没有，你看可以从purchase 那边capture吗？先读和确定」→「用最近一次进货价」+「cash flow 这边，direct labour 和office 的salaries 参在一起了」→「我用accrual account 去分辨吧」)(#775 69e91ddb, prod-verified; fix branch `fix/stock-take-price-list-sen`)
 
 1. ✅ Stock take — the count file is now the raw-material master export (Item Code / Item Group / Balance Qty, no prices).

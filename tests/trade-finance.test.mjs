@@ -86,6 +86,30 @@ test("tf_interest legs join the draw's amount and surface as interestSen", () =>
   assert.equal(r.unallocatedSen, 0);            // identity still closes
 });
 
+test("tf_bank_charge legs join the draw beside interest and surface as bankChargeSen (DEV-63)", () => {
+  const r = m.deriveDraws(
+    [
+      { sourceType: "supplier_payment", sourceId: "HPV-1", debitSen: 0, creditSen: 100000 },
+      { sourceType: "tf_interest", sourceId: "tfint-2026-10-09-HPV-1", debitSen: 0, creditSen: 2000 },
+      { sourceType: "tf_bank_charge", sourceId: "tfbc-2026-10-09-HPV-1", debitSen: 0, creditSen: 5000 },
+      // downward adjustment on a later day
+      { sourceType: "tf_bank_charge", sourceId: "tfbc-2026-10-10-HPV-1", debitSen: 1000, creditSen: 0 },
+    ],
+    [{ drawSourceId: "HPV-1", drawDate: "2026-07-07", dueDate: "2026-10-05" }],
+    [], new Set(),
+  );
+  assert.equal(r.draws.length, 1);
+  assert.equal(r.draws[0].amountSen, 106000);   // principal 100000 + interest 2000 + charges 4000
+  assert.equal(r.draws[0].interestSen, 2000);
+  assert.equal(r.draws[0].bankChargeSen, 4000);
+  assert.equal(r.draws[0].amountSen - r.draws[0].interestSen - r.draws[0].bankChargeSen, 100000);
+  assert.equal(r.unallocatedSen, 0);
+  assert.equal(m.tfInterestDrawId("tfbc-2026-10-09-HPV-1"), "HPV-1");
+  assert.equal(m.tfChargeKind("tf_bank_charge"), "bank_charge");
+  assert.equal(m.tfChargeKind("tf_interest"), "interest");
+  assert.equal(m.tfChargeKind("supplier_payment"), null);
+});
+
 test("clampRepayAlloc refuses overpay and non-positive", () => {
   assert.equal(m.clampRepayAlloc(1000, 1000).ok, true);
   assert.equal(m.clampRepayAlloc(1000, 1001).ok, false);

@@ -22,6 +22,7 @@ type TfDrawRow = {
   dueDate: string;
   amountSen: number;
   interestSen: number;
+  bankChargeSen: number;
   repaidSen: number;
   outstandingSen: number;
   paidSupplier: string;
@@ -74,26 +75,29 @@ export function TradeFinanceBlock() {
     else toast.error(j?.error || "Couldn't save the due date");
   };
 
-  // Keys the draw's TOTAL interest (the bank's figure); the server delta-posts
-  // DR INTEREST ON TRADE FINANCE / CR the TF account under this draw, so
-  // outstanding + the identity include it. Same figure twice = no-op.
-  const saveInterest = async (drawSourceId: string, rmStr: string) => {
+  // Keys the draw's TOTAL interest / bank charges (the bank's figure); the
+  // server delta-posts DR INTEREST ON TRADE FINANCE or BANK CHARGES / CR the
+  // TF account under this draw, so outstanding + the identity include it.
+  // Same figure twice = no-op.
+  const saveCharge = async (kind: "interest" | "bankCharge", drawSourceId: string, rmStr: string) => {
+    const label = kind === "interest" ? "Interest" : "Bank charges";
     // BUG-2026-08-13-095 — the interest cell is a free-text input, so the
     // bank's "1,250.00" reached `parseFloat` whole and posted RM 1.00 of
     // interest against the draw. Silence was the danger: the old guard simply
     // `return`ed, so an unreadable figure looked like a saved one.
-    const tfMoneyError = firstMoneyFieldError([{ label: "Interest (RM)", value: rmStr }]);
+    const tfMoneyError = firstMoneyFieldError([{ label: `${label} (RM)`, value: rmStr }]);
     if (tfMoneyError) { toast.error(tfMoneyError); return; }
     const rmv = moneyFieldToRinggit(rmStr) as number;
-    if (rmv < 0) { toast.error("Interest cannot be negative"); return; }
-    const res = await fetch("/api/accounting/trade-finance/draw-interest", {
+    if (rmv < 0) { toast.error(`${label} cannot be negative`); return; }
+    const sen = Math.round(rmv * 100);
+    const res = await fetch(`/api/accounting/trade-finance/${kind === "interest" ? "draw-interest" : "draw-bank-charge"}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ drawSourceId, interestSen: Math.round(rmv * 100) }),
+      body: JSON.stringify(kind === "interest" ? { drawSourceId, interestSen: sen } : { drawSourceId, bankChargeSen: sen }),
     }).catch(() => null);
     const j = (await res?.json().catch(() => null)) as { success?: boolean; error?: string; data?: { unchanged?: boolean } } | null;
-    if (j?.success) { if (!j.data?.unchanged) { toast.success("Interest posted"); } load(); }
-    else toast.error(j?.error || "Couldn't save the interest");
+    if (j?.success) { if (!j.data?.unchanged) { toast.success(`${label} posted`); } load(); }
+    else toast.error(j?.error || `Couldn't save the ${label.toLowerCase()}`);
   };
 
   if (sources === null) return null; // loading — the aging tab renders fine without it
@@ -145,13 +149,14 @@ export function TradeFinanceBlock() {
                     <th className="py-2 px-3 text-left font-medium">Due date</th>
                     <th className="py-2 px-3 text-right font-medium">Principal</th>
                     <th className="py-2 px-3 text-right font-medium">Interest</th>
+                    <th className="py-2 px-3 text-right font-medium">Bank charges</th>
                     <th className="py-2 px-3 text-right font-medium">Repaid</th>
                     <th className="py-2 px-3 text-right font-medium">Outstanding</th>
                   </tr>
                 </thead>
                 <tbody>
                   {s.draws.length === 0 && (
-                    <tr><td colSpan={8} className="py-4 px-3 text-center text-[#9CA3AF]">No open draws.</td></tr>
+                    <tr><td colSpan={9} className="py-4 px-3 text-center text-[#9CA3AF]">No open draws.</td></tr>
                   )}
                   {s.draws.map((d) => (
                     <tr key={d.drawSourceId} className="border-b border-[#F0ECE9]">
@@ -167,7 +172,7 @@ export function TradeFinanceBlock() {
                           className="rounded border border-[#E2DDD8] px-1.5 py-0.5 text-[12px] bg-white"
                         />
                       </td>
-                      <td className="py-1.5 px-3 text-right tabular-nums">{rm(d.amountSen - d.interestSen)}</td>
+                      <td className="py-1.5 px-3 text-right tabular-nums">{rm(d.amountSen - d.interestSen - d.bankChargeSen)}</td>
                       <td className="py-1.5 px-3 text-right">
                         {/* The bank's charged interest — keyed here (OCR prefill
                             later); posts to the dedicated INTEREST ON TRADE
@@ -181,7 +186,24 @@ export function TradeFinanceBlock() {
                           placeholder="0.00"
                           onBlur={(e) => {
                             const cur = d.interestSen ? (d.interestSen / 100).toFixed(2) : "";
-                            if (e.target.value !== cur && e.target.value !== "") void saveInterest(d.drawSourceId, e.target.value);
+                            if (e.target.value !== cur && e.target.value !== "") void saveCharge("interest", d.drawSourceId, e.target.value);
+                          }}
+                          className="w-24 rounded border border-[#E2DDD8] px-1.5 py-0.5 text-[12px] text-right tabular-nums bg-white"
+                        />
+                      </td>
+                      <td className="py-1.5 px-3 text-right">
+                        {/* The bank's charges on the draw — posts to BANK
+                            CHARGES (900-B001) and joins the balance. */}
+                        <input
+                          key={`${d.drawSourceId}:bc:${d.bankChargeSen}`}
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          defaultValue={d.bankChargeSen ? (d.bankChargeSen / 100).toFixed(2) : ""}
+                          placeholder="0.00"
+                          onBlur={(e) => {
+                            const cur = d.bankChargeSen ? (d.bankChargeSen / 100).toFixed(2) : "";
+                            if (e.target.value !== cur && e.target.value !== "") void saveCharge("bankCharge", d.drawSourceId, e.target.value);
                           }}
                           className="w-24 rounded border border-[#E2DDD8] px-1.5 py-0.5 text-[12px] text-right tabular-nums bg-white"
                         />
@@ -193,8 +215,9 @@ export function TradeFinanceBlock() {
                   {s.draws.length > 0 && (
                     <tr className="border-t-2 border-[#E2DDD8] bg-[#F6F1E7] font-semibold">
                       <td className="py-2 px-3" colSpan={4}>TOTAL</td>
-                      <td className="py-2 px-3 text-right tabular-nums">{rm(s.draws.reduce((t, d) => t + d.amountSen - d.interestSen, 0))}</td>
+                      <td className="py-2 px-3 text-right tabular-nums">{rm(s.draws.reduce((t, d) => t + d.amountSen - d.interestSen - d.bankChargeSen, 0))}</td>
                       <td className="py-2 px-3 text-right tabular-nums">{rm(s.draws.reduce((t, d) => t + d.interestSen, 0))}</td>
+                      <td className="py-2 px-3 text-right tabular-nums">{rm(s.draws.reduce((t, d) => t + d.bankChargeSen, 0))}</td>
                       <td className="py-2 px-3 text-right tabular-nums">{rm(s.draws.reduce((t, d) => t + d.repaidSen, 0))}</td>
                       <td className="py-2 px-3 text-right tabular-nums">{rm(s.draws.reduce((t, d) => t + d.outstandingSen, 0))}</td>
                     </tr>

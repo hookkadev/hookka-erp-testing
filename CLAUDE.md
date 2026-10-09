@@ -1,5 +1,7 @@
 # Hookka ERP — Start Here (read before any task)
 
+> **Last verified: 2026-10-09** (branch `feat/dev63-bank-charges-to-main`, to `main`): `docs/API.md` regenerated after adding `PUT /api/accounting/trade-finance/draw-bank-charge`; the mount/handler counts below restamped (143 / 1015). Nothing else on this page re-checked.
+
 > **Last verified: 2026-09-29** — Environment table: project refs moved out of the repo (it is
 > public) into `.env` / GitHub secrets; staging measured from the `hookka-erp-staging` Hyperdrive
 > (database) and the SG project's Storage logs (file storage). The old Tokyo staging project is retired.
@@ -48,8 +50,8 @@ measured 2026-09-22; this line said 2,122). Use the map's file:line +
 
 5. **Which endpoint** → [`docs/API.md`](docs/API.md) — **generated** from
    `src/api/worker.ts` + `src/api/routes/*.ts` by `node scripts/gen-api-docs.mjs`
-   (141 mounts, **978** handlers, plus the exact public/auth surface — re-measured 2026-09-23
-   by `--check`; this line said 139 / 936).
+   (143 mounts, **1015** handlers, plus the exact public/auth surface — re-measured 2026-10-09
+   by `--check` on `main`; this line said 141 / 978).
    Regenerate it instead of hand-editing; `--check` tells you if it is stale — **it WAS stale
    on `main` on 2026-08-14**, and the committed copy carried four duplicated mount rows with
    two different line sets for the same handlers. Run `--check` before trusting it.
