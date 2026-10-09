@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-09**: newest entry BUG-2026-10-09-275 (branch `fix/undone-labour-post-hides-payroll`, to main); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-09**: newest entry BUG-2026-10-09-274 (branch `fix/do-accessory-uom`, to main); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-09**: BUG-2026-10-09-272 follow-up (branch `fix/worker-i18n-single-words`, to staging then main): single-word worker labels translated; a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-09**: newest entry BUG-2026-10-09-272 (branch `fix/worker-i18n-popups-and-date`, to staging then main); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
@@ -88,6 +89,22 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-10-09-275 — A Labour post that was unposted still hid that month's payroll in the P&L `accounting` `pnl` 🟢
+
+🟢 **Fixed** (branch `fix/undone-labour-post-hides-payroll` → `main`) · owner 2026-10-09, while comparing July and August.
+
+**Symptom.** August showed no direct labour at all in the P&L. The month had been posted on the Labour tab and unposted a minute later.
+
+**Cause.** The P&L adds payroll from the payslips for any month and account the owner has not recorded through the salary accrual (410-0010). "Recorded" was decided by looking only at the legs that CREDIT the accrual, keyed by the exact sourceType + sourceId (`glWindowSigned` and the cost & expense classes report). Unpost appends a `labor_post_reversal` with the same sourceId, so the original `labor_post` legs still marked the month as recorded while the ledger netted to zero, and the payslip figures were skipped. A voided manual JV had the same flaw (bug class C5: a suffixed identity read by exact match).
+
+**Fix.** `recordedSalaryAccounts` (`src/lib/recorded-salary.ts`) takes the legs of one document together (posting, reversal, void, restate, via `stripLegSuffix` / `stripSourceIdSuffix`) and marks an account only while its NET debit in that document is above zero. Both readers use it through `salaryLegsIn`, with the same pre-opening / opening exclusions. A live post, a re-post after an unpost, an edited entry and an entry that accrues and pays at once still count.
+
+**Regression.** `tests/recorded-salary-net.test.mjs`: post, post + unpost, post + unpost + re-post, voided vs live JV, restated JV, accrue-and-pay in one entry, excluded legs, and both readers wired.
+
+**Verify.** On prod after deploy, read-only: August's direct labour should equal its payslip figures; other months unchanged.
 
 ---
 
