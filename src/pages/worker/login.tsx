@@ -705,7 +705,7 @@ export default function WorkerLoginPage() {
                 whiteSpace: "nowrap",
               }}
             >
-              WORKER PORTAL
+              {t("brand.title").toUpperCase()}
             </span>
             <span
               style={{

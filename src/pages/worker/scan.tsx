@@ -2545,7 +2545,7 @@ export default function WorkerScanPage() {
               }}
               className="text-xs text-[#6B5C32] underline"
             >
-              Exit
+              {t("common.exit")}
             </button>
           </div>
           <p className="text-xs text-[#6B7280]">
@@ -2682,7 +2682,7 @@ export default function WorkerScanPage() {
                   back-end tracks actual vs. planned via the scan-complete
                   endpoint; estMinutes is what's credited on completion. */}
               <div className="bg-[#F0ECE9] rounded px-3 py-2">
-                <p className="text-[11px] text-[#8A8680] uppercase">{t("home.productionTime")}</p>
+                <p className="text-[11px] text-[#8A8680] uppercase">{t("scan.prodTime")}</p>
                 <p className="font-semibold">
                   {result.jobCard.estMinutes > 0
                     ? `${result.jobCard.estMinutes} min`
@@ -2753,7 +2753,7 @@ export default function WorkerScanPage() {
                         onClick={() => saveRack(result.jobCard.id, rackChoice)}
                         className="h-10 px-4 rounded bg-[#3E6570] text-white font-semibold text-sm disabled:opacity-50"
                       >
-                        {savingRack ? "…" : "Save"}
+                        {savingRack ? "…" : t("common.save")}
                       </button>
                     </div>
                   )}
@@ -2843,7 +2843,7 @@ export default function WorkerScanPage() {
                     onClick={() => saveRack(result.jobCard.id, rackChoice)}
                     className="h-10 px-4 rounded bg-white text-[#1F1D1B] font-semibold text-sm disabled:opacity-50"
                   >
-                    {savingRack ? "…" : "Save"}
+                    {savingRack ? "…" : t("common.save")}
                   </button>
                 </div>
               )}
