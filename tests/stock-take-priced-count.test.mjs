@@ -101,6 +101,21 @@ test("server: the priced lines are kept with the month; the group count stays ho
   assert.match(get, /requirePermission\(c, "accounting", "read"\)/);
 });
 
+test("no purchase on file → the price list's price starts the row, marked and checked (owner 「要，先带价目表价」)", () => {
+  const build = slice(ui, "function pricedCountItem(", "const pricedValueSen = ");
+  assert.match(build, /const listUnitStr = pl \? unitSenToRm\(pl\.unitSen\) : "";/);
+  assert.match(build, /return \{ \.\.\.r, unitStr: listUnitStr, piUnitStr: "", source: "", listUnitStr, listSupplier: pl\?\.supplier \?\? "",/);
+  assert.match(build, /listUnitStr: "",\n\s+listSupplier: "",/, "a purchased item never takes the list price");
+  // Said as the price list — and as typed in once the owner changes it.
+  assert.match(ui, /if \(i\.listUnitStr && i\.unitStr\.trim\(\) === i\.listUnitStr\) return `price list\$\{i\.listSupplier \? ` · \$\{i\.listSupplier\}` : ""\}`;/);
+  assert.match(ui, /return i\.listUnitStr \? `typed in \(price list RM \$\{i\.listUnitStr\}\)` : "typed in";/);
+  // Its own view, inside "To check"; "No price" is only what has neither.
+  const tab = slice(ui, "function StockTakeTab() {", "\nfunction OpeningStockTab()");
+  assert.match(tab, /const fromList = priced\.items\.filter\(\(i\) => !i\.source && i\.listUnitStr\);\n\s+const noPrice = priced\.items\.filter\(\(i\) => !i\.source && !i\.listUnitStr\);/);
+  assert.match(tab, /\["list", `Price list \(\$\{fromList\.length\}\)`\],/);
+  assert.match(tab, /\["check", `To check \(\$\{toCheck\.length \+ fromList\.length \+ noPrice\.length\}\)`\],/);
+});
+
 test("page: import → review → put into the month → save with the lines", () => {
   const tab = slice(ui, "function StockTakeTab() {", "\nfunction OpeningStockTab()");
   const imp = slice(tab, "if (isRmCountShape(headerRow)) {", "// Shape 2:");
