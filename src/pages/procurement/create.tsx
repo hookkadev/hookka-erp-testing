@@ -31,6 +31,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MoneyInput } from "@/components/ui/money-input";
 import { SearchableSelect } from "@/components/ui/searchable-select";
+import { useConfirm } from "@/components/ui/confirm-dialog";
+import { useEscapeClose } from "@/lib/escape-stack";
 import { useCachedJson, invalidateCachePrefix } from "@/lib/cached-fetch";
 import { formatCurrency, formatRM } from "@/lib/utils";
 import {
@@ -38,7 +40,7 @@ import {
   lineTotalSen,
 } from "@/lib/unit-price";
 import type { Supplier, SupplierMaterialBinding, RawMaterial } from "@/types";
-import { ArrowLeft, Plus, Save, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, Plus, Save, Trash2, X } from "lucide-react";
 
 // Same shape used by the modal in procurement/index.tsx — kept identical
 // so the POST payload matches what the existing /api/purchase-orders
@@ -76,6 +78,7 @@ export default function CreatePurchaseOrderPageWrapper() {
 function CreatePurchaseOrderPage() {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { confirm } = useConfirm();
 
   // Data fetches — same endpoints procurement/index.tsx uses, so
   // useCachedJson dedupes (the operator typically arrives here from
@@ -107,8 +110,7 @@ function CreatePurchaseOrderPage() {
   const [expectedDate, setExpectedDate] = useState("");
   const [notes, setNotes] = useState("");
   const [items, setItems] = useState<POLineItem[]>([]);
-  const [rmSearch, setRmSearch] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState<string>("ALL");
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   // Primary supplier chosen in Order Details. Drives material picker
   // filtering — only materials offered by this supplier appear in the
@@ -220,63 +222,22 @@ function CreatePurchaseOrderPage() {
     return activeRMs.filter((rm) => supplierMaterialCodes.has(normMatCode(rm.itemCode)));
   }, [activeRMs, supplierMaterialCodes]);
 
-  const categoryCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const rm of pickerRMs) {
-      const cat = rm.itemGroup?.trim() || "(uncategorised)";
-      counts[cat] = (counts[cat] ?? 0) + 1;
-    }
-    return counts;
-  }, [pickerRMs]);
+  // When a primary supplier is selected, prefer its binding; fall back to
+  // the global main binding (isMainSupplier flag) if the chosen supplier
+  // has no binding for this material (shouldn't happen with filtered list,
+  // but guards against stale cache or a direct search-bypass).
+  const bindingForPick = (rmItemCode: string): SupplierMaterialBinding | undefined =>
+    (selectedSupplierId
+      ? getBindingsForRM(rmItemCode).find((b) => b.supplierId === selectedSupplierId)
+      : undefined) ?? getMainBinding(rmItemCode);
 
-  const categories = useMemo(
-    () => Object.keys(categoryCounts).sort((a, b) => a.localeCompare(b)),
-    [categoryCounts],
-  );
-
-  // Same Bedframe / Sofa / Common grouping the modal added in 8dc1644.
-  const groupedCategories = useMemo(() => {
-    const isBedframe = (c: string) => /^B[.-]/i.test(c);
-    const isSofa = (c: string) => /^S[.-]/i.test(c);
-    const byCountDesc = (a: string, b: string) =>
-      (categoryCounts[b] ?? 0) - (categoryCounts[a] ?? 0) || a.localeCompare(b);
-    return {
-      bedframe: categories.filter(isBedframe).sort(byCountDesc),
-      sofa: categories.filter(isSofa).sort(byCountDesc),
-      common: categories.filter((c) => !isBedframe(c) && !isSofa(c)).sort(byCountDesc),
-    };
-  }, [categories, categoryCounts]);
-
-  const filteredRMs = useMemo(() => {
-    const q = rmSearch.trim().toLowerCase();
-    return pickerRMs
-      .filter((rm) => {
-        if (selectedCategory !== "ALL") {
-          const cat = rm.itemGroup?.trim() || "(uncategorised)";
-          if (cat !== selectedCategory) return false;
-        }
-        if (!q) return true;
-        return (
-          rm.itemCode.toLowerCase().includes(q) ||
-          rm.description.toLowerCase().includes(q)
-        );
-      })
-      .sort((a, b) => a.itemCode.localeCompare(b.itemCode));
-  }, [pickerRMs, rmSearch, selectedCategory]);
+  const addedRmCodes = useMemo(() => new Set(items.map((it) => it.rmCode)), [items]);
 
   // ── Line-item mutators ─────────────────────────────────────────
   const addItemFromRM = (rmItemCode: string) => {
     const rm = rawMaterials.find((r) => r.itemCode === rmItemCode);
     if (!rm) return;
-    // When a primary supplier is selected, prefer its binding; fall back to
-    // the global main binding (isMainSupplier flag) if the chosen supplier
-    // has no binding for this material (shouldn't happen with filtered list,
-    // but guards against stale cache or a direct search-bypass).
-    const allBindings = getBindingsForRM(rmItemCode);
-    const mainBinding =
-      (selectedSupplierId
-        ? allBindings.find((b) => b.supplierId === selectedSupplierId)
-        : undefined) ?? getMainBinding(rmItemCode);
+    const mainBinding = bindingForPick(rmItemCode);
     const seedQty = mainBinding?.moq ?? 1;
     const newItem: POLineItem = {
       rmCode: rm.itemCode,
@@ -292,16 +253,31 @@ function CreatePurchaseOrderPage() {
       materialCategory: rm.itemGroup,
     };
     setItems((prev) => [...prev, newItem]);
-    setRmSearch("");
-    // Scroll the newly-added line into view — same trick as the modal,
-    // but the page can grow taller so it really helps.
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        const lines = document.querySelectorAll('[data-po-line-row="true"]');
-        const last = lines[lines.length - 1] as HTMLElement | undefined;
-        if (last) last.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
+
+  // Picking a different supplier (or clearing it) while lines from another
+  // supplier are in the table asks first, then empties the table.
+  const changeSupplier = async (nextId: string) => {
+    if (nextId === selectedSupplierId) return;
+    if (items.some((it) => it.supplierId !== nextId)) {
+      const ok = await confirm({
+        title: "Change supplier?",
+        message: "Changing the supplier will clear the current order items. Continue?",
+        confirmLabel: "Clear items",
+        danger: true,
       });
-    });
+      if (!ok) return;
+      setItems([]);
+    }
+    setSelectedSupplierId(nextId);
+    // Prefill the Purchase company from this supplier's
+    // default — always overridable by the operator below.
+    const sup = allSuppliers.find((s) => s.id === nextId);
+    if (sup?.purchaseOrgCode) {
+      setPurchaseOrgCode(sup.purchaseOrgCode);
+    } else if (!nextId) {
+      setPurchaseOrgCode("HOOKKA");
+    }
   };
 
   const pickSupplierForUnbound = (idx: number, supplierId: string) => {
@@ -638,26 +614,13 @@ function CreatePurchaseOrderPage() {
                     The PO supplier header is still derived from line items
                     for the save payload; this field is the filter anchor. */}
                 <SearchableSelect
+                  combobox
                   className="h-9"
                   value={selectedSupplierId}
-                  placeholder="— Pick a supplier —"
+                  placeholder="Select or search supplier..."
                   allowClear
                   options={activeSuppliers.map((s) => ({ value: s.id, label: `${s.code} - ${s.name}` }))}
-                  onChange={(nextId) => {
-                    setSelectedSupplierId(nextId);
-                    // Reset picker filters when supplier changes so the
-                    // operator isn't stranded in a now-empty category.
-                    setSelectedCategory("ALL");
-                    setRmSearch("");
-                    // Prefill the Purchase company from this supplier's
-                    // default — always overridable by the operator below.
-                    const sup = allSuppliers.find((s) => s.id === nextId);
-                    if (sup?.purchaseOrgCode) {
-                      setPurchaseOrgCode(sup.purchaseOrgCode);
-                    } else if (!nextId) {
-                      setPurchaseOrgCode("HOOKKA");
-                    }
-                  }}
+                  onChange={changeSupplier}
                 />
                 {/* Status hint below the dropdown */}
                 <div className="mt-1 text-xs min-h-[1.2em]">
@@ -783,99 +746,14 @@ function CreatePurchaseOrderPage() {
       {/* Order Items — full-width table */}
       <Card>
         <CardHeader className="pb-3">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <CardTitle>Order Items ({items.length})</CardTitle>
+            <Button type="button" variant="outline" size="sm" onClick={() => setPickerOpen(true)}>
+              <Plus className="h-4 w-4" /> Add Materials from Supplier
+            </Button>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* RM picker — category chips + search + scrolling list. Lifted
-              from the modal verbatim; only the surrounding spacing breathes
-              wider on the full page. */}
-          <div className="space-y-2">
-            <label className="block text-xs text-[#6B7280]">
-              {selectedSupplierId
-                ? `Add material — showing ${pickerRMs.length} material${pickerRMs.length === 1 ? "" : "s"} offered by this supplier`
-                : "Add material — pick a supplier above to filter to their materials, or browse all"}
-            </label>
-
-            {/* Compact filter row: one category dropdown (grouped Bedframe /
-                Sofa / Common) + a search box. The results list is absolutely
-                positioned as a dropdown overlay so it does not push the line
-                item table down when it appears. */}
-            <div className="relative">
-              <div className="flex flex-col sm:flex-row gap-2">
-                <select
-                  value={selectedCategory}
-                  onChange={(e) => setSelectedCategory(e.target.value)}
-                  className="h-9 w-full sm:w-60 rounded-md border border-[#E2DDD8] bg-white px-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#6B5C32]/20 focus:border-[#6B5C32]"
-                  aria-label="Filter materials by category"
-                >
-                  <option value="ALL">All categories ({pickerRMs.length})</option>
-                  {groupedCategories.bedframe.length > 0 && (
-                    <optgroup label="Bedframe">
-                      {groupedCategories.bedframe.map((cat) => (
-                        <option key={cat} value={cat}>{cat} ({categoryCounts[cat] ?? 0})</option>
-                      ))}
-                    </optgroup>
-                  )}
-                  {groupedCategories.sofa.length > 0 && (
-                    <optgroup label="Sofa">
-                      {groupedCategories.sofa.map((cat) => (
-                        <option key={cat} value={cat}>{cat} ({categoryCounts[cat] ?? 0})</option>
-                      ))}
-                    </optgroup>
-                  )}
-                  {groupedCategories.common.length > 0 && (
-                    <optgroup label="Common">
-                      {groupedCategories.common.map((cat) => (
-                        <option key={cat} value={cat}>{cat} ({categoryCounts[cat] ?? 0})</option>
-                      ))}
-                    </optgroup>
-                  )}
-                </select>
-                <Input
-                  className="h-9 text-sm flex-1"
-                  value={rmSearch}
-                  onChange={(e) => setRmSearch(e.target.value)}
-                  placeholder="Search by RM code or description..."
-                />
-              </div>
-
-              {/* Results dropdown — absolutely positioned under the search row so it
-                  overlays the line-item table below rather than reflowing the page. */}
-              {(rmSearch.trim() !== "" || selectedCategory !== "ALL") && (
-                <div className="absolute left-0 right-0 top-full mt-1 z-20 max-h-64 overflow-y-auto bg-white border border-[#E2DDD8] rounded-md shadow-lg">
-                  {filteredRMs.length === 0 ? (
-                    <div className="px-3 py-4 text-sm text-[#9CA3AF] text-center">
-                      No materials match this filter
-                    </div>
-                  ) : (
-                    <>
-                      {filteredRMs.slice(0, 100).map((rm) => (
-                        <button
-                          key={rm.id}
-                          type="button"
-                          className="w-full text-left px-3 py-2 text-sm hover:bg-[#FAF9F7] border-b border-[#E2DDD8] last:border-b-0 flex items-center gap-2"
-                          onClick={() => addItemFromRM(rm.itemCode)}
-                        >
-                          <Plus className="h-3 w-3 text-[#6B5C32] flex-shrink-0" />
-                          <span className="font-medium text-[#1F1D1B] flex-shrink-0">{rm.itemCode}</span>
-                          <span className="text-[#6B7280] truncate">{rm.description}</span>
-                          <span className="text-[#9CA3AF] ml-auto flex-shrink-0">({rm.baseUOM})</span>
-                        </button>
-                      ))}
-                      {filteredRMs.length > 100 && (
-                        <div className="px-3 py-2 text-xs text-[#9CA3AF] bg-[#FAF9F7]">
-                          Showing 100 of {filteredRMs.length}. Refine your search to narrow further.
-                        </div>
-                      )}
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-
           {/* Line item table — full-width, generous columns. The wrapper is
               an overflow-x-auto so very narrow viewports still scroll, but
               on a normal-width procurement screen every column fits without
@@ -1003,7 +881,7 @@ function CreatePurchaseOrderPage() {
                               className="h-8 text-sm text-right"
                               type="number"
                               onFocus={(e) => e.currentTarget.select()}
-                              min={0}
+                              min={1}
                               value={item.quantity === 0 ? "" : item.quantity}
                               onChange={(e) => updateItemQty(idx, Number(e.target.value) || 0)}
                             />
@@ -1069,7 +947,7 @@ function CreatePurchaseOrderPage() {
             </div>
           ) : (
             <div className="rounded-md border border-dashed border-[#E2DDD8] bg-[#FAF9F7] py-10 text-center text-sm text-[#9CA3AF]">
-              No items yet. Pick a category chip above or search for a raw material to add it.
+              No items yet. Use Add Materials from Supplier to add raw materials.
             </div>
           )}
 
@@ -1085,6 +963,216 @@ function CreatePurchaseOrderPage() {
           )}
         </CardContent>
       </Card>
+
+      {pickerOpen && (
+        <MaterialPickerModal
+          materials={pickerRMs}
+          supplierLabel={selectedSupplierId ? resolveSupplierName(selectedSupplierId) : ""}
+          priceSenFor={(code) => bindingForPick(code)?.unitPrice ?? 0}
+          addedCodes={addedRmCodes}
+          onAdd={addItemFromRM}
+          onClose={() => setPickerOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// Select Materials popup. Category + search run over the materials the page
+// passes in (already narrowed to the picked supplier); filters reset on each open.
+function MaterialPickerModal({
+  materials,
+  supplierLabel,
+  priceSenFor,
+  addedCodes,
+  onAdd,
+  onClose,
+}: {
+  materials: RawMaterial[];
+  supplierLabel: string;
+  priceSenFor: (rmCode: string) => number;
+  addedCodes: Set<string>;
+  onAdd: (rmCode: string) => void;
+  onClose: () => void;
+}) {
+  const [search, setSearch] = useState("");
+  const [category, setCategory] = useState("ALL");
+  useEscapeClose(onClose);
+
+  const categoryCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const rm of materials) {
+      const cat = rm.itemGroup?.trim() || "(uncategorised)";
+      counts[cat] = (counts[cat] ?? 0) + 1;
+    }
+    return counts;
+  }, [materials]);
+
+  // Same Bedframe / Sofa / Common grouping the modal added in 8dc1644.
+  const groupedCategories = useMemo(() => {
+    const categories = Object.keys(categoryCounts);
+    const isBedframe = (c: string) => /^B[.-]/i.test(c);
+    const isSofa = (c: string) => /^S[.-]/i.test(c);
+    const byCountDesc = (a: string, b: string) =>
+      (categoryCounts[b] ?? 0) - (categoryCounts[a] ?? 0) || a.localeCompare(b);
+    return {
+      bedframe: categories.filter(isBedframe).sort(byCountDesc),
+      sofa: categories.filter(isSofa).sort(byCountDesc),
+      common: categories.filter((c) => !isBedframe(c) && !isSofa(c)).sort(byCountDesc),
+    };
+  }, [categoryCounts]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return materials
+      .filter((rm) => {
+        if (category !== "ALL" && (rm.itemGroup?.trim() || "(uncategorised)") !== category) return false;
+        if (!q) return true;
+        return rm.itemCode.toLowerCase().includes(q) || rm.description.toLowerCase().includes(q);
+      })
+      .sort((a, b) => a.itemCode.localeCompare(b.itemCode));
+  }, [materials, search, category]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Select Materials"
+        className="mx-4 flex max-h-[85vh] w-full max-w-3xl flex-col rounded-lg bg-white shadow-xl"
+      >
+        <div className="flex items-start justify-between gap-3 border-b border-[#E2DDD8] px-4 py-3">
+          <div className="min-w-0">
+            <h2 className="text-base font-semibold text-[#1F1D1B]">Select Materials</h2>
+            <p className="mt-0.5 truncate text-xs text-[#6B7280]">
+              {supplierLabel
+                ? `${supplierLabel} · ${materials.length} material${materials.length === 1 ? "" : "s"} offered`
+                : `All suppliers · ${materials.length} materials. Pick a supplier above to narrow the list.`}
+            </p>
+          </div>
+          <button
+            type="button"
+            aria-label="Close"
+            className="rounded p-1 text-[#9CA3AF] hover:text-[#1F1D1B]"
+            onClick={onClose}
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="flex flex-col gap-2 border-b border-[#E2DDD8] px-4 py-3 sm:flex-row">
+          <select
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            className="h-9 w-full rounded-md border border-[#E2DDD8] bg-white px-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#6B5C32]/20 focus:border-[#6B5C32] sm:w-60"
+            aria-label="Filter materials by category"
+          >
+            <option value="ALL">All categories ({materials.length})</option>
+            {groupedCategories.bedframe.length > 0 && (
+              <optgroup label="Bedframe">
+                {groupedCategories.bedframe.map((cat) => (
+                  <option key={cat} value={cat}>{cat} ({categoryCounts[cat] ?? 0})</option>
+                ))}
+              </optgroup>
+            )}
+            {groupedCategories.sofa.length > 0 && (
+              <optgroup label="Sofa">
+                {groupedCategories.sofa.map((cat) => (
+                  <option key={cat} value={cat}>{cat} ({categoryCounts[cat] ?? 0})</option>
+                ))}
+              </optgroup>
+            )}
+            {groupedCategories.common.length > 0 && (
+              <optgroup label="Common">
+                {groupedCategories.common.map((cat) => (
+                  <option key={cat} value={cat}>{cat} ({categoryCounts[cat] ?? 0})</option>
+                ))}
+              </optgroup>
+            )}
+          </select>
+          <Input
+            autoFocus
+            className="h-9 flex-1 text-sm"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by RM code or description..."
+          />
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {filtered.length === 0 ? (
+            <div className="px-4 py-10 text-center text-sm text-[#9CA3AF]">
+              No materials match your search.
+            </div>
+          ) : (
+            <>
+              {filtered.slice(0, 100).map((rm) => {
+                const added = addedCodes.has(rm.itemCode);
+                const priceSen = priceSenFor(rm.itemCode);
+                return (
+                  <div
+                    key={rm.id}
+                    className="flex items-center gap-3 border-b border-[#E2DDD8] px-4 py-2.5 last:border-b-0"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-medium text-[#1F1D1B]">{rm.itemCode}</div>
+                      <div className="truncate text-xs text-[#6B7280]" title={rm.description}>
+                        {rm.description}
+                      </div>
+                    </div>
+                    <div className="flex-shrink-0 text-right">
+                      <div className="amount text-sm text-[#1F1D1B]">
+                        {priceSen > 0 ? formatRM(priceSen) : "-"}
+                      </div>
+                      <div className="text-xs text-[#9CA3AF]">{rm.baseUOM}</div>
+                    </div>
+                    {added ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled
+                        className="w-24 flex-shrink-0 border-[#C6DBA8] bg-[#EEF3E4] text-[#4F7C3A] disabled:opacity-100"
+                      >
+                        <Check className="h-3.5 w-3.5" /> Added
+                      </Button>
+                    ) : (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="w-24 flex-shrink-0"
+                        onClick={() => onAdd(rm.itemCode)}
+                      >
+                        <Plus className="h-3.5 w-3.5" /> Add
+                      </Button>
+                    )}
+                  </div>
+                );
+              })}
+              {filtered.length > 100 && (
+                <div className="bg-[#FAF9F7] px-4 py-2 text-xs text-[#9CA3AF]">
+                  Showing 100 of {filtered.length}. Refine your search to narrow further.
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between gap-3 border-t border-[#E2DDD8] bg-[#FAF9F7] px-4 py-3">
+          <span className="rounded-full border border-[#E2DDD8] bg-white px-2.5 py-0.5 text-xs font-medium text-[#374151]">
+            {addedCodes.size} item{addedCodes.size === 1 ? "" : "s"} selected
+          </span>
+          <Button type="button" size="sm" onClick={onClose}>
+            Done
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
