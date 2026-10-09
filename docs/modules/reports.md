@@ -1,5 +1,6 @@
 # Reports & Analytics — Module Guide
 
+> **Last verified: 2026-10-09** (branch `feat/compare-fabric-purchasing-tab`): the dashboard-overview.ts line anchors re-derived after new imports moved the handler. Nothing else re-checked.
 > **Last verified: 2026-10-09** (branch `feat/batch-exports-from-houzs`): the `export-report.ts` anchors re-derived (`exportReportPdf` :96) after `exportWorkbookXlsx` (:69, several sheets in one file) was added. Nothing else re-checked.
 
 > **Last verified: 2026-10-02** (branch `chore/sync-staging-from-main-1002`, staging<-main merge): every `reports.ts` anchor and its line count (1093) re-derived on the merged file (main added the first-run `seedLastSent`). Nothing else re-checked.
@@ -91,7 +92,7 @@ Two unrelated report worlds share the name **Reports**:
 | `collectOperationsReport` | `operations-report.ts:1112` | Ops report builder |
 | `collectBriefData` / `renderBriefHtml` | `production-brief.ts:386 / 467` | Morning production brief |
 | `GET /` (list) / `POST /` (create) | `src/api/routes/forecasts.ts:55 / 80` | `forecast_entries` CRUD |
-| `GET /` (overview) | `src/api/routes/dashboard-overview.ts:49` | Consolidated dashboard payload |
+| `GET /` (overview) | `src/api/routes/dashboard-overview.ts:66` | Consolidated dashboard payload |
 | `buildReportHTML` / `printReport` | `src/lib/print-report.ts:218 / 339` | Shared WYSIWYG print engine |
 | `exportReportCsv/Xlsx/Pdf` | `src/lib/export-report.ts:27 / 41 / 96` | Shared export helpers |
 | `exportWorkbookXlsx` | `src/lib/export-report.ts:69` | Several sheets in one .xlsx (the MRP workbook) |
