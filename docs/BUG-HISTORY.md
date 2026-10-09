@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-09**: newest entry BUG-2026-10-09-270 (branch `fix/staging-merge-copy-hang`, to main); a log, so "verified" means the entry matches the code on its branch.
 > **Last verified: 2026-10-08**: BUG-2026-10-08-269 got a follow-up, the ÷9 rule seeded from 2026-10-01 (branch `fix/ot-hourly-rate-display`, to `main`, second commit of #759).
 > **Last verified: 2026-10-08**: newest entry BUG-2026-10-08-269 (branch `fix/ot-hourly-rate-display`, to `main`); a log, so "verified" means the entry matches the code on its branch.
 > **Last verified: 2026-10-08**: newest entry BUG-2026-10-08-268 (branch `fix/worker-pwa-ios-start-url`, to main); a log, so "verified" means the entry matches the code on its branch.
@@ -84,6 +85,17 @@ Entries themselves stay newest-first.
 
 ---
 
+## BUG-2026-10-09-270 — "Sync prod → staging" (merge mode) hung after attendance_records and timed out at 20 minutes `ci-cd` `staging` 🟡
+
+🟡 Fix on `fix/staging-merge-copy-hang` (to `main`). Reported 2026-10-09 from run #151 (2026-10-06, `mode=merge`), cancelled by the 20-minute job limit.
+
+**Symptom:** the merge step printed `235 attendance_records (new rows)` at 02:46 and then nothing until GitHub killed the job at 03:05. Sanitise and the PIN step never ran.
+
+**Root cause:** `scripts/merge-prod-into-staging.mjs` read every table through ONE prod connection (`max: 1`). With postgres.js 3.4.9, after a large `COPY ... TO STDOUT` stream ends (attendance_records is ~200 MB), that connection never answers another query. Measured locally, read-only against prod: copy attendance_records (198.5 MB in 5.6 s), then `SELECT 1` on the same connection: no reply after 60 s. `audit_dlq` (1 row, the next table) copies in 29 ms on its own. Table size is not the cause: audit_events (227 MB) copies in 12 s on a fresh connection.
+
+**Fix:** open a fresh read-only prod connection for each table's COPY and close it afterwards. Measured: attendance_records, audit_dlq, audit_events, balance_sheet_entries copied back to back in 22 s. The edited script ran clean in report mode against prod and staging (280 tables). `--apply` was NOT run locally (it would land unsanitised rows on staging); the next `mode=merge` run on GitHub is the live check.
+
+---
 ## BUG-2026-10-08-269 — Payroll row: "4 hrs x RM 9.44 x 1.5 = RM 51.00", the hourly rate shown was not the rate paid `payroll` `employees` 🟡
 
 🟡 Fix on `fix/ot-hourly-rate-display` (to `main`). Reported 2026-10-08 from the expanded payroll row of a per-day worker (RM 85 a day, 9h day, 2h OT on 6 and 7 Oct).
