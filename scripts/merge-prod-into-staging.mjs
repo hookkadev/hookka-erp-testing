@@ -153,9 +153,7 @@ for (const t of order) {
     console.log(`${String(n).padStart(9)}  ${t}   (prod rows, ${cols.length} cols)`);
     continue;
   }
-  // A fresh prod connection per table: with postgres.js 3.4.9 a large COPY TO
-  // STDOUT (~200 MB attendance_records) leaves its connection stuck, and the next
-  // query on it never returns (BUG-2026-10-09-270).
+  // Fresh connection per table: postgres.js hangs after a large COPY (BUG-2026-10-09-270).
   const source = await prodConn();
   try {
     const n = await stg.begin(async (tx) => {
