@@ -231,13 +231,19 @@ function CreatePurchaseOrderPage() {
       ? getBindingsForRM(rmItemCode).find((b) => b.supplierId === selectedSupplierId)
       : undefined) ?? getMainBinding(rmItemCode);
 
-  const addedRmCodes = useMemo(() => new Set(items.map((it) => it.rmCode)), [items]);
+  const addedKeys = useMemo(
+    () => new Set(items.map((it) => `${it.rmCode}|${it.supplierId}`)),
+    [items],
+  );
 
   // ── Line-item mutators ─────────────────────────────────────────
-  const addItemFromRM = (rmItemCode: string) => {
+  const addItemFromRM = (rmItemCode: string, supplierId?: string) => {
     const rm = rawMaterials.find((r) => r.itemCode === rmItemCode);
     if (!rm) return;
-    const mainBinding = bindingForPick(rmItemCode);
+    const mainBinding =
+      (supplierId
+        ? getBindingsForRM(rmItemCode).find((b) => b.supplierId === supplierId)
+        : undefined) ?? bindingForPick(rmItemCode);
     const seedQty = mainBinding?.moq ?? 1;
     const newItem: POLineItem = {
       rmCode: rm.itemCode,
@@ -969,15 +975,17 @@ function CreatePurchaseOrderPage() {
         <MaterialPickerModal
           materials={pickerRMs}
           supplierLabel={selectedSupplierId ? resolveSupplierName(selectedSupplierId) : ""}
-          pickFor={(code) => {
-            const b = bindingForPick(code);
-            return {
-              priceSen: b?.unitPrice ?? 0,
-              supplierName: b ? resolveSupplierName(b.supplierId) : "",
-              otherSuppliers: Math.max(0, getBindingsForRM(code).length - 1),
-            };
-          }}
-          addedCodes={addedRmCodes}
+          optionsFor={(code) =>
+            (selectedSupplierId ? [bindingForPick(code)] : getSortedBindingsForRM(code))
+              .filter((b): b is SupplierMaterialBinding => !!b)
+              .map((b) => ({
+                supplierId: b.supplierId,
+                supplierName: resolveSupplierName(b.supplierId),
+                priceSen: b.unitPrice,
+                isMain: !!b.isMainSupplier,
+              }))
+          }
+          addedKeys={addedKeys}
           onAdd={addItemFromRM}
           onClose={() => setPickerOpen(false)}
         />
@@ -986,22 +994,25 @@ function CreatePurchaseOrderPage() {
   );
 }
 
+type PickOption = { supplierId: string; supplierName: string; priceSen: number; isMain: boolean };
+
 // Select Materials popup. Category + search run over the materials the page
 // passes in (already narrowed to the picked supplier); filters reset on each open.
 function MaterialPickerModal({
   materials,
   supplierLabel,
-  pickFor,
-  addedCodes,
+  optionsFor,
+  addedKeys,
   onAdd,
   onClose,
 }: {
   materials: RawMaterial[];
   supplierLabel: string;
-  /** The binding Add will use: its price and supplier, plus how many other suppliers sell it. */
-  pickFor: (rmCode: string) => { priceSen: number; supplierName: string; otherSuppliers: number };
-  addedCodes: Set<string>;
-  onAdd: (rmCode: string) => void;
+  /** One entry per supplier that sells this material (main first); each becomes its own row. */
+  optionsFor: (rmCode: string) => PickOption[];
+  /** `${rmCode}|${supplierId}` of lines already in the table. */
+  addedKeys: Set<string>;
+  onAdd: (rmCode: string, supplierId?: string) => void;
   onClose: () => void;
 }) {
   const [search, setSearch] = useState("");
@@ -1120,62 +1131,63 @@ function MaterialPickerModal({
             </div>
           ) : (
             <>
-              {filtered.slice(0, 100).map((rm) => {
-                const added = addedCodes.has(rm.itemCode);
-                const { priceSen, supplierName, otherSuppliers } = pickFor(rm.itemCode);
-                return (
-                  <div
-                    key={rm.id}
-                    className="flex items-center gap-3 border-b border-[#E2DDD8] px-4 py-2.5 last:border-b-0"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm font-medium text-[#1F1D1B]">{rm.itemCode}</div>
-                      <div className="truncate text-xs text-[#6B7280]" title={rm.description}>
-                        {rm.description}
+              {filtered.slice(0, 100).flatMap((rm) => {
+                const options = optionsFor(rm.itemCode);
+                const rows: (PickOption | null)[] = options.length > 0 ? options : [null];
+                return rows.map((opt) => {
+                  const added = addedKeys.has(`${rm.itemCode}|${opt?.supplierId ?? ""}`);
+                  const priceSen = opt?.priceSen ?? 0;
+                  return (
+                    <div
+                      key={`${rm.id}|${opt?.supplierId ?? ""}`}
+                      className="flex items-center gap-3 border-b border-[#E2DDD8] px-4 py-2.5 last:border-b-0"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium text-[#1F1D1B]">{rm.itemCode}</div>
+                        <div className="truncate text-xs text-[#6B7280]" title={rm.description}>
+                          {rm.description}
+                        </div>
+                        {/* No supplier picked above: one row per supplier, Add uses that row's supplier. */}
+                        {!supplierLabel && (
+                          opt ? (
+                            <div className="truncate text-xs text-[#6B5C32]" title={opt.supplierName}>
+                              {opt.supplierName}{opt.isMain ? " ★" : ""}
+                            </div>
+                          ) : (
+                            <div className="text-xs text-[#9A3A2D]">No supplier linked</div>
+                          )
+                        )}
                       </div>
-                      {/* No supplier picked above: show who Add will fill the line with. */}
-                      {!supplierLabel && (
-                        supplierName ? (
-                          <div className="truncate text-xs text-[#6B5C32]" title={supplierName}>
-                            {supplierName}
-                            {otherSuppliers > 0 && (
-                              <span className="text-[#9CA3AF]"> +{otherSuppliers} more</span>
-                            )}
-                          </div>
-                        ) : (
-                          <div className="text-xs text-[#9A3A2D]">No supplier linked</div>
-                        )
+                      <div className="flex-shrink-0 text-right">
+                        <div className="amount text-sm text-[#1F1D1B]">
+                          {priceSen > 0 ? formatRM(priceSen) : "-"}
+                        </div>
+                        <div className="text-xs text-[#9CA3AF]">{rm.baseUOM}</div>
+                      </div>
+                      {added ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled
+                          className="w-24 flex-shrink-0 border-[#C6DBA8] bg-[#EEF3E4] text-[#4F7C3A] disabled:opacity-100"
+                        >
+                          <Check className="h-3.5 w-3.5" /> Added
+                        </Button>
+                      ) : (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="w-24 flex-shrink-0"
+                          onClick={() => onAdd(rm.itemCode, opt?.supplierId)}
+                        >
+                          <Plus className="h-3.5 w-3.5" /> Add
+                        </Button>
                       )}
                     </div>
-                    <div className="flex-shrink-0 text-right">
-                      <div className="amount text-sm text-[#1F1D1B]">
-                        {priceSen > 0 ? formatRM(priceSen) : "-"}
-                      </div>
-                      <div className="text-xs text-[#9CA3AF]">{rm.baseUOM}</div>
-                    </div>
-                    {added ? (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        disabled
-                        className="w-24 flex-shrink-0 border-[#C6DBA8] bg-[#EEF3E4] text-[#4F7C3A] disabled:opacity-100"
-                      >
-                        <Check className="h-3.5 w-3.5" /> Added
-                      </Button>
-                    ) : (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        className="w-24 flex-shrink-0"
-                        onClick={() => onAdd(rm.itemCode)}
-                      >
-                        <Plus className="h-3.5 w-3.5" /> Add
-                      </Button>
-                    )}
-                  </div>
-                );
+                  );
+                });
               })}
               {filtered.length > 100 && (
                 <div className="bg-[#FAF9F7] px-4 py-2 text-xs text-[#9CA3AF]">
@@ -1188,7 +1200,7 @@ function MaterialPickerModal({
 
         <div className="flex items-center justify-between gap-3 border-t border-[#E2DDD8] bg-[#FAF9F7] px-4 py-3">
           <span className="rounded-full border border-[#E2DDD8] bg-white px-2.5 py-0.5 text-xs font-medium text-[#374151]">
-            {addedCodes.size} item{addedCodes.size === 1 ? "" : "s"} selected
+            {addedKeys.size} item{addedKeys.size === 1 ? "" : "s"} selected
           </span>
           <Button type="button" size="sm" onClick={onClose}>
             Done
