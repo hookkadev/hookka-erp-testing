@@ -74,10 +74,14 @@ if (!stgUrl.includes(STAGING_REF) || stgUrl.includes(PROD_REF)) {
 
 const conn = (url) =>
   postgres(url, { ssl: { rejectUnauthorized: false }, max: 1, idle_timeout: 20, connect_timeout: 30 });
-const prod = conn(prodUrl);
-const stg = conn(stgUrl);
 // Prod is only ever read; make the server refuse a write even if this file is edited badly.
-await prod.unsafe("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY");
+async function prodConn() {
+  const db = conn(prodUrl);
+  await db.unsafe("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY");
+  return db;
+}
+const prod = await prodConn();
+const stg = conn(stgUrl);
 
 console.log(`mode : ${APPLY ? "APPLY (insert-only into staging)" : "REPORT ONLY (no writes)"}\n`);
 
@@ -149,12 +153,16 @@ for (const t of order) {
     console.log(`${String(n).padStart(9)}  ${t}   (prod rows, ${cols.length} cols)`);
     continue;
   }
+  // A fresh prod connection per table: with postgres.js 3.4.9 a large COPY TO
+  // STDOUT (~200 MB attendance_records) leaves its connection stuck, and the next
+  // query on it never returns (BUG-2026-10-09-270).
+  const source = await prodConn();
   try {
     const n = await stg.begin(async (tx) => {
       await tx.unsafe(
         `CREATE TEMP TABLE _in ON COMMIT DROP AS SELECT ${list} FROM public.${q(t)} WITH NO DATA`,
       );
-      const src = await prod.unsafe(`COPY (SELECT ${list} FROM public.${q(t)}) TO STDOUT`).readable();
+      const src = await source.unsafe(`COPY (SELECT ${list} FROM public.${q(t)}) TO STDOUT`).readable();
       const dst = await tx.unsafe(`COPY _in (${list}) FROM STDIN`).writable();
       await pipeline(src, dst);
       const r = await tx.unsafe(
@@ -168,6 +176,8 @@ for (const t of order) {
   } catch (e) {
     failed.push(t);
     console.log(`${"FAILED".padStart(9)}  ${t}   ${e.message}`);
+  } finally {
+    await source.end({ timeout: 1 });
   }
 }
 
