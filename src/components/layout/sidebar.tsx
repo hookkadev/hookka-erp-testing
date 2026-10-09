@@ -86,6 +86,10 @@ const navigationGroups: NavGroup[] = [
     items: [
       { name: "Dashboard Experimental", href: "/dashboard-experimental", icon: FlaskConical },
       { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+      // STAGING ONLY (never PR'd into main): 7-day vs 14-day Plant Load.
+      ...(window.location.hostname.startsWith("staging.")
+        ? [{ name: "Dashboard Compare", href: "/dashboard/compare", icon: LayoutDashboard }]
+        : []),
       { name: "Hookka Report", href: "/daily-report", icon: ClipboardCheck },
       { name: "Notifications", href: "/notifications", icon: Bell },
       { name: "Announcements", href: "/announcements", icon: Megaphone },

@@ -70,6 +70,11 @@ app.get("/", async (c) => {
   const todayISOTop = fmtISO(new Date());
   const currentMonthPrefix = todayISOTop.slice(0, 7);
   const isPastMonth = period !== "all" && period < currentMonthPrefix;
+  // Staging Dashboard Compare asks for the old 7-day capacity window to show
+  // beside the 14-day one. An override skips every stored copy (snapshot,
+  // daily state, frozen month) both ways, so it is never served to, or saved
+  // for, the normal dashboard.
+  const windowOverride = c.req.query("capacityWindow") === "7" ? 7 : null;
 
   // Extract the live STATE metrics from a computed overview payload and
   // upsert today's daily snapshot (idempotent on (org_id, snap_date)).
@@ -126,7 +131,7 @@ app.get("/", async (c) => {
   // Snapshot is only used for the default `period=all` view. Specific
   // month filters skip the snapshot and run the compute (those reads
   // are rare — operator usually leaves it on "All").
-  if (period === "all") {
+  if (period === "all" && !windowOverride) {
     const [snap, sig] = await Promise.all([
       readSnapshot(c.var.DB, orgId),
       // Signature = timestamp AND row count. A deleted order never moves
@@ -145,7 +150,7 @@ app.get("/", async (c) => {
   // recomputed (owner 2026-10-08, see freezeMonth). Only the month list is
   // read fresh, so the month picker still offers months added after the
   // freeze.
-  if (isPastMonth) {
+  if (isPastMonth && !windowOverride) {
     const frozen = await readFrozenMonth(c.var.DB, orgId, period);
     if (frozen) {
       const monthRows = await c.var.DB
@@ -169,7 +174,7 @@ app.get("/", async (c) => {
   // v23 (2026-08-14, BUG-2026-08-13-142): payload gained `customerConcentration`.
   // A pre-fix body has no such key, and the card would render "—" until the 60s
   // TTL rolled; bumping the version makes that window zero.
-  const data = await cached(c, `dashboard:overview:${orgId}:v24:${period}`, 60, async () => {
+  const data = await cached(c, `dashboard:overview:${orgId}:v24:${period}:w${windowOverride ?? 14}`, 60, async () => {
     const db = c.var.DB;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -278,7 +283,7 @@ app.get("/", async (c) => {
     // current month, and every department's own capacity in the backlog
     // table. `guard` caps the walk-back so a malformed holiday list can
     // never spin.
-    const ROLLING_DAYS = 14;
+    const ROLLING_DAYS = windowOverride ?? 14;
     const rollingDays: string[] = [];
     {
       const cur = new Date(today);
@@ -2306,7 +2311,7 @@ app.get("/", async (c) => {
   // skip the snapshot entirely. Errors are swallowed: the cache write
   // is a perf optimisation, not load-bearing. The user already has the
   // computed payload in `data` and gets it back via the c.json below.
-  if (period === "all") {
+  if (period === "all" && !windowOverride) {
     try {
       const sig = await getDashboardSignature(c.var.DB);
       // maxUpdatedAt may be null on a brand-new install (every tracked
@@ -2330,7 +2335,9 @@ app.get("/", async (c) => {
   // reflects LIVE state — i.e. NOT a past month (a past-month payload may
   // carry state widgets overridden from an older snapshot, which must never
   // be recorded as today). All-time and the current month both qualify.
-  if (!isPastMonth) {
+  if (windowOverride) {
+    // Compare view: nothing stored.
+  } else if (!isPastMonth) {
     captureTodayState(data as Record<string, unknown>);
   } else {
     try {

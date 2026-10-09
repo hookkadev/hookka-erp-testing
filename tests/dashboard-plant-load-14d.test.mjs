@@ -21,7 +21,7 @@ const OVERVIEW = read("src/api/routes/dashboard-overview.ts");
 const PLANNING = read("src/pages/planning/index.tsx");
 
 test("capacity window is 14 working days on the dashboard and Planning", () => {
-  assert.match(OVERVIEW, /const ROLLING_DAYS = 14;/);
+  assert.match(OVERVIEW, /const ROLLING_DAYS = windowOverride \?\? 14;/);
   assert.match(OVERVIEW, /Math\.round\(windowTotal \/ ROLLING_DAYS\)/);
   // Only a past month averages its own days; the current month is rolling.
   assert.match(OVERVIEW, /if \(monthScope && isPastMonth\) \{\n\s+windowDays = \[\];/);
@@ -82,6 +82,18 @@ test("a past month is frozen on first write and never overwritten", async () => 
 });
 
 test("route reads the frozen copy only for past months and freezes after compute", () => {
-  assert.match(OVERVIEW, /if \(isPastMonth\) \{\n\s+const frozen = await readFrozenMonth\(/);
+  assert.match(OVERVIEW, /if \(isPastMonth && !windowOverride\) \{\n\s+const frozen = await readFrozenMonth\(/);
   assert.match(OVERVIEW, /\} else \{\n\s+try \{\n\s+await freezeMonth\(c\.var\.DB, orgId, period,/);
+});
+
+// Staging Dashboard Compare: capacityWindow=7 must never read or write a
+// stored copy, or the old 7-day numbers would leak into the real dashboard.
+test("the 7-day compare view reads and writes no stored copy", () => {
+  assert.match(OVERVIEW, /const windowOverride = c\.req\.query\("capacityWindow"\) === "7" \? 7 : null;/);
+  // snapshot read + snapshot write-back
+  assert.equal((OVERVIEW.match(/if \(period === "all" && !windowOverride\) \{/g) ?? []).length, 2);
+  // its own 60s cache key
+  assert.match(OVERVIEW, /:w\$\{windowOverride \?\? 14\}`/);
+  // no daily state capture, no freeze
+  assert.match(OVERVIEW, /if \(windowOverride\) \{\n\s+\/\/ Compare view: nothing stored\.\n\s+\} else if \(!isPastMonth\) \{\n\s+captureTodayState/);
 });

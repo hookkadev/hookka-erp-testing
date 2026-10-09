@@ -185,6 +185,7 @@ Owner asks (one message, plus answers to three follow-up questions):
 5. 🔵 Past months are frozen: the first time a finished month is opened its whole dashboard is stored and served as-is afterwards, never recalculated. Known limit: it freezes on that first view; nothing refreezes it later.
 6. 🟡 Not fixed (owner did not pick it): capacity counts Accessory work (about 6h/day) but the backlog does not, so backlog days read slightly low (about 18.4d vs 18.9d).
 7. ⬜ Staging check after deploy.
+8. 🔵 Follow-up ask (2026-10-09): a staging-only Dashboard Compare page under Dashboard in the side menu (`/dashboard/compare`, `src/pages/dashboard-compare.tsx`): the 7-day and 14-day Plant Load side by side, charts on one scale, plus a per-department difference table. The overview route takes `capacityWindow=7`, which reads and writes no stored copy.
 
 ## 2026-10-08 — 🔵 BOM Variant Fields and WIP Types as lists with product-type ticks (branch `feat/bom-variant-fields-list` → `staging`)
 
