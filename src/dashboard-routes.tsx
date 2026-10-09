@@ -159,6 +159,8 @@ const MailCenter = lazy(() => import('./pages/mail-center'))
 // PR'd into main; data only exists on staging builds (gen-staging-notes.mjs).
 const StagingNotes = lazy(() => import('./pages/staging-notes'))
 const StagingMail = lazy(() => import('./pages/staging-mail'))
+// STAGING ONLY (never PR'd into main): Plant Load 7-day vs 14-day side by side.
+const DashboardCompare = lazy(() => import('./pages/dashboard-compare'))
 const StagingSchema = lazy(() => import('./pages/staging-schema')) // STAGING ONLY, never PR into main
 const MailCenterDetail = lazy(() => import('./pages/mail-center/detail'))
 const Maintenance = lazy(() => import('./pages/maintenance'))
@@ -243,6 +245,15 @@ export const DASHBOARD_ROUTES: RouteObject[] = [
     ),
   },
   { path: '/dashboard-b', element: <Navigate to="/dashboard" replace /> },
+  // STAGING ONLY (never PR'd into main). Same resource as /dashboard.
+  {
+    path: '/dashboard/compare',
+    element: (
+      <RequirePermission resource="dashboard" action="read">
+        <S><DashboardCompare /></S>
+      </RequirePermission>
+    ),
+  },
 
   // Experimental dashboard. Its own resource, same as its menu link in
   // nav-permissions.ts: every dashboard:read holder has it, plus a role in

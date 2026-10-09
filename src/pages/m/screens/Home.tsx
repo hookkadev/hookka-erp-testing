@@ -597,7 +597,7 @@ export default function MobileHome() {
       loadPct,
       workforce: overview?.employee?.activeHeadcount ?? null,
       rows: [
-        { label: "Daily Capacity", sub: `${period} avg`, value: dailyCap ? hrs(dailyCap) : "—", icon: Calendar },
+        { label: "Daily Capacity", sub: period === CUR_YM ? "14-day avg" : `${period} avg`, value: dailyCap ? hrs(dailyCap) : "—", icon: Calendar },
         {
           label: "Total Backlog",
           sub: "per dept",

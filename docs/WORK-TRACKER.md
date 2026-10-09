@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-08**: branch `feat/plant-load-14d` (to `staging`, BUG-2026-10-08-269) added below (its entry is the newest).
 > **Last verified: 2026-10-08**: branch `fix/bom-module-guide-anchors` (to `staging`) added item 5b to the editable WIP types entry below.
 > **Last verified: 2026-10-08**: branch `feat/bom-variant-fields-list` (to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-08**: branch `fix/kpi-delivered-last-leg-myt` (to `staging`, BUG-2026-10-08-267) added below (its entry is the newest).
@@ -172,6 +173,19 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-08 — 🔵 Plant Load: 14-day capacity, Foam Cutting, past months frozen (branch `feat/plant-load-14d` → `staging`)
+
+Owner asks (one message, plus answers to three follow-up questions):
+
+1. 🔵 Daily Capacity averages the last 14 working days instead of 7. Applies to the This month and All time views; a past month keeps its own month average. Planning page moves to 14 days too, so the two pages agree.
+2. ✅ Accuracy check, "production hours = from card": measured on prod (read-only, 2026-10-08), all 6,068 job cards completed in the last 14 working days have no actual minutes recorded, so capacity is 100% the card's estimated minutes × quantity.
+3. ✅ Backlog check: the per-department backlog adds to exactly 4,440h, the figure on the card. 7 vs 14 days moves the headline only 18.5d to 18.4d today. Per-department days range 12.0d (Fabric Cutting) to 22.9d (Foam Bonding) on 14 days.
+4. 🔵 Foam Cutting was missing from the dashboard's department list: 23h of sofa backlog (132 cards) left out of the total and its "stalled" flag (no completions in 14 days) never shown. Added. BUG-2026-10-08-269.
+5. 🔵 Past months are frozen: the first time a finished month is opened its whole dashboard is stored and served as-is afterwards, never recalculated. Known limit: it freezes on that first view; nothing refreezes it later.
+6. 🟡 Not fixed (owner did not pick it): capacity counts Accessory work (about 6h/day) but the backlog does not, so backlog days read slightly low (about 18.4d vs 18.9d).
+7. ⬜ Staging check after deploy.
+8. 🔵 Follow-up ask (2026-10-09): a staging-only Dashboard Compare page under Dashboard in the side menu (`/dashboard/compare`, `src/pages/dashboard-compare.tsx`): the 7-day and 14-day Plant Load side by side, charts on one scale, plus a per-department difference table. The overview route takes `capacityWindow=7`, which reads and writes no stored copy.
 
 ## 2026-10-08 — 🔵 BOM Variant Fields and WIP Types as lists with product-type ticks (branch `feat/bom-variant-fields-list` → `staging`)
 

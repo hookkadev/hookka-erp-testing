@@ -1,5 +1,7 @@
 # Planning — Module Guide
 
+> **Last verified: 2026-10-08** (branch `feat/plant-load-14d`): `ROLLING_WINDOW_DAYS` is now 14; the `PlanningPage`, `TABS`, `ScheduleProposalsTab` and `DrilldownModal` anchors re-derived. Nothing else re-checked.
+
 > **Last verified: 2026-10-01** (branch `feat/dev08-pillow-follows-sofa`): the engine anchors (`computeChainWithAssignments`, `GET /schedule/:dept`, `computeChain`, `scheduleCutting` / `runCutting`) re-derived and the DEV-08 pillow gotcha added. Nothing else re-checked.
 
 > **Last verified: 2026-08-14** (branch `docs/docs-vs-code-audit`) — corrected against the
@@ -18,7 +20,7 @@ Owns production **planning, scheduling, MRP and lead times** — the read-mostly
 
 ## Entry points
 - Pages
-  - `/planning` → `src/pages/planning/index.tsx:444` (`PlanningPage` — one 4,060-line file, 5 tab-gated render blocks)
+  - `/planning` → `src/pages/planning/index.tsx:450` (`PlanningPage` — one 4,060-line file, 5 tab-gated render blocks)
   - MRP view → `src/pages/planning/mrp.tsx` (reads/posts `/api/mrp`)
   - Lead-time history + scheduled changes → `src/pages/planning/LeadTimeHistoryDialog.tsx`
   - Per-dept daily schedule (shared renderer) → `src/pages/planning/dept/_DepartmentSchedulePage.tsx` — the ONLY renderer; all nine dept pages import it. (`_PlainDeptSchedulePage.tsx`, a plain-table variant this line used to list, had no importer and was deleted in chore/dead-code-sweep.)
@@ -46,7 +48,7 @@ Owns production **planning, scheduling, MRP and lead times** — the read-mostly
 - `kv_config` — `public_holidays`, schedule settings, `lead-time-settings`, `planning_capacity` config.
 
 ## Core flows
-1. **Capacity / loading / tracker read** — `PlanningPage` (`index.tsx:444`) fetches POs/JCs and renders tab-gated blocks selected by `activeTab`; `ScheduleProposalsTab` is at `:3253` and `DrilldownModal` (`:3563`) shows per-cell detail. (The individual tab JSX blocks live inside `PlanningPage` — jump by tab id, not by a remembered line.)
+1. **Capacity / loading / tracker read** — `PlanningPage` (`index.tsx:450`) fetches POs/JCs and renders tab-gated blocks selected by `activeTab`; `ScheduleProposalsTab` is at `:3261` and `DrilldownModal` (`:3571`) shows per-cell detail. (The individual tab JSX blocks live inside `PlanningPage` — jump by tab id, not by a remembered line.)
 2. **Lead-time save / recalc** — the inline Save form → `PUT /api/production/leadtimes` + `PUT /settings` (`production-leadtimes.ts:202`); `POST /recalc-all` walks every PO + `job_cards` row and re-derives due dates from lead times + DD buffer. Gated OFF when `autoScheduleEnabled` is false so hand-entered due dates are never clobbered.
 3. **Per-dept daily schedule** — `GET /api/planning/schedule/:dept` (`planning-schedule.ts:611`, plus the `fabric-cutting` special `:107`) runs the cutting scheduler and returns per-day lanes rendered by `_DepartmentSchedulePage.tsx`.
 4. **Phase-2 proposals (read-only → approve writes)** — `POST /api/planning/proposals/generate` (`schedule-proposals.ts:95`) is pause-gated (`isAgentPaused`) + agent-run-logged (`recordAgentRun`) and calls `generateProposals` (`lib/schedule-proposals.ts:161`) — pure read, no writes. `POST /proposals/approve` (`:158`) is the ONLY path that writes `job_cards.dueDate` and stores one `plan_snapshots` row; `/proposals/reject` (`:249`) just flips status.
@@ -55,10 +57,10 @@ Owns production **planning, scheduling, MRP and lead times** — the read-mostly
 ## Key functions / sections (locate-to-function)
 | Symbol / section | file:line | Role |
 |---|---|---|
-| `PlanningPage` | `src/pages/planning/index.tsx:444` | Default export; 5 tab-gated render blocks keyed off `activeTab` |
-| `TABS` def | `src/pages/planning/index.tsx:198` | capacity · loading · leadtimes · tracker · proposals |
-| `ScheduleProposalsTab` | `src/pages/planning/index.tsx:3253` | Proposals list + approve/reject UI |
-| `DrilldownModal` | `src/pages/planning/index.tsx:3563` | Per-cell schedule drilldown |
+| `PlanningPage` | `src/pages/planning/index.tsx:450` | Default export; 5 tab-gated render blocks keyed off `activeTab` |
+| `TABS` def | `src/pages/planning/index.tsx:203` | capacity · loading · leadtimes · tracker · proposals |
+| `ScheduleProposalsTab` | `src/pages/planning/index.tsx:3261` | Proposals list + approve/reject UI |
+| `DrilldownModal` | `src/pages/planning/index.tsx:3571` | Per-cell schedule drilldown |
 | `computeChainWithAssignments` | `src/api/routes/planning-schedule.ts:610` | Phase-2 chain engine with per-(card,day) assignment collector |
 | `GET /schedule/:dept` | `src/api/routes/planning-schedule.ts:685` | Per-dept daily schedule data (`fabric-cutting` special at `:107`) |
 | `computeChain` | `src/api/lib/planning-chain.ts:2468` | Pure chain engine; takes OPTIONAL `collect` callback |
