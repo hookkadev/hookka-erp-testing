@@ -85,6 +85,10 @@ test("server: the latest purchase price per code on or before month-end; hints n
   assert.match(r, /if \(date > cur\.date \|\| \(date === cur\.date && piNo > cur\.piNo\)\) Object\.assign\(cur, \{ unitSen, piNo, date, supplier, qty \}\);/, "newest wins");
   assert.match(r, /cur\.minUnitSen = Math\.min\(cur\.minUnitSen, unitSen\);\n\s+cur\.maxUnitSen = Math\.max\(cur\.maxUnitSen, unitSen\);/);
   assert.match(r, /return c\.json\(\{ success: true, data: \{ asOf, prices, priceList, batchCost \} \}\);/, "hints kept apart from prices");
+  // BUG-2026-10-09-273: the price list is kept in sen (the PO screen reads it
+  // as unitPriceSen) — a ×100 made every hint 100× too high.
+  assert.match(r, /const unitSen = Math\.round\(Number\(r\.unitPrice\) \* 10000\) \/ 10000;/);
+  assert.match(read("src/pages/procurement/create.tsx"), /unitPriceSen: binding\.unitPrice,/, "the price list is sen where purchase orders use it");
   assert.match(api, /import \{ itemCodeKey \} from "\.\.\/\.\.\/lib\/stock-take-import";/, "one matching rule, server and page");
 });
 

@@ -17476,7 +17476,9 @@ app.get("/stock-take/purchase-prices", async (c) => {
     ).bind(orgId).all<{ materialCode: string | null; unitPrice: number | string | null; isMainSupplier: number | boolean | null; supplierName: string | null }>()).results ?? [];
     for (const r of rows) {
       const key = itemCodeKey(r.materialCode);
-      const unitSen = Math.round(Number(r.unitPrice) * 1000000) / 10000;
+      // The price list keeps sen — the purchase-order screen takes it as its
+      // unitPriceSen — so no ×100 (BUG-2026-10-09-273: hints read 100× high).
+      const unitSen = Math.round(Number(r.unitPrice) * 10000) / 10000;
       if (!key || !(unitSen > 0)) continue;
       const main = r.isMainSupplier === true || Number(r.isMainSupplier) === 1;
       if (!priceList[key] || main) priceList[key] = { unitSen, supplier: String(r.supplierName ?? "") };

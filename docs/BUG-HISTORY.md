@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-09**: newest entry BUG-2026-10-09-273 (branch `fix/stock-take-price-list-sen`; 272 is on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-09**: newest entry BUG-2026-10-09-271 (branch `fix/co-scan-po-creates-co`, to main); a log, so "verified" means the entry matches the code on its branch.
 > **Last verified: 2026-10-09**: BUG-2026-10-09-270 got a follow-up, the sync job timeout raised to 45 minutes (branch `fix/staging-sync-timeout`, to main).
 > **Last verified: 2026-10-09**: newest entry BUG-2026-10-09-270 (branch `fix/staging-merge-copy-hang`, to main); a log, so "verified" means the entry matches the code on its branch.
@@ -86,6 +87,20 @@ Entries themselves stay newest-first.
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
 
 ---
+
+## BUG-2026-10-09-273 — Stock-take price-list hints read 100× too high `accounting` 🟢
+
+🟢 Fixed on `fix/stock-take-price-list-sen` (follow-up to #775, the priced stock-take count).
+
+Found while checking #775 on prod (read-only): an item never bought since the system started showed
+"price list RM 680.00" while the same supplier's invoices for its twin item were RM 6.80. The supplier price
+list (`supplier_material_bindings.unitPrice`) is kept in sen — the purchase-order screen takes it straight as
+`unitPriceSen` — and `GET /stock-take/purchase-prices` multiplied it by 100 as if it were RM. Only the hint text
+was wrong: hints are never used as a price, so no value was ever computed from it. It also misled the analysis
+given to the owner ("the price list's units don't match"), now corrected.
+
+Fix: read the price list as sen. Regression test: `tests/stock-take-priced-count.test.mjs` (pins the conversion
+and that the PO screen reads the same field as sen).
 
 ## BUG-2026-10-09-271 — Scan PO on the Consignment Orders page created Sales Orders `consignment` `sales` `ocr` 🟡
 

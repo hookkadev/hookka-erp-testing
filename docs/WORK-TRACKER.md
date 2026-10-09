@@ -1,6 +1,6 @@
 # Hookka ERP — Work Tracker
 
-> **Last verified: 2026-10-09**: stock-take priced count in progress (branch `feat/stock-take-priced-count`); cash-flow office salaries answered.
+> **Last verified: 2026-10-09**: stock-take priced count (#775) prod-verified; price-list hint fix in progress (branch `fix/stock-take-price-list-sen`, BUG-2026-10-09-273).
 > **Last verified: 2026-10-09**: branch `fix/co-scan-po-creates-co` (to `main`, BUG-2026-10-09-271) added below (its entry is the newest).
 > **Last verified: 2026-10-09**: branch `docs/outsourced-ot-box-next-time` (to `main`) added item 7 (outsourced staff OT box, next time) to the hourly-rate entry below.
 > **Last verified: 2026-10-08**: branch `feat/bom-variant-fields-list-main` (to `main`) added below (its entry is the newest).
@@ -114,15 +114,21 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
-## 2026-10-09 — 🔵 Stock take priced at the latest purchase; Cash Flow office salaries (owner「这个是9月的closing stock … 只是价钱没有，你看可以从purchase 那边capture吗？先读和确定」→「用最近一次进货价」+「cash flow 这边，direct labour 和office 的salaries 参在一起了」→「我用accrual account 去分辨吧」)(branch `feat/stock-take-priced-count`)
+## 2026-10-09 — 🔵 Stock take priced at the latest purchase; Cash Flow office salaries (owner「这个是9月的closing stock … 只是价钱没有，你看可以从purchase 那边capture吗？先读和确定」→「用最近一次进货价」+「cash flow 这边，direct labour 和office 的salaries 参在一起了」→「我用accrual account 去分辨吧」)(#775 69e91ddb, prod-verified; fix branch `fix/stock-take-price-list-sen`)
 
-1. 🔵 Stock take — the count file is now the raw-material master export (Item Code / Item Group / Balance Qty, no prices).
+1. ✅ Stock take — the count file is now the raw-material master export (Item Code / Item Group / Balance Qty, no prices).
    Measured on prod (read-only): about two thirds of the counted items match a purchase-invoice line by item code; some
    codes were bought in different units (roll vs metre, pack vs piece); items not bought since the system started have
    price-list / old batch costs only, in units that do not match the count; the file carries groups never counted before.
    Built: Shape 3 of the import → latest purchase price per item code on or before month-end → "Priced count" review
    (earlier-counted groups ticked; rows to check; prices editable) → "Put into <month>" fills the group totals → Save keeps
    the priced lines with the month. The owner presses Save.
+   Prod (2026-10-09, nothing saved): the price endpoint answers for every item code bought; the owner's file opened the
+   panel with every counted item read, earlier-counted groups ticked and new ones not, rows to check marked; "Put into"
+   refused while ticked groups held unpriced items, filled only the ticked group when that was all, and Close took it back;
+   the month still has no saved figure or priced record.
+   🔵 BUG-2026-10-09-273: the supplier price list is kept in sen and the hints read it as RM (100× high) — hints only, no
+   value affected; fixed on `fix/stock-take-price-list-sen`.
 2. ✅ Cash Flow office salaries — answered, no code: every salary voucher debits the production salary accrual (410-0010)
    and the system payroll holds only the production departments, so whole payments were split over production departments.
    The chart already has the office twins (410-0011 / 0021 / 0031 / 0041) and the cash flow puts any 410-0000 child other
