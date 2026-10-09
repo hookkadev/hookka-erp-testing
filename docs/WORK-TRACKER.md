@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-09**: Journal Entries undone fold (#798) prod-verified.
 > **Last verified: 2026-10-09**: branch `feat/system-journal-undone-fold` (to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-09**: branch `feat/po-picker-row-per-supplier` (BUG-98 follow-up, to `main`) added item 6 to the BUG-98 to-main entry below.
 > **Last verified: 2026-10-09**: branch `feat/po-picker-show-supplier-main` (BUG-98 follow-up, staging #790 to `main`) added item 5 to the BUG-98 to-main entry below.
@@ -120,14 +121,16 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
-## 2026-10-09 — 🔵 Journal Entries: an undone system posting is one REVERSED · UNDONE row (owner「我post 了，然后发现unposted 有显示posted,很让人混乱」→「做」)(branch `feat/system-journal-undone-fold` → `main`)
+## 2026-10-09 — ✅ Journal Entries: an undone system posting is one REVERSED · UNDONE row (owner「我post 了，然后发现unposted 有显示posted,很让人混乱」→「做」)(#798 47d52f03, prod-verified)
 
-1. 🔵 An undo (Unpost on the Labour tab, a closing-stock or opening-balance reversal) used to be listed as its own
+1. ✅ An undo (Unpost on the Labour tab, a closing-stock or opening-balance reversal) used to be listed as its own
    POSTED row beside the posting it cancelled. It now folds into that posting: the posting shows REVERSED with
    SYSTEM · UNDONE chips, like a voided journal, and the undo is no longer its own row. Paired on the legs (same
    family, exactly reverses the posting, the latest live posting first); an undo that pairs with nothing stays listed.
-2. 🔵 The popup says when it was undone and that it no longer counts; the printed voucher reads JOURNAL VOUCHER — UNDONE.
-3. ⚪ Check on prod after deploy.
+2. ✅ The popup says when it was undone and that it no longer counts; the printed voucher reads JOURNAL VOUCHER — UNDONE.
+3. ✅ Prod (2026-10-09, read-only): the system postings list went from 27 rows to 15 — every labour undo and every
+   opening-balance re-post reversal paired with the posting it cancelled, none left unpaired; each month's latest
+   posting stays POSTED. The Journal Entries list and the popup show the UNDONE chip and the undo date.
 
 ## 2026-10-09 — ✅ P&L: a posted-then-unposted Labour month showed no direct labour (owner「做，8 月的 bug 修好，7 月我自己 Unpost」)(#795 29d33882, BUG-2026-10-09-275, prod-verified)
 
