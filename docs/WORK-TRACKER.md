@@ -1,6 +1,6 @@
 # Hookka ERP — Work Tracker
 
-> **Last verified: 2026-10-09**: stock-take priced count (#775) prod-verified; price-list hint fix #776 merged; price-list prefill in progress (branch `feat/stock-take-price-list-prefill`).
+> **Last verified: 2026-10-09**: stock-take priced count (#775), price-list hint fix (#776) and price-list prefill (#778) all prod-verified.
 > **Last verified: 2026-10-09**: branch `fix/co-scan-po-creates-co` (to `main`, BUG-2026-10-09-271) added below (its entry is the newest).
 > **Last verified: 2026-10-09**: branch `docs/outsourced-ot-box-next-time` (to `main`) added item 7 (outsourced staff OT box, next time) to the hourly-rate entry below.
 > **Last verified: 2026-10-08**: branch `feat/bom-variant-fields-list-main` (to `main`) added below (its entry is the newest).
@@ -136,11 +136,12 @@ Same change as staging #779 (merged 2026-10-09), cherry-picked onto `main`. Tick
    panel with every counted item read, earlier-counted groups ticked and new ones not, rows to check marked; "Put into"
    refused while ticked groups held unpriced items, filled only the ticked group when that was all, and Close took it back;
    the month still has no saved figure or priced record.
-   🔵 BUG-2026-10-09-273: the supplier price list is kept in sen and the hints read it as RM (100× high) — hints only, no
-   value affected; fixed on `fix/stock-take-price-list-sen` (#776).
-   🔵 Owner「要，先带价目表价」: an item with no purchase on file now starts at its supplier price-list price (the price a
+   ✅ BUG-2026-10-09-273: the supplier price list is kept in sen and the hints read it as RM (100× high) — hints only, no
+   value affected; fixed by #776 (17913a63), prod-verified: the price list now reads in sen.
+   ✅ Owner「要，先带价目表价」: an item with no purchase on file now starts at its supplier price-list price (the price a
    purchase order would take), marked "price list" and listed under To check / Price list; only an item on neither
-   stays empty (branch `feat/stock-take-price-list-prefill`).
+   stays empty (#778 ea4f6915). Prod (nothing saved): the owner's file gave the Price list view and a much shorter
+   No price list; a list-priced row reads "price list · <supplier>" with a check-the-unit note; purchased rows unchanged.
 2. ✅ Cash Flow office salaries — answered, no code: every salary voucher debits the production salary accrual (410-0010)
    and the system payroll holds only the production departments, so whole payments were split over production departments.
    The chart already has the office twins (410-0011 / 0021 / 0031 / 0041) and the cash flow puts any 410-0000 child other
