@@ -2388,4 +2388,48 @@ app.get("/", async (c) => {
   return c.json({ success: true, ...data });
 });
 
+// Staging Dashboard Compare, Fabric cost tab. Each month's fabric Avg cost /m
+// as the dashboard shows it (cost of the fabric cut, oldest stock first) next
+// to the same metres at real purchase prices. The opening-stock batches of
+// 2026-02-21 carry a flat RM 25 / RM 35 per metre, above every real buy price
+// of those fabrics, so only slices cut from an OPENING batch are repriced, at
+// that fabric's average receipt price. Read-only and uncached.
+app.get("/fabric-cost-compare", async (c) => {
+  const orgId = getOrgId(c);
+  const res = await c.var.DB.prepare(
+    `WITH buy AS (
+       SELECT itemId, SUM(totalCostSen) / NULLIF(SUM(qty), 0) AS "avgSen"
+         FROM cost_ledger WHERE type = 'RM_RECEIPT' GROUP BY itemId
+     )
+     SELECT po.itemCategory AS "cat", substr(cl.date::text, 1, 7) AS "ym",
+            COALESCE(SUM(cl.qty), 0) AS "meters",
+            COALESCE(SUM(cl.totalCostSen), 0) AS "shownSen",
+            COALESCE(SUM(CASE WHEN b.source = 'OPENING' AND buy."avgSen" IS NOT NULL
+                              THEN cl.qty * buy."avgSen" ELSE cl.totalCostSen END), 0) AS "realSen",
+            COALESCE(SUM(CASE WHEN b.source = 'OPENING' THEN cl.qty ELSE 0 END), 0) AS "openingMeters"
+       FROM cost_ledger cl
+       JOIN raw_materials rm ON rm.id = cl.itemId
+       JOIN production_orders po ON po.id = cl.refId
+       LEFT JOIN rm_batches b ON b.id = cl.batchId
+       LEFT JOIN buy ON buy.itemId = cl.itemId
+      WHERE po.orgId = ? AND cl.type = 'RM_ISSUE'
+        AND cl.refType = 'PRODUCTION_ORDER'
+        AND rm.itemGroup IN ('${FABRIC_ITEM_GROUPS.join("','")}')
+        AND po.itemCategory IN ('BEDFRAME','SOFA')
+      GROUP BY po.itemCategory, substr(cl.date::text, 1, 7)
+      ORDER BY substr(cl.date::text, 1, 7) DESC`,
+  )
+    .bind(orgId)
+    .all<{ cat: string; ym: string; meters: number; shownSen: number; realSen: number; openingMeters: number }>();
+  const rows = (res.results ?? []).map((r) => ({
+    cat: r.cat,
+    ym: r.ym,
+    meters: Number(r.meters) || 0,
+    shownSen: Math.round(Number(r.shownSen) || 0),
+    realSen: Math.round(Number(r.realSen) || 0),
+    openingMeters: Number(r.openingMeters) || 0,
+  }));
+  return c.json({ success: true, rows });
+});
+
 export default app;

@@ -10,11 +10,18 @@
 // its last day, or yesterday for the current month.
 // Each column: the Plant Load card, the Department Backlog bars and the daily
 // production chart. Bars and charts of a kind share one scale across columns.
+//
+// Second tab (?tab=fabric): fabric Avg cost /m per month as the dashboard shows
+// it vs at real purchase prices, from /api/dashboard/overview/fabric-cost-compare
+// (owner 2026-10-09, after the opening-stock placeholder price was found).
 // ============================================================
 import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Card, CardContent } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
+import { Tabs } from "@/components/ui/tabs";
+import { formatRM } from "@/lib/utils";
 import { useCachedJson } from "@/lib/cached-fetch";
 import { PlantLoadCard } from "@/pages/dashboards/DashboardWidgets";
 import { deptBacklogRows, type DeptBacklog } from "@/pages/dashboards/dashboard-widgets-lib";
@@ -139,7 +146,89 @@ function Column({
   );
 }
 
+type FabricRow = { cat: string; ym: string; meters: number; shownSen: number; realSen: number; openingMeters: number };
+
+function FabricCostCard({ cat, rows }: { cat: "SOFA" | "BEDFRAME"; rows: FabricRow[] }) {
+  const mine = rows.filter((r) => r.cat === cat && r.meters > 0);
+  return (
+    <Card className="min-w-0">
+      <CardContent className="p-4 sm:p-5">
+        <h2 className="text-base font-bold text-[#1F1D1B] mb-3">{cat === "SOFA" ? "Sofa" : "Bedframe"} fabric, Avg cost /m</h2>
+        {mine.length === 0 ? (
+          <p className="text-sm text-[#6B7280]">No fabric issued.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[440px] text-sm tabular-nums">
+              <thead>
+                <tr className="text-[10px] uppercase tracking-wider text-[#9CA3AF]">
+                  <th className="text-left py-2 pr-2">Month</th>
+                  <th className="text-right py-2 px-2">Cut</th>
+                  <th className="text-right py-2 px-2">Shown</th>
+                  <th className="text-right py-2 px-2">Real price</th>
+                  <th className="text-right py-2 px-2">Gap</th>
+                  <th className="text-right py-2 pl-2">At placeholder</th>
+                </tr>
+              </thead>
+              <tbody>
+                {mine.map((r) => {
+                  const shown = r.shownSen / r.meters;
+                  const real = r.realSen / r.meters;
+                  return (
+                    <tr key={r.ym} className="border-t border-[#F0ECE6]">
+                      <td className="py-2 pr-2 text-[#1F1D1B]">{r.ym}</td>
+                      <td className="text-right py-2 px-2">{Math.round(r.meters).toLocaleString()} m</td>
+                      <td className="text-right py-2 px-2">{formatRM(Math.round(shown))}</td>
+                      <td className="text-right py-2 px-2 font-semibold text-[#1F1D1B]">{formatRM(Math.round(real))}</td>
+                      <td className="text-right py-2 px-2" style={{ color: shown - real >= 1 ? RED : undefined }}>
+                        {formatRM(Math.round(shown - real))}
+                      </td>
+                      <td className="text-right py-2 pl-2 text-[#5A5550]">
+                        {Math.round(r.openingMeters).toLocaleString()} m · {Math.round((r.openingMeters / r.meters) * 100)}%
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function FabricCostTab() {
+  const res = useCachedJson<{ rows: FabricRow[] }>("/api/dashboard/overview/fabric-cost-compare", 60);
+  const rows = res.data?.rows;
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-[#5A5550]">
+        Shown is the dashboard's Avg cost /m: what the fabric cut that month cost, oldest stock first. Opening stock was
+        loaded on 2026-02-21 at a flat RM 25.00 or RM 35.00 per metre, above every real purchase price of those fabrics.
+        Real price costs the same metres with each opening-stock slice at that fabric's average purchase price. At
+        placeholder is how much of the month was cut from opening stock.
+      </p>
+      {rows ? (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <FabricCostCard cat="SOFA" rows={rows} />
+          <FabricCostCard cat="BEDFRAME" rows={rows} />
+        </div>
+      ) : (
+        <p className="text-sm text-[#6B7280]">{res.loading ? "Loading…" : "Could not load the fabric cost data."}</p>
+      )}
+    </div>
+  );
+}
+
+const TABS = [
+  { key: "plant", label: "Plant Load 7d vs 14d" },
+  { key: "fabric", label: "Fabric cost" },
+] as const;
+type TabKey = (typeof TABS)[number]["key"];
+
 export default function DashboardCompare() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab: TabKey = searchParams.get("tab") === "fabric" ? "fabric" : "plant";
   const [period, setPeriod] = useState("all");
   const r7 = useCachedJson<Overview>(`/api/dashboard/overview?period=${period}&capacityWindow=7`, 60);
   const r14 = useCachedJson<Overview>(`/api/dashboard/overview?period=${period}&capacityWindow=14`, 60);
@@ -171,83 +260,94 @@ export default function DashboardCompare() {
     <div className="space-y-4">
       <PageHeader
         title="Dashboard Compare"
-        subtitle="Plant Load with capacity averaged over the last 7 vs the last 14 working days. Staging only."
+        subtitle={
+          tab === "fabric"
+            ? "Fabric Avg cost /m as shown vs at real purchase prices. Staging only."
+            : "Plant Load with capacity averaged over the last 7 vs the last 14 working days. Staging only."
+        }
         actions={
-          <select
-            id="compare-period"
-            aria-label="Month"
-            value={period}
-            onChange={(e) => setPeriod(e.target.value)}
-            className="h-9 rounded-md border border-[#E2DDD8] bg-white px-2 text-sm"
-          >
-            <option value="all">Up to yesterday</option>
-            <option value={CUR_YM}>{CUR_YM} (this month so far)</option>
-            {pastMonths.map((m) => (
-              <option key={m} value={m}>
-                {m}
-              </option>
-            ))}
-          </select>
+          tab === "plant" && (
+            <select
+              id="compare-period"
+              aria-label="Month"
+              value={period}
+              onChange={(e) => setPeriod(e.target.value)}
+              className="h-9 rounded-md border border-[#E2DDD8] bg-white px-2 text-sm"
+            >
+              <option value="all">Up to yesterday</option>
+              <option value={CUR_YM}>{CUR_YM} (this month so far)</option>
+              {pastMonths.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          )
         }
       />
-      {period !== "all" && (
-        <p className="text-xs text-[#5A5550]">
-          Both windows stay inside {period}: they count back from {period === CUR_YM ? "yesterday" : "its last day"} and stop
-          at the 1st, so a window can hold fewer working days than its name.
-          {state && state.source !== "live" && (
-            <>
-              {" "}Backlog at month end:{" "}
-              {state.source === "snapshot"
-                ? `saved snapshot of ${state.asOf}`
-                : "estimated from job cards (no snapshot was saved that month)"}
-              .
-            </>
-          )}
-        </p>
-      )}
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Column win={7} period={widgetPeriod} res={r7} dayMax={dayMax} deptMax={deptMax} />
-        <Column win={14} period={widgetPeriod} res={r14} dayMax={dayMax} deptMax={deptMax} />
-      </div>
-      {p7 && p14 && (
-        <Card>
-          <CardContent className="p-4 sm:p-5">
-            <h2 className="text-base font-bold text-[#1F1D1B] mb-3">Difference</h2>
-            <p className="text-sm text-[#5A5550] mb-3">
-              Plant: daily capacity {h(p7.dailyCapacityMin)} → {h(p14.dailyCapacityMin)}, queue{" "}
-              {fmtDays(p7.backlogDays)} → {fmtDays(p14.backlogDays)} ({diff(p7.backlogDays, p14.backlogDays)}). The backlog is
-              the same in both; only the daily capacity it is divided by changes.
+      <Tabs tabs={TABS} value={tab} onChange={(k) => setSearchParams(k === "plant" ? {} : { tab: k })} />
+      {tab === "fabric" ? <FabricCostTab /> : (
+        <>
+          {period !== "all" && (
+            <p className="text-xs text-[#5A5550]">
+              Both windows stay inside {period}: they count back from {period === CUR_YM ? "yesterday" : "its last day"} and stop
+              at the 1st, so a window can hold fewer working days than its name.
+              {state && state.source !== "live" && (
+                <>
+                  {" "}Backlog at month end:{" "}
+                  {state.source === "snapshot"
+                    ? `saved snapshot of ${state.asOf}`
+                    : "estimated from job cards (no snapshot was saved that month)"}
+                  .
+                </>
+              )}
             </p>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[520px] text-sm tabular-nums">
-                <thead>
-                  <tr className="text-[10px] uppercase tracking-wider text-[#9CA3AF]">
-                    <th className="text-left py-2 pr-2">Department</th>
-                    <th className="text-right py-2 px-2">Backlog</th>
-                    <th className="text-right py-2 px-2">Per day, 7d</th>
-                    <th className="text-right py-2 px-2">Per day, 14d</th>
-                    <th className="text-right py-2 px-2">Queue, 7d</th>
-                    <th className="text-right py-2 px-2">Queue, 14d</th>
-                    <th className="text-right py-2 pl-2">Change</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map(({ d7, d14 }) => (
-                    <tr key={d7.dept} className="border-t border-[#F0ECE6]">
-                      <td className="py-2 pr-2 text-[#1F1D1B]">{d7.dept}</td>
-                      <td className="text-right py-2 px-2">{h(d7.totalMin)}</td>
-                      <td className="text-right py-2 px-2">{h(d7.dailyCapMin)}</td>
-                      <td className="text-right py-2 px-2">{h(d14?.dailyCapMin)}</td>
-                      <td className="text-right py-2 px-2">{fmtDays(d7.backlogDays)}</td>
-                      <td className="text-right py-2 px-2">{fmtDays(d14?.backlogDays)}</td>
-                      <td className="text-right py-2 pl-2 font-semibold">{diff(d7.backlogDays, d14?.backlogDays)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
+          )}
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Column win={7} period={widgetPeriod} res={r7} dayMax={dayMax} deptMax={deptMax} />
+            <Column win={14} period={widgetPeriod} res={r14} dayMax={dayMax} deptMax={deptMax} />
+          </div>
+          {p7 && p14 && (
+            <Card>
+              <CardContent className="p-4 sm:p-5">
+                <h2 className="text-base font-bold text-[#1F1D1B] mb-3">Difference</h2>
+                <p className="text-sm text-[#5A5550] mb-3">
+                  Plant: daily capacity {h(p7.dailyCapacityMin)} → {h(p14.dailyCapacityMin)}, queue{" "}
+                  {fmtDays(p7.backlogDays)} → {fmtDays(p14.backlogDays)} ({diff(p7.backlogDays, p14.backlogDays)}). The backlog is
+                  the same in both; only the daily capacity it is divided by changes.
+                </p>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[520px] text-sm tabular-nums">
+                    <thead>
+                      <tr className="text-[10px] uppercase tracking-wider text-[#9CA3AF]">
+                        <th className="text-left py-2 pr-2">Department</th>
+                        <th className="text-right py-2 px-2">Backlog</th>
+                        <th className="text-right py-2 px-2">Per day, 7d</th>
+                        <th className="text-right py-2 px-2">Per day, 14d</th>
+                        <th className="text-right py-2 px-2">Queue, 7d</th>
+                        <th className="text-right py-2 px-2">Queue, 14d</th>
+                        <th className="text-right py-2 pl-2">Change</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map(({ d7, d14 }) => (
+                        <tr key={d7.dept} className="border-t border-[#F0ECE6]">
+                          <td className="py-2 pr-2 text-[#1F1D1B]">{d7.dept}</td>
+                          <td className="text-right py-2 px-2">{h(d7.totalMin)}</td>
+                          <td className="text-right py-2 px-2">{h(d7.dailyCapMin)}</td>
+                          <td className="text-right py-2 px-2">{h(d14?.dailyCapMin)}</td>
+                          <td className="text-right py-2 px-2">{fmtDays(d7.backlogDays)}</td>
+                          <td className="text-right py-2 px-2">{fmtDays(d14?.backlogDays)}</td>
+                          <td className="text-right py-2 pl-2 font-semibold">{diff(d7.backlogDays, d14?.backlogDays)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </>
       )}
     </div>
   );
