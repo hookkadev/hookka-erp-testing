@@ -45,7 +45,9 @@ test("one definition of the interest sourceId: the draw it belongs to", () => {
   assert.equal(tf.tfInterestDrawId("tfint-2026-09-02-PV-2607-002"), "PV-2607-002");
   assert.equal(tf.tfInterestDrawId("HPV-2609-001"), "HPV-2609-001", "anything else is left alone");
   const lib = readFileSync("src/lib/trade-finance.ts", "utf8");
-  assert.match(lib, /const key = isInterest \? tfInterestDrawId\(l\.sourceId\) : l\.sourceId;/, "the draw maths reads the same definition");
+  assert.match(lib, /const key = kind \? tfInterestDrawId\(l\.sourceId\) : l\.sourceId;/, "the draw maths reads the same definition");
+  // DEV-63: bank charges share the definition under their own `tfbc-` prefix.
+  assert.equal(tf.tfInterestDrawId("tfbc-2026-10-09-PV-2607-002"), "PV-2607-002");
 });
 
 test("P&L / balance-sheet lines: a PI edit finds its PI, interest names the lender", () => {
@@ -66,7 +68,7 @@ test("Cash Flow lines: official receipts, JVs and interest have their counterpar
   const fn = slice(api, "async function computeCashflowStatement(", 'app.get("/cashflow-statement"');
   assert.match(fn, /for \(const \[id, r\] of await officialReceiptTexts\(c\.var\.DB, orIds\)\) \{/);
   assert.match(fn, /SELECT id, description FROM journal_entries WHERE id IN/);
-  assert.match(fn, /: sourceType\.startsWith\("official_receipt"\) \? "or"\n\s+: sourceType\.startsWith\("tf_interest"\) \? "tf"\n\s+: sourceType === "manual" \|\| sourceType\.startsWith\("manual_"\) \? "jv" : "";/);
+  assert.match(fn, /: sourceType\.startsWith\("official_receipt"\) \? "or"\n\s+: tfChargeKind\(sourceType\) \? "tf"\n\s+: sourceType === "manual" \|\| sourceType\.startsWith\("manual_"\) \? "jv" : "";/);
   assert.match(fn, /: kind === "or" \|\| kind === "jv" \? ownPurpose\.get\(`\$\{kind\}::\$\{e\.sourceId\}`\) : undefined;/);
   assert.match(fn, /const lender = \(byEntry\.get\(`\$\{e\.sourceType\}::\$\{e\.sourceId\}`\) \?\? \[\]\)\.map\(\(l\) => tfAccounts\.get\(l\.code\)\?\.lenderName \?\? ""\)\.find\(Boolean\) \?\? "";/);
   assert.match(fn, /if \(paid\) docs\.set\(`tf::\$\{e\.sourceId\}`, `Drawn to pay \$\{paid\}`\);/);

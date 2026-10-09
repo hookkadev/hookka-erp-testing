@@ -1,6 +1,9 @@
 # Hookka ERP — Start Here (read before any task)
 
+> **Last verified: 2026-10-09** (branch `feat/dashboard-compare-plant-card-drills`, staging merged in): `docs/API.md` regenerated on the merged tree; both sides had added one handler, so the count below is 146 / 1024. Nothing else on this page re-checked.
+
 > **Last verified: 2026-10-09** (branch `feat/dashboard-compare-plant-card-drills`): `docs/API.md` regenerated after adding `GET /api/dashboard/overview/purchasing-compare`; the handler count below restamped (146 / 1023). Nothing else on this page re-checked.
+> **Last verified: 2026-10-09** (branch `feat/dev63-creditor-aging-trade-finance`): `docs/API.md` regenerated after adding `PUT /api/accounting/trade-finance/draw-bank-charge`; the handler count below restamped (146 / 1023). Nothing else on this page re-checked.
 
 > **Last verified: 2026-10-09** (branch `feat/compare-fabric-cost-tab`): `docs/API.md` regenerated after adding `GET /api/dashboard/overview/fabric-cost-compare`; the handler count below restamped (146 / 1022). Nothing else on this page re-checked.
 
@@ -60,8 +63,8 @@ measured 2026-09-22; this line said 2,122). Use the map's file:line +
 
 5. **Which endpoint** → [`docs/API.md`](docs/API.md) — **generated** from
    `src/api/worker.ts` + `src/api/routes/*.ts` by `node scripts/gen-api-docs.mjs`
-   (146 mounts, **1023** handlers, plus the exact public/auth surface — re-measured 2026-10-09
-   by `--check`; this line said 146 / 1022).
+   (146 mounts, **1024** handlers, plus the exact public/auth surface — re-measured 2026-10-09
+   by `--check`; this line said 146 / 1023).
    Regenerate it instead of hand-editing; `--check` tells you if it is stale — **it WAS stale
    on `main` on 2026-08-14**, and the committed copy carried four duplicated mount rows with
    two different line sets for the same handlers. Run `--check` before trusting it.
