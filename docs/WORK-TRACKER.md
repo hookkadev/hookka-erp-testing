@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-09**: branch `feat/dev64-price-list-default-column-to-main` (DEV-64 staging to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-09**: stock-take priced count (#775) prod-verified; price-list hint fix in progress (branch `fix/stock-take-price-list-sen`, BUG-2026-10-09-273).
 > **Last verified: 2026-10-09**: branch `fix/co-scan-po-creates-co` (to `main`, BUG-2026-10-09-271) added below (its entry is the newest).
 > **Last verified: 2026-10-09**: branch `docs/outsourced-ot-box-next-time` (to `main`) added item 7 (outsourced staff OT box, next time) to the hourly-rate entry below.
@@ -113,6 +114,14 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-09 — 🔵 DEV-64: customer price list shows every Maintenance sofa size, DEFAULT included, to main (branch `feat/dev64-price-list-default-column-to-main` → `main`)
+
+Reporter ask (Siti, DEV-64 "price list"): "can add column default for the customer price". Cherry-pick of the staging commit e8f1a578 (#777).
+
+1. 🔵 Customer → Products → Sofa price grid (`CustomerProductsPanel` in `src/pages/customers.tsx`) hard-coded the seat columns `24 / 28 / 30 / 32 / 35`, so a named size like DEFAULT (and 20, 26) from Maintenance → Sofa → Sizes had no customer-price column. The grid now reads `useSofaSeatHeights()`, header via `sofaSeatLabel`. No backend change: prices are stored by size string.
+2. ✅ Seen on the `claude/dev64` preview (2026-10-09): header `20" 24" 26" 28" 30" 32" 35" DEFAULT`, existing 26" customer prices now visible. Save of a DEFAULT price not exercised.
+3. ⬜ Canary check (view-only), reporter OK, then merge.
 
 ## 2026-10-09 — 🔵 DEV-63: Bank charges column on the Trade Finance aging block, to main (branch `feat/dev63-bank-charges-to-main` → `main`)
 
