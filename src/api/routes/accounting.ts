@@ -42,6 +42,7 @@ import { docNoFromDescription, drillVariant, otherSideCodes, ownDescription, tid
 import { PV_KIND_TRANSFER, validatePvTransfer } from "../../lib/pv-transfer";
 import { labourInjectMonths } from "../../lib/labour-inject";
 import { labourCreditLines as splitLabourCredits } from "../../lib/labour-credit";
+import { recordedSalaryAccounts, salaryDocKey, type SalaryLegIn } from "../../lib/recorded-salary";
 import { SYSTEM_JOURNAL_FAMILIES, buildSystemJournals, type SystemLeg } from "../../lib/system-journals";
 import { projectedLabourByDept } from "../lib/labour-projection";
 import { groupPayslipsByMonthDept, forecastEntryKind, monthHasDeptForecast, labourMappedAccounts } from "../../lib/salary-dept";
@@ -6803,6 +6804,27 @@ interface DocDateCtx {
 // Labour tab's Post would. Returns [] when the month has neither payslips nor
 // clock data. Callers must ALREADY have established the month is unrecorded
 // (no salary-accrual credit in the GL) via labourInjectMonths.
+function salaryLegsIn(
+  rows: { accountCode: string; sourceId: string; debitSen: number; creditSen: number; postedAt: string; sourceType: string }[],
+  resolve: (code: string) => string,
+  docDate: (sourceType: string, sourceId: string, postedAt: string | null | undefined) => string,
+  obDate: string | null,
+): SalaryLegIn[] {
+  const docs = new Set<string>();
+  for (const l of rows) if (resolve(l.accountCode) === LABOUR_ACCRUAL_ACCT) docs.add(salaryDocKey(l.sourceType, l.sourceId));
+  const out: SalaryLegIn[] = [];
+  for (const l of rows) {
+    if (!docs.has(salaryDocKey(l.sourceType, l.sourceId))) continue;
+    const dd = docDate(l.sourceType, l.sourceId, l.postedAt);
+    const skip = legBeforeOpening(l.sourceType, dd, obDate) || isOpeningSource(l.sourceType);
+    out.push({
+      sourceType: l.sourceType, sourceId: l.sourceId, accountCode: resolve(l.accountCode),
+      debitSen: Number(l.debitSen) || 0, creditSen: Number(l.creditSen) || 0, ym: skip ? null : dd.slice(0, 7),
+    });
+  }
+  return out;
+}
+
 async function labourInjectionLines(
   db: Env["Variables"]["DB"],
   orgId: string,
@@ -6917,24 +6939,10 @@ async function glWindowSigned(
   // everything else still gets the report-layer labour injection below.
   // Account-level, not month-level (BUG-2026-08-31-172): the owner's Aug'26
   // office-salary JV (CR 410-0010 55,000 → DR 900-S00x) used to silence the
-  // WHOLE month, wiping the production 750-x auto-extract with it.
-  const salaryEntryYm = new Map<string, string>(); // sourceType::sourceId → ym of its 410-0010 credit
-  for (const l of legRes.results ?? []) {
-    if ((Number(l.creditSen) || 0) <= 0) continue;
-    if (resolve(l.accountCode) !== LABOUR_ACCRUAL_ACCT) continue;
-    const dd = docDate(l.sourceType, l.sourceId, l.postedAt);
-    if (legBeforeOpening(l.sourceType, dd, obDate) || isOpeningSource(l.sourceType)) continue;
-    salaryEntryYm.set(`${l.sourceType}::${l.sourceId}`, dd.slice(0, 7));
-  }
-  const recordedSalaryAccts = new Map<string, Set<string>>(); // ym → debited accounts
-  for (const l of legRes.results ?? []) {
-    if ((Number(l.debitSen) || 0) <= 0) continue;
-    const ym = salaryEntryYm.get(`${l.sourceType}::${l.sourceId}`);
-    if (!ym) continue;
-    let set = recordedSalaryAccts.get(ym);
-    if (!set) { set = new Set(); recordedSalaryAccts.set(ym, set); }
-    set.add(resolve(l.accountCode));
-  }
+  // WHOLE month, wiping the production 750-x auto-extract with it. Net of any
+  // undo (BUG-2026-10-09-275): a Labour post that was unposted, or a voided JV,
+  // records nothing — see src/lib/recorded-salary.ts.
+  const recordedSalaryAccts = recordedSalaryAccounts(salaryLegsIn(legRes.results ?? [], resolve, docDate, obDate), LABOUR_ACCRUAL_ACCT);
   for (const l of legRes.results ?? []) {
     const dd = docDate(l.sourceType, l.sourceId, l.postedAt); // by document date
     if (legBeforeOpening(l.sourceType, dd, obDate)) continue; // pre-opening: not extracted
@@ -8343,24 +8351,9 @@ app.get("/cost-expense-classes", async (c) => {
   const coa = new Map((coaRes.results ?? []).map((a) => [a.code, a] as const));
   const byAcct = new Map<string, number[]>();
   const openingNetCec = new Map<string, number>(); // opening legs on COST/EXPENSE accounts
-  // Same account-level recorded-salary map as glWindowSigned (BUG-2026-08-31-172).
-  const salaryEntryYmCec = new Map<string, string>();
-  for (const l of legRes.results ?? []) {
-    if ((Number(l.creditSen) || 0) <= 0) continue;
-    if (resolve(l.accountCode) !== LABOUR_ACCRUAL_ACCT) continue;
-    const dd = docDate(l.sourceType, l.sourceId, l.postedAt);
-    if (legBeforeOpening(l.sourceType, dd, obDateCec) || isOpeningSource(l.sourceType)) continue;
-    salaryEntryYmCec.set(`${l.sourceType}::${l.sourceId}`, dd.slice(0, 7));
-  }
-  const recordedSalaryAcctsCec = new Map<string, Set<string>>();
-  for (const l of legRes.results ?? []) {
-    if ((Number(l.debitSen) || 0) <= 0) continue;
-    const ym = salaryEntryYmCec.get(`${l.sourceType}::${l.sourceId}`);
-    if (!ym) continue;
-    let set = recordedSalaryAcctsCec.get(ym);
-    if (!set) { set = new Set(); recordedSalaryAcctsCec.set(ym, set); }
-    set.add(resolve(l.accountCode));
-  }
+  // Same account-level recorded-salary map as glWindowSigned (BUG-2026-08-31-172,
+  // net of any undo since BUG-2026-10-09-275).
+  const recordedSalaryAcctsCec = recordedSalaryAccounts(salaryLegsIn(legRes.results ?? [], resolve, docDate, obDateCec), LABOUR_ACCRUAL_ACCT);
   for (const l of legRes.results ?? []) {
     const dd = docDate(l.sourceType, l.sourceId, l.postedAt); // by document date
     if (legBeforeOpening(l.sourceType, dd, obDateCec)) continue; // pre-opening: not extracted
