@@ -44,7 +44,9 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Merge mode copies ~280 tables at ~5 s each (one prod connection per table,
+    # BUG-2026-10-09-270), about 25 minutes; 20 cut run #152 off part way.
+    timeout-minutes: 45
     steps:
       - name: Validate reset confirmation
         if: inputs.mode == 'reset'
