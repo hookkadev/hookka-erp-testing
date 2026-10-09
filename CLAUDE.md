@@ -50,8 +50,9 @@ measured 2026-09-22; this line said 2,122). Use the map's file:line +
 
 5. **Which endpoint** → [`docs/API.md`](docs/API.md) — **generated** from
    `src/api/worker.ts` + `src/api/routes/*.ts` by `node scripts/gen-api-docs.mjs`
-   (143 mounts, **1015** handlers, plus the exact public/auth surface — re-measured 2026-10-09
-   by `--check` on `main`; this line said 141 / 978).
+   (143 mounts, **1016** handlers, plus the exact public/auth surface — re-measured 2026-10-09
+   by `--check` on branch `feat/labour-statutory-accruals-system-journals`, which adds
+   `GET /api/accounting/system-journals`; this line said 1015).
    Regenerate it instead of hand-editing; `--check` tells you if it is stale — **it WAS stale
    on `main` on 2026-08-14**, and the committed copy carried four duplicated mount rows with
    two different line sets for the same handlers. Run `--check` before trusting it.

@@ -55,9 +55,11 @@ test("preview and post derive their lines from the SAME function", () => {
 
 test("the credit side still equals the FULL cost, so the entry balances", () => {
   // Debits are now gross + epf + socso + eis, which is exactly costSen summed.
+  // The credits are split since 2026-10-09 (each fund's share to its own
+  // accrual) — the sum is pinned in labour-statutory-accruals.test.mjs.
   assert.match(SRC, /cur\.costSen \+= gross \+ employer;/);
-  assert.match(SRC, /creditSen: totalSen,/);
-  assert.match(SRC, /accountCode: LABOUR_ACCRUAL_ACCT,/);
+  assert.match(SRC, /for \(const \{ account, sen, label \} of labourCreditLines\(byDept, labourMapPost\)\) \{/);
+  assert.match(SRC, /salary: LABOUR_ACCRUAL_ACCT,/);
 });
 
 test("a zero component posts no leg", () => {
