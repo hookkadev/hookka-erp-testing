@@ -112,6 +112,28 @@ test('the other worker pages lost their hardcoded English too', () => {
   }
 });
 
+test('single-word and conditional labels are translated too (follow-up)', () => {
+  // The first pass looked for phrases of two or more words between tags, so
+  // "Photo", "Open", "Exit", "Save" and the labels picked by a condition
+  // (busy ? "Opening…" : "Save payslip as PDF") slipped through.
+  const bare = (s) => new RegExp(`^\\s*${s}\\s*$`, 'm');
+  const checks = {
+    'src/pages/worker/issue.tsx': [bare('Photo')],
+    'src/pages/worker/announcement-media.tsx': [bare('Open')],
+    'src/pages/worker/login.tsx': [bare('WORKER PORTAL')],
+    'src/pages/worker/scan.tsx': [bare('Exit'), ': "Save"}'],
+    'src/pages/worker/me.tsx': [': "Save"}', '"Standard minutes per WIP'],
+    'src/pages/worker/pay.tsx': ['"Opening…"', '"Save payslip as PDF"'],
+  };
+  for (const [file, literals] of Object.entries(checks)) {
+    const text = read(file);
+    for (const l of literals) {
+      const found = typeof l === 'string' ? text.includes(l) : l.test(text);
+      assert.ok(!found, `${file} still hardcodes: ${String(l)}`);
+    }
+  }
+});
+
 test('the non-production request date defaults to the MALAYSIA date, not the UTC one', () => {
   const me = read('src/pages/worker/me.tsx');
   assert.match(me, /const \[npDate, setNpDate\] = useState\(\(\) => todayYmdMY\(\)\);/);

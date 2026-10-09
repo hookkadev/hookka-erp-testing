@@ -626,6 +626,29 @@ const dict: Dict = {
     my: 'ပုံ မရရှိနိုင်ပါ',
   },
   'media.video': { en: 'Video', ms: 'Video', zh: '视频', my: 'ဗီဒီယို' },
+  'common.save': { en: 'Save', ms: 'Simpan', zh: '保存', my: 'သိမ်းမည်' },
+  'common.open': { en: 'Open', ms: 'Buka', zh: '打开', my: 'ဖွင့်ရန်' },
+  'common.exit': { en: 'Exit', ms: 'Keluar', zh: '退出', my: 'ထွက်ရန်' },
+  'issue.photo': { en: 'Photo', ms: 'Gambar', zh: '照片', my: 'ဓာတ်ပုံ' },
+  'me.stdDescPick': {
+    en: 'Standard minutes per WIP. Pick a department to view.',
+    ms: 'Minit standard bagi setiap WIP. Pilih jabatan untuk dilihat.',
+    zh: '每个 WIP 的标准分钟数。请选择部门查看。',
+    my: 'WIP တစ်ခုစီအတွက် စံမိနစ်များ။ ကြည့်ရန် ဌာနတစ်ခု ရွေးပါ။',
+  },
+  'me.stdDescOwn': {
+    en: 'Standard minutes per WIP for your department.',
+    ms: 'Minit standard bagi setiap WIP untuk jabatan anda.',
+    zh: '您部门每个 WIP 的标准分钟数。',
+    my: 'သင့်ဌာနအတွက် WIP တစ်ခုစီ၏ စံမိနစ်များ။',
+  },
+  'pay.opening': { en: 'Opening…', ms: 'Membuka…', zh: '正在打开…', my: 'ဖွင့်နေသည်…' },
+  'pay.savePdf': {
+    en: 'Save payslip as PDF',
+    ms: 'Simpan slip gaji sebagai PDF',
+    zh: '将工资单保存为 PDF',
+    my: 'လစာစလစ်ကို PDF အဖြစ် သိမ်းရန်',
+  },
 
   // ---- Issue ----
   'issue.title': {
