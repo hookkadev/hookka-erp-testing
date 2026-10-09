@@ -50,6 +50,7 @@ import { buildDeliveredAsOf, fgClosingSen } from "../../lib/fg-closing";
 import { costAsOfByPo } from "../../lib/cost-attribution";
 import { STOCK_TAKE_ITEM_ALIAS_SEED_2026_05 } from "../lib/stock-take-item-alias-seed-2026-05";
 import { DOC_DATE_FAMILIES, stripLegSuffix, stripSourceIdSuffix, parseSourceIdDate } from "../../lib/doc-date";
+import { itemCodeKey } from "../../lib/stock-take-import";
 import {
   prefixForPartyType,
   computeBillTotals,
@@ -17425,9 +17426,102 @@ app.get("/stock-take-item-aliases", async (c) => {
   return c.json({ success: true, data, total: data.length });
 });
 
+// GET /api/accounting/stock-take/purchase-prices?asOf=YYYY-MM-DD — the latest
+// purchase price of every item code on or before asOf, to value a
+// quantity-only stock count (owner 2026-10-09 「用最近一次进货价」). A price is a
+// purchase-invoice STOCKED line's own total ÷ its qty (net of the line
+// discount, before SST); the newest line wins (invoice date, then PI no.).
+// min/max over every line of the code show when its units differ (a roll on
+// one invoice, a metre on another). A code never bought since the system
+// started gets hints only — the supplier price list (main supplier first) and
+// the last FIFO batch cost — never a price: their units are not the count's.
+app.get("/stock-take/purchase-prices", async (c) => {
+  const denied = await requirePermission(c, "accounting", "read");
+  if (denied) return denied;
+  const orgId = getOrgId(c);
+  const asOf = String(c.req.query("asOf") ?? "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(asOf)) return c.json({ success: false, error: "asOf must be YYYY-MM-DD" }, 400);
+  const lines = (await c.var.DB.prepare(
+    `SELECT pi.invoiceDate AS invoiceDate, pi.piNo AS piNo, pi.supplierName AS supplierName,
+            pii.materialCode AS materialCode, pii.qty AS qty, pii.lineTotalSen AS lineTotalSen
+       FROM purchase_invoice_items pii
+       JOIN purchase_invoices pi ON pi.id = pii.piId
+      WHERE pi.orgId = ? AND pi.status NOT IN ('DRAFT','CANCELLED') AND pii.lineType = 'STOCKED'
+        AND pii.materialCode IS NOT NULL`,
+  ).bind(orgId).all<{ invoiceDate: string | null; piNo: string | null; supplierName: string | null; materialCode: string | null; qty: number | null; lineTotalSen: number | null }>()).results ?? [];
+  type LastPrice = { unitSen: number; piNo: string; date: string; supplier: string; qty: number; minUnitSen: number; maxUnitSen: number; lines: number };
+  const prices: Record<string, LastPrice> = {};
+  for (const l of lines) {
+    const date = String(l.invoiceDate ?? "").slice(0, 10);
+    const qty = Number(l.qty) || 0;
+    const total = Number(l.lineTotalSen) || 0;
+    const key = itemCodeKey(l.materialCode);
+    if (!key || !date || date > asOf || qty <= 0 || total <= 0) continue;
+    const unitSen = Math.round((total / qty) * 10000) / 10000;
+    const piNo = String(l.piNo ?? "");
+    const supplier = String(l.supplierName ?? "");
+    const cur = prices[key];
+    if (!cur) { prices[key] = { unitSen, piNo, date, supplier, qty, minUnitSen: unitSen, maxUnitSen: unitSen, lines: 1 }; continue; }
+    cur.lines++;
+    cur.minUnitSen = Math.min(cur.minUnitSen, unitSen);
+    cur.maxUnitSen = Math.max(cur.maxUnitSen, unitSen);
+    if (date > cur.date || (date === cur.date && piNo > cur.piNo)) Object.assign(cur, { unitSen, piNo, date, supplier, qty });
+  }
+  const priceList: Record<string, { unitSen: number; supplier: string }> = {};
+  try {
+    const rows = (await c.var.DB.prepare(
+      `SELECT b.materialCode AS materialCode, b.unitPrice AS unitPrice, b.isMainSupplier AS isMainSupplier, s.name AS supplierName
+         FROM supplier_material_bindings b LEFT JOIN suppliers s ON s.id = b.supplierId
+        WHERE b.orgId = ?`,
+    ).bind(orgId).all<{ materialCode: string | null; unitPrice: number | string | null; isMainSupplier: number | boolean | null; supplierName: string | null }>()).results ?? [];
+    for (const r of rows) {
+      const key = itemCodeKey(r.materialCode);
+      const unitSen = Math.round(Number(r.unitPrice) * 1000000) / 10000;
+      if (!key || !(unitSen > 0)) continue;
+      const main = r.isMainSupplier === true || Number(r.isMainSupplier) === 1;
+      if (!priceList[key] || main) priceList[key] = { unitSen, supplier: String(r.supplierName ?? "") };
+    }
+  } catch { /* no price list → no hint */ }
+  const batchCost: Record<string, { unitSen: number; date: string }> = {};
+  try {
+    const rows = (await c.var.DB.prepare("SELECT rmId, unitCostSen, receivedDate FROM rm_batches")
+      .all<{ rmId: string | null; unitCostSen: number | null; receivedDate: string | null }>()).results ?? [];
+    for (const r of rows) {
+      const id = String(r.rmId ?? "");
+      const date = String(r.receivedDate ?? "").slice(0, 10);
+      const unitSen = Number(r.unitCostSen) || 0;
+      if (!id || unitSen <= 0 || !date || date > asOf) continue;
+      if (!batchCost[id] || date > batchCost[id].date) batchCost[id] = { unitSen, date };
+    }
+  } catch { /* no batches → no hint */ }
+  return c.json({ success: true, data: { asOf, prices, priceList, batchCost } });
+});
+
+// The priced count behind a month (owner 2026-10-09): every counted item with
+// the price that valued it — "how was this month's figure built?" — one
+// kv_config record per org + month, written by PUT /stock-take with `lines`.
+const stockTakeLinesKey = (orgId: string, ym: string) => `stock_take_lines:${orgId}:${ym}`;
+
+// GET /api/accounting/stock-take/lines?ym=YYYY-MM — that record, or null.
+app.get("/stock-take/lines", async (c) => {
+  const denied = await requirePermission(c, "accounting", "read");
+  if (denied) return denied;
+  const ym = String(c.req.query("ym") ?? "").slice(0, 7);
+  if (!/^\d{4}-\d{2}$/.test(ym)) return c.json({ success: false, error: "ym must be 'YYYY-MM'" }, 400);
+  const row = await c.var.DB.prepare("SELECT value FROM kv_config WHERE key = ?")
+    .bind(stockTakeLinesKey(getOrgId(c), ym))
+    .first<{ value: string | null }>()
+    .catch(() => null);
+  let data: unknown = null;
+  try { data = row?.value ? JSON.parse(row.value) : null; } catch { data = null; }
+  return c.json({ success: true, data });
+});
+
 // PUT /api/accounting/stock-take
 // Body: { ym: 'YYYY-MM', rows: [{ itemGroup, valueSen }], newAliases?: [{ itemKey,
-// itemGroup }] } — upserts one month's per-group closing values (ON CONFLICT
+// itemGroup }], lines?: [priced count items], linesFile?, linesAsOf? } — the
+// lines (owner 2026-10-09) are kept as the month's priced-count record.
+// Upserts one month's per-group closing values (ON CONFLICT
 // (org_id, item_group, ym)) AND any newly-resolved raw-import item aliases, in
 // one atomic write (design doc 2026-07-01-stock-take-item-alias-import-design.md).
 //
@@ -17447,6 +17541,9 @@ app.put("/stock-take", async (c) => {
       ym?: unknown;
       rows?: { itemGroup?: unknown; valueSen?: unknown }[];
       newAliases?: { itemKey?: unknown; itemGroup?: unknown }[];
+      lines?: Record<string, unknown>[];
+      linesFile?: unknown;
+      linesAsOf?: unknown;
     };
     const ym = String(body.ym ?? "").slice(0, 7);
     if (!/^\d{4}-\d{2}$/.test(ym)) return c.json({ success: false, error: "ym must be 'YYYY-MM'" }, 400);
@@ -17499,8 +17596,28 @@ app.put("/stock-take", async (c) => {
         aliasesSaved++;
       }
     }
+    const groupsSaved = stmts.length - cleared - aliasesSaved;
+    // The priced count behind the figures (owner 2026-10-09), replaced whole.
+    let linesSaved = 0;
+    if (Array.isArray(body.lines)) {
+      const str = (v: unknown, max: number) => String(v ?? "").slice(0, max);
+      const num = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+      const lines = body.lines.slice(0, 5000).map((l) => ({
+        id: str(l?.id, 64), code: str(l?.code, 120), description: str(l?.description, 200),
+        group: str(l?.group, 40), qty: num(l?.qty), uom: str(l?.uom, 20),
+        unitSen: l?.unitSen == null ? null : num(l?.unitSen), valueSen: Math.round(num(l?.valueSen)),
+        source: str(l?.source, 200), counted: l?.counted === true,
+      }));
+      stmts.push(
+        c.var.DB.prepare(
+          `INSERT INTO kv_config (key, value, updated_at) VALUES (?, ?, ?)
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+        ).bind(stockTakeLinesKey(orgId, ym), JSON.stringify({ file: str(body.linesFile, 200), asOf: str(body.linesAsOf, 10), savedAt: now, lines }), now),
+      );
+      linesSaved = lines.length;
+    }
     if (stmts.length) await c.var.DB.batch(stmts);
-    return c.json({ success: true, saved: stmts.length - cleared - aliasesSaved, cleared, aliasesSaved, ym });
+    return c.json({ success: true, saved: groupsSaved, cleared, aliasesSaved, linesSaved, ym });
   } catch {
     return c.json({ success: false, error: "Invalid request body" }, 400);
   }
