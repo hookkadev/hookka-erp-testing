@@ -10,8 +10,9 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import {
-  KPI_CATALOG, GATE_FAIL_CAP, attainment, kpiByKey, kpisForRole,
+  KPI_CATALOG, GATE_FAIL_CAP, attainment, kpiByKey, kpisForRole, withRules,
 } from "../src/api/lib/kpi-catalog.ts";
+import { weightedLatePct } from "../src/api/lib/kpi-metrics.ts";
 
 const ROUTE = readFileSync(resolve(process.cwd(), "src/api/routes/kpi.ts"), "utf8");
 
@@ -91,6 +92,54 @@ test("a rated KPI publishes its bands before the month starts", () => {
   }
 });
 
+test("late deliveries cost points, early ones win some back, never past 100", () => {
+  // Owner 2026-10-05: 1% late → 90 … 10% late → 0; 10% early → +1 … 50% → +5.
+  const d = kpiByKey("customer_delivery_date");
+  assert.equal(attainment(d, 0, 0, 0), 100);
+  assert.equal(attainment(d, 0, 3, 0), 70);
+  assert.equal(attainment(d, 0, 0, 30), 100, "the bonus never lifts the score past 100");
+  assert.equal(attainment(d, 0, 3, 30), 73);
+  assert.equal(attainment(d, 0, 3, 39.9), 73, "steps round down");
+  assert.equal(attainment(d, 0, 5, 60), 55, "the bonus stops at its maximum");
+  assert.equal(attainment(d, 0, 17.5, 0), 0);
+  // Owner 2026-10-08: late points stop at 0, then the bonus is added on top.
+  assert.equal(attainment(d, 0, 10.5, 87.1), 5, "no negative late points eating the bonus");
+  assert.equal(attainment(d, 0, 30, 20), 2);
+  assert.equal(attainment(d, 0, 2), 80, "no early figure is no bonus");
+
+  // Saved company rules replace the numbers AND the wording the card shows.
+  const r = withRules(d, { penaltyPerPct: 5, earlyStepPct: 20, earlyBonusPerStep: 2, earlyMaxBonus: 4 });
+  assert.equal(attainment(r, 0, 3, 0), 85);
+  assert.equal(attainment(r, 0, 3, 45), 89);
+  assert.equal(attainment(withRules(d, { penaltyPerPct: 0 }), 0, 50), 100, "0 is a real setting, not a fallback to 10");
+  assert.match(r.detail, /costs 5 points/);
+  assert.match(r.formula, /× 5/);
+  assert.ok(r.measurement.some((m) => /Every 20% of orders delivered early wins back 2 point/.test(m)));
+  assert.equal(d.penaltyPerPct, 10, "the catalogue entry itself is not mutated");
+  assert.equal(withRules(kpiByKey("setup_completeness"), { penaltyPerPct: 5 }).penaltyPerPct, undefined,
+    "a KPI with no editable rules ignores them");
+});
+
+test("a late urgent order counts as part of a late order", () => {
+  // Owner 2026-10-08: ordered 1/10, promised 7/10 is urgent; a late one counts in
+  // full by default, and the share is editable.
+  const d = kpiByKey("customer_delivery_date");
+  assert.equal(d.urgentDays, 7);
+  assert.equal(d.urgentLatePct, 100);
+  // 31 late of 295, 10 of them urgent: 21 + 10 × 0.5 = 26 → 8.8%.
+  assert.equal(weightedLatePct(295, 31, 10, 50), 8.8);
+  assert.equal(weightedLatePct(295, 31, 0, 50), 10.5, "no urgent orders, no change");
+  assert.equal(weightedLatePct(100, 4, 4, 0), 0, "0% excuses late urgent orders fully");
+  assert.equal(weightedLatePct(100, 4, 4, 100), 4, "100% counts them like any other");
+
+  const r = withRules(d, { urgentDays: 3, urgentLatePct: 25 });
+  assert.ok(r.measurement.some((m) => /within 3 days .* counts as 25% of a late order/.test(m)));
+
+  const metrics = readFileSync(resolve(process.cwd(), "src/api/lib/kpi-metrics.ts"), "utf8");
+  assert.match(metrics, /customerDeliveryLate\(c, period, def\)/, "the saved rules reach the metric");
+  assert.match(ROUTE, /computeMetric\(c, def\.key, period, a\.scope, def\)/);
+});
+
 test("invoicing lag costs 10 points per document-day", () => {
   // Owner 2026-08-07: "dispatch 了之后三天内要看到 invoice，迟一天扣10分 … 5张单
   // 1天就50分." Five documents one day late is the same as one document five
@@ -161,6 +210,21 @@ test("every KPI explains how it is calculated", () => {
   }
 });
 
+test("the card sends the calculation to the person, and the page shows it", () => {
+  // DEV-39. The card's "View calculation" block reads purpose / definition /
+  // measurement off each line. They were declared on the page but never sent,
+  // so the block rendered nothing. Every branch of buildCard must carry them.
+  const build = ROUTE.slice(ROUTE.indexOf("async function buildCard"), ROUTE.indexOf('app.get("/me"'));
+  const pushes = build.split("lines.push({").slice(1);
+  assert.equal(pushes.length, 3, "locked, unavailable and live lines");
+  for (const p of pushes) {
+    assert.match(p, /purpose: def\.purpose, definition: def\.definition, measurement: def\.measurement/);
+  }
+  const page = readFileSync(resolve(process.cwd(), "src/pages/kpi/index.tsx"), "utf8");
+  assert.match(page, /"View calculation"/);
+  assert.match(page, /l\.formula/, "the formula is shown, not just sent");
+});
+
 test("every AUTO KPI can be drilled into", () => {
   // A number nobody can click is a number nobody trusts. A checklist is its
   // own drill-down — the items ARE the detail.
@@ -189,10 +253,17 @@ test("a settled month is served as stored, not recomputed", () => {
   // agreed — and the whole thing becomes unarguable.
   assert.match(ROUTE, /lockedAt IS NOT NULL/);
   assert.match(ROUTE, /if \(isLocked\)/);
+  // Taking someone off a KPI must not drop it from a month already settled:
+  // the inactive skip has to come after the locked snapshot is served.
+  assert.ok(
+    ROUTE.indexOf("if (isLocked) {") < ROUTE.indexOf("if (a.isActive === false) continue;"),
+    "an unassigned KPI would vanish from a settled month",
+  );
 });
 
 test("a person is scored on what they were assigned, not on the whole catalogue", () => {
-  assert.match(ROUTE, /if \(!a \|\| a\.isActive === false\) continue;/);
+  assert.match(ROUTE, /if \(!a\) continue;/);
+  assert.match(ROUTE, /if \(a\.isActive === false\) continue;/);
   assert.ok(kpisForRole("OFFICE").length >= 4);
   assert.equal(kpisForRole("NOT_A_ROLE").length, 0);
 });

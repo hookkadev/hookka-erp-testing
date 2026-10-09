@@ -37,6 +37,7 @@ import { AnnouncementCategoryBadge } from "@/components/announcement-category-ba
 import { deriveWipName } from "@/lib/wip-name";
 import { compressImage } from "@/lib/image-compress";
 import { z } from "zod";
+import { DeptDayCard, type DeptDay } from "./dept-day-card";
 
 // workerFetch handles auth + 401 redirect, but we still want runtime-typed
 // JSON parsing on top — cast through a passthrough envelope schema.
@@ -66,6 +67,8 @@ type TodayData = {
   doneToday: number;
   doneByDept: Record<string, number>;
   earningsSen: number;
+  /** DEV-31 — absent on an older cached payload. */
+  deptDay?: DeptDay | null;
 };
 
 type DailyRow = {
@@ -155,6 +158,10 @@ type HistoryData = {
     // period, in minutes. 0 when the worker has no approved extra-time claims.
     addProdMinutes?: number;
     efficiencyPct: number;
+    // Efficiency % = effProductionMinutes ÷ prodDeptMinutes (hours logged in
+    // production departments). Optional: an older cached response lacks them.
+    prodDeptMinutes?: number;
+    effProductionMinutes?: number;
   };
 };
 // ---------- helpers ----------
@@ -1133,6 +1140,7 @@ export default function WorkerHomePage() {
                 </span>
               </button>
             )}
+            <DeptDayCard day={data.deptDay} t={t} />
           </>
         )}
         {clockErr && (
@@ -1289,22 +1297,25 @@ export default function WorkerHomePage() {
       {/* KPI row */}
       {hist && (
         <div className="grid grid-cols-3 gap-2">
+          {/* Production Hours (credited job-card minutes) ÷ Production Time
+              (hours logged in production departments) = Efficiency %, read
+              left to right. */}
           <Kpi
-            label={t("home.workingHours")}
-            value={mins2hrs(hist.totals.workedMinutes)}
+            label={t("home.productionHours")}
+            value={mins2hrs(hist.totals.effProductionMinutes ?? 0)}
           />
           <Kpi
             label={t("home.productionTime")}
-            value={mins2hrs(hist.totals.productionMinutes)}
+            value={mins2hrs(hist.totals.prodDeptMinutes ?? 0)}
           />
           <Kpi
             label={t("home.efficiencyPct")}
             // Under 30 logged minutes the ratio is meaningless noise (a 1-min
             // test punch against real production minutes printed 16000%) —
             // show a dash until there's a real base.
-            value={hist.totals.workedMinutes < 30 ? "—" : `${hist.totals.efficiencyPct}%`}
+            value={(hist.totals.prodDeptMinutes ?? 0) < 30 ? "—" : `${hist.totals.efficiencyPct}%`}
             tone={
-              hist.totals.workedMinutes < 30
+              (hist.totals.prodDeptMinutes ?? 0) < 30
                 ? "warn"
                 : hist.totals.efficiencyPct >= 80
                   ? "good"
@@ -1313,6 +1324,20 @@ export default function WorkerHomePage() {
                     : "bad"
             }
           />
+        </div>
+      )}
+
+      {/* How Efficiency % is worked out, with the tiles' own hour figures. */}
+      {hist && (hist.totals.prodDeptMinutes ?? 0) >= 30 && (
+        <div className="-mt-1 text-xs text-[#5A5550] text-center break-words">
+          <p>
+            {t("home.efficiencyPct")} = {t("home.productionHours")} ÷ {t("home.productionTime")} × 100
+          </p>
+          <p className="tabular-nums">
+            {mins2hrs(hist.totals.effProductionMinutes ?? 0)} ÷{" "}
+            {mins2hrs(hist.totals.prodDeptMinutes ?? 0)} × 100 ={" "}
+            {hist.totals.efficiencyPct}%
+          </p>
         </div>
       )}
 
@@ -1325,9 +1350,9 @@ export default function WorkerHomePage() {
         </div>
       )}
 
-      {/* Daily attendance MOVED to the Pay page (owner 2026-06-12: the per-day
-          punch records belong under the pay breakdown, following its month
-          picker). Home stays focused on today + completed pieces. */}
+      {/* Daily attendance lives on its own History tab (/worker/history,
+          owner 2026-10-05; it sat under Pay from 2026-06-12). Home stays
+          focused on today + completed pieces. */}
 
       {/* Team summary lived here pre-2026-05-10. Moved to /worker/team
           (dedicated tab on the bottom nav) so the leader gets the full

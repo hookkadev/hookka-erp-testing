@@ -7,14 +7,16 @@
 // spotty).
 //
 // IntersectionObserver gate: the Production page can easily mount 300+ tiles
-// at once, and `QRCode.toDataURL` is a synchronous CPU burn (~10ms each on a
-// commodity laptop). Generating all of them on mount freezes the main thread
-// for seconds. We only kick off generation when a tile approaches the viewport
-// (rootMargin 400px so scroll feels instant) and unobserve after — identical
-// inputs still reuse the memoised data URL from qrcode.toDataURL's own cache.
+// at once. We only kick off generation when a tile approaches the viewport
+// (rootMargin 400px so scroll feels instant) and unobserve after.
+//
+// 2026-10-01: renders SVG (getQRCodeSvgDataURL), not a PNG at `size` px. The
+// PNG path cost ~24 ms per 600 px code in Chromium and printed the FG sticker
+// QR from a 72-104 px bitmap; SVG is ~3 ms, prints crisp at any mm size, and identical
+// inputs reuse a session memo (qrcode itself caches nothing).
 // ---------------------------------------------------------------------------
 import { useEffect, useRef, useState, memo } from "react";
-import { getQRCodeDataURL } from "@/lib/qr-utils";
+import { getQRCodeSvgDataURL } from "@/lib/qr-utils";
 
 type QRImgProps = {
   data: string;
@@ -80,7 +82,7 @@ function QRImgBase({ data, size = 200, className, alt = "QR", eager = false }: Q
       setSrc("");
       return;
     }
-    getQRCodeDataURL(data, size)
+    getQRCodeSvgDataURL(data)
       .then((url) => {
         if (!cancelled) setSrc(url);
       })
@@ -90,7 +92,7 @@ function QRImgBase({ data, size = 200, className, alt = "QR", eager = false }: Q
     return () => {
       cancelled = true;
     };
-  }, [data, size, shouldRender]);
+  }, [data, shouldRender]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   if (!src) {
@@ -107,3 +109,4 @@ function QRImgBase({ data, size = 200, className, alt = "QR", eager = false }: Q
 }
 
 export const QRImg = memo(QRImgBase);
+

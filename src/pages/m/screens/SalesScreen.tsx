@@ -18,7 +18,7 @@
 // ===========================================================================
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Search, SlidersHorizontal, Plus, FileSearch } from "lucide-react";
+import { Search, SlidersHorizontal, Plus, FileSearch, ChevronRight } from "lucide-react";
 import { useCachedJson } from "@/lib/cached-fetch";
 import { MobileHeader, StatusPill, FilterSheet, FormSheet, ScanPOSheet } from "../components";
 import { M, M_ACCENT } from "../theme";
@@ -389,16 +389,21 @@ function SoCard({
         style={{
           display: "flex",
           justifyContent: "space-between",
-          gap: 8,
+          gap: 10,
           alignItems: "center",
         }}
       >
         <span
           style={{
-            fontSize: 11.5,
+            flex: 1,
+            minWidth: 0,
+            fontSize: 12,
             fontWeight: 700,
             color: M.taupe,
             fontVariantNumeric: "tabular-nums",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
           }}
         >
           {code}
@@ -407,23 +412,41 @@ function SoCard({
       </div>
       <div
         style={{
-          fontSize: 15,
-          fontWeight: 700,
-          color: M.raisin,
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
           marginTop: 8,
-          letterSpacing: "-0.2px",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
         }}
       >
-        {customer}
+        <span
+          style={{
+            flex: 1,
+            minWidth: 0,
+            fontSize: 15,
+            fontWeight: 700,
+            color: M.raisin,
+            letterSpacing: "-0.2px",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {customer}
+        </span>
+        <ChevronRight
+          aria-hidden="true"
+          size={19}
+          strokeWidth={1.75}
+          color="#C4BDB2"
+          style={{ flexShrink: 0 }}
+        />
       </div>
       {sub ? (
         <div
           style={{
             fontSize: 12.5,
-            color: M.muted,
+            color: M.taupe,
+            fontWeight: 500,
             marginTop: 3,
             overflow: "hidden",
             textOverflow: "ellipsis",
@@ -436,46 +459,66 @@ function SoCard({
 
       <div
         style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
+          display: "grid",
+          gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr) auto",
+          columnGap: 8,
+          alignItems: "end",
           marginTop: 12,
           paddingTop: 12,
           borderTop: `1px solid ${M.divider}`,
         }}
       >
-        <span style={{ fontSize: 11, color: M.faint, fontWeight: 600 }}>Order</span>
-        <span style={{ fontSize: 12, fontWeight: 600, color: M.ink }}>
-          {orderDate || "—"}
-        </span>
-        <svg
-          width="13"
-          height="13"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="#C4BDB2"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path d="M5 12h14M13 6l6 6-6 6" />
-        </svg>
-        <span style={{ fontSize: 11, color: M.faint, fontWeight: 600 }}>Expected</span>
-        <span style={{ fontSize: 12, fontWeight: 600, color: M.ink }}>
-          {expected || "—"}
-        </span>
-        <span style={{ flex: 1 }} />
-        <span
-          style={{
-            fontSize: 14,
-            fontWeight: 800,
-            color: M.raisin,
-            whiteSpace: "nowrap",
-            fontVariantNumeric: "tabular-nums",
-          }}
-        >
-          {money(total)}
-        </span>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 10, color: "#A89F8D", fontWeight: 600, whiteSpace: "nowrap" }}>
+            ORDER DATE
+          </div>
+          <div
+            style={{
+              marginTop: 3,
+              fontSize: 13,
+              fontWeight: 600,
+              color: M.raisin,
+              fontVariantNumeric: "tabular-nums",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {orderDate || "—"}
+          </div>
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 10, color: "#A89F8D", fontWeight: 600, whiteSpace: "nowrap" }}>
+            EXPECTED DD
+          </div>
+          <div
+            style={{
+              marginTop: 3,
+              fontSize: 13,
+              fontWeight: 600,
+              color: M.raisin,
+              fontVariantNumeric: "tabular-nums",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {expected || "—"}
+          </div>
+        </div>
+        <div style={{ minWidth: 0, textAlign: "right" }}>
+          <div style={{ fontSize: 10, color: "#A89F8D", fontWeight: 600, whiteSpace: "nowrap" }}>
+            AMOUNT
+          </div>
+          <div
+            style={{
+              marginTop: 3,
+              fontSize: 13,
+              fontWeight: 600,
+              color: M.raisin,
+              whiteSpace: "nowrap",
+              fontVariantNumeric: "tabular-nums",
+            }}
+          >
+            {money(total)}
+          </div>
+        </div>
       </div>
     </div>
   );

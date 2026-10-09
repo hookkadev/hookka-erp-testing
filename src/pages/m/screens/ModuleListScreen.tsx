@@ -15,9 +15,11 @@ import { useMemo, useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { Search, SlidersHorizontal, Plus, ScanLine, FileSearch, ListChecks, X, Download, Check, PackageCheck } from "lucide-react";
 import { useCachedJson, invalidateCachePrefix } from "@/lib/cached-fetch";
-import { MobileHeader, DocCard, StatusPill, FormSheet, ScanSheet, ScanPOSheet } from "../components";
+import { MobileHeader, DocCard, StatusPill, FormSheet, ScanSheet, ScanPOSheet, ResponsiveActionDock } from "../components";
+import { useResponsiveLayout } from "../lib/responsive-layout";
 import { newSalesOrderSpec, type SOCreatePrefill } from "../config/forms";
 import { SubTabs } from "../components/SubTabs";
+import { ChipTabs } from "../components/ChipTabs";
 import { FilterSheet } from "../components/FilterSheet";
 import { M } from "../theme";
 import { type ModuleConfig, type ActiveFilter, type DataSource, type RawRow } from "../config/types";
@@ -41,6 +43,7 @@ const PAGE_SIZE = 40;
 
 export function ModuleListScreen({ config }: { config: ModuleConfig }) {
   const navigate = useNavigate();
+  const { mode } = useResponsiveLayout();
 
   // Flatten every source's sub-tabs into one ordered tab row.
   const allTabs = useMemo(
@@ -208,6 +211,10 @@ export function ModuleListScreen({ config }: { config: ModuleConfig }) {
   // Invoice / Announcements / Mail). null = this module has no mobile create.
   const [createSpec, setCreateSpec] = useState<FormSpec | null>(null);
   const canCreate = createSpecFor(config.slug) != null;
+  // Delivery + Procurement use the same top section as Sales Orders:
+  // header → search/actions → chip tabs. Every other module keeps the
+  // original order (SubTabs above the search row).
+  const salesTop = config.slug === "delivery" || config.slug === "procurement";
 
   // Per-source filter + sort state (keyed by source url so switching tab groups
   // keeps each group's own filters).
@@ -375,18 +382,27 @@ export function ModuleListScreen({ config }: { config: ModuleConfig }) {
         }
       />
 
-      <SubTabs
-        tabs={allTabs}
-        active={activeTab}
-        onChange={setActiveTab}
-        counts={tabCounts}
-      />
+      {salesTop ? null : (
+        <SubTabs
+          tabs={allTabs}
+          active={activeTab}
+          onChange={setActiveTab}
+          counts={tabCounts}
+        />
+      )}
 
       {/* Search + Filter bar — design source: white pill (radius 12, border
           #E2DDD8) + a square sliders button that dots when filters are active.
           gap 7px + 40px buttons so the row fits in 380px even on Sales (which
           has the most buttons: Search + ScanQR + ScanPO + Filter + Select). */}
-      <div style={{ display: "flex", gap: 7, padding: "12px 18px 6px", minWidth: 0 }}>
+      <div
+        style={{
+          display: "flex",
+          gap: 7,
+          padding: salesTop ? "12px 18px 4px" : "12px 18px 6px",
+          minWidth: 0,
+        }}
+      >
         <div
           style={{
             flex: 1,
@@ -422,7 +438,7 @@ export function ModuleListScreen({ config }: { config: ModuleConfig }) {
           onClick={() => setScanOpen(true)}
           aria-label="Scan QR code"
           style={{
-            width: 40,
+            width: salesTop ? 44 : 40,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -496,7 +512,7 @@ export function ModuleListScreen({ config }: { config: ModuleConfig }) {
           }}
           aria-label={selectMode ? "Exit select mode" : "Select multiple"}
           style={{
-            width: 40,
+            width: salesTop ? 44 : 40,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -512,6 +528,15 @@ export function ModuleListScreen({ config }: { config: ModuleConfig }) {
           <ListChecks size={19} strokeWidth={1.75} />
         </button>
       </div>
+
+      {salesTop ? (
+        <ChipTabs
+          tabs={allTabs}
+          active={activeTab}
+          onChange={setActiveTab}
+          counts={tabCounts}
+        />
+      ) : null}
 
       {/* Optional bespoke panel above the list (e.g. Employees → Pending
           requests on the Attendance tab). */}
@@ -715,16 +740,15 @@ export function ModuleListScreen({ config }: { config: ModuleConfig }) {
           backend yet (bulk-delete / bulk-export / bulk-mark would need
           new routes). Cancel exits select-mode and clears the selection. */}
       {selectMode && selectedIds.size > 0 ? (
+        <ResponsiveActionDock scope="list" phoneBottom={72} zIndex={40}>
         <div
           style={{
-            position: "fixed",
-            left: 0,
-            right: 0,
-            bottom: "calc(72px + env(safe-area-inset-bottom))",
-            zIndex: 40,
+            width: "100%",
             background: M.raisin,
             color: "#fff",
-            padding: "12px 14px calc(12px + env(safe-area-inset-bottom))",
+            padding: mode === "phone"
+              ? "12px 14px calc(12px + env(safe-area-inset-bottom))"
+              : "12px 14px max(12px, env(safe-area-inset-bottom))",
             display: "flex",
             alignItems: "center",
             gap: 10,
@@ -830,16 +854,15 @@ export function ModuleListScreen({ config }: { config: ModuleConfig }) {
             {bulkBusy ? "…" : (bulkCfg?.label?.replace("Mark ", "") || "Mark")}
           </button>
         </div>
+        </ResponsiveActionDock>
       ) : null}
 
       {scanToast ? (
+        <ResponsiveActionDock scope="list" phoneBottom={80} zIndex={90}>
         <div
           style={{
-            position: "fixed",
-            left: 18,
-            right: 18,
-            bottom: "calc(80px + env(safe-area-inset-bottom))",
-            zIndex: 90,
+            width: mode === "phone" ? "calc(100% - 36px)" : "calc(100% - 28px)",
+            maxWidth: mode === "phone" ? 378 : "none",
             background: M.raisin,
             color: "#fff",
             borderRadius: 13,
@@ -851,6 +874,7 @@ export function ModuleListScreen({ config }: { config: ModuleConfig }) {
         >
           Scanned: {scanToast}
         </div>
+        </ResponsiveActionDock>
       ) : null}
     </>
   );

@@ -21,6 +21,7 @@ import { translateSql } from "../src/api/lib/supabase-compat.ts";
 const SOURCES = [
   "src/api/routes/kpi.ts",
   "src/api/lib/kpi-metrics.ts",
+  "src/api/lib/on-time-delivery.ts",
   "src/api/routes/public-kpi-survey.ts",
 ].map((f) => [f, readFileSync(resolve(process.cwd(), f), "utf8")]);
 

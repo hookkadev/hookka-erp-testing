@@ -163,7 +163,20 @@ const DDL: string[] = [
    )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS kpi_manual_ratings_unique
      ON kpi_manual_ratings (user_id, period, kpi_key)`,
+  // The company's scoring numbers for a KPI (EDITABLE_RULES in kpi-catalog.ts),
+  // as JSON. One row per KPI; no row means the catalogue defaults.
+  `CREATE TABLE IF NOT EXISTS kpi_rule_settings (
+     kpi_key      TEXT NOT NULL,
+     org_id       TEXT NOT NULL DEFAULT 'hookka',
+     rules        TEXT NOT NULL DEFAULT '{}',
+     updated_by   TEXT,
+     updated_at   TIMESTAMP NOT NULL DEFAULT NOW(),
+     PRIMARY KEY (org_id, kpi_key)
+   )`,
   `ALTER TABLE kpi_assignments ADD COLUMN IF NOT EXISTS assigned_by TEXT`,
+  // DEV-36: which department production_efficiency is scored on. NULL / '' =
+  // Overall; 'FAB_CUT' or 'FAB_CUT:SOFA' otherwise (parseEfficiencyScope).
+  `ALTER TABLE kpi_assignments ADD COLUMN IF NOT EXISTS scope TEXT`,
   `ALTER TABLE kpi_checklist_ticks ADD COLUMN IF NOT EXISTS note TEXT`,
   // 2026-08-07: exceptions_cleared was merged into documents_not_stuck ("这两个
   // 要结合"). The card loop iterates the CATALOGUE, so an assignment on a

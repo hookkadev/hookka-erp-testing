@@ -124,6 +124,7 @@ const PlanningWoodCutting = lazy(() => import('./pages/planning/dept/wood-cuttin
 const PlanningFraming = lazy(() => import('./pages/planning/dept/framing'))
 const PlanningFoamCutting = lazy(() => import('./pages/planning/dept/foam-cutting'))
 const PlanningFoamBonding = lazy(() => import('./pages/planning/dept/foam-bonding'))
+const PlanningFibre = lazy(() => import('./pages/planning/dept/fibre'))
 const PlanningUpholstery = lazy(() => import('./pages/planning/dept/upholstery'))
 const PlanningPacking = lazy(() => import('./pages/planning/dept/packing'))
 const PlanningWebbing = lazy(() => import('./pages/planning/dept/webbing'))
@@ -157,6 +158,10 @@ const MailCenter = lazy(() => import('./pages/mail-center'))
 // Staging patch notes — latest PRs merged into staging. STAGING ONLY, never
 // PR'd into main; data only exists on staging builds (gen-staging-notes.mjs).
 const StagingNotes = lazy(() => import('./pages/staging-notes'))
+const StagingMail = lazy(() => import('./pages/staging-mail'))
+// STAGING ONLY (never PR'd into main): Plant Load 7-day vs 14-day side by side.
+const DashboardCompare = lazy(() => import('./pages/dashboard-compare'))
+const StagingSchema = lazy(() => import('./pages/staging-schema')) // STAGING ONLY, never PR into main
 const MailCenterDetail = lazy(() => import('./pages/mail-center/detail'))
 const Maintenance = lazy(() => import('./pages/maintenance'))
 const MaintenanceSofaCombos = lazy(() => import('./pages/maintenance/sofa-combos'))
@@ -240,6 +245,15 @@ export const DASHBOARD_ROUTES: RouteObject[] = [
     ),
   },
   { path: '/dashboard-b', element: <Navigate to="/dashboard" replace /> },
+  // STAGING ONLY (never PR'd into main). Same resource as /dashboard.
+  {
+    path: '/dashboard/compare',
+    element: (
+      <RequirePermission resource="dashboard" action="read">
+        <S><DashboardCompare /></S>
+      </RequirePermission>
+    ),
+  },
 
   // Experimental dashboard. Its own resource, same as its menu link in
   // nav-permissions.ts: every dashboard:read holder has it, plus a role in
@@ -301,6 +315,7 @@ export const DASHBOARD_ROUTES: RouteObject[] = [
   { path: '/production/wood-cut', element: <S><ProductionDeptPage /></S> },
   { path: '/production/framing', element: <S><ProductionDeptPage /></S> },
   { path: '/production/webbing', element: <S><ProductionDeptPage /></S> },
+  { path: '/production/fibre', element: <S><ProductionDeptPage /></S> },
   { path: '/production/upholstery', element: <S><ProductionDeptPage /></S> },
   { path: '/production/packing', element: <S><ProductionDeptPage /></S> },
   // /production/:id PO-detail route deleted (2026-04-26, user request).
@@ -466,6 +481,7 @@ export const DASHBOARD_ROUTES: RouteObject[] = [
   { path: '/planning/dept/framing', element: <S><PlanningFraming /></S> },
   { path: '/planning/dept/foam-cutting', element: <S><PlanningFoamCutting /></S> },
   { path: '/planning/dept/foam-bonding', element: <S><PlanningFoamBonding /></S> },
+  { path: '/planning/dept/fibre', element: <S><PlanningFibre /></S> },
   { path: '/planning/dept/upholstery', element: <S><PlanningUpholstery /></S> },
   { path: '/planning/dept/packing', element: <S><PlanningPacking /></S> },
   { path: '/planning/dept/webbing', element: <S><PlanningWebbing /></S> },
@@ -498,6 +514,8 @@ export const DASHBOARD_ROUTES: RouteObject[] = [
   { path: '/announcements', element: <S><Announcements /></S> },
   { path: '/mail-center', element: <S><MailCenter /></S> },
   { path: '/staging-notes', element: <S><StagingNotes /></S> },
+  { path: '/staging-mail', element: <S><StagingMail /></S> },
+  { path: '/staging-schema', element: <S><StagingSchema /></S> },
   { path: '/mail-center/:id', element: <S><MailCenterDetail /></S> },
   { path: '/maintenance', element: <S><Maintenance /></S> },
   { path: '/maintenance/sofa-combos', element: <S><MaintenanceSofaCombos /></S> },
@@ -544,15 +562,11 @@ export const DASHBOARD_ROUTES: RouteObject[] = [
     // Owner 2026-08-05: everyone has the console; each role sees only its own
     // agents (AGENTS_BY_ROLE in src/api/lib/role-policy.ts, applied by
     // /api/agents/status). The CONTROLS behind it are still SUPER_ADMIN.
-    // KPI — the page itself is self-service (/api/kpi/me never takes a user
-    // id), so the gate here only decides who sees the menu entry. Every
-    // cross-user route re-checks SUPER_ADMIN on the server.
+    // KPI — every login's own card, so no gate (DEV-37: "open the module for
+    // them to view, but only their own KPI"). /api/kpi/me never takes a user
+    // id, and every cross-user route re-checks SUPER_ADMIN on the server.
     path: '/kpi',
-    element: (
-      <RequirePermission resource="kpi" action="read">
-        <S><KpiPage /></S>
-      </RequirePermission>
-    ),
+    element: <S><KpiPage /></S>,
   },
   {
     path: '/agents',
@@ -649,6 +663,7 @@ const ROUTE_CHUNK_LOADERS: Record<string, () => Promise<unknown>> = {
   '/production/wood-cut': () => import('./pages/production/dept'),
   '/production/framing': () => import('./pages/production/dept'),
   '/production/webbing': () => import('./pages/production/dept'),
+  '/production/fibre': () => import('./pages/production/dept'),
   '/production/upholstery': () => import('./pages/production/dept'),
   '/production/packing': () => import('./pages/production/dept'),
   '/production/scan': () => import('./pages/production/scan'),
@@ -661,6 +676,7 @@ const ROUTE_CHUNK_LOADERS: Record<string, () => Promise<unknown>> = {
   '/planning/dept/framing': () => import('./pages/planning/dept/framing'),
   '/planning/dept/foam-cutting': () => import('./pages/planning/dept/foam-cutting'),
   '/planning/dept/foam-bonding': () => import('./pages/planning/dept/foam-bonding'),
+  '/planning/dept/fibre': () => import('./pages/planning/dept/fibre'),
   '/planning/dept/upholstery': () => import('./pages/planning/dept/upholstery'),
   '/planning/dept/packing': () => import('./pages/planning/dept/packing'),
   '/planning/dept/webbing': () => import('./pages/planning/dept/webbing'),

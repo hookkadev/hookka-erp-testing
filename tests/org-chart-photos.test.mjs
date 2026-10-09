@@ -57,9 +57,18 @@ const USERS = [
 const WORKERS = [
   { id: 'w-1', empNo: 'E001', name: 'Ye Li Soe', position: 'Operator', status: 'ACTIVE', departmentCode: 'WOOD_CUT', photoFileId: 'file-existing' },
 ];
-const FILE_ASSETS = new Map([['file-existing', { orgId: 'hookka' }], ['file-new', { orgId: 'hookka' }], ['file-other-org', { orgId: 'acme' }]]);
+const photo = (resourceId, orgId = 'hookka') => ({ orgId, resourceType: 'org-photo', resourceId });
+const FILE_ASSETS = new Map([
+  ['file-existing', photo('worker:w-1')],
+  ['file-new', photo('worker:w-1')],
+  ['file-new-u1', photo('user:u-1')],
+  ['file-other-org', photo('worker:w-1', 'acme')],
+  // Real files in the right org that are NOT this person's photo.
+  ['file-so-pdf', { orgId: 'hookka', resourceType: 'SO', resourceId: 'so-1' }],
+  ['file-photo-of-w2', photo('worker:w-2')],
+]);
 
-function makeDb() {
+function makeDb(workers = WORKERS) {
   const seen = [];
   const writes = [];
   const migrations = [];
@@ -75,13 +84,17 @@ function makeDb() {
       async first() {
         if (/FROM file_assets WHERE id = \? AND orgId = \?/i.test(sql)) {
           const row = FILE_ASSETS.get(bound[0]);
-          return row && row.orgId === bound[1] ? { id: bound[0], r2Key: `k-${bound[0]}` } : null;
+          if (!row || row.orgId !== bound[1]) return null;
+          if (/resourceType = 'org-photo' AND resourceId = \?/i.test(sql)) {
+            if (row.resourceType !== 'org-photo' || row.resourceId !== bound[2]) return null;
+          }
+          return { id: bound[0], r2Key: `k-${bound[0]}` };
         }
         return null;
       },
       async all() {
         if (/FROM users/i.test(sql)) return { results: USERS, success: true };
-        if (/FROM workers/i.test(sql)) return { results: WORKERS, success: true };
+        if (/FROM workers/i.test(sql)) return { results: workers, success: true };
         if (/FROM org_reporting/i.test(sql)) return { results: [], success: true };
         return { results: [], success: true };
       },
@@ -106,7 +119,7 @@ function makeDb() {
   };
 }
 
-function call(db, method, path, role, body) {
+function call(db, method, path, role, body, userId) {
   _resetOrgReportingMigForTests();
   _resetOrgPhotoMigForTests();
   const app = new Hono();
@@ -114,6 +127,7 @@ function call(db, method, path, role, body) {
     c.set('DB', db);
     c.set('orgId', 'hookka');
     c.set('userRole', role);
+    if (userId) c.set('userId', userId);
     await next();
   });
   app.route('/', orgChartApp);
@@ -186,7 +200,7 @@ test('SUPER_ADMIN setting a WORKER photo updates the workers table, not users', 
 
 test('SUPER_ADMIN setting a USER photo updates the users table, not workers', async () => {
   const { db, writes } = makeDb();
-  const res = await call(db, 'PUT', '/photo', 'SUPER_ADMIN', { personKey: 'user:u-1', fileId: 'file-new' });
+  const res = await call(db, 'PUT', '/photo', 'SUPER_ADMIN', { personKey: 'user:u-1', fileId: 'file-new-u1' });
   assert.equal(res.status, 200);
   assert.equal(writes.length, 1);
   assert.equal(writes[0].table, 'users');
@@ -227,7 +241,7 @@ test('clearing a photo also deletes the previous file, not only the pointer', as
 
 test('setting a photo for someone who had NONE attempts no delete at all', async () => {
   const { db, deletes } = makeDb();
-  const res = await call(db, 'PUT', '/photo', 'SUPER_ADMIN', { personKey: 'user:u-1', fileId: 'file-new' });
+  const res = await call(db, 'PUT', '/photo', 'SUPER_ADMIN', { personKey: 'user:u-1', fileId: 'file-new-u1' });
   assert.equal(res.status, 200);
   assert.equal(deletes.length, 0, 'there was no previous file to clean up');
 });
@@ -249,6 +263,35 @@ test('the request still SUCCEEDS even though this stub org has no storage creden
   const res = await call(db, 'PUT', '/photo', 'SUPER_ADMIN', { personKey: 'worker:w-1', fileId: 'file-new' });
   const body = await res.json();
   assert.equal(body.success, true);
+});
+
+// ---------------------------------------------------------------------------
+// Scope — only THIS person's uploaded photo (2026-09-30 review). Because the
+// previous photo is deleted on change, accepting any org file would let a
+// users:update holder delete an unrelated document: point a photo at a
+// sales-order PDF, change the photo, and the PDF is removed.
+// ---------------------------------------------------------------------------
+test('a real org file that is NOT a photo (a sales-order PDF) is refused', async () => {
+  const { db, writes } = makeDb();
+  const res = await call(db, 'PUT', '/photo', 'SUPER_ADMIN', { personKey: 'worker:w-1', fileId: 'file-so-pdf' });
+  assert.equal(res.status, 400);
+  assert.equal(writes.length, 0);
+});
+
+test("another person's photo is refused — a photo belongs to the person it was uploaded for", async () => {
+  const { db, writes } = makeDb();
+  const res = await call(db, 'PUT', '/photo', 'SUPER_ADMIN', { personKey: 'worker:w-1', fileId: 'file-photo-of-w2' });
+  assert.equal(res.status, 400);
+  assert.equal(writes.length, 0);
+});
+
+test('an old pointer to a NON-photo file is never deleted on change', async () => {
+  // A pointer written before the scope check existed could name any file.
+  const { db, writes, deletes } = makeDb([{ ...WORKERS[0], photoFileId: 'file-so-pdf' }]);
+  const res = await call(db, 'PUT', '/photo', 'SUPER_ADMIN', { personKey: 'worker:w-1', fileId: 'file-new' });
+  assert.equal(res.status, 200);
+  assert.equal(writes.length, 1, 'the new photo is still set');
+  assert.equal(deletes.length, 0, 'the sales-order PDF must survive');
 });
 
 test('the route reuses the ONE shared delete path (files.ts removeStoredFile), not a bespoke storage call', () => {
@@ -334,4 +377,29 @@ test('the lightbox renders the SAME /stream URL, keyed off viewingPhoto rather t
 test('both render sites open the SAME lightbox via onView, not a second modal each', () => {
   const uses = (UI.match(/onView=\{\(\) => setViewingPhoto\(/g) ?? []).length;
   assert.equal(uses, 2, 'the tree card and the board card must both wire onView to the one lightbox state');
+});
+
+// Owner 2026-10-05: the header's Profile panel lets anyone change their OWN
+// photo. "Own" is the session's userId, never the body.
+test('a role without users:update MAY set its own user photo', async () => {
+  const { db, writes } = makeDb();
+  const res = await call(db, 'PUT', '/photo', 'HR', { personKey: 'user:u-1', fileId: 'file-new-u1' }, 'u-1');
+  assert.equal(res.status, 200);
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].table, 'users');
+  assert.equal(writes[0].id, 'u-1');
+});
+
+test("a role without users:update is still refused on someone else's photo", async () => {
+  const { db, writes } = makeDb();
+  const res = await call(db, 'PUT', '/photo', 'HR', { personKey: 'worker:w-1', fileId: 'file-new' }, 'u-1');
+  assert.equal(res.status, 403);
+  assert.equal(writes.length, 0);
+});
+
+test('the own-photo check still refuses a file that is not your photo', async () => {
+  const { db, writes } = makeDb();
+  const res = await call(db, 'PUT', '/photo', 'HR', { personKey: 'user:u-1', fileId: 'file-so-pdf' }, 'u-1');
+  assert.equal(res.status, 400);
+  assert.equal(writes.length, 0);
 });

@@ -58,11 +58,12 @@ import { productionRevenueByDay } from "../lib/production-revenue";
 import {
   REPORT_KINDS,
   invalidEmailsIn,
-  isDue,
+  dueSlot,
   loadLastSent,
   loadReportSettings,
   normalizeReportSettings,
   saveLastSent,
+  seedLastSent,
   saveReportSettings,
   type ReportKind,
 } from "../lib/report-settings";
@@ -411,7 +412,7 @@ app.get("/schedule", async (c) => {
   const date = parseDateParam(c.req.query("date"), todayYmdSgt);
   try {
     const data = await collectScheduleData(c.var.DB, date);
-    return new Response(renderScheduleHtml(data), {
+    return new Response(renderScheduleHtml(data, { dept: c.req.query("dept") }), {
       status: 200,
       headers: {
         "Content-Type": "text/html; charset=utf-8",
@@ -781,7 +782,7 @@ async function authCron(c: {
 // Exported for the Agent Console's "Run now" (routes/agent-console.ts) — the
 // console triggers the SAME send path the cron uses, wrapped in an agent run.
 export async function dispatchReport(
-  c: { env: Env["Bindings"]; var: Env["Variables"]; req: { json(): Promise<unknown> } },
+  c: { env: Env["Bindings"]; var: Env["Variables"]; req: { json(): Promise<unknown>; url?: string } },
   kind: ReportKind,
   usageSink?: { tokensIn: number; tokensOut: number },
 ): Promise<{
@@ -818,7 +819,10 @@ export async function dispatchReport(
     console.warn(`[reports/${kind}-trigger] no recipients — skipping send`);
     return { ok: false, date, sent: 0, failed: 0, errors: ["no recipients"] };
   }
-  return runAndSendReport(c, kind, date, recipients, usageSink);
+  // Links in the email point back at the site that sent it (cron → prod,
+  // a staging test send → staging).
+  const origin = c.req.url ? new URL(c.req.url).origin : undefined;
+  return runAndSendReport(c, kind, date, recipients, usageSink, origin);
 }
 
 // Crons skip on Sundays + declared public holidays (kv_config['public_holidays']).
@@ -900,7 +904,7 @@ async function sendScheduled(c: Parameters<typeof dispatchReport>[0], kind: Repo
 
 // POST /api/internal/reports/due-trigger — the 15-minute cron
 // (.github/workflows/daily-reports.yml). Sends every report whose schedule on
-// Settings → Email Reports has come due today and has not gone out yet.
+// Settings → Email Reports has a send time that has come due and not gone out.
 internal.post("/due-trigger", async (c) => {
   const authDenied = await authCron(c);
   if (authDenied) return authDenied;
@@ -911,13 +915,19 @@ internal.post("/due-trigger", async (c) => {
     loadLastSent(c.var.DB),
   ]);
   const now = new Date();
+  // First run on this database: record what the old fixed crons already sent
+  // today instead of sending it again (see seedLastSent).
+  const seeded = seedLastSent(settings, lastSent, now);
+  if (seeded.length > 0) await saveLastSent(c.var.DB, lastSent);
   const results: Partial<Record<ReportKind, unknown>> = {};
   for (const kind of REPORT_KINDS) {
+    if (seeded.includes(kind)) continue;
     if (settings[kind]?.enabled === false) continue;
-    if (!isDue(kind, settings[kind], now, lastSent[kind])) continue;
+    const slot = dueSlot(kind, settings[kind], now, lastSent[kind]);
+    if (!slot) continue;
     // Marked before sending: a failed send is not retried, rather than risk
     // emailing the same report twice.
-    lastSent[kind] = ymdInSgt(now);
+    lastSent[kind] = slot;
     await saveLastSent(c.var.DB, lastSent);
     results[kind] = await sendScheduled(c, kind);
   }
@@ -930,7 +940,7 @@ internal.post("/due-trigger", async (c) => {
 //        `fallback` is who an UNCONFIGURED report goes to today, so the page
 //        can prefill instead of showing an empty list.
 //   PUT  /api/reports/settings  body = { brief?: {enabled, recipients[],
-//        frequency, time, weekday, monthDay}, ... }
+//        frequency, times[], weekday, monthDay}, ... }
 // SUPER_ADMIN only: the lists are staff emails.
 // ---------------------------------------------------------------------------
 app.get("/settings", async (c) => {
@@ -983,6 +993,7 @@ async function runAndSendReport(
   date: string,
   recipients: string[],
   usageSink?: { tokensIn: number; tokensOut: number },
+  origin?: string,
 ): Promise<{
   ok: boolean;
   date: string;
@@ -1042,7 +1053,10 @@ async function runAndSendReport(
     subject = `[Hookka] Production Efficiency & Revenue — ${date} (${data.totals.efficiencyPct}% overall${rev})`;
   } else if (kind === "schedule") {
     const data = await collectScheduleData(c.var.DB, date);
-    html = renderScheduleHtml(data, { email: true });
+    html = renderScheduleHtml(data, {
+      email: true,
+      fullListUrl: origin ? `${origin}/api/reports/schedule?date=${date}` : undefined,
+    });
     text = renderScheduleEmailText(data);
     subject = `[Hookka] Production Schedule — ${date} (${data.totals.jobCards} JC · ${data.totals.quantity} units)`;
   } else {

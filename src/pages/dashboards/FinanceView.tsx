@@ -5,6 +5,7 @@ import { MoneyInput } from "@/components/ui/money-input";
 import { formatCurrency } from "@/lib/utils";
 import type { FinancePayload, Yoy, PeVariant } from "@/api/lib/dashboard-finance";
 import {
+  KPI_ROW,
   AMBER, BORDER, CARD_BG, CARD_BORDER, CHART_AXIS, CHART_GOLD, CHART_INK, GREEN, RED, TEAL,
   fmtRMAxis, monthLabel, periodLabel, type FinSub, type Period,
 } from "./dashboard-shared-lib";
@@ -194,11 +195,11 @@ function PerHead({ d, onMonth }: { d: Resp; onMonth: (ym: string) => void }) {
   const anyData = data.some((r) => r["Revenue / head"] !== null || r["Labour cost / head"] !== null);
   return (
     <>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <Kpi label="Avg employee cost" value={rm(p.labourPerHeadSen)} sub={d.period.mode === "ytd" ? "labour cost ÷ avg headcount, YTD" : "labour cost ÷ headcount, month"} valueSizeClass="text-xl" />
-        <Kpi label="Avg employee revenue" value={rm(p.revenuePerHeadSen)} sub="revenue ÷ headcount" valueSizeClass="text-xl" />
-        <Kpi label="Headcount" value={p.headcount === null ? "—" : p.headcount.toLocaleString("en-MY", { maximumFractionDigits: 1 })} sub="ACTIVE, excl. TEST" valueSizeClass="text-xl" />
-        <Kpi label="Labour cost" value={rm(p.labourSen)} sub={`revenue ${rm(p.revenueSen)}`} valueSizeClass="text-xl" />
+      <div className={KPI_ROW}>
+        <Kpi label="Avg employee cost" value={rm(p.labourPerHeadSen)} sub={d.period.mode === "ytd" ? "labour cost ÷ avg headcount, YTD" : "labour cost ÷ headcount, month"} />
+        <Kpi label="Avg employee revenue" value={rm(p.revenuePerHeadSen)} sub="revenue ÷ headcount" />
+        <Kpi label="Headcount" value={p.headcount === null ? "—" : p.headcount.toLocaleString("en-MY", { maximumFractionDigits: 1 })} sub="ACTIVE, excl. TEST" />
+        <Kpi label="Labour cost" value={rm(p.labourSen)} sub={`revenue ${rm(p.revenueSen)}`} />
       </div>
       <Card>
         <CardHeader className="pb-3">
@@ -261,16 +262,16 @@ function Returns({ d }: { d: Resp }) {
   const roiSub = r.investedCapitalSen === null ? "no balance sheet" : `on ${rm(r.investedCapitalSen)} invested`;
   return (
     <>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <Kpi label="ROA" value={pct(r.roa)} sub={`net profit ÷ total assets · ${tag}`} valueSizeClass="text-xl" />
-        <Kpi label="ROE" value={pct(r.roe)} sub={`net profit ÷ total equity · ${tag}`} valueSizeClass="text-xl" />
-        <Kpi label="ROI" value={pct(r.roi)} sub={`net profit ÷ invested capital · ${roiSub}`} valueSizeClass="text-xl" />
-        <Kpi label="Net profit" value={rm(r.netProfitSen)} sub={r.annualised ? `annualised ${rm(r.basisProfitSen)}` : "year to date"} valueSizeClass="text-xl" />
+      <div className={KPI_ROW}>
+        <Kpi label="ROA" value={pct(r.roa)} sub={`net profit ÷ total assets · ${tag}`} />
+        <Kpi label="ROE" value={pct(r.roe)} sub={`net profit ÷ total equity · ${tag}`} />
+        <Kpi label="ROI" value={pct(r.roi)} sub={`net profit ÷ invested capital · ${roiSub}`} />
+        <Kpi label="Net profit" value={rm(r.netProfitSen)} sub={r.annualised ? `annualised ${rm(r.basisProfitSen)}` : "year to date"} />
       </div>
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-        <Kpi label="Total assets" value={rm(l?.assetsSen)} valueSizeClass="text-xl" />
-        <Kpi label="Total liabilities" value={rm(l?.liabilitiesSen)} valueSizeClass="text-xl" />
-        <Kpi label="Total equity" value={rm(l?.equitySen)} valueSizeClass="text-xl" />
+      <div className={KPI_ROW}>
+        <Kpi label="Total assets" value={rm(l?.assetsSen)} />
+        <Kpi label="Total liabilities" value={rm(l?.liabilitiesSen)} />
+        <Kpi label="Total equity" value={rm(l?.equitySen)} />
       </div>
       <Card>
         <CardHeader className="pb-3">
@@ -363,11 +364,11 @@ function Outlook({ d, onSaved }: { d: Resp; onSaved: () => void }) {
   };
   return (
     <>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <Kpi label="Forecast revenue, next 12 mo" value={rm(f.next12RevenueSen)} sub="estimate" valueSizeClass="text-xl" />
-        <Kpi label="Forecast net profit, next 12 mo" value={rm(f.next12ProfitSen)} sub="estimate" valueSizeClass="text-xl" />
-        <Kpi label="Trailing net margin" value={f.marginPct === null ? "—" : `${f.marginPct.toFixed(1)}%`} sub={`last ${f.trailingMonths} months with data`} valueSizeClass="text-xl" />
-        <Kpi label="Company valuation" value={rm(valSen)} sub={valSen === null ? "not set" : "owner-entered"} valueSizeClass="text-xl" />
+      <div className={KPI_ROW}>
+        <Kpi label="Forecast revenue, next 12 mo" value={rm(f.next12RevenueSen)} sub="estimate" />
+        <Kpi label="Forecast net profit, next 12 mo" value={rm(f.next12ProfitSen)} sub="estimate" />
+        <Kpi label="Trailing net margin" value={f.marginPct === null ? "—" : `${f.marginPct.toFixed(1)}%`} sub={`last ${f.trailingMonths} months with data`} />
+        <Kpi label="Company valuation" value={rm(valSen)} sub={valSen === null ? "not set" : "owner-entered"} />
       </div>
       <Card>
         <CardHeader className="pb-3">

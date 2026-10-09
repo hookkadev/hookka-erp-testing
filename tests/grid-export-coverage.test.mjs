@@ -160,6 +160,11 @@ const EXPORT_PAGES = {
   "src/pages/procurement/pi.tsx": "purchase-invoices",
   "src/pages/consignment/index.tsx": "consignment-orders",
   "src/pages/customers.tsx": "customers",
+  // Brought over from the Houzs comparison (2026-10-09).
+  "src/pages/procurement/maintenance.tsx": "suppliers",
+  "src/pages/inventory/fabrics.tsx": "fabrics",
+  "src/pages/delivery-returns/index.tsx": "delivery-returns",
+  "src/pages/suppliers/detail.tsx": "supplier-sku-prices",
 };
 
 for (const [file, name] of Object.entries(EXPORT_PAGES)) {
@@ -230,15 +235,26 @@ test("the invoice detail export fetches per invoice and paces itself", () => {
 
 test("the export reads the FILTERED rows and the VISIBLE columns, never raw data", () => {
   const src = readFileSync("src/components/ui/data-grid.tsx", "utf8");
+  // Ticked rows narrow the export further, but only ever out of sortedData.
   assert.match(
     src,
-    /buildListingAoa\(visibleColumns as unknown as ExportColumn<T>\[\], sortedData\)/,
-    "listing must be built from visibleColumns × sortedData",
+    /const ticked = selectable\s*\?\s*sortedData\.filter\(/,
+    "ticked rows must be picked out of the filtered rows",
   );
   assert.match(
     src,
-    /detailExport\.build\(sortedData\)/,
-    "the detail listing must also be built from the filtered rows",
+    /const exportRows = ticked\.length > 0 \? ticked : sortedData;/,
+    "with nothing ticked the export falls back to the filtered rows",
+  );
+  assert.match(
+    src,
+    /buildListingAoa\(visibleColumns as unknown as ExportColumn<T>\[\], exportRows\)/,
+    "listing must be built from visibleColumns × exportRows",
+  );
+  assert.match(
+    src,
+    /detailExport\.build\(exportRows\)/,
+    "the detail listing must also be built from the same rows",
   );
 });
 

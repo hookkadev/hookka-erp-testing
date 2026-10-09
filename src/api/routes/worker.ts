@@ -22,7 +22,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import type { Env } from "../worker";
 import { resolveWorkerToken } from "./worker-auth";
-import { computeMonthlyLabor, computeAttendanceDayDetail, absenceCutoffDay, effectiveSalarySenForMonth } from "../../lib/labor-engine";
+import { computeMonthlyLabor, computeAttendanceDayDetail, absenceCutoffDay, effectiveSalarySenForMonth, workerPayrollDayRateSen } from "../../lib/labor-engine";
 import { jcMinutesTotal } from "../../lib/job-card-minutes";
 import { deriveBarcodeToken, deptOfBarcodeToken, isBarcodeToken } from "../../lib/job-card-id";
 import { computeMonthlyEfficiencyByWorker, resolveEfficiencyAllowanceSen, monthBounds } from "../lib/efficiency-allowance";
@@ -51,9 +51,10 @@ import { aggregateWipTimes } from "../lib/wip-times-core";
 import {
   recordDeptScan,
   autofillWorkingHoursFromPunch,
+  computeLiveDeptDay,
 } from "../lib/punch-autofill";
 import { loadPayRuleVersions } from "../lib/pay-rules-store";
-import { resolvePayRulesAsOf, toAttendanceRules, payrollDayRateSen, payrollHourDivisor } from "../../lib/pay-rules";
+import { resolvePayRulesAsOf, toAttendanceRules, payrollHourDivisor } from "../../lib/pay-rules";
 import { computeAttendanceDay, hhmmToMinutes, otMinutesAtLeastMinimum } from "../../lib/attendance-rules";
 import {
   rowToMinimalPO,
@@ -74,6 +75,8 @@ import {
 import { DEFAULT_ORG_ID } from "../lib/tenant";
 import { normalizeStoredPcbStatus } from "../../lib/pcb";
 import { ensurePayrollTaxColumns } from "../lib/payroll-tax-columns";
+import { ensureWorkerPenaltyTables, freshAll } from "../lib/worker-penalties";
+import { ensureAdvanceTables, rowToAdvance, type AdvanceRow } from "../lib/employee-advances";
 // One shared completion core with the desktop QC page — see the QC-on-the-
 // phone block below for why the phone must not own a second copy.
 import { completeInspection } from "./qc-pending";
@@ -236,6 +239,108 @@ async function getCurrentDeptForWorker(
   return (homeDept || "").trim().toUpperCase();
 }
 
+// Department code → the label the phone shows (short name first, as the rest
+// of the worker app does).
+async function loadDeptNames(db: D1Database): Promise<Map<string, string>> {
+  const res = await db
+    .prepare("SELECT code, name, shortName FROM departments")
+    .all<Record<string, unknown>>();
+  const names = new Map<string, string>();
+  for (const d of res.results ?? []) {
+    const code = String(d.code ?? "").trim().toUpperCase();
+    if (!code) continue;
+    names.set(code, String(d.shortName ?? d.shortname ?? "") || String(d.name ?? "") || code);
+  }
+  return names;
+}
+
+const minToHhmm = (m: number) =>
+  `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+
+// DEV-31 "Today's departments": where the worker is now and the hours in each
+// department today. Open punch → the live split (same maths punch-out saves);
+// punched out → the saved Working Hours rows, so an office correction shows.
+async function buildDeptDay(
+  db: D1Database,
+  worker: { id: string; departmentCode?: string | null },
+) {
+  const my = malaysiaNow();
+  const date = my.toISOString().slice(0, 10);
+  const att = await db
+    .prepare(
+      "SELECT id, clockIn, clockOut FROM attendance_records WHERE employeeId = ? AND date = ? ORDER BY clockIn DESC LIMIT 1",
+    )
+    .bind(worker.id, date)
+    .first<{ id: string; clockIn: string | null; clockOut: string | null }>();
+  if (!att?.clockIn) {
+    return { clockedIn: false, final: false, current: null, rows: [], hoursSoFar: 0 };
+  }
+  const names = await loadDeptNames(db);
+  const named = (r: { departmentCode: string; category: string | null; hours: number }) => ({
+    ...r,
+    name: names.get(r.departmentCode) ?? r.departmentCode,
+  });
+  if (att.clockOut) {
+    const saved = await db
+      .prepare(
+        "SELECT departmentCode, category, hours FROM working_hour_entries WHERE workerId = ? AND date = ?",
+      )
+      .bind(worker.id, date)
+      .all<Record<string, unknown>>();
+    const rows = (saved.results ?? [])
+      .map((r) => ({
+        departmentCode: String(r.departmentCode ?? r.departmentcode ?? r.department_code ?? "").toUpperCase(),
+        category: String(r.category ?? "") || null,
+        hours: Number(r.hours) || 0,
+      }))
+      .filter((r) => r.departmentCode && r.hours > 0)
+      .map(named);
+    return {
+      clockedIn: true,
+      final: true,
+      current: null,
+      rows,
+      hoursSoFar: Math.round(rows.reduce((s, r) => s + r.hours, 0) * 100) / 100,
+    };
+  }
+  const live = await computeLiveDeptDay(db, {
+    attendanceId: att.id,
+    workerId: worker.id,
+    date,
+    clockIn: att.clockIn,
+    nowMin: my.getUTCHours() * 60 + my.getUTCMinutes(),
+    homeDeptCode: worker.departmentCode,
+  });
+  return {
+    clockedIn: true,
+    final: false,
+    current: live.current
+      ? {
+          departmentCode: live.current.departmentCode,
+          name: names.get(live.current.departmentCode) ?? live.current.departmentCode,
+          category: live.current.category,
+          since: minToHhmm(live.current.sinceMin),
+          scanned: live.current.scanned,
+        }
+      : null,
+    rows: live.rows.map(named),
+    hoursSoFar: live.hoursSoFar,
+  };
+}
+
+// The card is extra: a failure here must never take down /today or a scan.
+async function buildDeptDaySafe(
+  db: D1Database,
+  worker: { id: string; departmentCode?: string | null },
+) {
+  try {
+    return await buildDeptDay(db, worker);
+  } catch (err) {
+    console.error("[worker] deptDay failed:", err);
+    return null;
+  }
+}
+
 function genId(prefix: string): string {
   return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
 }
@@ -250,6 +355,16 @@ function malaysiaNow(): Date {
 }
 function todayYmd(): string {
   return malaysiaNow().toISOString().slice(0, 10);
+}
+// Minutes since an open punch's clockIn ("HH:MM", Malaysia wall clock), read
+// against the Malaysia clock too. Raw elapsed, no lunch deduction, because that
+// is what punch-out stores in workingMinutes, so the card doesn't jump when the
+// worker punches out. BUG-2026-10-01-243: this used UTC getHours(), 8h behind,
+// so the figure clamped to 0 most of the day and the card hid it.
+export function liveWorkingMinutes(clockIn: string, nowMs = Date.now()): number {
+  const [h, m] = clockIn.split(":").map(Number);
+  const my = new Date(nowMs + 8 * 60 * 60 * 1000);
+  return Math.max(0, my.getUTCHours() * 60 + my.getUTCMinutes() - (h * 60 + m));
 }
 
 // ----- types for joined queries -----
@@ -500,17 +615,11 @@ app.get("/today", async (c) => {
             clockOut: attendance.clockOut,
             // Live computation: when worker is clocked IN but not OUT yet,
             // workingMinutes = 0 in DB until clockOut runs. Show ticking
-            // working time on the home page instead of a static 0.
-            workingMinutes: (() => {
-              if (attendance.workingMinutes > 0) return attendance.workingMinutes;
-              if (!attendance.clockIn || attendance.clockOut) {
-                return attendance.workingMinutes;
-              }
-              const [h, m] = attendance.clockIn.split(":").map(Number);
-              const now = new Date();
-              const total = now.getHours() * 60 + now.getMinutes() - (h * 60 + m);
-              return Math.max(0, total);
-            })(),
+            // working time (Malaysia clock) on the home page instead of a 0.
+            workingMinutes:
+              attendance.workingMinutes > 0 || !attendance.clockIn || attendance.clockOut
+                ? attendance.workingMinutes
+                : liveWorkingMinutes(attendance.clockIn),
             status: attendance.status,
           }
         : null,
@@ -519,6 +628,7 @@ app.get("/today", async (c) => {
       doneToday,
       doneByDept,
       earningsSen,
+      deptDay: await buildDeptDaySafe(c.var.DB, worker),
     },
   });
 });
@@ -912,6 +1022,11 @@ function parseCoord(v: unknown): number | null {
     ? v
     : null;
 }
+// Every write to attendance_records bumps updated_at: it is half of the
+// /history snapshot's freshness probe, and a clock-out that adds no row moves
+// nothing else (BUG-2026-10-01-245). Same ISO text the column default and
+// attendance.ts write, so the per-table MAX stays comparable.
+const BUMP_UPDATED_AT = "updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')";
 async function stampPunchGeo(
   db: D1Database,
   recId: string,
@@ -925,7 +1040,7 @@ async function stampPunchGeo(
       ? "clockInLat = ?, clockInLng = ?"
       : "clockOutLat = ?, clockOutLng = ?";
   await db
-    .prepare(`UPDATE attendance_records SET ${cols} WHERE id = ?`)
+    .prepare(`UPDATE attendance_records SET ${cols}, ${BUMP_UPDATED_AT} WHERE id = ?`)
     .bind(lat, lng, recId)
     .run();
 }
@@ -942,7 +1057,7 @@ async function stampPunchPhoto(
   if (!photo || !photo.startsWith("data:image/") || photo.length > 600_000) return;
   const col = action === "CLOCK_IN" ? "clockInPhoto" : "clockOutPhoto";
   await db
-    .prepare(`UPDATE attendance_records SET ${col} = ? WHERE id = ?`)
+    .prepare(`UPDATE attendance_records SET ${col} = ?, ${BUMP_UPDATED_AT} WHERE id = ?`)
     .bind(photo, recId)
     .run();
 }
@@ -987,7 +1102,7 @@ async function autoCloseForgottenPunch(
     .prepare(
       `UPDATE attendance_records
          SET clockOut = ?, workingMinutes = ?, ${clearMetrics}
-             overtimeMinutes = 0,
+             overtimeMinutes = 0, ${BUMP_UPDATED_AT},
              notes = CASE WHEN notes IS NULL OR notes = '' THEN ? ELSE notes END
        WHERE id = ? AND clockOut IS NULL`,
     )
@@ -1138,13 +1253,13 @@ app.post("/clock", async (c) => {
       // status is PRESENT.
       if (!existing.clockIn) {
         await c.var.DB.prepare(
-          "UPDATE attendance_records SET clockIn = ?, status = 'PRESENT' WHERE id = ?",
+          `UPDATE attendance_records SET clockIn = ?, status = 'PRESENT', ${BUMP_UPDATED_AT} WHERE id = ?`,
         )
           .bind(time, existing.id)
           .run();
       } else {
         await c.var.DB.prepare(
-          "UPDATE attendance_records SET status = 'PRESENT' WHERE id = ?",
+          `UPDATE attendance_records SET status = 'PRESENT', ${BUMP_UPDATED_AT} WHERE id = ?`,
         )
           .bind(existing.id)
           .run();
@@ -1224,7 +1339,7 @@ app.post("/clock", async (c) => {
   await c.var.DB.prepare(
     `UPDATE attendance_records
        SET clockOut = ?, workingMinutes = ?, ${clockOutClear}
-           overtimeMinutes = ?
+           overtimeMinutes = ?, ${BUMP_UPDATED_AT}
      WHERE id = ?`,
   )
     .bind(
@@ -1380,6 +1495,7 @@ app.post("/dept-scan", async (c) => {
       departmentName: dept.shortName || dept.name || dept.code,
       category,
       time,
+      deptDay: await buildDeptDaySafe(c.var.DB, worker),
     },
   });
 });
@@ -1426,12 +1542,14 @@ app.get("/history", async (c) => {
         "workers",
       ] as const,
       orgId: DEFAULT_ORG_ID,
-      cacheKey: `${workerId}:${fromStr}:${toStr}`,
+      // v2: daily[] rows carry deptHours (DEV-31) — older snapshots lack it.
+      // v3: totals carry prodDeptMinutes + effProductionMinutes.
+      cacheKey: `v3:${workerId}:${fromStr}:${toStr}`,
     },
-    async () => {
+    async (db) => {
 
   // ---- attendance ----
-  const attRes = await c.var.DB.prepare(
+  const attRes = await db.prepare(
     "SELECT * FROM attendance_records WHERE employeeId = ? AND date >= ? AND date <= ? ORDER BY date DESC",
   )
     .bind(workerId, fromStr, toStr)
@@ -1444,17 +1562,30 @@ app.get("/history", async (c) => {
   // is gated off until rollout (see commit a803ca9), so attendance.workingMinutes
   // is typically 0. Sum hours per date and let working_hour_entries take precedence
   // over attendance clock-time wherever both exist.
-  const wheRes = await c.var.DB.prepare(
-    "SELECT date, hours FROM working_hour_entries WHERE workerId = ? AND date >= ? AND date <= ?",
+  const wheRes = await db.prepare(
+    "SELECT date, hours, departmentCode, category FROM working_hour_entries WHERE workerId = ? AND date >= ? AND date <= ?",
   )
     .bind(workerId, fromStr, toStr)
-    .all<{ date: string; hours: number }>();
+    .all<Record<string, unknown>>();
   const wheMinutesByDate = new Map<string, number>();
+  // DEV-31: the same rows per department, so the phone shows the split the
+  // office sees on Working Hours (one total per day hid it).
+  const deptNames = await loadDeptNames(db);
+  const deptHoursByDate = new Map<
+    string,
+    Array<{ departmentCode: string; name: string; category: string | null; hours: number }>
+  >();
   for (const r of wheRes.results ?? []) {
-    const d = (r.date || "").slice(0, 10);
+    const d = String(r.date ?? "").slice(0, 10);
     if (!d) continue;
     const mins = Math.round((Number(r.hours) || 0) * 60);
     wheMinutesByDate.set(d, (wheMinutesByDate.get(d) ?? 0) + mins);
+    const code = String(r.departmentCode ?? r.departmentcode ?? r.department_code ?? "").toUpperCase();
+    const hours = Number(r.hours) || 0;
+    if (!code || hours <= 0) continue;
+    const list = deptHoursByDate.get(d) ?? [];
+    list.push({ departmentCode: code, name: deptNames.get(code) ?? code, category: String(r.category ?? "") || null, hours });
+    deptHoursByDate.set(d, list);
   }
 
   // Approved EXTRA PRODUCTION TIME claims (kind='ADD_PROD') for this worker in
@@ -1464,8 +1595,8 @@ app.get("/history", async (c) => {
   let addProdTotalMin = 0;
   const addProdMinByJobCard = new Map<string, number>();
   try {
-    await ensureNonprodRequests(c.var.DB);
-    const apRes = await c.var.DB.prepare(
+    await ensureNonprodRequests(db);
+    const apRes = await db.prepare(
       `SELECT COALESCE(approved_hours, hours) AS hours, job_card_id AS jobCardId
          FROM worker_nonprod_requests
         WHERE worker_id = ? AND kind = 'ADD_PROD' AND status = 'APPROVED'
@@ -1493,7 +1624,7 @@ app.get("/history", async (c) => {
   // everywhere else). Resilient: no versions table → defaults.
   let histPayRules: Awaited<ReturnType<typeof loadPayRuleVersions>> = [];
   try {
-    histPayRules = await loadPayRuleVersions(c.var.DB);
+    histPayRules = await loadPayRuleVersions(db);
   } catch {
     histPayRules = [];
   }
@@ -1548,7 +1679,7 @@ app.get("/history", async (c) => {
   // ---- completed job cards in range ----
   // First: every JC the worker touches that's COMPLETED/TRANSFERRED inside
   // [fromStr, toStr].  Two paths to "mine" (legacy + piecePics).
-  const myJcsLegacy = await c.var.DB.prepare(
+  const myJcsLegacy = await db.prepare(
     `SELECT * FROM job_cards
        WHERE (pic1Id = ? OR pic2Id = ?)
          AND status IN ('COMPLETED','TRANSFERRED')`,
@@ -1556,7 +1687,7 @@ app.get("/history", async (c) => {
     .bind(workerId, workerId)
     .all<JobCardRow>();
 
-  const myPicsRes = await c.var.DB.prepare(
+  const myPicsRes = await db.prepare(
     "SELECT * FROM piece_pics WHERE pic1Id = ? OR pic2Id = ?",
   )
     .bind(workerId, workerId)
@@ -1570,7 +1701,7 @@ app.get("/history", async (c) => {
   let extraJcs: JobCardRow[] = [];
   if (extraJcIds.length > 0) {
     const placeholders = extraJcIds.map(() => "?").join(",");
-    const r = await c.var.DB.prepare(
+    const r = await db.prepare(
       `SELECT * FROM job_cards WHERE id IN (${placeholders})
          AND status IN ('COMPLETED','TRANSFERRED')`,
     )
@@ -1592,7 +1723,7 @@ app.get("/history", async (c) => {
   if (inRangeJcs.length > 0) {
     const ids = inRangeJcs.map((j) => j.id);
     const placeholders = ids.map(() => "?").join(",");
-    const r = await c.var.DB.prepare(
+    const r = await db.prepare(
       `SELECT * FROM piece_pics WHERE jobCardId IN (${placeholders})`,
     )
       .bind(...ids)
@@ -1611,7 +1742,7 @@ app.get("/history", async (c) => {
   const posById = new Map<string, ProductionOrderRow>();
   if (poIds.length > 0) {
     const placeholders = poIds.map(() => "?").join(",");
-    const r = await c.var.DB.prepare(
+    const r = await db.prepare(
       `SELECT id, poNo, productCode, productName, itemCategory, sizeLabel FROM production_orders WHERE id IN (${placeholders})`,
     )
       .bind(...poIds)
@@ -1663,7 +1794,7 @@ app.get("/history", async (c) => {
   if (coPicIds.size > 0) {
     const ids = Array.from(coPicIds);
     const placeholders = ids.map(() => "?").join(",");
-    const r = await c.var.DB.prepare(
+    const r = await db.prepare(
       `SELECT id, name FROM workers WHERE id IN (${placeholders})`,
     )
       .bind(...ids)
@@ -1811,9 +1942,9 @@ app.get("/history", async (c) => {
     if (!prev.departmentName) prev.departmentName = c2.departmentCode;
     dailyMap.set(d, prev);
   }
-  const daily = Array.from(dailyMap.values()).sort((a, b) =>
-    a.date.localeCompare(b.date),
-  );
+  const daily = Array.from(dailyMap.values())
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map((d) => ({ ...d, deptHours: deptHoursByDate.get(d.date) ?? [] }));
 
   // workedMinutes / overtimeMinutes — split per date once we know which side
   // (working_hour_entries vs attendance clock-time) wins. Per-date split:
@@ -1864,7 +1995,7 @@ app.get("/history", async (c) => {
   // number as before. Returned as a 1-decimal figure (matching the Overview's
   // toFixed(1)); the phone renders `${efficiencyPct}%` unchanged.
   const effByWorkerRange = await memoizedMonthlyEfficiency(
-    c.var.DB,
+    db,
     fromStr,
     toStr,
   );
@@ -1881,6 +2012,11 @@ app.get("/history", async (c) => {
     // Extra production time credited to the numerator this period (display).
     addProdMinutes: addProdTotalMin,
     efficiencyPct,
+    // The two halves of efficiencyPct itself, so the phone can show
+    // Production Time (prod-dept hours) and Production Hours (credited minutes)
+    // that divide to exactly the Efficiency % beside them.
+    prodDeptMinutes: Math.round((myEff?.prodHours ?? 0) * 60),
+    effProductionMinutes: myEff?.prodMinutes ?? 0,
   };
 
       return {
@@ -1931,6 +2067,9 @@ type PayslipRow = {
   otWeekdayHours?: number | null;
   otSundayHours?: number | null;
   otPhHours?: number | null;
+  advanceDeductionSen?: number | null;
+  advance_deduction_sen?: number | null;
+  status?: string | null;
 };
 
 app.get("/payslips", async (c) => {
@@ -1946,6 +2085,8 @@ app.get("/payslips", async (c) => {
   // migrations are inert on deploy here — without this the whole My Pay
   // history 400s on a database where payroll has never been generated.
   await ensurePayrollTaxColumns(c.var.DB);
+  // Same for payslips.advance_deduction_sen and the employee_advances table.
+  await ensureAdvanceTables(c.var.DB);
 
   // Current-month key for the snapshot. Computed up front so the cache_key is
   // stable for the whole request; the live compute below re-derives the same
@@ -1976,23 +2117,30 @@ app.get("/payslips", async (c) => {
         "kv_config",
         "workers",
         "worker_nonprod_requests",
+        // The advance dates and notes shown under a finished month.
+        "employee_advances",
       ] as const,
       orgId: DEFAULT_ORG_ID,
-      cacheKey: `${workerId}:${snapPeriod}`,
+      // The suffix retires snapshots built before a fix to what history
+      // carries (":adv" the salary advance, ":late" the late charge priced
+      // from a per-day worker's day rate, ":daily" the per-day fields on the
+      // current month, ":past" each past month's status), so no cached month
+      // hides one.
+      cacheKey: `${workerId}:${snapPeriod}:adv:late:daily:past`,
     },
-    async () => {
+    async (db) => {
 
-  const res = await c.var.DB.prepare(
+  const res = await db.prepare(
     // absentDays / absenceDeductionSen ride along so a FINISHED month can show
     // the same "why is it this number" breakdown the in-progress month already
     // showed. Without them the worker could see every late minute and absent
     // day for the current month and then, once payroll ran, only a bare Net —
     // which is exactly the moment they most want to check it (owner 2026-08-02:
     // 「他们的迟到、OT、请假等等，全部都可以在 MyPay 那一边呈现出来」).
-    `SELECT id, employeeId, period, basicSalarySen, totalOtSen, allowancesSen,
+    `SELECT id, employeeId, period, status, basicSalarySen, totalOtSen, allowancesSen,
             grossPaySen, netPaySen, epfEmployeeSen, socsoEmployeeSen,
             eisEmployeeSen, pcbSen, pcb_status, absentDays, absenceDeductionSen,
-            otWeekdayHours, otSundayHours, otPhHours
+            otWeekdayHours, otSundayHours, otPhHours, advance_deduction_sen
        FROM payslips
       WHERE employeeId = ?
       ORDER BY period DESC`,
@@ -2008,17 +2156,17 @@ app.get("/payslips", async (c) => {
   const lateByPeriod = new Map<string, Array<{ date: string; hours: number }>>();
   const lateSenByPeriod = new Map<string, number>();
   try {
-    const dedRes = await c.var.DB.prepare(
+    const dedRes = await db.prepare(
       "SELECT date, hours FROM payroll_hour_deductions WHERE workerId = ? ORDER BY date",
     )
       .bind(workerId)
       .all<{ date: string; hours: number }>();
-    const wRow = await c.var.DB.prepare(
-      "SELECT basicSalarySen, workingDaysPerMonth, workingHoursPerDay FROM workers WHERE id = ?",
+    const wRow = await db.prepare(
+      "SELECT basicSalarySen, payMode, dailyRateSen, workingDaysPerMonth, workingHoursPerDay FROM workers WHERE id = ?",
     )
       .bind(workerId)
-      .first<{ basicSalarySen: number; workingDaysPerMonth: number; workingHoursPerDay: number }>();
-    const versions = await loadPayRuleVersions(c.var.DB);
+      .first<{ basicSalarySen: number; payMode: string | null; dailyRateSen: number | null; workingDaysPerMonth: number; workingHoursPerDay: number }>();
+    const versions = await loadPayRuleVersions(db);
     for (const d of dedRes.results ?? []) {
       const h = Number(d.hours) || 0;
       if (h <= 0 || typeof d.date !== "string") continue;
@@ -2030,8 +2178,14 @@ app.get("/payslips", async (c) => {
       // Rules as of THAT period — a rule change today must not re-price a
       // month the worker was already paid for.
       const cfg = resolvePayRulesAsOf(versions, `${per}-28`);
-      const dayRate = payrollDayRateSen(
-        Number(wRow.basicSalarySen) || 0,
+      // Pay-mode aware: a per-day (OSC) worker has no monthly basic, so the
+      // salary-only rate priced their late hours at RM 0 and the line vanished.
+      const dayRate = workerPayrollDayRateSen(
+        {
+          basicSalarySen: Number(wRow.basicSalarySen) || 0,
+          payMode: wRow.payMode,
+          dailyRateSen: wRow.dailyRateSen,
+        },
         {
           workingDaysPerMonth: Number(wRow.workingDaysPerMonth) || 26,
           calendarDays: 30,
@@ -2046,6 +2200,32 @@ app.get("/payslips", async (c) => {
     // Best-effort: the money figures above are still correct without it, the
     // breakdown just loses its per-day chips. Logged, never silent.
     console.error("[worker/payslips] late-day detail unavailable:", e);
+  }
+
+  // Which days the worker drew a salary advance, per pay period (an advance is
+  // recovered in the month it is dated in, the same rule payroll and the PDF
+  // payslip use). Display only: the money is the stored advance_deduction_sen.
+  const advancesByPeriod = new Map<string, Array<{ date: string; amountSen: number; note: string }>>();
+  try {
+    const advRes = await db
+      .prepare(
+        `SELECT id, worker_id, advance_date, amount_sen, note
+           FROM employee_advances
+          WHERE worker_id = ?
+          ORDER BY advance_date, id`,
+      )
+      .bind(workerId)
+      .all<AdvanceRow>();
+    for (const raw of advRes.results ?? []) {
+      const a = rowToAdvance(raw);
+      const per = a.date.slice(0, 7);
+      const arr = advancesByPeriod.get(per) ?? [];
+      arr.push({ date: a.date, amountSen: a.amountSen, note: a.note });
+      advancesByPeriod.set(per, arr);
+    }
+  } catch (e) {
+    // Same as the late days: the amount below is still right, only the dates go.
+    console.error("[worker/payslips] advance detail unavailable:", e);
   }
 
   const history = (res.results ?? []).map((r) => ({
@@ -2072,6 +2252,12 @@ app.get("/payslips", async (c) => {
       (Number(r.otPhHours ?? 0) || 0),
     lateDays: lateByPeriod.get(r.period) ?? [],
     shortHourDeductionSen: lateSenByPeriod.get(r.period) ?? 0,
+    // Cash already handed over that month, taken off Net. Without it the phone
+    // showed Net below Gross with nothing in between to explain the gap.
+    advanceDeductionSen: Number(r.advanceDeductionSen ?? r.advance_deduction_sen ?? 0) || 0,
+    advanceDays: advancesByPeriod.get(r.period) ?? [],
+    // DRAFT until the office approves it; the per-day card tags it Estimate.
+    status: r.status ?? null,
   }));
 
   // Live current-month estimate, computed by the shared labor engine —
@@ -2085,7 +2271,7 @@ app.get("/payslips", async (c) => {
   const monthPrefix = `${period}-`;
 
   // This worker's Working Hours rows for the current month.
-  const wheRes = await c.var.DB.prepare(
+  const wheRes = await db.prepare(
     `SELECT date, hours FROM working_hour_entries
       WHERE workerId = ? AND date LIKE ?`,
   )
@@ -2095,7 +2281,7 @@ app.get("/payslips", async (c) => {
   // Public holidays — kv_config['public_holidays'], a JSON array of
   // YYYY-MM-DD strings. A holiday is never charged to the worker as an
   // absence (the divisor still stays at workingDaysPerMonth).
-  const phRes = await c.var.DB.prepare(
+  const phRes = await db.prepare(
     "SELECT value FROM kv_config WHERE key = ?",
   )
     .bind("public_holidays")
@@ -2120,7 +2306,7 @@ app.get("/payslips", async (c) => {
   // mid-month raise. Resilient: no history table / no rows → current basic salary.
   let salaryHistory: Array<{ effectiveFrom: string; basicSalarySen: number }> = [];
   try {
-    const wsh = await c.var.DB.prepare(
+    const wsh = await db.prepare(
       "SELECT basicSalarySen, effectiveFrom FROM worker_salary_history WHERE workerId = ?",
     )
       .bind(workerId)
@@ -2148,7 +2334,7 @@ app.get("/payslips", async (c) => {
   // (2 working days back), so days that haven't happened yet AND the most
   // recent not-yet-keyed days aren't charged as absences. Matches payroll.
   // Effective-dated grace — same source the office payroll uses.
-  const workerPayRules = await loadPayRuleVersions(c.var.DB);
+  const workerPayRules = await loadPayRuleVersions(db);
   const absenceThroughDay = absenceCutoffDay(
     now.getFullYear(),
     now.getMonth() + 1,
@@ -2167,7 +2353,7 @@ app.get("/payslips", async (c) => {
   // to the specific days (date + hours docked), mirroring the Absent / OT chips.
   const lateDays: Array<{ date: string; hours: number; note: string }> = [];
   try {
-    const dedRes = await c.var.DB.prepare(
+    const dedRes = await db.prepare(
       "SELECT date, hours, note FROM payroll_hour_deductions WHERE workerId = ? AND date LIKE ? ORDER BY date",
     )
       .bind(workerId, `${monthPrefix}%`)
@@ -2183,12 +2369,21 @@ app.get("/payslips", async (c) => {
     console.warn("[worker/pay] payroll_hour_deductions read skipped:", e);
   }
 
+  // Per-day (outsourced) people have no monthly basic. Without these two the
+  // engine priced them as a RM 0 monthly worker, so the phone showed RM 0.00
+  // basic while payroll paid days x day rate.
+  const payWorker = await db
+    .prepare("SELECT payMode, dailyRateSen FROM workers WHERE id = ?")
+    .bind(workerId)
+    .first<{ payMode: string | null; dailyRateSen: number | null }>();
   const labor = computeMonthlyLabor({
     worker: {
       basicSalarySen: effectiveSalarySen,
       workingDaysPerMonth: auth.worker.workingDaysPerMonth,
       workingHoursPerDay: auth.worker.workingHoursPerDay,
       otMultiplier: auth.worker.otMultiplier,
+      payMode: payWorker?.payMode,
+      dailyRateSen: Number(payWorker?.dailyRateSen) || 0,
     },
     year: now.getFullYear(),
     month: now.getMonth() + 1,
@@ -2220,11 +2415,11 @@ app.get("/payslips", async (c) => {
   // the to-date estimate (only elapsed cards + keyed hours exist yet).
   const { start: effStart, end: effEnd } = monthBounds(period);
   const effByWorker = await computeMonthlyEfficiencyByWorker(
-    c.var.DB,
+    db,
     effStart,
     effEnd,
   );
-  const effCfg = await c.var.DB.prepare(
+  const effCfg = await db.prepare(
     "SELECT efficiencyAllowanceSen, efficiencyThresholdPct, leadershipAllowanceSen FROM workers WHERE id = ?",
   )
     .bind(workerId)
@@ -2250,7 +2445,7 @@ app.get("/payslips", async (c) => {
   // DRAFT (or none) → the numbers above are an estimate.
   let payslipStatus: "NONE" | "DRAFT" | "APPROVED" | "PAID" = "NONE";
   try {
-    const ps = await c.var.DB.prepare(
+    const ps = await db.prepare(
       "SELECT status FROM payslips WHERE employeeId = ? AND period = ?",
     )
       .bind(workerId, period)
@@ -2261,6 +2456,10 @@ app.get("/payslips", async (c) => {
   } catch {
     /* unreadable → treated as not finalised, which is the safe direction */
   }
+
+  // Same test the engine uses: DAILY with no day rate is paid as monthly.
+  const isDailyPaid =
+    payWorker?.payMode === "DAILY" && Number(payWorker?.dailyRateSen) > 0;
 
       return {
         current: {
@@ -2288,6 +2487,16 @@ app.get("/payslips", async (c) => {
           // approved 才能 print). The phone hides Save-as-PDF until then, so a
           // mid-month figure can never be mistaken for the final one.
           payslipStatus,
+          // Per-day people get their own card on My Pay: "N days @ RM X/day"
+          // instead of a RM 0.00 basic. dailyRateSen is the engine's day rate,
+          // so the card prices the same days payroll does. Past months use the
+          // same card, rebuilt from their stored payslip (pay.tsx).
+          payMode: isDailyPaid ? "DAILY" : "MONTHLY",
+          dailyRateSen: labor.payrollDailyRateSen,
+          // Cash already collected this month (recovered from this month's pay,
+          // same rule as payroll). Display only until the payslip is generated.
+          advanceSen: (advancesByPeriod.get(period) ?? []).reduce((s, a) => s + a.amountSen, 0),
+          advanceDays: advancesByPeriod.get(period) ?? [],
         },
         history,
       };
@@ -2295,6 +2504,52 @@ app.get("/payslips", async (c) => {
   );
 
   return c.json({ success: true, data: payslipsData });
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/worker/penalties — DEV-22: the worker's own penalties, so a
+// deduction on their pay is never a surprise. Only APPROVED / POSTED are
+// shown: a draft or one still pending approval is not yet a decision, and
+// may yet be rejected. One row per line (a penalty naming three workers shows
+// each worker only their own amount).
+// ---------------------------------------------------------------------------
+app.get("/penalties", async (c) => {
+  const auth = await getWorker(c);
+  if (!auth.ok) return auth.response;
+  await ensureWorkerPenaltyTables(c.var.DB);
+  // Fresh read (see freshAll): a deduction the worker was just told about
+  // must not be missing from their phone for the cache window.
+  const rows = await freshAll<Record<string, unknown>>(
+    c.var.DB,
+    c.var.DB.prepare(
+      `SELECT l.id, p.penalty_no, p.penalty_date, p.po_no, p.customer_name, p.product_name, p.reason,
+              p.status, p.approved_at, l.amount_sen, l.payroll_period, l.payslip_id, l.posted_at
+         FROM worker_penalty_lines l
+         JOIN worker_penalties p ON p.id = l.penalty_id
+        WHERE l.worker_id = ? AND p.status IN ('APPROVED', 'POSTED')
+        ORDER BY l.payroll_period DESC, p.penalty_date DESC`,
+    ).bind(auth.workerId),
+  );
+  const s = (a: unknown, b: unknown) => String(a ?? b ?? "");
+  const data = rows.map((r) => {
+    const posted = !!(r.postedAt ?? r.posted_at);
+    const amountSen = Number(r.amountSen ?? r.amount_sen) || 0;
+    return {
+      id: String(r.id),
+      penaltyNo: s(r.penaltyNo, r.penalty_no),
+      date: s(r.penaltyDate, r.penalty_date),
+      poNo: s(r.poNo, r.po_no),
+      productName: s(r.productName, r.product_name),
+      reason: s(r.reason, r.reason),
+      amountSen,
+      payrollPeriod: s(r.payrollPeriod, r.payroll_period),
+      // What has actually come off a signed-off payslip. Until the month's
+      // payroll is approved the deduction is scheduled, not taken.
+      deductedSen: posted ? amountSen : 0,
+      status: posted ? "DEDUCTED" : "APPROVED",
+    };
+  });
+  return c.json({ success: true, data });
 });
 
 /**
@@ -2316,9 +2571,9 @@ async function buildWorkerDayDetail(
 }> {
   const [yy, mm] = period.split("-").map(Number);
   const w = await db
-    .prepare("SELECT workingHoursPerDay, basicSalarySen, workingDaysPerMonth FROM workers WHERE id = ?")
+    .prepare("SELECT workingHoursPerDay, basicSalarySen, payMode, dailyRateSen, workingDaysPerMonth FROM workers WHERE id = ?")
     .bind(workerId)
-    .first<{ workingHoursPerDay: number | null; basicSalarySen: number | null; workingDaysPerMonth: number | null }>();
+    .first<{ workingHoursPerDay: number | null; basicSalarySen: number | null; payMode: string | null; dailyRateSen: number | null; workingDaysPerMonth: number | null }>();
   const hoursPerDay = Number(w?.workingHoursPerDay) || 9;
 
   const heRes = await db
@@ -2360,8 +2615,12 @@ async function buildWorkerDayDetail(
     .prepare("SELECT date, hours FROM payroll_hour_deductions WHERE workerId = ? AND date LIKE ? ORDER BY date")
     .bind(workerId, `${period}-%`)
     .all<{ date: string; hours: number }>();
-  const dayRate = payrollDayRateSen(
-    Number(w?.basicSalarySen) || 0,
+  const dayRate = workerPayrollDayRateSen(
+    {
+      basicSalarySen: Number(w?.basicSalarySen) || 0,
+      payMode: w?.payMode,
+      dailyRateSen: w?.dailyRateSen,
+    },
     {
       workingDaysPerMonth: Number(w?.workingDaysPerMonth) || 26,
       calendarDays: lastDay,

@@ -706,7 +706,7 @@ test("a release cancels an allocation even when it omits the line fields", async
 // ── A7: the invoice for an allocated piece bills the CUSTOMER ───────────────
 //
 // The placeholder stock SO carries a sales_order_items row at
-// `unitPriceSen: 0` (production-orders.ts:1335 — "insert minimal SO item so
+// `unitPriceSen: 0` (production-orders.ts:1337 — "insert minimal SO item so
 // downstream readers don't crash"). An invoice line's price is resolved by
 // `priceForItem` from `production_orders.salesOrderId`, which is EXACTLY the
 // column allocation rewrites — so these pin that the rewrite is what makes the

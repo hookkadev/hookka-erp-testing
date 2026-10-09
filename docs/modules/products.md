@@ -1,6 +1,9 @@
 # Products & MDM — Module Guide
 
+> **Last verified: 2026-10-08** (branch `feat/bom-variant-fields-list`, to `staging`): `src/pages/products/index.tsx` anchors re-derived after the Variant Fields / WIP Types list rows (`ProductsPage` :2154, `MaintenanceView` :1151, modular photo fetch :3055). Nothing else re-checked.
+> **Last verified: 2026-10-08** (branch `fix/bom-module-guide-anchors`, to `staging`): the `src/pages/products/index.tsx` anchors (`ProductsPage` :2076, `VariantEditorDialog` :663, `MaintenanceView` :1147, `CustomerAssignmentsSection` :481, `ProductionConfig` / `CategoryBadge` :388 / :375), read from the file after #752 added the WIP Types and Variant Fields Maintenance tabs. Nothing else re-checked.
 > **Last verified: 2026-09-21** — `products.ts` handler anchors re-derived after the bulk-import BOM-materials change (`pushMaterials`, +27 lines); bulk import now also writes `bom_components` from the 9 material-usage columns (`PRODUCT_BULK_MATERIALS`).
+> **Last verified: 2026-10-05** (branch `fix/bom-master-template-accessory`): the `bom-master-templates.ts` anchors (line count, PUT `/:id`, bulk PUT), read from the file; it now accepts ACCESSORY (BUG-2026-10-05-255). Nothing else re-checked.
 >
 > **Last verified: 2026-09-10 (evening)** — Products page's own "Import SKUs" (hand-rolled
 > CSV, one PUT per row, no preview) migrated onto `BatchImportDialog` + the same
@@ -54,7 +57,7 @@ Money is integer sen; many product columns are legacy camelCase.
 
 ## Entry points
 - **Pages** (all under `/products`, one page hosts three views)
-  - `/products` → `src/pages/products/index.tsx:2025` (`ProductsPage`; `viewMode` = `skuMaster|catalog|maintenance`)
+  - `/products` → `src/pages/products/index.tsx:2154` (`ProductsPage`; `viewMode` = `skuMaster|catalog|maintenance`)
   - `/products/:id/bom` → `src/pages/products/bom.tsx:462` (`BOMPage` — Master BOM Templates editor; also reached via `?sku=` from sales/consignment)
   - `/products/:id/documents` → `src/pages/products/documents.tsx:92` (`ProductDocumentsPage` — production docs per variant)
   - Catalog is NOT a route — `ProductCatalog` (`src/pages/products/catalog.tsx:138`) renders inline as `viewMode==="catalog"`
@@ -63,7 +66,7 @@ Money is integer sen; many product columns are legacy camelCase.
   - `/api/products` → `src/api/routes/products.ts` (1245) — core CRUD, nested `bomComponents`+`deptWorkingTimes`, master price history
   - `/api/customer-products` → `src/api/routes/customer-products.ts` (1235) — per-customer SKU + price overrides
   - `/api/bom` → `src/api/routes/bom.ts` (1454) — `/` = `bom_versions`, `/templates` = `bom_templates` (declared BEFORE `/:id`)
-  - `/api/bom-master-templates` → `src/api/routes/bom-master-templates.ts` (243) — master template presets CRUD
+  - `/api/bom-master-templates` → `src/api/routes/bom-master-templates.ts` (271) — master template presets CRUD
   - `/api/product-configs` → `src/api/routes/product-configs.ts` (88) — read-only per-product dept config lookup
   - `/api/maintenance-config` → `src/api/routes/maintenance-config.ts` (248) — append-only effective-dated config
   - `/api/mdm` → `src/api/routes/mdm.ts` (248) — detection-only review queue
@@ -84,18 +87,18 @@ Money is integer sen; many product columns are legacy camelCase.
 1. **Create/edit product** — `app.post("/")` `products.ts:590`, `app.put("/:id")` `products.ts:970`. Both replace-in-full the nested `bomComponents` and `deptWorkingTimes` sets when provided; `rowToProduct` (`:166`) re-nests children + parses JSON columns on read. Column self-apply via `ensureProductCreatedAtColumn` (`:33`). Bulk import: `app.post("/bulk-import")` `:727` upserts by `code` in one D1 transaction (rows + audit row together); shaping/validation is `shapeProductBulkRow` in `src/api/lib/product-bulk-import.ts` — a blank sheet cell never overwrites an existing value.
 2. **Master price change** — `app.post("/:productId/prices")` `products.ts:1327` appends an effective-dated row; `resolveProductPriceAsOf` (`:1238`) picks the newest `<= asOf`; history read at `app.get("/:productId/price-history")` `:1301`. Surfaced in `MasterPriceHistoryDialog`.
 3. **Per-customer price (inherit-or-override)** — `customer-products.ts` `resolvePrices` (`:95`) returns master price when the override column is NULL, override value when non-null. List GET (`:113`) also surfaces a future master change to inherited customers as `masterPendingEffectiveFrom` (built into `masterPendingByProduct` at `:184-206`, emitted at `:262`). Append price via `app.post("/:customerProductId/prices")` `:434`.
-4. **BOM templates (bulk replace)** — `app.put("/templates")` `bom.ts:377` does DELETE-ALL + INSERT-ALL in one D1 batch; single-row upsert at `app.put("/templates/:id")` `:484`. Master presets: `bom-master-templates.ts` upsert `app.put("/:id")` `:101`, bulk replace `app.put("/")` `:190` (clears sibling `isDefault` per category).
+4. **BOM templates (bulk replace)** — `app.put("/templates")` `bom.ts:377` does DELETE-ALL + INSERT-ALL in one D1 batch; single-row upsert at `app.put("/templates/:id")` `:484`. Master presets: `bom-master-templates.ts` upsert `app.put("/:id")` `:127`, bulk replace `app.put("/")` `:217` (clears sibling `isDefault` per category).
 5. **Maintenance config (effective-dated)** — `app.post("/changes")` `maintenance-config.ts:174` appends a new full-config row; `resolveMaintenanceConfigAsOf` (`:66`) resolves newest `<= today` and reports the next pending effective date. `GET /resolved` `:120`, `GET /history` `:141`.
 6. **MDM detection + resolve** — `app.post("/detection/run")` `mdm.ts:232` (admin-gated) runs `runMdmDetectionPass` (`src/api/lib/mdm-detect.ts`) to insert flags; `resolveRow` (`:148`) marks MERGED/DISMISSED — **closes the flag only**, does not merge records.
 
 ## Key functions / sections (locate-to-function)
 | Symbol / section | file:line | Role |
 |---|---|---|
-| `ProductsPage` (default export) | `src/pages/products/index.tsx:2025` | 3-way view host; `viewMode` state just below |
-| `VariantEditorDialog` | `src/pages/products/index.tsx:654` | Add/edit a product variant |
-| `MaintenanceView` | `src/pages/products/index.tsx:1130` | Maintenance-config view (Edit/Save/Cancel) |
-| `CustomerAssignmentsSection` | `src/pages/products/index.tsx:472` | Per-customer SKU assignment (expand row) |
-| `ProductionConfig` / `CategoryBadge` | `src/pages/products/index.tsx:379 / 366` | Per-dept config display helpers |
+| `ProductsPage` (default export) | `src/pages/products/index.tsx:2154` | 3-way view host; `viewMode` state just below |
+| `VariantEditorDialog` | `src/pages/products/index.tsx:663` | Add/edit a product variant |
+| `MaintenanceView` | `src/pages/products/index.tsx:1151` | Maintenance-config view (Edit/Save/Cancel) |
+| `CustomerAssignmentsSection` | `src/pages/products/index.tsx:481` | Per-customer SKU assignment (expand row) |
+| `ProductionConfig` / `CategoryBadge` | `src/pages/products/index.tsx:388 / 375` | Per-dept config display helpers |
 | `ProductCatalog` | `src/pages/products/catalog.tsx:138` | Model-based photo grid (inline catalog view) |
 | `rowToProduct` | `src/api/routes/products.ts:166` | Re-nests children + parses JSON columns on read |
 | `app.post("/")` / `app.put("/:id")` | `src/api/routes/products.ts:590 / 970` | Product create / edit (full-replace children) |
@@ -105,7 +108,7 @@ Money is integer sen; many product columns are legacy camelCase.
 | `resolvePrices` | `src/api/routes/customer-products.ts:95` | Inherit-or-override price resolution |
 | `app.put("/templates")` | `src/api/routes/bom.ts:377` | Bulk-replace `bom_templates` (DELETE-ALL + INSERT-ALL) |
 | `app.put("/templates/:id")` | `src/api/routes/bom.ts:484` | Single-template upsert |
-| `app.put("/:id")` (master) | `src/api/routes/bom-master-templates.ts:101` | Master preset upsert; bulk replace is `app.put("/")` `:190` (clears sibling isDefault) |
+| `app.put("/:id")` (master) | `src/api/routes/bom-master-templates.ts:127` | Master preset upsert; bulk replace is `app.put("/")` `:217` (clears sibling isDefault) |
 | `resolveMaintenanceConfigAsOf` | `src/api/routes/maintenance-config.ts:66` | Newest-as-of-today config resolver |
 | `app.post("/changes")` | `src/api/routes/maintenance-config.ts:174` | Append effective-dated config row |
 | `resolveRow` | `src/api/routes/mdm.ts:148` | Mark queue row MERGED/DISMISSED (flag only) |
@@ -116,7 +119,7 @@ Money is integer sen; many product columns are legacy camelCase.
 - **Two separate price tables.** Master price lives in `product_prices` (`MasterPriceHistoryDialog`); per-customer overrides in `customer_product_prices`. Reconcile BOTH when changing pricing; a future master change is surfaced to inherited customers as `masterPending`.
 - **maintenance-config & master price are APPEND-ONLY effective-dated.** Edits create NEW rows; the resolver picks newest `WHERE effective_from <= today`. Never UPDATE-in-place. The POST endpoint is `/changes` (not `/history` despite older header comments).
 - **`/api/bom/templates` MUST stay declared before `/:id`** or Hono's first-match router swallows `"templates"` as an `:id` param (`bom.ts:9`). The templates LIST response is ~1.95 MB — `rowToTemplateListItem` (`:87`) trims it; don't send full rows.
-- **Catalog tiles are AUTO-DERIVED** from each distinct `baseModel` in `products` (no dedicated table); `baseProductCode` splits on the first dash (`index.tsx:36`). Modular photos go through `/api/files?resourceType=modular` (`index.tsx:2901`, `catalog.tsx:29`), not a products column. Note the read path: `GET /api/files/:id/download` **302-redirects** to a signed Supabase URL (`files.ts:446`); only the `/stream` proxy fallback (`:485`) sets `Content-Disposition: attachment` itself (`:503`). `<img>` renders either way — browsers ignore the disposition on subresource loads — so don't "fix" it.
+- **Catalog tiles are AUTO-DERIVED** from each distinct `baseModel` in `products` (no dedicated table); `baseProductCode` splits on the first dash (`index.tsx:36`). Modular photos go through `/api/files?resourceType=modular` (`index.tsx:3055`, `catalog.tsx:29`), not a products column. Note the read path: `GET /api/files/:id/download` **302-redirects** to a signed Supabase URL (`files.ts:446`); only the `/stream` proxy fallback (`:485`) sets `Content-Disposition: attachment` itself (`:503`). `<img>` renders either way — browsers ignore the disposition on subresource loads — so don't "fix" it.
 - **MDM is DETECTION-ONLY.** `merge`/`dismiss` just close the flag (set `status`); the real record merge happens in the existing customer/supplier UI. Detection-run is admin-gated to stop non-admins flooding the queue.
 - **camelCase columns need a `column-rename-map.json` entry** (`basePriceSen`, `seatHeightPrices`, `effectiveFrom`, …) or the write 400s "Invalid request body". Prefer snake_case for NEW columns; read dual-keyed `r.camelCase ?? r.snake_case`.
 - **`index.tsx` is a 5,316-line single page** — three views share one `ProductsPage` (`:2025`); `MaintenanceView` (`:1130`) and `VariantEditorDialog` (`:654`) are large sub-components ABOVE the default export, not separate files.
@@ -124,7 +127,7 @@ Money is integer sen; many product columns are legacy camelCase.
 ## Common tasks (mini-playbook)
 - **Add a field to a product** → column self-apply near `ensureProductCreatedAtColumn` (`products.ts:33`); persist in `app.post("/")` (`:590`) + `app.put("/:id")` (`:970`) + `app.post("/bulk-import")` (`:727` — also update `shapeProductBulkRow` in `product-bulk-import.ts`); surface in `rowToProduct` (`:166`); render in `VariantEditorDialog` (`index.tsx:654`). New column = snake_case (+ rename-map if camelCase). Verify BOM math with `tests/bom-explosion.test.mjs`.
 - **Change master or per-customer pricing** → master history in `products.ts` (`resolveProductPriceAsOf:1211`, POST `:1300`); per-customer in `customer-products.ts` (`resolvePrices:95`, POST `:434`). Append, never update; reconcile both tables.
-- **Edit BOM templates** → `bom.ts` templates block (bulk `:377`, single upsert `:484`); presets in `bom-master-templates.ts` (`:101`/`:190`). Keep `/templates` (GET `:231`) before `/:id` (GET `:1336`).
+- **Edit BOM templates** → `bom.ts` templates block (bulk `:377`, single upsert `:484`); presets in `bom-master-templates.ts` (`:127`/`:217`). Keep `/templates` (GET `:231`) before `/:id` (GET `:1336`).
 - **Change maintenance defaults** → append via `maintenance-config.ts` POST `/changes` (`:174`); resolver `:66`. Never mutate old rows (old-SO safety banner lives in `MaintenanceConfigHistoryDialog.tsx`).
 - **Tune MDM detection** → logic lives in `src/api/lib/mdm-detect.ts` (`runMdmDetectionPass`), not the route; the route only queues + resolves flags.
 

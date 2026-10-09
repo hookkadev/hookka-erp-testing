@@ -2,6 +2,9 @@
 
 > **Last verified: 2026-09-29** (branch `chore/sync-main-into-staging`, staging<-main merge): kept staging's `deploy.yml` row (staging-only patch-notes step) and main's `sync-staging.yml` row. Nothing else re-checked.
 
+> **Last verified: 2026-09-29** (branch `ci/label-prs`) — added the `label-prs.yml` row, read from the workflow and the
+> GitHub `pull_request_target` docs (it always runs the default branch's copy). Only that row was touched.
+
 > **Last verified: 2026-09-29** (branch `fix/staging-no-nightly-wipe`) — the `sync-staging.yml` row only, read from the workflow:
 > the nightly cron is gone (manual `workflow_dispatch` only), with a `merge` (default) and a `reset` mode.
 
@@ -54,6 +57,7 @@ The next improvement is not to move files around for neatness. The next improvem
 | `.github/workflows/sync-staging.yml` | Manual prod-to-staging refresh, NO cron (the nightly run dropped staging's schema and wiped test data). `mode=merge` (default) inserts prod rows staging lacks via `scripts/merge-prod-into-staging.mjs` and keeps all staging data; `mode=reset` (needs `confirm=SYNC`) drops and reloads staging from a prod dump. Both then run `scripts/sanitize-staging.mjs` and the shared worker-PIN step. |
 | `.github/workflows/deploy.yml` | CI/build/deploy/canary pipeline. Runs on `main` / `staging` are recorded in the repo's Deployments sidebar as the `production` / `staging` environment (no URL shown); PR canary and other branch runs are not recorded (2026-09-23). On `staging` only: checkout with full history and a non-blocking "Staging patch notes" step that writes `public/staging-notes.json` for the `/staging-notes` page (2026-09-29; this change lives on `staging` only and is never PR'd into main). |
 | `.github/workflows/merge-main-into-staging.yml` | On every push to `main`, merges `main` into the `staging` branch and dispatches the staging deploy; on conflict opens a PR from `chore/sync-staging-from-main` into `staging` and fails (added 2026-09-22). |
+| `.github/workflows/label-prs.yml` | Labels every PR into `main` or `staging`, from anyone: base `staging` gets `staging`, and the title type (`fix:`, `feat(x):` ...) gets `bug` / `enhancement` / `documentation` / `security` / `performance` / `ci` / `chore`. Must stay on `main`: `pull_request_target` always runs the default branch's copy, which is why the staging-only `label-staging-prs.yml` never ran. |
 | `.github/workflows/*.yml` | One workflow per scheduled/ops job, with header comments explaining purpose, secrets, timing, and safety. |
 
 ## Direct production / canary / staging rule

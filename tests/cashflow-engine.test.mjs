@@ -109,8 +109,8 @@ test("buildStatement — raw materials split into material lines", () => {
   const fabric = st.rows.find((r) => r.label === "Purchase of Fabric");
   const wooden = st.rows.find((r) => r.label === "Purchase of Wooden");
   const mIdx = st.columns.findIndex((c) => c.key === "2026-03");
-  assert.equal(fabric.values[mIdx], 60000);
-  assert.equal(wooden.values[mIdx], 30000);
+  assert.equal(fabric.values[mIdx], -60000); // money out reads negative (cash view, 2026-09-29)
+  assert.equal(wooden.values[mIdx], -30000);
 });
 
 test("buildStatement — unmapped contra account lands in Unallocated", () => {
@@ -172,7 +172,7 @@ test("buildStatement — account lines nest under their COA parent with a subtot
   assert.ok(parent, "parent cluster row missing");
   assert.equal(parent.groupId, "GENERAL_EXPENSE>900-S001");
   assert.equal(parent.accountCode, "900-S001");
-  assert.equal(parent.values[mIdx], 100000); // outflow sections display payments positive
+  assert.equal(parent.values[mIdx], -100000); // money out reads negative (cash view, 2026-09-29)
   const child = st.rows.find((r) => r.kind === "line" && r.label === "STAFFS' EPF");
   assert.equal(child.groupId, "GENERAL_EXPENSE>900-S001");
   assert.equal(child.depth, parent.depth + 1);
@@ -180,7 +180,7 @@ test("buildStatement — account lines nest under their COA parent with a subtot
   assert.equal(flatRow.groupId, "GENERAL_EXPENSE"); // untouched
   // The section subtotal still covers everything once.
   const ge = st.rows.find((r) => r.kind === "group" && r.section === "GENERAL_EXPENSE" && r.groupId === "GENERAL_EXPENSE");
-  assert.equal(ge.values[mIdx], 115000);
+  assert.equal(ge.values[mIdx], -115000);
 });
 
 test("buildStatement — a lone COA child stays flat; RM stock rows join their purchase parent", () => {
@@ -234,7 +234,7 @@ test("buildStatement — supplier category nests Opening rows under their purcha
   const parent = st.rows.find((r) => r.kind === "group" && r.label === "PURCHASE - FILLER");
   assert.ok(parent, "filler parent missing");
   const mIdx = st.columns.findIndex((c) => c.key === "2026-03");
-  assert.equal(parent.values[mIdx], 50000);
+  assert.equal(parent.values[mIdx], -50000);
   // Unmapped supplier stays flat under the section.
   const mystery = st.rows.find((r) => r.kind === "line" && r.label.includes("MYSTERY"));
   assert.equal(mystery.groupId, "RAW_MATERIALS");
@@ -287,11 +287,11 @@ test("buildStatement — RM block orders groups, payees, opening, advance, unall
   ]);
   const mIdx = st.columns.findIndex((c) => c.key === "2026-03");
   const val = (label) => rmLines.find((r) => r.label === label).values[mIdx];
-  assert.equal(val("PLYWOOD"), 6000);
-  assert.equal(val("Supplier advance / deposit"), 4000);
-  assert.equal(val("Houzs Century Sdn Bhd (other creditor)"), 20000);
-  assert.equal(val("Opening creditors settlement"), 30000);
-  assert.equal(val("Unallocated raw material"), 4000);
+  assert.equal(val("PLYWOOD"), -6000);
+  assert.equal(val("Supplier advance / deposit"), -4000);
+  assert.equal(val("Houzs Century Sdn Bhd (other creditor)"), -20000);
+  assert.equal(val("Opening creditors settlement"), -30000);
+  assert.equal(val("Unallocated raw material"), -4000);
 });
 
 test("rmLineOrder — unallocated always after every named row", () => {
@@ -318,8 +318,8 @@ test("buildStatement — DIRECT_LABOUR legs split by department via deptSplit", 
   });
   const mIdx = st.columns.findIndex((c) => c.key === "2026-03");
   const val = (label) => st.rows.find((r) => r.kind === "line" && r.label === label).values[mIdx];
-  assert.equal(val("SEWING"), 7000);
-  assert.equal(val("CUTTING"), 3000);
+  assert.equal(val("SEWING"), -7000);
+  assert.equal(val("CUTTING"), -3000);
   assert.ok(!st.rows.some((r) => r.kind === "line" && r.label === "ACCRUAL - SALARY"));
 
   const st2 = cf.buildStatement({
@@ -328,7 +328,7 @@ test("buildStatement — DIRECT_LABOUR legs split by department via deptSplit", 
   });
   const acc = st2.rows.find((r) => r.kind === "line" && r.label === "ACCRUAL - SALARY");
   assert.equal(acc.section, "DIRECT_LABOUR");
-  assert.equal(acc.values[mIdx], 10000);
+  assert.equal(acc.values[mIdx], -10000);
 });
 
 test("rmLineOrder — 'Suppliers settled via' rows sit with the other-creditor zone", () => {
@@ -365,7 +365,7 @@ test("buildStatement — RM leg on a non-control account keeps its own name", ()
   const mIdx = st.columns.findIndex((c) => c.key === "2026-03");
   const line = st.rows.find((r) => r.kind === "line" && r.label === "PURCHASE - FABRIC");
   assert.equal(line.section, "RAW_MATERIALS");
-  assert.equal(line.values[mIdx], 8000);
+  assert.equal(line.values[mIdx], -8000);
   assert.ok(!st.rows.some((r) => r.kind === "line" && r.label === "Unallocated raw material"));
 });
 
@@ -387,8 +387,8 @@ test("buildStatement — rmSplit keyed sourceId@account overrides the plain key"
   });
   const mIdx = st.columns.findIndex((c) => c.key === "2026-03");
   const val = (label) => st.rows.find((r) => r.kind === "line" && r.label === label)?.values[mIdx];
-  assert.equal(val("Suppliers settled via X"), 6000);
-  assert.equal(val("fallback line"), 4000);
+  assert.equal(val("Suppliers settled via X"), -6000);
+  assert.equal(val("fallback line"), -4000);
 });
 
 test("rmLineOrder — per-supplier opening/unallocated rows keep their zones", () => {

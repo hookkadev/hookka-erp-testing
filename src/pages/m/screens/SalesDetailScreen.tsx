@@ -20,8 +20,7 @@
 import { useState, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useCachedJson } from "@/lib/cached-fetch";
-import { StatusPill } from "../components";
-import { FormSheet } from "../components";
+import { StatusPill, FormSheet, ResponsiveActionDock } from "../components";
 import { M } from "../theme";
 import { editSalesOrderSpec, newDeliveryOrderSpec } from "../config/forms";
 import { type FormSpec } from "../config/form-types";
@@ -445,13 +444,11 @@ export function SalesDetailScreen() {
       />
 
       {toast ? (
+        <ResponsiveActionDock scope="detail" phoneBottom={84} zIndex={90}>
         <div
           style={{
-            position: "fixed",
-            left: 18,
-            right: 18,
-            bottom: "calc(84px + env(safe-area-inset-bottom))",
-            zIndex: 90,
+            width: "calc(100% - 36px)",
+            maxWidth: 520,
             background: M.raisin,
             color: "#fff",
             borderRadius: 13,
@@ -463,6 +460,7 @@ export function SalesDetailScreen() {
         >
           {toast}
         </div>
+        </ResponsiveActionDock>
       ) : null}
     </div>
   );

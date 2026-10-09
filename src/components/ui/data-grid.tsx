@@ -230,7 +230,8 @@ export type DataGridProps<T> = {
   onFilteredDataChange?: (rows: T[]) => void;
   // Enables the toolbar Export button. `exportName` is the filename base. The
   // built-in "Listing" export is WYSIWYG — the CURRENT visible columns (in
-  // order) over the CURRENT filtered+sorted rows. `detailExport` adds a second
+  // order) over the CURRENT filtered+sorted rows, or only the ticked rows when
+  // any are ticked. `detailExport` adds a second
   // option (e.g. an AutoCount per-line "Detail Listing"); it is handed the same
   // filtered+sorted rows so it honours the on-screen filter too.
   exportName?: string;
@@ -382,10 +383,11 @@ function matchesFilter(value: any, filter: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Context Menu
+// Context Menu — also used by plain document tables (finance lists, owner
+// 2026-10-02: row actions on right-click), so it is exported.
 // ---------------------------------------------------------------------------
 
-function ContextMenu({
+export function ContextMenu({
   x,
   y,
   items,
@@ -417,7 +419,9 @@ function ContextMenu({
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) onClose();
     }
     function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") { onClose(); return; }
+      // preventDefault: this Esc is used up here, so a popup underneath
+      // (src/lib/escape-stack.ts) stays open.
+      if (e.key === "Escape") { e.preventDefault(); onClose(); return; }
       const enabledIndices = items.reduce<number[]>((acc, item, i) => {
         if (!item.disabled) acc.push(i);
         return acc;
@@ -2949,7 +2953,8 @@ export function DataGrid<T extends Record<string, any>>({
         )}
 
         {/* Export — WYSIWYG: the CURRENT visible columns over the CURRENT
-            filtered+sorted rows. Opt-in per page via the `exportName` prop. */}
+            filtered+sorted rows (only the ticked ones when any are ticked).
+            Opt-in per page via the `exportName` prop. */}
         {exportName && (
           <div className="relative">
             <button
@@ -2972,8 +2977,13 @@ export function DataGrid<T extends Record<string, any>>({
                   {(() => {
                     const today = new Date().toISOString().slice(0, 10);
                     const label = exportSheetLabel || exportName;
+                    // Ticked rows win when any are ticked; otherwise everything on screen.
+                    const ticked = selectable
+                      ? sortedData.filter((r) => selectedKeys.has(String(getNestedValue(r, keyField))))
+                      : [];
+                    const exportRows = ticked.length > 0 ? ticked : sortedData;
                     const listingAoa = (): Aoa =>
-                      buildListingAoa(visibleColumns as unknown as ExportColumn<T>[], sortedData);
+                      buildListingAoa(visibleColumns as unknown as ExportColumn<T>[], exportRows);
                     const run = (
                       aoa: Aoa | Promise<Aoa>,
                       kind: string,
@@ -3000,7 +3010,7 @@ export function DataGrid<T extends Record<string, any>>({
                     return (
                       <>
                         <div className="px-3 pt-1 pb-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#9CA3AF]">
-                          Listing · {sortedData.length} rows, {visibleColumns.length} cols
+                          Listing · {ticked.length > 0 ? `${ticked.length} ticked` : exportRows.length} rows, {visibleColumns.length} cols
                         </div>
                         <Item onClick={() => run(listingAoa(), "listing", "xlsx")}>Listing → Excel</Item>
                         <Item onClick={() => run(listingAoa(), "listing", "csv")}>Listing → CSV</Item>
@@ -3010,10 +3020,10 @@ export function DataGrid<T extends Record<string, any>>({
                             <div className="px-3 pt-1 pb-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#9CA3AF]">
                               {detailExport.label} · per line item
                             </div>
-                            <Item onClick={() => run(detailExport.build(sortedData), "detail", "xlsx")}>
+                            <Item onClick={() => run(detailExport.build(exportRows), "detail", "xlsx")}>
                               {detailExport.label} → Excel
                             </Item>
-                            <Item onClick={() => run(detailExport.build(sortedData), "detail", "csv")}>
+                            <Item onClick={() => run(detailExport.build(exportRows), "detail", "csv")}>
                               {detailExport.label} → CSV
                             </Item>
                           </>

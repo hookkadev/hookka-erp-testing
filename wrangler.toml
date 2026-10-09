@@ -299,7 +299,7 @@ SENTRY_DSN = "https://9ad06534a79eed8df457becbe2a2244f@o4511302465814528.ingest.
 # (prod). Do NOT also define it here — Cloudflare rejects the deploy with
 # "Binding name 'SUPABASE_PROJECT_REF' already in use" (caused the 2026-05-30
 # deploy failure). Keep it commented; the worker reads it from the dashboard.
-# SUPABASE_PROJECT_REF = "vpwdqtsxexpiqxzweivd"
+# SUPABASE_PROJECT_REF = "<prod-ref>"
 # Uncomment + fill once the Google Cloud Console step is done. Empty values
 # keep the OAuth route returning 503 (fails closed, see auth-oauth.ts).
 # OAUTH_GOOGLE_CLIENT_ID = ""

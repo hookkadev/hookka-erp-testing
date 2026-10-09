@@ -84,9 +84,18 @@ function makeDb() {
   }
 
   async function batch(stmts) {
-    const out = [];
-    for (const s of stmts) out.push(await s.run());
-    return out;
+    // The real adapter runs a batch as ONE transaction (sql.begin in
+    // supabase-compat.ts): a statement that raises rolls back every statement
+    // before it. Model that, or "nothing was written" cannot be asserted.
+    const snapshot = structuredClone(tables);
+    try {
+      const out = [];
+      for (const s of stmts) out.push(await s.run());
+      return out;
+    } catch (e) {
+      for (const k of Object.keys(tables)) tables[k] = snapshot[k];
+      throw e;
+    }
   }
 
   function getCol(row, col) {
@@ -201,7 +210,26 @@ function makeDb() {
       if (b) applySet(b, m[1], binds.slice(0, -1));
       return;
     }
-    // PO receivedQty +/- (cascades)
+    // T-006 R2 — the guarded increment. Binds: (check qty, increase, id).
+    // Evaluated against the row's REAL value at write time, like Postgres does
+    // after waiting on the row lock, and it raises the way the failed cast does.
+    m = sql.match(/^UPDATE purchase_order_items SET receivedQty = CASE WHEN receivedQty \+ \? <= quantity \* 1\.1 THEN receivedQty \+ \? ELSE CAST\('po_line_over_receipt:' \|\| id AS DOUBLE PRECISION\) END WHERE id = \?/i);
+    if (m) {
+      const [check, bump, id] = binds;
+      const poi = tables.purchase_order_items.find((r) => String(r.id) === String(id));
+      if (!poi) return;
+      const cur = Number(poi.receivedQty) || 0;
+      if (cur + Number(check) <= Number(getCol(poi, "quantity")) * 1.1) {
+        poi.receivedQty = cur + Number(bump);
+        return;
+      }
+      const err = new Error(
+        `invalid input syntax for type double precision: "po_line_over_receipt:${poi.id}"`,
+      );
+      err.code = "22P02";
+      throw err;
+    }
+    // PO receivedQty decrement (cascades). An increase is the guarded form above.
     m = sql.match(/^UPDATE purchase_order_items SET receivedQty = receivedQty ([+-]) \? WHERE id = \?/i);
     if (m) {
       const sign = m[1] === "+" ? 1 : -1;
@@ -835,4 +863,66 @@ test("PI PAID cannot be line-edited (locked)", async () => {
   assert.equal(res.status, 409);
   assert.match((await res.json()).error, /DRAFT/);
   assert.equal(Number(db.tables.grn_items.find((r) => r.id === 201).invoiced_qty), 6);
+});
+
+// ---------------------------------------------------------------------------
+// T-006 R2 — a qty correction that RAISES accepted qty also raises the PO
+// line's receivedQty, so it goes through the same 110% ceiling as a receipt.
+// The counter statements used to run in their own batch after the stock
+// adjustment had committed; they now ride in the same one.
+// seed(): PO line ordered 10 (ceiling 11), receivedQty 10, this GRN accepted 5.
+// ---------------------------------------------------------------------------
+test("GRN POSTED edit: raising a line past 110% of the PO line is refused, nothing moves", async () => {
+  const db = makeDb();
+  seed(db);
+  const grnRoot = mount(grnApp, db);
+
+  const grn = await getGrn(grnRoot, "grn-1");
+  const res = await editGrnAccepted(grnRoot, grn, 0, 7); // 10 + 2 = 12 > 11
+  assert.equal(res.status, 400);
+  assert.match((await res.json()).error, /already received 10 \+ this correction 2 = 12/);
+
+  assert.equal(db.tables.purchase_order_items.find((r) => r.id === "poi-1").receivedQty, 10);
+  assert.equal(db.tables.grn_items.find((r) => r.id === 201).acceptedQty, 5);
+  assert.equal(db.tables.raw_materials.find((r) => r.id === "rm-foam-1").balanceQty, 5);
+  assert.equal(db.tables.cost_ledger.length, 0);
+});
+
+test("GRN POSTED edit: a raced increase rolls the stock adjustment back and returns 409", async () => {
+  const db = makeDb();
+  seed(db);
+  const grnRoot = mount(grnApp, db);
+  const poi = () => db.tables.purchase_order_items.find((r) => r.id === "poi-1");
+  const grn = await getGrn(grnRoot, "grn-1");
+
+  // The edit reads receivedQty 10 (10 + 1 = 11, allowed). Before its batch
+  // runs, another receipt takes the last unit under the ceiling.
+  const realPrepare = db.prepare;
+  let fired = false;
+  db.prepare = (rawSql) => {
+    const stmt = realPrepare(rawSql);
+    if (!/SELECT id, quantity, receivedQty FROM purchase_order_items WHERE purchaseOrderId = \?/i.test(rawSql)) {
+      return stmt;
+    }
+    const realAll = stmt.all.bind(stmt);
+    stmt.all = async () => {
+      const res = await realAll();
+      if (!fired) {
+        fired = true;
+        poi().receivedQty = 11;
+      }
+      return res;
+    };
+    return stmt;
+  };
+
+  const res = await editGrnAccepted(grnRoot, grn, 0, 6);
+  assert.equal(res.status, 409);
+  assert.match((await res.json()).error, /received by another GRN/);
+
+  assert.equal(poi().receivedQty, 11, "only the other receipt's unit is on the PO line");
+  assert.equal(db.tables.grn_items.find((r) => r.id === 201).acceptedQty, 5, "line qty rolled back");
+  assert.equal(db.tables.raw_materials.find((r) => r.id === "rm-foam-1").balanceQty, 5, "stock rolled back");
+  assert.equal(db.tables.rm_batches.find((r) => r.id === "rmb-grn-grn-1-1").remainingQty, 5);
+  assert.equal(db.tables.cost_ledger.length, 0, "no ledger entry for the refused edit");
 });

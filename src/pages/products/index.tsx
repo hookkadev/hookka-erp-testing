@@ -12,6 +12,8 @@ import { Plus, Trash2, Check, Calendar, History, Pencil, FileDown, Loader2, X as
 import { verifiedSave, formatMismatchError } from "@/lib/verified-save";
 import { useNavGuard } from "@/lib/use-nav-guard";
 import { familyOf } from "@/lib/product-family";
+import { DEFAULT_EXTRA_WIP_TYPES, BUILT_IN_WIP_TYPES, wipTypeCode, wipTypeAllowed } from "@/lib/wip-types";
+import { BOM_PRODUCT_TYPES, VARIANT_FIELDS, DEFAULT_VARIANT_FIELDS } from "@/lib/bom-variant-fields";
 import { MasterPriceHistoryDialog } from "./MasterPriceHistoryDialog";
 import { BatchImportDialog, type ImportColumn } from "@/components/ui/batch-import-dialog";
 import { PRODUCT_BULK_MATERIALS } from "@/api/lib/product-bulk-import";
@@ -910,7 +912,8 @@ type MaintenanceListKey =
   | "sofaLegHeights"
   | "sofaSpecials"
   | "sofaSizes"
-  | "sofaCompartments";
+  | "sofaCompartments"
+  | "wipTypes";
 
 // BedframeSize (code · label · dimensions) + the seed catalogs live in
 // @/lib/fg-variants (shared with the Add FG bulk-generate flow so they can't
@@ -944,6 +947,14 @@ type MaintenanceConfig = {
   // Sofa compartment pool (1A(LHF), 1A(RHF), 1NA, 2A(LHF)…) — the codes a sofa
   // model can be split into. Add FG bulk-generate lists these to tick per model.
   sofaCompartments: string[];
+  // Extra BOM WIP types (e.g. Sandback) on top of the six built-ins; see
+  // src/lib/wip-types.ts.
+  wipTypes: string[];
+  // Product types allowed per WIP type code; a missing code allows all three.
+  wipTypeProducts: Record<string, string[]>;
+  // BOM code-builder variant fields per product type; see
+  // src/lib/bom-variant-fields.ts.
+  bomVariantFields: Record<string, string[]>;
 };
 
 // Variants live in D1 under kv_config('variants-config'); see src/lib/kv-config.ts.
@@ -1020,6 +1031,9 @@ const DEFAULT_MAINTENANCE_CONFIG: MaintenanceConfig = {
   ],
   sofaSizes: FALLBACK_SOFA_SEAT_HEIGHTS,
   sofaCompartments: DEFAULT_SOFA_COMPARTMENTS,
+  wipTypes: DEFAULT_EXTRA_WIP_TYPES,
+  wipTypeProducts: {},
+  bomVariantFields: DEFAULT_VARIANT_FIELDS,
 };
 
 // Numeric seat sizes for the SOFA price columns, from the Maintenance config.
@@ -1046,7 +1060,7 @@ function sofaHeightsFromConfig(cfg: MaintenanceConfig): string[] {
   });
 }
 
-type MaintenanceTab = MaintenanceListKey | "fabrics";
+type MaintenanceTab = MaintenanceListKey | "fabrics" | "bomVariantFields";
 
 type FabricTrackingItem = {
   id: string;
@@ -1069,6 +1083,8 @@ const MAINTENANCE_TABS: { key: MaintenanceTab; label: string; description: strin
   { key: "sofaLegHeights", label: "Leg Heights", description: "Sofa leg height options with surcharge pricing", priced: true, section: "Sofa" },
   { key: "sofaSpecials", label: "Specials", description: "Sofa special order options with surcharge pricing", priced: true, section: "Sofa" },
   { key: "sofaCompartments", label: "Compartments", description: "Sofa compartment pool (1A(LHF), 1A(RHF), 1NA, 2A(LHF)…). Add FG bulk generate ticks which a model offers.", section: "Sofa" },
+  { key: "wipTypes", label: "WIP Types", description: "WIP component types in the BOM type dropdown. Tick which product types may use each one. The six built-in types are fixed; an added type (e.g. Sandback) follows the departments set in its BOM.", section: "BOM" },
+  { key: "bomVariantFields", label: "Variant Fields", description: "Variant fields in the BOM WIP code builder. Tick which product types offer each one. Each field is filled in from the sales order.", section: "BOM" },
   { key: "fabrics", label: "Fabrics", description: "Fabric price tier assignment — determines Price 1 or Price 2 for bedframe pricing", section: "Common" },
 ];
 
@@ -1114,6 +1130,11 @@ function parseMaintenanceConfig(parsed: VariantsConfig | null): MaintenanceConfi
       sofaSpecials: ensurePriced(parsed.sofaSpecials, DEFAULT_MAINTENANCE_CONFIG.sofaSpecials),
       sofaSizes: ensureStrings(parsed.sofaSizes, DEFAULT_MAINTENANCE_CONFIG.sofaSizes),
       sofaCompartments: ensureStrings(parsed.sofaCompartments, DEFAULT_MAINTENANCE_CONFIG.sofaCompartments),
+      wipTypes: ensureStrings(parsed.wipTypes, DEFAULT_MAINTENANCE_CONFIG.wipTypes),
+      wipTypeProducts: parsed.wipTypeProducts ?? {},
+      bomVariantFields: Object.fromEntries(
+        BOM_PRODUCT_TYPES.map(({ key }) => [key, ensureStrings(parsed.bomVariantFields?.[key], DEFAULT_VARIANT_FIELDS[key])]),
+      ),
     };
   } catch {
     return DEFAULT_MAINTENANCE_CONFIG;
@@ -1296,6 +1317,8 @@ function MaintenanceView() {
   // per-compartment Default BOM + Unit M3 controls (owner 2026-07-11), so it
   // gets its own render branch rather than the bare string editor.
   const isSofaCompartmentsTab = tab === "sofaCompartments";
+  const isVariantFieldsTab = tab === "bomVariantFields";
+  const isWipTypesTab = tab === "wipTypes";
   const currentStringList = !isFabricsTab && !isPricedTab && !isBedframeSizesTab && !isSofaCompartmentsTab ? (config[tab as MaintenanceListKey] as string[]) : [];
   const currentPricedList = !isFabricsTab && isPricedTab ? (config[tab as MaintenanceListKey] as PricedOption[]) : [];
   const currentBedframeSizes = isBedframeSizesTab ? config.bedframeSizes : [];
@@ -1392,6 +1415,49 @@ function MaintenanceView() {
         [k]: (prev[k] as string[]).map((o, i) => i === idx ? newVal : o),
       }));
     }
+  }
+
+  // Tick / untick one BOM variant field for one product type.
+  function toggleVariantField(type: string, field: string, on: boolean) {
+    if (!editMode) return;
+    setConfig(prev => {
+      const cur = prev.bomVariantFields[type] ?? [];
+      const next = on ? [...cur.filter(f => f !== field), field] : cur.filter(f => f !== field);
+      return { ...prev, bomVariantFields: { ...prev.bomVariantFields, [type]: next } };
+    });
+  }
+
+  // Tick / untick one product type on one WIP type (by code). A code with no
+  // saved list starts with every product type ticked.
+  function toggleWipTypeProduct(code: string, type: string, on: boolean) {
+    if (!editMode) return;
+    setConfig(prev => {
+      const saved = prev.wipTypeProducts[code];
+      const cur = Array.isArray(saved) ? saved : BOM_PRODUCT_TYPES.map(p => p.key);
+      const next = on ? [...cur.filter(t => t !== type), type] : cur.filter(t => t !== type);
+      return { ...prev, wipTypeProducts: { ...prev.wipTypeProducts, [code]: next } };
+    });
+  }
+
+  // Bedframe / Sofa / Accessory ticks shown on each Variant Fields and WIP
+  // Types row.
+  function productTypeTicks(isOn: (type: string) => boolean, onToggle: (type: string, on: boolean) => void) {
+    return (
+      <div className="flex flex-wrap gap-x-4 gap-y-1">
+        {BOM_PRODUCT_TYPES.map((pt) => (
+          <label key={pt.key} className="inline-flex items-center gap-1.5 text-sm text-gray-700">
+            <input
+              type="checkbox"
+              disabled={!editMode}
+              checked={isOn(pt.key)}
+              onChange={(e) => onToggle(pt.key, e.target.checked)}
+              className="accent-[#6B5C32]"
+            />
+            {pt.label}
+          </label>
+        ))}
+      </div>
+    );
   }
 
   // Bedframe Sizes inline editor — update one field (code / label / dimensions)
@@ -1626,7 +1692,7 @@ function MaintenanceView() {
                 >
                   {t.label}
                   <span className="ml-1.5 text-[10px] text-gray-400 font-normal">
-                    ({(() => { if (t.key === "fabrics") return fabricsList.length; const list = config[t.key as MaintenanceListKey]; return Array.isArray(list) ? list.length : 0; })()})
+                    ({(() => { if (t.key === "fabrics") return fabricsList.length; if (t.key === "bomVariantFields") return VARIANT_FIELDS.length; if (t.key === "wipTypes") return Object.keys(BUILT_IN_WIP_TYPES).length + config.wipTypes.length; const list = config[t.key as MaintenanceListKey]; return Array.isArray(list) ? list.length : 0; })()})
                   </span>
                 </button>
               </div>
@@ -1637,7 +1703,23 @@ function MaintenanceView() {
         <div className="p-6">
           <p className="text-sm text-gray-500 mb-4">{meta.description}</p>
 
-          {isFabricsTab ? (
+          {isVariantFieldsTab ? (
+            /* ── BOM Variant Fields: one row per field, ticked per product type ── */
+            <div className="space-y-1.5">
+              {VARIANT_FIELDS.map((f, idx) => (
+                <div key={f.category} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2 bg-[#FAF9F7] border border-[#E2DDD8] rounded-md hover:bg-white transition-colors">
+                  <div className="flex items-center gap-2 min-w-0 sm:w-56">
+                    <span className="text-[10px] text-gray-400 font-mono w-6 flex-shrink-0">{idx + 1}</span>
+                    <span className="text-sm text-[#111827] font-medium">{f.label}</span>
+                  </div>
+                  {productTypeTicks(
+                    (type) => config.bomVariantFields[type]?.includes(f.category) ?? false,
+                    (type, on) => toggleVariantField(type, f.category, on),
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : isFabricsTab ? (
             /* ── Fabrics Tab ── */
             <div className="space-y-3">
               <div className="relative">
@@ -1959,6 +2041,53 @@ function MaintenanceView() {
                       </div>
                     ))
                   )
+                ) : isWipTypesTab ? (
+                  /* WIP Types: the fixed built-ins, then the added types; each row
+                   * ticked per product type it is offered for. */
+                  <>
+                    {Object.entries(BUILT_IN_WIP_TYPES).map(([code, s], idx) => (
+                      <div key={code} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2 bg-[#FAF9F7] border border-[#E2DDD8] rounded-md hover:bg-white transition-colors">
+                        <div className="flex items-center gap-2 min-w-0 sm:w-56">
+                          <span className="text-[10px] text-gray-400 font-mono w-6 flex-shrink-0">{idx + 1}</span>
+                          <span className="text-sm text-[#111827] font-medium">{s.label}</span>
+                          <span className="text-[10px] text-gray-400">Built-in</span>
+                        </div>
+                        {productTypeTicks(
+                          (type) => wipTypeAllowed(code, type, config.wipTypeProducts),
+                          (type, on) => toggleWipTypeProduct(code, type, on),
+                        )}
+                      </div>
+                    ))}
+                    {config.wipTypes.map((entry, idx) => (
+                      <div key={`wipTypes-${idx}`} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2 bg-[#FAF9F7] border border-[#E2DDD8] rounded-md hover:bg-white transition-colors">
+                        <div className="flex items-center gap-2 min-w-0 sm:w-56">
+                          <span className="text-[10px] text-gray-400 font-mono w-6 flex-shrink-0">{Object.keys(BUILT_IN_WIP_TYPES).length + idx + 1}</span>
+                          {editMode ? (
+                            <input
+                              value={entry}
+                              onChange={(e) => updateEntryValue(idx, e.target.value)}
+                              className="text-sm font-medium border border-[#E2DDD8] rounded px-2 py-1 bg-white focus:outline-none focus:border-[#6B5C32] w-40 min-w-0"
+                            />
+                          ) : (
+                            <span className="text-sm text-[#111827] font-medium">{entry}</span>
+                          )}
+                        </div>
+                        {productTypeTicks(
+                          (type) => wipTypeAllowed(wipTypeCode(entry), type, config.wipTypeProducts),
+                          (type, on) => toggleWipTypeProduct(wipTypeCode(entry), type, on),
+                        )}
+                        {editMode && (
+                          <button
+                            onClick={() => removeEntry(idx)}
+                            className="ml-auto p-1.5 text-[#9A3A2D] hover:text-[#7A2E24] hover:bg-[#F9E1DA] rounded"
+                            title="Remove"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </>
                 ) : (
                   currentStringList.length === 0 ? (
                     <div className="text-center py-10 text-sm text-gray-400 bg-[#FAF9F7] rounded-md border border-dashed border-[#E2DDD8]">

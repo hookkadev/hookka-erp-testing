@@ -8,7 +8,7 @@ import { DeptEfficiencyCard } from "./ProductionDailyPanels";
 import { DepartmentsView } from "./DepartmentsView";
 import { AttendanceLogCard } from "./AttendanceLogCard";
 import { filterSlice } from "./employee-filter";
-import { TAUPE, TEAL, MUTED, BORDER, fmtN, inPeriod, overallEfficiencyPct, periodLabel, dayLabel, type Period, type PeopleSub } from "./dashboard-shared-lib";
+import { KPI_ROW, TAUPE, TEAL, MUTED, BORDER, fmtN, inPeriod, overallEfficiencyPct, periodLabel, dayLabel, type Period, type PeopleSub } from "./dashboard-shared-lib";
 import { Kpi, LiveBadge, MissingNote } from "./dashboard-shared";
 
 // Real data from GET /api/dashboard/prototype — the `employee` +
@@ -181,7 +181,7 @@ export function EmployeesView({
       {/* Two real metrics; the config constants (target, working day) ride
           along as a baseline line and a subtitle instead of their own tiles. */}
       <div className="space-y-2">
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className={KPI_ROW}>
         <Kpi
           label="Headcount"
           value={fmtN(headcount)}

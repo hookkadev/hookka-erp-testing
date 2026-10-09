@@ -28,6 +28,8 @@ import { LockBanner } from "@/components/ui/lock-banner";
 import { ObjectPageHeader } from "@/components/ui/object-page-header";
 import { useCachedJson, invalidateCache, invalidateCachePrefix, isUnknownOutcome } from "@/lib/cached-fetch";
 import { RecordLoadError } from "@/components/ui/record-load-error";
+import { StagingStageSkipCard } from "@/components/staging-stage-skip";
+import { StagingDeliverySkipCard } from "@/components/staging-delivery-skip";
 import { getCurrentUser } from "@/lib/auth";
 import type { SalesOrder, SOStatus, Customer } from "@/types";
 
@@ -1206,7 +1208,7 @@ export default function SalesOrderDetailPage() {
               <button onClick={() => setBomError({ open: false, incompleteProducts: [] })} className="text-[#9CA3AF] hover:text-[#374151]"><X className="h-5 w-5" /></button>
             </div>
             <p className="text-sm text-[#374151]">
-              Cannot confirm — the following products have no BOM yet:
+              Cannot confirm — these products have no WIP components in their BOM yet:
             </p>
             <ul className="space-y-1 text-sm bg-[#FBF3F1] border border-[#E8B2A1] rounded-md p-3 max-h-64 overflow-y-auto">
               {bomError.incompleteProducts.map((p) => (
@@ -1216,7 +1218,7 @@ export default function SalesOrderDetailPage() {
               ))}
             </ul>
             <p className="text-xs text-[#6B7280]">
-              Please complete their BOM in Products &rarr; BOM first, then retry. The order remains in DRAFT status.
+              Fill in their WIP components in Products &rarr; BOM first, then retry. The order remains in DRAFT status.
             </p>
             <div className="flex justify-end gap-3">
               {bomError.incompleteProducts.length === 1 && (
@@ -1651,6 +1653,10 @@ export default function SalesOrderDetailPage() {
 
       {/* Order Progress — production + delivery glance card, mobile-first */}
       <OrderProgressCard linkedPOs={linkedPOs} linkedDOs={linkedDOs} />
+
+      {/* Staging-only: renders nothing off the staging host. */}
+      <StagingStageSkipCard linkedPOs={linkedPOs} onChanged={fetchOrder} />
+      <StagingDeliverySkipCard soId={order.id} onChanged={fetchOrder} />
 
       {/* R15 — hands finished stock to this order, and takes it back. Renders
           nothing when there is neither stock nor a holding to show. */}

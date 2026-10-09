@@ -1,6 +1,148 @@
 # Hookka ERP — Work Tracker
 
-> **Last verified: 2026-09-29**: branch `fix/dev-05-allocation-loser-note` (→ `staging`) added below (DEV-05 A9, BUG-223, its entry is the newest).
+> **Last verified: 2026-10-09**: branch `fix/dev-05-allocation-loser-note` (→ `staging`)
+> synced with staging and extended: DEV-05 A9 (BUG-2026-10-09-273, renumbered from -223)
+> plus the A7 resolver pins. Its entry is below, dated 2026-09-29.
+> **Last verified: 2026-10-09**: branch `feat/po-picker-show-supplier` (BUG-98 follow-up to `staging`) added item 5 to the BUG-98 entry below.
+> **Last verified: 2026-10-09**: branch `fix/po-line-material-supplier-only` (BUG-98 follow-up to `staging`) added item 4 to the BUG-98 entry below.
+> **Last verified: 2026-10-09**: branch `feat/po-supplier-combobox-material-modal` (BUG-98 to `staging`) added below (its entry is the newest).
+> **Last verified: 2026-10-09**: branch `feat/dashboard-compare-plant-card-drills` (to `staging`) added item 11 to the Plant Load entry below.
+> **Last verified: 2026-10-09**: branch `feat/batch-exports-from-houzs` (to `staging`) added below (its entry is the newest).
+> **Last verified: 2026-10-09**: branch `feat/dev64-price-list-default-column` (DEV-64 to `staging`) added below (its entry is the newest).
+> **Last verified: 2026-10-09**: branch `fix/worker-i18n-popups-and-date` (to `staging`, then `main`) added below (in progress, its entry is the newest).
+> **Last verified: 2026-10-09**: branch `feat/dashboard-month-static-kpis` (to `staging`) added below (its entry is the newest).
+> **Last verified: 2026-10-08**: branch `feat/plant-load-14d` (to `staging`, BUG-2026-10-08-269) added below (its entry is the newest).
+> **Last verified: 2026-10-08**: branch `fix/bom-module-guide-anchors` (to `staging`) added item 5b to the editable WIP types entry below.
+> **Last verified: 2026-10-08**: branch `feat/bom-variant-fields-list` (to `staging`) added below (its entry is the newest).
+> **Last verified: 2026-10-08**: branch `fix/kpi-delivered-last-leg-myt` (to `staging`, BUG-2026-10-08-267) added below (its entry is the newest).
+> **Last verified: 2026-10-07**: branch `feat/kpi-dept-efficiency-daily-chart` (DEV-36 follow-up to `staging`) added below (its entry is the newest).
+> **Last verified: 2026-10-07**: branch `chore/sync-staging-from-main-1007` (staging<-main merge): both trackers merged, main-only entries added, entry below.
+> **Last verified: 2026-10-07**: branch `feat/dev37-kpi-self-view-to-main` (DEV-37 staging to `main`) added below (its entry is the newest).
+> **Last verified: 2026-10-07**: branch `fix/rm-uom-bottle-main` (DEV-20 follow-up to `main`, BUG-2026-10-07-262) added below (its entry is the newest).
+> **Last verified: 2026-10-07**: branch `fix/sales-transfer-credit-block` (to `staging`, BUG-2026-10-07-263) added below (its entry is the newest).
+> **Last verified: 2026-10-06**: branch `feat/dev37-kpi-checklist-admin-only` (DEV-37 to `staging`) added item 6 of the DEV-37 entry below.
+> **Last verified: 2026-10-06**: branch `feat/dev37-kpi-office-self-view` (DEV-37 to `staging`) added below (its entry is the newest).
+> **Last verified: 2026-10-06**: branch `chore/sync-staging-from-main-1006` (staging<-main merge): both trackers merged, main-only entries added, entries on both sides kept once in staging's wording. Sync entry added below.
+> **Last verified: 2026-10-06**: branch `feat/kpi-department-efficiency` (DEV-36 part 3 to `staging`) added below (its entry is the newest).
+> **Last verified: 2026-10-06**: branch `fix/kpi-remove-floor-workers` (to `staging`) updated the DEV-36 part 2 entry below: floor workers removed again.
+> **Last verified: 2026-10-06**: branch `feat/kpi-efficiency-multi-dept` (DEV-36 part 2 to `staging`) added below (its entry is the newest), and closed item 5 of the DEV-36 entry (staging check).
+> **Last verified: 2026-10-06**: branch `feat/kpi-efficiency-department` (DEV-36 to `staging`) added below (its entry is the newest).
+> **Last verified: 2026-10-06**: branch `feat/pay-card-all-workers` (to `staging`) added item 5 (monthly workers) of the per-day card entry below.
+> **Last verified: 2026-10-06**: branch `feat/daily-pay-card-past-months` (to `staging`) closed item 3 of the per-day card entry below.
+> **Last verified: 2026-10-06**: branch `feat/daily-pay-card` (to `staging`, BUG-2026-10-06-259) added below (its entry is the newest).
+> **Last verified: 2026-10-05**: branch `feat/topbar-profile` (to `staging`) added below (its entry is the newest).
+> **Last verified: 2026-10-05**: branch `fix/worker-pay-advance-line` (to `staging`) added below (its entry is the newest).
+> **Last verified: 2026-10-05**: branch `feat/bom-manual-minutes` (to `staging`) added below (its entry is the newest).
+> **Last verified: 2026-10-05**: branch `feat/kpi-assign-unassign` (to `staging`) added below (its entry is the newest).
+> **Last verified: 2026-10-02**: branch `fix/dashboard-exp-kpi-scale` (to `staging`, BUG-2026-10-02-252) added below (its entry is the newest).
+> **Last verified: 2026-10-02**: branch `feat/dashboard-plan-vs-actual-jobcards` (to `staging`) added below (its entry is the newest).
+> **Last verified: 2026-10-02**: branch `chore/sync-staging-from-main-1002` (staging<-main merge): both trackers merged, main-only entries added, main's duplicate BUG-34 entry (mislabelled BUG-2026-09-28-210) dropped for staging's (-233), and staging's accessories entry now carries main's number BUG-2026-10-01-244.
+> **Last verified: 2026-10-02**: branch `feat/dashboard-exp-mobile` (to `staging`) added below (its entry is the newest).
+> **Last verified: 2026-10-02**: branch `feat/schedule-dept-share-table` (to `staging`) entry got item 4 (summary-only email, full list filter).
+> **Last verified: 2026-10-02**: branch `feat/schedule-dept-share-table` (to `staging`) added below (its entry is the newest).
+> **Last verified: 2026-10-02**: branch `fix/schedule-email-full-list-row` (to `staging`) added below (its entry is the newest).
+> **Last verified: 2026-10-02**: branch `fix/efficiency-email-dept-table` (to `staging`, BUG-2026-10-02-248) added below (its entry is the newest).
+> **Last verified: 2026-10-06**: branch `feat/pay-card-main` (to `main`, BUG-2026-10-06-259) added below (its entry is the newest).
+> **Last verified: 2026-10-05**: fill job cards stuck at 0 minutes (#696, BUG-2026-10-05-256) closed ✅ with its prod run.
+> **Last verified: 2026-10-05**: branch `fix/worker-pay-late-daily-rate` (to `main`, BUG-2026-10-05-258) added below (its entry is the newest).
+> **Last verified: 2026-10-05**: branch `fix/worker-pay-advance-line-main` (to `main`, BUG-2026-10-05-257) added below (its entry is the newest).
+> **Last verified: 2026-10-05**: branch `fix/backfill-zero-minutes-open-cards` (to `main`, BUG-2026-10-05-256) added below (its entry is the newest).
+> **Last verified: 2026-10-05**: branch `fix/bom-master-template-accessory` (to `main`, BUG-2026-10-05-255) added below (its entry is the newest).
+> **Last verified: 2026-10-05**: branch `fix/bom-minutes-leading-zero-main` (to `main`, BUG-2026-10-05-254) added below (its entry is the newest).
+> **Last verified: 2026-10-05**: branch `feat/bom-manual-minutes-main` (to `main`) added below (its entry is the newest).
+> **Last verified: 2026-10-05**: branch `feat/kpi-assign-unassign-to-main` (to `main`) added below (its entry is the newest).
+> **Last verified: 2026-10-05**: branch `feat/permissions-tab-main` (Permissions tab, staging to `main`) added below (its entry is the newest).
+> **Last verified: 2026-10-02**: finance right-click row menus + Esc + fund transfer description edit (#680) closed ✅ with its prod check.
+> **Last verified: 2026-10-02**: branch `feat/m-install-and-desktop-switch` (to `main`, BUG-2026-10-02-250) added below (its entry is the newest).
+> **Last verified: 2026-10-02**: branch `feat/dev31-worker-dept-hours-main` (DEV-31 to `main`) added below (its entry is the newest).
+> **Last verified: 2026-10-02**: branch `feat/schedule-summary-email-to-main` (to `main`) added below (its entry is the newest).
+> **Last verified: 2026-10-02**: one Scan on Payment Vouchers (#673) closed ✅ with its prod check.
+> **Last verified: 2026-10-02**: branch `feat/email-reports-to-main` (to `main`) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: DEV-31 entry updated with the staging test run (#651 merged, measured on staging).
+> **Last verified: 2026-10-01**: branch `feat/dev08-pillow-follows-sofa` (DEV-08 rule B) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: branch `fix/accessory-l1-only-job-cards` (to `staging`, BUG-2026-10-01-244, was 241 on staging) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: branch `fix/schedule-email-size` (to `staging`) added item 10 under BUG-36 (2026-09-29 entry).
+> **Last verified: 2026-10-01**: branch `feat/dev31-worker-dept-hours` (to `staging`) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: branch `feat/email-report-multi-times` (to `staging`) added items 7, 8 and 9 under BUG-36 (2026-09-29 entry).
+> **Last verified: 2026-10-01**: branch `fix/staging-topbar-patch-notes-hidden` (to `staging`, STAGING ONLY) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: branch `feat/staging-view-as-user` (to `staging`, STAGING ONLY) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: branch `feat/staging-role-switcher` (to `staging`, STAGING ONLY) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: branch `fix/staging-mail-bare-raw` (to `staging`, STAGING ONLY) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: branch `fix/staging-mail-source-diagnostics` (to `staging`, STAGING ONLY) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: branch `fix/staging-mail-raw-body` (to `staging`, STAGING ONLY) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: branch `fix/staging-mail-show-source` (to `staging`, STAGING ONLY) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: branch `fix/staging-sticky-topbar` (to `staging`, STAGING ONLY) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: branch `feat/dev22-worker-penalty` (to `staging`) added below (in progress, its entry is the newest).
+> **Last verified: 2026-10-01**: branch `feat/staging-api-log-in-topbar` (to `staging`, STAGING ONLY) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: branch `fix/staging-mail-empty-body` (to `staging`, STAGING ONLY) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: branch `fix/grn-number-collision` added below.
+> **Last verified: 2026-10-01**: corrected two staging-tool claims below: the today-override cache rows are not wiped nightly, and the delivery-skip notices go to sanitised `@staging.invalid` addresses in code (live UNMEASURED).
+> **Last verified: 2026-10-01**: branch `feat/staging-today-override` (staging-only today override) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: branch `feat/staging-mail-outbox` (to `staging`, STAGING ONLY) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: branch `feat/staging-schema-check` (to `staging`, STAGING ONLY) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: branch `feat/staging-api-log` (to `staging`, STAGING ONLY) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: branch `feat/staging-delivery-skip` (to `staging`, STAGING ONLY) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: one Scan on Payment Vouchers in progress (branch `feat/pv-scan-one-button`).
+> **Last verified: 2026-10-01**: branch `fix/bom-editor-layered` (BUG-2026-10-01-247, Edit BOM tree back to layered colour cards) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: OCB attachments + New AP Payment popup (#668) closed ✅ with its prod check.
+> **Last verified: 2026-10-01**: OCB attachments + New AP Payment popup in progress (branch `feat/ocb-attachments-ap-popup`).
+> **Last verified: 2026-10-01**: accessories entry (BUG-2026-10-01-244) got item 7, the (FC) follow-up on branch `claude/main-accessories-duplicate-cards-fdxaik`.
+> **Last verified: 2026-10-01**: finance plan batch 4 (#665) closed ✅ with its prod check — the plan is done.
+> **Last verified: 2026-10-01**: finance plan batch 3 (#664) closed ✅ with its prod check; batch 4 in progress (branch `feat/finance-tables-drills`).
+> **Last verified: 2026-10-01**: finance plan batch 2 (#663) closed ✅ with its prod check; batch 3 in progress (branch `feat/finance-scan-learn`).
+> **Last verified: 2026-10-01**: finance plan batch 2 in progress (branch `feat/pv-popup-form-transfer`).
+> **Last verified: 2026-10-01**: finance plan batch 1 (#662) closed ✅ with its prod check.
+> **Last verified: 2026-10-01**: owner said start — batch 1 of the finance plan in progress (branch `feat/finance-sidebar-accordion-selfcheck-wording`).
+> **Last verified: 2026-10-01**: branch `fix/worker-history-snapshot-stale` (BUG-2026-10-01-245) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: branch `fix/accessory-l1-only-job-cards-main` (BUG-2026-10-01-244, staging #656) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: finance improvement plan logged below as ⚪ queued (owner confirmed every point; start on his word).
+> **Last verified: 2026-10-01**: branch `fix/dev08-accessory-so-ready` (DEV-08) added below (its entry is the newest).
+> **Last verified: 2026-10-01**: branch `feat/cn-pdf-size-column` (DEV-30) added below (its entry is the newest).
+> **Last verified: 2026-09-30**: branch `chore/sync-staging-from-main-0930`, staging<-main merge added below (its entry is the newest).
+> **Last verified: 2026-09-30**: branch `feat/dev22-worker-penalty` (to `staging`) added below (in progress, its entry is the newest).
+> **Last verified: 2026-09-30**: #617 entry item 4 — owner re-posted the opening; creditor Self-check card green (measured).
+> **Last verified: 2026-09-30**: #617 (BUG-2026-09-30-229/-230, Self-check reconciliations + cancelled opening seeds) closed ✅ below with its prod check.
+> **Last verified: 2026-09-30**: branch `fix/pillow-fab-sew-sticker` (DEV-26) added below (its entry is the newest).
+> **Last verified: 2026-09-30**: branch `fix/selfcheck-recon-and-opening-seeds` added below (its entry is the newest).
+> **Last verified: 2026-09-30**: #616 (BUG-2026-09-30-228, receipt drill text) closed ✅ below with its prod check.
+> **Last verified: 2026-09-30**: branch `fix/drill-receipt-description` added below (its entry is the newest); the #614 entry corrected (its receipt premise was wrong).
+> **Last verified: 2026-09-30**: branch `feat/org-chart-to-main` (org-chart photos + Add Department, staging → main) added below (its entry is the newest).
+> **Last verified: 2026-09-30**: #614 (drill labels / empty descriptions) closed ✅ below with its prod check.
+> **Last verified: 2026-09-30**: branch `fix/drill-variant-noise` added below (its entry is the newest); #612 closed ✅ with its prod check.
+> **Last verified: 2026-09-30**: branch `fix/drill-names-tf-and-pi-edits` added below (its entry is the newest).
+> **Last verified: 2026-09-30**: #607 (Balance Sheet inline drill) and #609 (its counterparty names) closed ✅ below with their prod checks.
+> **Last verified: 2026-09-30**: branch `fix/drill-names-on-bs-documents` added below (its entry is the newest).
+> **Last verified: 2026-09-30**: branch `feat/bs-inline-drill` added below (its entry is the newest).
+> **Last verified: 2026-09-30**: #606 (P&L drill like the Cash Flow drill) closed ✅ below with its prod check.
+> **Last verified: 2026-09-30**: branch `feat/pl-drill-like-cashflow` added below (its entry is the newest).
+> **Last verified: 2026-09-30**: #605 (Cash Flow drill Ref. 2 = counterparty) closed ✅ below with its prod check.
+> **Last verified: 2026-09-30**: branch `feat/cashflow-drill-party-ref` added below (its entry is the newest).
+> **Last verified: 2026-09-30**: branch `feat/production-overview-cards-narrow-main` added below as item 5 of the Production Overview Cards to `main` entry (#597 merged).
+> **Last verified: 2026-09-30**: branch `feat/production-overview-cards-main` added below (its entry is the newest).
+> **Last verified: 2026-09-30**: #598 (Cash Flow stock accounts → Raw Materials) closed ✅ below with its prod check.
+> **Last verified: 2026-09-30**: branch `feat/cashflow-stock-accounts-rm` added below (its entry is the newest).
+> **Last verified: 2026-09-30**: #594 (General Ledger source links) closed ✅ below.
+> **Last verified: 2026-09-30**: branch `fix/gl-source-link-opens-pi` added below (its entry is the newest).
+> **Last verified: 2026-09-29**: #588 (Cash Flow drill tidy + payroll month) closed ✅ below with its prod check; #589 corrected its fallback note.
+> **Last verified: 2026-09-29**: branch `feat/cashflow-drill-tidy` added below (its entry is the newest).
+> **Last verified: 2026-09-29**: #587 (Cash Flow inline drill) closed ✅ below with its prod check.
+> **Last verified: 2026-09-29**: branch `feat/cashflow-inline-drill` added below (its entry is the newest).
+> **Last verified: 2026-09-29**: #586 (P&L inline drill) closed ✅ below with its prod check.
+> **Last verified: 2026-09-29**: branch `feat/pl-inline-drill` added below (its entry is the newest).
+> **Last verified: 2026-09-29**: #581 (Cash Flow staff-contribution accruals → General Expense) closed ✅ below with its prod check.
+> **Last verified: 2026-09-29**: branch `fix/cashflow-staff-contribution-accruals` added below (its entry is the newest).
+> **Last verified: 2026-09-29**: Cash Flow "Unallocated · STOCK - FABRIC M" entry added below — no code; branch `feat/cashflow-stock-accounts-raw-materials` dropped.
+> **Last verified: 2026-09-29**: #575 (AP Invoices popups) and #578 (Cash Flow cash view) closed ✅ below with their prod measurements.
+> **Last verified: 2026-09-29**: branch `feat/ap-invoices-popup` added below (its entry is the newest); the 410-0000 entry (#573) closed ✅ with its prod measurements.
+> **Last verified: 2026-09-30**: branch `feat/account-permissions-tab` (to `staging`) added below (in progress, its entry is the newest).
+> **Last verified: 2026-09-30**: branch `fix/t006-r2-grn-receipt-race` (to `staging`) added below (committed locally, not pushed, its entry is the newest).
+> **Last verified: 2026-09-30**: branch `fix/t006-r7-return-qty` (to `staging`) added below (its entry is the newest).
+> **Last verified: 2026-09-30**: branch `feat/production-overview-cards-narrow` added below as item 8 of the Production Overview Cards entry.
+> **Last verified: 2026-09-30**: branch `feat/production-overview-card-filters` added below as item 7 of the Production Overview Cards entry (stacked on #595).
+> **Last verified: 2026-09-30**: branch `feat/production-overview-card-pills` added below as item 6 of the Production Overview Cards entry (stacked on #592).
+> **Last verified: 2026-09-30**: branch `feat/production-overview-cards` added below (open, its entry is the newest).
+> **Last verified: 2026-09-30**: branch `test/bug06-do-guard-behavioural` (to `staging`) added below (its entry is the newest).
+> **Last verified: 2026-09-30**: branch `feat/m-warehouse-movement-time` (to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-09-29**: branch `fix/report-emails-mobile` (to `staging`) added below as BUG-36 item 6; item 5 marked merged (#582).
 > **Last verified: 2026-09-29**: branch `fix/overdue-email-mobile` (to `staging`) added below as BUG-36 item 5; the duplicated item 4 line removed.
 > **Last verified: 2026-09-29**: branch `chore/sync-main-into-staging` (staging<-main sync): DEV-20 conflicts take main's superset (`loadUomConfig` + `wholeUoms`), staging's R17 "On draft DO" label kept; staging's BUG-2026-09-28-210 (credit control) renumbered to -218.
@@ -43,6 +185,721 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
+## 2026-10-09 — 🔵 BUG-98: New Purchase Order supplier search box and material picker popup (branch `feat/po-supplier-combobox-material-modal` → `staging`)
+
+Ticket BUG-98 (reporter siti): the supplier picker on New Purchase Order shows every supplier. Owner then asked for two changes to the page:
+
+1. 🔵 Order Details Supplier becomes a type-to-search box with an inline clear (✕). Typing or clicking opens the list; Esc or a click outside closes it; emptying the box clears the supplier. Picking a different supplier while items are in the table asks first, then clears the items.
+2. 🔵 The inline category + search list above Order Items moves into a Select Materials popup opened by `+ Add Materials from Supplier`. Each row shows code, description, unit, price and Add / Added; the footer counts the items added.
+3. ⚪ Check on the staging site after merge.
+4. 🔵 Owner follow-up: once a supplier is picked, only that supplier's materials can be chosen. The popup already did this; the RM code box on each line now does too (its suggestions and what it accepts), and a swapped line takes the picked supplier's price. Changing supplier keeps the ask-then-clear prompt (owner choice).
+5. 🔵 Owner follow-up: with no supplier picked, each row in the Select Materials popup shows the supplier Add will fill the line with (main supplier first, "+N more" when others sell it), or "No supplier linked".
+
+## 2026-10-09 — 🔵 Batch exports brought over from the Houzs ERP comparison (branch `feat/batch-exports-from-houzs` → `staging`)
+
+Owner asks: compare batch import/export with the Houzs ERP repo (finance tabs and modules only one system has are out of scope), then build the exports first and leave imports for later. Owner picked: the MRP workbook covers both tabs; list exports use only the ticked rows when any are ticked.
+
+1. 🔵 Shared grid Export uses only the ticked rows when any are ticked (`data-grid.tsx`).
+2. 🔵 Export switched on for Suppliers, Fabrics, Delivery Returns and a supplier's SKU price list.
+3. 🔵 MRP page: one Excel workbook with a Material Requirements sheet and a Fabric Planning sheet, matching the screen.
+4. ⚪ Per-line Excel (Detail Listing) for Delivery Return, Purchase Invoice and Purchase Return. Separate PR.
+5. 🟡 One merged PDF of ticked Delivery Orders, Delivery Returns and Purchase Returns. Needs owner: Purchase Returns has no PDF layout yet, and ticked DOs already print as one PDF behind a packing-list cover.
+6. ⚪ Imports (fabrics, supplier prices, PO line updates) parked by the owner until exports are done.
+
+## 2026-10-09 — 🔵 DEV-63: Bank charges column on the Trade Finance aging block (branch `feat/dev63-creditor-aging-trade-finance` → `staging`)
+
+Ticket DEV-63 (reporter Ain): "in creditor aging for supplier that we pay through trade finance, they have column for interest. so can help me include another column of bank charges".
+
+1. 🔵 `PUT /api/accounting/trade-finance/draw-bank-charge {drawSourceId, bankChargeSen, date?}` — the twin of draw-interest: delta-posts `tf_bank_charge` legs under `tfbc-<date>-<draw>` (DR 900-B001 BANK CHARGES / CR the TF account), so the charge joins the draw's outstanding and the identity line. `ensureTfBankChargeAccount` creates 900-B001 only if missing and refuses the post if the code is some other account (same guard as BUG-2026-09-29-196).
+2. 🔵 `deriveDraws` returns `bankChargeSen`; `tfChargeKind` classifies both charge families; `tfInterestDrawId` strips `tfint-` and `tfbc-`. Principal = amount − interest − bank charges. doc-date: `tf_bank_charge` self-dates from its sourceId.
+3. 🔵 GL drill / Cash Flow ("Bank charges by <lender>") / cash-flow drill treat `tf_bank_charge` like `tf_interest`; voiding a draw with bank charges refuses (TF_DRAW_HAS_INTEREST, copy now says "interest or bank charges").
+4. 🔵 UI: `TradeFinanceBlock.tsx` Bank charges input column beside Interest, with a total.
+5. ✅ Reporter ruling (Ain, 2026-10-09 WhatsApp): the bank charges are part of what we owe Houzs Century, and keying them by hand is fine — so they join the draw's outstanding, as built.
+6. ⬜ Staging check after deploy.
+
+## 2026-10-09 — 🔵 DEV-64: customer price list shows every Maintenance sofa size, DEFAULT included (branch `feat/dev64-price-list-default-column` → `staging`)
+
+Reporter ask (Siti, DEV-64 "price list"): "can add column default for the customer price".
+
+1. 🔵 Customer → Products → Sofa price grid (`CustomerProductsPanel` in `src/pages/customers.tsx`) hard-coded the seat columns `24 / 28 / 30 / 32 / 35`, so a named size like DEFAULT (and 26) from Maintenance → Sofa → Sizes had no customer-price column, though the SKU Master, quotation PDF and history dialog already showed it. The grid now reads `useSofaSeatHeights()`, header via `sofaSeatLabel`. No backend change: prices are stored by size string, so `DEFAULT` saves like `28`.
+2. ⬜ Staging check after deploy: Customers → a customer → Products → Sofa shows a DEFAULT column; edit + Save a DEFAULT price for one tier and reload.
+
+## 2026-10-09 — 🔵 Worker pages: scan pop-ups translated + local-date default (branch `fix/worker-i18n-popups-and-date` → `staging`, then `main`)
+
+Ask (owner, preparing the worker app for the Play Store): "start on 1 and 2" from the worker-page scan.
+1. ✅ (BUG-2026-10-09-272) ~45 hardcoded English strings on the worker pages now go through `worker-i18n.ts` (en / ms / zh / my); Burmese drafted, not reviewed. Not driven in a browser.
+2. ✅ (BUG-2026-10-09-272) non-production request date uses `todayYmdMY()` instead of the UTC date.
+
+## 2026-10-09 — 🔵 Pending Delivery and Outstanding fixed per month (branch `feat/dashboard-month-static-kpis` → `staging`)
+
+Owner ask: a picked month must show that month's Pending Delivery and Outstanding, not today's live total. Owner chose saving daily over saving once at month end.
+
+1. 🔵 Daily save: the three endpoints the tiles read save their part of today's whole-company figure into today's `dashboard_state_snapshots` row, merged by key (`saveStateKpisLater` in `dashboard-state-snapshot.ts`). A scoped (salesperson) call never saves. The state capture now merges too, so neither writer wipes the other.
+2. 🔵 Read: a finished month's overview payload carries `stateKpis` (each part from the month's latest saved day). `stateKpiTile` in `dashboard-widgets-lib.ts` decides the tile on /dashboard, the experimental dashboard and the mobile home: saved figure "as of <date>", or "no record"; never live. This month and All-time stay live.
+3. 🟡 Part 2, not started: estimate Outstanding for September and older (confirmed by month end minus delivered by month end), tagged estimated. Pending Delivery for those months stays "no record": rebuilding "ready for delivery" at a past date would re-express `poReadyForDelivery`, which the code warns against. Months frozen before part 2 ships will need a refreeze.
+4. ⬜ Staging check after deploy (staging data stops at the 30 Sep clone; the save itself can still be seen).
+
+## 2026-10-08 — 🔵 Plant Load: 14-day capacity, Foam Cutting, past months frozen (branch `feat/plant-load-14d` → `staging`)
+
+Owner asks (one message, plus answers to three follow-up questions):
+
+1. 🔵 Daily Capacity averages the last 14 working days instead of 7. Applies to the This month and All time views; a past month keeps its own month average. Planning page moves to 14 days too, so the two pages agree.
+2. ✅ Accuracy check, "production hours = from card": measured on prod (read-only, 2026-10-08), all 6,068 job cards completed in the last 14 working days have no actual minutes recorded, so capacity is 100% the card's estimated minutes × quantity.
+3. ✅ Backlog check: the per-department backlog adds to exactly 4,440h, the figure on the card. 7 vs 14 days moves the headline only 18.5d to 18.4d today. Per-department days range 12.0d (Fabric Cutting) to 22.9d (Foam Bonding) on 14 days.
+4. 🔵 Foam Cutting was missing from the dashboard's department list: 23h of sofa backlog (132 cards) left out of the total and its "stalled" flag (no completions in 14 days) never shown. Added. BUG-2026-10-08-269.
+5. 🔵 Past months are frozen: the first time a finished month is opened its whole dashboard is stored and served as-is afterwards, never recalculated. Known limit: it freezes on that first view; nothing refreezes it later.
+6. 🟡 Not fixed (owner did not pick it): capacity counts Accessory work (about 6h/day) but the backlog does not, so backlog days read slightly low (about 18.4d vs 18.9d).
+7. ⬜ Staging check after deploy.
+8. 🔵 Follow-up ask (2026-10-09): a staging-only Dashboard Compare page under Dashboard in the side menu (`/dashboard/compare`, `src/pages/dashboard-compare.tsx`): the 7-day and 14-day Plant Load side by side, charts on one scale, plus a per-department difference table. The overview route takes `capacityWindow=7`, which reads and writes no stored copy.
+9. 🔵 Follow-up (2026-10-09, branch `feat/dashboard-compare-month`): month picker on Dashboard Compare. "Up to yesterday" or the end of a finished month; for a month both windows end on its last day and the saved month-end backlog is divided again by each. `capacityWindow` now takes 7 or 14, with its own cache key.
+10. 🔵 Follow-up (2026-10-09, branch `feat/dashboard-compare-plant-card`): each column of Dashboard Compare shows the Plant Load card (`PlantLoadCard` takes an optional `capacityWindow`) and Department Backlog bars (sofa / bedframe, shared scale) above the daily chart. A picked month keeps both windows inside that month (no days from the month before; divisor = days counted); the current month is in the picker too. Staging data stops at the 30 Sep clone, so October windows on staging hold empty days.
+11. 🔵 Follow-up (2026-10-09, branch `feat/dashboard-compare-plant-card-drills`): the compare page's Plant Load card is now a copy of the /dashboard card, so its four rows (Daily Capacity, Total Backlog, Active Jobs, Completed) open the same drill-throughs; the Fabric tab shows a copy of the /dashboard Fabric Usage section for the picked month above the shown-vs-real tables; the month picker stays at the top right on every tab. Copies (`src/pages/dashboard-compare-cards.tsx`), not shared code, because `dashboard-b/index.tsx` is frozen. The optional `capacityWindow` on the experimental `PlantLoadCard` is removed again.
+
+## 2026-10-08 — 🔵 BOM Variant Fields and WIP Types as lists with product-type ticks (branch `feat/bom-variant-fields-list` → `staging`)
+
+1. 🔵 Products > Maintenance > BOM > Variant Fields: one row per field (like the Leg Heights list), each with Bedframe / Sofa / Accessory ticks. Same saved data as before.
+2. 🔵 Products > Maintenance > BOM > WIP Types: shows all types, the six built-ins (fixed) then the added ones, each with Bedframe / Sofa / Accessory ticks (`variants-config.wipTypeProducts`, all ticked until changed). The BOM editor type dropdowns only offer types ticked for the product type, keeping a row's current type. Test: `tests/wip-types.test.mjs`.
+
+## 2026-10-08 — 🔵 Editable BOM WIP types, Sandback first (branch `feat/editable-wip-types` → `staging`)
+
+Owner ask: the WIP component type dropdown in the BOM editor (Master BOM Templates included) was a fixed list of six, so an Accessory template like SANDBACK had no type of its own. Owner picked "make the list editable" and "no fixed department route" for extra types.
+
+1. 🔵 `src/lib/wip-types.ts`: the six built-ins stay fixed (their codes carry factory rules); extra names saved in `variants-config.wipTypes` are added after them. Name to code: "Sandback" becomes SANDBACK. Until Maintenance is saved with its own list, the extras default to Sandback; a saved empty list means none.
+2. 🔵 BOM page: the type list is refilled from saved settings on page load, so every type dropdown and label shows the extras. The read-only product BOM page (`products/bom.tsx`) uses the same list for its labels. Inventory WIP pages still show an extra type by its code (SANDBACK); they fall back to the raw code, nothing is dropped.
+3. 🔵 Products > Maintenance > BOM > WIP Types: the existing string-list editor, saved with the rest of the maintenance config.
+4. 🔵 Test: `tests/wip-types.test.mjs`.
+5. 🔵 Follow-up ask, same branch: the code-builder variant fields per product type (three copies in bom.tsx) are now ticked in Products > Maintenance > BOM > Variant Fields (`src/lib/bom-variant-fields.ts`, `variants-config.bomVariantFields`). Owner wants Model on Accessory: it is ticked by default. Only the ten known fields can be ticked, because each is filled in from the sales order. Test: `tests/bom-variant-fields.test.mjs`.
+5b. 🔵 #752 broke `tests/docs-module-guide-anchors.test.mjs`: line anchors in `docs/modules/production.md` and `docs/modules/products.md` stopped naming their symbol after the line shifts (the same failure got the `main` copy #753 reverted). Re-derived on branch `fix/bom-module-guide-anchors`.
+6. ⬜ Staging check after deploy: add Sandback in Maintenance, pick it in a Master BOM Template, save, reload; the Accessory code builder offers Model.
+
+## 2026-10-08 — 🟡 On-time delivery KPI judged on the delivered date, last delivery, Malaysia date (branch `fix/kpi-delivered-last-leg-myt` → `staging`, stacked on #748, BUG-2026-10-08-267)
+
+Owner ask: the KPI must follow the 2026-08-14 rule the Hookka Report already uses (delivered date vs the customer date, once per sales order, judged on its last delivery), and both must take the Malaysia date of the timestamp, not the UTC one. Owner answers 2026-10-08: an overdue order not fully delivered stays out (as in the report); keep the early bonus and the urgent rule by extending the shared code; build on top of #748.
+
+1. 🔵 One shared Malaysia-date SQL helper in `src/api/lib/on-time-delivery.ts`, used for the report and the KPI. Formats measured read-only on staging and prod first.
+2. 🔵 The KPI and its drill-down list read the shared on-time code (late %, early %, urgent late), so the card, the list and the Hookka Report agree.
+3. 🔵 The order list shows the last delivered date; the KPI page reads the new field.
+4. 🔵 Catalog wording (detail, definition, measurement) rewritten for the delivered-date, last-delivery rule.
+5. 🔵 Tests: last leg late, 07:00 MYT the day after, delivered on the day, part-delivered, and the card and list agree.
+6. 🔵 BUG-HISTORY entry, CODEBASE-MAP kpi-metrics row, API.md, stamps.
+7. ⬜ Staging check after deploy.
+
+## 2026-10-07 — ⬜ DEV-36 follow-up: daily efficiency chart on the Department efficiency KPI card (branch `feat/kpi-dept-efficiency-daily-chart` → `staging`)
+
+Owner ask: the department leads holding Department efficiency cannot open Dashboard Experimental, so the card's "See the list" link leads nowhere for them. Show the graph on their own card instead, for the departments ticked when the KPI was assigned. Owner picked the Daily efficiency line, on Department efficiency only. The department pick is a scoring scope, not an access limit: nothing else on the site is narrowed by it.
+
+1. 🔵 `dailyEfficiencyPct` in `src/api/lib/workforce-perf.ts`: `poolEfficiencyPct` one day at a time, the same points the page's Daily efficiency chart draws. `departmentEfficiency` returns them as `daily`; `buildCard` passes them on the `/me` line. A settled month serves its snapshot, which has no daily points, so no chart there.
+2. 🔵 My KPI card: a small line chart (day of month, %, dashed target line) under the Department efficiency line; its "See the list" link is hidden.
+3. 🔵 Test: `tests/workforce-perf.test.mjs` requires the card's points to equal the page's daily line for one department, another, and the whole floor.
+4. ⬜ Staging check after deploy: a holder login sees the chart for their departments, figures match Dashboard Experimental's Daily efficiency with the same department picked.
+
+## 2026-10-07 — 🔵 Sync `staging` from `main` (branch `chore/sync-staging-from-main-1007` → `staging`)
+
+13 `main` commits merged into `staging` (331 staging-only kept). Conflicts: 2 code/test files, 1 add/add test, 6 docs.
+1. 🔵 BOM editor (`bom.tsx`, `tests/bom-editor-reorder.test.mjs`): #729's version, which is main's #722 tree helpers (delete one level, ↑/↓ swap levels in a chain) plus the Master BOM two-pane layout staging already had from #728. Nothing staging-only was in the diff.
+2. 🔵 `tests/kpi-self-service.test.mjs`: staging's stricter `/api/departments` check (the DEV-36 picker is on staging).
+3. 🔵 Docs: logs and stamps unioned, one copy of each entry, no bug id collisions. `API.md` regenerated; bom, production and inventory anchors re-measured on the merged files.
+
+`npm test` 5555 pass / 1 fail / 3 skipped. The failure is `customer-scope-sql` ("the Planning and Pending-Delivery tabs narrow too"), which fails the same way on `origin/staging` before this merge. tsc not run locally.
+
+## 2026-10-07 — 🔵 Customer credit control (BUG-34): staging test run + Sales transfer box fix (branch `fix/sales-transfer-credit-block` → `staging`, BUG-2026-10-07-263)
+
+1. ✅ Ran the 36 credit control test cases on the staging site (TEST COMPANY plus test orders for SL HOME DESIGN, RX HOMICE, SOON, The Conts; all test DOs, invoices, SOs, packing list and consignment notes cancelled or returned afterwards, customer terms and limits restored). 33 pass, 1 fail (CC-31), 2 skipped (CC-10 cannot occur: every payment path sets PAID at full payment; CC-36 needs prod).
+2. 🔵 CC-31 fix: the Sales "Transfer to Delivery Order" box now shows the credit dialog with the override, and asks `ready-planning?fresh=1` so a just-finished order is not shown as "Nothing ready". Staging check after deploy pending.
+3. 🟡 Owner decisions found by the run: OFFICE and SALES roles can override today (`delivery-orders:*` includes `credit-override`), not only admins; term "CASH" counts as one month, not COD; the phone New DO form and the DO detail "Load & Generate DO" have no override; invoice due dates disagree (stored "+30 days" on older and consignment invoices vs the block's calendar-month rule; PDFs print "NET 30" for every customer). Prod count of customers that would be blocked is UNMEASURED.
+
+## 2026-10-06 — ⬜ DEV-37: every staff login can open their own KPI card (branch `feat/dev37-kpi-office-self-view` → `staging`)
+
+Reporter ask (Violet, DEV-37): office staff log in and see their own assigned KPIs, never anyone else's. Confirmed on WhatsApp 2026-10-06: office staff (ERP logins, not the worker portal), every staff will have their own account, only Super Admin assigns, "just open the module for them to view, but only their own KPI".
+
+1. 🔵 `/kpi` becomes a self-service page for every ERP login: no `kpi:read` gate on the route or the menu. The cross-user API was already Super Admin only and `/api/kpi/me` never takes a user id, so the gate only hid the menu.
+2. 🔵 The `kpi` resource goes from `ALL_RESOURCES` / Office's exclusion / `NAV_RESOURCE`, so the per-user permission editor no longer shows a box that does nothing.
+3. 🔵 Guard test `tests/kpi-self-service.test.mjs`: menu + route stay open for every role (code roles and an empty permission set), every KPI route except `/me`, `/checklist` and `/survey` GET still calls `requireSuperAdmin`, those take the user from the session, and the page fetches the people lists only for a Super Admin.
+4. ⬜ Browser check with a non-admin login: not done locally, the only `.dev.vars` on this machine points at production.
+5. ⬜ Check on the staging site after merge with a non-admin login. Super Admin side checked on staging 2026-10-06 (#719 deployed: `kpi` gone from the permission catalogue, 79 resources; KPI menu and all three tabs still there). The non-admin side waits for Violet.
+6. 🔵 Checklist ticks are Super Admin only (Violet 2026-10-06: "super admin only can tick. staff can view only"). `PUT /api/kpi/checklist/:kpiKey` calls `requireSuperAdmin`; a non-admin's card shows the boxes read-only with "Items are ticked by Super Admin." (branch `feat/dev37-kpi-checklist-admin-only`).
+
+## 2026-10-06 — 🔵 Sync `staging` from `main` (branch `chore/sync-staging-from-main-1006` → `staging`)
+
+50 `main` commits merged into `staging` (320 staging-only kept). Conflicts: 6 code/test files, 9 docs.
+1. 🔵 BOM minutes box (`bom.tsx`, `tests/bom-manual-minutes.test.mjs`): main's text box fix (BUG-2026-10-05-254).
+2. 🔵 My Pay (`worker/pay.tsx`): main's file; the merge had doubled `isFinalised` / `SavePayslipButton`. Daily Attendance moves to main's History tab.
+3. 🔵 KPI page and Create SO keep staging's (department scope, R14 stock line); git had also doubled the `emptyWip` prop on Create SO, so that file is staging's as is. `worker.ts` keeps the staging-only routes.
+4. 🔵 Docs: logs and stamps unioned, one copy of each entry, no bug id collisions. `API.md` regenerated (146 / 1021), sales and production anchors re-measured.
+`npm test` 5538 pass / 0 fail / 3 skipped. tsc not run locally.
+
+## 2026-10-06 — 🔵 DEV-36 part 3: Department efficiency KPI (branch `feat/kpi-department-efficiency` → `staging`)
+
+Owner ask: an office lead (for example R&D or Upholstery) is scored on their own department's efficiency as Dashboard Experimental > People > Efficiency shows it, as a separate KPI card; Production time efficiency stays as it is. Owner chose: same grouping as the dashboard (each worker's home department), called Department efficiency, several departments combined.
+
+1. 🔵 New KPI `department_efficiency`: the Efficiency tab's figure for the month, for the workers whose home department is one of the assigned departments; none = whole floor. Same scoring bands as Production time efficiency.
+2. 🔵 The dashboard's per-day maths moved unchanged from `dashboard-prototype.ts` into `src/api/lib/workforce-perf.ts`; the route and the KPI both call it (500 random data sets compared old against new before the move was kept).
+3. 🔵 Library: picking Department efficiency shows one chip per department, any number ticked.
+4. ⬜ Check on the staging site after merge, against the Efficiency tab for the same department and month.
+
+## 2026-10-06 — 🔵 DEV-36 part 2: several departments, and floor workers as KPI holders (branch `feat/kpi-efficiency-multi-dept` → `staging`)
+
+Owner ask: tick several departments for one Production time efficiency assignment, and assign it to floor workers in those departments (the ticket's "assign to individual workers within that department"). Owner chose one combined score across the ticked departments, and worker records (not login accounts) as holders.
+
+1. 🔵 Several departments per assignment, stored as a comma list in `kpi_assignments.scope`; minutes and hours are pooled across them. Nothing ticked = Overall.
+2. 🔵 Floor workers can hold production_efficiency (only that KPI). The Library lists workers in the ticked departments.
+3. 🔵 Library chips, People tab and the card show workers as holders.
+4. 🔵 Worker phone app: the worker's own KPI on the Me page, in all four languages.
+5. 🔵 One figure per department set per page load, so the People tab does not slow down with many workers.
+6. ⬜ Check on the staging site after merge.
+7. 🔵 Owner, same day after #714 merged: floor workers are not KPI holders after all; the ask is for office staff (e.g. R&D, Upholstery leads) to see their own department's efficiency. Items 2, 3, 4 and 5 removed again (branch `fix/kpi-remove-floor-workers` → `staging`): no worker holders, no Floor workers list, no My KPI on the worker app, People tab back to login accounts. Item 1 (several departments, pooled) stays. A separate department-efficiency KPI card based on the Dashboard Experimental figure is the next step, not started.
+
+## 2026-10-06 — 🔵 DEV-36: Production time efficiency KPI by department (branch `feat/kpi-efficiency-department` → `staging`)
+
+Owner ask (DEV-36, marked Done but never built): pick a department when assigning the Production time efficiency KPI, keep Overall, and score only that department's production when one is picked. Owner chose a team score: everyone assigned to a department gets that department's figure.
+
+1. 🔵 Department choice on the assignment: Overall, a production department (all types), or a department and type (Sofa / Bedframe / Accessory).
+2. 🔵 The efficiency figure is filtered to that department (and type) through the same per-worker function the payslip uses. Overall stays as it is.
+3. 🔵 The Library chips show which department each person is scored on.
+4. Not done, by design: the people list is not filtered by department (KPIs go to login accounts, which have no link to worker records), and there is no month settling yet, so nothing past can change.
+5. 🔵 Checked on the staging site 2026-10-06 after #712 merged: 10 of 10 cases passed (picker, chip, scoped card, Overall unchanged, refusals, phone width, clean-up). Data finding: September Fabric Cutting hours were mostly keyed as Bedframe or with no type, so a Sofa-only score reads far above 100%; a department-only score is not affected.
+
+## 2026-10-06 — 🔵 Worker My Pay: a card for per-day workers (branch `feat/daily-pay-card` → `staging`, BUG-2026-10-06-259)
+
+Owner ask: a per-day worker (RM 85 / day) sees "Basic: RM 0.00" with no reason, deductions above the gross, and the sum backwards. Redesign the card and put it on staging.
+
+1. 🔵 `GET /api/worker/payslips` prices the current month with the worker's pay mode and day rate, and returns `payMode`, `dailyRateSen`, `advanceSen`.
+2. 🔵 New `DailyPayCard` on My Pay for a per-day worker's current month: Net pay, Earnings, Deductions, Summary. Labels in all four worker languages.
+3. 🔵 Finished months use the same card, rebuilt from the stored payslip (branch `feat/daily-pay-card-past-months` → `staging`, which also brings main's BUG-2026-10-05-258 late-rate fix over).
+4. ⬜ Check on the staging site as OSC-001 after merge (needs October hours keyed for them on staging).
+5. 🔵 (branch `feat/pay-card-all-workers` → `staging`) Monthly workers get the same card: absent and late inside Earnings so Gross matches the payslip, one card for every worker and month (`src/pages/worker/pay-card.tsx`).
+
+## 2026-10-05 — 🔵 Top-right Profile menu works, profile picture synced (branch `feat/topbar-profile` → `staging`)
+
+Owner ask: make the top-right Profile item actually work and sync the profile picture.
+
+1. 🔵 Header avatar shows the signed-in person's photo (the same `users.photo_file_id` the Org Chart uses), initial as fallback. `GET /api/auth/me` now returns `photoFileId`.
+2. 🔵 Profile opens a panel: photo, name, email, role, department, position.
+3. 🔵 Anyone can change or remove their OWN photo there (owner decision 2026-10-05). `PUT /api/org-chart/photo` skips the `users:update` check only when the person key is the caller's own user.
+4. 🔵 A photo change from the Org Chart or User Management updates the header without a reload.
+5. ⬜ Check on the staging site after merge.
+## 2026-10-07 — ⬜ DEV-37: every staff login sees their own KPI card, view only (branch `feat/dev37-kpi-self-view-to-main` → `main`)
+
+Reporter ask (Violet, DEV-37, confirmed on WhatsApp 2026-10-06): office staff log in to the ERP and see their own assigned KPIs, never anyone else's; only Super Admin assigns; "super admin only can tick. staff can view only". Same two changes as #719 and #721 on `staging`, cherry-picked onto `main` (DEV-36's department scope stays on staging).
+
+1. 🔵 `/kpi` has no `kpi:read` gate on the route or the menu; every ERP login opens their own card. `kpi` leaves `ALL_RESOURCES`, Office's exclusion and `NAV_RESOURCE`.
+2. 🔵 `PUT /api/kpi/checklist/:kpiKey` is Super Admin only; staff see the boxes read-only. No KPI in the catalogue is a checklist today, so nobody's card changes from this half.
+3. 🔵 Guard `tests/kpi-self-service.test.mjs`. Its `/api/departments` check is conditional: the Library's department picker is staging-only until DEV-36 reaches main.
+4. 🔵 Staging: deployed 2026-10-06, Super Admin side checked (KPI menu and three tabs, `kpi` gone from the permission catalogue, new checklist text in the KPI bundle). Non-admin side not checked there.
+5. ⬜ After deploy: Super Admin check on prod, then Violet checks with a staff login (KPI in the menu, only her own card, no Library / People).
+
+## 2026-10-07 — 🔵 DEV-20 follow-up: one unit list for raw materials (branch `fix/rm-uom-bottle-main` → `main`, BUG-2026-10-07-262)
+
+Owner asks: BOTTLE was refused on save for item group MAINTENA; a mistyped unit must be removable; the per-category Allowed UOMs confuses people, so take it out and give a way to add a new unit instead.
+1. 🔵 RM Settings: the per-category Allowed UOMs section is gone; a global Units section adds a unit (e.g. BOTTLE) for every category, and × deletes one added by mistake. Built-in units stay.
+2. 🔵 Every RM unit dropdown and the save check use that one list.
+3. ⬜ Check on the live site after deploy.
+
+## 2026-10-06 — 🔵 Worker My Pay: one card for every worker and month (branch `feat/pay-card-main` → `main`, BUG-2026-10-06-259)
+
+Owner ask: redesign My Pay so a per-day worker's pay explains itself (no "Basic RM 0.00"), deductions come after earnings, and every worker and month uses the same card. Staging has it through #707 to #710; this brings it to main.
+
+1. 🔵 `GET /api/worker/payslips` prices the current month with the worker's pay mode and day rate, and returns `payMode`, `dailyRateSen`, `advanceSen`, `advanceDays`, plus each past month's `status`.
+2. 🔵 `src/pages/worker/pay-card.tsx` on My Pay for every worker and month: Net pay, Earnings (monthly salary or N days @ day rate, less absent and late, plus OT and allowances = the payslip's Gross), Deductions, Summary. Labels in all four worker languages.
+3. ⬜ Check on production after deploy (read and write path).
+
+## 2026-10-05 — 🔵 Worker My Pay shows a per-day worker's late charge (branch `fix/worker-pay-late-daily-rate` → `main`, then `staging`, BUG-2026-10-05-258)
+
+Owner ask: is the same worker late, and why does the phone not show it. Measured: late 3 days in September, RM 10.21 docked; the phone priced it from basic salary (RM 0 for an OSC worker) and hid the line.
+
+1. 🔵 Both late-charge sites in `src/api/routes/worker.ts` use the pay-mode aware day rate.
+2. ⬜ Check on staging, then live, after merge.
+
+## 2026-10-05 — 🔵 Worker My Pay shows the salary advance (branch `fix/worker-pay-advance-line` → `staging`, BUG-2026-10-05-257)
+
+Owner ask: a worker's Net was RM 100 below Gross with no reason on the phone. Measured on prod: a RM 100 salary advance (21 Sep, no note), not a penalty.
+
+1. 🔵 `GET /api/worker/payslips` returns each slip's stored advance and the advance dates and notes.
+2. 🔵 The finished-month card shows "Salary advance" after Tax, tap for the dates. New label in all four worker languages.
+3. ⬜ Check on the staging site after merge.
+
+## 2026-10-05 — ✅ Fill job cards stuck at 0 production minutes (branch `fix/backfill-zero-minutes-open-cards` → `main`, BUG-2026-10-05-256, #696 7d507a59, prod-run)
+
+1. ✅ Owner screenshot (Fab Cut sheet, A02 at 0 min): fill the cards whose BOM was filled after they were made. Owner scope: unfinished cards, plus cards completed from 2026-10-01 (September left alone so September pay is not affected); cards that already have minutes are left alone. New `fill-zero-minutes` endpoint, dry run first. Checks: `tsc -p tsconfig.app.json` exit 0, new `tests/fill-zero-minutes.test.mjs`. Prod run pending until deployed; Canary dry run (prod data, read-only) found cancelled cards selected (fixed) and 355 live zeros on the old FG_MAIN all-dept chain; owner chose to fill those by dept from today's BOM. Re-run the dry run on the canary before merge.
+2. ✅ Prod run 2026-10-05 after #696 (7d507a59) deployed, `completedFrom=2026-10-01`: updated 309 (254 live, 55 completed in October). Measured after: a second dry run finds 0 to fill (cards at 0 scanned fell 825 to 516); the reported A02 Fab Cut cards SO-2609-281-12 / 393-13 / 393-14 / 247-11 / 247-12 read 15; the audit row on SO-2609-281-12's cut card is 0 to 15; SO-2610-035-12 (had minutes) still 10. Left at 0 on purpose: 411 cards whose BOM step is still 0 (mostly pillow Packing, 1005-(Q) Foam) and 103 in a dept their BOM does not use.
+
+## 2026-10-05 — 🔵 Accessory master BOM templates could not be saved (branch `fix/bom-master-template-accessory` → `main`, BUG-2026-10-05-255)
+
+1. 🔵 Owner screenshot (Edit Master Templates, ARMREST): Save Templates showed "Some details aren't valid". Staging confirmed the server refuses ACCESSORY (400). The route now accepts ACCESSORY and widens the table CHECK at runtime. Checks: `tsc -p tsconfig.app.json` exit 0, new `tests/bom-master-template-accessory.test.mjs`. Prod check pending until deployed.
+
+## 2026-10-05 — 🔵 BOM minutes box showed "052" while typing (branch `fix/bom-minutes-leading-zero-main` → `main`, BUG-2026-10-05-254)
+
+1. 🔵 Owner screenshot (Edit BOM, A02): typing 52 showed "052". The minutes box is now a text box that always shows the stored number (digits only, 0 to 1440). Checks: `tsc -p tsconfig.app.json` exit 0, `tests/bom-manual-minutes.test.mjs` extended. Prod check pending until deployed.
+
+## 2026-10-05 — 🔵 BOM process minutes typed in by hand, CAT 1-14 removed (branch `feat/bom-manual-minutes` → `staging`)
+
+1. 🔵 Owner asked to remove the CAT dropdown from BOM process rows completely, so minutes are only typed in. (First asked as a "Manual" option next to the CATs; changed to full removal before anything shipped.) Done in `src/pages/bom.tsx`: all 7 CAT dropdowns removed (New BOM, Edit BOM, Master Templates), the read-only minutes box is now `MinutesInput` (whole minutes, 0-1440), a department change keeps the typed minutes, CAT no longer shows on routing pills or the printed BOM, and new rows save no CAT.
+2. 🔵 `src/lib/production-order-builder.ts`: a process with no CAT no longer becomes `"CAT 1"` on its job card, so the dept+category job-card resync cannot overwrite typed minutes.
+3. Existing BOM minutes and stored CAT labels, existing job cards, the Production Times record in `kv_config` and the WIP Times page are left as they are.
+4. Checks: `tsc -p tsconfig.app.json` exit 0; new `tests/bom-manual-minutes.test.mjs`. Staging-site check pending until merged.
+
+## 2026-10-05 — 🔵 KPI Library: easier to pick, and people can be taken off a KPI (branch `feat/kpi-assign-unassign` → `staging`)
+
+Owner ask: picking KPIs means hitting the small tick on the left, and once someone is assigned there is no way to take them off.
+
+1. 🔵 Clicking anywhere on a KPI row picks it (the tick stays). The people list scrolls inside the panel so Assign / Clear stay in view, and anyone already carrying every picked KPI shows "has it".
+2. 🔵 Each name chip on a KPI row has a remove button: confirm, then the existing `PUT /api/kpi/kpi/:kpiKey/assignees` with `isActive: false`. No new endpoint.
+3. 🔵 A removed KPI stays on the person's already-settled months (`buildCard` now checks the locked snapshot before the inactive skip), so removing someone never changes a settled score.
+4. ⬜ Verify on the PR preview / staging.
+
+## 2026-10-02 — 🔵 Dashboard Experimental scales at every width, round 2 (branch `fix/dashboard-exp-kpi-scale` → `staging`, BUG-2026-10-02-252)
+
+Owner, after #681: numbers out of the box, padding bad and not centred, cramped, not scaling. #681 had been checked at one phone width only.
+
+1. 🔵 Tiles flush at the top on phones (0px top padding, measured): fixed once in `card.tsx`.
+2. 🔵 Cramped 5-across rows and "UPHOLSTER / Y" at 1024px: rows fill their real width (`KPI_ROW`), values scale with the tile and never split.
+3. 🔵 Page sideways on Sales at 390 (91px) and on every tab at 768 (5px): grid boxes may shrink, top bar wraps below lg.
+4. 🔵 Sticky bars stacked: the dashboard header now docks under the app top block (`--app-sticky-h`), which stays pinned as the owner asked on 2026-10-01.
+5. ⬜ Verify on the PR preview at 390 / 768 / 1024 / 1280 / 1440 / 1920, then on staging after merge.
+
+## 2026-10-02 — 🔵 Experimental dashboard, Operations > Plan vs Actual on the Schedule email's measures (branch `feat/dashboard-plan-vs-actual-jobcards` → `staging`)
+
+Owner ask: Plan vs Actual should follow the Schedule report: job cards, units and planned time.
+
+1. 🔵 `buildDailySlice` (`dashboard-daily-slice.ts`): per day per department now carries job cards, units (the card's order quantity) and planned time (`jcMinutesTotal`, estimate first on both sides, so actual = planned time of the work that finished). Cards of cancelled orders excluded. The order-based tallies (`orders`) are removed; nothing else read them. `jcAllSec` in `dashboard-prototype.ts` selects `est_minutes, actual_minutes, wip_qty`.
+2. 🔵 `ProductionDailyPanels.tsx`: three KPIs (Job cards / Units / Planned time, actual / plan and variance), chart toggle Job cards / Units / Planned time, department table with all three plan / actual / variance. The Overview tile "Plan vs Actual" (stage completion of open orders) is a different measure and is unchanged.
+3. Test: `tests/dashboard-daily-slice.test.mjs`. Staging check: UNMEASURED until deployed.
+
+## 2026-10-02 — 🔵 Sync `staging` from `main` (branch `chore/sync-staging-from-main-1002` → `staging`)
+
+93 `main` commits merged into `staging` (273 staging-only kept). Conflicts: 13 code/test files, 8 docs.
+1. 🔵 Accessory job cards (`bom-wip-breakdown.ts`, `production-builder.ts`, `jobcard-sync.ts`, `tests/bom-explosion.test.mjs`): main's version, which is newer (BUG-2026-10-01-244 plus the (FC) Fab Cut follow-up).
+2. 🔵 Email reports (`report-settings.ts`, `reports.ts`, `EmailReports.tsx`, `daily-reports.yml`): staging keeps its send times (overdue 08:00, efficiency 18:30 with revenue) and gains main's first-run `seedLastSent`; its test now uses staging's times.
+3. 🔵 `worker.ts` `/history`: main's snapshot `db`. `scan.tsx` keeps staging's sequence-unlock import, `route-titles.ts` keeps both titles, `tests/worker-penalties.test.mjs` keeps staging's catalog check (the Permissions tab is staging only).
+4. 🔵 Docs: logs and stamps unioned, one copy of each entry. Bug numbers follow `main`: staging's accessories BUG-2026-10-01-241 is main's 244. `API.md` regenerated, module anchors re-measured.
+tsc strict 0; `npm test` 5464 pass / 0 fail.
+
+## 2026-10-05 — 🔵 Permissions tab to `main` (branch `feat/permissions-tab-main`)
+
+Ask (owner): bring the staging Permissions tab (User Management → Permissions) to main, because access problems keep coming up and the owner wants to fix them per account without a code change.
+1. 🔵 Ported staging commit 8b1c6e71 as is (gate + menu read an account's own list before its role; `/api/user-permissions` Super Admin only; tab in User Management) plus the `worker-penalties: approve` catalog line from 9959320b. Staging-only "View as" changes to the same files are not included. An account never edited has no row, so shipping changes no one's access.
+
+## 2026-10-02 — ✅ Finance lists: row actions on right-click; Esc closes popups; Fund Transfer edit (owner「FUND TRANSFER无法edit?」+「这个显示太多了，能不能right click 才选我的东西」+「点开后无法用esc 关闭，create new pv 时也是这样」)(#680 1b339244, prod-verified; branch `feat/finance-row-menu-esc`)
+
+1. ✅ Fund Transfer edit — the old Fund Transfer page never had an edit (void / unvoid / delete only). The Payment
+   Vouchers popup told every outside door "Edit … live on that page" — wrong for a fund transfer; now said per door.
+   Owner then「我要可以edit, 因为我发现description 少了」→ built **Edit description**: `PUT /fund-transfers/:no/description`
+   rewrites only the text of the transfer's two live ledger legs ("Transfer <no> · <text>"); accounts, amounts, date and a
+   bank match (held by leg id) stay; a voided transfer is refused. From the Fund Transfer page and from Payment Vouchers
+   (menu + popup). Changing the money is still void + post again.
+2. ✅ Row actions on right-click (plus a ⋮ per row, as the data grid has): Payment Vouchers, Receipts, Fund Transfer,
+   Other Party Bills / Payments, Supplier Payment — no action links in the rows; double-click still opens the popup.
+3. ✅ Esc closes the popup on top: the document popups, the voucher / AP payment / AP bill forms (they ask first when
+   something was keyed), the scan dialogs, the report image — one shared stack (`src/lib/escape-stack.ts`) that the confirm
+   dialog joins, so Esc on a confirm never also closes the form under it.
+4. Prod (2026-10-02, read-only — nothing saved, voided or created; voucher count unchanged): Payment Vouchers rows all
+   carry the ⋮ and no action links; a real right-click on a row opens its menu there (row highlighted, the browser menu
+   held back), the ⋮ opens it under itself inside the screen; menus match each kind (approved voucher, fund transfer with
+   Edit description, receipt, supplier payment with Edit); Esc closes the menu, then the popup; New Payment Voucher closes
+   on Esc when empty, asks when typed, Esc on the question keeps the form and its text, Discard closes it. The description
+   editor opens with the transfer's current text (empty for the one without), Save stays off until it changes, Esc closes
+   it. `PUT …/description` refuses an unknown number (404) and an over-long text (400) before writing; the transfers'
+   descriptions read back unchanged — the real edit is the owner's.
+
+## 2026-10-02 — 🔵 /m office app: one-tap Install app, and a working "Open the full desktop app" (branch `feat/m-install-and-desktop-switch` → `main`)
+
+Owner asks, in order:
+
+1. Installing the office app always opens `/m`. Explained: `start_url` is `/m` in `public/manifest-erp.webmanifest`, and `scope` is `/`, so every page stays inside the installed app. No change asked.
+2. "Open the full desktop app" in `/m` More stays in `/m`. Bug, BUG-2026-10-02-250. Fixed: the link sets a session flag (`src/lib/prefer-desktop.ts`) that the desktop shell's phone redirect honours; the desktop shell shows a "Back to mobile app" bar to phones. Owner picked "until the app or tab is closed" (sessionStorage).
+3. Let people install without the browser menu. Built: `src/lib/pwa-install.ts` catches the browser's one-time install offer at page load (imported from `src/main.tsx`); `/m` gets an Install app row in More (always, until installed) and a dismissible card on Home (`src/pages/m/components/InstallAppCard.tsx`). Android / desktop Chromium: one tap. iPhone Safari: the three Share steps (Apple allows nothing else). Other browsers: a browser-menu hint. The worker portal card now reads the same offer, so it no longer misses an offer that fired before it mounted.
+
+Not checked yet: the one-tap install needs a published https build, so it can only be tried after deploy.
+
+## 2026-10-02: 🔵 DEV-31 worker department hours to main (branch `feat/dev31-worker-dept-hours-main` to `main`)
+
+- Asked: PR DEV-31 to main, to check on canary. Staging PR #651, tested on staging (#659).
+- Cherry-pick of the staging commit onto main. `/history` on main runs inside the `freshReads` snapshot callback, so the new department read uses its `db` handle (staging used `c.var.DB`). The staging-only sequence-unlock import in `scan.tsx` was left out.
+- No new tables or columns: reads `dept_scan_events` and `working_hour_entries`, which main already writes.
+- 🟡 Not yet checked on canary / prod.
+
+## 2026-10-02 — 🔵 Schedule email summary and full list filter to main (branch `feat/schedule-summary-email-to-main` → `main`)
+
+Owner asked to bring the Schedule email layout verified on staging (#674, #676) to main.
+
+1. 🔵 Email: four top boxes, a Departments table (job cards, planned time, % of planned time, % of job cards, heaviest first) and one "Show full list" link; no job rows, so the row cap is removed.
+2. 🔵 Full list page (`GET /api/reports/schedule`): the same summary, then a department filter (`?dept=<code>`, plain links) and every job row.
+3. ✅ Display only, no figure recalculated. Verified on the staging site 2026-10-02 (8 department rows, 9 filter buttons, 164 job rows; `?dept=UPHOLSTERY` shows only Upholstery's 50).
+
+## 2026-10-02 — 🔵 BUG-36 Email Reports to main: per-report recipients and send times (branch `feat/email-reports-to-main` → `main`)
+
+Owner asked for the Email Reports system built on staging to go to main, with the phone fixes, and for NO change to any report calculation.
+
+1. 🔵 Settings > Email Reports (SUPER_ADMIN): per report on/off, own recipient list, daily / weekly / monthly at one or more times, send-test. Stored in `kv_config['daily_report_settings']`. A report nobody has saved keeps the old shared recipient list (env, then `daily_report_recipients`, then SUPER_ADMINs) and its old time.
+2. 🔵 `daily-reports.yml` runs every 15 minutes against `due-trigger` instead of four fixed crons. Defaults are today's times (brief 07:00, schedule 08:00, efficiency 12:00, overdue 17:00 SGT). First run after deploy records what already went out today instead of sending it again (`seedLastSent`).
+3. ✅ Phone layouts for all four emails (BUG-2026-09-29-221 / -232 / -248) and the Schedule email size cap (BUG-2026-10-01-240), presentation only.
+4. ✅ NOT brought over, because they change a calculation: the Efficiency email covering today instead of the previous working day, and the production revenue figure. They stay on staging; moving the Efficiency email to the evening needs the owner's say.
+5. ✅ Mail goes through `sendMail` as on main (Brevo, else Resend). MailSlurp is staging only and is not in this branch.
+
+## 2026-10-01 — 🔵 Accessories doubled on Fab Cut (Violet) (staging #656 merged + verified; branch `fix/accessory-l1-only-job-cards-main` → `main`, BUG-2026-10-01-244)
+
+Ask: on Fabric Cutting every accessory line shows twice, though the quantity is 1. Owner confirmed accessory BOMs are meant to be L1-only.
+
+1. 🔵 Cause: an accessory BOM has an empty WIP tree and its steps on the L1 tab. The builder answered the empty tree with the FG_MAIN fallback (all 9 depts) and then added the L1 cards too. BC05-MF qty 1 had 12 cards. Fixed in the builder and jobcard-sync through one helper, `breakBomIntoJobCardWips`. Tests in `tests/bom-explosion.test.mjs`.
+2. ✅ Foam: the fallback was the only source of a Foam card on these orders (prod: 16 worked). Owner decision: follow the BOM as it is, add no step. Nothing to do before deploy.
+3. ⚪ A01's active BOM on prod is fully empty (no tree, no L1). It keeps the fallback chain until someone fills it in.
+4. ⚪ Not in this change: the 463 cards already created on prod (53 pending orders; 81 of the cards already COMPLETED). Cleanup needs a reviewed script and an owner decision on the completed ones.
+5. ⚪ Not in this change: FG-level Fab Cut / Fab Sew cards add to a `wip_items` row named after the product and Packing never takes it off (prod: `BC05-MF` 8, `SB02` 9, `A02` 2). Older than this bug.
+
+6. ✅ Verified on staging: SO-2610-002 (BC05-MF) got 3 cards; control SO-2610-003 (SQUARE PILLOW) got its usual 4.
+7. 🔵 Follow-up (branch `claude/main-accessories-duplicate-cards-fdxaik` → `main`): #660 kept the wrong Fab Cut card. The L1 one is labelled with the bare product code; the right one is the auto-generated `(FC)` card with the fabric code (IT team: a BOM without WIP components is incomplete setup, not the SOP shape). New rule: auto-generated cards first, and an L1 step is skipped when that dept already has one. An L1-only BOM gets an auto-generated chain of its own L1 steps only (no Wood Cut / Foam / etc.), so Fab Cut goes through the (FC) merge. Builder and jobcard-sync both.
+
+Prod measured 2026-10-01 with read-only queries (counts above). Staging gave the same picture.
+
+
+## 2026-10-02 — 🔵 Dashboard Experimental works at phone width (branch `feat/dashboard-exp-mobile` → `staging`)
+
+Ask (owner): make the Experimental dashboard mobile friendly and scalable, on the desktop page itself, not in the /m app.
+
+1. Measured on staging at 390px: the page was 655px wide on every tab. Cause: the staging tool row in the top bar did not wrap. Fixed: on phones the header wraps and the tools take their own row.
+2. Measured: several tiles cut numbers off ("UPHOLST...", "RM 6,456,942.11" in a 76px tile). Fixed: `Kpi` and the widget `Stat` tiles wrap instead of truncating; the three-across Purchasing and Ratios rows stack below `sm`; the Due-soon lanes go 2x2 below `sm`.
+3. Not changed: phones are still sent to /m. The "Open the full desktop app" switch (PR #679) is on `main` and reaches staging with the next main sync. Wide tables keep scrolling inside their own box.
+
+## 2026-10-02 — ✅ Schedule email: department summary with share of the day (branch `feat/schedule-dept-share-table` → `staging`)
+
+Owner ask: the Production Schedule should read as overall totals, then a department table (job cards, planned time, % of planned time, % of job cards), with the full list still below and a "Show full list" link.
+
+1. ✅ `renderScheduleHtml`: a `Departments` table under the four top boxes, heaviest planned time first, shares to one decimal, and a "Show full list" link under it in the email only (the in-app page already is the full list). The department sections and their last-row link are unchanged.
+2. ✅ Display only: every figure is a department total `collectScheduleData` already returns; no existing number changes. `tests/schedule-department-share.test.mjs`; the row-count test in `schedule-email-size.test.mjs` now counts job rows only. Looked at at 375px with the real 2 October department totals (no sideways scroll).
+3. 🔵 Not done, not asked: the top two departments call-out, the unassigned-PIC count, and anything else from the earlier suggestions list. The requester decides.
+4. ✅ Owner follow-up: the email stops at the department table and one "Show full list" link (no job rows; the row cap and its "N more not shown" rows are gone, about 8 KB on any day). The in-app full list page repeats the summary, then a department filter (`?dept=<code>`, plain links) and every job row. Preview published as an artifact for the owner; tests updated (`schedule-email-size`, `report-emails-mobile`).
+
+## 2026-10-02 — ✅ Schedule email: "Show full list" in the last row of each capped department (branch `fix/schedule-email-full-list-row` → `staging`)
+
+Owner ask: where the Production Orders email cuts off a department's jobs, add a last row with "Show full list" in the last column. Nothing else in the email changes (owner: keep the format, ask the requester about any other additions first).
+
+1. ✅ `renderScheduleHtml`: a capped department ends with a `more-row` row, the count in the first cell and a "Show full list" link in the last (PIC) column; the sentence under the table is gone. The one-line total under the summary stays. Without a link base it reads "Full list in Reports".
+2. ✅ `tests/schedule-email-size.test.mjs` asserts the row and its last-column link. Looked at at 375px (a card, no sideways scroll) and on a wide screen.
+
+## 2026-10-02 — ✅ Check all four report emails on a phone (branch `fix/efficiency-email-dept-table` → `staging`, BUG-2026-10-02-248)
+
+Ask: the Overdue, Today's Production Orders, Efficiency & Revenue and Morning Brief emails stay as `main` has them (Brief not removed); double-check all four read on a phone before anything goes to `main`.
+
+1. ✅ Rendered all four from `staging` at 375px: Overdue, Schedule and Brief fit; Efficiency scrolled sideways and clipped its Efficiency column (BUG-2026-10-02-248).
+2. ✅ Fixed in `efficiency-report.ts`, regression test added, re-measured at 375px (no sideways scroll).
+3. 🔵 Owner ask: send all four emails to one test address from staging for one round, then decide what goes to `main`. Needs this fix on `staging` and a signed-in staging session; arrival in the inbox is for the owner to confirm (staging sends through MailSlurp).
+4. 🔵 Not done: `main` has none of the phone layout (no viewport tag in any of the four renderers); what goes to `main` is the owner's call. Not checked in a real mail app.
+
+## 2026-10-01 — 🔵 DEV-08 Pillows scheduled with their sofa, rule B (Violet, High) (branch `feat/dev08-pillow-follows-sofa` → `staging`)
+
+Violet chose rule B (WhatsApp 2026-10-01): a pillow is guaranteed finished before its sofa is packed, so the full set is packed and shipped together. The SO-status half of DEV-08 is on `fix/dev08-accessory-so-ready` → `main` (BUG-2026-10-01-241).
+
+1. 🔵 Sewing (`runSewing`, `src/api/lib/planning-chain.ts`): a pillow group whose SO has a sofa group is due no later than the sofa group's last sew day, so it never pushes the SO's Wood Cut floor (= whole-SO sew end + 2). Pillow-only SOs unchanged. Main item already past sewing or done → pillow due now; `soIdsWithMainItem` (new query in `loadChainInputs`, falls back to WAITING cards on error) tells "sofa done" from "no sofa"; a held (ON_HOLD) main item does not pull its pillows forward.
+2. 🔵 Packing (`runFraming` packing block): ACCESSORY PACKING cards ride their SO's sofa / bedframe pack day and show in the same SO group on the Packing schedule. Today they are dropped (`lane !== BEDFRAME && !== SOFA → continue`). Held as `PackUnit.acc` so they add minutes and rows but never pin or re-key the sofa unit. Side effect: the Phase-2 collector now emits PACKING assignments for those pillow cards, so Proposals can suggest their due date (= the sofa's pack day). Pillow-only SOs still not on Packing.
+3. ✅ `tests/planning-pillow-follows-sofa.test.mjs` (7 cases; 5 fail on the old engine, the 2 "unchanged" cases pass on both). tsc strict exit 0; `npm test` 5355 / 0 fail; doc gates OK; `docs/modules/planning.md` anchors re-derived + gotcha added.
+4. ⚪ Before/after on staging data: list SOs whose sew / pack day moves, and run the new `soIdsWithMainItem` SQL for real (UNMEASURED: only exercised by the engine tests, never against a DB). MEASURED on staging (hookka-erp-staging-sg) 2026-10-01, one READ ONLY transaction, old vs new engine over the same data: 5069 assignments identical, 178 new = PACKING/ACCESSORY rows, 24 SOs, every one on its sofa's pack day. Sewing change moved NOTHING: ACCESSORY sew capacity is never the limit, the cut floor is. 5 of 21 SOs still sew pillows on/after the sofa's pack day (e.g. SO-2609-021: sofa packs 10-10, pillow cut 10-22..24, sewn 10-28 = its customer DD). Cause: cutting is JIT, accessory floor = DD - chunkLeadDays (3) vs sofa modelLeadDays (6), and the sofa then runs ahead on free capacity. Rule B needs a cutting change; decision pending. `soIdsWithMainItem` SQL ran fine (31 SOs, key `mainSoId`). Packing page not yet checked in a browser (Pack Calendar rows checked via computeDeptSchedule).
+6. 🔵 Cutting, Violet chose A (WhatsApp 2026-10-01 15:35, "we always missed out the pillow, after delivery only found out this order got pillows"): a pillow on an SO with a sofa/bedframe is cut with it. Main item still waiting to be cut → pillow uses the main item's lead (`modelLeadDays`) instead of `chunkLeadDays`; main item already cut → pillow cut as soon as possible. Pillow-only SOs unchanged. Same rule on the standalone Fabric Cutting sheet. Done (`CutCard.mainItem`, `tagPillowCuts`). MEASURED on staging (read-only, old vs new engine incl. cutting): pillow cuts 87 earlier / 20 later (pillow-only orders displaced in the ACCESSORY pool, at most +7d), pillow sewing 62 cards earlier (up to 18d), 0 later; SO-2609-021 pillow sew 10-28 → 10-10 (= sofa pack day), SO-2609-198 10-23 → 10-10. Side effect: sofa wood→pack reshuffles within slack (17 SOs pack later, up to +11d; 13 earlier) because SOs no longer held by their pillows join Wood Cut sooner; SOs packed after customer DD: 117 before, 117 after, 0 newly late. Still after the sofa's pack day: SO-2609-093 / -198 / -223, all cut on day 1 and waiting on ACCESSORY sew capacity (175 pillow sew cards, near days full) — a capacity/OT call, not code.
+5. Not changed: Wood Cut waits for the whole SO's sewing (owner-confirmed Python port, Wei Siang 2026-06).
+
+## 2026-10-01 — 🔵 Accessories doubled on Fab Cut (Violet) (branch `fix/accessory-l1-only-job-cards` → `staging`, BUG-2026-10-01-244, was 241 on staging)
+
+Ask: on Fabric Cutting every accessory line shows twice, though the quantity is 1. Owner confirmed accessory BOMs are meant to be L1-only.
+
+1. 🔵 Cause: an accessory BOM has an empty WIP tree and its steps on the L1 tab. The builder answered the empty tree with the FG_MAIN fallback (all 9 depts) and then added the L1 cards too. BC05-MF qty 1 had 12 cards. Fixed in the builder and jobcard-sync through one helper, `breakBomIntoJobCardWips`. Tests in `tests/bom-explosion.test.mjs`.
+2. ⚪ Deploy blocker for the owner: Foam is only on these orders because of the fallback (prod: 16 fallback Foam cards worked by a real person, on A01, A02, BC05-MF, SB02, square pillows). Add Foam to the L1 tab of every accessory that goes through Foam before this ships, or new orders lose their Foam card.
+3. ⚪ A01's active BOM on prod is fully empty (no tree, no L1). It keeps the fallback chain until someone fills it in.
+4. ⚪ Not in this change: the 463 cards already created on prod (53 pending orders; 81 of the cards already COMPLETED). Cleanup needs a reviewed script and an owner decision on the completed ones.
+5. ⚪ Not in this change: FG-level Fab Cut / Fab Sew cards add to a `wip_items` row named after the product and Packing never takes it off (prod: `BC05-MF` 8, `SB02` 9, `A02` 2). Older than this bug.
+
+Prod measured 2026-10-01 with read-only queries (counts above). Staging gave the same picture.
+
+## 2026-10-01: ✅ DEV-31 worker sees their department and hours there today (branch `feat/dev31-worker-dept-hours` to `staging`)
+
+- Asked (ticket DEV-31, High, VIOLET): after scanning a department QR the worker should see which department they are in and how many hours they work there that day. Photo 1 is the office Working Hours grid with a punch-out split (Fabric Sewing · Bedframe 4.34h + R&D 3.19h), so "hours" = hours worked per department, not a planned target.
+- Already built before this: dept QR → `POST /api/worker/dept-scan` → `dept_scan_events`; punch-out splits the day into `working_hour_entries`. Missing: the worker never saw the split.
+- Done: `GET /today` and `POST /dept-scan` return `deptDay` (live = the punch-out maths with now as the end; punched out = the saved rows). Card on the home clock card and the scan result. My Pay > Daily Attendance lists each day's department rows (`/history` `daily[].deptHours`, snapshot key `v2:`). Strings in en / ms / zh / my.
+- Owner 2026-10-01: no "of 9h" target or progress bar on the card, it reads as pressure to hit 9h. The card shows hours worked only.
+- The punch-out autofill now calls the same `splitDayHours` helper (same result, checked by a test that compares it to the old inline path).
+- Tests: 7 new cases in `tests/dept-scan-split.test.mjs`; `npm test` and `tsc -p tsconfig.app.json` clean.
+- #651 merged into `staging` 2026-10-01; worktree removed (junction unlinked first).
+- ✅ Tested on staging 2026-10-01 with TEST-002 (home Fab Cut), punch 16:17 to 16:37, dept QRs opened as scan URLs: card on home dept since clock-in; Fab Sew · Sofa scan; Packing scan; back to Fab Sew (minutes summed, a stretch under 0.1h folds into the largest as at punch-out). Saved after punch-out: Fab Sew · Sofa 0.21h + Packing 0.12h, the same rows on the office Working Hours. Scan before punch-in shows "punch in first". TEST-001 (same-minute in/out) shows the broken-punch 9h Packing row.
+- ❌ My Pay rows for the punch-out day did not show: `/api/worker/history` kept serving the snapshot taken before clock-out (clockOut null, 0 min) on both test workers. Pre-existing snapshot freshness issue, not DEV-31; split out as its own task.
+- Test rows left on staging for TEST-001 and TEST-002 (2026-10-01).
+
+## 2026-10-01: 🔵 Staging top bar: Patch notes pill hidden under the search box (branch `fix/staging-topbar-patch-notes-hidden` to `staging`, STAGING ONLY, never PR into main)
+
+- Asked: after #641 the Patch notes pill was gone, covered by the search box.
+- Cause: the staging tool row had `min-w-0`, so it shrank below its own pills and the last one (Patch notes) spilled under the search box. The View as select was also as wide as the longest account name (271px showing "Me").
+- Fix: the row no longer shrinks (no `min-w-0`); the search box gets `min-w-0` and is the one that narrows. View as shows the picked name in a span sized to it, with the native select invisible over the whole pill. Patch notes label shows from xl.
+- Measured on staging in the browser pane with the sidebar open, classes applied in place: at 1360px Patch notes ended at 865px with the search starting at 765px (overlap); after the fix 773 vs 785, and at 1280px still 773 vs 785 with the search at 124px wide. View as 271px to 111px.
+
+## 2026-10-01: 🔵 Staging: "View as" picks a user, not a role; topbar tidied (branch `feat/staging-view-as-user` to `staging`, STAGING ONLY, never PR into main)
+
+- Asked: switch by user instead of by role, so what you see follows that account in User Management > Permissions; and fix the cramped top bar when the sidebar is open (labels wrapping onto two lines), make it scale and easy to click.
+- View as: the picker lists active accounts from `/api/users`. The pick's id goes out as `X-Staging-View-As`; `auth-middleware.ts` swaps in that user's id, role and org when `stagingViewAsUser` agrees (staging request, real SUPER_ADMIN, active user). So the gate and `/me/permissions` use the account's own Permissions-tab list with no special case, and customer scope and "my own" screens show that account's data. Non-GET calls under `/api/auth/` (password, 2FA, logout) are never impersonated. Writes are saved as the viewed account; the audit journal records the real account (`stagingRealUserId` / `stagingRealRole`). Replaces the role switcher from #640 (its rbac.ts and auth.ts hunks are reverted, no longer needed).
+- Top bar: all staging tools (API, View as, fake date, patch notes) sit in one row on the left as same-height (h-9) pills that never wrap; labels drop to icons below xl / 2xl. The search box narrows to w-56 below 2xl, and the user name / role block hides below xl (avatar stays).
+- Sign-out (`clearAuth`) clears the pick. Limits: the client keeps your user id (only the role follows the pick), so a screen comparing "my id" to an owner id can disagree while viewing; a failed user lookup silently falls back to you; `/api/users` is not org-filtered, so picking an account in another org swaps the tenant too.
+- Test: `tests/staging-view-as.test.mjs` (parse, per-tab read, server gate incl. ADMIN refused, inactive user, /api/auth writes, DB error, sign-out clears). UNMEASURED: not tried in a browser; check on staging after deploy.
+
+## 2026-10-01: 🔵 Staging: "View as" role switcher next to the API button (branch `feat/staging-role-switcher` to `staging`, STAGING ONLY, never PR into main)
+
+- Asked: a staging tool beside the API button, top left, to swap between roles and use the app as that role.
+- `src/components/staging-role-switch.tsx`: a "View as" picker in the topbar after `StagingApiLog`, listing `ROLE_OPTIONS`. Per tab (sessionStorage), off by default, shown only to a real SUPER_ADMIN on a `staging.` host. Picking wipes the `hookka-cache:` API cache and reloads; the pill turns red while a role is active.
+- The pick is sent as `X-Staging-Role` from the `api-client.ts` fetch patch. `auth-middleware.ts` stamps it as `userRole` only when `stagingRoleFromRequest` (`src/api/lib/staging-role.ts`) agrees: staging request (`isStagingRequest`), real role SUPER_ADMIN, known role. ADMIN is refused so it cannot pick SUPER_ADMIN. So the API gate, `/api/auth/me/permissions` (menu, nav hiding, home page) and the client role checks (`getCurrentUser()` in `auth.ts`) all act as the picked role.
+- While viewing as a role the account's own permission list is skipped (rbac.ts and /me/permissions), and the audit journal records the real role (`stagingRealRole`).
+- Limits: it is a role view, not a user view. `userId` stays yours, so "my own" data (attendance, payslip, KPI card) is still yours. Staging admin pages (Mail Outbox, Schema Check) 403 under a non-admin role, as they should.
+- Test: `tests/staging-role.test.mjs` (parse, per-tab read, server gate incl. ADMIN refused, prod and canary refused). UNMEASURED: not tried in a browser; check on staging after deploy.
+
+## 2026-10-01: 🔵 Mail Outbox shows the whole email, measured cause (branch `fix/staging-mail-bare-raw` to `staging`, STAGING ONLY)
+
+- The #636 sources line: `record 121 · html 121 · raw 31,976 -> 0 decoded · raw/json 31,976 -> 0 decoded`. "Show raw" was the full brief as bare HTML, no MIME headers.
+- `htmlFromRawMime` now returns text that already starts with a tag as the HTML. Read-side fix, so old emails show too. BUG-2026-10-01-234.
+- Test: `tests/staging-mail.test.mjs` (13 pass; the bare-HTML case fails before). UNMEASURED until opened on staging: the brief should show about 31,976 characters and render.
+
+## 2026-10-01: 🟡 Mail Outbox: measure every body source (branch `fix/staging-mail-source-diagnostics` to `staging`, STAGING ONLY)
+
+- #635 did not work: the brief still shows 121 characters. Its fallbacks swallowed failures, so the page could not say why.
+- Each opened email now shows "Sources: record N · html N · raw N -> N decoded · raw/json N" (or the HTTP status / error), and a "Show raw" view. `/raw/json` added as a fourth source; longest still wins.
+- Not a fix. Next: read the sources line and the raw message's `Content-Type` / `Content-Transfer-Encoding`, then fix the call, the decoder, or (only if raw is also short) the sender. BUG-2026-10-01-234 stays open.
+- Test: `tests/staging-mail.test.mjs` (12 pass).
+
+## 2026-10-01: 🔵 Mail Outbox shows the whole email (branch `fix/staging-mail-raw-body` to `staging`, STAGING ONLY)
+
+- "Show source" (#633) showed the brief's body as 121 characters: its first line only. The owner opened the delivered copy in the MailSlurp dashboard and it is complete. So MailSlurp's stored sent record is short; delivery is fine. BUG-2026-10-01-234 corrected (the #629 "empty body" guess was wrong).
+- `getSentMail` now also reads `GET /sent/{id}/html` and the raw SMTP message (`GET /sent/{id}/raw`, decoded by `htmlFromRawMime`) and shows the longest.
+- Test: `tests/staging-mail.test.mjs` (11 pass; 2 fail on the old reader). UNMEASURED: which of `/html` or `/raw` is whole on MailSlurp's side; check on `/staging-mail` after deploy (length should be in the thousands).
+
+## 2026-10-01 — 🔵 Production QR show / print load time (branch `perf/production-qr-speed-staging` → `staging`, BUG-2026-10-01-235)
+
+Ask: Production pages load slowly, worst on Show QR and Print; make it faster, or cache it so a click or refresh does not pay again.
+
+1. 🔵 QR generation: SVG instead of 600 px PNG (Chromium, 200 codes: 0.5-0.8 s vs 4.7 s), memoised per session. Covers on-screen tiles and every sticker print on the Production page.
+2. 🔵 FG / Foam packing print waited a fixed 1.5 s for QRs, which is too short for a large batch (blank QRs) and wasted time on a small one. Pre-build the QRs, then print.
+3. ⚪ FG sticker load fans out 2 requests per PO plus one full SO read per SO. A single batch endpoint is the real cold-load fix; needs a prod / staging Network waterfall first to confirm the request fan-out dominates. Prod split UNMEASURED.
+
+
+## 2026-10-01: 🟡 Mail Outbox: opened email still showed an empty white box (branch `fix/staging-mail-show-source` to `staging`, STAGING ONLY)
+
+- Reported after #629: clicking an email shows an empty white frame, not the "no body" message, so the server does return a body and it renders blank. Follow-up to BUG-2026-10-01-234.
+- Cause UNMEASURED: no enforced CSP on the page (checked the response headers and `index.html`), and our email HTML hides nothing. Could not read the live response: Claude in Chrome was not connected.
+- Added a "Show source" toggle and the body's type and length on each opened email. The source is printed as escaped text, so the content is readable whatever it is, and the length tells "empty" from "renders blank".
+- Next: open an email, click "Show source", and read what MailSlurp returns; fix the renderer from that.
+
+## 2026-10-01: 🔵 Staging: the topbar stays on screen when scrolling (branch `fix/staging-sticky-topbar` to `staging`, STAGING ONLY)
+
+- Asked: keep the top part fixed so the API log button is reachable without scrolling back up.
+- Cause: `topbar.tsx` has `sticky top-0`, but `DashboardLayout.tsx` wraps Topbar + Breadcrumbs in a div only as tall as they are, and a sticky child cannot leave its parent, so the whole block scrolled away. The wrapper is now `sticky top-0 z-30`.
+- `main` has the same wrapper, so prod's header scrolls away too. Not changed there: this branch is staging only.
+- Test: `tests/staging-api-log.test.mjs` pins the sticky wrapper. UNMEASURED: not looked at in a browser; check on staging after deploy.
+
+## 2026-10-01: 🔵 Staging: API log button moves into the topbar, tab strip hidden (branch `feat/staging-api-log-in-topbar` to `staging`, STAGING ONLY, never PR into main)
+
+- Asked: remove the workspace tab strip at the top on staging and put the API log button there. The floating bottom-left button sat over the sidebar.
+- `topbar.tsx` renders `StagingApiLog` instead of `WorkspaceTabs` when the host starts with `staging.`; every other host keeps the tabs. The drawer drops down from the button. The floating mount in `DashboardLayout.tsx` is removed.
+- Side effect: the strip is what records visited pages as tabs, so on staging no tabs build up at all.
+- Test: `tests/staging-api-log.test.mjs` pins the placement; `tests/workspace-tabs.test.mjs` still passes. UNMEASURED: not looked at in a browser; check on staging after deploy.
+
+## 2026-10-01: 🔵 Mail Outbox opened an email to an empty frame (branch `fix/staging-mail-empty-body` to `staging`, STAGING ONLY, never PR into main)
+
+- Asked: the Mail Outbox list loaded but clicking an email showed nothing. BUG-2026-10-01-234.
+- `getSentMail` now falls back to MailSlurp `GET /sent/{id}/html` when the sent record's `body` is empty; the page shows "MailSlurp returned no body for this email." if it is still empty.
+- Setup done the same day: `MAILSLURP_API_KEY` and `MAILSLURP_INBOX_ID` added as secrets on the Pages Preview environment (names checked, values not seen); a stray copy on Production removed by the owner; staging redeployed.
+- Test: `tests/staging-mail.test.mjs` (8 pass). UNMEASURED: the real MailSlurp response; check by opening an email on `/staging-mail` after deploy.
+
+## 2026-09-30 — 🔵 DEV-22 Worker Penalty + payroll deduction (branch `feat/dev22-worker-penalty` → `staging`)
+
+Ask (ticket DEV-22, High): a Worker Penalty module for confirmed order / production mistakes, with approval, a payroll deduction, and the worker seeing it in the app. Owner's answers: approval gated on a new `worker-penalties:approve` right and the creator may not approve their own penalty; the deduction lands in the payroll month of the APPROVAL date, rolling to the next month when that month's payroll is already approved; net pay is not clamped (same rule as advances).
+1. ✅ Backend lib + tables (`worker_penalties`, `worker_penalty_lines`, `payslips.penalty_deduction_sen`), runtime self-applied.
+2. ✅ API `/api/worker-penalties`: CRUD, submit / approve / reject / revoke, production-order lookup with the job-card PICs as suggested workers.
+3. ✅ Payroll: generate + projected subtract the period's approved penalties after statutory; payroll approval posts them (and refuses while the stored slips disagree with the approved penalties); back to DRAFT un-posts.
+4. ✅ RBAC: `worker-penalties` resource (HR + Office via allExcept), `approve` in the Permissions catalog.
+5. 🔵 Employees > Worker Penalty tab (list, create from a production order, multi-worker amounts, photos, approval actions) + Payroll tab Penalty column.
+6. 🔵 Worker app My Pay: penalty card (date, PO No., reason, amount, payroll month, status).
+7. ✅ Tests + docs: `tests/worker-penalties.test.mjs` (9), employees module guide, CODEBASE-MAP, API.md regenerated.
+8. 🟡 Items 5 and 6 are typecheck / lint / unit clean but NOT yet driven in a browser. The local `.dev.vars` points at PRODUCTION (checked 2026-10-01 by project ref only), so no local run; owner chose to verify on staging after the PR merges.
+9. ✅ #628 merged and deployed to staging. Driven on staging 2026-10-01: tab renders, order lookup CO-2608-006-01 pulls product / qty / customer and per-department PICs, two suggested workers added (RM 50.00 + RM 25.50), WP-2610-001 submitted, self-approval refused, Payroll tab shows the Penalty column.
+10. 🔵 Owner 2026-10-01 (no second approver account): a SUPER_ADMIN may approve a penalty they raised; every other role still needs a second person (`selfApprovalBlocked`, branch `feat/dev22-superadmin-self-approve`). Then finish on staging: approve, payroll estimate, generate + approve Oct payroll, POSTED, drift banner.
+
+## 2026-10-01 — 🔵 DEV-30 Size column on the Consignment Note PDF (Siti, High) (branch `feat/cn-pdf-size-column` → `main`)
+
+Ask (DEV-30): the CN PDF should show the item size the CO shows (a sofa's seat size, e.g. 28), as a Size column left of Set.
+
+1. 🔵 New Size column between Description and Set. Value comes from `GET /api/consignment-notes/:id/print-extras` (`sizeLabel`: the production order's, which is copied from the CO line; the CO line itself as fallback). Lines without one print "-". Verified on a locally rendered sample PDF.
+2. ⚪ Noticed, not changed: the Description still prints "Size: 1A(LHF)" for sofas, which is `products.sizeLabel` (the module code), not the seat size. Two different things both labelled size; owner to decide whether to rename or drop it.
+3. ⚪ The dispatch-notice email PDF only has the Size value when print-extras was already fetched for that CN (same as the other rich detail); otherwise it prints "-".
+
+Prod data is UNMEASURED (no prod access this session): how many CO lines carry a blank size.
+
+
+## 2026-10-01 — 🔵 DEV-08 Sofa + accessories as one order (Violet, High) (branch `fix/dev08-accessory-so-ready` → `main`)
+
+Ask (DEV-08): sofa and its accessories (pillow) must be scheduled together, show per-item + overall status, and the order is only Completed / Ready for Delivery when every item is done.
+
+1. 🔵 Bug: `cascadeUpholsteryToSO` (and its CO twin) flips the SO to READY_TO_SHIP once the sofa's UPHOLSTERY cards are done. A pillow PO has no UPHOLSTERY card, so it counts as done while still at FAB_SEW. Fix: a sibling with no UPHOLSTERY card counts only once the PO itself is COMPLETED (or CANCELLED); one `siblingUphGateDone` shared by all three cascades (BUG-2026-10-01-241, class C28). Verified locally: tsc strict exit 0, `npm test` 0 fail, new test fails 7 of 9 on the old code. PR to `main`, not deployed.
+2. 🔵 MEASURED on staging 2026-10-01 (read-only): 9 SOs at READY_TO_SHIP with unfinished pillow POs (24 PO rows incl. SO-2609-199's 3 SERVICE CHARGE lines, which have no UPH sibling so this fix does not touch them). 7 of them already shipped/invoiced the sofa (e.g. SO-2605-104 on DO-2606-034, pillows pending 4 months). Safety: on shipped SOs, accessory POs are COMPLETED 267 vs PENDING 2, so the floor does close pillow POs and the fix will not wedge normal orders. Prod still UNMEASURED. Query: `SELECT so.id, po.po_no, po.status FROM sales_orders so JOIN production_orders po ON po.sales_order_id = so.id WHERE so.status = 'READY_TO_SHIP' AND po.item_category = 'ACCESSORY' AND po.status NOT IN ('COMPLETED','CANCELLED')`. Prod impact UNMEASURED.
+3. 🟡 Parked, needs reporter: align SOFA + ACCESSORY sewing days for the same SO (`runSewing` schedules each lane independently). Violet has not answered which schedule screen she means.
+4. 🟡 Parked: per-SO sibling status on Production / Planning rows. The SO detail "Linked Production Orders" table already shows per-PO status.
+5. Not a gap: armrest is a sofa WIP (`SOFA_ARMREST`, mig 0027), not a separate SKU, so it already rides on the sofa PO.
+
+
+## 2026-10-01 — 🔵 Worker My Pay / home showed the clock-in state after clock-out (branch `fix/worker-history-snapshot-stale` → `main`, BUG-2026-10-01-245)
+
+Ask: staging, TEST-001: after clock-out `/api/worker/today` had the punch-out and the 9h row, `/api/worker/history` for the same day still had clockOut null, 0 minutes, no department rows. Confirm the cause, fix where all writers route through, regression test, log it.
+
+1. 🔵 Cause (inferred from code and BUG-2026-10-01-236, not reproduced): the snapshot's freshness probe and its rebuild reads are plain SELECTs that Hyperdrive caches. The insert did move the row count, so missing `updated_at` alone does not explain this case. Fix: `withWorkerSnapshot` reads through `freshReads` (transactions). Verified locally: tsc strict exit 0, `npm test` 0 fail, new test fails 3 of 4 on the old code. PR to `main`, not deployed.
+2. 🔵 Second defect, the one in the ask: worker.ts's six `UPDATE attendance_records` never bumped `updated_at` (attendance.ts and the Working Hours grid do; no trigger exists). A punch-out that adds no row was invisible to the probe. All six bump it now; a class test scans `src/api` for any UPDATE of the two tables that does not.
+3. ⚪ Owner decision: turn off Hyperdrive caching on both configs (`wrangler hyperdrive update <id> --caching-disabled`). The same cached-rebuild risk is in `lib/snapshot.ts` and the other snapshot helpers; not changed here.
+4. ⚪ To check on staging after deploy: clock in, open My Pay, clock out, open My Pay within a minute. The day must show the clock-out and the department hours.
+
+
+## 2026-10-01 — 🔵 Edit BOM: the WIP tree back to layered colour cards (owner「A 然后我整个UI 又要像B那种 … 有颜色这样的 渐变」)(branch `fix/bom-editor-layered` → `main`, BUG-2026-10-01-247)
+
+Ask: the Edit BOM WIP tab used to look layered like the BOM Structure view; since 2026-08-04 it is a flat list of identical "{DIVAN_HEIGHT} Divan- {SI…" rows and hard to read. Keep the two-pane editor (option A) but give it the colour / nesting / gradient look of the old one (option B).
+
+1. 🔵 Left tree = nested gradient cards in the BOM Structure palette (L2 blue, L3 purple, L4 orange, L5 green), L-badge, resolved name ("8" Divan- 6FT Foam"), qty, minutes, process pills. Right pane header in the selected node's level colour. Dialog widened to 1360px; stacks on phone width. tsc strict + eslint exit 0. Visual check on localhost (prod API) pending the owner's login.
+2. 🔵 #669 merged (edc4c0cf), deployed; owner saw the new cards on prod.
+3. 🔵 Follow-up (branch `fix/bom-editor-scroll`): neither pane scrolled — dialog had no definite height on the WIP tab. Fixed; scroll measured in a static repro at desktop and phone width. Owner to confirm on prod.
+
+## 2026-10-01 — 🔵 GRN number collision returns a retry, not a 500 (branch `fix/grn-number-collision` → `staging`)
+
+- Asked: fix #5 from the T-006 test findings. Two GRNs created in the same instant: the second failed with `500 duplicate key ... ux_grns_grn_number` (measured on staging 2026-09-30).
+- `POST /api/grn` now retries with the next number on a collision (up to 5), then answers 409 with a plain message. BUG-2026-10-01-232, C27 row 5.
+- Not yet verified on staging. After deploy: 5 rounds, each a fresh 10-unit PO with two GRN creates of 4 fired at once (both fit, so only the number can collide). Pass = every response 201 with two different consecutive GRN numbers, no 500 and no "took this GRN number" 409.
+
+## 2026-10-01: 🔵 Staging test tool, today override (branch `feat/staging-today-override` to `staging`, STAGING ONLY, never PR to main)
+
+- Asked: a staging-only fake "today" so month-end, overdue, aging, leave and payroll-month screens can be tested without waiting for the calendar. Scoped to named date helpers only.
+- Done: topbar control next to the patch-notes badge (staging hosts only). Sets a fake date per tab in sessionStorage, off by default; a red "Fake date: yyyy-mm-dd" pill shows while it is on, and set/clear reloads the page. `api-client.ts` sends it as `X-Staging-Today` on `/api/*` calls only while set. The server reads it only when `isStagingRequest(c)` is true (`src/api/lib/staging-gate.ts`) and the value is a real yyyy-mm-dd date; anywhere else it is ignored.
+- Persisted dates: the override affects READS only. `todayYmdMY()` is unchanged, because almost all of its callers write a date into a document (completed date, effective-from, R&D created/issued/work dates, service-case dates, stage-skip). Reads use a new wrapper, `todayYmdMYForReads()`. One write side effect: the production overdue snapshot cache is keyed by date, so a fake-date request writes a cache row under the fake date on the staging DB. Real-date requests never read it. Nothing clears it: the nightly staging wipe was removed on 2026-09-29 (`fix/staging-no-nightly-wipe`), so these rows stay until someone deletes them. They are harmless, because only a request carrying the same fake date reads them.
+- Honours the override:
+
+  | Helper | Caller | Screen |
+  |---|---|---|
+  | `todayYmdMYForReads()` (client) | `src/pages/accounting/index.tsx` overview | P&L month default |
+  | `todayYmdMYForReads()` (client) | `src/pages/production/index.tsx` baserows `today` | production grid overdue marks |
+  | `overdueTodayUtc(c)` (server) | `computeOverdueCounts` in `production-orders.ts` | production overdue counts |
+
+- Does NOT honour it (known date reads, real date still used):
+
+  | Where | What |
+  |---|---|
+  | `todayYmdMY()` callers (production completedDate, employees effectiveFrom, rd/detail, service-cases, stage-skip) | document dates written, on purpose |
+  | `src/pages/employees.tsx` future effective-from badge | read, left out of scope |
+  | `src/pages/worker/scan.tsx` today history | read, left out: the worker portal mounts `WorkerLayout` (`src/router.tsx`), not the topbar, so it would show no banner |
+  | `src/pages/production/utils.ts` `todayISO` | production page cold-start date filter (from = to = real today) |
+  | `src/lib/delivery-list-filters.ts` `startOfMonthMYT` | delivery list default month |
+  | `accounting.ts` inline `new Date()` (AP/AR aging, trial-balance `asOf` default and about ten more) | aging and period defaults |
+  | `invoices.ts`, `dashboard-prototype.ts` inline `new Date()` | overdue on invoices and dashboard |
+  | `customer-credit.ts` `decideCredit(..., todayYmdMY())` | credit block on DO create (a write gate, no request context) |
+  | `leave-entitlement.ts` `currentLeaveYear()`, `payslips.ts` inline `new Date()` | leave year, payroll month |
+  | `reports.ts` cron date helpers, `agent-learning.ts` `ymdInSgt` (planning), `fabric-usage.ts` `FABRIC_METRICS_TODAY` | crons and planners, no request context |
+
+- Server gap: the aging, leave and payroll reads are inline `new Date()` in route handlers, not helpers, so they were left alone rather than threading the override through dozens of sites.
+- Tests: `tests/staging-today.test.mjs` (5: parsing, off by default, prod host and invalid values ignored, gate refuses prod/canary/custom domain/unbound DB, `overdueTodayUtc` unchanged off staging) and `tests/warm-overdue-counts.test.mjs` (6) pass. `tsc -p tsconfig.app.json` exit 0; eslint 0 errors on touched files.
+- UNMEASURED: not checked on staging. After merge, set a fake date on staging and confirm the red pill, the `X-Staging-Today` header on `/api/*` calls, and that production overdue counts move; on the prod host the control must not appear.
+
+## 2026-10-01: 🔵 Staging test tool, test order factory (branch `feat/staging-test-order-factory` to `staging`, STAGING ONLY, never PR to main)
+
+- Asked: on the Sales Orders list, staging only, a one-click "New test SO" (customer + number of lines, products random or chosen) that creates the SO through the normal create API and opens it, plus a "Void my test docs from today" cleanup.
+- `src/components/staging-test-order-factory.tsx` on `sales/index.tsx`, rendered only when the host starts with `staging.` (sales mode only). Logic in `src/lib/staging-test-order-factory.ts`. No new endpoint, no schema change.
+- Create: `POST /api/sales-orders` as DRAFT. Each line is seeded the way `sales/create.tsx` seeds it after product, seat and fabric are picked (customer price row first, sofa seat x fabric tier, bedframe PRICE_1 uses price1); divan / leg / total-height / special surcharges are left out so the server derives them. The server then applies `resolveSoBasePriceSen` and the sofa combo pass as usual. Never mixes sofa and bedframe; sofa qty 1; every line gets a fabric. Sofa legs are not sent, because an omitted leg price is derived from the bedframe leg list.
+- Tag: `reference` = `[TEST yyyy-mm-dd by <userId>]` (the paginated list search covers `reference`). `sales_orders` has no creator column, so "created by me" is the user id in that tag, self-asserted.
+- Cleanup: list search on the tag, then only rows whose `reference` holds the exact tag AND whose `createdAt` is today (MY time). Each one's detail is read and any SO with a live DO or invoice is skipped and logged. The confirm dialog lists what will be cancelled and what is left alone. Cancel is `PUT /api/sales-orders/:id {status: CANCELLED}`; never DELETE.
+- Email: SO create sends none. Confirm (not done by this tool) enqueues a PO emission whose inline fallback only logs.
+- Test: `tests/staging-test-order-factory.test.mjs` (12 pass, stubbed fetch). tsc strict exit 0.
+- UNMEASURED: not tried in a browser (local dev proxies to prod, and the host check hides the tool there). Check on staging after merge.
+
+## 2026-10-01: 🔵 Staging test tool, mail outbox page (branch `feat/staging-mail-outbox` to `staging`, STAGING ONLY, never PR to main)
+
+- Asked: a staging page listing the mail staging has sent (time, to, subject, status/error, body, attachments), so report and PO emails can be checked without opening MailSlurp.
+- Source: staging sends every email through one MailSlurp inbox, and MailSlurp keeps each sent message with its body and attachments. `outbox_emails` only holds the `enqueueEmail` path; the report emails (`reports.ts` `sendMail`) never touch it. So sent mail is read from the MailSlurp API (`GET /sent`, `GET /sent/{id}`, attachment metadata and bytes), proxied by the worker. No new storage.
+- `/staging-mail` (sidebar group PATCH NOTES): sent mail newest first, 50 a page; a click opens the body in a sandboxed iframe (scripts off) and lists attachments as download links. A "Queued, not sent" card shows `outbox_emails` rows that are not SENT, with status, tries and last error.
+- `/api/staging-mail`: read-only, 404 unless `isStagingRequest`, then SUPER_ADMIN / ADMIN only. The MailSlurp key never leaves the worker. Detail and download refuse a sent email from another inbox, and a download only serves an attachment of that email.
+- Gaps: a send MailSlurp refused is not stored there, and direct `sendMail` failures (reports, mail center, CRM, auth, users) are only logged, so neither shows. The page only fills while MailSlurp is the active provider (`sendMail` prefers Brevo, then Resend).
+- Test: `tests/staging-mail.test.mjs` (7, stubbed fetch, no network).
+- UNMEASURED: nothing was run against MailSlurp or staging. After merge, open `/staging-mail` on staging as an admin and open a report email; check a non-admin gets 403.
+
+## 2026-10-01: 🔵 Staging test tool, schema check page (branch `feat/staging-schema-check` to `staging`, STAGING ONLY, never PR to main)
+
+- Asked: a staging-only page that lists missing tables, missing columns and type mismatches between what the code expects and what the staging DB has, since migrations do not auto-apply.
+- Expected = `tests/db-schema.json` (with `tests/db-boolean-columns.json` for types). It is the only complete column-level source: a prod `information_schema` snapshot that `tests/sql-columns-exist.test.mjs` holds route SQL to, and that self-apply PRs extend by hand. `check-schema-applied.mjs` knows tables only; migrations are inert here; self-apply statements are scattered and partial.
+- `/staging-schema` page plus `GET /api/staging-schema`: 404 unless `isStagingRequest`, then `requireSuperAdmin`; one SELECT on `information_schema.columns`, no DDL. Diff in `src/api/lib/staging-schema-diff.ts`.
+- Blind spots, shown on the page: names only (types checked for real booleans only); a prod snapshot, so a self-applied column missing on staging may just mean its write path has not run there yet; only as fresh as its last refresh.
+- Test: `tests/staging-schema-diff.test.mjs` (5, fixtures only).
+- UNMEASURED: never run against a live DB. Open the page on staging after merge.
+
+## 2026-10-01: 🔵 Staging test tool: API log drawer (branch `feat/staging-api-log` to `staging`, STAGING ONLY, never PR to main)
+
+- Asked: a way to see recent API calls and their errors on staging, and copy one into a bug report.
+- Every dashboard page gains a small "API" button bottom-left, rendered only when the host starts with `staging.`. It opens a drawer with the last 50 `/api` calls: method, path (no query string), status, ms, and for failures the response body cut to 500 characters. "Copy as bug report" copies page URL, time, user agent and the picked call (or the last failed one).
+- Recording rides the existing `window.fetch` patch in `src/lib/api-client.ts` (two host-gated lines, CSRF untouched). The log is in memory only. Request bodies are never kept; failure bodies are read from a clone, and never for auth / PIN / password / session / token / invite paths. No new endpoint, no server change.
+- Test: `tests/staging-api-log.test.mjs`. UNMEASURED: not checked in a browser (local dev proxies to prod and the host check hides it there). Check on staging after merge.
+
+## 2026-10-01: 🔵 Staging test tool, delivery and billing skip (branch `feat/staging-delivery-skip` to `staging`, STAGING ONLY, never PR to main)
+
+- Asked: carry the stage-skip tool past production. For an SO whose production is done, one click creates the DO, delivers it, raises the invoice and records a full payment, each step optional through a "go up to" selector (DO / Delivered / Invoiced / Paid), with a step log.
+- SO detail page gains `StagingDeliverySkipCard` (`src/components/staging-delivery-skip.tsx`, planner and runner `src/lib/staging-delivery-skip.ts`), rendered only when the host starts with `staging.`. Writes go through the operator endpoints only: `POST /api/delivery-orders` (finished POs no live DO holds), `PUT /api/delivery-orders/:id` to LOADED then DELIVERED with a proof of delivery, `POST /api/invoices` when a DO is still DELIVERED, `POST /api/payments` for each live invoice's balance. The runner re-reads `GET /api/sales-orders/:id` between writes, stops at the first refused write, and stops if a write did not move the order. No new endpoint, no schema change.
+- Email: there is no opt-out. `applyDeliveryOrderUpdate` queues the dispatch notice on the move to LOADED and the invoice notice on the move to DELIVERED (`fireCustomerNoticeBestEffort`), and `POST /api/invoices` queues the invoice notice too. The only skips are "already sent" and no hub/customer email on file. MailSlurp sends to the address on file. Corrected 2026-10-01: the notice reads `customers.email` and `delivery_hubs.email`, and `scripts/sanitize-staging.mjs` (step 4, contact details) rewrites both to `<table>-<id>@staging.invalid`, an unroutable domain, and the sync workflow runs it after every merge. So in code these notices cannot reach a real customer. Live staging is UNMEASURED: nobody has queried whether every row is sanitised. The card says so in its confirm text; the "DO" target sends nothing. Open question for the owner: a recipient redirect in the MailSlurp branch of `src/api/lib/email.ts`.
+- "Finished" means PO status COMPLETED (the job-card rollup); `createDeliveryOrderForPOs` does not check readiness itself.
+- Test: `tests/staging-delivery-skip.test.mjs` (planner, runner against a stubbed fetch, source pins). UNMEASURED: not run on staging yet; check after merge, including that the staging user has the delivery-orders, invoices and payments permissions.
+
+## 2026-09-30 — 🔵 Sync `staging` from `main` (branch `chore/sync-staging-from-main-0930` → `staging`)
+
+96 `main` commits merged into `staging` (171 staging-only). Conflicts: 8 docs, no code.
+1. 🔵 Docs: stamps and logs unioned; `modules/production.md` and `CODEBASE-MAP.md` production anchors re-derived on the merged file; `API.md` regenerated.
+2. 🔵 Bug-id collisions, followed `main`: staging's report-emails BUG-2026-09-29-222 → -232 and customer-credit BUG-2026-09-28-218 → -233, with their references (`tests/report-emails-mobile.test.mjs`, this file, `CODEBASE-MAP.md`).
+3. 🔵 `BUG-HISTORY.md` had the BUG-2026-09-29-214 entry twice after the merge; main's copy is the one kept.
+4. 🔵 `HOOKKA-GOTCHAS.md`: a staging-only gotcha named two project refs, which main's new ref test (`tests/sync-staging-no-nightly-wipe.test.mjs`) refuses; replaced by their `.env` names.
+
+## 2026-09-30 — 🔵 Per-account permissions tab (branch `feat/account-permissions-tab` → `staging`)
+
+Ask (owner): "a new tab beside org chart … the admin can see all of the user permission and role and the admin can edit every acc access weather it was edit, view, delete etc". Owner's answers: **per account only**; the 5 code roles (Sales/Office/QA/R&D/HR) may become editable (replaces the 2026-08-04 code-only rule for any account that is edited); **Super Admin only** may edit.
+1. ✅ Backend: per-account override consulted by BOTH the gate (`rbac.ts`) and the menu (`/me/permissions`); an account never edited keeps its role's set, so day one changes nothing. `tests/user-permissions.test.mjs` (14; 4 fail on the old code).
+2. ✅ API: `/api/user-permissions` — catalog, list, get, save, reset-to-role; Super Admin only; audited.
+3. 🔵 UI: "Permissions" tab beside Org Chart — built, typecheck/lint clean. NOT driven in a browser locally (local dev needs the owner's sandbox DB string); owner chose to verify on staging.
+
+## 2026-09-30 — 🔵 T-006 R2: GRN over-receipt race (branch `fix/t006-r2-grn-receipt-race` to `staging`, STAGING ONLY, never PR to main)
+
+- Asked: close the window where two simultaneous receipts both pass the 110% check, inside the database statement, failing loudly (no 0-row update), mapped to 409. Keep the pre-batch 400. Guard every place a GRN raises the PO counter. Tests, docs, commit locally, no push, no PR.
+- Done: `poCounterIncrement` in `grn.ts` carries the ceiling in the counter UPDATE and raises when it is used up. Guarded at all three sites: create (born POSTED), DRAFT to POSTED, and a qty edit that increases. The last two now run the counter in their main batch. BUG-2026-09-30-226, BUG-CLASSES C27.
+- Tests: `purchasing-convert-flow` (3 new), `purchase-edit-cascade` (2 new), source pins in `t006-r2-grn-cumulative-overreceipt` and `grn-multi-po`. The five behavioural ones fail on the old code.
+- NOT verified: real Postgres row locking (no database access from this branch). After deploy to staging, fire two receipts at one PO line at once; exactly one must post.
+- Needs an owner look: a POSTED line can no longer be edited up past 110% of its PO line, and a second DRAFT that would pass 110% can no longer be posted. No override exists.
+- Left alone: the check tests received qty while the counter moves by accepted qty; two lines of one document on the same PO line are not summed.
+
+## 2026-09-30 — 🔵 T-006 R7: delivery return quantity must be positive (branch `fix/t006-r7-return-qty` to `staging`)
+
+- Asked: close the two request shapes that got past the R7 return cap on staging (`quantity: -1`, and `quantity` omitted after a full return).
+- `createDeliveryReturnRecord` reads each line's quantity once and refuses anything not greater than 0 with a 400; the cap and the insert use the same value. A line with no production order is refused when the DO has production-order lines. BUG-2026-09-30-224.
+- Test: `tests/t006-r7-delivery-return.test.mjs` runs the real create function on a fake DB; the new cases fail on the old code.
+- Not done: the driver flow ignores a refused create (`public-do-qr.ts`), and other capped create paths are unswept for the same shape (BUG-CLASSES C26 row 3).
+
+## 2026-09-30 — 🔵 Staging test tool: skip production stages (branch `feat/staging-stage-skip` to `staging`, STAGING ONLY, never PR to main)
+
+- Asked: a way to skip production stages easily on staging, so a test case can start from a chosen stage (e.g. ready for DO).
+- SO detail page gains a card, rendered only when the host starts with `staging.`: "Complete up to <stage>" and "Reset stages" for the order's production orders not yet on a DO. Writes go through the existing `POST /api/production-orders/bulk-patch`, one wave per job-card `sequence` (bulk-patch runs a batch in parallel and the upstream sequence lock would refuse a later stage in the same wave). No new endpoint, no schema change.
+- Test: `tests/staging-stage-skip.test.mjs`. Not usable on local dev: local proxies to prod, and the host check hides the card there.
+- #599 merged and deployed. Used live on staging 2026-09-30: test order SO-2609-397 pushed to Packing, 14 job cards in 8 waves, 0 failed; reset put all 14 back to WAITING.
+- Fix (branch `fix/staging-stage-skip-cancelled-do`): after a DO was cancelled the card said "0 of 1 can be moved", because the SO reports a cancelled DO as the PO's delivery. The card now ignores a CANCELLED delivery, and before writing asks `GET /api/delivery-orders/linked-po-ids` which POs a live DO holds, since the SO's per-PO delivery field is first-DO-wins and can name a cancelled DO while a live one exists.
+- Fix (branch `fix/staging-stage-skip-retry`): on a 20-order SO the tool reported "160 job card(s) updated, 1 failed. Something went wrong on our side" and stopped. That text is the API's generic 500, not a timeout. Cause of the 500 is UNMEASURED: bulk-patch drops the error `ref`, so the Worker log line could not be matched. `sendWave` (`src/lib/staging-stage-skip.ts`) now sends a card that failed in the parallel wave again on its own through `PATCH /api/production-orders/:id`, and a card that fails twice is shown with its `ref`. Not yet tried on staging.
+
+## 2026-09-30 — 🔵 BUG-06: finish the Transfer / Convert duplicate guard on staging (branch `test/bug06-do-guard-behavioural` → `staging`)
+
+- Asked: go back to BUG-06 ("Transfer / convert: one entry point bypasses the duplicate guard"), test case it, finish it; work goes to staging, PR #448 to main closed.
+- Sales page path (T-006 R1): already fixed on staging. Proved by a new behavioural test that runs the real `createDeliveryOrderForPOs`.
+- Second gap found by the same test: `items` naming an already-delivered PO went past the guard. Fixed, BUG-2026-09-30-223.
+- tsc strict 0; `npm test` 5168 pass / 0 fail / 3 skip.
+- Measured on staging 2026-09-30 (all 10 BUG-06 cases pass): 3, 6, 7, 8, 9 read-only or refused; 1, 2, 4, 5, 10 on test order SO-2609-397 (RX HOMICE, the only customer with no overdue invoices). DO-2609-090 created, the stale second tab refused with 409, repeat transfer shows "Nothing ready", cancel frees the PO, same Idempotency-Key twice gives DO-2609-091 once. Cleanup: both DOs, the SO and its PO cancelled, job cards reset.
+- Found on the way, not fixed: (a) the Sales "Transfer to Delivery Order" dialog has no credit override, so on staging it fails for every customer with overdue invoices (6 of 7 with open orders), while the Delivery page offers the override; (b) the ready list is a cached snapshot, so for about a minute after a DO is created the dialog still offers the PO (the server guard refuses it); (c) the SO detail's per-PO delivery field is first-DO-wins and can show a cancelled DO. Prod state of (a) UNMEASURED.
+
+## 2026-09-30 — 🔵 /m Warehouse: movements show the time, not just the date (branch `feat/m-warehouse-movement-time` → `staging`)
+- DEV-09 asks for "Date / Time" on movements. `WarehouseScreen.tsx` `MovementRow` and `MovementCard` now format `createdAt` with `dateTimeShort` ("28 Sep, 14:05") instead of `dateShort`. Display only, no API or schema change.
+
+## 2026-09-30 — 🔵 DEV-26 Pillow sticker for Fab Sew (Siti, High) (branch `fix/pillow-fab-sew-sticker` → `main`, BUG-2026-09-30-231)
+
+Ask (DEV-26): a pillow sticker for the sewing department to scan. Fab Cut already has a pillow QR, Fab Sew does not.
+
+1. 🔵 Pillows print a Fab Sew sticker, from both the Fab Sew page and "Print Fab Sew Stickers" on the Fab Cut page. One QR per SO ID row; the normal Fab Sew layout.
+2. ⚪ Not in scope, decided with the requester's side: a non-sewing worker who scans a pillow sticker still gets "Upholstery already complete" (a pillow has no Upholstery card; nothing is written). Left as is.
+3. ⚪ Noticed, not fixed: A02 armrest lines print two Fab Sew stickers per SO ID ("A02 (main)" and "A02") because those orders carry two sets of Fab Sew cards. Needs its own ticket.
+
+Measured on staging 2026-09-30 (read-only): 392 open accessory orders on Fab Sew, 320 with no sticker, all pillows (Square Pillow 280, Long Pillow 38, 5543-Long Pillow 2). Prod data is UNMEASURED.
+
 
 ## 2026-09-29 — 🔵 Org Chart photo UX split + Users drawer photo upload (branch `feat/org-chart-photo-ux` → `staging`, continues BUG-2026-09-29-214's feature)
 
@@ -59,10 +916,14 @@ Verified: `tsc -p tsconfig.app.json` clean; `npm test` full suite green (5098 pa
 - 2. ✅ (branch `feat/report-evening-revenue` → `staging`) Overdue moved to 08:00 with the schedule; efficiency email now covers TODAY at 18:30 and carries production revenue. Revenue = the dashboard's Daily (Lim) figure (PO booked when its last upholstery JC completes, SO/CO line price × qty); owner confirmed on the dashboard 28 Sep 2026 = RM 12,002.50 (24 orders, 1 unpriced). One shared query `src/api/lib/production-revenue.ts`. Email only, not the HR-readable in-app page. The schedule change only takes effect once it reaches `main` (GitHub cron runs from the default branch).
 - 4. ✅ (branch `feat/email-report-schedule` → `staging`) Per-report schedule on Settings → Email Reports: daily / weekly (Mon to Sat) / monthly (day 1 to 28) at an SGT time. `daily-reports.yml` now fires every 15 min at `POST /api/internal/reports/due-trigger`, which sends whatever `isDue` says is due and records the day in `kv_config['daily_report_last_sent']` (marked before sending, so never twice; a failed send is not retried). Unconfigured reports keep their old times. Report CONTENT is unchanged: a weekly/monthly email still covers the day it is sent. Like item 2, the cron change only runs once it reaches `main`. Verified: `tests/report-settings.test.mjs`, tsc strict, page rendered standalone with stubbed API (controls + PUT body); not driven against a live DB.
 - 5. ✅ #582 merged to staging (branch `fix/overdue-email-mobile`, BUG-2026-09-29-221) Overdue email reads on a phone: below 900px each SO becomes a card (labelled Items / Units / Customer DD / Our target / Overdue), summary boxes two per row; `screen`-only so the A4 print is unchanged. Status shows `IN PRODUCTION` (was clipped as `IN_PRODUCTION`). Email copy has no Print button (the in-app page keeps it). Verified: `tests/overdue-email-mobile.test.mjs`, tsc strict, sample render at 375px / 720px / 1200px in the browser; not sent through a real mail client.
-- 6. 🔵 (branch `fix/report-emails-mobile` to `staging`, BUG-2026-09-29-222) Same for the other emails: Schedule reuses the Overdue phone CSS (cards below 900px, status with spaces); Efficiency gets summary boxes two per row and employee cards below 640px; the Morning Brief gets a viewport tag, tighter padding, and its one Chinese line (schedule proposals notice) in English. Schedule + Efficiency emails drop the Print button. Verified: `tests/report-emails-mobile.test.mjs`, tsc strict, sample renders at 375px and 1200px in the browser; not sent through a real mail client.
+- 6. 🔵 (branch `fix/report-emails-mobile` to `staging`, BUG-2026-09-29-232) Same for the other emails: Schedule reuses the Overdue phone CSS (cards below 900px, status with spaces); Efficiency gets summary boxes two per row and employee cards below 640px; the Morning Brief gets a viewport tag, tighter padding, and its one Chinese line (schedule proposals notice) in English. Schedule + Efficiency emails drop the Print button. Verified: `tests/report-emails-mobile.test.mjs`, tsc strict, sample renders at 375px and 1200px in the browser; not sent through a real mail client.
+- 10. ✅ (branch `fix/schedule-email-size` to `staging`, BUG-2026-10-01-240) Owner screenshot: Today's Production Orders "Send test now" failed on staging. Measured: the email was 199 KB and MailSlurp refuses over 100,000 bytes. Owner chose "summary + capped list": department totals always, rows capped at 80 KB split across departments, then "N more" and a link to the full in-app list. Verified: `tests/schedule-email-size.test.mjs`, tsc strict; not re-sent on staging until deployed.
 - 3. ❓ Open for Lim: overdue scope (production-late only vs any order late to the customer); carry slipped job cards into today's production list.
+- 7. ✅ (branch `feat/email-report-multi-times` to `staging`) Ask: "send only allowed 1 time frame, add a option allowed us to add / remove multiple timeframe". Each report now has a list of send times (`times[]`, 1 to 8, sorted) instead of one `time`; the card shows them as chips with an Add time picker and a remove x (the last one cannot be removed). `isDue` became `dueSlot`, which returns the latest passed slot of the day ("YYYY-MM-DD HH:MM"); the due-trigger stores that slot in `kv_config['daily_report_last_sent']`, so each time sends once and two missed slots send once. Old rows still load: a saved `time` is read as `[time]`, and an old day-only last-sent stamp counts as the whole day sent. Verified: `tests/report-settings.test.mjs`, tsc strict, full `npm test` green. UI not rendered in a browser; not driven against a live DB. A brief with two times runs its AI paragraph twice (inside the existing monthly budget); config proposals already de-duplicate.
+- 9. ✅ (same branch) Ask: redesign the Email Reports card for clarity and accessibility. Each card now has two panels, Schedule (frequency, day, send-time chips shown as 12-hour "08:00 AM", "+ Add time" picker, Enter adds) and Recipients ("Add recipient" replaces "Add PIC", chips truncate long addresses with the full one on hover, Enter or Add button). Keyboard focus rings on every control and remove button; Save / Send test sit under both panels. Stored times stay 24-hour "HH:MM", so the API is unchanged. Verified: tsc strict; page mounted in a stubbed-fetch harness (no network) at desktop and 375px: add time, remove time, add recipient by Enter, Save sends `times: ["08:00","12:15"]` and the lowercased new recipient; no horizontal scroll, no console errors.
+- 8. ✅ (resolved by item 10) Ask: "create another check for today production orders because its not working". Owner: no email arrives. Measured 2026-10-01 from the `daily-reports.yml` run logs: on PRODUCTION the schedule email went out at 08:07 MYT on 29 Sep, 30 Sep and 1 Oct, each `{"ok":true,"sent":3,"failed":0}` (to the legacy recipient chain, since prod has no Email Reports page). The Settings > Email Reports page exists only on staging, and nothing fires scheduled sends there (the cron runs from `main` and targets erp.hookka.com), so PICs and times saved on staging never trigger a send; only "Send test now" does. Not yet measured: who the 3 prod recipients are, and whether the date match (`jc.dueDate = ?`, where other queries use `substr(jc.dueDate::text,1,10)`) drops rows. Owner 2026-10-01: Email Reports stays on staging (no `main` PR), so on staging the page only sends through "Send test now" and production keeps its fixed-time cron and legacy recipients.
 
-## 2026-09-28 — 🔵 BUG-34 Customer credit control: quota + overdue-term DO block, admin override (branch `feat/customer-credit-control` → `staging`, BUG-2026-09-28-218)
+## 2026-09-28 — 🔵 BUG-34 Customer credit control: quota + overdue-term DO block, admin override (branch `feat/customer-credit-control` → `staging`, BUG-2026-09-28-233)
 
 1. 🔵 Term-aware due date: `termMonths` / `dueDateForTerms` in `src/lib/terms.ts` (COD/NET30/NET60/NET90 = 0/1/2/3 months, due = last day of invoice month + N). Used by the DO auto-invoice and the manual invoice POST (was +30 days / fixed 1 month).
 2. 🔵 One shared gate `src/api/lib/customer-credit.ts`: PAYMENT_OVERDUE (issued unpaid invoice past its term due date, derived from invoiceDate + the customer's current term) and CREDIT_LIMIT_EXCEEDED (outstanding + undelivered DRAFT/LOADED/IN_TRANSIT DOs + this DO). Limit 0 = no quota check.
@@ -83,6 +944,104 @@ Verified: `tsc -p tsconfig.app.json` exit 0; `npm test` all pass. NOT verified o
 tsc strict 0; `npm test` 5047 pass / 0 fail.
 ---
 
+## 2026-10-01 — ✅ Payment Vouchers: ONE Scan (owner「不能做一起吗？」→「就是一个 ocr … 多张 receipt 转一张 payment voucher, 支持一次性开多张 voucher」→「不保留，做」)(#673 639ae341, prod-verified; branch `feat/pv-scan-one-button`)
+
+1. ✅ `ScanVouchers` replaces Scan Bills + Scan Receipt: every receipt starts as its own voucher; tick several → Merge into one
+   voucher (split undoes); Create = draft vouchers dated today with their receipts attached; the last voucher can open in the
+   full form. No other-creditor bills from this page (owner: not kept) — those are scanned on Other Creditor Bills and paid
+   through New AP Payment. The form's own "Scan bill (OCR)" stays. Guards updated: `finance-scan-learn-ui`, `pv-attachments`,
+   `ocb-attachments-ap-popup`.
+2. Prod (2026-10-02, a made-up two-receipt PDF, nothing created): the page shows Scan / New AP Payment / New Payment
+   Voucher only; the PDF gave two vouchers (one per receipt); Merge made one voucher holding both (lines summed, the second
+   receipt's payee shown, open in form offered); split restored two; Close left no voucher behind.
+
+## 2026-10-01 — ✅ Other-creditor bill attachments; New AP Payment as a popup (owner「OCB 附件要做」+「new ap payment 的页面还是这样」)(#668 82f632d4, prod-verified; branch `feat/ocb-attachments-ap-popup`)
+
+1. ✅ Bill attachments: `GET/POST/DELETE /api/accounting/other-party-bills/:billNo/attachments` on the shared file store
+   (`storeUploadedFile` / `removeStoredFile`, resourceType `other_party_bill`, resourceId = bill id); a voided bill takes no
+   file; once money is paid against a bill its files are locked; the bills list carries `attachmentCount`. UI: one
+   `DocAttachmentsBlock` (the voucher's block now wraps it) in the AP Invoices bill popup and the Other Creditor Bills card,
+   "Print + files" there; the bill form holds the scanned file and files picked with "Attach files" and attaches them
+   when the new bill is saved; Scan Bills' OCB rows attach their scan.
+2. ✅ New AP Payment opens as the same popup as the voucher form (HEADER: creditor kind, creditor, PV #, payment date,
+   paid from, reference; BILLS TO PAY: the bills table, advance, total); fields and save rules unchanged.
+   Guard `tests/ocb-attachments-ap-popup.test.mjs`.
+3. Prod (read-only, nothing uploaded or saved): New AP Payment opens as the popup (Header / Bills to pay, every field),
+   the creditor picker loads that creditor into Bills to pay, Cancel closes it; every bill in the list carries
+   attachmentCount; an unpaid bill allows add + remove, a paid one add only, a voided one nothing; a post to a missing bill
+   is refused (404); the AP Invoices bill popup and the Other Creditor Bills card show the files block; the New Bill form
+   has Attach files. The first real upload is the owner's.
+
+## 2026-10-01 — ✅ Finance improvements, confirmed point by point with the owner (owner「做」2026-10-01)
+
+Four batches, each shipped and prod-verified before the next:
+1. ✅ (#662 f3fe0964, prod-verified) FINANCE sidebar: opening one group closes the others (finance section only). Self-check debtor item shows the receipt
+   number and debtor wording (`ReconCfg.words` + `kindLabel`; the creditor side keeps its words). Branch
+   `feat/finance-sidebar-accordion-selfcheck-wording`, guard `tests/finance-batch1-sidebar-selfcheck.test.mjs`.
+   Prod: Reports → Daily → Monthly each closed the previous FINANCE group; Production and Consignment still open together;
+   the debtor card reads "receipt GL mismatch" with the receipt number and invoice / receipt / 300-0000 wording.
+2. ✅ (#663 ececcfdc, prod-verified; branch `feat/pv-popup-form-transfer`, guard `tests/pv-popup-form-transfer.test.mjs`) Payment voucher form as a popup in the layout the owner showed (Payment / Transfer switch; payee, number on save, date,
+   paid from, printed description + internal notes, supplier bill no. + bill date, MYR only, line cards, scan inside the
+   form, accrue / draft / post kept; no event, no product line — measured unused). Transfer = an ordinary voucher (own
+   accounts on both sides, TR badge); Fund Transfer leaves the sidebar, its URL and old entries stay. List: single click
+   does nothing, double click pops the whole voucher read-only with Print / Edit / Void + who/when, ledger entry, bank
+   reconciliation state. New AP Payment form unchanged.
+   Prod (read-only, no voucher saved): list summary counts every door incl. TR and 4 old fund transfers (FT); single click
+   opens nothing; double click on a PV, an SP and an FT row shows header, lines, who/when, ledger entry and bank state
+   (matched lines name the statement line); New Payment Voucher opens the popup, Transfer swaps the fields (receiving
+   account list leaves out Paid from), Cancel closes it; sidebar has no Fund Transfer; `?tab=transfer` still loads.
+3. ✅ (#664 2717a176, prod-verified; branch `feat/finance-scan-learn`) Scans (finance only — the shared OCR engine and party-alias memory untouched): a new payee is not skipped (suggestions
+   from similar descriptions, marked); account learned per line from description (approved/posted vouchers and bills);
+   voucher date defaults to today, bill date to the document date; SST as its own line; duplicate check on the supplier
+   bill no.; one PDF with several bills → one record each; batch shows a review table, then "create all"; several
+   receipts into one voucher.
+   Built: the scan endpoint returns every bill in the file (`docs`); `src/lib/scan-account-learn.ts` (guess by description:
+   same payee → payee's usual → another payee's similar line marked suggested; duplicate by bill no.; SST line) fed by
+   `loadScanMemory` (finance documents only, read-only, dropped after each save); Scan Bills = review table (PV/OCB per
+   row from the payee's last kind, duplicates unticked, new creditor registered once, Create all); voucher form adds
+   further receipts to the same voucher and flags a known bill no.; creditor-bill form learns per line and never counts
+   the SST twice (also closes a latent double count when the printed lines already carried the tax). Guards
+   `tests/scan-account-learn.test.mjs`, `tests/finance-scan-learn-ui.test.mjs`.
+   Prod (read-only, a made-up two-bill PDF, nothing created): Scan Bills gave one row per bill ("bill 1 of 2"), voucher
+   date today, bill dates from the bills, SST as its own 706-0000 line, a new payee's account marked Suggested, the bill
+   with no similar history flagged "pick an account", Create all (2) offered; the voucher form put both receipts into one
+   voucher (3 lines, bill nos. joined, "Add another receipt"); a typed bill no. already on an other-creditor bill showed
+   "Already recorded". Memory measured: approved vouchers and active bills give the lines to learn from; bill references
+   and purchase-invoice supplier nos. give the duplicates. Follow-up in batch 4: weight rarer shared words higher (the
+   suggestion matched a place name before the word "transport"; same account, weaker reason shown).
+4. ✅ (#665, prod-verified; branch `feat/finance-tables-drills`) Finance tables: no wrapping, drag a column edge (only that column changes, the rest shift), widths remembered;
+   reports resize the description column only; monthly reports stop stretching to full width. Monthly P&L and Cash
+   Flow drills in the monthly layout: each ledger line under the row with its amount in its month column, counterparty
+   name kept, last row "N entries · open in GL".
+   Built: `src/lib/use-resizable-tables.ts` (one enhancer for every plain table under a page root marked `data-fin-tables`:
+   no wrap, a handle per header cell, widths pinned by its own colgroup, remembered per tab, double-click resets; reports
+   `data-col-resize="first"`; DataGrid skipped) on the accounting page and the supplier / customer payment and e-invoice
+   pages; Monthly P&L no longer stretched; `GET /pl-drill?from&to` + `PlMonthlyDrillRows`; `CfMonthlyDrillRows` replaces
+   the Cash Flow panel; the GL tab opens from `?account&from&to`. Checked locally on a harness page in a real browser:
+   one column changes and the rest shift, report figures keep their widths (a spanning month header used to split them
+   evenly until the colgroup), reload remembers, double-click resets, a colgroup grid is untouched. Also: scan guesses
+   weight rarer shared words higher. Guard `tests/finance-tables-drills.test.mjs`.
+   Prod (#665 e6ecdc17 + fix #667 b9a25301, read-only; the one test drag was reset): every finance page (30+ accounting tabs,
+   supplier / customer payment, e-invoice) — no wrapping, no page-level horizontal overflow, no table spilling out of its
+   card; Payment Vouchers: dragging one column changed only it and the table shrank by the same amount, width saved,
+   double-click reset. First check found BUG-2026-10-01-246 (pinned widths rounded down → a date column cut to "2026-10-…");
+   #667 rounds up and schedules with a timeout (a background tab had no handles until looked at); re-checked: no cell cut
+   outside the narrowed column. Monthly P&L no longer stretched; drills tie to the row month by month (sales, an expense,
+   a purchase group, carriage with none); "open in GL" lands on the account with the FY dates picked. Cash Flow drill
+   rows tie to the line; a split payment shows its share with the whole payment / bank / settled bills on hover.
+Not wanted: opening-out-of-date reminder, % toggle, on-account receipts reminder.
+
+## 2026-09-30 — 🔵 Production Overview: Cards view, one card per work order (branch `feat/production-overview-cards` → `staging`)
+- 1. 🔵 Cards / Grid toggle on the Overview; opens on Cards every time, choice not saved. Grid is the old matrix, unchanged (resize, saved widths).
+- 2. 🔵 Card = one-line header bar (checkbox, SO ID + hold pill, Customer PO, product + specs, hold reason, customer | Special, Qty, Cust DD, Our DD) over a stage pipeline (existing `CellBox`, same colours). No sideways scroll at 1280px+.
+- 3. 🔵 Stages from `overviewStages()` (`production/utils.ts`): today's 9 in today's order and labels, plus any other `isProduction` dept from `/api/departments` appended by sequence. Overview only; dept tabs / print keep `DEPARTMENTS`.
+- 4. 🔵 Sort / filter / select-all move into a sticky 2-line header inside the cards' scroll box (same popovers, same saved `hookka-production-overview-table-state`). Click bar = select, double-click = open SO/CO, click stage = date picker.
+- 5. 🔵 Perf: each card is one virtual row (fixed height, `OverviewVirtualRows`); `WorkOrderCard` / `StageCell` are `React.memo` with stable handlers.
+- 6. 🔵 (branch `feat/production-overview-card-pills` → `staging`, stacked on #592) Cards restyled: white rounded card with shadow; header badges (Qty / Cust DD / Our DD, customer with a building icon); each stage = label, status pill (Completed #2D5A54, In progress #2563EB = some JCs done, Pending #B0892A, Overdue #991B1B + alert icon, N/A dashed) and the date under it (overdue bold red "! date"); off-plan dates get a cyan dot. Card row 128px. Legend follows the view. Grid unchanged.
+- 7. 🔵 (branch `feat/production-overview-card-filters` → `staging`, stacked on #595) Cards view drops the column headers. Its filters move to a second line of the page filter bar: a pill per stage (status + date popover, count badge when active), "More filters" (the 8 order-level column filters), Sort select + direction, Select all (N), Clear. Cards / Grid toggle moved to the right end of the filter bar. Grid unchanged.
+- 8. 🔵 (branch `feat/production-overview-cards-narrow` → `staging`) Cards scale on a narrow list (< 56rem, e.g. a tablet or a half-width window): two-line header (product / customer drop to line 2) and the stages in two rows, so stage names and pills stop squeezing; pills shrink to their tile; the legend wraps. Row 210px there, 128px unchanged on wide screens.
+- Guard: `tests/production-overview-cards.test.mjs`.
+
 ## 2026-09-28 — 🔵 DEV-20 Raw Material UOM options per category (branch `feat/rm-uom-options` → `staging`)
 
 Ask (DEV-20, requester VIOLET): the RM UOM should be selectable from options that fit the material (Fabric: MTR / ROLL; other groups their own), and used for purchasing, stock, production and inventory.
@@ -94,11 +1053,273 @@ Ask (DEV-20, requester VIOLET): the RM UOM should be selectable from options tha
 
 ---
 
+## 2026-09-30 — ✅ Self-check reds: the reconciliations copy the control cards; cancelled opening seeds out (owner「先查 8 和 9」→「确定没有问题才做」)(BUG-2026-09-30-229/-230)(#617 ffcc915c MERGED, deployed, prod-verified)
+
+1. Investigated first (prod, read-only): the Self-check headline is the reconciliation's drift, not the card's. Creditor:
+   the card's gap is the opening leg only; the reconciliation added three trade-finance repayments as supplier advances.
+   Debtor: the card's gap is one receipt knocked off against invoices outside the books (waits for that customer's
+   opening); the reconciliation added every receipt held on account, labelled "void payment GL leak" though all were live.
+   The opening gap: bills changed after the last opening post (the owner's cleanup of one supplier's pre-opening bills),
+   plus four CANCELLED supplier seeds the opening sum still counted.
+2. ✅ `ap-recon.ts`: a `TF_REPAYMENT` payment is never an advance. `/ar-reconciliation`: on-account remainders as advance
+   rows (the card's rule). `openingControlSums` + the Opening Balance supplier list: CANCELLED seeds out. Guard
+   `tests/selfcheck-recon-mirrors-controls.test.mjs`; class C18 rows 6–8.
+3. ✅ Prod (measured before/after): each reconciliation now reads exactly its card (same drift, same advances) with one item
+   each — the opening leg (creditor) and the receipt knocked off against invoices outside the books (debtor); the control
+   cards, trial balance and the other opening totals unchanged; the Opening Balance page lists no cancelled seed and its
+   difference grew by exactly the cancelled seeds. Self-check page read back the same.
+4. ✅ Owner re-posted the opening himself (difference placed on the account he chose). Measured after: opening balanced,
+   creditor control = subledger to the sen (Self-check card green), trial balance unchanged, the finalised bank
+   reconciliations' live figures still equal their sealed snapshots. 🟡 The debtor item waits for that customer's opening
+   (needs their statement at the opening date).
+
+## 2026-09-30 — ✅ Drills: an official receipt reads its own text, never a lone "from" (BUG-2026-09-30-228)(#616 d68542b0 MERGED, deployed, prod-verified)
+
+1. Owner opened the receipt the drill showed as "from": its header note is empty and its text is on its line. The "from" was
+   the drill's own doing — the bank leg's text "<no> · from <payer>" with the payer taken out (it is Ref. 2). #614 below had
+   read it as typed data; it was not.
+2. ✅ `officialReceiptTexts` (one lookup for the P&L / balance-sheet and Cash Flow drills): the note, else the receipt lines'
+   text, else "Official receipt". `tidyDescription` never leaves a lone "to" / "from". `ownDescription` back to
+   "empty → none". Guard `tests/drill-tf-interest-and-corrections.test.mjs`.
+3. ✅ Prod (measured): the owner's receipt now reads its line text in the balance-sheet (bank account), P&L (income account)
+   and Cash Flow drills, payer as Ref. 2; every balance-sheet account May–Sep and every Cash Flow line of the year to
+   September tied (c/f equal to the sheet), and no drill line anywhere reads a lone "from" / "to".
+
+## 2026-09-30 — ✅ Drills: an edited document is not labelled, a description that says nothing is not shown (follow-up to #612)(#614 ba33071b MERGED, deployed, prod-verified)
+
+1. Found by #612's prod check: every edit re-posts the document and hides its older legs (each restate family does), so the
+   re-post IS the document — labelling it `re-posted on edit` marked hundreds of ordinary lines. And one official receipt's
+   drill line read "from" — **corrected 2026-09-30: that was not typed data (the receipt's note is empty, its text is on its
+   line); the drill made it — see the BUG-2026-09-30-228 entry above.**
+2. ✅ `drillVariant`: an edit's re-post says nothing (void / unvoid / reversal / edit adjustment / GL re-sync stay).
+   `ownDescription`: a description that is empty or a lone "from" / "to" / "for" does not replace the ledger text — an
+   official receipt then shows "Official receipt". Applied to every typed description the drills use (vouchers, bills, JVs,
+   official receipts; P&L / balance-sheet and Cash Flow). Guard `tests/drill-tf-interest-and-corrections.test.mjs`.
+3. ✅ Prod (measured, the same sweep as #612): every balance-sheet account May–Sep and every Cash Flow line of the year to
+   September tied, c/f equal to the sheet; no `re-posted on edit` left; void / unvoid / edit adjustment / GL re-sync lines
+   still labelled; the official receipt reads "Official receipt" with its payer as Ref. 2. UI: the trade-finance account
+   opened on the September sheet — b/f, interest lines naming the lender, c/f equal to the sheet.
+
+## 2026-09-30 — ✅ Drills: the last lines without a counterparty, and corrections say what they are (follow-up to #609)(#612 84be12ba MERGED, deployed, prod-verified)
+
+1. Measured on prod after #609 (read-only): in the P&L / balance-sheet drills the lines still without a Ref. 2 were trade-finance
+   interest, a PI edit's correction (posted under `<PI id>:edit-<time>`, so the PI lookup missed it), JVs, bank transfers and
+   payroll postings; in the Cash Flow drill (every line of the year to September) trade-finance interest, one official receipt
+   and one JV. JVs, transfers and payroll postings have no counterparty.
+2. ✅ Trade-finance interest names the lender (the facility account on the entry) with the supplier the draw paid on hover; a PI
+   edit's correction finds its PI (supplier, supplier invoice no.); in the Cash Flow drill an official receipt names its payer
+   and shows its description, a JV its description. The interest sourceId format has one definition (`tfInterestDrawId`,
+   also used by the draw maths).
+3. ✅ The drills show the document's description instead of the ledger text, which hid what a correction is ("Void · PI …").
+   A correction now says it after the description: `reversed on edit` / `re-posted on edit` / `void` / `unvoid` / `reversal`
+   / `edit adjustment` / `GL re-sync` (`drillVariant`). Guard `tests/drill-tf-interest-and-corrections.test.mjs`.
+4. ✅ Prod (measured, every balance-sheet account May–Sep, every Cash Flow line of the year to September, the interest
+   account's P&L drill): all tied, c/f equal to the sheet; trade-finance interest and PI edit corrections now all carry a name;
+   in the Cash Flow drill only one JV is left without one (it has no counterparty; it now shows its own description). Left
+   without a name elsewhere: the opening-balance entries, JVs, transfers, payroll postings — none has a counterparty.
+   The `re-posted on edit` label proved to be noise → next entry.
+
+## 2026-09-30 — ✅ Balance-sheet drill: name the counterparty of payments, receipts and purchase credit notes (follow-up to #607)(#609 659ce9bb MERGED, deployed, prod-verified)
+
+1. Measured on prod after #607 (read-only, every account May–Sep): supplier payments, other-creditor payments, customer
+   receipts and purchase credit notes carried no Ref. 2 — the shared line builder only knew the documents that hit the P&L.
+2. ✅ `buildDrillLines` names them (supplier / creditor / customer / supplier), lists the PIs / bills a payment settled on
+   hover, and a voucher-made payment takes the voucher's purpose. JVs, transfers and payroll entries have no counterparty.
+   Guard `tests/drill-bs-document-names.test.mjs`.
+3. ✅ Prod (measured, every balance-sheet account May–Sep): every drill tied and its c/f equal to the sheet; supplier
+   payments (edits included), other-creditor payments, customer receipts and purchase credit notes all carry a name. Left
+   without one: PI edit corrections and trade-finance interest (next entry), JVs, transfers, payroll postings.
+
+## 2026-09-30 — ✅ Balance Sheet inline drill (owner「Balance sheet 也要这样点开看」)(#607 e82d244b MERGED, deployed, prod-verified)
+
+1. Checked first (code): every balance-sheet line except the unclosed-earnings one is an account's ledger balance up to the
+   month end — no computed adjustments — so a drill can tie exactly.
+2. ✅ Name → panel: Balance b/f (end of the previous month), the month's lines in the P&L / Cash Flow drill columns, Balance
+   c/f = the figure. `GET /api/accounting/bs-drill` uses the sheet's own leg rules; the line builder is shared with the P&L
+   drill (`buildDrillLines`). Not in Edit, not the unclosed-earnings line. Guard `tests/bs-inline-drill.test.mjs`.
+   Prod check after deploy: every account of a month, tied and c/f = the sheet.
+3. ✅ Prod (measured): every balance-sheet account of September and of August opened, each tied (b/f + lines = c/f) and c/f
+   equal to the sheet's figure; UI: an account opened under its row with b/f, the month's lines and c/f.
+
+## 2026-09-30 — ✅ P&L drill reads like the Cash Flow drill (owner「P&L 同理，我想看 supplier 名字，p&L 点开要看的东西和 cash flow 一样」)(#606 235cb95c MERGED, deployed, prod-verified)
+
+1. Measured first (prod, read-only): sales rows read "Sales · invoice" with the SO as Ref. 2; purchases "Purchase · PI" with the
+   supplier's invoice no.; JVs only "JV"; no customer / supplier name anywhere.
+2. ✅ Ref. 2 = the counterparty for every document kind (the related documents on hover); Description = the document's overall
+   description; one Amount column in the line's own direction; month blocks with totals when the period spans months.
+   Display only; the tie is unchanged. Guard `tests/pl-drill-like-cashflow.test.mjs`.
+3. ✅ Prod (measured): sales rows "Sales invoice" + customer (SO on hover), purchases "Purchase invoice" + supplier (supplier
+   invoice no. on hover), JV / voucher / receipt rows their own description, voucher payee as Ref. 2; tied on every line
+   checked. UI: a group's PURCHASE line opened with the new columns, total equal to the line.
+
+## 2026-09-30 — ✅ Cash Flow drill: Ref. 2 = the counterparty's name, the overall description, invoice numbers on hover (owner「refer 2 是看 supplier 名字和 overall description 就好」→「可以，做」)(#605 402daae7 MERGED, deployed, prod-verified)
+
+1. Measured first (prod, read-only): supplier-payment rows read "Supplier payment" / "Supplier payment (edited)" with a
+   list of PI numbers as Ref. 2 and no supplier name anywhere.
+2. ✅ Ref. 2 = supplier / other creditor / voucher payee / customer; the PIs / bills a payment settled on hover; Description =
+   the voucher's purpose (also for payments made through an AP voucher) else the ledger text without number, name and
+   "(edited)" (`tidyDescription`). Display only. Guard `tests/cashflow-drill-party.test.mjs`.
+3. ✅ Prod (measured): a raw-material line's rows read "Supplier payment" with the supplier as Ref. 2 and the PI numbers on
+   hover; collections read "Receipt" with the customer; tied unchanged. UI checked on the FY statement's All months view.
+
+## 2026-09-30 — 🔵 Production Overview Cards view to `main` (branch `feat/production-overview-cards-main` → `main`; staging #592 / #595 / #596 merged)
+- 1. 🔵 Cards / Grid toggle on the Overview (opens on Cards, not saved); Grid is the old matrix, unchanged.
+- 2. 🔵 Card per work order: header (SO ID, hold pill, product + specs, Customer PO, customer | Special, Qty, Cust DD, Our DD) over stage tiles (label, status pill, date). Pills: Completed teal, In progress blue (some JCs done), Pending gold, Overdue dark red + "! date", N/A dashed. Off-plan dates: cyan dot. Fixed 128px rows, virtualized, memoized.
+- 3. 🔵 Stage columns from `overviewStages()`: the 9 `DEPARTMENTS` in today's order/labels plus extra `isProduction` depts from `/api/departments`.
+- 4. 🔵 Cards has no column headers: stage pills (status + date popover, count badge), More filters (8 order-level filters), Sort, Select all and Clear sit on a second line of the page filter bar; the toggle sits at its right end. Same filters/sort as Grid.
+- 5. 🔵 (branch `feat/production-overview-cards-narrow-main` → `main`; staging #601 merged) Cards scale on a narrow list (< 56rem, e.g. a tablet or a half-width window): two-line header, stages in two rows, pills shrink to their tile, legend wraps. Row 210px there; 128px unchanged on wide screens.
+- Applied to `main` as one commit (the three staging commits, cherry-picked; code identical to staging apart from the pre-existing main/staging drift). Guard: `tests/production-overview-cards.test.mjs`.
+
+## 2026-09-30 — ✅ Cash Flow: payments booked to a raw-material stock account read as Raw Materials (owner「不要动到 P&L」+ re-booked the loan line himself)(#598 c284ab0a MERGED, deployed, prod-verified)
+
+1. Owner: the pre-opening fabric repaid to a related company stays on its stock account (no P&L change). He first re-booked
+   the one loan-repayment line that shared that account (measured on prod: the stock account now holds only fabric lines,
+   the loan line shows under Loan in the cash flow).
+2. ✅ `rawStockAccountSections` + nesting by name: SBS stock accounts (not WIP / finished goods) default to Raw Materials,
+   under the purchase parent their name maps to. Replaces the dropped branch `feat/cashflow-stock-accounts-raw-materials`.
+   Guard `tests/cashflow-stock-accounts.test.mjs`. Prod check after deploy: only those lines move, Cash Surplus identical.
+3. ✅ Prod (measured, snapshot before vs after): the stock-account line moved from Unallocated to Raw Materials under PURCHASE -
+   FABRIC in Aug'26 and Sep'26; Unallocated is empty in both months. Between snapshot and check the owner's team posted two new
+   salary vouchers (one dated in Aug, one in Sep); the operating result differs by exactly the moved line plus those vouchers,
+   and Cash Surplus by exactly those vouchers — i.e. the release itself moved no cash.
+
+## 2026-09-30 — ✅ A finance user's click on a purchase invoice still lands on the PI list (owner: colleague on finance@hookka.com「点 ap invoice 还是跳去 purchase invoice list」)(#594 a435e752 MERGED, deployed, live-checked)
+
+1. Checked (code): AP Invoices has opened the PI itself since #559, for every role — the endpoint is accounting:read, the PI
+   detail route has no permission guard and GET /purchase-invoices/:id only needs a login. The list jump is the pre-#559
+   code, i.e. a browser still running the old bundle → reload. Not measured as that user (no credentials in this session).
+2. ✅ The General Ledger's source link still sent a purchase-invoice leg to the PI list (and a supplier payment to the PI
+   list too): now `/procurement/pi/:id` and `/invoices/supplier-payments`. Guard `tests/ledger-source-links.test.mjs`.
+3. ✅ Live check (the public accounting bundle after deploy): the source-link switch now returns the PI detail path and the
+   supplier-payment page. The colleague's browser was not checked — the owner is to ask for a hard reload (Ctrl+Shift+R).
+
+## 2026-09-29 — ✅ Cash Flow drill tidy + payroll month read right (owner「有一点点乱，有没有优化的建议」→「好像可以，月份一起修」)(#588 12295837 + #589 MERGED, deployed, prod-verified)
+
+1. ✅ Panel: Description = the voucher's own purpose; bank by short name; "Whole payment" + "Share" columns when split;
+   one Amount column (money out in brackets); "All months" in month blocks, each with its total.
+2. ✅ Salary department split: the payroll month named in the voucher text is read in any case / full name / without a year
+   (`payrollMonthFrom`). Before, only "May'26"-style text was read, so most salary payments used the PAYMENT month's payslip
+   mix. Totals do not move — only how Direct Labour spreads across departments. A named month without payslips uses the payment month's mix (one April-salary leg paid at opening used to stay unsplit; it now splits by May's payslips).
+   Guard `tests/cashflow-drill-tidy.test.mjs`. Prod check after deploy: Direct Labour total, result and Cash Surplus identical.
+3. ✅ Prod (measured, statement snapshot before vs after, FY to Aug'26 and Sep'26): Direct Labour per column, the operating
+   result, Cash Surplus, Bank b/f and c/f identical; only department lines moved. Payments for the same payroll month now carry
+   the same department share. UI: the new columns, month blocks and totals on a department line, tied.
+4. 🟡 For the owner: one voucher's header names a different payroll month than its line; the split follows the line, the panel
+   shows the header. Either the voucher text is corrected or the panel shows the line text — owner to decide.
+
+## 2026-09-29 — ✅ Cash Flow inline drill: click a line's name, its payments / receipts open underneath (owner「cash flow 也要这样点开看」)(#587 81560c37 MERGED, deployed, prod-verified)
+
+1. ✅ Cash Flow: a line's name toggles a panel under the row — Date · Description · Bank · Ref. 1 · Ref. 2 · Money in ·
+   Money out + totals; month chips (the statement's month first, "All months"). Not in Edit (the drag owns the row).
+2. ✅ Engine: `buildStatement({ trace })` records every leg that fed each line (`CfSource`), including the share when a payment
+   is split across materials / departments ("part of" its whole amount in the panel). Rows carry `lineKey`.
+3. ✅ `GET /api/accounting/cashflow-drill?period&key` (read): the statement's own computation with a trace, rolled up one row per
+   entry; Ref. 2 = the PIs / bills a payment settled or a voucher's payee; `tied` = every column of the line equals its rows.
+   Guard `tests/cashflow-inline-drill.test.mjs`. Prod check after deploy: every line of a month, `tied` true.
+4. ✅ Prod (measured): every line of the Sep'26 statement and of the FY statement ending Aug'26 opened through the endpoint —
+   all found and `tied` (every column equals its rows), including the split shares; under a second per line. UI: a
+   General Expense line opened under its row with its two vouchers, bank, payee as Ref. 2 and the total equal to the line.
+
+## 2026-09-29 — ✅ P&L inline drill: click a line's name, its ledger lines open underneath (owner「我要点开看 detail，就是这样」+ Houzs P&L screenshot)(#586 5489aa74 MERGED, deployed, prod-verified)
+
+1. ✅ P&L statement: an account line's name toggles a panel under the row — Date · Description · Other side · Ref. 1 · Ref. 2 ·
+   Debit · Credit (the screenshot's columns) + a total. Not in edit mode (the drag owns the row there). A new period starts closed.
+2. ✅ `GET /api/accounting/pl-drill?period&account` (read): the statement's own pass with a trace, so the lines sum to the line;
+   payroll taken from payslips (not posted yet) and the opening month's share show as their own rows; a month keyed from
+   the old books says so. Ref. 1 = the document; Ref. 2 = invoice → SO, PI → supplier invoice no., bill → its reference,
+   voucher → payee. Other side = the opposite accounts of the same entry.
+3. ✅ Computed lines that are one account's ledger figure open too (a group's PURCHASE, carriage, SST); stock / WIP / FG don't.
+   Guard `tests/pl-inline-drill.test.mjs`. Prod check after deploy: every openable line of a month, drill total = line.
+4. ✅ Prod (measured): every openable line of Sep'26 and Aug'26 opened through the endpoint — each drill total equals its
+   P&L line and `tied` is true (none off); roughly half a second per line. UI: the sales line opened under its row with the
+   seven columns, Ref. 1 = invoice, Ref. 2 = its SO, other side = trade debtors, total = the line.
+
+## 2026-09-29 — ✅ Cash Flow: EPF / SOCSO / EIS accruals are the ordinary staff's → General Expense (owner「这个是普通 staff，不是 direct 的」)(#581 302e67c7 MERGED, deployed, prod-verified)
+
+1. ✅ #573 filed the whole payroll-accrual family under Direct Labour. The owner: the EPF / SOCSO accruals are the ordinary
+   staff's, not direct labour. Checked first (prod P&L, read-only): the P&L books that EPF as STAFFS' EPF; PRODUCTION - EPF
+   is a small fixed line — the two statements now agree.
+2. ✅ New pure rule `payrollAccrualSections` (cashflow-engine.ts): salary accrual + its parent → Direct Labour (the
+   department split is unchanged); every other accrual under that parent → General Expense. Found from the chart; the
+   owner's drags still win. Both sections are above the operating result: result and Cash Surplus do not move.
+   Guard `tests/cashflow-staff-contribution-accruals.test.mjs` (runs the rule and the statement).
+3. ✅ Prod (measured, statement snapshot before deploy vs after): in every month Jun–Sep only the ACCRUAL - EPF / SOCSO rows
+   moved from Direct Labour to General Expense (nested under ACCRUALS); Net operation surplus, Cash Surplus, Bank b/f and
+   c/f identical. The lone ACCRUAL - SALARY row (May) stays in Direct Labour, now shown flat (single child, not nested).
+   Snapshot deleted from the browser afterwards.
+
+## 2026-09-29 — 🔵 PR labels for the whole team (branch `ci/label-prs` → `main`)
+- 1. 🔵 `label-prs.yml` on `main`: every PR into `main`/`staging` gets `staging` (by base) and a type label (by title prefix). BUG-2026-09-29-218: the staging-only labeler never ran.
+- 2. 🔵 Labels `security`, `performance`, `ci`, `chore` created in the repo.
+- 3. 🟡 Live check after merge: open or retitle a PR and confirm the run and labels.
+
+## 2026-09-29 — 🟡 Cash Flow Unallocated "STOCK - FABRIC M": booking fix is the owner's, no code (owner「2. 不明白」→ answers → 「就放着」)
+
+1. Measured (prod): the stock account 330-0001 holds exactly three other-creditor bill lines (Jun / Aug / Sep); the P&L
+   reads purchases from the 701~705 GL accounts, so none of them reaches the P&L today. Figures and parties are in the
+   owner's handoff notes, not here (this repo is public).
+2. Owner: two lines are fabric purchases, one is a related-party loan repayment. Fix = the owner re-books the three
+   lines himself (AP Invoices › double-click › Edit): two to 701-0010, one to 440-0030.
+   Branch `feat/cashflow-stock-accounts-raw-materials` ("every stock-account payment is raw material") DROPPED — it
+   would have filed the loan repayment as a purchase. Not merged.
+3. 🟡 Parked by the owner (「就放着」): the related-party loan itself was never booked (no 440-0030 line in the 22/05
+   opening, no inflow in the bank), while the June and August bills repay it, so 440-0030 reads as a debit until an
+   opening credit is added. Opening fix = the owner's / accountant's.
+
+
+## 2026-09-29 — ✅ Cash Flow: cash-view signs — money in positive, money out negative everywhere (owner「这个 cash flow 我想要更改，全部进钱 positive，出钱 negative」)(#578 0a24bdea MERGED, deployed, prod-verified)
+
+1. ✅ Supersedes the morning`s #569 rule (money out positive below the collection). `OUTFLOW_SECTIONS` is now empty:
+   costs, Trade Finance repayments, finance costs, capex spend, loans repaid / lent, unallocated payments read
+   negative; collections, drawdowns, loans received, asset sales read positive. Labels: Loan received / (repaid ·
+   lent), Deposit refunded / (paid); footer states the rule. Figures, the operating result and Cash Surplus unchanged.
+   Tests re-pointed (engine, trade finance, supplier section, finance cost, unified signs).
+2. ✅ Prod (measured): statement snapshots taken before deploy for 2026-06 / -07 / -08 / -09 (the -08 one carries every
+   month Sep'25–Aug'26), compared row by row after: 0 unexpected rows. Unchanged: Revenue Collection rows, Net operation
+   surplus, Cash Surplus, Bank b/f, Bank c/f. Every other non-zero row exactly sign-flipped. Sep'26: result 13,597.20,
+   Trade Finance 729.24, Finance Cost (1,636.48), CAPEX (1,747.10), Unallocated (442.00), Cash Surplus 10,500.86 —
+   now a plain sum; Bank c/f 132,703.25. Snapshot deleted from the browser afterwards.
+
+## 2026-09-29 — ✅ AP Invoices: bill form + bill detail in popups; Other Creditors back in the sidebar (owner「ap invoice 就 pop out 出来给我填相关之类不可以吗？」+「other creditor maintenance 放 sidebar 旁边」→「3. 做」)(#575 33378a85 MERGED, deployed, prod-verified)
+
+1. ✅ New AP bill opens the other-creditor bill form in a popup (`OtherPartyBillsManager` in `formOnly` mode: form open at once,
+   no list, closes on save or Cancel; ✕ closes, a stray click outside does not — a half-filled bill never vanishes).
+2. ✅ Double-click an AP bill (or click its No.) → detail popup: creditor / date / reference / lines / tax / total / paid /
+   outstanding, actions Print / Edit / Copy / Void (Unvoid when voided). Edit and Copy open the same popup form
+   (Edit re-posts the same bill number; Copy = today, no reference, never an opening — one builder `billFormFrom`).
+   Void goes through the Bills page's own lifecycle endpoint, behind a confirm. PI rows still open their own page.
+3. ✅ The duplicate bills list + names list under the mirror are gone; Creditors › **Other Creditors** is a menu entry again
+   (`?tab=ocreditor`, the same names/contacts page). FINANCE menu 32 → 33 entries.
+4. UI only — no endpoint, no write path, no ledger change. Guards `tests/ap-invoices-popup.test.mjs` (new),
+   `tests/finance-sidebar.test.mjs`, `tests/ap-invoices-chips.test.mjs`, `tests/doc-detail-dblclick.test.mjs`.
+5. ✅ Prod (checked in the owner's browser, nothing saved): New AP bill popup opens with Scan Bill + the form, the account
+   picker drops down inside it, Cancel closes it; double-click OCB-2609-004 → detail popup (PAID, 330-0001 STOCK -
+   FABRIC M 442.00, Print / Edit / Copy / Void); Edit → "Edit OCB-2609-004" prefilled, creditor locked, no Scan; Cancel
+   closes; the page no longer carries the editor / names list below; Creditors › Other Creditors opens `?tab=ocreditor`.
+
+## 2026-09-29 — ✅ 410-0000 ACCRUALS: parent accounts never postable + Cash Flow accrual family → Direct Labour (owner「by right 410-0000 不能选吧？我有注意到 410-0000 pv 开过去」→「做 a b d，c 的不做，要 park 回去对的 accrual」)(#573 e6bd8e93 MERGED, deployed, prod-verified)
+
+1. Measured (prod): 410-0000 ACCRUALS was the ONLY account with children still flagged postable; PVs had been paid
+   against it. The owner re-parked the September ones himself at 15:04–15:26 (HPV-2609-026 / -027 → 410-0010,
+   HPV-2609-029 → 410-0020 EPF, HPV-2609-030 → 410-0030 SOCSO); 6 older legs (11,192.45) remain on 410-0000 for him.
+   c (restating them) is the owner`s, not ours — the restate path validates only the NEW lines, so locking 410-0000
+   does not block his re-parking.
+2. ✅ a — flip 410-0000 to non-postable on prod (PUT /coa, owner-ordered).
+3. ✅ b — parents never postable: validation / JE post / pickers / COA editor. Guard `tests/parent-accounts-not-postable.test.mjs`.
+   Prod (measured after deploy): GET /coa returns all 18 parent accounts non-postable (410-0000 ACCRUALS, 4 children);
+   the Payment Voucher account picker, typed "410", offers only 410-0010 / -0020 / -0030 / -0040. The server-side
+   refusal of a parent code is covered by the test only — not exercised on prod (it would need a write).
+4. ✅ d — Cash Flow: ACCRUALS parent + ACCRUAL - EPF / SOCSO / EIS → Direct Labour (Sep: ACCRUAL - EPF 7,801.00,
+   ACCRUAL - SOCSO 1,035.50, ACCRUALS 255.05 leave Unallocated). Prod Sep'26 (measured): Direct Labour › ACCRUALS
+   8,836.50 (EPF 7,801.00 + SOCSO 1,035.50; the 255.05 leg on the parent follows the salary department split);
+   Unallocated 442.00 (only STOCK - FABRIC M left); Cash Surplus 10,500.86 unchanged.
+
 ## 2026-09-29 — 🔵 Staging wiped every night; refresh must keep test data (branch `fix/staging-no-nightly-wipe` → `main`)
 - 1. 🔵 Cause: `sync-staging.yml` cron (18:00 UTC) on `main` dropped staging's public schema. Cron removed, manual dispatch only. BUG-2026-09-29-216.
 - 2. 🔵 New `mode=merge` (default): `scripts/merge-prod-into-staging.mjs` inserts prod rows staging lacks, never deletes or overwrites. `mode=reset` = old full clone, needs `confirm=SYNC`.
-- 3. 🔵 `sanitize-staging.mjs` STAGING_REF `zaxy...` changed to `kahx...` (it was refusing to run, so the scrub and PIN steps were skipped after each wipe).
+- 3. 🔵 `sanitize-staging.mjs` STAGING_REF changed from the old staging project to the current one (it was refusing to run, so the scrub and PIN steps were skipped after each wipe).
 - 4. 🟡 UNMEASURED: merge not run against a live DB (no credentials in this session). First step after merge: dispatch `Sync prod → staging` with mode=merge and read the per-table log. The sanitiser also re-fakes contact fields and passwords on ALL staging rows, including test rows.
+- 5. 🔵 Project refs out of the repo: scripts read `SUPABASE_PROJECT_REF` / `SUPABASE_STAGING_REF` from env (`scripts/_db.mjs` `projectRef`), `.mcp.json` uses `${SUPABASE_STAGING_REF}`, docs name the variable. Needs GitHub secret `SUPABASE_STAGING_REF` before the next staging sync (branch `fix/staging-ref-cleanup`).
 
 ## 2026-09-29 — ✅ Cash Flow: one sign convention (owner「确定一下整体的符号哦，有点乱，loan from houzs … 应该是我借出去吧」→「做，统一符号」)(#569 e96e89c5 MERGED, deployed, prod-verified)
 
@@ -312,6 +1533,7 @@ INFAB). One numbering book, three lists.
    so both the Supplier Payment page and the hub print the identical voucher
    (react-refresh forbids a plain-function export from a component module —
    the #471 lesson).
+
 ## 2026-09-28 — 🔵 DEV-20 Raw Material UOM options per category (branch `feat/rm-uom-options` → `staging`, #536 merged; follow-up `feat/rm-whole-uoms`; both brought to `main` on `feat/rm-uom-options-main`)
 
 Ask (DEV-20, requester VIOLET): the RM UOM should be selectable from options that fit the material (Fabric: MTR / ROLL; other groups their own), and used for purchasing, stock, production and inventory.
@@ -407,6 +1629,7 @@ transaction) failed where the mocked tests passed. Asks: fix, push to `staging`,
 - [x] `tsc -p tsconfig.app.json` exit 0; full suite 4779 pass / 0 fail / 3 skips; live re-run on the fixed code: procurement 24/25, sales 16/18 (misses are the pre-existing items below).
 - [x] Push; PR → `staging` (#506, merged); live check re-run against the deployed commit `f434916e`: 24/25 + 16/18, misses were the three pre-existing bugs (entry above).
 - 🟡 Needs a decision: GRN-sourced return of unbilled goods leaves them billable (needs a returned-qty counter); CN items stay `SOLD` after void; GRN stock resolves by description when `material_code` is blank (wrong raw material); single-line DO fully returned still invoices in full.
+
 ## 2026-09-25 — 🔵 Experimental dashboard: icon-free KPI cards, Sales values, sticky tables, Attendance log, time-audit dates, Department Status (branch `feat/dashboard-kpi-no-icons` → `main`)
 
 1. 🔵 `Kpi` (`dashboard-shared.tsx`) no longer takes an icon: label → value → sub; a ±% delta sub is a green/red pill, any other sub stays plain wrapping text. Applies to Sales / Finance / Operations (incl. its 2 custom cards) / Production / Service / Employees; All-Overview Hero + DomainCard label icons and the Service approvals header icon removed too.
@@ -877,7 +2100,9 @@ the `??`-blank-overwrite bug at the PUT merge block — NOT fixed, only the new 
 it), R9 export fields (`price1`, sofa tier prices, `skuCode`, pricing-permission banner), R11-R13
 (grid "export all" / invoice 200 cap / mobile placeholder), R1/R2 (shared `src/lib/import-export/`
 client lib), R15 doc updates beyond products.md.
+
 ## 2026-09-14 — 🔵 PRD T-006 · Transfer/Convert foundation (R1-R10 all implemented, pending merge)
+
 ## 2026-09-21 — 🔵 T-006 follow-through: the four gaps in the R1-R10 work (branch `fix/t006-transfer-convert-guards`)
 
 Review of the merged T-006 work (on `staging`, NOT on `main`) turned up four gaps, plus a bigger
@@ -1195,6 +2420,7 @@ OVERHEAD SALARIES / NON-PRODUCTION SALARIES — BY DEPARTMENT），supersede 扩
 上一批（8/11 的 Interest + v8 部门表格）已确认随 8/21 部署上线。
 
 ---
+
 ## 2026-08-28 — 🔵 Fund Transfer 每行加 print 链接（branch `feat/fund-transfer-print-link`，PR 待批）
 
 Owner（贴 Fund Transfer 截图）：「这个 fund transfer 没有办法 print out voucher」。
@@ -1203,6 +2429,7 @@ Owner（贴 Fund Transfer 截图）：「这个 fund transfer 没有办法 print
 （同 JV 表的行内打印，走同一个 `printVoucher`/`print-voucher.ts` 渲染器），一行改动。
 本地已验：4 行都出链接，点击生成完整 FUND TRANSFER VOUCHER（抬头/单号/户口/金额/大写/签名栏）。
 2026-08-29：**已合并（#379）、prod 已验**（4 行 print 全通，凭证单号/金额正确）。
+
 ## 2026-08-27 — 🔵 JV 行菜单全灭（Post 打 /journals/undefined）· BUG-2026-08-27-001 · PR 待合
 
 Owner:「每次 JV 都会 merge 不上」（JE-2608-0001 七月薪水 35,370.50 过不了账，
@@ -1239,6 +2466,7 @@ before each run). NOT deployed — no prod verification has been done.
 came from `operations-report.ts:873-876`; (b) the compliance report has **15** checks, not 13.
 
 ---
+
 ## 2026-08-14 — 🔵 Leave entitlement into data + year reset + public holidays (branch `feat/leave-entitlement`, **NOT deployed, NOT merged**)
 
 The owner's ask: leave must respect the public holidays he configures — 「应该根据我在
@@ -1263,6 +2491,7 @@ been shown 14.
 (+27) · `check-docs-freshness` OK · `check-codebase-map` OK · `check-secrets` OK ·
 `gen-api-docs --check` up to date. All **21** mutations proved RED with bytes-on-disk asserted
 changed first; that run caught **4 blind guards** which have been fixed and re-proved.
+
 ## 2026-08-14 — 🔵 PCB is finally calculated (branch `feat/pcb-calculation`, **NOT deployed, NOT merged**)
 
 Owner-confirmed, real money on real payslips: PCB (Potongan Cukai Berjadual) has never been
@@ -1375,6 +2604,7 @@ other routers, out of scope, still open and still inert on a single-tenant prod.
 must send `pendingToken` back to `/login-verify`; `LoginResponse` in `src/pages/login.tsx`
 carries the field and a pointer, but the screen itself still does not exist
 (BUG-2026-08-04-006).
+
 ## 2026-08-14 — 🔵 Apply the strict money parser everywhere it is a money field (branch `fix/money-input-parsing`, **NOT deployed**)
 
 `src/lib/parse-money.ts` landed in `3c52fd56` and was used by nothing. This branch
@@ -2237,7 +3467,7 @@ Owner 早前的指示：**「假的acc就不要放了 放空都好过放假的�
 
 **没做的：已经生成并存起来的 payslip 列。** 那些是真正会印出来交给 HR 的东西。
 
-实测 prod（`vpwdqtsxexpiqxzweivd`）：
+实测 prod：
 
 | period | rows | fake | status |
 |---|---|---|---|
@@ -3856,7 +5086,7 @@ mobile (`/worker`, `/m`) must not lag (currently laggy). Plus OCR + research.
 **Asks logged (so none drop):**
 1. ✅ Pool size 50 (owner set in Supabase). ⏳ Compute → Small blocked by a
    Supabase platform incident (project resizing failing globally). Re-do once
-   status.supabase.com clears; verify it lands on prod `vpwdqtsxexpiqxzweivd`.
+   status.supabase.com clears; verify it lands on prod (`SUPABASE_PROJECT_REF`).
 2. 🔵 **B — DB connection retry + graceful 503 login** (`supabase-compat.ts`,
    `auth.ts`) — written, shipping now.
 3. ⬜ **Keep-warm heartbeat** — ping `/api/pg-ping` every 1–5 min (GitHub Action
@@ -4298,6 +5528,7 @@ PRESERVE ALL behaviour: reply/forward/star/unread/archive/trash, labels, Assign 
 - [x] ① Supplier phone/email standardization — supplier-form-dialog: PhoneInput (+60/intl) + isValidEmail gate (mirrors customer/lead forms) — PR #141
 - [x] ② Purchase Return convert-from-GRN (not just PI) — loadGrnItemsForReturn, GET /source/grn/:id, POST branches PI|GRN, GRN-detail "Create Purchase Return" btn, dialog grnMode; DN step gated OFF for GRN returns (not invoiced → no AP) — PR #141
 - [x] FILLER sponge sheet default = **96 × 48 INCHES**; every cut/sheet/category-default input labelled inches (owner confirmed "48×96 inches, 全部 usage 用 inches") — PR #140
+
 ## 2026-07-31 (session: mechanism→screw reusable sub-BOM, owner 乙)
 - [x] ③ Mechanism→screw binding — owner chose **乙 (reusable sub-BOM / multi-level BOM)** over 甲 (lightweight per-BOM binding). "更正统 ERP,但重".
   - `component_bom_lines` table (parent SKU → child SKU + qty_per + waste_pct), runtime self-applied (component-bom.ts).
@@ -4307,6 +5538,7 @@ PRESERVE ALL behaviour: reply/forward/star/unread/archive/trash, labels, Assign 
   - BOM editor shows a read-only `+ kit` hint on any material line whose SKU has a kit (module-level KIT_PARENT_CODES, loaded from /api/component-boms).
   - Tests: `component-kit-subbom.test.mjs` — functional (saveKit self-guard, explodeKits qty math / parent-kept / no-op) + structural wiring. Full suite 1691 pass; build:strict clean.
   - branch `feat/mechanism-subbom` off staging.
+
 ## 2026-07-29 owner rulings — do NOT re-raise
 - [x] Forecast P&L 全套上线（%/RM 双填、按类型归并、父子折叠+段合计、空行自动藏、千位逗号、% 两位小数、表头 Aug 2026 + AMOUNT/% SALES 图例、SALES 行 100%）
 - [x] BUG-2026-07-29-001 partial payment 约束名破案并修复
@@ -4418,6 +5650,7 @@ PRESERVE ALL behaviour: reply/forward/star/unread/archive/trash, labels, Assign 
   dashboard fans out to many AE SQL calls and may need caching.
 - [ ] Then sweep module-by-module (devtools) for slow fetches / console errors, now that there
   is real telemetry to cross-check against.
+
 ## 2026-08-01 (session: OCR re-upload hint + OCR observability asks)
 
 Owner asks logged verbatim before work (multi-part message, CLAUDE.md rule):
@@ -5286,7 +6519,7 @@ other orders"*. Only-stock-is-an-oversized-set → its own sentence. No stock at
 all → still silent, because a note on every unstocked product is noise. The
 availability read is for the notes and nothing else; the pool stays the single
 authority on what moves, so a stale aggregate can only produce a wrong sentence,
-never a wrong allocation. Logged BUG-2026-09-29-223.
+never a wrong allocation. Logged BUG-2026-10-09-273.
 
 **Why it hid**: an emptied pool is byte-for-byte identical to a product nobody
 stocks — `loadAllocatablePOs` stops returning pieces the moment another order

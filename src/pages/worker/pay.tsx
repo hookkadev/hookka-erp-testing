@@ -9,12 +9,14 @@
 // reached.
 //
 // No date-range picker here: salary is viewed one whole month at a time.
-// Attendance / efficiency by date range lives on /worker (Home).
+// Attendance / efficiency by date range lives on /worker (Home); the per-day
+// punch records live on /worker/history.
 // ============================================================
 import { useCallback, useEffect, useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { useT } from "@/lib/worker-i18n";
 import { workerFetch } from "@/layouts/WorkerLayout";
+import PayCard, { liveMonthCard, payslipCard } from "./pay-card";
 
 // ---------- helpers ----------
 function rm(sen: number | undefined): string {
@@ -61,6 +63,11 @@ type PayData = {
     otDays?: Array<{ date: string; hours: number }>;
     lateDays?: Array<{ date: string; hours: number }>;
     payslipStatus?: string;
+    // Per-day workers (no monthly basic): PayCard names the day rate instead.
+    payMode?: "DAILY" | "MONTHLY";
+    dailyRateSen?: number;
+    advanceSen?: number;
+    advanceDays?: Array<{ date: string; amountSen: number; note: string }>;
   };
   history: Array<{
     absentDays?: number;
@@ -79,6 +86,9 @@ type PayData = {
     socsoEeSen?: number;
     eisEeSen?: number;
     taxSen?: number;
+    advanceDeductionSen?: number;
+    advanceDays?: Array<{ date: string; amountSen: number; note: string }>;
+    status?: string;
   }>;
 };
 type PayslipRow = PayData["history"][number];
@@ -125,6 +135,18 @@ function asPayslipRow(v: unknown): PayslipRow | null {
     socsoEeSen: asNumber(v.socsoEeSen) ?? undefined,
     eisEeSen: asNumber(v.eisEeSen) ?? undefined,
     taxSen: asNumber(v.taxSen) ?? undefined,
+    advanceDeductionSen: asNumber(v.advanceDeductionSen) ?? 0,
+    advanceDays: Array.isArray(v.advanceDays)
+      ? v.advanceDays
+          .filter(isRecord)
+          .map((d) => ({
+            date: String(d.date ?? ""),
+            amountSen: asNumber(d.amountSen) ?? 0,
+            note: asString(d.note) ?? "",
+          }))
+          .filter((d) => d.date)
+      : [],
+    status: asString(v.status) ?? undefined,
   };
 }
 
@@ -192,6 +214,19 @@ function asPayData(v: unknown): PayData | null {
       otDays,
       lateDays,
       payslipStatus: typeof v.current.payslipStatus === "string" ? v.current.payslipStatus : "NONE",
+      payMode: v.current.payMode === "DAILY" ? "DAILY" : "MONTHLY",
+      dailyRateSen: asNumber(v.current.dailyRateSen) ?? 0,
+      advanceSen: asNumber(v.current.advanceSen) ?? 0,
+      advanceDays: Array.isArray(v.current.advanceDays)
+        ? v.current.advanceDays
+            .filter(isRecord)
+            .map((d) => ({
+              date: String(d.date ?? ""),
+              amountSen: asNumber(d.amountSen) ?? 0,
+              note: asString(d.note) ?? "",
+            }))
+            .filter((d) => d.date)
+        : [],
     },
     history: v.history
       .map(asPayslipRow)
@@ -209,48 +244,37 @@ function asWorkerPayResponse(v: unknown): WorkerPayResponse | null {
   return null;
 }
 
-// Per-day attendance for the selected month — the same /history slice the
-// Home page used to render (owner 2026-06-12: "搬进去 Pay 的里面" — the daily
-// punch records belong under the pay breakdown, following the month picker).
-type PayDailyRow = { date: string; workingMinutes: number; productionMinutes: number };
-type PayAttRow = {
+// DEV-22: the worker's own approved penalties, one row per penalty line.
+type WorkerPenalty = {
+  id: string;
+  penaltyNo: string;
   date: string;
-  clockIn: string | null;
-  clockOut: string | null;
-  overtimeMinutes: number;
-  lateMinutes: number;
+  poNo: string;
+  productName: string;
+  reason: string;
+  amountSen: number;
+  payrollPeriod: string;
+  deductedSen: number;
+  status: "APPROVED" | "DEDUCTED";
 };
-type PayMonthHistory = { daily: PayDailyRow[]; attendance: PayAttRow[] };
 
-function asPayMonthHistory(v: unknown): PayMonthHistory | null {
-  if (!isRecord(v) || !isRecord(v.data)) return null;
-  const d = v.data;
-  if (!Array.isArray(d.daily) || !Array.isArray(d.attendance)) return null;
-  const daily = d.daily
-    .map((r) =>
-      isRecord(r) && typeof r.date === "string"
-        ? {
-            date: r.date,
-            workingMinutes: asNumber(r.workingMinutes) ?? 0,
-            productionMinutes: asNumber(r.productionMinutes) ?? 0,
-          }
-        : null,
-    )
-    .filter((x): x is PayDailyRow => !!x);
-  const attendance = d.attendance
-    .map((r) =>
-      isRecord(r) && typeof r.date === "string"
-        ? {
-            date: r.date,
-            clockIn: typeof r.clockIn === "string" ? r.clockIn : null,
-            clockOut: typeof r.clockOut === "string" ? r.clockOut : null,
-            overtimeMinutes: asNumber(r.overtimeMinutes) ?? 0,
-            lateMinutes: asNumber(r.lateMinutes) ?? 0,
-          }
-        : null,
-    )
-    .filter((x): x is PayAttRow => !!x);
-  return { daily, attendance };
+function asWorkerPenalties(v: unknown): WorkerPenalty[] {
+  if (!isRecord(v) || !Array.isArray(v.data)) return [];
+  return v.data
+    .filter(isRecord)
+    .map((r) => ({
+      id: asString(r.id) ?? "",
+      penaltyNo: asString(r.penaltyNo) ?? "",
+      date: asString(r.date) ?? "",
+      poNo: asString(r.poNo) ?? "",
+      productName: asString(r.productName) ?? "",
+      reason: asString(r.reason) ?? "",
+      amountSen: asNumber(r.amountSen) ?? 0,
+      payrollPeriod: asString(r.payrollPeriod) ?? "",
+      deductedSen: asNumber(r.deductedSen) ?? 0,
+      status: r.status === "DEDUCTED" ? ("DEDUCTED" as const) : ("APPROVED" as const),
+    }))
+    .filter((p) => p.id);
 }
 
 // ============================================================
@@ -259,7 +283,7 @@ export default function WorkerPayPage() {
   const [pay, setPay] = useState<PayData | null>(null);
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState<string | null>(null);
-  const [hist, setHist] = useState<PayMonthHistory | null>(null);
+  const [penalties, setPenalties] = useState<WorkerPenalty[]>([]);
 
   const loadPay = useCallback(async () => {
     try {
@@ -281,29 +305,22 @@ export default function WorkerPayPage() {
     })();
   }, [loadPay]);
 
-  // Daily attendance for the month being viewed. Swallows errors — the pay
-  // card must render even if the history slice fails.
-  const histPeriod = period ?? pay?.current.period ?? null;
+  // Penalties are a separate read: the pay card must render even if this fails.
   useEffect(() => {
-    if (!histPeriod || !/^\d{4}-\d{2}$/.test(histPeriod)) return;
     let cancelled = false;
     (async () => {
       try {
-        const [yy, mm] = histPeriod.split("-").map(Number);
-        const last = new Date(yy, mm, 0).getDate();
-        const res = await workerFetch(
-          `/api/worker/history?from=${histPeriod}-01&to=${histPeriod}-${String(last).padStart(2, "0")}`,
-        );
-        const j = asPayMonthHistory(await res.json());
-        if (!cancelled) setHist(j);
+        const res = await workerFetch("/api/worker/penalties");
+        const list = asWorkerPenalties(await res.json());
+        if (!cancelled) setPenalties(list);
       } catch {
-        if (!cancelled) setHist(null);
+        /* leave the list empty */
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [histPeriod]);
+  }, []);
 
   if (loading) {
     return (
@@ -320,12 +337,37 @@ export default function WorkerPayPage() {
   // Home, which is for efficiency). Options = the in-progress current month
   // (live estimate) + every finalised payslip, newest first. (Wei Siang
   // 2026-06-09: "Pay 只能选月份".)
+  // A month whose only news is a scheduled penalty is still a month to pick.
   const months = Array.from(
-    new Set([pay.current.period, ...pay.history.map((p) => p.period)]),
+    new Set([
+      pay.current.period,
+      ...pay.history.map((p) => p.period),
+      ...penalties.map((p) => p.payrollPeriod).filter(Boolean),
+    ]),
   ).sort((a, b) => (a < b ? 1 : -1));
   const selected = period ?? pay.current.period;
   const isCurrent = selected === pay.current.period;
   const slip = pay.history.find((p) => p.period === selected) ?? null;
+  // One card for every worker and month: Net, Earnings, Deductions, Summary.
+  // A month whose lines would not add up to payroll's figure keeps the old
+  // card (see pay-card.tsx).
+  const penaltySen = penalties
+    .filter((p) => p.payrollPeriod === selected && p.status === "DEDUCTED")
+    .reduce((s, p) => s + p.deductedSen, 0);
+  const card = isCurrent
+    ? liveMonthCard({ ...pay.current, periodLabel: monthLabel(selected) }, t)
+    : slip
+      ? payslipCard(
+          slip,
+          {
+            periodLabel: monthLabel(selected),
+            payMode: pay.current.payMode,
+            dailyRateSen: pay.current.dailyRateSen,
+            penaltySen,
+          },
+          t,
+        )
+      : null;
 
   return (
     <div className="space-y-4 pt-2">
@@ -346,7 +388,13 @@ export default function WorkerPayPage() {
         </select>
       </div>
 
-      {isCurrent ? (
+      {card ? (
+        <PayCard t={t} card={card}>
+          {isCurrent && isFinalised(pay.current) && (
+            <SavePayslipButton period={pay.current.period} />
+          )}
+        </PayCard>
+      ) : isCurrent ? (
         <CurrentMonthBreakdown current={pay.current} t={t} />
       ) : slip ? (
         <FinalisedBreakdown slip={slip} t={t} />
@@ -356,88 +404,124 @@ export default function WorkerPayPage() {
         </div>
       )}
 
-      {/* Daily attendance for the SAME month — moved here from Home (owner
-          2026-06-12): money on top, the per-day punch records that produced
-          it right underneath. */}
-      {hist && hist.daily.length > 0 && (
-        <DailyAttendanceCard hist={hist} t={t} />
+      {/* Penalties deducted (or to be deducted) in the SAME payroll month. */}
+      {penalties.some((p) => p.payrollPeriod === selected) && (
+        <PenaltyCard
+          penalties={penalties.filter((p) => p.payrollPeriod === selected)}
+          t={t}
+        />
       )}
     </div>
   );
 }
 
-// Per-day table: Date / Working / Production / Eff%, with the punch line
-// (in → out · OT · Late) under any day that has a punch — identical facts to
-// the office Working Hours + Attendance views.
-function DailyAttendanceCard({ hist, t }: { hist: PayMonthHistory; t: Translate }) {
-  const mins2hrs = (m: number) => (m / 60).toFixed(1);
+// DEV-22 — every approved penalty in the month: when, which order, why, how
+// much, and whether it has actually come off an approved payslip yet.
+function PenaltyCard({ penalties, t }: { penalties: WorkerPenalty[]; t: Translate }) {
+  const total = penalties.reduce((s, p) => s + p.amountSen, 0);
   return (
     <div className="bg-white rounded-xl border border-[#D8D2CC] overflow-hidden">
-      <div className="bg-[#1F2A3C] px-4 py-2.5">
+      <div className="bg-[#4A2520] px-4 py-2.5 flex items-center justify-between">
         <p className="text-[11px] font-bold uppercase tracking-wider text-white">
-          {t("pay.dailyAttendance")}
+          {t("pay.penalties")}
         </p>
+        <p className="text-sm font-bold text-[#F0A99C] tabular-nums">− {rm(total)}</p>
       </div>
-      <div className="px-4 pb-2">
-        <div className="grid grid-cols-[auto_1fr_1fr_1fr] gap-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-[#8A8680] border-b border-[#E5E0DB]">
-          <span>{t("pay.colDate")}</span>
-          <span className="text-right">{t("home.colWorkingHrs")}</span>
-          <span className="text-right">{t("home.colProductionHrs")}</span>
-          <span className="text-right">{t("home.efficiencyPct")}</span>
-        </div>
-        {hist.daily.map((r) => {
-          const eff =
-            r.workingMinutes > 0
-              ? Math.round((r.productionMinutes / r.workingMinutes) * 100)
-              : null;
-          const effTone =
-            eff == null
-              ? "text-[#9CA3AF]"
-              : eff >= 80
-                ? "text-[#2A6B4A]"
-                : eff >= 60
-                  ? "text-[#9C6F1E]"
-                  : "text-[#9A3A2D]";
-          const att = hist.attendance.find(
-            (a) => a.date === r.date && (a.clockIn || a.clockOut),
-          );
-          return (
-            <div key={r.date} className="py-2.5 border-b border-[#F0ECE9] last:border-b-0">
-              <div className="grid grid-cols-[auto_1fr_1fr_1fr] gap-3 text-sm items-center">
-                <span className="font-medium text-[#1F1D1B]">{fmtDay(r.date)}</span>
-                <span className="tabular-nums text-right font-semibold">
-                  {mins2hrs(r.workingMinutes)}
-                </span>
-                <span className="tabular-nums text-right font-semibold text-[#3E6570]">
-                  {mins2hrs(r.productionMinutes)}
-                </span>
-                <span className={`tabular-nums text-right font-semibold ${effTone}`}>
-                  {eff == null ? "—" : `${eff}%`}
-                </span>
+      <div className="divide-y divide-[#F0ECE9]">
+        {penalties.map((p) => (
+          <div key={p.id} className="px-4 py-3 text-sm">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="font-semibold text-[#1F1D1B]">{fmtDay(p.date)} · {p.penaltyNo}</p>
+                {p.poNo && (
+                  <p className="text-xs text-[#8A8680]">
+                    {t("pay.penaltyOrder")}: {p.poNo}{p.productName ? ` · ${p.productName}` : ""}
+                  </p>
+                )}
               </div>
-              {att && (
-                <p className="mt-1 text-xs text-[#8A8680] tabular-nums">
-                  {att.clockIn ?? "—"} → {att.clockOut ?? "—"}
-                  {att.overtimeMinutes > 0 && (
-                    <span className="text-[#3E6570] font-medium">
-                      {" "}· OT {mins2hrs(att.overtimeMinutes)}h
-                    </span>
-                  )}
-                  {(att.lateMinutes ?? 0) > 0 && (
-                    <span className="text-[#9A3A2D] font-medium">
-                      {" "}· {t("home.lateBy")} {att.lateMinutes}m
-                    </span>
-                  )}
-                </p>
-              )}
+              <p className="shrink-0 font-bold tabular-nums text-[#9A3A2D]">− {rm(p.amountSen)}</p>
             </div>
-          );
-        })}
+            <p className="mt-1 text-xs text-[#5A5550]">
+              {t("pay.penaltyReason")}: {p.reason}
+            </p>
+            <div className="mt-1.5 flex items-center justify-between text-[11px]">
+              <span className="text-[#8A8680]">
+                {t("pay.penaltyPayrollMonth")}: {monthLabel(p.payrollPeriod)}
+              </span>
+              <span
+                className={`rounded px-1.5 py-0.5 font-semibold ${
+                  p.status === "DEDUCTED"
+                    ? "bg-[#EEF3E4] text-[#4F7C3A]"
+                    : "bg-[#FBF1DC] text-[#9C6F1E]"
+                }`}
+              >
+                {p.status === "DEDUCTED"
+                  ? `${t("pay.penaltyDeducted")} ${rm(p.deductedSen)}`
+                  : t("pay.penaltyApproved")}
+              </span>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
 }
 
+// A month is only a DOCUMENT once the office has approved it. Until then the
+// figures move as attendance comes in, so the phone shows them as an estimate
+// and offers nothing to save — a worker holding a mid-month PDF that later
+// changed is exactly the argument this whole screen exists to prevent
+// (owner 2026-08-01: 只有 approved 才能 print).
+function isFinalised(c: PayData["current"]): boolean {
+  return c.payslipStatus === "APPROVED" || c.payslipStatus === "PAID";
+}
+
+function SavePayslipButton({ period }: { period: string }) {
+  const t = useT();
+  const [payslipBusy, setPayslipBusy] = useState(false);
+  const openPayslip = async () => {
+    // Fetch the DATA and render with the same generatePayslipHTML the office
+    // prints — one document, two entry points. Opening the API URL directly
+    // would have downloaded JSON.
+    setPayslipBusy(true);
+    try {
+      const res = await workerFetch(`/api/worker/payslip/${encodeURIComponent(period)}`);
+      const body = (await res.json()) as { success?: boolean; error?: string; data?: unknown };
+      if (!res.ok || !body.success || !body.data) {
+        alert(body.error || "Could not open the payslip.");
+        return;
+      }
+      const { generatePayslipHTML } = await import("@/lib/generate-payslip-pdf");
+      const html = generatePayslipHTML(
+        body.data as Parameters<typeof generatePayslipHTML>[0],
+      );
+      const w = window.open("", "_blank");
+      if (!w) {
+        alert(t("pay.allowPopups"));
+        return;
+      }
+      w.document.write(html);
+      w.document.close();
+      w.focus();
+    } catch {
+      alert(t("common.serverUnreachable"));
+    } finally {
+      setPayslipBusy(false);
+    }
+  };
+  return (
+    <button
+      type="button"
+      onClick={openPayslip}
+      disabled={payslipBusy}
+      className="mt-3 w-full rounded-lg bg-white/10 py-2.5 text-sm font-semibold text-white active:bg-white/20 disabled:opacity-50"
+    >
+      {payslipBusy ? t("pay.opening") : t("pay.savePdf")}
+    </button>
+  );
+}
+
+// The old cards below are the fallback for a month PayCard cannot rebuild.
 // Current (in-progress) month — a LIVE estimate. Every line is itemised so the
 // worker can see how the gross is built; Absent / OT rows tap open to the dates.
 function CurrentMonthBreakdown({
@@ -466,43 +550,7 @@ function CurrentMonthBreakdown({
       Number.isInteger(d.hours) ? d.hours : d.hours.toFixed(1)
     }h`,
   }));
-  // A month is only a DOCUMENT once the office has approved it. Until then the
-  // figures move as attendance comes in, so the phone shows them as an estimate
-  // and offers nothing to save — a worker holding a mid-month PDF that later
-  // changed is exactly the argument this whole screen exists to prevent
-  // (owner 2026-08-01: 只有 approved 才能 print).
-  const finalised = c.payslipStatus === "APPROVED" || c.payslipStatus === "PAID";
-  const [payslipBusy, setPayslipBusy] = useState(false);
-  const openPayslip = async () => {
-    // Fetch the DATA and render with the same generatePayslipHTML the office
-    // prints — one document, two entry points. Opening the API URL directly
-    // would have downloaded JSON.
-    setPayslipBusy(true);
-    try {
-      const res = await workerFetch(`/api/worker/payslip/${encodeURIComponent(c.period)}`);
-      const body = (await res.json()) as { success?: boolean; error?: string; data?: unknown };
-      if (!res.ok || !body.success || !body.data) {
-        alert(body.error || "Could not open the payslip.");
-        return;
-      }
-      const { generatePayslipHTML } = await import("@/lib/generate-payslip-pdf");
-      const html = generatePayslipHTML(
-        body.data as Parameters<typeof generatePayslipHTML>[0],
-      );
-      const w = window.open("", "_blank");
-      if (!w) {
-        alert("Please allow pop-ups to save your payslip.");
-        return;
-      }
-      w.document.write(html);
-      w.document.close();
-      w.focus();
-    } catch {
-      alert("Could not reach the server.");
-    } finally {
-      setPayslipBusy(false);
-    }
-  };
+  const finalised = isFinalised(c);
   return (
     <div className="bg-[#1F1D1B] text-white rounded-xl p-4">
       <p className="text-[11px] text-[#B0AAA3]">
@@ -511,16 +559,7 @@ function CurrentMonthBreakdown({
       <p className="text-4xl font-bold tracking-tight mt-1">
         {rm(c.estimatedGrossSen)}
       </p>
-      {finalised && (
-        <button
-          type="button"
-          onClick={openPayslip}
-          disabled={payslipBusy}
-          className="mt-3 w-full rounded-lg bg-white/10 py-2.5 text-sm font-semibold text-white active:bg-white/20 disabled:opacity-50"
-        >
-          {payslipBusy ? "Opening…" : "Save payslip as PDF"}
-        </button>
-      )}
+      {finalised && <SavePayslipButton period={c.period} />}
 
       <div className="mt-4 pt-4 border-t border-white/10 space-y-2 text-sm">
         <Row label={t("pay.fullSalary")} value={rm(c.fullSalarySen)} />
@@ -575,7 +614,7 @@ function CurrentMonthBreakdown({
 function FinalisedBreakdown({ slip, t }: { slip: PayslipRow; t: Translate }) {
   return (
     <div className="bg-[#1F1D1B] text-white rounded-xl p-4">
-      <p className="text-[11px] text-[#B0AAA3]">Net pay</p>
+      <p className="text-[11px] text-[#B0AAA3]">{t("pay.netPay")}</p>
       <p className="text-4xl font-bold tracking-tight mt-1">
         {rm(slip.netSen ?? slip.grossSen)}
       </p>
@@ -632,6 +671,19 @@ function FinalisedBreakdown({ slip, t }: { slip: PayslipRow; t: Translate }) {
         ) : null}
         {slip.taxSen ? (
           <Row label="Tax" value={`− ${rm(slip.taxSen)}`} muted />
+        ) : null}
+        {/* Cash already collected during the month. Net is net of it, so
+            without this line Net sat below Gross with no reason shown. */}
+        {slip.advanceDeductionSen ? (
+          <DetailRow
+            label={t("pay.salaryAdvance")}
+            value={`− ${rm(slip.advanceDeductionSen)}`}
+            chips={(slip.advanceDays ?? []).map((d, i) => ({
+              key: `${d.date}-${i}`,
+              text: `${fmtDay(d.date)} · ${rm(d.amountSen)}${d.note ? ` · ${d.note}` : ""}`,
+            }))}
+            tone="red"
+          />
         ) : null}
         <div className="pt-2 mt-2 border-t border-white/10">
           <Row label="Net" value={rm(slip.netSen)} bold />
@@ -713,7 +765,7 @@ function DetailRow({
           {chips.map((c) => (
             <span
               key={c.key}
-              className={`inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-medium tabular-nums ${palette}`}
+              className={`inline-flex max-w-full items-center break-words rounded px-1.5 py-0.5 text-[11px] font-medium tabular-nums ${palette}`}
             >
               {c.text}
             </span>

@@ -11,16 +11,19 @@
 //             assign them to several people in one go.
 //   People  — everyone's score this month against last month.
 //   My KPI  — the card the person being measured sees, read-only, with the
-//             formula spelled out and any checklist items tickable.
+//             formula spelled out. Checklist items are ticked by Super Admin
+//             only (DEV-37); everyone else sees which are done.
 //
 // An ordinary user has only the third, so they never see the strip.
 // ---------------------------------------------------------------------------
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { LineChart, Line as ChartLine, XAxis, YAxis, Tooltip, ReferenceLine, ResponsiveContainer } from "recharts";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCachedJson, invalidateCachePrefix } from "@/lib/cached-fetch";
 import { getCurrentUser } from "@/lib/auth";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { drillHref, SETUP_FIELD_LABEL } from "@/lib/kpi-drill";
 
 /** The four per-field cuts offered under the setup_completeness drill link. */
@@ -36,10 +39,11 @@ type Line = {
   ratingGuide?: string[]; surveyScale?: string[];
   purpose?: string; definition?: string; measurement?: string[];
   shape: "GATE" | "RATIO"; unit: "%" | "count" | "score";
-  available: boolean; blockedBy?: string; drillPath?: string;
+  available: boolean; blockedBy?: string; drillPath?: string; urgentDays?: number;
   target: number; weight: number;
   actual: number | null; attainment: number | null; points: number | null;
   evidence: string;
+  daily?: Array<{ date: string; pct: number }>;
 };
 type CardData = {
   period: string; locked: boolean; lines: Line[];
@@ -62,7 +66,10 @@ type LibItem = {
   purpose?: string; definition?: string; measurement?: string[];
   defaultTarget: number; defaultWeight: number; available: boolean;
   current: number | null; evidence: string;
-  assignedTo: Array<{ userId: string; name: string; role: string }>;
+  editableRules?: string[];
+  penaltyPerPct?: number; earlyStepPct?: number; earlyBonusPerStep?: number; earlyMaxBonus?: number;
+  urgentDays?: number; urgentLatePct?: number;
+  assignedTo: Array<{ userId: string; name: string; role: string; scope?: string }>;
 };
 type PersonRow = {
   userId: string; name: string; email: string; role: string;
@@ -110,6 +117,7 @@ const Badge = ({ kind, children }: { kind: string; children: React.ReactNode }) 
 
 export default function KpiPage() {
   const me = getCurrentUser();
+  const { confirm } = useConfirm();
   const isSuperAdmin = (me?.role ?? "").toUpperCase() === "SUPER_ADMIN";
   const [period, setPeriod] = useState(() => new Date().toISOString().slice(0, 7));
   const months = useMemo(() => monthsBack(12), []);
@@ -158,8 +166,39 @@ export default function KpiPage() {
   // KPI. Five KPIs sharing one number is not a weighting.
   const [kpiWeights, setKpiWeights] = useState<Record<string, number>>({});
   const [chosenPeople, setChosenPeople] = useState<Set<string>>(new Set());
+  // DEV-36: which departments production_efficiency is scored on, pooled into
+  // one figure. Empty = Overall; entries are "FAB_CUT" or "FAB_CUT:SOFA".
+  // Everyone assigned in one go shares it.
+  const [effScopes, setEffScopes] = useState<string[]>([]);
+  // Department efficiency: the departments whose workers it scores, pooled.
+  // Empty = the whole floor. Department codes only, no Sofa / Bedframe.
+  const [deptEffScopes, setDeptEffScopes] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+
+  const { data: deptResp } = useCachedJson<{
+    data?: Array<{ code: string; name: string; sequence: number; isProduction: boolean }>;
+  }>(isSuperAdmin && tab === "library" ? "/api/departments" : "");
+  const allDepts = useMemo(
+    () => [...(deptResp?.data ?? [])].sort((a, b) => a.sequence - b.sequence),
+    [deptResp],
+  );
+  const prodDepts = useMemo(() => allDepts.filter((d) => d.isProduction), [allDepts]);
+  /** "FAB_CUT:SOFA,R_AND_D" → readable names. Only production_efficiency says "(all)". */
+  const scopeLabel = (v: string, kpiKey = "production_efficiency") =>
+    v
+      .split(",")
+      .map((entry) => {
+        const [code, cat] = entry.split(":");
+        const name = allDepts.find((d) => d.code === code)?.name ?? code;
+        if (cat) return `${name} ${cat === "SOFA" ? "Sofa" : "Bedframe"}`;
+        return kpiKey === "production_efficiency" ? `${name} (all)` : name;
+      })
+      .join(", ");
+  const toggleScope = (v: string) =>
+    setEffScopes((cur) => (cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v]));
+  const toggleDeptEff = (v: string) =>
+    setDeptEffScopes((cur) => (cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v]));
 
   const lib = libResp?.data ?? [];
   const pickedDefs = lib.filter((k) => picked.has(k.key));
@@ -190,6 +229,12 @@ export default function KpiPage() {
               target: def.defaultTarget,
               weight: weightOf(def),
               isActive: true,
+              scope:
+                def.key === "production_efficiency"
+                  ? effScopes.join(",")
+                  : def.key === "department_efficiency"
+                    ? deptEffScopes.join(",")
+                    : undefined,
             })),
           }),
         });
@@ -198,12 +243,39 @@ export default function KpiPage() {
       }
       setMsg(`Assigned ${pickedDefs.length} KPI(s) to ${people.length} person(s).`);
       setPicked(new Set());
+      setEffScopes([]);
+      setDeptEffScopes([]);
       invalidateCachePrefix("/api/kpi");
     } catch (e) {
       setMsg(e instanceof Error ? e.message : "Save failed");
     } finally {
       setSaving(false);
     }
+  };
+
+  // Taking one person off one KPI. The upsert route already accepts
+  // isActive:false; the Library only reads active rows, so the chip goes.
+  // Target and weight are overwritten, which is harmless: re-assigning sends
+  // both again.
+  const unassign = async (k: LibItem, a: LibItem["assignedTo"][number]) => {
+    const ok = await confirm({
+      title: "Remove from KPI?",
+      message: `Take ${a.name} off "${k.label}"? Months already settled keep their score.`,
+      danger: true,
+      confirmLabel: "Remove",
+    });
+    if (!ok) return;
+    setMsg(null);
+    const r = await fetch(`/api/kpi/kpi/${k.key}/assignees`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        assignees: [{ userId: a.userId, target: k.defaultTarget, weight: 0, isActive: false }],
+      }),
+    });
+    const j = (await r.json().catch(() => ({}))) as { success?: boolean; error?: string };
+    if (!r.ok || !j.success) setMsg(j.error || `Could not remove ${a.name}`);
+    invalidateCachePrefix("/api/kpi");
   };
 
   // ---- Payout settings, per person ----------------------------------------
@@ -344,8 +416,11 @@ export default function KpiPage() {
               <div>
                 <p className="text-sm font-bold">All KPIs</p>
                 <p className="text-[11px] text-[#9CA3AF]">
-                  {lib.length} defined · tick several, then assign in one go
+                  {lib.length} defined · click KPIs to pick them, then assign in one go
                 </p>
+                {/* A failed removal with nothing picked has no Assign footer to
+                    show in, so the message surfaces here. */}
+                {msg && !pickedDefs.length && <p className="text-[11px] text-[#9A3A2D]">{msg}</p>}
               </div>
             </div>
             {libLoading && !lib.length ? (
@@ -364,11 +439,17 @@ export default function KpiPage() {
                         sit here in full and turned every row into a wall of
                         text — the list has to be scannable first, explained
                         second. */}
-                    <div className="flex items-center gap-3 px-4 py-3">
+                    {/* The whole row picks the KPI, not just the tick; the tick
+                        is readOnly so its own click bubbles here once. */}
+                    <div
+                      onClick={() => togglePick(k.key)}
+                      className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-[#FBF8F2]"
+                    >
                       <input
                         type="checkbox"
                         checked={picked.has(k.key)}
-                        onChange={() => togglePick(k.key)}
+                        readOnly
+                        aria-label={`Pick ${k.label}`}
                         className="shrink-0"
                       />
                       <div className="flex-1 min-w-0">
@@ -393,8 +474,18 @@ export default function KpiPage() {
                         </span>
                       ) : (
                         k.assignedTo.map((a) => (
-                          <span key={a.userId} className="rounded-full bg-[#EDE7DA] px-2 py-0.5 text-[10px] text-[#5A5550]">
+                          <span key={a.userId} className="inline-flex items-center rounded-full bg-[#EDE7DA] pl-2 text-[10px] text-[#5A5550]">
                             {a.name}
+                            {a.scope && <span className="ml-1 text-[#8A8178]">· {scopeLabel(a.scope, k.key)}</span>}
+                            <button
+                              type="button"
+                              onClick={() => unassign(k, a)}
+                              aria-label={`Remove ${a.name} from ${k.label}`}
+                              title="Remove"
+                              className="grid h-6 w-6 place-items-center rounded-full text-[13px] leading-none text-[#8A8178] hover:bg-[#DCD3C1] hover:text-[#9A3A2D]"
+                            >
+                              ×
+                            </button>
                           </span>
                         ))
                       )}
@@ -421,6 +512,9 @@ export default function KpiPage() {
                               <li key={m} className="text-[11.5px] text-[#3A3733] leading-relaxed">{m}</li>
                             ))}
                           </ol>
+                        )}
+                        {k.key === "customer_delivery_date" && (k.editableRules?.length ?? 0) > 0 && (
+                          <DeliveryRulesEditor item={k} />
                         )}
                         {(k.surveyQuestions?.length ?? 0) > 0 && (
                           <div>
@@ -496,7 +590,7 @@ export default function KpiPage() {
             )}
           </Card>
 
-          <Card className="bg-white rounded-xl overflow-hidden">
+          <Card className="bg-white rounded-xl overflow-hidden lg:sticky lg:top-[calc(var(--app-sticky-h,0px)+1rem)]">
             <CardContent className="p-4">
               <p className="text-sm font-bold">
                 {pickedDefs.length ? `Assign ${pickedDefs.length} KPI(s)` : "Pick a KPI"}
@@ -504,7 +598,7 @@ export default function KpiPage() {
               <p className="text-[11px] text-[#9CA3AF]">
                 {pickedDefs.length
                   ? "Targets come from the catalogue — you set the weight"
-                  : "Tick one or more on the left to assign them"}
+                  : "Click one or more KPIs on the left to assign them"}
               </p>
               {/* Weight per KPI — a target belongs to the KPI, so the weight
                   it carries does too. */}
@@ -526,6 +620,98 @@ export default function KpiPage() {
                   <span className="text-[10px] text-[#9CA3AF]">wt</span>
                 </div>
               ))}
+              {pickedDefs.some((k) => k.key === "production_efficiency") && (
+                <div className="mt-3 text-[11.5px]">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <b>Production time efficiency: departments</b>
+                    {effScopes.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setEffScopes([])}
+                        className="shrink-0 text-[11px] text-[#6B5C32] underline decoration-dotted"
+                      >
+                        Back to Overall
+                      </button>
+                    )}
+                  </div>
+                  <span className="block text-[#9CA3AF]">
+                    {effScopes.length
+                      ? `Scored on ${scopeLabel(effScopes.join(","))} combined. Everyone picked below shares that figure.`
+                      : "Nothing ticked: Overall, the whole floor. Tick one or more to score only those departments, combined."}
+                  </span>
+                  <div className="mt-1.5 max-h-[30vh] overflow-y-auto rounded border border-[#E2DDD8] bg-white">
+                    {prodDepts.map((d) => (
+                      <div key={d.code} className="flex flex-wrap items-center gap-1.5 border-b border-[#F2EFE9] px-2 py-1.5 last:border-0">
+                        <span className="min-w-0 flex-1 basis-28 truncate">{d.name}</span>
+                        {[
+                          { v: d.code, label: "All" },
+                          { v: `${d.code}:SOFA`, label: "Sofa" },
+                          { v: `${d.code}:BEDFRAME`, label: "Bedframe" },
+                        ].map((o) => {
+                          const on = effScopes.includes(o.v);
+                          return (
+                            <button
+                              key={o.v}
+                              type="button"
+                              aria-pressed={on}
+                              aria-label={`${d.name} ${o.label}`}
+                              onClick={() => toggleScope(o.v)}
+                              className={`rounded-full border px-2.5 py-0.5 text-[11px] ${
+                                on
+                                  ? "border-[#6B5C32] bg-[#6B5C32] text-white"
+                                  : "border-[#E2DDD8] text-[#5A5550] hover:bg-[#FBF8F2]"
+                              }`}
+                            >
+                              {o.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {pickedDefs.some((k) => k.key === "department_efficiency") && (
+                <div className="mt-3 text-[11.5px]">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <b>Department efficiency: departments</b>
+                    {deptEffScopes.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setDeptEffScopes([])}
+                        className="shrink-0 text-[11px] text-[#6B5C32] underline decoration-dotted"
+                      >
+                        Back to whole floor
+                      </button>
+                    )}
+                  </div>
+                  <span className="block text-[#9CA3AF]">
+                    {deptEffScopes.length
+                      ? `Scored on the workers of ${scopeLabel(deptEffScopes.join(","), "department_efficiency")}, combined, as Dashboard Experimental shows it.`
+                      : "Nothing ticked: the whole floor. Tick one or more departments to score only their workers, combined."}
+                  </span>
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {allDepts.map((d) => {
+                      const on = deptEffScopes.includes(d.code);
+                      return (
+                        <button
+                          key={d.code}
+                          type="button"
+                          aria-pressed={on}
+                          onClick={() => toggleDeptEff(d.code)}
+                          className={`rounded-full border px-2.5 py-0.5 text-[11px] ${
+                            on
+                              ? "border-[#6B5C32] bg-[#6B5C32] text-white"
+                              : "border-[#E2DDD8] text-[#5A5550] hover:bg-[#FBF8F2]"
+                          }`}
+                        >
+                          {d.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </CardContent>
             {pickedDefs.length > 0 && (
               <div className="border-t border-[#E2DDD8] bg-[#FAF9F7] px-4 py-3">
@@ -539,23 +725,29 @@ export default function KpiPage() {
                     {Math.round(weightTotal) === 100 ? " ✓" : " / 100"}
                   </span>
                 </div>
-                {(usersResp?.data ?? []).map((u) => (
-                  <label key={u.id} className="flex items-center gap-2 py-1 text-[11.5px] cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={chosenPeople.has(u.id)}
-                      onChange={() => {
-                        const next = new Set(chosenPeople);
-                        if (next.has(u.id)) next.delete(u.id);
-                        else next.add(u.id);
-                        setChosenPeople(next);
-                      }}
-                    />
-                    <span className="flex-1 truncate">
-                      {u.displayName || u.email} <span className="text-[#9CA3AF]">· {u.role}</span>
-                    </span>
-                  </label>
-                ))}
+                {/* Scrolls inside the panel so Assign stays in view. */}
+                <div className="max-h-[45vh] overflow-y-auto -mx-1 px-1">
+                  {(usersResp?.data ?? []).map((u) => (
+                    <label key={u.id} className="flex items-center gap-2 py-1 text-[11.5px] cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={chosenPeople.has(u.id)}
+                        onChange={() => {
+                          const next = new Set(chosenPeople);
+                          if (next.has(u.id)) next.delete(u.id);
+                          else next.add(u.id);
+                          setChosenPeople(next);
+                        }}
+                      />
+                      <span className="flex-1 truncate">
+                        {u.displayName || u.email} <span className="text-[#9CA3AF]">· {u.role}</span>
+                      </span>
+                      {pickedDefs.every((k) => k.assignedTo.some((a) => a.userId === u.id)) && (
+                        <span className="shrink-0 rounded-full bg-[#F2F7EE] px-1.5 text-[10px] text-[#3B6D11]">has it</span>
+                      )}
+                    </label>
+                  ))}
+                </div>
                 <div className="mt-2.5 flex items-center gap-2 flex-wrap">
                   <button
                     type="button"
@@ -917,25 +1109,15 @@ export default function KpiPage() {
                             </Badge>
                           )}
                         </div>
-                        {l.purpose && (
-                          <p className="text-[12px] text-[#1F1D1B] mt-1.5 leading-relaxed">
-                            <span className="font-semibold">Why: </span>{l.purpose}
-                          </p>
+                        {l.key === "customer_delivery_date" ? (
+                          <DeliveryOrderList period={period} evidence={l.evidence} urgentDays={l.urgentDays} />
+                        ) : (
+                          <p className="text-[12px] text-[#5A5550] mt-1.5 font-medium">{l.evidence}</p>
                         )}
-                        {l.definition && (
-                          <p className="text-[12px] text-[#3A3733] mt-1 leading-relaxed">
-                            <span className="font-semibold">What is counted: </span>{l.definition}
-                          </p>
-                        )}
-                        {(l.measurement?.length ?? 0) > 0 && (
-                          <ol className="mt-1.5 ml-4 list-decimal space-y-0.5">
-                            {l.measurement!.map((m) => (
-                              <li key={m} className="text-[11.5px] text-[#3A3733] leading-relaxed">{m}</li>
-                            ))}
-                          </ol>
-                        )}
-                        <p className="text-[12px] text-[#5A5550] mt-1.5 font-medium">{l.evidence}</p>
-                        {l.drillPath && (
+                        {/* department_efficiency: the holder usually cannot open
+                            Dashboard Experimental, so the card draws its daily
+                            line below instead of linking to it. */}
+                        {l.drillPath && l.key !== "customer_delivery_date" && l.key !== "department_efficiency" && (
                           // The card's month travels with the link. Without it
                           // the target page opens "all of them, ever", which is
                           // a different set from the one this row counted —
@@ -977,8 +1159,81 @@ export default function KpiPage() {
                         {l.points !== null && (
                           <p className="text-[11px] font-semibold">{l.points} pts</p>
                         )}
+                        <button
+                          type="button"
+                          onClick={() => setExpanded(expanded === l.key ? null : l.key)}
+                          aria-expanded={expanded === l.key}
+                          className="mt-1 text-[11px] text-[#6B5C32] underline decoration-dotted"
+                        >
+                          {expanded === l.key ? "Hide calculation" : "View calculation"}
+                        </button>
                       </div>
                     </div>
+
+                    {(l.daily?.length ?? 0) > 0 && (
+                      <div className="mt-3 h-40 w-full select-none [&_*]:outline-none">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={l.daily} margin={{ top: 6, right: 8, bottom: 0, left: 0 }}>
+                            <XAxis dataKey="date" tickFormatter={(d: string) => d.slice(8)} tick={{ fontSize: 10, fill: "#9CA3AF" }} axisLine={{ stroke: "#E2DDD8" }} tickLine={false} />
+                            <YAxis tick={{ fontSize: 10, fill: "#9CA3AF" }} axisLine={false} tickLine={false} width={38} unit="%" domain={[0, "auto"]} />
+                            <Tooltip formatter={(v) => [`${v}%`, "Efficiency"]} contentStyle={{ fontSize: 11 }} />
+                            <ReferenceLine y={l.target} stroke="#9CA3AF" strokeDasharray="4 3" label={{ value: `${l.target}% target`, fontSize: 10, fill: "#9CA3AF", position: "insideTopRight" }} />
+                            <ChartLine type="monotone" dataKey="pct" stroke="#6B5C32" strokeWidth={1.75} dot={{ r: 2.5 }} isAnimationActive={false} />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    )}
+
+                    {/* DEV-39: the person being measured asked to see how each
+                        result is worked out. The rules come from the catalogue;
+                        the last part repeats the server's own numbers for this
+                        person, so nothing here is recomputed in the browser. */}
+                    {expanded === l.key && (
+                      <div className="mt-3 space-y-2 rounded-lg border border-[#F2EFE9] bg-[#FCFBF8] p-3">
+                        {l.purpose && (
+                          <p className="text-[12px] text-[#1F1D1B] leading-relaxed">
+                            <span className="font-semibold">Why: </span>{l.purpose}
+                          </p>
+                        )}
+                        {l.definition && (
+                          <p className="text-[12px] text-[#3A3733] leading-relaxed">
+                            <span className="font-semibold">What is counted: </span>{l.definition}
+                          </p>
+                        )}
+                        {l.formula && (
+                          <p className="text-[12px] text-[#3A3733] leading-relaxed">
+                            <span className="font-semibold">Formula: </span>{l.formula}
+                          </p>
+                        )}
+                        {(l.measurement?.length ?? 0) > 0 && (
+                          <ol className="ml-4 list-decimal space-y-0.5">
+                            {l.measurement!.map((m) => (
+                              <li key={m} className="text-[11.5px] text-[#3A3733] leading-relaxed">{m}</li>
+                            ))}
+                          </ol>
+                        )}
+                        <div className="border-t border-[#EFEBE4] pt-2 text-[12px] text-[#3A3733] leading-relaxed">
+                          <p className="font-semibold text-[#1F1D1B]">Your result for {card.period}</p>
+                          {l.attainment === null ? (
+                            <p>{l.evidence || "No result yet this month."}</p>
+                          ) : (
+                            <ol className="ml-4 list-decimal space-y-0.5">
+                              <li>Measured: <b>{fmt(l.actual, l.unit)}</b>{l.evidence && <> · {l.evidence}</>}</li>
+                              <li>Score for this KPI: <b>{l.attainment}</b> out of 100</li>
+                              {l.shape !== "GATE" && l.points !== null && (
+                                <>
+                                  <li>{l.attainment} × weight {l.weight} ÷ 100 = <b>{l.points} points</b></li>
+                                  <li>
+                                    Your month's score is all points earned ÷ total weight {card.weightMeasured} × 100
+                                    = <b>{card.score ?? "—"}</b>
+                                  </li>
+                                </>
+                              )}
+                            </ol>
+                          )}
+                        </div>
+                      </div>
+                    )}
 
                     {l.scoring === "CHECKLIST" && (l.checklistItems?.length ?? 0) > 0 && (
                       <ChecklistBlock
@@ -987,6 +1242,7 @@ export default function KpiPage() {
                         period={period}
                         userId={viewUserId}
                         locked={card.locked}
+                        canTick={isSuperAdmin}
                         onTick={tickItem}
                       />
                     )}
@@ -1147,6 +1403,197 @@ function SurveyLinkMaker({
   );
 }
 
+type DeliveryStatus = "LATE" | "EARLY" | "ON_TIME";
+const DELIVERY_STATUS: Record<DeliveryStatus, { label: string; cls: string }> = {
+  LATE: { label: "Late", cls: "bg-[#F9E4E0] text-[#9A3A2D]" },
+  EARLY: { label: "Early", cls: "bg-[#E3EEDA] text-[#3B6D11]" },
+  ON_TIME: { label: "On time", cls: "bg-[#EDE7DA] text-[#5A5550]" },
+};
+
+/** Whole days between two YYYY-MM-DD dates (b − a). */
+const daysBetween = (a: string, b: string) =>
+  Math.round((Date.parse(b) - Date.parse(a)) / 86_400_000);
+
+/**
+ * The delivery KPI's orders, opened in place on the card. Tap the summary line
+ * and every order fully delivered that month is listed with its Late / Early / On time
+ * tag, filterable by tag. Same query as the score, so the counts match it.
+ */
+function DeliveryOrderList({ period, evidence, urgentDays }: {
+  period: string; evidence: string; urgentDays?: number;
+}) {
+  const [open, setOpen] = useState(false);
+  const [show, setShow] = useState<DeliveryStatus | "ALL">("ALL");
+  const { data, loading, error } = useCachedJson<{
+    data?: Array<{
+      id: string; companySOId: string | null; customerName: string | null;
+      customerDeliveryDate: string | null; deliveredOn: string | null; status: DeliveryStatus;
+      leadDays: number | null;
+    }>;
+  }>(open ? `/api/sales-orders/late-to-customer?period=${period}&all=1` : "");
+  const rows = data?.data ?? [];
+  const count = (s: DeliveryStatus) => rows.filter((r) => r.status === s).length;
+  const shown = show === "ALL" ? rows : rows.filter((r) => r.status === show);
+
+  return (
+    <div className="mt-1.5">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        className="text-left text-[12px] font-medium text-[#5A5550] hover:text-[#1F1D1B]"
+      >
+        {evidence}{" "}
+        <span className="text-[11px] text-[#6B5C32] underline decoration-dotted whitespace-nowrap">
+          {open ? "Hide orders" : "Show orders"}
+        </span>
+      </button>
+      {open && (
+        <div className="mt-2 rounded-lg border border-[#E2DDD8] bg-[#FCFBF8]">
+          {loading && !rows.length ? (
+            <Skeleton height={80} />
+          ) : error ? (
+            <p className="p-3 text-[11.5px] text-[#9A3A2D]">Could not load the orders: {error}</p>
+          ) : rows.length === 0 ? (
+            <p className="p-3 text-[11.5px] text-[#9CA3AF]">No orders fully delivered in {period}.</p>
+          ) : (
+            <>
+              <div className="flex flex-wrap gap-1.5 border-b border-[#E2DDD8] p-2">
+                {(["ALL", "LATE", "EARLY", "ON_TIME"] as const).map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => setShow(s)}
+                    className={`rounded-full border px-2.5 py-0.5 text-[11px] ${
+                      show === s
+                        ? "border-[#6B5C32] bg-[#6B5C32] text-white font-semibold"
+                        : "border-[#E2DDD8] bg-white text-[#5A5550]"
+                    }`}
+                  >
+                    {s === "ALL" ? "All" : DELIVERY_STATUS[s].label} {s === "ALL" ? rows.length : count(s)}
+                  </button>
+                ))}
+              </div>
+              <ul className="max-h-80 overflow-y-auto divide-y divide-[#EFEBE4]">
+                {shown.map((r) => {
+                  const diff =
+                    r.customerDeliveryDate && r.deliveredOn
+                      ? daysBetween(r.customerDeliveryDate, r.deliveredOn)
+                      : 0;
+                  return (
+                    <li key={r.id} className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-3 py-2 text-[11.5px]">
+                      <Link to={`/sales/${r.id}`} className="font-semibold text-[#6B5C32] underline decoration-dotted">
+                        {r.companySOId || r.id}
+                      </Link>
+                      <span className="min-w-0 flex-1 truncate text-[#3A3733]">{r.customerName || "—"}</span>
+                      <span className="text-[#9CA3AF] tabular-nums">
+                        promised {r.customerDeliveryDate ?? "—"} · delivered {r.deliveredOn ?? "—"}
+                      </span>
+                      {urgentDays != null && r.leadDays != null && r.leadDays <= urgentDays && (
+                        <span
+                          title={`Promised ${r.leadDays} day(s) after the order date`}
+                          className="rounded-full bg-[#FBEFD5] px-2 py-0.5 text-[10.5px] font-semibold text-[#8A5A00]"
+                        >
+                          Urgent
+                        </span>
+                      )}
+                      <span className={`rounded-full px-2 py-0.5 text-[10.5px] font-semibold ${DELIVERY_STATUS[r.status].cls}`}>
+                        {DELIVERY_STATUS[r.status].label}
+                        {diff !== 0 && ` ${Math.abs(diff)}d`}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The delivery KPI's scoring numbers, editable by Super Admin. One set for the
+ * whole company. Saving refetches the library, so the explanation above it is
+ * rebuilt from the new numbers.
+ */
+function DeliveryRulesEditor({ item }: { item: LibItem }) {
+  const [form, setForm] = useState({
+    penaltyPerPct: String(item.penaltyPerPct ?? 10),
+    earlyStepPct: String(item.earlyStepPct ?? 10),
+    earlyBonusPerStep: String(item.earlyBonusPerStep ?? 1),
+    earlyMaxBonus: String(item.earlyMaxBonus ?? 5),
+    urgentDays: String(item.urgentDays ?? 7),
+    urgentLatePct: String(item.urgentLatePct ?? 100),
+  });
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  const num = (key: keyof typeof form, label: string) => (
+    <input
+      type="number"
+      min={0}
+      max={100}
+      step="any"
+      inputMode="decimal"
+      aria-label={label}
+      value={form[key]}
+      onChange={(e) => { setForm({ ...form, [key]: e.target.value }); setMsg(""); }}
+      className="mx-1 h-7 w-14 rounded-md border border-[#E2DDD8] bg-white px-1.5 text-right text-[11.5px] tabular-nums"
+    />
+  );
+
+  const save = async () => {
+    setBusy(true);
+    setMsg("");
+    try {
+      const r = await fetch(`/api/kpi/rules/${item.key}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(Object.fromEntries(Object.entries(form).map(([k, v]) => [k, Number(v)]))),
+      });
+      const j = (await r.json()) as { success?: boolean; error?: string };
+      if (!r.ok || !j.success) throw new Error(j.error || "Could not save the rules");
+      setMsg("Saved. Every month not yet settled now uses these numbers.");
+      invalidateCachePrefix("/api/kpi");
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "Could not save the rules");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-2 rounded-lg border border-[#E2DDD8] bg-white p-3 space-y-2">
+      <p className="text-[11.5px] font-semibold text-[#1F1D1B]">Scoring rules (applies to everyone)</p>
+      <p className="text-[11.5px] text-[#3A3733] leading-loose">
+        Lose{num("penaltyPerPct", "Points lost per 1% late")}points for every 1% of orders shipped late.
+      </p>
+      <p className="text-[11.5px] text-[#3A3733] leading-loose">
+        Win back{num("earlyBonusPerStep", "Bonus points per step")}point(s) for every
+        {num("earlyStepPct", "Early % per step")}% shipped early, up to
+        {num("earlyMaxBonus", "Most bonus points")}points. The score never goes above 100.
+      </p>
+      <p className="text-[11.5px] text-[#3A3733] leading-loose">
+        An order promised within{num("urgentDays", "Urgent order days")}days of its order date is urgent.
+        If it ships late it counts as{num("urgentLatePct", "Late urgent order counts as percent")}% of a late order.
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void save()}
+          className="h-7 rounded-md bg-[#6B5C32] px-3 text-[11.5px] font-semibold text-white disabled:opacity-50"
+        >
+          {busy ? "Saving..." : "Save rules"}
+        </button>
+        {msg && <span className="text-[11px] text-[#5A5550]">{msg}</span>}
+      </div>
+    </div>
+  );
+}
+
 /**
  * A supervisor-rated KPI: the guide everyone can read, and — for Super Admin —
  * the box to score it in.
@@ -1253,12 +1700,13 @@ function RatingBlock({
  * The tickable items behind a checklist KPI.
  *
  * The list itself comes from the code catalogue, so the denominator cannot be
- * changed by anyone being measured against it; only the ticks are data.
+ * changed by anyone being measured against it; only the ticks are data. Only a
+ * Super Admin ticks; the person being measured sees the boxes read-only.
  */
 function ChecklistBlock({
-  kpiKey, items, period, userId, locked, onTick,
+  kpiKey, items, period, userId, locked, canTick, onTick,
 }: {
-  kpiKey: string; items: string[]; period: string; userId: string; locked: boolean;
+  kpiKey: string; items: string[]; period: string; userId: string; locked: boolean; canTick: boolean;
   onTick: (kpiKey: string, itemIndex: number, done: boolean) => Promise<void>;
 }) {
   const url = `/api/kpi/checklist/${kpiKey}?period=${period}${userId ? `&userId=${userId}` : ""}`;
@@ -1272,14 +1720,18 @@ function ChecklistBlock({
           <input
             type="checkbox"
             checked={done.has(i)}
-            disabled={locked}
+            disabled={locked || !canTick}
             onChange={(e) => void onTick(kpiKey, i, e.target.checked)}
             className="mt-0.5"
           />
           <span className={done.has(i) ? "text-[#5A5550]" : ""}>{it}</span>
         </label>
       ))}
-      {locked && <p className="text-[10.5px] text-[#9CA3AF]">This month is settled — items are locked.</p>}
+      {locked ? (
+        <p className="text-[10.5px] text-[#9CA3AF]">This month is settled — items are locked.</p>
+      ) : !canTick && (
+        <p className="text-[10.5px] text-[#9CA3AF]">Items are ticked by Super Admin.</p>
+      )}
     </div>
   );
 }

@@ -48,6 +48,49 @@ export async function getQRCodeDataURL(
   });
 }
 
+// Session memo for getQRCodeSvgDataURL: Show QR → hide → show, or Print after
+// Show, reuses the same string instead of encoding every code again.
+const svgCache = new Map<string, string>();
+
+/**
+ * The same QR as `getQRCodeDataURL` (quiet zone, level Q) as an SVG data URL.
+ * Use it for anything shown in an `<img>` (screen tiles, the browser-print
+ * sticker containers): vector, so it prints crisp at any mm size, and 6-10x
+ * cheaper than the 600 px PNG (measured in Chromium 2026-10-01, 200 codes:
+ * 0.5-0.8 s vs 4.7 s). Keep the PNG function for jsPDF `addImage`, which cannot
+ * take SVG.
+ */
+export async function getQRCodeSvgDataURL(data: string, margin: number = 2): Promise<string> {
+  const key = `${margin}|${data}`;
+  const hit = svgCache.get(key);
+  if (hit) return hit;
+  const svg = await QRCode.toString(data, { type: "svg", margin, errorCorrectionLevel: "Q" });
+  const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  // ponytail: wholesale clear at 5,000 codes (~25 MB worst case), LRU if a session ever needs more
+  if (svgCache.size >= 5000) svgCache.clear();
+  svgCache.set(key, url);
+  return url;
+}
+
+/**
+ * Call `done` once no `<QRImg>` (src/components/qr-img.tsx) under `root` is still a "(loading)" placeholder,
+ * checking every 100 ms. Print containers use it instead of a fixed delay, which
+ * was either too short for a big batch (blank QRs) or idle time for a small one.
+ * Gives up waiting after `maxMs` and calls `done` anyway, so a print never hangs.
+ */
+export function whenQrsReady(root: Element | null, done: () => void, maxMs = 10_000): void {
+  // A placeholder not yet swapped for an <img>, or an <img> not yet decoded.
+  const pending = () =>
+    !!root?.querySelector('[aria-label$="(loading)"]') ||
+    Array.from(root?.querySelectorAll("img") ?? []).some((i) => !i.complete);
+  if (!pending() || maxMs <= 0) {
+    done();
+    return;
+  }
+  // eslint-disable-next-line no-restricted-syntax -- short poll on a DOM condition, not a React lifecycle
+  setTimeout(() => whenQrsReady(root, done, maxMs - 100), 100);
+}
+
 // ============================================================
 // Schedule WIP code — the scannable twin of the per-WIP sticker QR.
 //

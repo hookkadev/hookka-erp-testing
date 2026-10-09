@@ -43,11 +43,12 @@ test("a hidden column simply isn't passed — export mirrors what's visible", ()
   assert.deepEqual(aoa[1], ["SO-1", 6000]);
 });
 
-test("select/actions pseudo-columns are excluded", () => {
+test("select/actions pseudo-columns and the row-buttons column are excluded", () => {
   const cols = [
     { key: "__select__", label: "" },
     { key: "companySOId", label: "SO No." },
     { key: "__actions__", label: "" },
+    { key: "actions", label: "Actions" },
   ];
   const aoa = ge.buildListingAoa(cols, [{ companySOId: "SO-1" }]);
   assert.deepEqual(aoa[0], ["SO No."]);

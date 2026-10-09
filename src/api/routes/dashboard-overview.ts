@@ -15,7 +15,21 @@ import type { Env } from "../worker";
 import { getOrgId } from "../lib/tenant";
 import { jcMinutesTotal } from "../../lib/job-card-minutes";
 import { loadSoLinePriceIndex, priceForItem } from "../lib/do-value";
-import { computeFabricNext30ByCategory } from "../lib/fabric-usage";
+import {
+  computeFabricNext30ByCategory,
+  computeFcFabricUsageMeters,
+  fetchBomWipComponentsByCode,
+} from "../lib/fabric-usage";
+import {
+  buildFabricPurchasingMonths,
+  monthsBack,
+  PURCHASE_GROUP_CAT,
+  type CutRow,
+  type GrnRow,
+  type InvoiceRow,
+  type PoRow,
+  type ReceiptRow,
+} from "../lib/fabric-purchasing-compare";
 import {
   readSnapshot,
   writeSnapshot,
@@ -25,6 +39,9 @@ import {
 import {
   writeStateSnapshot,
   readStateSnapshotForMonth,
+  readStateKpisForMonth,
+  readFrozenMonth,
+  freezeMonth,
   type DashboardStateMetrics,
 } from "../lib/dashboard-state-snapshot";
 
@@ -68,6 +85,13 @@ app.get("/", async (c) => {
   const todayISOTop = fmtISO(new Date());
   const currentMonthPrefix = todayISOTop.slice(0, 7);
   const isPastMonth = period !== "all" && period < currentMonthPrefix;
+  // Staging Dashboard Compare asks for a 7- or 14-day capacity window side by
+  // side. For a past month both windows END on that month's last day, so the
+  // two panels show the month-end state on each basis. An override skips
+  // every stored copy (snapshot, daily state, frozen month) both ways, so it
+  // is never served to, or saved for, the normal dashboard.
+  const cwRaw = c.req.query("capacityWindow");
+  const windowOverride = cwRaw === "7" ? 7 : cwRaw === "14" ? 14 : null;
 
   // Extract the live STATE metrics from a computed overview payload and
   // upsert today's daily snapshot (idempotent on (org_id, snap_date)).
@@ -124,7 +148,7 @@ app.get("/", async (c) => {
   // Snapshot is only used for the default `period=all` view. Specific
   // month filters skip the snapshot and run the compute (those reads
   // are rare — operator usually leaves it on "All").
-  if (period === "all") {
+  if (period === "all" && !windowOverride) {
     const [snap, sig] = await Promise.all([
       readSnapshot(c.var.DB, orgId),
       // Signature = timestamp AND row count. A deleted order never moves
@@ -139,10 +163,36 @@ app.get("/", async (c) => {
     }
   }
 
+  // A finished month is frozen: served exactly as first stored, never
+  // recomputed (owner 2026-10-08, see freezeMonth). Only the month list is
+  // read fresh, so the month picker still offers months added after the
+  // freeze.
+  if (isPastMonth && !windowOverride) {
+    const frozen = await readFrozenMonth(c.var.DB, orgId, period);
+    if (frozen) {
+      const monthRows = await c.var.DB
+        .prepare(
+          `SELECT DISTINCT substr(so.companySODate::text, 1, 7) AS "ym"
+             FROM sales_orders so
+             JOIN sales_order_items si ON si.salesOrderId = so.id
+            WHERE so.orgId = ? AND so.status NOT IN ('DRAFT','CANCELLED','ON_HOLD')
+              AND so.companySODate IS NOT NULL`,
+        )
+        .bind(orgId)
+        .all<{ ym: string }>();
+      const salesMonths = (monthRows.results ?? [])
+        .map((r) => r.ym)
+        .sort((a, b) => b.localeCompare(a));
+      return c.json({ success: true, ...frozen, salesMonths });
+    }
+  }
+
+  // v25 (2026-10-09): payload gained `stateKpis` (past-month Pending Delivery / Outstanding).
+  // v24 (2026-10-08): capacity window 7 → 14 working days, Foam Cutting row.
   // v23 (2026-08-14, BUG-2026-08-13-142): payload gained `customerConcentration`.
   // A pre-fix body has no such key, and the card would render "—" until the 60s
   // TTL rolled; bumping the version makes that window zero.
-  const data = await cached(c, `dashboard:overview:${orgId}:v23:${period}`, 60, async () => {
+  const data = await cached(c, `dashboard:overview:${orgId}:v25:${period}${windowOverride ? `:cmp${windowOverride}` : ""}`, 60, async () => {
     const db = c.var.DB;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -187,7 +237,7 @@ app.get("/", async (c) => {
     // `period` is already validated as "YYYY-MM" or "all" (line ~56).
     //   - All-time            → bounds unused (each widget keeps its own
     //                           rolling window: last 12 weeks / 7 days /
-    //                           7 working days).
+    //                           14 working days).
     //   - Current month       → [1st .. TODAY]. Owner request 2026-06-10
     //                           ("今天明明已经是 10 号了,为什么还没有呈现 10 号
     //                           的数据") — the chart/list must include the
@@ -244,54 +294,55 @@ app.get("/", async (c) => {
       }
     }
 
-    // Rolling 7 most-recent COMPLETE working days (Mon-Sat, EXCLUDING
+    // Rolling 14 most-recent COMPLETE working days (Mon-Sat, EXCLUDING
     // Sundays AND public holidays), ending YESTERDAY — same window the
-    // Planning page uses. This ALWAYS drives the Backlog "days of queue"
-    // figure (`backlogDays`), which is a point-in-time state metric and is
-    // therefore NOT re-scoped by the selected month. `guard` caps the
-    // walk-back so a malformed holiday list can never spin.
-    const rolling7Days: string[] = [];
+    // Planning page uses (ROLLING_WINDOW_DAYS there). Owner 2026-10-08 moved
+    // it from 7 to 14 days. Drives Daily Capacity for All-time and the
+    // current month, and every department's own capacity in the backlog
+    // table. `guard` caps the walk-back so a malformed holiday list can
+    // never spin.
+    const ROLLING_DAYS = windowOverride ?? 14;
+    const rollingDays: string[] = [];
     {
-      const cur = new Date(today);
-      cur.setDate(cur.getDate() - 1);
+      // Compare view on a past month: count back from the month's last day.
+      const cur =
+        windowOverride && isPastMonth && monthScope
+          ? new Date(`${monthScope.lastDay}T00:00:00`)
+          : new Date(new Date(today).getTime() - 24 * 60 * 60 * 1000);
       let guard = 0;
-      while (rolling7Days.length < 7 && guard < 130) {
+      // Compare view on a month: the window never reaches into the month
+      // before (owner 2026-10-09), so it can hold fewer than ROLLING_DAYS.
+      const clipStart = windowOverride && monthScope ? monthScope.start : null;
+      while (rollingDays.length < ROLLING_DAYS && guard < 130) {
         guard++;
         const iso = fmtISO(cur);
-        if (cur.getDay() !== 0 && !holidaySet.has(iso)) rolling7Days.push(iso);
+        if (clipStart && iso < clipStart) break;
+        if (cur.getDay() !== 0 && !holidaySet.has(iso)) rollingDays.push(iso);
         cur.setDate(cur.getDate() - 1);
       }
     }
-    const rolling7Set = new Set(rolling7Days);
+    const rollingSet = new Set(rollingDays);
 
     // Daily-Capacity widget window (Mon-Sat, EXCLUDING Sundays AND public
     // holidays). The widget's average divisor is `windowDays.length`.
-    //   - All-time / current behaviour → identical to the rolling 7 above.
-    //   - A selected month → every working day in that month within
-    //     [monthScope.start .. monthScope.end] (end already clamped to
-    //     yesterday for the current month). Divisor becomes that month's
-    //     working-day COUNT, not a hardcoded 7.
+    //   - All-time / current month → the rolling 14 above. The current month
+    //     used to average its own days so far, which on the 2nd of the month
+    //     was one day of output (owner 2026-10-08).
+    //   - A PAST month → every working day in that month. Divisor becomes
+    //     that month's working-day COUNT.
     let windowDays: string[];
-    if (monthScope) {
+    if (monthScope && isPastMonth && !windowOverride) {
       windowDays = [];
-      // Capacity averaging counts COMPLETE days only: the in-progress today is
-      // excluded (it deflated the month average all day long — owner audit
-      // 2026-07-11). monthScope.end itself stays "today" because the Completed
-      // widgets DO want today's completions; only this divisor window differs.
-      const capEnd =
-        monthScope.end === fmtISO(new Date(today)) && !isPastMonth
-          ? fmtISO(new Date(new Date(today).getTime() - 24 * 60 * 60 * 1000))
-          : monthScope.end;
       const cur = new Date(`${monthScope.start}T00:00:00`);
       let guard = 0;
-      while (fmtISO(cur) <= capEnd && guard < 40) {
+      while (fmtISO(cur) <= monthScope.end && guard < 40) {
         guard++;
         const iso = fmtISO(cur);
         if (cur.getDay() !== 0 && !holidaySet.has(iso)) windowDays.push(iso);
         cur.setDate(cur.getDate() + 1);
       }
     } else {
-      windowDays = rolling7Days;
+      windowDays = rollingDays;
     }
     const windowSet = new Set(windowDays);
 
@@ -932,7 +983,7 @@ app.get("/", async (c) => {
 
     // ---- Production ----
     let capacityMin = 0; // capacity over the Daily-Capacity widget window
-    let capacityMin7 = 0; // capacity over the rolling 7 working days (Backlog)
+    let capacityMinRolling = 0; // capacity over the rolling 14 working days
     const capByDay = new Map<string, number>();
     // Distinct workers (PIC1/PIC2 ids) credited on the job cards COMPLETED
     // each day — the denominator for the per-worker capacity figure in the
@@ -946,9 +997,9 @@ app.get("/", async (c) => {
       const done = jc.status === "COMPLETED" || jc.status === "TRANSFERRED";
       if (done && jc.completedDate) {
         const mins = jcMinutesTotal(jc.actualMinutes ?? jc.estMinutes ?? 0, jc);
-        // Backlog "days of queue" always uses the rolling 7-working-day
-        // capacity — it is a point-in-time state metric, never re-scoped.
-        if (rolling7Set.has(jc.completedDate)) capacityMin7 += mins;
+        // Rolling capacity — the backlog-days fallback below when the
+        // selected window has no output yet.
+        if (rollingSet.has(jc.completedDate)) capacityMinRolling += mins;
         if (windowSet.has(jc.completedDate)) {
           capacityMin += mins;
           capByDay.set(
@@ -968,20 +1019,17 @@ app.get("/", async (c) => {
       // headline backlog now derives from backlogGrandMin — the per-dept,
       // PO-filtered SOFA+BEDFRAME total — so gauge == drill-down == Planning.)
     }
-    // Widget divisor = the window's working-day count (7 for all-time /
-    // current; the month's working days for a selected month). Guard the
-    // empty-window case (e.g. the 1st of the current month, no complete day
-    // yet) so we never divide by zero.
+    // Widget divisor = the window's working-day count (14 for all-time /
+    // current month; the month's working days for a past month). Guarded so
+    // an empty window never divides by zero.
     const capacityDivisor = windowDays.length || 1;
     const dailyCapacityMin = Math.round(capacityMin / capacityDivisor);
-    // Backlog days uses the rolling-7 capacity (state metric — unchanged by
-    // the month selector). Divisor stays a fixed 7. The headline DAYS figure
-    // itself is derived BELOW from backlogGrandMin (the per-dept, PO-filtered
-    // SOFA+BEDFRAME total) so gauge == drill-down == Planning — the old
-    // all-JC numerator made the gauge read higher than both (9.4d vs 9.1d,
-    // owner tally audit 2026-07-11).
+    // The headline DAYS figure is derived BELOW from backlogGrandMin (the
+    // per-dept, PO-filtered SOFA+BEDFRAME total) so gauge == drill-down ==
+    // Planning — the old all-JC numerator made the gauge read higher than
+    // both (9.4d vs 9.1d, owner tally audit 2026-07-11).
     // Daily Capacity drill-down: the widget window's working days, oldest
-    // first (rolling 7 for all-time / current; the month for a selection).
+    // first (rolling 14 for all-time / current; the month for a past month).
     const capacityDays = [...windowDays]
       .sort((a, b) => a.localeCompare(b))
       .map((date) => ({
@@ -995,7 +1043,11 @@ app.get("/", async (c) => {
       { code: "FAB_CUT", name: "Fabric Cutting" },
       { code: "FAB_SEW", name: "Fabric Sewing" },
       { code: "WOOD_CUT", name: "Wood Cutting" },
+      // Was missing until 2026-10-08 (BUG-2026-10-08-269): its backlog fell
+      // out of the headline total and its "stalled" flag never showed.
+      { code: "FOAM_CUTTING", name: "Foam Cutting" },
       { code: "FOAM", name: "Foam Bonding" },
+      { code: "FIBRE", name: "Fibre" },
       { code: "FRAMING", name: "Framing" },
       { code: "WEBBING", name: "Webbing" },
       { code: "UPHOLSTERY", name: "Upholstery" },
@@ -1015,7 +1067,7 @@ app.get("/", async (c) => {
         if (
           (r.jcStatus === "COMPLETED" || r.jcStatus === "TRANSFERRED") &&
           r.completedDate &&
-          rolling7Set.has(r.completedDate)
+          rollingSet.has(r.completedDate)
         ) {
           windowTotal += jcMinutesTotal(r.actualMinutes ?? r.estMinutes ?? 0, jc);
         }
@@ -1048,7 +1100,7 @@ app.get("/", async (c) => {
             bedframeMin += m;
         }
       }
-      // Per-dept capacity keeps its own rolling-7 basis: it is that dept's
+      // Per-dept capacity keeps its own rolling-14 basis: it is that dept's
       // OWN recent throughput, which is the only sensible denominator for a
       // per-dept queue, and no plant-wide capacity figure is printed beside
       // this table to contradict it. The HEADLINE gauge is different — it sits
@@ -1056,7 +1108,7 @@ app.get("/", async (c) => {
       // it now does. Flagged rather than unified: making both use the month
       // would divide a bottleneck dept by three days of its own output and
       // swing the bottleneck ranking on the 1st of every month.
-      const dailyCapMin = Math.round(windowTotal / 7);
+      const dailyCapMin = Math.round(windowTotal / (rollingDays.length || 1));
       const totalMin = sofaMin + bedframeMin;
       // Div-zero guard (owner audit 2026-07-11): a dept with backlog but ZERO
       // completions in the rolling window used to divide by 1 MINUTE, showing
@@ -1091,11 +1143,13 @@ app.get("/", async (c) => {
     // 1,433 ÷ 190 is 7.5, not 9.1. Both halves were individually right and the
     // pair was nonsense, with the gap moving whenever the month selector did.
     //
-    // Falls back to rolling-7 when the selected window has no capacity yet (a
-    // month one working day old), so an early-month view still shows a number
-    // instead of dividing by zero.
+    // Falls back to the rolling 14 when the selected window has no capacity
+    // (a past month with no output), so it still shows a number instead of
+    // dividing by zero.
     const backlogDailyCapacityMin =
-      dailyCapacityMin > 0 ? dailyCapacityMin : Math.round(capacityMin7 / 7);
+      dailyCapacityMin > 0
+        ? dailyCapacityMin
+        : Math.round(capacityMinRolling / (rollingDays.length || 1));
     const backlogDays =
       backlogDailyCapacityMin > 0
         ? Math.round((backlogGrandMin / backlogDailyCapacityMin) * 10) / 10
@@ -1993,6 +2047,11 @@ app.get("/", async (c) => {
       isHistorical: boolean;
       asOf: string | null;
     } = { source: "live", isHistorical: false, asOf: null };
+    // A finished month's Pending Delivery and Outstanding tiles: the last
+    // saved day of that month (saved daily since 2026-10-09). null = nothing
+    // saved for that month; the tiles say so instead of showing today's
+    // live figure. All-time and the current month stay live.
+    const stateKpis = isPastMonth ? await readStateKpisForMonth(db, orgId, period) : null;
     if (isPastMonth) {
       const snapRow = await readStateSnapshotForMonth(db, orgId, period);
       if (snapRow) {
@@ -2056,7 +2115,7 @@ app.get("/", async (c) => {
           // the live backlogByDept shape (sofa/bedframe split per department).
           // We also pull cards COMPLETED *within the month* to rebuild each
           // department's daily capacity for that month (mirrors the live
-          // per-dept `windowTotal/7`, but scoped to the month's own throughput
+          // per-dept `windowTotal / ROLLING_DAYS`, but scoped to the month's own throughput
           // ÷ the month's working-day count).
           const reconRows =
             (
@@ -2222,6 +2281,26 @@ app.get("/", async (c) => {
           stateSnapshot = { source: "live", isHistorical: true, asOf: null };
         }
       }
+      // Compare view: the month-end backlog was saved (or rebuilt) against
+      // another capacity basis, so divide it again by this window's figures.
+      if (windowOverride) {
+        const capByDept = new Map(backlogByDept.map((d) => [d.dept, d.dailyCapMin]));
+        stateProduction = {
+          ...stateProduction,
+          backlogDays:
+            dailyCapacityMin > 0
+              ? Math.round((stateProduction.backlogGrandMin / dailyCapacityMin) * 10) / 10
+              : 0,
+          backlogByDept: stateProduction.backlogByDept.map((d) => {
+            const cap = capByDept.get(d.dept) ?? 0;
+            return {
+              ...d,
+              dailyCapMin: cap,
+              backlogDays: cap > 0 ? Math.round((d.totalMin / cap) * 10) / 10 : null,
+            };
+          }),
+        };
+      }
     }
 
     return {
@@ -2231,6 +2310,7 @@ app.get("/", async (c) => {
       deliveredOfMonthOrdersSen,
       production: stateProduction,
       stateSnapshot,
+      stateKpis,
       purchasing: {
         openPOCount: Number(poOpenRes?.n) || 0,
         spendThisMonthSen: Number(poSpendRes?.v) || 0,
@@ -2282,7 +2362,7 @@ app.get("/", async (c) => {
   // skip the snapshot entirely. Errors are swallowed: the cache write
   // is a perf optimisation, not load-bearing. The user already has the
   // computed payload in `data` and gets it back via the c.json below.
-  if (period === "all") {
+  if (period === "all" && !windowOverride) {
     try {
       const sig = await getDashboardSignature(c.var.DB);
       // maxUpdatedAt may be null on a brand-new install (every tracked
@@ -2306,10 +2386,268 @@ app.get("/", async (c) => {
   // reflects LIVE state — i.e. NOT a past month (a past-month payload may
   // carry state widgets overridden from an older snapshot, which must never
   // be recorded as today). All-time and the current month both qualify.
-  if (!isPastMonth) {
+  if (windowOverride) {
+    // Compare view: nothing stored.
+  } else if (!isPastMonth) {
     captureTodayState(data as Record<string, unknown>);
+  } else {
+    try {
+      await freezeMonth(c.var.DB, orgId, period, data as Record<string, unknown>);
+    } catch (e) {
+      // Not frozen this time; the next view of the month tries again.
+      console.warn("[dashboard-month-frozen] freeze failed:", e);
+    }
   }
 
+  return c.json({ success: true, ...data });
+});
+
+// Staging Dashboard Compare, "Fabric & purchasing" tab (owner 2026-10-09).
+// The last 12 calendar months, every figure bucketed by month (none rolling or
+// "as of today"). Per month and category:
+//   - fabric cut: the dashboard's Avg cost /m (RM_ISSUE cost) next to the same
+//     metres at real purchase prices. The opening stock of 2026-02-21 carries a
+//     flat RM 25 / RM 35 per metre, above every real buy price, so only slices
+//     cut from an OPENING batch are repriced, at the fabric's average receipt price;
+//   - purchasing: fabric invoiced (purchase invoice lines) vs received into stock
+//     (RM_RECEIPT) vs GRNs, by the fabric's item group;
+//   - orders finished: each order's own BOM fabric metres (the plan) vs the metres
+//     it recorded, and how many fabrics were used vs recorded;
+//   - price trend: invoice price per metre for the top fabrics by invoiced metres.
+// Invoices are the only current price source: receipts into stock stop in 2026-03.
+app.get("/fabric-cost-compare", async (c) => {
+  const orgId = getOrgId(c);
+  const { cached } = await import("../lib/kv-cache");
+  const data = await cached(c, `dashboard:fabric-compare:${orgId}:v2`, 60, async () => {
+    const db = c.var.DB;
+    // Business months are Malaysian (UTC+8).
+    const curYm = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 7);
+    const months = monthsBack(curYm, 12);
+    const fromYm = months[months.length - 1];
+    const groupsSql = `'${Object.keys(PURCHASE_GROUP_CAT).join("','")}'`;
+    const fabricSql = `'${FABRIC_ITEM_GROUPS.join("','")}'`;
+    // One row per item code: a handful of codes exist twice and would double a line.
+    const codeGroup = `(SELECT item_code, MIN(item_group) AS grp FROM raw_materials
+                         WHERE org_id = ? AND item_group IN (${groupsSql}) GROUP BY item_code)`;
+    const [cutRes, invRes, recvRes, grnRes, poRes, bomMap] = await Promise.all([
+      db
+        .prepare(
+          `WITH buy AS (
+             SELECT itemId, SUM(totalCostSen) / NULLIF(SUM(qty), 0) AS "avgSen"
+               FROM cost_ledger WHERE type = 'RM_RECEIPT' GROUP BY itemId
+           )
+           SELECT po.itemCategory AS "cat", substr(cl.date::text, 1, 7) AS "ym",
+                  COALESCE(SUM(cl.qty), 0) AS "meters",
+                  COALESCE(SUM(cl.totalCostSen), 0) AS "shownSen",
+                  COALESCE(SUM(CASE WHEN b.source = 'OPENING' AND buy."avgSen" IS NOT NULL
+                                    THEN cl.qty * buy."avgSen" ELSE cl.totalCostSen END), 0) AS "realSen",
+                  COALESCE(SUM(CASE WHEN b.source = 'OPENING' THEN cl.qty ELSE 0 END), 0) AS "openingMeters"
+             FROM cost_ledger cl
+             JOIN raw_materials rm ON rm.id = cl.itemId
+             JOIN production_orders po ON po.id = cl.refId
+             LEFT JOIN rm_batches b ON b.id = cl.batchId
+             LEFT JOIN buy ON buy.itemId = cl.itemId
+            WHERE po.orgId = ? AND cl.type = 'RM_ISSUE'
+              AND cl.refType = 'PRODUCTION_ORDER'
+              AND rm.itemGroup IN (${fabricSql})
+              AND po.itemCategory IN ('BEDFRAME','SOFA')
+              AND substr(cl.date::text, 1, 7) >= ?
+            GROUP BY po.itemCategory, substr(cl.date::text, 1, 7)`,
+        )
+        .bind(orgId, fromYm)
+        .all<CutRow>(),
+      db
+        .prepare(
+          `SELECT substr(pi.invoice_date, 1, 7) AS "ym", g.grp AS "grp", pii.material_code AS "code",
+                  COUNT(*) AS "lines", COALESCE(SUM(pii.qty), 0) AS "meters",
+                  COALESCE(SUM(pii.line_total_sen), 0) AS "sen"
+             FROM purchase_invoice_items pii
+             JOIN purchase_invoices pi ON pi.id = pii.pi_id
+             JOIN ${codeGroup} g ON g.item_code = pii.material_code
+            WHERE pi.org_id = ? AND pi.status <> 'CANCELLED' AND COALESCE(pi.is_opening, 0) = 0
+              AND pi.invoice_date IS NOT NULL AND substr(pi.invoice_date, 1, 7) >= ?
+            GROUP BY 1, 2, 3`,
+        )
+        .bind(orgId, orgId, fromYm)
+        .all<InvoiceRow>(),
+      db
+        .prepare(
+          `SELECT substr(cl.date::text, 1, 7) AS "ym", rm.item_group AS "grp",
+                  COALESCE(SUM(cl.qty), 0) AS "meters"
+             FROM cost_ledger cl
+             JOIN raw_materials rm ON rm.id = cl.item_id
+            WHERE rm.org_id = ? AND cl.type = 'RM_RECEIPT' AND rm.item_group IN (${groupsSql})
+              AND substr(cl.date::text, 1, 7) >= ?
+            GROUP BY 1, 2`,
+        )
+        .bind(orgId, fromYm)
+        .all<ReceiptRow>(),
+      db
+        .prepare(
+          `SELECT substr(g.receive_date, 1, 7) AS "ym", cg.grp AS "grp",
+                  COUNT(DISTINCT g.id) AS "grns", COALESCE(SUM(gi.received_qty), 0) AS "meters"
+             FROM grns g
+             JOIN grn_items gi ON gi.grn_id = g.id
+             JOIN ${codeGroup} cg ON cg.item_code = gi.material_code
+            WHERE g.org_id = ? AND g.status <> 'CANCELLED'
+              AND g.receive_date IS NOT NULL AND substr(g.receive_date, 1, 7) >= ?
+            GROUP BY 1, 2`,
+        )
+        .bind(orgId, orgId, fromYm)
+        .all<GrnRow>(),
+      db
+        .prepare(
+          `SELECT po.item_category AS "cat", substr(po.completed_date, 1, 7) AS "ym",
+                  po.fabric_code AS "fabricCode", po.product_code AS "productCode",
+                  po.quantity AS "quantity", po.gap_inches AS "gapInches",
+                  po.divan_height_inches AS "divanHeightInches", po.leg_height_inches AS "legHeightInches",
+                  po.size_code AS "sizeCode", po.size_label AS "sizeLabel",
+                  COALESCE(iss.m, 0) AS "recordedMeters", COALESCE(iss.sen, 0) AS "recordedSen"
+             FROM production_orders po
+             LEFT JOIN (SELECT cl.ref_id, SUM(cl.qty) AS m, SUM(cl.total_cost_sen) AS sen
+                          FROM cost_ledger cl
+                          JOIN raw_materials rm ON rm.id = cl.item_id
+                         WHERE cl.type = 'RM_ISSUE' AND cl.ref_type = 'PRODUCTION_ORDER'
+                           AND rm.item_group IN (${fabricSql})
+                         GROUP BY cl.ref_id) iss ON iss.ref_id = po.id
+            WHERE po.org_id = ? AND po.item_category IN ('BEDFRAME','SOFA')
+              AND po.status <> 'CANCELLED' AND po.completed_date IS NOT NULL
+              AND substr(po.completed_date, 1, 7) >= ?`,
+        )
+        .bind(orgId, fromYm)
+        .all<{
+          cat: string; ym: string; fabricCode: string | null; productCode: string | null;
+          quantity: number; gapInches: number | null; divanHeightInches: number | null;
+          legHeightInches: number | null; sizeCode: string | null; sizeLabel: string | null;
+          recordedMeters: number; recordedSen: number;
+        }>(),
+      fetchBomWipComponentsByCode(db),
+    ]);
+    const num = (v: unknown) => Number(v) || 0;
+    // The plan for each order is its own BOM's fabric (every fabric-cutting node),
+    // the same engine the Fab Cut page uses. Siblings are left out on purpose:
+    // both sides are per order, so nothing is counted twice.
+    const orders: PoRow[] = (poRes.results ?? []).map((r) => ({
+      cat: r.cat,
+      ym: r.ym,
+      fabricCode: r.fabricCode,
+      plannedMeters: r.productCode
+        ? computeFcFabricUsageMeters(
+            { ...r, quantity: num(r.quantity) },
+            { departmentCode: "FAB_CUT", wipType: null },
+            bomMap.get(r.productCode),
+          )
+        : 0,
+      recordedMeters: num(r.recordedMeters),
+      recordedSen: num(r.recordedSen),
+    }));
+    return buildFabricPurchasingMonths({
+      months,
+      cut: (cutRes.results ?? []).map((r) => ({
+        cat: r.cat, ym: r.ym, meters: num(r.meters), shownSen: num(r.shownSen),
+        realSen: num(r.realSen), openingMeters: num(r.openingMeters),
+      })),
+      invoices: (invRes.results ?? []).map((r) => ({
+        ym: r.ym, grp: r.grp, code: r.code, lines: num(r.lines), meters: num(r.meters), sen: num(r.sen),
+      })),
+      receipts: (recvRes.results ?? []).map((r) => ({ ym: r.ym, grp: r.grp, meters: num(r.meters) })),
+      grns: (grnRes.results ?? []).map((r) => ({ ym: r.ym, grp: r.grp, grns: num(r.grns), meters: num(r.meters) })),
+      orders,
+    });
+  });
+  return c.json({ success: true, ...data });
+});
+
+// Staging Dashboard Compare, "Purchasing" tab (owner 2026-10-09). Next to the
+// dashboard's Purchasing card (which the page draws from the overview payload):
+//   - invoiced spend per calendar month, last 12 months, same rule as the card
+//     (amount_sen by invoice date, cancelled left out);
+//   - every open PO (not RECEIVED / CLOSED / CANCELLED, the card's Open POs
+//     filter) with what has been received of it, by value;
+//   - every supplier invoice not cancelled and not fully paid.
+// The two lists are today's state by nature; the tab says so. Read-only.
+// Raw rows: text and numeric columns come back as strings or null.
+type PurchasingCompareRow = Record<string, string | null>;
+app.get("/purchasing-compare", async (c) => {
+  const orgId = getOrgId(c);
+  const { cached } = await import("../lib/kv-cache");
+  const data = await cached(c, `dashboard:purchasing-compare:${orgId}:v1`, 60, async () => {
+    const db = c.var.DB;
+    // Business days are Malaysian (UTC+8).
+    const today = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
+    const months = monthsBack(today.slice(0, 7), 12);
+    const [monthRes, poRes, piRes] = await Promise.all([
+      db
+        .prepare(
+          `SELECT substr(invoice_date, 1, 7) AS "ym", COUNT(*) AS "invoices",
+                  COALESCE(SUM(amount_sen), 0) AS "spendSen",
+                  COUNT(DISTINCT supplier_name) AS "suppliers"
+             FROM purchase_invoices
+            WHERE org_id = ? AND status <> 'CANCELLED'
+              AND invoice_date IS NOT NULL AND substr(invoice_date, 1, 7) >= ?
+            GROUP BY substr(invoice_date, 1, 7)`,
+        )
+        .bind(orgId, months[months.length - 1])
+        .all<{ ym: string; invoices: number; spendSen: number; suppliers: number }>(),
+      db
+        .prepare(
+          `SELECT p.po_no AS "poNo", p.supplier_name AS "supplier",
+                  p.order_date::text AS "orderDate", p.expected_date::text AS "expectedDate",
+                  p.status AS "status", COALESCE(p.total_sen, 0) AS "totalSen",
+                  COALESCE(SUM(LEAST(poi.received_qty, poi.quantity) * poi.unit_price_sen), 0) AS "receivedSen",
+                  COUNT(poi.id) AS "lines"
+             FROM purchase_orders p
+             LEFT JOIN purchase_order_items poi ON poi.purchase_order_id = p.id
+            WHERE p.org_id = ? AND p.status NOT IN ('RECEIVED','CLOSED','CANCELLED')
+            GROUP BY p.id, p.po_no, p.supplier_name, p.order_date, p.expected_date, p.status, p.total_sen
+            ORDER BY p.order_date, p.po_no`,
+        )
+        .bind(orgId)
+        .all<PurchasingCompareRow>(),
+      db
+        .prepare(
+          `SELECT pi_no AS "piNo", supplier_invoice_no AS "supplierInvoiceNo",
+                  supplier_name AS "supplier", invoice_date::text AS "invoiceDate",
+                  due_date::text AS "dueDate", status AS "status",
+                  amount_sen AS "amountSen", COALESCE(paid_amount_sen, 0) AS "paidSen"
+             FROM purchase_invoices
+            WHERE org_id = ? AND status NOT IN ('CANCELLED','PAID')
+              AND amount_sen - COALESCE(paid_amount_sen, 0) > 0
+            ORDER BY due_date NULLS LAST, pi_no`,
+        )
+        .bind(orgId)
+        .all<PurchasingCompareRow>(),
+    ]);
+    const num = (v: unknown) => Number(v) || 0;
+    const byYm = new Map((monthRes.results ?? []).map((r) => [r.ym, r]));
+    return {
+      today,
+      months: months.map((ym) => {
+        const r = byYm.get(ym);
+        return { ym, invoices: num(r?.invoices), spendSen: num(r?.spendSen), suppliers: num(r?.suppliers) };
+      }),
+      openPos: (poRes.results ?? []).map((r) => ({
+        poNo: r.poNo ?? "",
+        supplier: r.supplier ?? "",
+        orderDate: r.orderDate,
+        expectedDate: r.expectedDate,
+        status: r.status ?? "",
+        totalSen: num(r.totalSen),
+        receivedSen: Math.round(num(r.receivedSen)),
+        lines: num(r.lines),
+      })),
+      unpaid: (piRes.results ?? []).map((r) => ({
+        piNo: r.piNo ?? "",
+        supplierInvoiceNo: r.supplierInvoiceNo,
+        supplier: r.supplier ?? "",
+        invoiceDate: r.invoiceDate,
+        dueDate: r.dueDate,
+        status: r.status ?? "",
+        amountSen: num(r.amountSen),
+        paidSen: num(r.paidSen),
+      })),
+    };
+  });
   return c.json({ success: true, ...data });
 });
 

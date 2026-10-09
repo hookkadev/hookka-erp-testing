@@ -3,6 +3,7 @@
 import { ChevronLeft } from "lucide-react";
 import { type ReactNode } from "react";
 import { M, M_MAX_WIDTH } from "../theme";
+import { useResponsiveLayout } from "../lib/responsive-layout";
 
 type Props = {
   title: string;
@@ -12,6 +13,7 @@ type Props = {
 };
 
 export function MobileHeader({ title, onBack, trailing }: Props) {
+  const { mode } = useResponsiveLayout();
   return (
     <div
       style={{
@@ -28,7 +30,7 @@ export function MobileHeader({ title, onBack, trailing }: Props) {
       <div
         style={{
           width: "100%",
-          maxWidth: M_MAX_WIDTH,
+          maxWidth: mode === "phone" ? M_MAX_WIDTH : "none",
           display: "flex",
           alignItems: "center",
           gap: 6,

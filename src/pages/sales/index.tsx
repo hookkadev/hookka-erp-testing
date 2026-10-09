@@ -20,6 +20,7 @@ import { Plus, ShoppingCart, Download, Filter, X, Eye, Pencil, Printer, Truck, F
 // Note: generateSOPdf is dynamic-imported at the click handler so the
 // 1MB jspdf vendor chunk only ships when the user actually prints a SO.
 import { ScanPOModal } from "@/components/scan-po-modal";
+import { StagingTestOrderFactory } from "@/components/staging-test-order-factory";
 import { useCachedJson, invalidateCachePrefix } from "@/lib/cached-fetch";
 import {
   OUTSTANDING_STATUSES,
@@ -30,7 +31,8 @@ import {
 } from "@/lib/so-status";
 import type { SalesOrder } from "@/types";
 import type { Customer, DeliveryOrder } from "@/types";
-import { fetchJson } from "@/lib/fetch-json";
+import { fetchJson, FetchJsonError } from "@/lib/fetch-json";
+import { askCreditOverride, isCreditBlock } from "@/pages/delivery/credit-override";
 import { useIdempotencyKey } from "@/lib/idempotency-key";
 import { mutationWithData } from "@/lib/schemas/common";
 import { DeliveryOrderSchema } from "@/lib/schemas/delivery-order";
@@ -1083,7 +1085,9 @@ export default function SalesPage() {
         setTransferDORow(row);
         setTransferPOsLoading(true);
         try {
-          const rp = await fetchJson("/api/delivery-orders/ready-planning", ReadyPlanningSchema);
+          // fresh=1: the shared list is served stale for a moment after a
+          // change, which showed a just-finished order as "Nothing ready".
+          const rp = await fetchJson("/api/delivery-orders/ready-planning?fresh=1", ReadyPlanningSchema);
           const forThisSO = (rp.ready ?? []).filter((po) => po.salesOrderId === row.id);
           setTransferReadyPOs(forThisSO);
           if (forThisSO.length === 0) {
@@ -1259,6 +1263,7 @@ export default function SalesPage() {
           </Button>
         </div>
       </div>
+      {!isServiceOrderMode && <StagingTestOrderFactory basePath={basePath} />}
 
       <div className="grid gap-4 grid-cols-1 sm:grid-cols-5 max-[360px]:grid-cols-1">
         {isServiceOrderMode ? (
@@ -1943,18 +1948,33 @@ export default function SalesPage() {
                         // This is what makes validateDoComposition's
                         // once-only-delivery guard actually run; the old
                         // items-only body skipped it entirely.
-                        const d = await transferDoIdem.withKey((key) =>
-                          fetchJson("/api/delivery-orders", DOMutationSchema, {
-                          method: "POST",
-                          headers: { "Idempotency-Key": key },
-                          body: {
-                            productionOrderIds: transferReadyPOs.map((po) => po.id),
-                            ...(doDeliveryDate && { deliveryDate: doDeliveryDate }),
-                            ...(doDriverName && { driverName: doDriverName }),
-                            ...(doVehicleNo && { vehicleNo: doVehicleNo }),
-                          },
-                          }),
-                        );
+                        const body = {
+                          productionOrderIds: transferReadyPOs.map((po) => po.id),
+                          ...(doDeliveryDate && { deliveryDate: doDeliveryDate }),
+                          ...(doDriverName && { driverName: doDriverName }),
+                          ...(doVehicleNo && { vehicleNo: doVehicleNo }),
+                        };
+                        const postDo = (b: Record<string, unknown>) =>
+                          transferDoIdem.withKey((key) =>
+                            fetchJson("/api/delivery-orders", DOMutationSchema, {
+                              method: "POST",
+                              headers: { "Idempotency-Key": key },
+                              body: b,
+                            }),
+                          );
+                        let d: Awaited<ReturnType<typeof postDo>>;
+                        try {
+                          d = await postDo(body);
+                        } catch (e) {
+                          // Customer credit block (BUG-34): same dialog as the
+                          // Delivery page, re-sent with the override reason when
+                          // the server allows one.
+                          const eb = e instanceof FetchJsonError ? e.body : null;
+                          if (!isCreditBlock(eb)) throw e;
+                          const reason = await askCreditOverride(confirm, toast, eb);
+                          if (!reason) return;
+                          d = await postDo({ ...body, creditOverride: { reason } });
+                        }
                         if (d.success) {
                           invalidateCachePrefix("/api/delivery-orders");
                           invalidateCachePrefix("/api/sales-orders");
@@ -1963,8 +1983,10 @@ export default function SalesPage() {
                         } else {
                           toast.error(d.error || "Failed to create Delivery Order.");
                         }
-                      } catch {
-                        toast.error("Failed to create Delivery Order. Please try again.");
+                      } catch (e) {
+                        // Show the server's reason when there is one, not a fixed line.
+                        const msg = e instanceof FetchJsonError ? (e.body as { error?: string } | null)?.error || e.message : null;
+                        toast.error(msg || "Failed to create Delivery Order. Please try again.");
                       } finally {
                         setTransferLoading(false);
                       }

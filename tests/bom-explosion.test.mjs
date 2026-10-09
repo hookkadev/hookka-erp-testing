@@ -50,7 +50,12 @@ try {
   throw err;
 }
 
-const { breakBomIntoWips, resolveWipTokens } = bom;
+const {
+  breakBomIntoWips,
+  breakBomIntoJobCardWips,
+  l1ProcessesWithoutWipDupes,
+  resolveWipTokens,
+} = bom;
 
 // ===========================================================================
 // resolveWipTokens — `{TOKEN}` substitution against a variant context.
@@ -198,8 +203,8 @@ test("breakBomIntoWips: null wipComponents → single FG_MAIN fallback WIP", () 
   assert.equal(fg.wipLabel, "5531-1A(LHF) (main)");
   assert.equal(fg.wipKey, "5531-1A(LHF)::FG_MAIN");
   assert.equal(fg.quantityMultiplier, 1);
-  // Fallback FG WIP walks the full DEPT_ORDER (9 depts incl. FOAM_CUTTING).
-  assert.equal(fg.processes.length, 9);
+  // Fallback FG WIP walks the full DEPT_ORDER (10 depts incl. FOAM_CUTTING + FIBRE).
+  assert.equal(fg.processes.length, 10);
 });
 
 test("breakBomIntoWips: empty-string wipComponents → FG_MAIN fallback", () => {
@@ -476,6 +481,7 @@ test("breakBomIntoWips: WIP with no processes falls back to wipType default chai
     "WOOD_CUT",
     "FOAM_CUTTING",
     "FOAM",
+    "FIBRE",
     "FRAMING",
     "WEBBING",
     "UPHOLSTERY",
@@ -491,7 +497,7 @@ test("breakBomIntoWips: zero-process WIP of unknown wipType falls back to full D
     { wipCode: "X", wipType: "MYSTERY", quantity: 1, processes: [] },
   ]);
   const wips = breakBomIntoWips(raw, "P");
-  assert.equal(wips[0].processes.length, 9); // full DEPT_ORDER (incl. FOAM_CUTTING)
+  assert.equal(wips[0].processes.length, 10); // full DEPT_ORDER (incl. FOAM_CUTTING + FIBRE)
 });
 
 test("breakBomIntoWips: SOFA_CUSHION default chain matches DEFAULT_WIP_DEPT_CHAINS", () => {
@@ -501,7 +507,7 @@ test("breakBomIntoWips: SOFA_CUSHION default chain matches DEFAULT_WIP_DEPT_CHAI
   const wips = breakBomIntoWips(raw, "5531-1A(LHF)");
   assert.deepEqual(
     wips[0].processes.map((p) => p.deptCode),
-    ["FAB_CUT", "FAB_SEW", "FOAM_CUTTING", "FOAM", "UPHOLSTERY", "PACKING"],
+    ["FAB_CUT", "FAB_SEW", "FOAM_CUTTING", "FOAM", "FIBRE", "UPHOLSTERY", "PACKING"],
   );
 });
 
@@ -651,4 +657,148 @@ test("breakBomIntoWips: an array of only junk entries → FG_MAIN fallback", () 
   const wips = breakBomIntoWips(raw, "P");
   assert.equal(wips.length, 1);
   assert.equal(wips[0].wipType, "FG_MAIN");
+});
+
+// ===========================================================================
+// breakBomIntoJobCardWips + l1ProcessesWithoutWipDupes — the cards a BOM gets
+// (BUG-2026-10-01-244). Rule: auto-generated (WIP) cards first; an L1 step is
+// skipped when its dept already has one. An L1-only BOM (accessories today)
+// gets an auto-generated chain of its own L1 steps, so Fab Cut goes through
+// the (FC) merge. Before: the all-dept fallback PLUS the L1 cards (BC05-MF
+// qty 1 had 12 cards). #660 then dropped the (FC) card and kept the bare L1
+// one, which is the wrong label.
+// ===========================================================================
+
+const ACC_L1 = [
+  { deptCode: "PACKING", category: "CAT 1", minutes: 5 },
+  { deptCode: "FAB_CUT", category: "CAT 1", minutes: 10 },
+  { deptCode: "FAB_SEW", category: "CAT 1", minutes: 20 },
+];
+
+test("breakBomIntoJobCardWips: L1-only BOM → one auto chain of exactly its L1 depts, in dept order", () => {
+  for (const raw of ["[]", null]) {
+    const wips = breakBomIntoJobCardWips(raw, ACC_L1, "BC05-MF");
+    assert.equal(wips.length, 1);
+    assert.equal(wips[0].wipKey, "BC05-MF::FG_MAIN");
+    assert.deepEqual(
+      wips[0].processes.map((p) => [p.deptCode, p.minutes, p.category]),
+      [
+        ["FAB_CUT", 10, "CAT 1"],
+        ["FAB_SEW", 20, "CAT 1"],
+        ["PACKING", 5, "CAT 1"],
+      ],
+    );
+  }
+});
+
+test("breakBomIntoJobCardWips: an L1 dept listed twice becomes one step, minutes summed", () => {
+  const wips = breakBomIntoJobCardWips(
+    "[]",
+    [...ACC_L1, { deptCode: "FAB_SEW", category: "CAT 2", minutes: 7 }],
+    "SB02",
+  );
+  const sew = wips[0].processes.filter((p) => p.deptCode === "FAB_SEW");
+  assert.equal(sew.length, 1);
+  assert.equal(sew[0].minutes, 27);
+});
+
+test("breakBomIntoJobCardWips: empty tree + no L1 steps → all-dept FG_MAIN fallback stays", () => {
+  const wips = breakBomIntoJobCardWips("[]", [], "LEGACY");
+  assert.deepEqual(wips, breakBomIntoWips("[]", "LEGACY"));
+});
+
+test("breakBomIntoJobCardWips: real tree → tree unchanged (SQUARE PILLOW shape)", () => {
+  const raw = JSON.stringify([
+    {
+      wipCode: "SQUARE PILLOW {FABRIC} (FOAM)",
+      wipType: "SOFA_CUSHION",
+      processes: [{ deptCode: "FOAM", minutes: 35 }],
+      children: [
+        { wipCode: "SQUARE PILLOW {FABRIC}", processes: [{ deptCode: "FAB_SEW", minutes: 10 }] },
+      ],
+    },
+  ]);
+  const ctx = { fabricCode: "MODENZA-01" };
+  const l1 = [{ deptCode: "PACKING", category: "", minutes: 5 }];
+  const wips = breakBomIntoJobCardWips(raw, l1, "SQUARE PILLOW", ctx);
+  assert.deepEqual(wips, breakBomIntoWips(raw, "SQUARE PILLOW", ctx));
+  // Packing is not in the tree, so its L1 card stays.
+  assert.deepEqual(l1ProcessesWithoutWipDupes(l1, wips), l1);
+});
+
+test("l1ProcessesWithoutWipDupes: L1-only BOM → every L1 step is a duplicate of the auto chain", () => {
+  const wips = breakBomIntoJobCardWips("[]", ACC_L1, "BC05-MF");
+  assert.deepEqual(l1ProcessesWithoutWipDupes(ACC_L1, wips), []);
+});
+
+test("l1ProcessesWithoutWipDupes: tree has Fab Cut + Fab Sew, L1 repeats them → only the extra L1 step stays", () => {
+  const raw = JSON.stringify([
+    {
+      wipCode: "BC05-MF {FABRIC}",
+      wipType: "SOFA_CUSHION",
+      processes: [
+        { deptCode: "FAB_CUT", minutes: 10 },
+        { deptCode: "FAB_SEW", minutes: 20 },
+      ],
+    },
+  ]);
+  const wips = breakBomIntoJobCardWips(raw, ACC_L1, "BC05-MF");
+  assert.deepEqual(
+    l1ProcessesWithoutWipDupes(ACC_L1, wips).map((p) => p.deptCode),
+    ["PACKING"],
+  );
+});
+
+test("L1-only accessory: its Fab Cut comes out as the (FC) card with the fabric code", async () => {
+  const { aggregateFcSlots } = await import(
+    pathToFileURL(
+      resolve(process.cwd(), "src/api/routes/_shared/production-builder.ts"),
+    ).href
+  );
+  const [wip] = breakBomIntoJobCardWips("[]", ACC_L1, "BC05-MF");
+  const fc = wip.processes.find((p) => p.deptCode === "FAB_CUT");
+  const merged = aggregateFcSlots(
+    [
+      {
+        poId: "po-1",
+        productCode: "BC05-MF",
+        baseModel: "BC05",
+        fabricCode: "MODENZA-01",
+        sizeLabel: "",
+        isBF: false,
+        itemCategory: "ACCESSORY",
+        processCategory: fc.category,
+        totalH: 0,
+        divanHeightInches: null,
+        deptId: "d-fc",
+        deptCode: "FAB_CUT",
+        deptName: "Fab Cut",
+        sequence: 0,
+        dueDate: "2026-10-10",
+        minutes: fc.minutes,
+        wipQty: 1,
+        wipKey: wip.wipKey,
+        wipCode: fc.wipCode,
+        wipLabel: fc.wipLabel,
+        wipType: wip.wipType,
+        branchKey: fc.branchKey,
+      },
+    ],
+    "SO-1",
+  );
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].wipLabel, "BC05-MF | MODENZA-01 | (FC)");
+});
+
+test("job card creators go through breakBomIntoJobCardWips and drop duplicate L1 steps", async () => {
+  const { readFileSync } = await import("node:fs");
+  for (const f of [
+    "src/api/routes/_shared/production-builder.ts",
+    "src/api/routes/jobcard-sync.ts",
+  ]) {
+    const src = readFileSync(resolve(process.cwd(), f), "utf8");
+    assert.match(src, /breakBomIntoJobCardWips\(/, `${f} must use the L1-aware breakdown`);
+    assert.doesNotMatch(src, /breakBomIntoWips\(/, `${f} must not call breakBomIntoWips directly`);
+    assert.match(src, /l1ProcessesWithoutWipDupes\(/, `${f} must skip L1 steps a WIP card covers`);
+  }
 });

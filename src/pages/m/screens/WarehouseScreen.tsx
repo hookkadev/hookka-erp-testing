@@ -1040,6 +1040,18 @@ function dateShort(iso?: string): string {
   if (Number.isNaN(d.getTime())) return iso.slice(0, 10);
   return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
 }
+// Movement rows need the time too (DEV-09 "Date / Time"), e.g. "28 Sep, 14:05".
+function dateTimeShort(iso?: string): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso.slice(0, 16);
+  return d.toLocaleString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
 // IN green, OUT red, MOVE (TRANSFER) neutral. A move's reason is written as
 // "Moved from <rack>" (public-rack-qr.ts), so from → to is recovered from it.
@@ -1119,7 +1131,7 @@ function MovementRow({
             whiteSpace: "nowrap",
           }}
         >
-          {[str(m, "docRef"), rackText(m), dateShort(m.createdAt)]
+          {[str(m, "docRef"), rackText(m), dateTimeShort(m.createdAt)]
             .filter(Boolean)
             .join(" · ")}
         </div>
@@ -1175,7 +1187,7 @@ function MovementCard({ m }: { m: Movement }) {
           {tag}
         </span>
         <span style={{ fontSize: 11, color: M.muted, fontWeight: 600 }}>
-          {dateShort(m.createdAt)}
+          {dateTimeShort(m.createdAt)}
         </span>
       </div>
       <div

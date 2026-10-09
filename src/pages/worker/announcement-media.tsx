@@ -27,6 +27,7 @@ import {
   ImageOff,
 } from "lucide-react";
 import { getWorkerToken } from "@/layouts/WorkerLayout";
+import { useT } from "@/lib/worker-i18n";
 
 // One media file attached to a notice (image/video/PDF). The bytes live in the
 // shared /api/files store; render inline by `mime`.
@@ -110,6 +111,7 @@ function PhotoLightbox({
   startIndex: number;
   onClose: () => void;
 }) {
+  const t = useT();
   const [idx, setIdx] = useState(startIndex);
   const total = photos.length;
   const go = useCallback(
@@ -238,14 +240,14 @@ function PhotoLightbox({
           onClick={(e) => e.stopPropagation()}
         >
           <ImageOff className="h-10 w-10" />
-          <p className="text-sm">This image could not be displayed.</p>
+          <p className="text-sm">{t("media.imageFailed")}</p>
           <a
             href={fileHref(cur.fileId)}
             target="_blank"
             rel="noreferrer"
             className="rounded-full bg-white/15 px-4 py-2 text-sm font-semibold active:bg-white/25"
           >
-            Open original
+            {t("media.openOriginal")}
           </a>
         </div>
       )}
@@ -355,13 +357,14 @@ function PhotoTile({
   hiddenCount: number;
   onOpen: () => void;
 }) {
+  const t = useT();
   const [broken, setBroken] = useState(false);
   if (broken) {
     return (
       <div className="relative flex aspect-square w-full flex-col items-center justify-center gap-1 overflow-hidden rounded-lg border border-[#E2DDD8] bg-[#F3EFE9] text-[#9A948C]">
         <ImageOff className="h-6 w-6" />
         <span className="px-2 text-center text-[10px] leading-tight">
-          Image unavailable
+          {t("media.imageUnavailable")}
         </span>
         {showMore && (
           <span className="absolute inset-0 flex items-center justify-center bg-black/50 text-2xl font-bold text-white">
@@ -400,6 +403,7 @@ function PhotoTile({
 // that hands the file to the OS player via the same token-bearing URL — so a
 // posted clip is never a dead black box.
 function VideoTile({ src }: { src: string }) {
+  const t = useT();
   const [playing, setPlaying] = useState(false);
   const [failed, setFailed] = useState(false);
 
@@ -412,9 +416,9 @@ function VideoTile({ src }: { src: string }) {
         className="flex items-center gap-2 rounded-lg border border-[#E2DDD8] bg-[#FAFAF8] px-3 py-2 text-xs font-medium text-[#5A5550] active:bg-[#F3EFE9]"
       >
         <Play className="h-4 w-4 shrink-0 fill-[#9A3A2D] text-[#9A3A2D]" />
-        <span className="min-w-0 flex-1 truncate">Video</span>
+        <span className="min-w-0 flex-1 truncate">{t("media.video")}</span>
         <span className="shrink-0 rounded bg-[#EDE7E0] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#8A6F3A]">
-          Open
+          {t("common.open")}
         </span>
         <Download className="h-4 w-4 shrink-0 text-[#8A8680]" />
       </a>

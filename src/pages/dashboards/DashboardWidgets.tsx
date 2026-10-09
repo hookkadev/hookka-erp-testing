@@ -7,7 +7,7 @@ import { agingBucketTotals } from "@/lib/aging-export";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   completedHeadline, customerRevenue, capacityPerWorkerMin, deptBacklogRows, fabricView,
-  financeRatios, orderPipeline, pendingDeliveryTotalSen, plantLoad, stateTags,
+  financeRatios, orderPipeline, pendingDeliveryTotalSen, plantLoad, stateKpiTile, stateTags,
   type CustCat, type DoStatsResp, type FinanceDashRow, type Overview, type PendingValueResp,
   type SoStats, type StateSnapshot,
 } from "./dashboard-widgets-lib";
@@ -169,10 +169,11 @@ function StateTags({ ss }: { ss: StateSnapshot | undefined }) {
 
 function Stat({ label, value, sub, color }: { label: string; value: string; sub?: string; color?: string }) {
   return (
-    <div className="min-w-0 rounded-lg bg-[#F7F4EF] px-3 py-2">
-      <p className="truncate text-[10px] uppercase tracking-wider" style={{ color: MUTED }}>{label}</p>
-      <p className="truncate text-lg font-bold tabular-nums" style={{ color: color ?? "#1F1D1B" }}>{value}</p>
-      {sub && <p className="truncate text-[10px]" style={{ color: MUTED }}>{sub}</p>}
+    <div className="@container min-w-0 rounded-lg bg-[#F7F4EF] px-3 py-2">
+      {/* Label and sub wrap; the value scales with the tile (cqi) and never splits a word. */}
+      <p className="break-words text-[10px] uppercase tracking-wider" style={{ color: MUTED }}>{label}</p>
+      <p className="whitespace-nowrap overflow-hidden text-ellipsis text-[clamp(0.8rem,8cqi,1.125rem)] font-bold tabular-nums" style={{ color: color ?? "#1F1D1B" }} title={value}>{value}</p>
+      {sub && <p className="break-words text-[10px]" style={{ color: MUTED }}>{sub}</p>}
     </div>
   );
 }
@@ -194,6 +195,11 @@ export function OrderPipelineCard({ period }: { period: Period }) {
   const doStats = ok(doR);
   const monthScoped = wp !== "all";
   const pipe = so && ov ? orderPipeline(wp, so, ov) : null;
+  // A finished month: its saved month-end figure or "no record" (stateKpiTile).
+  const pdTile = stateKpiTile(wp, ov?.stateKpis?.pendingDeliverySen, ov?.stateKpis?.asOf, pend && doStats ? pendingDeliveryTotalSen(pend, doStats) : 0);
+  const outTile = stateKpiTile(wp, ov?.stateKpis?.outstandingSen, ov?.stateKpis?.asOf, so?.outstandingItemsSen ?? 0);
+  const pastValue = (t: typeof pdTile) => (!ov ? "…" : t.sen == null ? "—" : fmtRM2(t.sen));
+  const pastSub = (t: typeof pdTile, live: string) => (t.sen == null && ov ? "nothing saved for that month" : live);
   return (
     <CardShell
       title={`Order Pipeline — ${label}`}
@@ -206,16 +212,24 @@ export function OrderPipelineCard({ period }: { period: Period }) {
       }
     >
       <div className="mb-3 grid grid-cols-2 gap-3">
-        <Stat
-          label="Pending Delivery · live"
-          value={pend && doStats ? fmtRM2(pendingDeliveryTotalSen(pend, doStats)) : pendR.loading || doR.loading ? "…" : "—"}
-          sub={pend && doStats ? "made / on DO, not yet delivered" : pendR.loading || doR.loading ? "loading" : "couldn't load — not shown as zero"}
-        />
-        <Stat
-          label="Outstanding · live"
-          value={so ? fmtRM2(so.outstandingItemsSen ?? 0) : soR.loading ? "…" : "—"}
-          sub={so ? "confirmed · not yet delivered" : soR.loading ? "loading" : "couldn't load — not shown as zero"}
-        />
+        {pdTile.past ? (
+          <Stat label={`Pending Delivery · ${pdTile.tag}`} value={pastValue(pdTile)} sub={pastSub(pdTile, "made / on DO, not yet delivered")} />
+        ) : (
+          <Stat
+            label="Pending Delivery · live"
+            value={pend && doStats ? fmtRM2(pendingDeliveryTotalSen(pend, doStats)) : pendR.loading || doR.loading ? "…" : "—"}
+            sub={pend && doStats ? "made / on DO, not yet delivered" : pendR.loading || doR.loading ? "loading" : "couldn't load — not shown as zero"}
+          />
+        )}
+        {outTile.past ? (
+          <Stat label={`Outstanding · ${outTile.tag}`} value={pastValue(outTile)} sub={pastSub(outTile, "confirmed · not yet delivered")} />
+        ) : (
+          <Stat
+            label="Outstanding · live"
+            value={so ? fmtRM2(so.outstandingItemsSen ?? 0) : soR.loading ? "…" : "—"}
+            sub={so ? "confirmed · not yet delivered" : soR.loading ? "loading" : "couldn't load — not shown as zero"}
+          />
+        )}
       </div>
       {!pipe ? (
         <Gate loading={soR.loading || ovR.loading} what="the order pipeline" />
@@ -490,7 +504,9 @@ export function PlantLoadCard({ period }: { period: Period }) {
   const prod = ov?.production;
   const pl = plantLoad(prod, true);
   const perWorker = prod ? capacityPerWorkerMin(prod.capacityDays ?? [], prod.dailyCapacityMin) : null;
-  const avgBasis = widgetPeriod(period) === "all" ? "7-day avg" : "month avg";
+  // All-time and the current month: last 14 working days. A past month: its own average.
+  const wp = widgetPeriod(period);
+  const avgBasis = wp === "all" || wp === new Date().toISOString().slice(0, 7) ? "14-day avg" : "month avg";
   const capDays = [...(prod?.capacityDays ?? [])].sort((a, b) => a.date.localeCompare(b.date));
   const tone = TONE[pl.tone];
   return (
@@ -736,7 +752,7 @@ export function PurchasingCard({ period }: { period: Period }) {
         <Gate loading={ovR.loading} what="purchasing" />
       ) : (
         <div className="space-y-3">
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <Stat label="Open POs" value={fmtN(pur.openPOCount)} sub="all open" />
             <Stat label="PI spend" value={fmtRM2(pur.piSpendThisMonthSen)} sub={`${scoped ?? "all time"} · by invoice date`} />
             <Stat label="Prev month" value={pur.prevPeriod ? fmtRM2(pur.piSpendPrevMonthSen) : "—"} sub={pur.prevPeriod || "—"} />
@@ -898,7 +914,7 @@ export function AgingRatiosCard({ period }: { period: Period }) {
           {!ratios ? (
             <FinGate s={ratiosS} what="the ratios" />
           ) : (
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <Stat label="Gross margin" value={fmtPct2(ratios.grossMarginPct)} sub="gross profit ÷ sales" />
               <Stat label="Current ratio" value={ratios.currentRatio == null ? "—" : fmtDec2(ratios.currentRatio)} sub="current assets ÷ current liabilities" />
               <Stat label="Quick ratio" value={ratios.quickRatio == null ? "—" : fmtDec2(ratios.quickRatio)} sub="(current assets − inventory) ÷ current liabilities" />

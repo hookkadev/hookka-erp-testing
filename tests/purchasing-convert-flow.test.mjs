@@ -70,6 +70,7 @@ function makeDb() {
     const sql = norm(rawSql);
     let binds = [];
     const api = {
+      sql,
       bind(...args) {
         binds = args;
         return this;
@@ -90,11 +91,18 @@ function makeDb() {
   }
 
   async function batch(stmts) {
-    // stmts are the prepared-statement objects from prepare().bind(); each
-    // carries its own captured SQL+binds via the closure. We re-run them.
-    const out = [];
-    for (const s of stmts) out.push(await s.run());
-    return out;
+    // The real adapter runs a batch as ONE transaction (sql.begin in
+    // supabase-compat.ts): a statement that raises rolls back every statement
+    // before it. Model that, or "nothing was written" cannot be asserted.
+    const snapshot = structuredClone(tables);
+    try {
+      const out = [];
+      for (const s of stmts) out.push(await s.run());
+      return out;
+    } catch (e) {
+      for (const k of Object.keys(tables)) tables[k] = snapshot[k];
+      throw e;
+    }
   }
 
   // ---- write side -----------------------------------------------------------
@@ -132,7 +140,28 @@ function makeDb() {
       if (gi) gi.invoiced_qty = (Number(gi.invoiced_qty) || 0) - Number(delta);
       return;
     }
-    // UPDATE purchase_order_items SET receivedQty = receivedQty + ? WHERE id = ?
+    // T-006 R2 — the guarded increment. Binds: (check qty, increase, id).
+    // Evaluated against the row's REAL value at write time, like Postgres does
+    // after waiting on the row lock, and it raises the way the failed cast does.
+    m = sql.match(/^UPDATE purchase_order_items SET receivedQty = CASE WHEN receivedQty \+ \? <= quantity \* 1\.1 THEN receivedQty \+ \? ELSE CAST\('po_line_over_receipt:' \|\| id AS DOUBLE PRECISION\) END WHERE id = \?/i);
+    if (m) {
+      const [check, bump, id] = binds;
+      const poi = tables.purchase_order_items.find((r) => String(r.id) === String(id));
+      if (!poi) return;
+      const cur = Number(poi.receivedQty) || 0;
+      if (cur + Number(check) <= Number(getCol(poi, "quantity")) * 1.1) {
+        poi.receivedQty = cur + Number(bump);
+        return;
+      }
+      const err = new Error(
+        `invalid input syntax for type double precision: "po_line_over_receipt:${poi.id}"`,
+      );
+      err.code = "22P02";
+      throw err;
+    }
+    // The UNGUARDED increase the route used before T-006 R2. Kept so that a
+    // regression back to it shows up as what it is, a PO line received twice,
+    // instead of as a statement this mock silently ignores.
     m = sql.match(/^UPDATE purchase_order_items SET receivedQty = receivedQty \+ \? WHERE id = \?/i);
     if (m) {
       const [delta, id] = binds;
@@ -682,7 +711,7 @@ test("PO-linked + arrival ARRIVED at create → POSTED + receivedQty cascades", 
   const grnRoot = mount(grnApp, db);
 
   // Goods physically arrived against the PO at receipt time → arrival ARRIVED →
-  // born POSTED → postGRNToStock + cascadePOStatusAfterGRNPost run.
+  // born POSTED → stock statements + PO counter statements run in the create batch.
   const res = await grnRoot.request("/", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -1211,4 +1240,257 @@ test("A3 — a born-POSTED GRN's header, stock and PO counter go in ONE batch", 
     5,
     "PO counter drawn down in the same batch",
   );
+});
+
+// ---------------------------------------------------------------------------
+// T-006 R2, the concurrency half. The over-receipt check reads the PO line's
+// receivedQty BEFORE db.batch(), so two receipts that interleave between that
+// read and the write both used to pass and both post. The ceiling now also
+// sits inside the statement that raises the counter.
+//
+// What this CAN prove: given a stale read, the route ends with nothing written
+// and a 409, and the guard travels in the same batch as the counter update.
+// What it CANNOT prove: that Postgres really makes the second transaction wait
+// on the row and re-evaluate. The mock has no locks. That half is verified on
+// staging by firing two receipts at once.
+// ---------------------------------------------------------------------------
+
+/** The "other receipt" commits right after this request's pre-batch read. */
+function raceAfterRead(db, sqlPattern, commitOther) {
+  const realPrepare = db.prepare;
+  let fired = false;
+  db.prepare = (rawSql) => {
+    const stmt = realPrepare(rawSql);
+    if (!sqlPattern.test(stmt.sql)) return stmt;
+    const realAll = stmt.all.bind(stmt);
+    stmt.all = async () => {
+      const res = await realAll();
+      const stale = { results: res.results.map((r) => ({ ...r })) };
+      if (!fired) {
+        fired = true;
+        commitOther();
+      }
+      return stale;
+    };
+    return stmt;
+  };
+}
+
+const receiveAgainstPo9 = (root, qty, extra = {}) =>
+  root.request("/", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      poId: "po-9",
+      receivedBy: "Ahmad",
+      arrival_state: "ARRIVED",
+      items: [{ poItemIndex: 0, receivedQty: qty, acceptedQty: qty, rejectedQty: 0 }],
+      ...extra,
+    }),
+  });
+
+test("R2 race — a receipt that read a stale receivedQty writes nothing and gets a 409", async () => {
+  const db = makeDb();
+  seedOpenPo(db); // poi-9: 5 ordered, 0 received, ceiling 5.5
+  db.tables.raw_materials.push({
+    id: "rm-9", itemCode: "FOAM-9", description: "Foam block", balanceQty: 0,
+  });
+  const poi = () => db.tables.purchase_order_items.find((r) => r.id === "poi-9");
+
+  // This request reads receivedQty 0. Before its batch runs, another receipt
+  // for the full 5 commits.
+  raceAfterRead(db, /^SELECT \* FROM purchase_order_items WHERE purchaseOrderId = \?/i, () => {
+    poi().receivedQty = 5;
+  });
+
+  const res = await mount(grnApp, db).request("/", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      poId: "po-9",
+      receivedBy: "Ahmad",
+      arrival_state: "ARRIVED",
+      items: [
+        { poItemIndex: 0, materialCode: "FOAM-9", materialName: "FOAM-9 - Foam block", receivedQty: 5, acceptedQty: 5, rejectedQty: 0, unitPrice: 10000 },
+      ],
+    }),
+  });
+
+  assert.equal(res.status, 409, "the raced receipt must be refused, not posted");
+  assert.match((await res.json()).error, /received by another GRN/);
+
+  // Nothing of the refused receipt survives.
+  assert.equal(Number(poi().receivedQty), 5, "only the other receipt's 5 is on the PO line, not 10");
+  assert.equal(db.tables.grns.length, 0, "no GRN header left behind");
+  assert.equal(db.tables.grn_items.length, 0, "no GRN line left behind");
+  assert.equal(db.tables.rm_batches.length, 0, "no stock posted");
+  assert.equal(Number(db.tables.raw_materials[0].balanceQty), 0, "stock balance untouched");
+  assert.equal(
+    db.tables.purchase_orders.find((r) => r.id === "po-9").status,
+    "CONFIRMED",
+    "the refused receipt must not move the PO status",
+  );
+});
+
+test("R2 race — the ceiling guard is the counter update, inside the create batch", async () => {
+  const db = makeDb();
+  seedOpenPo(db);
+
+  const batches = [];
+  const realBatch = db.batch;
+  db.batch = async (stmts) => {
+    batches.push(stmts.map((s) => s.sql));
+    return realBatch(stmts);
+  };
+
+  assert.equal((await receiveAgainstPo9(mount(grnApp, db), 5)).status, 201);
+
+  assert.equal(batches.length, 1, "a born-POSTED create issues exactly one batch");
+  const counter = batches[0].filter((q) => /^UPDATE purchase_order_items SET receivedQty/i.test(q));
+  assert.equal(counter.length, 1, "one counter statement for the one PO line");
+  assert.match(counter[0], /CASE WHEN receivedQty \+ \? <= quantity \* 1\.1 THEN receivedQty \+ \?/);
+  assert.match(counter[0], /ELSE CAST\('po_line_over_receipt:' \|\| id AS DOUBLE PRECISION\) END WHERE id = \?$/);
+  assert.ok(
+    batches[0].some((q) => /^INSERT INTO grns /i.test(q)),
+    "the GRN header insert is in that same batch, so a raised guard rolls it back",
+  );
+
+  // The adapter rewrites camelCase identifiers. A guard that named a column
+  // the rewriter does not know would fail on every receipt, not only a raced one.
+  const { translateSql } = await import(
+    pathToFileURL(resolve(process.cwd(), "src/api/lib/supabase-compat.ts")).href
+  );
+  const pg = translateSql(counter[0]);
+  assert.match(pg, /SET received_qty = CASE WHEN received_qty \+ \$1 <= quantity \* 1\.1 THEN received_qty \+ \$2/);
+  assert.match(pg, /CAST\('po_line_over_receipt:' \|\| id AS DOUBLE PRECISION\) END WHERE id = \$3$/);
+});
+
+test("R2 race — posting a DRAFT goes through the same guard and rolls back whole", async () => {
+  const db = makeDb();
+  seedOpenPo(db); // 5 ordered
+  db.tables.raw_materials.push({
+    id: "rm-9", itemCode: "FOAM-9", description: "Foam block", balanceQty: 0,
+  });
+  const root = mount(grnApp, db);
+  const poi = () => db.tables.purchase_order_items.find((r) => r.id === "poi-9");
+  const draft = async () => {
+    const res = await root.request("/", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        poId: "po-9",
+        receivedBy: "Ahmad",
+        arrival_state: "ARRIVED",
+        status: "DRAFT",
+        items: [
+          { poItemIndex: 0, materialCode: "FOAM-9", materialName: "FOAM-9 - Foam block", receivedQty: 5, acceptedQty: 5, rejectedQty: 0, unitPrice: 10000 },
+        ],
+      }),
+    });
+    assert.equal(res.status, 201);
+    return (await res.json()).data.id;
+  };
+  const postIt = (id) =>
+    root.request(`/${id}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ status: "POSTED" }),
+    });
+
+  // Two drafts for the full order. Neither drew the PO line down, so both
+  // passed the create check.
+  const first = await draft();
+  const second = await draft();
+  assert.equal(Number(poi().receivedQty), 0);
+
+  assert.equal((await postIt(first)).status, 200);
+  assert.equal(Number(poi().receivedQty), 5);
+  const stockAfterFirst = db.tables.rm_batches.length;
+
+  const res = await postIt(second);
+  assert.equal(res.status, 409, "the second post would take the line to 10 of 5");
+  assert.equal(Number(poi().receivedQty), 5, "PO line not drawn down twice");
+  assert.equal(
+    db.tables.grns.find((g) => g.id === second).status,
+    "DRAFT",
+    "the refused GRN must stay DRAFT, not end up POSTED without a PO draw-down",
+  );
+  assert.equal(db.tables.rm_batches.length, stockAfterFirst, "no stock posted for the refused GRN");
+});
+
+// ---------------------------------------------------------------------------
+// GRN number collision. generateGrnNumber reads the last number and adds one,
+// so two GRNs created in the same instant pick the same number and the second
+// INSERT hits ux_grns_grn_number. Seen live on staging 2026-09-30 as a raw 500
+// "duplicate key value violates unique constraint". The route now reads the
+// next number and retries. The mock has no unique index, so the collision is
+// injected: the batch fails the way Postgres does, as if another GRN had just
+// committed the number this request picked.
+// ---------------------------------------------------------------------------
+function collideOnGrnNumber(db, times) {
+  const d = new Date();
+  const prefix = `GRN-${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}-`;
+  let taken = 0;
+  let left = times;
+  const realPrepare = db.prepare;
+  db.prepare = (rawSql) => {
+    const stmt = realPrepare(rawSql);
+    if (/FROM grns WHERE grnNumber LIKE/i.test(stmt.sql)) {
+      stmt.first = async () => (taken ? { grnNumber: prefix + String(taken).padStart(3, "0") } : null);
+    }
+    return stmt;
+  };
+  const realBatch = db.batch;
+  db.batch = async (stmts) => {
+    if (left > 0 && stmts.some((s) => /^INSERT INTO grns /i.test(s.sql))) {
+      left -= 1;
+      taken += 1; // the other GRN now owns the number this request picked
+      throw new Error('duplicate key value violates unique constraint "ux_grns_grn_number"');
+    }
+    return realBatch(stmts);
+  };
+  return prefix;
+}
+
+const createFoamReceipt = (db) =>
+  mount(grnApp, db).request("/", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      poId: "po-9",
+      receivedBy: "Ahmad",
+      arrival_state: "ARRIVED",
+      items: [
+        { poItemIndex: 0, materialCode: "FOAM-9", materialName: "FOAM-9 - Foam block", receivedQty: 5, acceptedQty: 5, rejectedQty: 0, unitPrice: 10000 },
+      ],
+    }),
+  });
+
+test("GRN number collision: the create retries with the next number instead of a 500", async () => {
+  const db = makeDb();
+  seedOpenPo(db);
+  db.tables.raw_materials.push({ id: "rm-9", itemCode: "FOAM-9", description: "Foam block", balanceQty: 0 });
+  const prefix = collideOnGrnNumber(db, 1);
+
+  const res = await createFoamReceipt(db);
+  assert.equal(res.status, 201, "a number collision must be retried, not surface as a 500");
+  assert.equal(db.tables.grns.length, 1, "exactly one GRN written");
+  assert.equal(db.tables.grns[0].grnNumber, prefix + "002", "the retry takes the next number");
+  const poi = db.tables.purchase_order_items.find((r) => r.id === "poi-9");
+  assert.equal(Number(poi.receivedQty), 5, "the failed attempt rolled back, so the PO line counts the receipt once");
+  assert.equal(db.tables.rm_batches.length, 1, "stock posted once");
+});
+
+test("GRN number collision: after the retries run out the answer is a clear 409 and nothing is written", async () => {
+  const db = makeDb();
+  seedOpenPo(db);
+  db.tables.raw_materials.push({ id: "rm-9", itemCode: "FOAM-9", description: "Foam block", balanceQty: 0 });
+  collideOnGrnNumber(db, 99);
+
+  const res = await createFoamReceipt(db);
+  assert.equal(res.status, 409);
+  assert.match((await res.json()).error, /took this GRN number\. Please try again/);
+  assert.equal(db.tables.grns.length, 0);
+  assert.equal(Number(db.tables.purchase_order_items.find((r) => r.id === "poi-9").receivedQty), 0);
+  assert.equal(db.tables.rm_batches.length, 0);
 });

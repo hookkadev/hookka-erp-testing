@@ -20,8 +20,58 @@
 // ---------------------------------------------------------------------------
 import type { Context } from "hono";
 import type { Env } from "../worker";
-import { kpiByKey } from "./kpi-catalog";
-import { computeMonthlyEfficiencyByWorker } from "./efficiency-allowance";
+import { kpiByKey, type KpiDef } from "./kpi-catalog";
+import { getOrgId } from "./tenant";
+import {
+  collectOnTimeOrders,
+  judgeOnTimeRow,
+  onTimeDates,
+  summarizeOnTimeRows,
+  type OnTimeRow,
+} from "./on-time-delivery";
+import {
+  buildPerfDays,
+  poolEfficiencyPct,
+  dailyEfficiencyPct,
+  type PerfWheRow,
+  type PerfJcRow,
+  type PerfPicRow,
+} from "./workforce-perf";
+import {
+  computeMonthlyEfficiencyByWorker,
+  type EfficiencyScope,
+} from "./efficiency-allowance";
+
+/** Categories a production_efficiency scope may name (DEV-36). */
+export const EFFICIENCY_CATEGORIES = ["SOFA", "BEDFRAME"] as const;
+
+/**
+ * An assignment's stored scope: "" / null = Overall, otherwise a comma list of
+ * "FAB_CUT" (a department) and "FAB_CUT:SOFA" (a department and category),
+ * pooled into one figure. Anything else is not a scope and reads as null, so
+ * the caller can refuse it. Duplicates are dropped.
+ */
+export function parseEfficiencyScope(raw: unknown): EfficiencyScope | null {
+  const out: EfficiencyScope = [];
+  const seen = new Set<string>();
+  for (const item of String(raw ?? "").trim().toUpperCase().split(",")) {
+    const [dept, category, extra] = item.trim().split(":");
+    if (!dept || extra !== undefined || !/^[A-Z0-9_]+$/.test(dept)) return null;
+    if (category !== undefined && !(EFFICIENCY_CATEGORIES as readonly string[]).includes(category)) {
+      return null;
+    }
+    const key = category ? `${dept}:${category}` : dept;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(category ? { dept, category } : { dept });
+  }
+  return out;
+}
+
+/** The stored form of a parsed scope: "FAB_CUT,FAB_SEW:SOFA". */
+export function formatEfficiencyScope(scope: EfficiencyScope): string {
+  return scope.map((p) => (p.category ? `${p.dept}:${p.category}` : p.dept)).join(",");
+}
 
 export interface MetricResult {
   actual: number | null;
@@ -29,6 +79,10 @@ export interface MetricResult {
   sampleSize: number;
   /** One line for the card, e.g. "9 late of 41 shipped". */
   detail: string;
+  /** customer_delivery_date only — % shipped before the promised date. */
+  earlyPct?: number;
+  /** department_efficiency only: the same pool per day, for the card's chart. */
+  daily?: Array<{ date: string; pct: number }>;
 }
 
 const EMPTY: MetricResult = { actual: null, sampleSize: 0, detail: "No data" };
@@ -42,71 +96,87 @@ export function periodBounds(period: string): { start: string; end: string } {
 }
 
 // ---------------------------------------------------------------------------
-// The delivery-date predicate, written ONCE.
+// On-time delivery to the customer's promised date.
 //
-// The KPI card reports a number and its "See the list →" link has to open
-// exactly the orders that number counted. Two hand-written copies of this join
-// would agree on the day they were written and quietly diverge afterwards —
-// the card would say 11 and the list would show 14, and at that point nobody
-// believes either. So the CTE, the FROM/WHERE and the "is it late" test are
-// string constants shared by the metric and by its drill-down list below.
+// Owner's rule (2026-08-14): the date the goods were DELIVERED against
+// `sales_orders.customer_delivery_date`, once per sales order, judged on its
+// LAST delivery, on the Malaysia date. It lives in on-time-delivery.ts, which
+// the Hookka Report already uses. The KPI, its order list and the report all
+// read the same rows (`collectOnTimeOrders`) and the same verdict
+// (`judgeOnTimeRow`), so the card cannot say 11 while the list shows 14.
+//
+// Until BUG-2026-10-08-267 this file had its own query: the FIRST DISPATCH,
+// on the UTC date. A part-delivered order whose first lorry left on time
+// counted as on time however late the last one arrived.
 // ---------------------------------------------------------------------------
 
-/** First dispatch per sales order, via the only join path that resolves. */
-const FIRST_DISPATCH_CTE = `WITH first_dispatch AS (
-       SELECT po.salesOrderId AS so_id,
-              MIN(substr(d.dispatchedAt::text, 1, 10)) AS shipped_on
-         FROM delivery_orders d
-         JOIN delivery_order_items di ON di.deliveryOrderId = d.id
-         JOIN production_orders po ON po.id = di.productionOrderId
-        WHERE d.status <> 'CANCELLED'
-          AND d.dispatchedAt IS NOT NULL AND d.dispatchedAt <> ''
-          AND po.salesOrderId IS NOT NULL AND po.salesOrderId <> ''
-        GROUP BY po.salesOrderId
-     )`;
-
-/** Orders whose first dispatch fell inside the period. Binds: start, end. */
-const DISPATCHED_IN_PERIOD = `FROM first_dispatch f
-       JOIN sales_orders so ON so.id = f.so_id
-      WHERE f.shipped_on >= ? AND f.shipped_on <= ?
-        AND so.customerDeliveryDate IS NOT NULL
-        AND so.customerDeliveryDate <> ''`;
-
-/** …and left after the date promised to the customer. */
-const IS_LATE = `f.shipped_on > substr(so.customerDeliveryDate::text, 1, 10)`;
+/** Promised date − order date, in whole days. Null with no order date. */
+export function leadDays(r: OnTimeRow): number | null {
+  const due = onTimeDates(r).due;
+  const ordered = String(r.orderDate ?? r.order_date ?? "").slice(0, 10).trim();
+  if (!due || !ordered) return null;
+  const d = Math.round((Date.parse(due) - Date.parse(ordered)) / 86_400_000);
+  return Number.isFinite(d) ? d : null;
+}
 
 /**
- * GATE — orders dispatched in the period, later than the customer's date.
- *
- * Counted at SALES ORDER level, not per delivery order: a customer who was
- * promised one date and received three deliveries was let down once, not
- * three times. The first dispatch is what counts.
+ * Late %, with a late URGENT order (promised within the urgent window of its
+ * order date) counting as `urgentLatePct`% of a late one. Owner 2026-10-08.
+ */
+export function weightedLatePct(
+  judged: number, late: number, urgentLate: number, urgentLatePct: number,
+): number {
+  const counted = late - urgentLate * (1 - urgentLatePct / 100);
+  return Math.round((counted / judged) * 1000) / 10;
+}
+
+/**
+ * The KPI figure from the shared rows. Pure, so the tests can hold it and the
+ * order list to the same rows.
+ */
+export function deliveryMetric(
+  rows: OnTimeRow[],
+  rules: Pick<KpiDef, "urgentDays" | "urgentLatePct">,
+): MetricResult {
+  const urgentDays = Math.floor(Number(rules.urgentDays ?? 7));
+  const urgentLatePct = Number(rules.urgentLatePct ?? 100);
+  const s = summarizeOnTimeRows(rows);
+  if (s.judged === 0) return EMPTY;
+  const urgentLate = rows.filter((r) => {
+    if (judgeOnTimeRow(r) !== "LATE") return false;
+    const lead = leadDays(r);
+    return lead !== null && lead <= urgentDays;
+  }).length;
+  // Reported as a PERCENTAGE, not a count: 9 late out of 41 and 9 out of 400
+  // are different failures, and the scoring curve is per percentage point.
+  const pct = weightedLatePct(s.judged, s.late, urgentLate, urgentLatePct);
+  const earlyPct = Math.round((s.early / s.judged) * 1000) / 10;
+  return {
+    actual: pct,
+    sampleSize: s.judged,
+    detail:
+      `${s.late} late` +
+      (urgentLate > 0 && urgentLatePct < 100
+        ? ` (${urgentLate} urgent at ${urgentLatePct}%, so ${Math.round((s.late - urgentLate * (1 - urgentLatePct / 100)) * 10) / 10} counted)`
+        : "") +
+      `, ${s.early} early of ${s.judged} delivered (${pct}% late, ${earlyPct}% early)`,
+    earlyPct,
+  };
+}
+
+/**
+ * Sales orders fully delivered in the period (last delivery, Malaysia date),
+ * later than the customer's date. Counted once per SALES ORDER: a customer
+ * promised one date and sent three lorries was let down once, not three times.
+ * An order not fully delivered yet is left out until its last delivery lands.
  */
 export async function customerDeliveryLate(
   c: Context<Env>,
   period: string,
+  rules: Pick<KpiDef, "urgentDays" | "urgentLatePct"> = kpiByKey("customer_delivery_date")!,
 ): Promise<MetricResult> {
   const { start, end } = periodBounds(period);
-  const row = await c.var.DB.prepare(
-    `${FIRST_DISPATCH_CTE}
-     SELECT COUNT(*) AS shipped,
-            COALESCE(SUM(CASE WHEN ${IS_LATE} THEN 1 ELSE 0 END), 0) AS late
-       ${DISPATCHED_IN_PERIOD}`,
-  )
-    .bind(start, end)
-    .first<{ shipped: number; late: number }>();
-
-  const shipped = Number(row?.shipped) || 0;
-  const late = Number(row?.late) || 0;
-  if (shipped === 0) return EMPTY;
-  // Reported as a PERCENTAGE, not a count: 9 late out of 41 and 9 out of 400
-  // are different failures, and the scoring curve is per percentage point.
-  const pct = Math.round((late / shipped) * 1000) / 10;
-  return {
-    actual: pct,
-    sampleSize: shipped,
-    detail: `${late} late of ${shipped} shipped (${pct}%)`,
-  };
+  return deliveryMetric(await collectOnTimeOrders(c.var.DB, start, end), rules);
 }
 
 export interface LateOrderRow {
@@ -115,14 +185,41 @@ export interface LateOrderRow {
   customerId: string | null;
   customerName: string | null;
   customerDeliveryDate: string | null;
-  shippedOn: string | null;
+  /** The last delivery's Malaysia date. */
+  deliveredOn: string | null;
+  status: "LATE" | "EARLY" | "ON_TIME";
+  /** Promised date − order date, in days. The card tags it urgent against the rule. */
+  leadDays: number | null;
+}
+
+/**
+ * The judged orders as list rows: LATE only, or every judged order with `all`.
+ * Orders the metric left out (not fully delivered, no customer date) are not
+ * listed, so the LATE rows ARE the card's late count.
+ */
+export function deliveryOrderRows(rows: OnTimeRow[], all: boolean): LateOrderRow[] {
+  const out: LateOrderRow[] = [];
+  for (const r of rows) {
+    const v = judgeOnTimeRow(r);
+    if (v !== "LATE" && v !== "EARLY" && v !== "ON_TIME") continue;
+    if (!all && v !== "LATE") continue;
+    const { due, delivered } = onTimeDates(r);
+    out.push({
+      id: String(r.soId ?? r.so_id),
+      companySOId: r.companySOId ?? r.company_so_id ?? null,
+      customerId: r.customerId ?? r.customer_id ?? null,
+      customerName: r.customerName ?? r.customer_name ?? null,
+      customerDeliveryDate: due,
+      deliveredOn: delivered,
+      status: v,
+      leadDays: leadDays(r),
+    });
+  }
+  return out;
 }
 
 /**
  * The ORDERS behind `customerDeliveryLate` — the "See the list →" drill-down.
- *
- * Same CTE, same period bounds, same lateness test as the metric, so the list
- * length is the metric's `late` count by construction and not by coincidence.
  *
  * `scope` is the row-level customer filter (src/api/lib/customer-scope.ts). A
  * salesperson may not see another salesperson's orders even when those orders
@@ -130,29 +227,18 @@ export interface LateOrderRow {
  * list is legitimately SHORTER than the count. Narrowing here rather than in
  * the browser is the point: a client-side filter over a full payload has
  * already shipped the rows.
+ *
+ * `all` returns every order the metric judged (late, early and on time). The
+ * KPI card lists them inline so a person can see which order fell on which side.
  */
 export async function lateToCustomerOrders(
   c: Context<Env>,
   period: string,
   scope: { clause: string; binds: string[] } = { clause: "", binds: [] },
+  all = false,
 ): Promise<LateOrderRow[]> {
   const { start, end } = periodBounds(period);
-  const scopeClause = scope.clause ? ` AND ${scope.clause}` : "";
-  const res = await c.var.DB.prepare(
-    `${FIRST_DISPATCH_CTE}
-     SELECT so.id AS "id",
-            so.companySOId AS "companySOId",
-            so.customerId AS "customerId",
-            so.customerName AS "customerName",
-            substr(so.customerDeliveryDate::text, 1, 10) AS "customerDeliveryDate",
-            f.shipped_on AS "shippedOn"
-       ${DISPATCHED_IN_PERIOD}
-        AND ${IS_LATE}${scopeClause}
-      ORDER BY f.shipped_on DESC, so.id DESC`,
-  )
-    .bind(start, end, ...scope.binds)
-    .all<LateOrderRow>();
-  return res.results ?? [];
+  return deliveryOrderRows(await collectOnTimeOrders(c.var.DB, start, end, scope), all);
 }
 
 /**
@@ -398,10 +484,10 @@ async function invoiceLag(
   const today = new Date().toISOString().slice(0, 10);
   const asAt = today < end ? today : end;
 
-  // DISPATCH, in the owner's word — the day the goods left. `dispatchedAt` is
-  // the field the on-time-delivery KPI already scores against, so the two
-  // cannot disagree about when a shipment happened. `deliveredAt` is the
-  // fallback for older rows that only carry the arrival date.
+  // DISPATCH, in the owner's word — the day the goods left. (The on-time
+  // delivery KPI scores the delivered date instead, BUG-2026-10-08-267.)
+  // `deliveredAt` is the fallback for older rows that only carry the arrival
+  // date. Still the UTC date: not part of that fix.
   const res = await c.var.DB.prepare(
     `SELECT d.id AS "id",
             substr(COALESCE(NULLIF(d.dispatchedAt::text, ''), d.deliveredAt::text), 1, 10) AS "dispatched",
@@ -642,13 +728,21 @@ export async function surveyMean(
  * NOTE: this is the FLOOR's efficiency, not the assignee's own. App users
  * carry no employee link (`users` has no employee_id), so a personal figure
  * cannot be resolved yet. Assign this to whoever owns the floor's output.
+ *
+ * DEV-36: an assignment can carry a scope (one or more departments, each
+ * optionally one category, pooled). Everyone assigned that scope shares its
+ * figure, a team score.
  */
 export async function productionEfficiency(
   c: Context<Env>,
   period: string,
+  scope?: EfficiencyScope | null,
 ): Promise<MetricResult> {
   const { start, end } = periodBounds(period);
-  const byWorker = await computeMonthlyEfficiencyByWorker(c.var.DB, start, end);
+  const byWorker = await computeMonthlyEfficiencyByWorker(c.var.DB, start, end, scope ?? undefined);
+  const where = scope?.length
+    ? ` in ${scope.map((p) => (p.category ? `${p.dept} ${p.category}` : p.dept)).join(" + ")}`
+    : "";
 
   let minutes = 0;
   let hours = 0;
@@ -660,13 +754,96 @@ export async function productionEfficiency(
     counted += 1;
   }
   if (hours <= 0) {
-    return { actual: null, sampleSize: 0, detail: "No production hours logged this month" };
+    return { actual: null, sampleSize: 0, detail: `No production hours logged${where} this month` };
   }
   const pct = Math.round((minutes / (hours * 60)) * 1000) / 10;
   return {
     actual: pct,
     sampleSize: counted,
-    detail: `${Math.round(minutes).toLocaleString()} standard minutes earned on ${Math.round(hours).toLocaleString()} production hours, across ${counted} workers`,
+    detail: `${Math.round(minutes).toLocaleString()} standard minutes earned on ${Math.round(hours).toLocaleString()} production hours, across ${counted} workers${where}`,
+  };
+}
+
+/**
+ * Department efficiency: the Dashboard Experimental > People > Efficiency
+ * figure for the month, for the workers whose home department is one of the
+ * assignment's departments (DEV-36). No departments = everyone, the page with
+ * no department picked.
+ *
+ * Built by lib/workforce-perf.ts, the same code the dashboard route runs, from
+ * the same tables, so this card and the page cannot disagree. The month's rows
+ * only: every per-day figure depends on that day's rows alone.
+ */
+export async function departmentEfficiency(
+  c: Context<Env>,
+  period: string,
+  scope?: EfficiencyScope | null,
+): Promise<MetricResult> {
+  const { start } = periodBounds(period);
+  const [y, m] = period.split("-").map(Number);
+  const next = new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 10);
+  const orgId = getOrgId(c);
+  const db = c.var.DB;
+
+  const depts = await db.prepare(`SELECT code, is_production FROM departments`)
+    .all<{ code: string; isProduction: number | boolean | null }>();
+  const productionDepts = new Set(
+    (depts.results ?? []).filter((d) => d.isProduction).map((d) => String(d.code)),
+  );
+  const whe = await db.prepare(
+    `SELECT worker_id, date, department_code, hours
+       FROM working_hour_entries
+      WHERE org_id = ? AND date >= ? AND date < ?`,
+  )
+    .bind(orgId, start, next)
+    .all<PerfWheRow>();
+  const doneInMonth = `org_id = ?
+          AND status IN ('COMPLETED','TRANSFERRED')
+          AND completed_date IS NOT NULL
+          AND completed_date >= ? AND completed_date < ?`;
+  const jobCards = await db.prepare(
+    `SELECT id, department_code, pic1_id, pic2_id, completed_date,
+            est_minutes, actual_minutes, wip_qty
+       FROM job_cards
+      WHERE ${doneInMonth}`,
+  )
+    .bind(orgId, start, next)
+    .all<PerfJcRow>();
+  const pics = await db.prepare(
+    `SELECT job_card_id, pic1_id, pic2_id FROM piece_pics
+      WHERE org_id = ? AND job_card_id IN (SELECT id FROM job_cards WHERE ${doneInMonth})`,
+  )
+    .bind(orgId, orgId, start, next)
+    .all<PerfPicRow>();
+
+  let workerIds: Set<string> | null = null;
+  if (scope?.length) {
+    const want = new Set(scope.map((s) => s.dept));
+    const ws = await db.prepare(`SELECT id, department_code FROM workers`)
+      .all<{ id: string; departmentCode: string | null }>();
+    workerIds = new Set(
+      (ws.results ?? []).filter((w) => want.has(String(w.departmentCode ?? ""))).map((w) => String(w.id)),
+    );
+  }
+
+  const { perfDays } = buildPerfDays({
+    whe: whe.results ?? [],
+    jobCards: jobCards.results ?? [],
+    pics: pics.results ?? [],
+    productionDepts,
+  });
+  const r = poolEfficiencyPct(perfDays, workerIds, (d) => d.startsWith(period));
+  const where = scope?.length ? ` in ${scope.map((s) => s.dept).join(" + ")}` : "";
+  if (r.pct === null) {
+    return { actual: null, sampleSize: 0, detail: `No production hours clocked${where} this month` };
+  }
+  const h = (min: number) => Math.round(min / 60).toLocaleString();
+  const daily = dailyEfficiencyPct(perfDays, workerIds, (d) => d.startsWith(period));
+  return {
+    actual: Math.round(r.pct * 10) / 10,
+    sampleSize: r.days,
+    daily,
+    detail: `${h(r.productionMinutes)} production hours on ${h(r.workingMinutes)} clocked hours over ${r.days} days${where}`,
   };
 }
 
@@ -742,16 +919,21 @@ export async function computeMetric(
   c: Context<Env>,
   key: string,
   period: string,
+  scope?: string | null,
+  /** The KPI with the company's saved rules applied (`withRules`). */
+  def?: KpiDef,
 ): Promise<MetricResult> {
   switch (key) {
     case "customer_delivery_date":
-      return customerDeliveryLate(c, period);
+      return customerDeliveryLate(c, period, def);
     case "setup_completeness":
       return setupCompleteness(c);
     case "documents_not_stuck":
       return documentsStuck(c, period);
     case "production_efficiency":
-      return productionEfficiency(c, period);
+      return productionEfficiency(c, period, parseEfficiencyScope(scope));
+    case "department_efficiency":
+      return departmentEfficiency(c, period, parseEfficiencyScope(scope));
     case "service_case_resolution":
       return serviceCaseResolution(c, period);
     default:

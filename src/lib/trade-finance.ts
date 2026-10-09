@@ -16,11 +16,14 @@ export type TfDraw = {
   drawSourceId: string;
   drawDate: string;
   dueDate: string;
-  /** Ledger family net for this draw INCLUDING interest legs. */
+  /** Ledger family net for this draw INCLUDING interest and bank-charge legs. */
   amountSen: number;
   /** The interest portion of amountSen (net of `tf_interest%` legs), shown
-      as its own column; principal = amountSen − interestSen. */
+      as its own column; principal = amountSen − interestSen − bankChargeSen. */
   interestSen: number;
+  /** The bank-charge portion of amountSen (net of `tf_bank_charge%` legs),
+      shown as its own column beside interest (DEV-63). */
+  bankChargeSen: number;
   repaidSen: number;
   outstandingSen: number;
 };
@@ -29,6 +32,22 @@ export function addDays(iso: string, days: number): string {
   const d = new Date(`${iso.slice(0, 10)}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
+}
+
+// Interest charged on a draw posts `tf_interest` legs whose sourceId is
+// `tfint-YYYY-MM-DD-<draw payment no>`; bank charges post `tf_bank_charge`
+// legs under `tfbc-YYYY-MM-DD-<draw payment no>`. This gives back the draw's
+// payment no for either.
+export function tfInterestDrawId(sourceId: string): string {
+  return sourceId.replace(/^tf(?:int|bc)-\d{4}-\d{2}-\d{2}-/, "");
+}
+
+// The two per-draw charge families folded into a draw's balance.
+export function tfChargeKind(sourceType: string | null | undefined): "interest" | "bank_charge" | null {
+  const base = String(sourceType ?? "").split(":")[0];
+  if (base.startsWith("tf_interest")) return "interest";
+  if (base.startsWith("tf_bank_charge")) return "bank_charge";
+  return null;
 }
 
 export function deriveDraws(
@@ -45,16 +64,19 @@ export function deriveDraws(
   // `tfint-YYYY-MM-DD-<draw payment no>` (the date part makes the leg
   // self-dated for doc-date). Fold each into ITS DRAW's family net, so
   // outstanding, repayment clamps and the identity include interest
-  // automatically; tracked separately only for display.
+  // automatically; tracked separately only for display. Bank charges
+  // (`tf_bank_charge`, `tfbc-<date>-<draw>`) fold in the same way.
   const interestBy = new Map<string, number>();
+  const bankChargeBy = new Map<string, number>();
   let accountNetSen = 0;
   for (const l of legs) {
     const net = (Number(l.creditSen) || 0) - (Number(l.debitSen) || 0);
     accountNetSen += net;
-    const isInterest = String(l.sourceType ?? "").split(":")[0].startsWith("tf_interest");
-    const key = isInterest ? l.sourceId.replace(/^tfint-\d{4}-\d{2}-\d{2}-/, "") : l.sourceId;
+    const kind = tfChargeKind(l.sourceType);
+    const key = kind ? tfInterestDrawId(l.sourceId) : l.sourceId;
     netBy.set(key, (netBy.get(key) ?? 0) + net);
-    if (isInterest) interestBy.set(key, (interestBy.get(key) ?? 0) + net);
+    if (kind === "interest") interestBy.set(key, (interestBy.get(key) ?? 0) + net);
+    if (kind === "bank_charge") bankChargeBy.set(key, (bankChargeBy.get(key) ?? 0) + net);
   }
   const draws: TfDraw[] = [];
   for (const [sourceId, net] of netBy) {
@@ -67,6 +89,7 @@ export function deriveDraws(
       dueDate: meta?.dueDate ?? "",
       amountSen: net,
       interestSen: interestBy.get(sourceId) ?? 0,
+      bankChargeSen: bankChargeBy.get(sourceId) ?? 0,
       repaidSen,
       outstandingSen: net - repaidSen,
     });

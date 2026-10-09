@@ -79,13 +79,17 @@ interface NavGroup {
 const navigationGroups: NavGroup[] = [
   // STAGING ONLY (never PR'd into main): latest PRs merged into staging.
   ...(window.location.hostname.startsWith("staging.")
-    ? [{ label: "PATCH NOTES", items: [{ name: "Patch Notes", href: "/staging-notes", icon: ScrollText }] }]
+    ? [{ label: "PATCH NOTES", items: [{ name: "Patch Notes", href: "/staging-notes", icon: ScrollText }, { name: "Schema Check", href: "/staging-schema", icon: Grid3x3 }, { name: "Mail Outbox", href: "/staging-mail", icon: Mail }] }]
     : []),
   {
     label: "OVERVIEW",
     items: [
       { name: "Dashboard Experimental", href: "/dashboard-experimental", icon: FlaskConical },
       { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+      // STAGING ONLY (never PR'd into main): 7-day vs 14-day Plant Load.
+      ...(window.location.hostname.startsWith("staging.")
+        ? [{ name: "Dashboard Compare", href: "/dashboard/compare", icon: LayoutDashboard }]
+        : []),
       { name: "Hookka Report", href: "/daily-report", icon: ClipboardCheck },
       { name: "Notifications", href: "/notifications", icon: Bell },
       { name: "Announcements", href: "/announcements", icon: Megaphone },
@@ -121,6 +125,7 @@ const navigationGroups: NavGroup[] = [
         { name: "Fab Sew", href: "/production/fab-sew", icon: Shirt },
         { name: "Foam Cutting", href: "/production/foam-cutting", icon: Scissors },
         { name: "Foam Bonding", href: "/production/foam", icon: Box },
+        { name: "Fibre", href: "/production/fibre", icon: Layers },
         { name: "Wood Cut", href: "/production/wood-cut", icon: Axe },
         { name: "Framing", href: "/production/framing", icon: Frame },
         { name: "Webbing", href: "/production/webbing", icon: Grid3x3 },
@@ -216,7 +221,7 @@ const navigationGroups: NavGroup[] = [
       // views. Retired from the MENU only — every route / tab still answers
       // its old URL: /invoices/payments, /invoices/supplier-payments (FX PIs,
       // advance knock-off, TF repayment — linked from Payment Vouchers),
-      // ?tab=ocreditorpay / odebtorpay / ocreditor / odebtor / ocreditorbills /
+      // ?tab=ocreditorpay / odebtorpay / odebtor / ocreditorbills /
       // plmonthly / coststruct.
       {
         name: "Reports", href: "/accounting?tab=overview", icon: BarChart3, children: [
@@ -233,7 +238,9 @@ const navigationGroups: NavGroup[] = [
         name: "Daily", href: "/accounting?tab=payments", icon: Wallet, children: [
           { name: "Payment Vouchers", href: "/accounting?tab=payments", icon: Wallet },
           { name: "Receipts", href: "/accounting?tab=receipts", icon: Receipt },
-          { name: "Fund Transfer", href: "/accounting?tab=transfer", icon: Wallet },
+          // Fund Transfer left the menu 2026-10-01: a transfer is now a voucher
+          // (Payment Vouchers → New Payment Voucher → Transfer); ?tab=transfer
+          // still opens the old page and its entries are listed on the hub.
           { name: "Cash Position", href: "/accounting?tab=dailycash", icon: Wallet },
         ],
       },
@@ -260,6 +267,9 @@ const navigationGroups: NavGroup[] = [
         name: "Creditors", href: "/accounting?tab=ap", icon: Building2, children: [
           { name: "Creditor Aging", href: "/accounting?tab=ap", icon: Building2 },
           { name: "AP Invoices", href: "/accounting?tab=apinvoices", icon: BookOpen },
+          // Back in the menu (owner 2026-09-29 「other creditor maintenance 放 sidebar
+          // 旁边」): the creditor register, no longer folded under AP Invoices.
+          { name: "Other Creditors", href: "/accounting?tab=ocreditor", icon: Users },
           { name: "Supplier Discount", href: "/accounting?tab=supplier-discount", icon: CreditCard },
         ],
       },
@@ -613,6 +623,7 @@ export function Sidebar({
       href === "/production/wood-cut" ||
       href === "/production/framing" ||
       href === "/production/webbing" ||
+      href === "/production/fibre" ||
       href === "/production/upholstery" ||
       href === "/production/packing"
     ) {
@@ -789,15 +800,27 @@ export function Sidebar({
                           // production"). Open the full sidebar and expand this
                           // menu so the departments become tappable, same as
                           // desktop.
+                          // FINANCE opens one group at a time (owner 2026-10-01
+                          // 「我点 daily，report 就收起来」); every other section
+                          // keeps its menus independent.
+                          const openOnly = (prev: Set<string>) => {
+                            const next = new Set(prev);
+                            if (group.label === "FINANCE") {
+                              for (const other of group.items) if (other.name !== item.name) next.delete(other.name);
+                            }
+                            next.add(item.name);
+                            return next;
+                          };
                           if (collapsed) {
                             onToggleCollapsed();
-                            setExpandedMenus((prev) => new Set(prev).add(item.name));
+                            setExpandedMenus((prev) => openOnly(prev));
                             return;
                           }
-                          const next = new Set(expandedMenus);
-                          if (isExpanded) next.delete(item.name);
-                          else next.add(item.name);
-                          setExpandedMenus(next);
+                          if (isExpanded) {
+                            const next = new Set(expandedMenus);
+                            next.delete(item.name);
+                            setExpandedMenus(next);
+                          } else setExpandedMenus(openOnly(expandedMenus));
                         }}
                         className={cn(
                           "w-full group relative flex items-center gap-3 rounded-md text-sm font-medium transition-colors",

@@ -12,6 +12,20 @@
 import type { JobCard, ProductionOrder, DeptRow, DeptSched, PrevState } from "./types";
 import { jcMinutesTotal } from "../../lib/job-card-minutes";
 
+// A Fab Cut / Fab Sew row that gets NO sticker of its own: a sofa's Back
+// Cushion / Armrest / Headrest is sewn with the base, so the BASE sticker
+// travels with the whole assembly. An ACCESSORY is its own item even when its
+// BOM borrows one of those types (pillows are typed SOFA_CUSHION, the closest
+// of the six BOM types), so it keeps its sticker (BUG-2026-09-30-231).
+export const travelsWithBaseSticker = (row: {
+  wipType?: string;
+  category?: string;
+}): boolean =>
+  (row.wipType === "CUSHION" ||
+    row.wipType === "ARMREST" ||
+    row.wipType === "HEADREST") &&
+  (row.category || "").toUpperCase() !== "ACCESSORY";
+
 // Per (poId, deptCode, wipKey) -> JobCard index. The outer Map keys on
 // deptCode; the inner Map keys on wipKey ("" when none) plus a "*" entry
 // for the latest-due fallback across all wipKeys in that (PO, dept).
@@ -413,7 +427,7 @@ export const buildBaseRows = (
               return `${o.divanHeightInches}" Divan-${o.sizeLabel || o.sizeCode || ""}`;
             }
             // HB-producing depts
-            if (["FAB_CUT", "FAB_SEW", "FOAM_CUTTING", "FOAM", "UPHOLSTERY", "PACKING"].includes(jc.departmentCode) && totalH > 0) {
+            if (["FAB_CUT", "FAB_SEW", "FOAM_CUTTING", "FOAM", "FIBRE", "UPHOLSTERY", "PACKING"].includes(jc.departmentCode) && totalH > 0) {
               return `${o.productCode}-HB${totalH}"`;
             }
           }
@@ -547,6 +561,7 @@ export const buildBaseRows = (
               sched_WOOD_CUT:   buildSchedAgg(o.jobCards.filter((j) => j.departmentCode === "WOOD_CUT"),   today, o.id),
               sched_FRAMING:    buildSchedAgg(o.jobCards.filter((j) => j.departmentCode === "FRAMING"),    today, o.id),
               sched_WEBBING:    buildSchedAgg(o.jobCards.filter((j) => j.departmentCode === "WEBBING"),    today, o.id),
+              sched_FIBRE: buildSchedAgg(o.jobCards.filter((j) => j.departmentCode === "FIBRE"), today, o.id),
               sched_UPHOLSTERY: buildSchedAgg(o.jobCards.filter((j) => j.departmentCode === "UPHOLSTERY"), today, o.id),
               sched_PACKING:    buildSchedAgg(o.jobCards.filter((j) => j.departmentCode === "PACKING"),    today, o.id),
             }
@@ -558,6 +573,7 @@ export const buildBaseRows = (
               sched_WOOD_CUT:   buildSched(picker("WOOD_CUT"),   today, o.id, poJobCards),
               sched_FRAMING:    buildSched(picker("FRAMING"),    today, o.id, poJobCards),
               sched_WEBBING:    buildSched(picker("WEBBING"),    today, o.id, poJobCards),
+              sched_FIBRE: buildSched(picker("FIBRE"), today, o.id, poJobCards),
               sched_UPHOLSTERY: buildSched(picker("UPHOLSTERY"), today, o.id, poJobCards),
               sched_PACKING:    buildSched(picker("PACKING"),    today, o.id, poJobCards),
             }),

@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ArrowRight, TrendingUp, TrendingDown } from "lucide-react";
 import {
+  KPI_ROW,
   MUTED, GREEN, RED, AMBER, fmtN, fmtRM2, widgetPeriod, widgetPeriodLabel,
   periodLabel, dayLabel, isConfirmedOrder, type Period,
 } from "./dashboard-shared-lib";
@@ -75,7 +76,7 @@ function ActionTile({ label, value, hint, onOpen }: { label: string; value: numb
       onClick={onOpen}
       className="text-left rounded-md border border-[#E2DDD8] bg-white transition-shadow hover:shadow-md p-3 min-h-11 hover:bg-[#F7F5F3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#6B5C32]"
     >
-      <p className="text-2xl max-md:text-xl font-bold tabular-nums" style={{ color: value ? RED : value === 0 ? GREEN : MUTED }}>
+      <p className="text-2xl max-md:text-xl font-bold tabular-nums whitespace-nowrap" style={{ color: value ? RED : value === 0 ? GREEN : MUTED }}>
         {value == null ? "—" : fmtN(value)}
       </p>
       <p className="text-xs font-medium text-[#1F1D1B] flex items-center gap-1">
@@ -114,12 +115,12 @@ function Hero({
   children?: React.ReactNode;
 }) {
   return (
-    <Card>
+    <Card className="@container">
       <CardContent className="p-3 space-y-1">
         <p className="text-[11px] uppercase tracking-wide" style={{ color: MUTED }}>
           {label}
         </p>
-        <p className="text-2xl font-bold tabular-nums truncate text-[#1F1D1B]">{value}</p>
+        <p className="font-bold tabular-nums leading-tight whitespace-nowrap overflow-hidden text-ellipsis text-[clamp(0.875rem,8.5cqi,1.5rem)] text-[#1F1D1B]" title={value}>{value}</p>
         {children}
       </CardContent>
     </Card>
@@ -129,8 +130,8 @@ function Hero({
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
-      <p className="text-[10px] uppercase tracking-wide truncate" style={{ color: MUTED }}>{label}</p>
-      <p className="text-sm font-semibold tabular-nums truncate text-[#1F1D1B]">{value}</p>
+      <p className="text-[10px] uppercase tracking-wide break-words" style={{ color: MUTED }}>{label}</p>
+      <p className="text-sm font-semibold tabular-nums break-words text-[#1F1D1B]">{value}</p>
     </div>
   );
 }
@@ -281,7 +282,7 @@ export function AllOverviewView({
         Key operational bottlenecks &amp; priority action items
       </p>
 
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+      <div className={KPI_ROW}>
         <Hero label={`Total Revenue (${period.day ? "day" : period.mode === "monthly" ? "MTD" : "YTD"})`} value={formatCurrency(totals.revenueSen)}>
           <Delta pct={deltaPct} vs={totals.prevLabel || "—"} />
           <p className="text-xs" style={{ color: MUTED }}>{fmtN(totals.orders)} orders recorded</p>
@@ -320,7 +321,7 @@ export function AllOverviewView({
 
       <section aria-label="Needs action" className="space-y-2">
         <h3 className="text-sm font-semibold text-[#1F1D1B]">Needs action</h3>
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+        <div className={KPI_ROW}>
           <ActionTile
             label="Pending approvals"
             value={svc ? svc.filter((c) => c.approvalStatus === "PENDING").length : null}

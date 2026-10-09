@@ -11,6 +11,7 @@
 // ============================================================
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { todayYmdMY } from "@/lib/utils";
 import { LogOut, Plus, Clock, Search, ChevronDown, Megaphone } from "lucide-react";
 import {
   useT,
@@ -274,7 +275,7 @@ export default function WorkerMePage() {
   const [npShowForm, setNpShowForm] = useState(false);
   const [npKind, setNpKind] = useState<"NONPROD" | "ADD_PROD">("NONPROD");
   const [npDept, setNpDept] = useState("");
-  const [npDate, setNpDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [npDate, setNpDate] = useState(() => todayYmdMY());
   // The worker enters MINUTES (owner 2026-06-27: "20" meant 20 min, not 20h).
   // We store `npMinutes` as the raw input and convert to hours (minutes / 60)
   // only at submit time — the backend + efficiency math keep `hours` as the
@@ -646,7 +647,7 @@ export default function WorkerMePage() {
                 disabled={phoneSaving}
                 className="h-10 px-3 rounded bg-[#6B5C32] text-white text-sm font-semibold disabled:opacity-60"
               >
-                {phoneSaving ? "…" : "Save"}
+                {phoneSaving ? "…" : t("common.save")}
               </button>
             )}
           </div>
@@ -709,10 +710,10 @@ export default function WorkerMePage() {
                     onChange={(e) => setLeaveType(e.target.value)}
                     className="w-full h-10 px-2 rounded border border-[#D8D2CC] bg-white text-sm"
                   >
-                    <option value="ANNUAL">Annual</option>
-                    <option value="MEDICAL">Medical</option>
-                    <option value="UNPAID">Unpaid</option>
-                    <option value="EMERGENCY">Emergency</option>
+                    <option value="ANNUAL">{t("leave.type.ANNUAL")}</option>
+                    <option value="MEDICAL">{t("leave.type.MEDICAL")}</option>
+                    <option value="UNPAID">{t("leave.type.UNPAID")}</option>
+                    <option value="EMERGENCY">{t("leave.type.EMERGENCY")}</option>
                   </select>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
@@ -1135,7 +1136,7 @@ export default function WorkerMePage() {
           <span className="flex items-center gap-2">
             <Clock className="h-4 w-4 text-[#6B5C32]" />
             <span className="text-sm font-semibold">
-              Standard Times
+              {t("me.standardTimes")}
               {stdDept
                 ? ` · ${stdDept}`
                 : me.departmentCode
@@ -1152,8 +1153,8 @@ export default function WorkerMePage() {
           <div className="px-4 pb-4">
             <p className="text-xs text-[#8A8680] mb-2">
               {stdDepts.length > 1
-                ? "Standard minutes per WIP. Pick a department to view."
-                : "Standard minutes per WIP for your department."}
+                ? t("me.stdDescPick")
+                : t("me.stdDescOwn")}
             </p>
             {/* Single-department label — when the worker belongs to exactly
                 one department the selector is hidden, so show that dept as a
@@ -1192,7 +1193,7 @@ export default function WorkerMePage() {
                 type="text"
                 value={stdSearch}
                 onChange={(e) => setStdSearch(e.target.value)}
-                placeholder="Search product / WIP…"
+                placeholder={t("me.stdSearch")}
                 className="w-full h-10 pl-8 pr-3 rounded border border-[#D8D2CC] bg-white text-sm focus:outline-none focus:ring-2 focus:ring-[#6B5C32]"
               />
             </div>
@@ -1207,13 +1208,13 @@ export default function WorkerMePage() {
                 if (stdRows.length === 0) {
                   return (
                     <p className="text-sm text-[#8A8680] py-2">
-                      No standard times found for your department.
+                      {t("me.stdNone")}
                     </p>
                   );
                 }
                 if (shown.length === 0) {
                   return (
-                    <p className="text-sm text-[#8A8680] py-2">No match.</p>
+                    <p className="text-sm text-[#8A8680] py-2">{t("me.stdNoMatch")}</p>
                   );
                 }
                 return (

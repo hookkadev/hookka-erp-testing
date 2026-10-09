@@ -109,9 +109,11 @@ test("production dept page: VALID_DEPTS includes FOAM_CUTTING", () => {
   assert.ok(src.includes('"FOAM_CUTTING"'), "VALID_DEPTS missing FOAM_CUTTING");
 });
 
-test("production index: DeptCode union + overview width carry FOAM_CUTTING", () => {
+test("production index: overview stages + width carry FOAM_CUTTING", () => {
   const src = read("src/pages/production/index.tsx");
-  assert.ok(src.includes('"FOAM_CUTTING"'), "DeptCode union missing FOAM_CUTTING");
+  // The Overview sort/filter keys used to be a hardcoded DeptCode union; they
+  // now come from overviewStages() (built on utils DEPARTMENTS, checked below).
+  assert.ok(src.includes("buildOverviewStages(deptsResp?.data)"), "Overview stages must derive from overviewStages()");
   assert.ok(src.includes("FOAM_CUTTING: 108"), "overview default width missing FOAM_CUTTING");
 });
 

@@ -18,9 +18,8 @@
 // see src/pages/m/config/modules.ts). L2 detail routes (/m/<slug>/:id) land on
 // a ComingSoon detail until Phase 3 supplies the real detail screen.
 // ===========================================================================
-import { lazy, Suspense, useEffect, type ComponentType, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useState, type ComponentType, type ReactNode } from "react";
 import { Route, Routes } from "react-router-dom";
-import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { BottomTabBar, LeftRail } from "./components";
 import { M, M_FONT, M_MAX_WIDTH } from "./theme";
 import MobileHome from "./screens/Home";
@@ -41,6 +40,13 @@ import { MODULE_CONFIGS } from "./config/modules";
 import { preloadMobileCritical } from "./lib/preload";
 import { useAutoUpdateOnNavigate } from "@/lib/use-version-check";
 import { bootstrapMobileTheme } from "./lib/theme-mode";
+import {
+  ResponsiveLayoutProvider,
+  readRailExpandedPreference,
+  resolveResponsiveLayout,
+  useObservedWidth,
+  writeRailExpandedPreference,
+} from "./lib/responsive-layout";
 import "./theme-vars.css";
 
 // The dashboard screen is code-split: it is the only /m screen that needs
@@ -95,49 +101,83 @@ export default function MobileLayout() {
   // screen change (BUG-2026-09-23-184).
   useAutoUpdateOnNavigate();
 
-  // Fold detection — owner 2026-06-30: "折叠如果没有展开,应该是在电话
-  // 版本的;展开了之后,才在 Fold 版本". Galaxy Z Fold inner screen is
-  // ~884px wide in EITHER orientation (portrait or landscape) when unfolded,
-  // and the cover screen is ~390px wide when folded. So a single width
-  // threshold (>=720) is the correct gate — orientation does NOT enter the
-  // decision. Previously required landscape too, which made the inner screen
-  // in portrait incorrectly stay on phone mode.
-  const fold = useMediaQuery("(min-width: 720px)");
+  const [railPreferences, setRailPreferences] = useState(() => ({
+    "tablet-portrait": readRailExpandedPreference("tablet-portrait"),
+    "tablet-landscape": readRailExpandedPreference("tablet-landscape"),
+  }));
+  const [shellRef, shellWidth] = useObservedWidth<HTMLDivElement>();
+  const shellLayout = resolveResponsiveLayout(shellWidth);
+  const railExpanded = shellLayout.mode === "phone"
+    ? false
+    : railPreferences[shellLayout.mode];
+  const preferredShellLayout = resolveResponsiveLayout(
+    shellWidth,
+    undefined,
+    railExpanded,
+  );
+  const [contentRef, measuredContentWidth] = useObservedWidth<HTMLDivElement>(
+    Math.max(0, shellWidth - preferredShellLayout.railWidth),
+  );
+  const expectedContentWidth = Math.max(
+    0,
+    shellWidth - preferredShellLayout.railWidth,
+  );
+  // ResizeObserver updates after the rail has painted. Use the immediately
+  // derivable width during that one render so split eligibility never lags a
+  // user toggle by one frame.
+  const effectiveContentWidth = Math.abs(measuredContentWidth - expectedContentWidth) <= 1
+    ? measuredContentWidth
+    : expectedContentWidth;
+  const layout = resolveResponsiveLayout(
+    shellWidth,
+    effectiveContentWidth,
+    railExpanded,
+  );
+  const tablet = layout.mode !== "phone";
+  const compactRail = tablet && !railExpanded;
+  const toggleRail = () => {
+    if (layout.mode === "phone") return;
+    const mode = layout.mode;
+    setRailPreferences((current) => {
+      const expanded = !current[mode];
+      writeRailExpandedPreference(mode, expanded);
+      return { ...current, [mode]: expanded };
+    });
+  };
+
   return (
-    <div
-      style={{
-        minHeight: "100dvh",
-        backgroundColor: M.paper,
-        fontFamily: M_FONT,
-        color: M.raisin,
-        display: "flex",
-        // On fold, lay the left rail + content side-by-side; on phone, just
-        // center the content column (rail isn't rendered).
-        justifyContent: fold ? "flex-start" : "center",
-      }}
-    >
-      {fold ? <LeftRail /> : null}
+    <ResponsiveLayoutProvider value={layout}>
       <div
+        ref={shellRef}
         style={{
-          width: "100%",
-          // Fold: take all available width (LeftRail eats 198 on the left;
-          // the rest is for content + the 2-pane list/detail split).
-          // Phone: cap at the centered phone column.
-          maxWidth: fold ? "none" : M_MAX_WIDTH,
-          flex: fold ? 1 : "none",
           minHeight: "100dvh",
-          paddingBottom: fold
-            ? "24px"
-            : "calc(72px + env(safe-area-inset-bottom))",
-          position: "relative",
-          // Safety net — clip horizontal overflow so a wide child (chip
-          // strip, toolbar buttons, flow indicator) can't cause the WHOLE
-          // page to scroll horizontally. Each scrolling sub-region keeps
-          // its own overflowX:auto (SubTabs, StatusFlow, etc.).
-          overflowX: "hidden",
+          backgroundColor: M.paper,
+          fontFamily: M_FONT,
+          color: M.raisin,
+          display: "flex",
+          justifyContent: tablet ? "flex-start" : "center",
         }}
       >
-        <Routes>
+        {tablet ? (
+          <LeftRail compact={compactRail} onToggle={toggleRail} />
+        ) : null}
+        <div
+          ref={contentRef}
+          data-mobile-content
+          style={{
+            width: "100%",
+            maxWidth: tablet ? "none" : M_MAX_WIDTH,
+            flex: tablet ? 1 : "none",
+            minWidth: 0,
+            minHeight: "100dvh",
+            paddingBottom: layout.hasBottomNavigation
+              ? "calc(72px + env(safe-area-inset-bottom))"
+              : "24px",
+            position: "relative",
+            overflowX: "hidden",
+          }}
+        >
+          <Routes>
           <Route path="/" element={<MobileHome />} />
           <Route path="/more" element={<MobileMore />} />
 
@@ -170,7 +210,7 @@ export default function MobileLayout() {
                 path={`${cfg.slug}/:id`}
                 element={
                   L2 ? (
-                    fold ? (
+                    layout.canSplitDetail ? (
                       <TwoPane left={L1} right={L2} />
                     ) : (
                       L2
@@ -184,7 +224,7 @@ export default function MobileLayout() {
                 <Route
                   path={`${cfg.slug}/:id/item/:itemId`}
                   element={
-                    fold ? (
+                    layout.canSplitDetail ? (
                       <TwoPane
                         left={<DocumentDetailScreen config={cfg} />}
                         right={<LineItemDetailScreen config={cfg} />}
@@ -201,10 +241,11 @@ export default function MobileLayout() {
 
           {/* Unknown /m/* → Home. */}
           <Route path="*" element={<MobileHome />} />
-        </Routes>
+          </Routes>
+        </div>
+        {layout.hasBottomNavigation ? <BottomTabBar /> : null}
       </div>
-      {fold ? null : <BottomTabBar />}
-    </div>
+    </ResponsiveLayoutProvider>
   );
 }
 
@@ -212,10 +253,13 @@ export default function MobileLayout() {
  * scrollbars. dc13 v13 Fold layout. */
 function TwoPane({ left, right }: { left: ReactNode; right: ReactNode }) {
   return (
-    <div style={{ display: "flex", height: "100dvh", overflow: "hidden" }}>
+    <div
+      data-mobile-split-view
+      style={{ display: "flex", height: "100dvh", overflow: "hidden" }}
+    >
       <div
         style={{
-          width: 340,
+          width: "clamp(320px, 38%, 340px)",
           flex: "none",
           borderRight: `1px solid ${M.border}`,
           overflowY: "auto",

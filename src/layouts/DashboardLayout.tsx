@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Navigate, Routes, ScrollRestoration, useLocation } from "react-router-dom";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { prefetchRoutesWhenIdle } from "@/lib/prefetch-routes";
@@ -12,6 +12,7 @@ import { useAutoUpdateOnNavigate } from "@/lib/use-version-check";
 import { DASHBOARD_ROUTE_ELEMENTS } from "@/dashboard-routes";
 import { FloatingChatButton } from "@/components/assistant/FloatingChatButton";
 import { MobileBottomNav } from "@/components/layout/mobile-bottom-nav";
+import { isPhoneUa, prefersDesktop, setPreferDesktop, shouldRedirectToMobile } from "@/lib/prefer-desktop";
 
 // Lives inside ToastProvider so it can pop a toast when a new deploy lands.
 // Polls for a new bundle hash every 2 min + on focus. On change: offers an
@@ -76,6 +77,20 @@ export default function DashboardLayout() {
   // sidebar full (not the icons-only rail) so the drawer is readable.
   const isMobile = useMediaQuery("(max-width: 767px)");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  // Publishes the sticky top block's live height as --app-sticky-h on <html>,
+  // so a page with its own sticky header (the dashboard) docks UNDER it instead
+  // of over it. It wraps to 2-3 rows below lg, so it cannot be a constant.
+  const stickyRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = stickyRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() =>
+      document.documentElement.style.setProperty("--app-sticky-h", `${el.offsetHeight}px`),
+    );
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   const closeMobileNav = useCallback(() => setMobileNavOpen(false), []);
 
   // Auto-collapse on narrow / portrait viewports — the always-on 240px
@@ -160,10 +175,11 @@ export default function DashboardLayout() {
   // A small *desktop* window also stays on desktop (no mobile UA token). The
   // worker portal (/worker) is a separate layout and never reaches here. The
   // early return is AFTER all hooks above (rules-of-hooks safe).
-  const isMobileDevice =
-    typeof navigator !== "undefined" &&
-    /Android|iPhone|iPod|Mobile/i.test(navigator.userAgent);
-  if (isMobileDevice) return <Navigate to="/m" replace />;
+  // "Open the full desktop app" in /m More lets a phone through for the
+  // session (src/lib/prefer-desktop.ts); it then gets a way back below.
+  const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+  if (shouldRedirectToMobile(ua, prefersDesktop())) return <Navigate to="/m" replace />;
+  const phoneOnDesktop = isPhoneUa(ua);
 
   return (
     <ToastProvider>
@@ -182,12 +198,24 @@ export default function DashboardLayout() {
         {/* Full-width on phones (no rail); rail-padded at md+. Print drops the
             rail offset so content starts at the page edge. */}
         <div className={`pl-0 ${sidebarCollapsed ? "md:pl-14" : "md:pl-60"} transition-all duration-300 print:!pl-0`}>
-          <div className="print:hidden">
+          {/* Sticky as one block: a sticky child cannot leave its parent, so
+              the header's own sticky did nothing while this wrapper scrolled. */}
+          <div ref={stickyRef} className="sticky top-0 z-30 print:hidden">
             <Topbar />
             <Breadcrumbs />
           </div>
           {/* Extra bottom padding on phones so content clears the bottom nav. */}
           <main className="p-4 pb-24 md:p-6 print:!p-0">
+            {phoneOnDesktop && (
+              <a
+                href="/m"
+                onClick={() => setPreferDesktop(false)}
+                className="mb-3 flex items-center justify-between rounded-md border border-[#D8D2CC] bg-[#F4EFE6] px-3 py-2 text-xs text-[#6B655C] print:hidden"
+              >
+                <span>You are on the desktop site.</span>
+                <span className="font-semibold text-[#6B5C32]">Back to mobile app</span>
+              </a>
+            )}
             <Routes>{DASHBOARD_ROUTE_ELEMENTS}</Routes>
           </main>
         </div>

@@ -9,11 +9,14 @@
 // from /api/scan-supplier/extract:
 //   · permission gate = accounting:create (finance clerks don't hold
 //     purchase-orders:create)
-//   · single-doc contract — the FIRST detected doc prefills the form; a
-//     multi-doc PDF surfaces a hint so the operator splits it
+//   · the FIRST detected doc sits at the top level (a single-bill form uses
+//     it and hints when there are more); `docs` carries every doc in the file
+//     — Scan Bills makes one row per bill, a payment voucher takes them all
+//     (owner 2026-10-01)
 //   · amounts converted to integer SEN here (forms are MoneyInput-style)
-//   · no learning-loop sample rows (finance parties aren't suppliers; the
-//     per-entity distill infra can be extended later if volume justifies it)
+//   · no learning-loop sample rows (finance parties aren't suppliers). What
+//     finance scans learn — the account per line — comes from finance's own
+//     saved vouchers and bills, client-side (src/lib/scan-account-learn.ts)
 //
 // The result only PREFILLS the form — the operator reviews, picks the GL
 // account(s), and saves through the normal POST. Nothing posts automatically.
@@ -98,28 +101,37 @@ app.post("/extract", async (c) => {
 
   const env = result.data as { docs?: RawDoc[] };
   const docs = Array.isArray(env.docs) ? env.docs : [];
-  const d = docs[0] ?? {};
+  const shaped = docs.map(shapeDoc);
+  // The first bill at the top level (every caller reads it); `docs` carries
+  // EVERY bill the file holds — one PDF can bundle several (owner 2026-10-01:
+  // the batch scan opens one record per bill, not just the first).
+  return c.json({
+    success: true,
+    data: {
+      ...(shaped[0] ?? shapeDoc({})),
+      extraDocs: docs.length > 1 ? docs.length - 1 : 0,
+      docs: shaped,
+    },
+  });
+});
+
+function shapeDoc(d: RawDoc) {
   const lines = (Array.isArray(d.lines) ? d.lines : [])
     .map((l) => ({
       description: String(l.description ?? "").trim(),
       amountSen: toSen(l.amount) ?? (toSen(l.unitPrice) !== null && Number(l.qty) ? Math.round((Number(l.unitPrice) || 0) * (Number(l.qty) || 0) * 100) : null),
     }))
     .filter((l) => l.amountSen !== null && l.amountSen > 0) as { description: string; amountSen: number }[];
-
-  return c.json({
-    success: true,
-    data: {
-      partyName: String(d.supplierName ?? "").trim() || null,
-      docType: String(d.docType ?? "").trim() || null,
-      docNo: String(d.docNo ?? "").trim() || null,
-      docDate: /^\d{4}-\d{2}-\d{2}$/.test(String(d.docDate ?? "")) ? String(d.docDate) : null,
-      lines,
-      subtotalSen: toSen(d.subtotal),
-      taxSen: toSen(d.tax),
-      totalSen: toSen(d.total),
-      extraDocs: docs.length > 1 ? docs.length - 1 : 0,
-    },
-  });
-});
+  return {
+    partyName: String(d.supplierName ?? "").trim() || null,
+    docType: String(d.docType ?? "").trim() || null,
+    docNo: String(d.docNo ?? "").trim() || null,
+    docDate: /^\d{4}-\d{2}-\d{2}$/.test(String(d.docDate ?? "")) ? String(d.docDate) : null,
+    lines,
+    subtotalSen: toSen(d.subtotal),
+    taxSen: toSen(d.tax),
+    totalSen: toSen(d.total),
+  };
+}
 
 export default app;

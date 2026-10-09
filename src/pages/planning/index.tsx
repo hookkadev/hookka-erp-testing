@@ -141,6 +141,7 @@ const DEPARTMENTS = [
   { id: "dept-3", code: "WOOD_CUT", name: "Wood Cutting", shortName: "Wood Cut", color: "#F59E0B" },
   { id: "dept-14", code: "FOAM_CUTTING", name: "Foam Cutting", shortName: "Foam Cut", color: "#A78BFA" },
   { id: "dept-4", code: "FOAM", name: "Foam Bonding", shortName: "Foam Bonding", color: "#8B5CF6" },
+  { id: "dept-15", code: "FIBRE", name: "Fibre", shortName: "Fibre", color: "#84CC16" },
   { id: "dept-5", code: "FRAMING", name: "Framing", shortName: "Framing", color: "#F97316" },
   { id: "dept-6", code: "WEBBING", name: "Webbing", shortName: "Webbing", color: "#10B981" },
   { id: "dept-7", code: "UPHOLSTERY", name: "Upholstery", shortName: "Upholstery", color: "#F43F5E" },
@@ -157,6 +158,7 @@ const DEPT_DRILL_ROUTE: Record<string, string> = {
   WOOD_CUT: "/planning/dept/wood-cutting",
   FOAM_CUTTING: "/planning/dept/foam-cutting",
   FOAM: "/planning/dept/foam-bonding",
+  FIBRE: "/planning/dept/fibre",
   FRAMING: "/planning/dept/framing",
   WEBBING: "/planning/dept/webbing",
   UPHOLSTERY: "/planning/dept/upholstery",
@@ -178,7 +180,10 @@ const HOURS_PER_DAY = 9;
 // days, Mon-Sat); shortened to 7 so the average reflects more
 // recent production reality. Pull out as a single constant so a
 // future "make this configurable per-dept" lands in one place.
-const ROLLING_WINDOW_DAYS = 7;
+// Back to 14 on 2026-10-08 (owner), together with the dashboard's Plant
+// Load card (ROLLING_DAYS in api/routes/dashboard-overview.ts) so both
+// pages show the same capacity.
+const ROLLING_WINDOW_DAYS = 14;
 
 // Wei Siang 2026-05-15: Capacity Loading chart window. Operator
 // asked for ~21 days total split as "past production" + "future
@@ -251,6 +256,7 @@ const TRACKER_DEPARTMENTS = [
   { name: "Wood Cut",  code: "WOOD_CUT",   color: "#F59E0B" },
   { name: "Foam Cut",  code: "FOAM_CUTTING", color: "#A78BFA" },
   { name: "Foam Bonding", code: "FOAM",    color: "#8B5CF6" },
+  { name: "Fibre",     code: "FIBRE",      color: "#84CC16" },
   { name: "Framing",   code: "FRAMING",    color: "#F97316" },
   { name: "Webbing",   code: "WEBBING",    color: "#10B981" },
   { name: "Upholstery",code: "UPHOLSTERY", color: "#F43F5E" },
@@ -801,6 +807,7 @@ export default function PlanningPage() {
     { code: "FAB_SEW",    label: "Fabric Sewing" },
     { code: "FOAM_CUTTING", label: "Foam Cutting" },
     { code: "FOAM",       label: "Foam Bonding" },
+    { code: "FIBRE",      label: "Fibre" },
     { code: "WOOD_CUT",   label: "Wood Cutting" },
     { code: "FRAMING",    label: "Framing" },
     { code: "UPHOLSTERY", label: "Upholstery" },
@@ -2551,7 +2558,7 @@ export default function PlanningPage() {
                                 style={{ height: `${barHeightPct}%` }}
                               />
                               {/* 100% reference: a tick at the height
-                                  that = 7-day capacity on this dept's
+                                  that = 14-day capacity on this dept's
                                   own scale. Adjacent ticks line up into
                                   a continuous dashed rule across the
                                   whole chart. */}
@@ -3246,6 +3253,7 @@ const PROPOSAL_DEPT_LABEL: Record<string, string> = {
   WEBBING: "Webbing",
   FOAM_CUTTING: "Foam Cutting",
   FOAM: "Foam Bonding",
+  FIBRE: "Fibre",
   UPHOLSTERY: "Upholstery",
   PACKING: "Packing",
 };

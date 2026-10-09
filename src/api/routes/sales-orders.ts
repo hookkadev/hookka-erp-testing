@@ -14,6 +14,7 @@ import { Hono } from "hono";
 import type { Env } from "../worker";
 import { requirePermission } from "../lib/rbac";
 import { customerScopeSql, isCustomerScoped } from "../lib/customer-scope";
+import { saveStateKpisLater } from "../lib/dashboard-state-snapshot";
 import { lateToCustomerOrders } from "../lib/kpi-metrics";
 import { assertCustomerBillable } from "../lib/customer-stage";
 import { emitAudit, buildAuditStatement } from "../lib/audit";
@@ -98,6 +99,7 @@ import {
   soListToOrdersDue,
   ORDERS_DUE_DEFAULT_TOP,
   findIncompleteBomProducts,
+  findEmptyWipProducts,
   rowToStatusChange,
   rowToPriceOverride,
   genSoId,
@@ -115,6 +117,7 @@ import {
   canonicalizeRepairScopesAgainstBom,
   ensurePendingMigrations,
   pushNewlyCreatedJobCardsToSheet,
+  buildPoDeliveryMap,
 } from "./sales-orders/_helpers";
 import type {
   SalesOrderRow,
@@ -1123,6 +1126,11 @@ app.get("/stats", async (c) => {
     "",
     c,
   );
+  // Daily save for a finished month's Outstanding tile: the whole-company,
+  // default-filter figure only (scoped and Service Order calls returned above).
+  if (c.req.query("isStock") !== "all") {
+    saveStateKpisLater(c, orgId, { outstandingItemsSen: Number(data.outstandingItemsSen) || 0 });
+  }
   return c.json({ success: true, ...data });
 });
 
@@ -1308,8 +1316,23 @@ app.get("/late-to-customer", async (c) => {
     );
   }
   const scope = await customerScopeSql(c, "so.customerId");
-  const rows = await lateToCustomerOrders(c, period, scope);
+  // ?all=1 — every order shipped that month, each tagged LATE / EARLY /
+  // ON_TIME. The KPI card's inline order list.
+  const rows = await lateToCustomerOrders(c, period, scope, c.req.query("all") === "1");
   return c.json({ success: true, period, data: rows });
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/sales-orders/empty-wip?productCodes=A,B — which of these products
+// have an empty WIP tab (or no BOM). Feeds the per-line warning on Create SO;
+// see findEmptyWipProducts. Registered BEFORE /:id.
+// ---------------------------------------------------------------------------
+app.get("/empty-wip", async (c) => {
+  const denied = await requirePermission(c, "sales-orders", "read");
+  if (denied) return denied;
+  const codes = (c.req.query("productCodes") ?? "").split(",");
+  const data = await findEmptyWipProducts(c.var.DB, codes);
+  return c.json({ success: true, data });
 });
 
 // ---------------------------------------------------------------------------
@@ -3076,7 +3099,8 @@ app.get("/:id", async (c) => {
   // status. Lets the Linked Production Orders table show a real per-line
   // delivery state (DO no. + Delivered/Dispatched/…) instead of the operator
   // cross-checking the Delivery page. Reuses the DOs already fetched above.
-  const poDeliveryMap = new Map<string, { doNo: string; status: string }>();
+  // A live DO beats a cancelled one (BUG-2026-09-30-225).
+  let poDeliveryMap = new Map<string, { doNo: string; status: string }>();
   if (doIds.length > 0) {
     const diRes = await c.var.DB.prepare(
       `SELECT productionOrderId, deliveryOrderId
@@ -3086,13 +3110,7 @@ app.get("/:id", async (c) => {
     )
       .bind(...doIds)
       .all<{ productionOrderId: string; deliveryOrderId: string }>();
-    const doById = new Map(linkedDOs.map((d) => [d.id, d]));
-    for (const di of diRes.results ?? []) {
-      const d = doById.get(di.deliveryOrderId);
-      if (d && !poDeliveryMap.has(di.productionOrderId)) {
-        poDeliveryMap.set(di.productionOrderId, { doNo: d.doNo, status: d.status });
-      }
-    }
+    poDeliveryMap = buildPoDeliveryMap(diRes.results ?? [], linkedDOs);
   }
 
   // Invoices: by SO link OR by any of this SO's DOs. A consolidated invoice

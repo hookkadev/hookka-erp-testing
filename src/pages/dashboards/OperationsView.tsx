@@ -6,7 +6,7 @@ import {
 import { useCachedJson } from "@/lib/cached-fetch";
 import { formatCurrency } from "@/lib/utils";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { TAUPE, TEAL, AMBER, MUTED, BORDER, fmtN, fmtRMAxis, inPeriod, inFocus, overallEfficiencyPct, dayLabel, periodLabel, type Period, type OpsSub } from "./dashboard-shared-lib";
+import { KPI_ROW, TAUPE, TEAL, AMBER, MUTED, BORDER, fmtN, fmtRMAxis, inPeriod, inFocus, overallEfficiencyPct, dayLabel, periodLabel, type Period, type OpsSub } from "./dashboard-shared-lib";
 import { Kpi, LiveBadge } from "./dashboard-shared";
 import { AttendanceLogCard } from "./AttendanceLogCard";
 import { DueSoonWorklist, type ProdOrderSummary } from "./OverdueCards";
@@ -196,7 +196,7 @@ export function OperationsView({
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
              <div className="xl:col-span-2">
               <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[#6B7280]">Orders</p>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              <div className={KPI_ROW}>
               <Kpi
                 label="Overdue Orders"
                 value={fmtN(totalOverdue)}
@@ -249,7 +249,7 @@ export function OperationsView({
                     : undefined
                 }
                 valueColorClass="text-[#3E6570]"
-                valueSizeClass="text-xl"
+               
               />
               </div>
              </div>

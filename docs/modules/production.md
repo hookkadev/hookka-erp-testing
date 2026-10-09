@@ -1,7 +1,30 @@
 # Production & BOM — Module Guide
 
-> **Last verified: 2026-09-29** (branch `chore/sync-main-into-staging`, staging<-main merge): `ProductionPage` :564, `filteredOrders` :2930, `loadFgStickers` / `packingStickerUrl` :5643 / :5602 re-derived. Nothing else re-checked.
+> **Last verified: 2026-10-08** (branch `fix/bom-module-guide-anchors`, to `staging`): the `bom.tsx` anchors (`BOMManagementPage` :5922, `EditBOMDialog` :2945, `MasterTemplatesDialog` :3807), read from `src/pages/bom.tsx` after #752 moved the hard-coded variant lists to `src/lib/bom-variant-fields.ts`. Nothing else re-checked.
+> **Last verified: 2026-10-07** (branch `chore/sync-staging-from-main-1007`, staging<-main merge): the `bom.tsx` anchors (`BOMManagementPage` :5957, `EditBOMDialog` :2957, `MasterTemplatesDialog` :3819) re-measured on the merged file; the `ProductionPage` / `filteredOrders` / `loadFgStickers` / `packingStickerUrl` anchors keep staging's (632 / 3014 / 5767 / 5726, re-checked). Nothing else re-checked.
+> **Last verified: 2026-10-07** (branch `feat/master-bom-two-pane`, to `staging`): the `bom.tsx` anchors (`BOMManagementPage` :6030, `EditBOMDialog` :2952, `MasterTemplatesDialog` :3839) and the 6,513-line count, read from `src/pages/bom.tsx` after Master BOM Templates moved to the two-pane layout and `SubWIPTree` was deleted. Nothing else re-checked.
+> **Last verified: 2026-10-06** (branch `chore/sync-staging-from-main-1006`, staging<-main merge): `bom.tsx` anchors take main's (:6304 / :3192 / :4079, the merged file is main's); `ProductionPage` :632, `filteredOrders` :3014, `loadFgStickers` / `packingStickerUrl` :5767 / :5726 re-measured on the merged file. Nothing else re-checked.
 
+> **Last verified: 2026-10-05** (branch `feat/bom-manual-minutes`): only the `bom.tsx` anchors (`BOMManagementPage`, `EditBOMDialog`, `MasterTemplatesDialog`) and the minute-rates gotcha, read from `src/pages/bom.tsx`.
+> **Last verified: 2026-10-02** (branch `chore/sync-staging-from-main-1002`, staging<-main merge): the `ProductionPage`, `filteredOrders`, `loadFgStickers` / `packingStickerUrl`, `BOMManagementPage` and `EditBOMDialog` / `MasterTemplatesDialog` anchors re-measured on the merged files. Nothing else re-checked.
+> **Last verified: 2026-09-30** (branch `chore/sync-staging-from-main-0930`, staging<-main merge): only the `ProductionPage`, `filteredOrders` and `loadFgStickers` / `packingStickerUrl` anchors, re-derived on the merged file.
+>
+> **Last verified: 2026-09-30** (branch `feat/production-overview-card-filters`): only the `ProductionPage`, `filteredOrders` and
+> `loadFgStickers` / `packingStickerUrl` anchors, re-derived after the Cards filter strip (and its module-scope
+> `AnchoredPopover` / `FilterPill`) was added.
+>
+> **Last verified: 2026-09-30** (branch `feat/production-overview-cards`): only the `ProductionPage`, `filteredOrders` and
+> `loadFgStickers` / `packingStickerUrl` anchors, re-derived after the Overview Cards view was added.
+>
+> **Last verified: 2026-09-29** (branch `chore/sync-main-into-staging`, staging<-main merge): `ProductionPage` :564, `filteredOrders` :2930, `loadFgStickers` / `packingStickerUrl` :5643 / :5602 re-derived. Nothing else re-checked.
+>
+> **Last verified: 2026-10-05** (branch `fix/bom-master-template-accessory`): only the `bom-master-templates.ts` line count, read from the file. Nothing else re-checked.
+>
+> **Last verified: 2026-10-05** (branch `fix/bom-minutes-leading-zero-main`): only the `bom.tsx` anchors (`BOMManagementPage`, `EditBOMDialog`, `MasterTemplatesDialog`), re-read after `parseMinutes` moved them 5 lines.
+> **Last verified: 2026-10-05** (branch `feat/bom-manual-minutes-main`): only the `bom.tsx` anchors (`BOMManagementPage`, `EditBOMDialog`, `MasterTemplatesDialog`) and the minute-rates gotcha, read from `src/pages/bom.tsx`.
+> **Last verified: 2026-09-30** (branch `feat/production-overview-cards-main`): only the `ProductionPage`, `filteredOrders` and
+> `loadFgStickers` / `packingStickerUrl` anchors, re-derived after the Overview Cards view (#592 / #595 / #596) was brought to `main`.
+>
 > **Last verified: 2026-09-29** (branch `feat/production-multi-select-filters`): only the `ProductionPage`,
 > `filteredOrders` and `loadFgStickers` / `packingStickerUrl` anchors, re-derived after the filter-bar options moved to module scope.
 >
@@ -22,20 +45,20 @@
 > Self-navigating docs (L2). Repo-wide map: [[CODEBASE-MAP]]. Never grep the whole repo — use the file:line below.
 
 ## What it does
-Owns the shop floor: a **dept-tabbed WIP board** (one production_order per confirmed SO item), the **job cards** each PO explodes into, and the **BOM** that drives the explosion. A confirmed SO's production_orders (created upstream in `sales-orders.ts`) are broken into per-department job cards via the BOM's `wipComponents` (`breakBomIntoWips`); workers **scan** each dept complete on the phone, which advances the card, recomputes PO status/progress, cascades completion back to the SO/CO, and fires the **cost cascade** (RM consumption, labour posting, FG batch cost). The board is one 9,643-line page driven entirely by `activeTab` (dept code). **BOM Management** (`bom.tsx`, 6,613 lines) edits `bom_templates` + `bom_versions`, master templates (Bedframe/Sofa/Accessory), per-dept production-time minute rates, and CNC drilldown templates.
+Owns the shop floor: a **dept-tabbed WIP board** (one production_order per confirmed SO item), the **job cards** each PO explodes into, and the **BOM** that drives the explosion. A confirmed SO's production_orders (created upstream in `sales-orders.ts`) are broken into per-department job cards via the BOM's `wipComponents` (`breakBomIntoWips`); workers **scan** each dept complete on the phone, which advances the card, recomputes PO status/progress, cascades completion back to the SO/CO, and fires the **cost cascade** (RM consumption, labour posting, FG batch cost). The board is one 9,643-line page driven entirely by `activeTab` (dept code). **BOM Management** (`bom.tsx`, 6,513 lines) edits `bom_templates` + `bom_versions`, master templates (Bedframe/Sofa/Accessory), per-dept production-time minute rates, and CNC drilldown templates.
 
 ## Entry points
 - Pages
-  - `/production` → `src/pages/production/index.tsx:564` (`ProductionPage` — dept-tabbed WIP board; `activeTab` ∈ ALL/UPHOLSTERY/PACKING/FOAM/FAB_CUT/FAB_SEW)
+  - `/production` → `src/pages/production/index.tsx:631` (`ProductionPage` — dept-tabbed WIP board; `activeTab` ∈ ALL/UPHOLSTERY/PACKING/FOAM/FAB_CUT/FAB_SEW)
   - `/production/folders` → `src/pages/production/folders.tsx:39` (`ProductionFoldersPage`) · `/folder-detail` → `src/pages/production/folder-detail.tsx`
   - `/production/tracker` → redirect to `/planning?tab=tracker` (`src/dashboard-routes.tsx`). The Master Tracker lives as a TAB of the Planning page; the standalone `production/tracker.tsx` was deleted 2026-08-13 — unreachable since the route became a redirect, imported nowhere. **`PlanningPage` does not read `?tab=` yet** (`activeTab` is local state), so this redirect and the Production page's own "Master Tracker" button both land on Capacity Overview.
   - `/production/scan` → `src/pages/production/scan.tsx` (shop-floor dept scan) · `/production/fg-scan` → `src/pages/production/fg-scan.tsx`
   - `/production/wip-times` → `src/pages/production/wip-times.tsx` (per-dept minute rates)
-  - `/bom` → `src/pages/bom.tsx:6245` (`BOMManagementPage`) · `/cnc-templates` → `src/pages/cnc-templates.tsx`
+  - `/bom` → `src/pages/bom.tsx:5922` (`BOMManagementPage`) · `/cnc-templates` → `src/pages/cnc-templates.tsx`
 - API routes
   - PO / job-card / WIP / scan **handlers** → `src/api/routes/production-orders.ts` (3903 lines); every shared
     function lives in `src/api/routes/production-orders/_helpers.ts` (5799). Mounted `worker.ts:1233`.
-  - BOM templates + versions → `src/api/routes/bom.ts` (1454) · master variants → `bom-master-templates.ts` (243)
+  - BOM templates + versions → `src/api/routes/bom.ts` (1454) · master variants → `bom-master-templates.ts` (271)
   - Job-card reads + event timeline → `job-cards.ts` (804) · folders group/ungroup → `production-folders.ts` (461)
   - CNC Model→Size/Seat derive → `cnc-templates.ts` (1322) · minute counts → `wip-times.ts` (588) · due-date buffer → `production-leadtimes.ts` (625)
   - BOM explosion engine → `src/api/lib/bom-wip-breakdown.ts` · cost cascade → `src/api/lib/po-cost-cascade.ts`
@@ -55,16 +78,16 @@ Owns the shop floor: a **dept-tabbed WIP board** (one production_order per confi
 3. **PO status recompute + completion cascade** — `recomputePoStatusAndProgress` (`_helpers.ts:4133`) is the single source of truth for PO `status` + progress. On full completion it fans out to `postProductionOrderCompletion` (`fg-completion.ts`, FG units/batches), `postJobCardLabor` (`po-cost-cascade.ts:953`), and the SO/CO cascades (`cascadePoCompletionToSO` `_helpers.ts:3900` / `cascadeUpholsteryToSO` `:3536` / `cascadeCNCompletionToCO` `:3994`).
 4. **Cost cascade** — on scan/completion: `consumeRawMaterialsForPO` (`po-cost-cascade.ts:803`, RM_ISSUE), `postJobCardLabor` (`:953`, LABOR_POSTED — idempotent via a `cost_ledger` check in the scan handler), `backfillFGBatchCost` (`:1153`), `postWIPCompletionMarker` (`:1276`). All append-only to `cost_ledger`.
 5. **Stock PO create** — `app.post("/stock")` (`production-orders.ts:1187`) builds make-to-stock POs (no SO). Board list read is `app.get("/")` (`:726`) via `fetchFilteredPOs` (`_helpers.ts:1444`); board summary `app.get("/board")` (`:3301`).
-6. **BOM edit** — `bom.tsx` `EditBOMDialog` (`:2963`) → `PUT /templates/:id` (`bom.ts:484`); master templates via `MasterTemplatesDialog` (`bom.tsx:3893`). Per-dept minute rates are edited on `src/pages/production/wip-times.tsx` (backed by `wip-times.ts`) and land in `bom_templates.wipComponents`.
+6. **BOM edit** — `bom.tsx` `EditBOMDialog` (`:2957`) → `PUT /templates/:id` (`bom.ts:484`); master templates via `MasterTemplatesDialog` (`bom.tsx:3819`). Per-dept minute rates are edited on `src/pages/production/wip-times.tsx` (backed by `wip-times.ts`) and land in `bom_templates.wipComponents`.
 
 ## Key functions / sections (locate-to-function)
 | Symbol / section | file:line | Role |
 |---|---|---|
-| `ProductionPage` | `src/pages/production/index.tsx:564` | WIP board; every column/row branches on `activeTab` |
-| `filteredOrders` (memo) | `src/pages/production/index.tsx:2930` | Dept-narrow + overdue-set grid filter |
-| `loadFgStickers` / `packingStickerUrl` | `src/pages/production/index.tsx:5643 / 5602` | FG sticker set (immediate paint → /p/ token upgrade) |
-| `BOMManagementPage` | `src/pages/bom.tsx:6245` | BOM page shell (tabs, list) |
-| `EditBOMDialog` / `MasterTemplatesDialog` | `src/pages/bom.tsx:3070 / 4001` | L1+WIP editor / master variants |
+| `ProductionPage` | `src/pages/production/index.tsx:632` | WIP board; every column/row branches on `activeTab` |
+| `filteredOrders` (memo) | `src/pages/production/index.tsx:3014` | Dept-narrow + overdue-set grid filter |
+| `loadFgStickers` / `packingStickerUrl` | `src/pages/production/index.tsx:5767 / 5726` | FG sticker set (immediate paint → /p/ token upgrade) |
+| `BOMManagementPage` | `src/pages/bom.tsx:5922` | BOM page shell (tabs, list) |
+| `EditBOMDialog` / `MasterTemplatesDialog` | `src/pages/bom.tsx:2945 / 3807` | L1+WIP editor / master variants |
 | `rowToPO` | `production-orders/_helpers.ts:905` | PO row → API shape (dual-keyed reads) |
 | `applyWipInventoryChange` | `production-orders/_helpers.ts:2574` | WIP inventory change; idempotent ONLY when `orgId` passed |
 | `recomputePoStatusAndProgress` | `production-orders/_helpers.ts:4133` | Single source of truth for PO status/progress |
@@ -89,7 +112,7 @@ Owns the shop floor: a **dept-tabbed WIP board** (one production_order per confi
 - **Production locks are inviolate.** COMPLETED job_cards / non-PENDING fg_units must not be overridden for cosmetic edits; suggest a UI fix instead.
 - **Snapshot must stay in sync.** `production_orders_list_snapshot` is a denormalized fast-read cache (serve-stale + background refresh) — every write to `production_orders` must keep it current, else the list serves the pre-write row for the rebuild window.
 - **Migrations are inert** unless runtime self-applied — new columns reach prod only via `ALTER TABLE … ADD COLUMN IF NOT EXISTS` in `ensurePendingMigrations` (`production-orders/_helpers.ts:98`), awaited before the first write.
-- **Minute rates land in `bom_templates.wipComponents`** via `wip-times.tsx` + `wip-times.ts`; they feed `productionCostRatePerMinuteSen` in the cost cascade. (An earlier version of this doc named a `ProductionTimesDialog` in `bom.tsx` — no such component exists in the tree as of 2026-08-13.)
+- **Minute rates land in `bom_templates.wipComponents`** via the typed minutes box on every BOM process row (`MinutesInput` in `bom.tsx`; the CAT 1-14 dropdown was removed 2026-10-05) and via `wip-times.tsx` + `wip-times.ts`; they feed `productionCostRatePerMinuteSen` in the cost cascade. (An earlier version of this doc named a `ProductionTimesDialog` in `bom.tsx` — no such component exists in the tree as of 2026-08-13.)
 - **camelCase DB columns** are dual-keyed (`r.camelCase ?? r.snake_case`); db-pg `toCamel` can't recover folded-lowercase camelCase. New columns snake_case; a camelCase write column needs a `column-rename-map.json` entry or it 400s.
 - **CNC hierarchy is FE-derived.** `cnc_templates` has no category column (from `products.category`) and `total_height` doubles as sofa seat size — no migration for the Model→Size/Seat→Files hierarchy.
 - **Packing rack → warehouse occupancy.** Office PATCH `/:id` (`production-orders.ts:3813` — this said `:8419`, the PRE-SPLIT line, which is past the end of the 3,944-line file), the public /p/ scan, and worker scan ALL funnel through `applyPackingRack` (`packing-rack-write.ts:71`), which also mirrors ONE `rack_items` row per piece + recomputes `rack_locations.status`. Piece identity comes from the shared `packingPieceIdentity` (`packing-piece-identity.ts:48`) — don't re-inline the formula (BUG-2026-06-25-007).

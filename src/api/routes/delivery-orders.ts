@@ -26,6 +26,16 @@ import {
 import { requirePermission, requireReadOrDashboardTab } from "../lib/rbac";
 import { readIdempotencyKey, withIdempotency } from "../lib/idempotency";
 import { customerScopeSql, salesOrderScopeSql, isCustomerScoped } from "../lib/customer-scope";
+import { saveStateKpisLater } from "../lib/dashboard-state-snapshot";
+
+// Today's dispatch-chain money for the dashboard's daily Pending Delivery save
+// (the same DRAFT / LOADED + IN_TRANSIT fold the tile does).
+function dispatchKpis(v: Record<string, number> | undefined) {
+  return {
+    pendingDispatchSen: v?.DRAFT ?? 0,
+    inTransitSen: (v?.LOADED ?? 0) + (v?.IN_TRANSIT ?? 0),
+  };
+}
 import { getOrgId } from "../lib/tenant";
 import { emitAudit } from "../lib/audit";
 import { checkDeliveryOrderLocked } from "../lib/lock-helpers";
@@ -55,6 +65,7 @@ import {
 // of the simplified branded fallback. buildSimpleTablePdf stays the ULTIMATE
 // fallback if the unified render ever throws on Workers.
 import { getOrCreateQrToken, qrScanUrl } from "../lib/do-qr-token";
+import { freshReads } from "../lib/worker-perf";
 import { parseStatusList, startOfMonthMYT } from "../../lib/delivery-list-filters";
 // Company office number — the driver-contact fallback on dispatch notices
 // (owner rule: no driver phone on file → give the company's number).
@@ -400,6 +411,7 @@ app.get("/stats", async (c) => {
       getDeliveryStatsSignature(c.var.DB),
     ]);
     if (isSnapshotFresh(snap, sig.maxUpdatedAt, sig.rowCount) && snap) {
+      saveStateKpisLater(c, orgId, dispatchKpis(snap.data.valueByStatus as Record<string, number>));
       return c.json({ success: true, ...snap.data, deliveredMtd });
     }
   }
@@ -449,6 +461,7 @@ app.get("/stats", async (c) => {
   } catch (e) {
     console.warn("[delivery-stats-snapshot] write-back failed:", e);
   }
+  if (!statsScope.clause) saveStateKpisLater(c, orgId, dispatchKpis(valueByStatus));
 
   return c.json({ success: true, ...payload, deliveredMtd });
 });
@@ -552,9 +565,15 @@ app.get("/linked-po-ids", async (c) => {
 // ---------------------------------------------------------------------------
 async function loadDeliveryReadyPlanning(
   c: Context<Env>,
+  // fresh: a caller about to act on one order (the Sales "Transfer to Delivery
+  // Order" box) must not get the serve-stale copy, which still showed a
+  // just-finished order as not ready. It skips serve-stale and reads past
+  // Hyperdrive's query cache (freshReads), so a stale snapshot is rebuilt
+  // before the answer. The Delivery page keeps serve-stale for its speed.
+  fresh = false,
 ): Promise<{ ready: ReadyPORow[]; planning: ReadyPORow[] }> {
   const orgId = getOrgId(c);
-  const db = c.var.DB;
+  const db = fresh ? freshReads(c.var.DB) : c.var.DB;
 
   // Runtime self-apply — migration files are inert on deploy, so the snapshot
   // table must be created here (awaited) before withSnapshot reads/writes it.
@@ -727,7 +746,7 @@ async function loadDeliveryReadyPlanning(
     compute,
     "",
     c,
-    { staleWhileRevalidate: true },
+    { staleWhileRevalidate: !fresh },
   );
   return data;
 }
@@ -735,7 +754,8 @@ async function loadDeliveryReadyPlanning(
 app.get("/ready-planning", async (c) => {
   const denied = await requirePermission(c, "delivery-orders", "read");
   if (denied) return denied;
-  return c.json({ success: true, ...(await loadDeliveryReadyPlanning(c)) });
+  const fresh = c.req.query("fresh") === "1";
+  return c.json({ success: true, ...(await loadDeliveryReadyPlanning(c, fresh)) });
 });
 
 // ---------------------------------------------------------------------------
@@ -772,6 +792,15 @@ app.get("/pending-value", async (c) => {
   const { ready } = await loadDeliveryReadyPlanning(c);
   let pendingDeliveryValueSen = 0;
   for (const r of ready) pendingDeliveryValueSen += r.valueSen || 0;
+  // Daily save for a finished month's Pending Delivery, whole-company only:
+  // loadDeliveryReadyPlanning narrows by both scopes for a scoped caller.
+  const [pvPoScope, pvSoScope] = await Promise.all([
+    salesOrderScopeSql(c, "salesOrderId"),
+    customerScopeSql(c, "customerId"),
+  ]);
+  if (!pvPoScope.clause && !pvSoScope.clause) {
+    saveStateKpisLater(c, getOrgId(c), { pendingDeliveryValueSen });
+  }
   return c.json({
     success: true,
     pendingDeliveryValueSen,

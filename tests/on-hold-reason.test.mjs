@@ -39,6 +39,10 @@ const PROD_API = resolve(process.cwd(), "src/api/routes/production-orders.ts");
 const SO_DETAIL = resolve(process.cwd(), "src/pages/sales/detail.tsx");
 const CO_DETAIL = resolve(process.cwd(), "src/pages/consignment/detail.tsx");
 const PROD_FE = resolve(process.cwd(), "src/pages/production/index.tsx");
+// The Overview row look (pill + hold tooltip) is shared by the Grid and Cards
+// views and lives in production/utils.ts (overviewRowLook).
+const PROD_UTILS = resolve(process.cwd(), "src/pages/production/utils.ts");
+const PROD_CARDS = resolve(process.cwd(), "src/pages/production/components/OverviewCards.tsx");
 const BASEROWS = resolve(process.cwd(), "src/pages/production/baserows-core.ts");
 const PROD_TYPES = resolve(process.cwd(), "src/pages/production/types.ts");
 
@@ -254,11 +258,21 @@ test("ALL-tab overview renders the reason line + chip tooltip", () => {
   assert.match(
     f,
     /ovHoldTooltip/,
-    "Overview pill must carry the hold tooltip.",
+    "Overview Grid pill must carry the hold tooltip.",
   );
   assert.match(
     f,
-    /On hold: \$\{ovHoldReason\}\$\{[\s\S]*?order\.heldBy[\s\S]*?order\.heldAt/,
+    /holdTooltip: ovHoldTooltip[\s\S]*?overviewRowLook\(order, isSelected\)/,
+    "Overview Grid must take its tooltip from the shared overviewRowLook.",
+  );
+  assert.match(
+    flat(PROD_CARDS),
+    /title=\{look\.holdTooltip/,
+    "Overview Cards pill must carry the same hold tooltip.",
+  );
+  assert.match(
+    flat(PROD_UTILS),
+    /On hold: \$\{holdReason\}\$\{[\s\S]*?order\.heldBy[\s\S]*?order\.heldAt/,
     "Overview tooltip must reveal the full reason + who + when.",
   );
 });

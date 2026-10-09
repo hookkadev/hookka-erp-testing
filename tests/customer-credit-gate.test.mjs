@@ -79,3 +79,19 @@ test("structural: DO create, packing-list-first and dispatch all run the shared 
   // No second copy of the old inline limit maths anywhere in the DO routes.
   assert.doesNotMatch(helpers + routes, /projectedOutstanding|projectCreditFailure/);
 });
+
+// BUG-2026-10-07-263: the Sales "Transfer to Delivery Order" box swallowed the
+// credit block into "Failed to create Delivery Order", and read the ready list
+// from the serve-stale snapshot ("Nothing ready" for a just-finished order).
+test("structural: Sales transfer box shows the credit dialog and reads a fresh ready list", () => {
+  const sales = readFileSync("src/pages/sales/index.tsx", "utf8");
+  const routes = readFileSync("src/api/routes/delivery-orders.ts", "utf8");
+  const box = sales.slice(sales.indexOf('fetchJson("/api/delivery-orders", DOMutationSchema'));
+  assert.match(box.slice(0, 1500), /isCreditBlock\(eb\)[\s\S]{0,200}askCreditOverride\(confirm, toast, eb\)/);
+  assert.match(box.slice(0, 1500), /creditOverride: \{ reason \}/);
+  assert.match(sales, /ready-planning\?fresh=1/);
+  const rp = routes.slice(routes.indexOf('app.get("/ready-planning"'));
+  assert.match(rp.slice(0, 400), /c\.req\.query\("fresh"\) === "1"/);
+  assert.match(routes, /staleWhileRevalidate: !fresh/);
+  assert.match(routes, /const db = fresh \? freshReads\(c\.var\.DB\) : c\.var\.DB;/);
+});

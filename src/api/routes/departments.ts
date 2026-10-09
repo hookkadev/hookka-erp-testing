@@ -147,6 +147,66 @@ async function ensureFoamCuttingDept(c: Context<Env>): Promise<void> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Runtime self-apply for the FIBRE department (owner 2026-10-07).
+//
+// FIBRE is a production stage placed immediately AFTER FOAM (Foam Bonding) in
+// the line order. Same reasoning as ensureFoamCuttingDept: migrations are inert
+// on deploy, so the row reaches prod only through this awaited, idempotent
+// apply.
+//
+// Every position is read inside the write statement itself (never from a
+// possibly cached SELECT), the insert is guarded by NOT EXISTS, and the shift
+// runs only when that insert actually added the row, so a stale read or a
+// second concurrent GET cannot shift the line order twice.
+//
+// The first version (2026-10-07, staging only) put FIBRE immediately BEFORE
+// UPHOLSTERY. The relocation UPDATE moves a row left in that spot to just after
+// FOAM in one statement, and is a no-op once FIBRE is anywhere else.
+// ---------------------------------------------------------------------------
+export async function ensureFibreDept(db: D1Database): Promise<void> {
+  try {
+    const res = await db
+      .prepare(
+        `INSERT INTO departments (id, code, name, shortName, sequence, color, workingHoursPerDay, isProduction)
+         SELECT ?, 'FIBRE', 'Fibre', 'Fibre',
+                (SELECT sequence FROM departments WHERE code = 'FOAM') + 1, '#84CC16', 9, 1
+          WHERE NOT EXISTS (SELECT 1 FROM departments WHERE code = 'FIBRE')`,
+      )
+      .bind(genId())
+      .run();
+    if ((res.meta?.changes ?? 0) === 1) {
+      // Shift every dept after FOAM up by one so FIBRE holds the slot right
+      // after it. Relative order of every other dept is kept.
+      await db
+        .prepare(
+          `UPDATE departments SET sequence = sequence + 1
+            WHERE code <> 'FIBRE'
+              AND sequence > (SELECT sequence FROM departments WHERE code = 'FOAM')`,
+        )
+        .run();
+      return;
+    }
+    await db
+      .prepare(
+        `UPDATE departments
+            SET sequence = CASE WHEN code = 'FIBRE'
+                                THEN (SELECT sequence FROM departments WHERE code = 'FOAM') + 1
+                                ELSE sequence + 1 END
+          WHERE (SELECT sequence FROM departments WHERE code = 'FIBRE')
+                  = (SELECT sequence FROM departments WHERE code = 'UPHOLSTERY') - 1
+            AND (SELECT sequence FROM departments WHERE code = 'FIBRE')
+                  > (SELECT sequence FROM departments WHERE code = 'FOAM') + 1
+            AND (code = 'FIBRE'
+                 OR (sequence > (SELECT sequence FROM departments WHERE code = 'FOAM')
+                     AND sequence < (SELECT sequence FROM departments WHERE code = 'FIBRE')))`,
+      )
+      .run();
+  } catch (e) {
+    console.warn("[departments] ensureFibreDept failed:", e);
+  }
+}
+
 // Code is used as a soft FK in workers.departmentCode (and historical rows),
 // so we lock it to uppercase + underscores to match the existing seed
 // convention (FAB_CUT, R_AND_D, etc.). Numeric chars allowed for future-
@@ -156,9 +216,10 @@ const CODE_PATTERN = /^[A-Z][A-Z0-9_]*$/;
 // GET /api/departments
 app.get("/", async (c) => {
   // Runtime self-apply — reaches existing prod because migrations are inert on
-  // deploy. Awaited BEFORE the read so the new FOAM_CUTTING row + FOAM relabel
+  // deploy. Awaited BEFORE the read so the new FOAM_CUTTING / FIBRE rows + FOAM relabel
   // are in the returned set.
   await ensureFoamCuttingDept(c);
+  await ensureFibreDept(c.var.DB);
   const res = await c.var.DB.prepare(
     "SELECT * FROM departments ORDER BY sequence",
   ).all<DepartmentRow>();

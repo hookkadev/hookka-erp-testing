@@ -932,15 +932,18 @@ async function buildSupplierPaymentLifecycle(
       .bind(paymentNo)
       .first<{ s: number | null }>();
     if ((Number(allocSum?.s) || 0) > 0) throw new Error("TF_DRAW_HAS_REPAYMENTS");
-    // Interest legs live under their own `tfint-<date>-<paymentNo>` sourceId —
-    // voiding the draw would strand them as a ghost balance. Zero the interest
-    // first (its delta-post reverses cleanly), then void.
+    // Interest / bank-charge legs live under their own `tfint-<date>-<paymentNo>`
+    // / `tfbc-<date>-<paymentNo>` sourceIds — voiding the draw would strand
+    // them as a ghost balance. Zero them first (the delta-post reverses
+    // cleanly), then void.
     const intNet = await db
       .prepare(
         `SELECT COALESCE(SUM(creditSen - debitSen),0) AS s FROM ledger_journal_entries
-          WHERE hidden = 0 AND sourceType LIKE 'tf_interest%' AND sourceId LIKE 'tfint-____-__-__-' || ?`,
+          WHERE hidden = 0 AND (
+            (sourceType LIKE 'tf_interest%' AND sourceId LIKE 'tfint-____-__-__-' || ?)
+            OR (sourceType LIKE 'tf_bank_charge%' AND sourceId LIKE 'tfbc-____-__-__-' || ?))`,
       )
-      .bind(paymentNo)
+      .bind(paymentNo, paymentNo)
       .first<{ s: number | null }>();
     if ((Number(intNet?.s) || 0) !== 0) throw new Error("TF_DRAW_HAS_INTEREST");
   }
@@ -1426,7 +1429,7 @@ app.post("/:paymentNo/void", async (c) => {
     }
     if (msg === "TF_DRAW_HAS_INTEREST") {
       return c.json(
-        { success: false, error: "This draw has interest posted — set its interest to 0 in the aging block first, then void." },
+        { success: false, error: "This draw has interest or bank charges posted — set them to 0 in the aging block first, then void." },
         400,
       );
     }
@@ -1521,7 +1524,7 @@ app.post("/:paymentNo/lifecycle", async (c) => {
     }
     if (msg === "TF_DRAW_HAS_INTEREST") {
       return c.json(
-        { success: false, error: "This draw has interest posted — set its interest to 0 in the aging block first, then void." },
+        { success: false, error: "This draw has interest or bank charges posted — set them to 0 in the aging block first, then void." },
         400,
       );
     }

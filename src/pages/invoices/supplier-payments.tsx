@@ -3,7 +3,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/confirm-dialog";
-import { LifecycleActions, LifecycleBadge } from "@/components/accounting/lifecycle-actions";
+import { LifecycleBadge } from "@/components/accounting/lifecycle-actions";
+import { useRowMenu, lifecycleMenuItems, type RowMenuGroups } from "@/components/accounting/row-menu";
+import { useEscapeClose } from "@/lib/escape-stack";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { defaultBankCode } from "@/lib/default-bank";
 import { formatCurrency, formatDateDMY, formatRM } from "@/lib/utils";
@@ -12,7 +14,8 @@ import { printVouchers } from "@/lib/print-voucher";
 import { buildSupplierPaymentVoucher } from "@/lib/supplier-payment-voucher";
 import { useRowSelection } from "@/lib/use-row-selection";
 import { BatchActionsBar } from "@/components/accounting/batch-actions-bar";
-import { CreditCard, Printer } from "lucide-react";
+import { CreditCard } from "lucide-react";
+import { useResizableTables } from "@/lib/use-resizable-tables";
 // One money parser. NOTE: `rateStr` on this page is an FX RATE, not money, and
 // deliberately keeps `parseFloat` - see the comment at `rowBankSenWith`.
 import { moneyFieldToRinggit, moneyFieldToSen, firstMoneyFieldError, isUnreadableMoney } from "@/lib/money-field";
@@ -603,6 +606,26 @@ export default function SupplierPaymentsPage() {
   const canPost = !!selectedSupplierId && !!payFrom && totalBankSen > 0 && !posting;
   const [histQ, setHistQ] = useState("");
   const [detail, setDetail] = useState<PaymentGroup | null>(null);
+  // Esc closes the payment popup (owner 2026-10-02 「点开后无法用esc 关闭」).
+  useEscapeClose(() => setDetail(null), !!detail);
+  // Row actions on right-click or the row's ⋮ (owner 2026-10-02 「这个显示太多了，
+  // 能不能 right click 才选我的东西」) — no action links in the rows.
+  const rowMenu = useRowMenu();
+  const payRowMenu = (p: PaymentGroup): RowMenuGroups => [
+    [{ label: "Open", action: () => setDetail(p) }],
+    [
+      { label: "Print", action: () => printVouchers([buildSupplierPaymentVoucher(p)]) },
+      // A trade-finance repayment has no in-place edit (its draw allocations
+      // live outside the rows) — void it and record it again. Backend enforces
+      // the same.
+      ...((p.lifecycleState ?? "ACTIVE") === "ACTIVE" && !lenderIds.has(p.supplierId) ? [{ label: "Edit", action: () => editPayment(p) }] : []),
+    ],
+    lifecycleMenuItems(p.lifecycleState, {
+      void: () => void handleLifecycle(p.paymentNo, "void"),
+      delete: () => void handleLifecycle(p.paymentNo, "delete"),
+      unvoid: () => void handleLifecycle(p.paymentNo, "unvoid"),
+    }),
+  ];
 
   // Manual knock-off (owner rule 2026-06-30: "我要手动去knock off，不是自动knock
   // off") — apply part/all of an unapplied advance line against an open PI for
@@ -683,6 +706,10 @@ export default function SupplierPaymentsPage() {
   // Ticked-row selection for batch print + export, keyed by payment number.
   const sel = useRowSelection(filteredHistory, (p) => p.paymentNo);
 
+  // Finance tables (owner 2026-10-01): no wrapping; drag a column edge to
+  // resize — widths remembered (src/lib/use-resizable-tables.ts).
+  const tablesRef = useResizableTables("supplier-payments");
+
   if (loading) {
     return (
       <div className="p-6">
@@ -695,7 +722,8 @@ export default function SupplierPaymentsPage() {
   }
 
   return (
-    <div className="p-6 space-y-6 max-md:p-4 max-sm:p-3 max-md:space-y-4">
+    <div ref={tablesRef} data-fin-tables className="p-6 space-y-6 max-md:p-4 max-sm:p-3 max-md:space-y-4">
+      {rowMenu.element}
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -1098,7 +1126,7 @@ export default function SupplierPaymentsPage() {
                 </thead>
                 <tbody>
                   {filteredHistory.map((p) => (
-                    <tr key={p.paymentNo} onClick={() => setDetail(p)} className={`border-t hover:bg-gray-50 cursor-pointer ${(p.lifecycleState ?? "ACTIVE") !== "ACTIVE" ? "opacity-50" : ""}`}>
+                    <tr key={p.paymentNo} onClick={() => setDetail(p)} onContextMenu={rowMenu.onContextMenu(p.paymentNo, () => payRowMenu(p))} title="Click to open · right-click for actions" className={`border-t hover:bg-gray-50 cursor-pointer ${rowMenu.openKey === p.paymentNo ? "bg-gray-100" : ""} ${(p.lifecycleState ?? "ACTIVE") !== "ACTIVE" ? "opacity-50" : ""}`}>
                       <td className="px-3 py-2 text-center" onClick={(e) => e.stopPropagation()}>
                         <input
                           type="checkbox"
@@ -1115,26 +1143,8 @@ export default function SupplierPaymentsPage() {
                       <td className="px-3 py-2 text-right font-medium text-[#4F7C3A]">{formatRM(p.totalBankSen)}</td>
                       <td className="px-3 py-2 text-right text-gray-600">{p.lines?.length ?? 0}</td>
                       <td className="px-3 py-2 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          onClick={() => printVouchers([buildSupplierPaymentVoucher(p)])}
-                          title="Print payment voucher"
-                          className="inline-flex items-center gap-1 text-[#6B5C32] hover:text-[#1F1D1B] text-xs underline decoration-dotted cursor-pointer mr-3"
-                        >
-                          <Printer className="h-3 w-3" />print
-                        </button>
-                        {(p.lifecycleState ?? "ACTIVE") === "ACTIVE" && !lenderIds.has(p.supplierId) && (
-                          // A trade-finance repayment has no in-place edit (its
-                          // draw allocations live outside the rows) — void it
-                          // and record it again. Backend enforces the same.
-                          <button onClick={() => editPayment(p)} className="text-xs text-[#3E6570] hover:underline mr-2">Edit</button>
-                        )}
                         <span className="mr-2"><LifecycleBadge state={p.lifecycleState} /></span>
-                        <LifecycleActions
-                          state={p.lifecycleState}
-                          onVoid={() => handleLifecycle(p.paymentNo, "void")}
-                          onDelete={() => handleLifecycle(p.paymentNo, "delete")}
-                          onUnvoid={() => handleLifecycle(p.paymentNo, "unvoid")}
-                        />
+                        {rowMenu.button(p.paymentNo, () => payRowMenu(p))}
                       </td>
                     </tr>
                   ))}

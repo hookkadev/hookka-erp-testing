@@ -27,7 +27,7 @@ on:
   workflow_dispatch:
     inputs:
       kind:
-        description: 'Which report to fire (defaults to all three)'
+        description: 'Which report to fire (defaults to all four)'
         required: false
         type: choice
         default: 'all'

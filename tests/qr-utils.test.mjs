@@ -161,3 +161,19 @@ test('the short compartment form is much less dense than the legacy wk= form it 
     `expected the short form (v${shortV}) to be >=2 QR versions below the legacy wk= form (v${longV})`,
   );
 });
+
+// --- SVG QR for <img> + print (2026-10-01 load-time fix) --------------------
+// QRImg and the Production print containers moved from a 600 px PNG to SVG.
+// The SVG must be the SAME code as the PNG path (level Q, 2-module quiet zone),
+// and the session memo must hand back the identical string on a repeat call.
+test('getQRCodeSvgDataURL: SVG data URL, level Q + 2-module quiet zone, memoised', async () => {
+  const { getQRCodeSvgDataURL } = await import('../src/lib/qr-utils.ts');
+  const payload = generateStickerData(WORST_PO, 'PACKING', 'FG-PACKING', '/worker/scan', 1, 2);
+  const url = await getQRCodeSvgDataURL(payload);
+  assert.match(url, /^data:image\/svg\+xml;charset=utf-8,/);
+  const svg = decodeURIComponent(url.slice(url.indexOf(',') + 1));
+  const side = Number(/viewBox="0 0 (\d+) \1"/.exec(svg)?.[1]);
+  const modules = QRCode.create(payload, { errorCorrectionLevel: 'Q' }).modules.size;
+  assert.equal(side, modules + 4, 'viewBox = Q-level module count + 2-module quiet zone each side');
+  assert.equal(await getQRCodeSvgDataURL(payload), url, 'second call returns the memoised string');
+});

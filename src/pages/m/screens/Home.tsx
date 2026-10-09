@@ -59,19 +59,20 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useCachedJson } from "@/lib/cached-fetch";
-import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { formatCurrency } from "@/lib/utils";
+import { stateKpiTile, type StateKpis } from "@/pages/dashboards/dashboard-widgets-lib";
 import { getCurrentUser } from "@/lib/auth";
 import {
   SO_STATUS_COLOR,
   type SemanticStyle,
 } from "@/lib/design-tokens";
 import type { RawMaterial } from "@/types";
-import { MobileCard, StatusPill, FormSheet, Sheet } from "../components";
+import { MobileCard, StatusPill, FormSheet, Sheet, InstallAppCard } from "../components";
 import { GlobalSearchSheet } from "../components/GlobalSearchSheet";
 import { ORDERS_DUE_URL, STOCK_ALERTS_URL } from "../lib/preload";
 import { M, M_ACCENT, M_DELTA } from "../theme";
 import { type FormSpec } from "../config/form-types";
+import { useResponsiveLayout } from "../lib/responsive-layout";
 import {
   newSalesOrderSpec,
   newDeliveryOrderSpec,
@@ -90,6 +91,7 @@ type StatsResp = {
 type JobsBreakdown = { bedframeUnits: number; sofaSets: number };
 type OverviewResp = {
   success?: boolean;
+  stateKpis?: StateKpis | null;
   salesThisMonthSen?: number;
   invoicesThisMonthSen?: number;
   monthlyRevenue?: {
@@ -230,7 +232,7 @@ function todayISO(): string {
 // eff% = production minutes ÷ (production-dept clocked hours × 60). Only the
 // eight production departments count toward the denominator.
 const PROD_DEPTS = new Set([
-  "FAB_CUT", "FAB_SEW", "WOOD_CUT", "FOAM_CUTTING", "FOAM",
+  "FAB_CUT", "FAB_SEW", "WOOD_CUT", "FOAM_CUTTING", "FOAM", "FIBRE",
   "FRAMING", "WEBBING", "UPHOLSTERY", "PACKING",
 ]);
 const DEPT_LABEL: Record<string, string> = {
@@ -239,6 +241,7 @@ const DEPT_LABEL: Record<string, string> = {
   WOOD_CUT: "Wood Cutting",
   FOAM_CUTTING: "Foam Cutting",
   FOAM: "Foam Bonding",
+  FIBRE: "Fibre",
   FRAMING: "Framing",
   WEBBING: "Webbing",
   UPHOLSTERY: "Upholstery",
@@ -301,7 +304,8 @@ export default function MobileHome() {
   // rail as 4 columns instead of 2×2. Other dashboard cards stay stacked
   // vertically (the design has a 2-col grid there too — bigger refactor,
   // deferred).
-  const fold = useMediaQuery("(min-width: 720px) and (orientation: landscape)");
+  const { mode } = useResponsiveLayout();
+  const expanded = mode === "tablet-landscape";
 
   // Quick-action create form: holds the active FormSpec, or null. "Staff" has
   // no in-scope create endpoint, so it routes to the Employees directory.
@@ -465,6 +469,21 @@ export default function MobileHome() {
   // flight. Once both land, the real value renders (same computation).
   const pendingDeliveryLoading = !pdEnabled || !pendingRaw || !doStatsRaw;
 
+  // A finished month shows its saved month-end figure (or "no record"), not
+  // today's live one. Same rule as /dashboard (stateKpiTile).
+  const pdTile = stateKpiTile(period, overview?.stateKpis?.pendingDeliverySen, overview?.stateKpis?.asOf, pendingDeliverySen);
+  const outTile = stateKpiTile(period, overview?.stateKpis?.outstandingSen, overview?.stateKpis?.asOf, outstandingSen);
+  const tileValue = (t: typeof pdTile, liveLoading: boolean) =>
+    t.past
+      ? !overview
+        ? "…"
+        : t.sen == null
+          ? "—"
+          : formatCurrency(t.sen)
+      : liveLoading
+        ? "…"
+        : formatCurrency(t.sen ?? 0);
+
   // ---- Sales month-over-month delta (This Month Sales card) ----
   const salesDeltaPct = useMemo(() => {
     const rev = overview?.monthlyRevenue ?? [];
@@ -596,7 +615,7 @@ export default function MobileHome() {
       loadPct,
       workforce: overview?.employee?.activeHeadcount ?? null,
       rows: [
-        { label: "Daily Capacity", sub: `${period} avg`, value: dailyCap ? hrs(dailyCap) : "—", icon: Calendar },
+        { label: "Daily Capacity", sub: period === CUR_YM ? "14-day avg" : `${period} avg`, value: dailyCap ? hrs(dailyCap) : "—", icon: Calendar },
         {
           label: "Total Backlog",
           sub: "per dept",
@@ -932,6 +951,8 @@ export default function MobileHome() {
       </div>
 
       <div style={{ padding: "0 18px" }}>
+        {/* One-tap install offer (hidden once installed or dismissed). */}
+        <InstallAppCard dismissible />
         {/* ===== Quick actions (FIRST per dc13 order) ===== */}
         <div style={{ display: "flex", gap: 9, marginTop: 14 }}>
           <QuickAction
@@ -966,7 +987,7 @@ export default function MobileHome() {
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: fold ? "repeat(4, 1fr)" : "1fr 1fr",
+            gridTemplateColumns: expanded ? "repeat(4, minmax(0, 1fr))" : "1fr 1fr",
             gap: 9,
             marginTop: 11,
           }}
@@ -1006,9 +1027,10 @@ export default function MobileHome() {
             icon={Package}
             accent="moss"
             label="Pending Delivery"
+            note={pdTile.past ? pdTile.tag : undefined}
             // Lazy-loaded after first paint — show a placeholder until its two
             // deferred fetches resolve, then the real (dashboard-identical) value.
-            value={pendingDeliveryLoading ? "…" : formatCurrency(pendingDeliverySen)}
+            value={tileValue(pdTile, pendingDeliveryLoading)}
             // Live point-in-time figure — no prior-period delta (as on desktop).
             delta={null}
           />
@@ -1017,7 +1039,8 @@ export default function MobileHome() {
             icon={Clock}
             accent="danger"
             label="Outstanding"
-            value={formatCurrency(outstandingSen)}
+            note={outTile.past ? outTile.tag : undefined}
+            value={tileValue(outTile, false)}
             // Live point-in-time figure — no prior-period delta (as on desktop).
             delta={null}
           />
@@ -2097,12 +2120,15 @@ function KpiCard({
   label,
   value,
   delta,
+  note,
 }: {
   icon: LucideIcon;
   accent: AccentKey;
   label: string;
   value: string;
   delta: { text: string; good: boolean } | null;
+  /** Small muted line under the label, e.g. "as of 2026-09-30". */
+  note?: string;
 }) {
   // dc13 mobile tightening: 13×14 padding · 18px value · 11.5px label ·
   // delta on its own line under the label. Was 15×16 / 25px / 12px / delta
@@ -2163,6 +2189,9 @@ function KpiCard({
         >
           {delta.text}
         </div>
+      ) : null}
+      {note ? (
+        <div style={{ fontSize: 10.5, fontWeight: 600, color: M.muted, marginTop: 1 }}>{note}</div>
       ) : null}
     </MobileCard>
   );

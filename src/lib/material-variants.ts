@@ -34,30 +34,29 @@ export function materialVariantDescription(baseDescription: string, variant: str
 }
 
 // ---------------------------------------------------------------------------
-// Allowed UOMs per category (DEV-20). Each itemGroup can narrow the UOMs a
-// material in it may carry (e.g. a fabric group → MTR / ROLL). Stored on
-// kv-config `variants-config` under `uomOptions`, edited in RM Settings, read
-// by every RM form AND enforced by the raw-materials route. A group with no
-// list set allows every UOM, so nothing changes until the owner configures it.
+// RM units (DEV-20). One list for every category: the built-in units plus the
+// ones added in RM Settings (kv-config `variants-config` → `extraUoms`). Read
+// by every RM form AND enforced by the raw-materials route. The per-category
+// lists (`uomOptions`) were taken out 2026-10-07 (owner: confusing); a unit
+// typed into one still counts as added until the unit list is next saved.
 // ---------------------------------------------------------------------------
 
 /** Every UOM the RM forms offered before DEV-20 (union of the four lists that
  * were hardcoded in inventory/index.tsx). */
 export const ALL_RM_UOMS = ["PCS", "MTR", "ROLL", "BOX", "CTN", "SET", "KG", "LITER", "PAIR", "UNIT"];
 
-/** category (itemGroup) → allowed UOMs. */
-export type UomOptions = Record<string, string[]>;
-
-/** The UOMs a material in `group` may use. */
-export function uomOptionsFor(group: string, opts: UomOptions | null | undefined): string[] {
-  const list = opts?.[(group ?? "").trim()];
-  return Array.isArray(list) && list.length > 0 ? list : ALL_RM_UOMS;
+/** Every unit a raw material may use: the built-ins, then the added ones. */
+export function rmUnitsFrom(cfg: { extraUoms?: unknown; uomOptions?: unknown } | null | undefined): string[] {
+  const extra = Array.isArray(cfg?.extraUoms) ? cfg.extraUoms : [];
+  const legacy = cfg?.uomOptions && typeof cfg.uomOptions === "object" ? Object.values(cfg.uomOptions).flat() : [];
+  const added = [...extra, ...legacy].map((u) => String(u).trim().toUpperCase()).filter(Boolean);
+  return [...new Set([...ALL_RM_UOMS, ...added])];
 }
 
 /** Case-insensitive: legacy rows carry "pcs" / "Mtr" from AutoCount imports. */
-export function isUomAllowed(group: string, uom: string, opts: UomOptions | null | undefined): boolean {
+export function isUomAllowed(uom: string, units: string[]): boolean {
   const u = (uom ?? "").trim().toUpperCase();
-  return uomOptionsFor(group, opts).some((x) => x.toUpperCase() === u);
+  return units.some((x) => x.toUpperCase() === u);
 }
 
 /** Units whose stock balance may not be TYPED as a fraction on the Inventory

@@ -1638,6 +1638,7 @@ const WH_DEPT_OPTS: SelectOption[] = [
   { value: "FAB_SEW", label: "Fab Sew" },
   { value: "FOAM_CUTTING", label: "Foam Cutting" },
   { value: "FOAM", label: "Foam Bonding" },
+  { value: "FIBRE", label: "Fibre" },
   { value: "WOOD_CUT", label: "Wood Cut" },
   { value: "FRAMING", label: "Framing" },
   { value: "WEBBING", label: "Webbing" },

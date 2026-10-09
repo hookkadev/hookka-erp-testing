@@ -20,6 +20,7 @@
 import { Hono } from "hono";
 import { permissionsForRole, withDashboardAccess, dashboardTabsForRole } from "../lib/role-policy";
 import { requirePermission } from "../lib/rbac";
+import { getUserOverride } from "../lib/user-permissions";
 import { hiddenNavPrefixes, hiddenNavForRole, homeForPermissions } from "../lib/nav-permissions";
 import type { Context } from "hono";
 import type { Env } from "../worker";
@@ -103,6 +104,11 @@ type UserRow = {
   // snake_case and db-pg camelCases it on read.
   mustChangePassword?: boolean | number | null;
   must_change_password?: boolean | number | null;
+  // The same photo the Org Chart shows; the header avatar reads it from /me.
+  photoFileId?: string | null;
+  photo_file_id?: string | null;
+  department?: string | null;
+  position?: string | null;
 };
 
 function publicUser(u: UserRow) {
@@ -115,6 +121,9 @@ function publicUser(u: UserRow) {
     // Surfaced so the app can make the first thing an admin-created user does
     // be choosing their own password. Nothing else depends on it.
     mustChangePassword: mustChange === true || mustChange === 1,
+    photoFileId: u.photoFileId ?? u.photo_file_id ?? null,
+    department: u.department ?? "",
+    position: u.position ?? "",
   };
 }
 
@@ -576,6 +585,23 @@ app.get("/me/permissions", async (c) => {
 
     const roleId = roleRow.roleId ?? "role_read_only";
     const roleName = resolvedRole ?? "READ_ONLY";
+
+    // An account a Super Admin has edited uses its OWN list — the same lookup,
+    // in the same order, as the gate (rbac.ts getEffectivePermissions), so the
+    // menu can never show a page the API refuses or hide one it allows.
+    const own = await getUserOverride(c, userId);
+    if (own) {
+      const ownPerms = new Set(withDashboardAccess(own, roleName));
+      return c.json({
+        success: true,
+        role: roleName,
+        customized: true,
+        permissions: [...ownPerms],
+        navHidden: [...new Set([...hiddenNavPrefixes(ownPerms), ...hiddenNavForRole(roleName)])],
+        home: homeForPermissions(ownPerms, roleName),
+        dashboardTabs: dashboardTabsForRole(roleName),
+      });
+    }
 
     // A role whose policy is written in CODE never touches the table — the same
     // short-circuit rbac.ts uses for the GATE. Reading the table here while the

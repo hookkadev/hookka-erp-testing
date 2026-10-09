@@ -1,9 +1,23 @@
 # Hookka ERP — Start Here (read before any task)
 
+> **Last verified: 2026-10-09** (branch `feat/dashboard-compare-plant-card-drills`, staging merged in): `docs/API.md` regenerated on the merged tree; both sides had added one handler, so the count below is 146 / 1024. Nothing else on this page re-checked.
+
+> **Last verified: 2026-10-09** (branch `feat/dashboard-compare-plant-card-drills`): `docs/API.md` regenerated after adding `GET /api/dashboard/overview/purchasing-compare`; the handler count below restamped (146 / 1023). Nothing else on this page re-checked.
+> **Last verified: 2026-10-09** (branch `feat/dev63-creditor-aging-trade-finance`): `docs/API.md` regenerated after adding `PUT /api/accounting/trade-finance/draw-bank-charge`; the handler count below restamped (146 / 1023). Nothing else on this page re-checked.
+
+> **Last verified: 2026-10-09** (branch `feat/compare-fabric-cost-tab`): `docs/API.md` regenerated after adding `GET /api/dashboard/overview/fabric-cost-compare`; the handler count below restamped (146 / 1022). Nothing else on this page re-checked.
+
+> **Last verified: 2026-10-06** (branch `chore/sync-staging-from-main-1006`, staging<-main merge): `docs/API.md` regenerated on the merged tree and the mount/handler counts below restamped (146 / 1021). Nothing else on this page re-checked.
+
+> **Last verified: 2026-09-30** (branch `chore/sync-staging-from-main-0930`, staging<-main merge): `docs/API.md` regenerated on the merged tree and the mount/handler counts below restamped (143 / 997). Nothing else on this page re-checked.
+
 > **Last verified: 2026-09-29** (branch `feat/org-chart-photo-ux`) — re-ran
 > `node scripts/gen-api-docs.mjs --check` after touching `src/api/routes/org-chart.ts`
 > (an added import shifted its handler line numbers); regenerated and restamped the
 > mount/handler counts below (142 / 987). Nothing else on this page re-checked.
+> **Last verified: 2026-09-29** — Environment table: project refs moved out of the repo (it is
+> public) into `.env` / GitHub secrets; staging measured from the `hookka-erp-staging` Hyperdrive
+> (database) and the SG project's Storage logs (file storage). The old Tokyo staging project is retired.
 
 > **Last verified: 2026-09-22** (branch `fix/scan-queue-client-driven`) — re-measured the tracked-file
 > count and the API.md mount/handler counts quoted below; nothing else re-checked.
@@ -49,8 +63,8 @@ measured 2026-09-22; this line said 2,122). Use the map's file:line +
 
 5. **Which endpoint** → [`docs/API.md`](docs/API.md) — **generated** from
    `src/api/worker.ts` + `src/api/routes/*.ts` by `node scripts/gen-api-docs.mjs`
-   (142 mounts, **988** handlers, plus the exact public/auth surface — re-measured 2026-09-29
-   by `--check`; this line said 987).
+   (146 mounts, **1024** handlers, plus the exact public/auth surface — re-measured 2026-10-09
+   by `--check`; this line said 146 / 1023).
    Regenerate it instead of hand-editing; `--check` tells you if it is stale — **it WAS stale
    on `main` on 2026-08-14**, and the committed copy carried four duplicated mount rows with
    two different line sets for the same handlers. Run `--check` before trusting it.
@@ -89,11 +103,23 @@ Doc map: [`docs/DOCS-INDEX.md`](docs/DOCS-INDEX.md). The big picture: [`docs/DEV
 
 **Say which environment every command or query touches, before running it. Every time.**
 
-| | Supabase project | Use |
+| | Supabase project ref (in `.env` / GitHub secrets, never in the repo) | Use |
 |---|---|---|
-| Sandbox | `cjnewpxxmiucwirlcqpj` | Where development happens. Seed it; never mind that it is fake. |
-| Staging | `zaxygxwadidiqcphibma` | A **production clone**. Read-only confirmation of a finished fix. Never the surface a fix is developed against. |
-| Production | `vpwdqtsxexpiqxzweivd` | Never written to from development work. |
+| Sandbox | `SUPABASE_SANDBOX_REF` | Where development happens. Seed it; never mind that it is fake. |
+| Staging | `SUPABASE_STAGING_REF` (`hookka-erp-staging-sg`, Singapore) | A **production clone**. Read-only confirmation of a finished fix. Never the surface a fix is developed against. Database **and** file storage (`hookka-files` bucket). |
+| Production | `SUPABASE_PROJECT_REF` | Never written to from development work. |
+
+**The old Tokyo staging project (`hookka-erp-staging`) is RETIRED** — owner 2026-09-29. Its
+database is stale (`file_assets` stops at 2026-09-12) and staging stopped using its storage the
+same day. Never query it to answer a question about staging, and never put its ref in a secret.
+It used to be listed here as staging, which sent an afternoon of debugging to the wrong database.
+
+Where each half of staging is wired, so this can be re-checked instead of trusted: the
+database is the Cloudflare Hyperdrive config `hookka-erp-staging` (bound as
+`HYPERDRIVE_STAGING`; its user carries the SG project ref). File storage is the
+`SUPABASE_PROJECT_REF` secret on the Pages **Preview** environment — encrypted, so confirm it
+from the SG project's Storage logs (an upload from staging shows `ObjectCreated` there; measured
+2026-09-29 17:47).
 
 - **Fixes are finished and verified locally first.** Pushing is never a way to get something
   testable — if the only way to try a change is to deploy it, the change is not ready.

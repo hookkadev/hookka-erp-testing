@@ -161,7 +161,7 @@ app.post("/", async (c) => {
         return c.json(
           {
             success: false,
-            error: `Cannot create consignment note — ${mutex.conflicts.length} PO${mutex.conflicts.length === 1 ? "" : "s"} already on an active dispatch document: ${mutex.conflicts.join(", ")}`,
+            error: mutex.message,
             conflicts: mutex.conflicts,
             reason: mutex.reason,
           },
@@ -178,7 +178,7 @@ app.post("/", async (c) => {
           return c.json(
             {
               success: false,
-              error: `Cannot create consignment note — ${mutex.conflicts.length} PO${mutex.conflicts.length === 1 ? "" : "s"} already on an active dispatch document: ${mutex.conflicts.join(", ")}`,
+              error: mutex.message,
               conflicts: mutex.conflicts,
               reason: mutex.reason,
             },
@@ -389,6 +389,22 @@ app.put("/:id", async (c) => {
       }
     }
 
+    // Same pre-flight for a PO already on a DO or another CN
+    // (BUG-2026-10-01-238): this route deletes the items before the helper
+    // runs, so the helper's own check would come too late.
+    if (Array.isArray(body.items)) {
+      const poIds = (body.items as Array<Record<string, unknown>>)
+        .map((it) => it.productionOrderId)
+        .filter((s): s is string => typeof s === "string" && s.length > 0);
+      const mutex = await validatePOMutex(c.var.DB, poIds, "CN", id);
+      if (!mutex.ok) {
+        return c.json(
+          { success: false, error: mutex.message, reason: "po_conflict", conflicts: mutex.conflicts },
+          409,
+        );
+      }
+    }
+
     // If items provided, replace them and recompute totalValue. We do
     // this before delegating to updateConsignmentNoteById so the helper
     // sees the post-replace state if a future iteration of it reads
@@ -469,6 +485,9 @@ app.put("/:id", async (c) => {
           },
           403,
         );
+      }
+      if (res.reason === "po_conflict") {
+        return c.json({ success: false, error: res.message, reason: "po_conflict" }, 409);
       }
       return c.json({ success: false, error: "Consignment not found" }, 404);
     }

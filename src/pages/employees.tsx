@@ -35,6 +35,7 @@ import { formatCurrency, formatDate, formatDateDMY, formatHours, formatRM, round
 import { printReport, type PrintColumn, type PrintCard, type PrintSection } from "@/lib/print-report";
 import { normalizePaymentMethod, paymentDestinationLabel } from "@/lib/payment-method";
 import { EmployeeDrawer, type EmployeeDraft } from "@/components/employee-drawer";
+import { WorkerPenaltyTab } from "@/components/worker-penalty-tab";
 import { DepartmentMultiSelect } from "@/components/department-multi-select";
 import { POSITIONS, categoryOptions, positionHasCategory } from "@/lib/employee-options";
 import { asArray } from "@/lib/safe-json";
@@ -63,6 +64,7 @@ import {
   Eye,
   KeyRound,
   Copy,
+  AlertTriangle,
 } from "lucide-react";
 // One money parser. NOTE: hours/day and the OT multiplier below are NOT money
 // and deliberately keep `parseFloat`.
@@ -241,6 +243,19 @@ type PayslipData = {
    *  here, or the screen and the payslip disagree. Absent / 0 on a payslip
    *  generated before the feature existed. */
   advanceDeductionSen?: number;
+  /** Approved worker penalties (DEV-22) recovered in this payslip, in sen.
+   *  Same rule as the advance: ALREADY subtracted from netPay by the backend. */
+  penaltyDeductionSen?: number;
+};
+
+/** The slice of a worker penalty (DEV-22) the Payroll tab reads. */
+type PayrollPenalty = {
+  id: string;
+  penaltyNo: string;
+  poNo: string;
+  reason: string;
+  status: string;
+  lines: Array<{ id: string; workerId: string; amountSen: number; payrollPeriod: string }>;
 };
 
 /** One advance: cash handed to a worker mid-month, recovered from that month's
@@ -432,6 +447,7 @@ const SEED_DEPARTMENTS: DepartmentLite[] = [
   { id: "dept-3",  code: "WOOD_CUT",             name: "Wood Cutting",         isProduction: true },
   { id: "dept-14", code: "FOAM_CUTTING",         name: "Foam Cutting",         isProduction: true },
   { id: "dept-4",  code: "FOAM",                 name: "Foam Bonding",         isProduction: true },
+  { id: "dept-15", code: "FIBRE",                name: "Fibre",                isProduction: true },
   { id: "dept-5",  code: "FRAMING",              name: "Framing",              isProduction: true },
   { id: "dept-6",  code: "WEBBING",              name: "Webbing",              isProduction: true },
   { id: "dept-7",  code: "UPHOLSTERY",           name: "Upholstery",           isProduction: true },
@@ -6971,6 +6987,28 @@ function PayrollTab({ workers }: { workers: Worker[] }) {
     return m;
   }, [periodAdvances]);
 
+  // The period's approved worker penalties (DEV-22) — for the per-worker
+  // detail and the same drift check as advances. Skipped for a role without
+  // the right; the money still comes off the payslip row either way.
+  const { hasPermission: hasPenaltyPerm } = usePermissions();
+  const canReadPenalties = hasPenaltyPerm("worker-penalties", "read");
+  const { data: penaltiesResp } = useCachedJson<{ success?: boolean; data?: PayrollPenalty[] }>(
+    canReadPenalties ? `/api/worker-penalties?period=${period}` : null,
+  );
+  const penaltyLinesByWorker = useMemo(() => {
+    const m = new Map<string, Array<{ id: string; penaltyNo: string; poNo: string; reason: string; amountSen: number }>>();
+    for (const p of penaltiesResp?.data ?? []) {
+      if (p.status !== "APPROVED" && p.status !== "POSTED") continue;
+      for (const l of p.lines) {
+        if (l.payrollPeriod !== period) continue;
+        const arr = m.get(l.workerId) ?? [];
+        arr.push({ id: l.id, penaltyNo: p.penaltyNo, poNo: p.poNo, reason: p.reason, amountSen: l.amountSen });
+        m.set(l.workerId, arr);
+      }
+    }
+    return m;
+  }, [penaltiesResp, period]);
+
   const generatePayslips = async () => {
     setGenerating(true);
     try {
@@ -7046,6 +7084,8 @@ function PayrollTab({ workers }: { workers: Worker[] }) {
         const data: any = await res.json().catch(() => ({}));
         toast.error(data?.error || `Failed to approve payslips (HTTP ${res.status})`);
       } else {
+        // Approving posts the month's penalties — their status just changed.
+        invalidateCachePrefix("/api/worker-penalties");
         fetchPayslips();
       }
     } catch {
@@ -7075,13 +7115,14 @@ function PayrollTab({ workers }: { workers: Worker[] }) {
         pcb: acc.pcb + r.pcb,
         totalDeductions: acc.totalDeductions + r.totalDeductions,
         advanceDeductionSen: acc.advanceDeductionSen + (r.advanceDeductionSen || 0),
+        penaltyDeductionSen: acc.penaltyDeductionSen + (r.penaltyDeductionSen || 0),
         netPay: acc.netPay + r.netPay,
       }),
       {
         basicSalary: 0, absenceDeductionSen: 0, shortHourDeductionSen: 0, otWeekdayHours: 0, otSundayHours: 0, otPHHours: 0,
         totalOT: 0, allowances: 0, grossPay: 0, epfEmployee: 0, epfEmployer: 0,
         socsoEmployee: 0, socsoEmployer: 0, eisEmployee: 0, eisEmployer: 0,
-        pcb: 0, totalDeductions: 0, advanceDeductionSen: 0, netPay: 0,
+        pcb: 0, totalDeductions: 0, advanceDeductionSen: 0, penaltyDeductionSen: 0, netPay: 0,
       }
     );
   }, [payslipData]);
@@ -7133,6 +7174,18 @@ function PayrollTab({ workers }: { workers: Worker[] }) {
     );
     return recordedForPayees - totals.advanceDeductionSen;
   }, [payslipData, periodAdvances, totals.advanceDeductionSen]);
+  // Same check for penalties. The API refuses to approve a month while this is
+  // non-zero; the banner says why before anyone clicks.
+  const penaltyDrift = useMemo(() => {
+    if (!penaltiesResp?.success) return 0;
+    const payees = new Set(payslipData.map((r) => r.employeeId));
+    let expected = 0;
+    for (const [workerId, lines] of penaltyLinesByWorker) {
+      if (!payees.has(workerId)) continue;
+      for (const l of lines) expected += l.amountSen;
+    }
+    return expected - totals.penaltyDeductionSen;
+  }, [penaltiesResp, payslipData, penaltyLinesByWorker, totals.penaltyDeductionSen]);
 
   // "Part-month" column — LEGACY display reconciliation. Under the UNIFIED ÷26
   // model (owner 2026-06-11) the engine never prorates: join/resign months are
@@ -7200,6 +7253,7 @@ function PayrollTab({ workers }: { workers: Worker[] }) {
       // = Net Pay. Putting them inside Total Deductions would make every
       // statutory column in this file stop reconciling.
       "Advance Taken", "Advance Dates",
+      "Worker Penalty", "Penalty Refs",
       "Net Pay", "Bank Account", "Status",
     ];
     const rm2 = (sen: number) => (sen / 100).toFixed(2);
@@ -7222,6 +7276,7 @@ function PayrollTab({ workers }: { workers: Worker[] }) {
       // Cash already handed over — the figure the payslip was computed with,
       // not a live re-sum, so this column always ties to Net Pay.
       const advanceSen = r.advanceDeductionSen ?? 0;
+      const penaltySen = r.penaltyDeductionSen ?? 0;
       const prorationSen = prorationSenOf(r);
       const basicEarnedSen = Math.max(
         0,
@@ -7256,6 +7311,12 @@ function PayrollTab({ workers }: { workers: Worker[] }) {
         advanceSen > 0
           ? (advanceDaysByWorker.get(r.employeeId) ?? [])
               .map((a) => `${a.date} ${rm2(a.amountSen)}`)
+              .join("; ")
+          : "",
+        penaltySen > 0 ? rm2(penaltySen) : "",
+        penaltySen > 0
+          ? (penaltyLinesByWorker.get(r.employeeId) ?? [])
+              .map((l) => `${l.penaltyNo}${l.poNo ? ` (${l.poNo})` : ""} ${rm2(l.amountSen)}`)
               .join("; ")
           : "",
         rm2(r.netPay),
@@ -7377,6 +7438,7 @@ function PayrollTab({ workers }: { workers: Worker[] }) {
       // Between the statutory columns and Net Pay, because that is where it
       // sits in the sum: Gross − statutory − Advance = Net Pay.
       { header: "Advance", align: "right", value: (r) => { const v = (r as PayslipData).advanceDeductionSen || 0; return v > 0 ? `−${printMoney(v)}` : "-"; } },
+      { header: "Penalty", align: "right", value: (r) => { const v = (r as PayslipData).penaltyDeductionSen || 0; return v > 0 ? `−${printMoney(v)}` : "-"; } },
       { header: "Net Pay", align: "right", value: (r) => ({ text: printMoney((r as PayslipData).netPay), bold: true }) },
       { header: "Status", align: "center", value: (r) => (r as PayslipData).status },
     ];
@@ -7384,6 +7446,9 @@ function PayrollTab({ workers }: { workers: Worker[] }) {
       { label: "Still To Pay Out", value: formatCurrency(totalPayrollCost) },
       ...(totals.advanceDeductionSen > 0
         ? [{ label: "Advances Already Paid", value: formatCurrency(totals.advanceDeductionSen) }]
+        : []),
+      ...(totals.penaltyDeductionSen > 0
+        ? [{ label: "Worker Penalties", value: formatCurrency(totals.penaltyDeductionSen) }]
         : []),
       { label: "Total EPF (EE+ER)", value: formatCurrency(totals.epfEmployee + totals.epfEmployer) },
       { label: "Total SOCSO", value: formatCurrency(totals.socsoEmployee + totals.socsoEmployer) },
@@ -7658,6 +7723,13 @@ function PayrollTab({ workers }: { workers: Worker[] }) {
               Use &ldquo;Regenerate&rdquo; to recompute this period. (Approved payslips keep the figure they were signed off with — un-approve first.)
             </div>
           )}
+          {penaltyDrift !== 0 && payslipData.length > 0 && !isProjected && (
+            <div className="mb-3 rounded-md border border-[#E8C9C3] bg-[#FBEFEC] px-3 py-2 text-xs text-[#9A3A2D]">
+              <span className="font-semibold">Worker penalties changed since these payslips were generated.</span>{" "}
+              {formatCurrency(Math.abs(penaltyDrift))} of approved penalties {penaltyDrift > 0 ? "is not yet" : "is no longer"} reflected in Net Pay.
+              Use &ldquo;Regenerate&rdquo; before approving this period.
+            </div>
+          )}
           {isProjected && (
             <div className="mb-3 rounded-md border border-[#E2D9C3] bg-[#FBF7EC] px-3 py-2 text-xs text-[#6B5C32]">
               <span className="font-semibold">Estimate · month in progress.</span> Same engine the worker app shows — payslips aren&rsquo;t generated yet. The figures update as Working Hours are entered; click &ldquo;Generate (finalise)&rdquo; at month-end to lock them in (the numbers will match).
@@ -7702,6 +7774,7 @@ function PayrollTab({ workers }: { workers: Worker[] }) {
                     <th className="h-10 px-2 text-right font-medium text-[#374151] whitespace-nowrap">EIS</th>
                     <th className="h-10 px-2 text-right font-medium text-[#374151] whitespace-nowrap">PCB</th>
                     <th className="h-10 px-3 text-right font-medium text-[#374151] whitespace-nowrap" title="Salary advance already handed to this worker during the month. Not a statutory deduction — it comes off AFTER them, because it is pay they have already received. Recorded on the Advances tab.">Advance</th>
+                    <th className="h-10 px-3 text-right font-medium text-[#374151] whitespace-nowrap" title="Approved worker penalties for this payroll month. Not statutory — it comes off after them, like an advance. Raised on the Worker Penalty tab.">Penalty</th>
                     <th className="h-10 px-3 text-right font-medium text-[#374151] whitespace-nowrap">Net Pay</th>
                     <th className="h-10 px-3 text-right font-medium text-[#374151] whitespace-nowrap" title="Gross + employer EPF / SOCSO / EIS — what this worker costs. An advance does not reduce it; it reduces Net Pay, which is what is still handed over.">Total Pay</th>
                     <th className="h-10 px-2 text-center font-medium text-[#374151] whitespace-nowrap">Status</th>
@@ -7753,11 +7826,14 @@ function PayrollTab({ workers }: { workers: Worker[] }) {
                             ? <span>−{formatCurrency(r.advanceDeductionSen ?? 0)}{(advanceDaysByWorker.get(r.employeeId)?.length ?? 0) > 0 ? <span className="text-[10px] text-[#9CA3AF]"> ({advanceDaysByWorker.get(r.employeeId)?.length}x)</span> : null}</span>
                             : "-"}
                         </td>
+                        <td className="h-10 px-3 text-right whitespace-nowrap text-[#9A3A2D]" title="Approved worker penalty deducted this month — click the row for the penalty numbers.">
+                          {(r.penaltyDeductionSen ?? 0) > 0 ? `−${formatCurrency(r.penaltyDeductionSen ?? 0)}` : "-"}
+                        </td>
                         {/* Net Pay can go NEGATIVE when someone drew more than
                             the month earns. Shown as-is, in red: they owe the
                             company, and clamping it at zero would silently
                             write the difference off. */}
-                        <td className={`h-10 px-3 text-right font-bold whitespace-nowrap ${r.netPay < 0 ? "text-[#9A3A2D]" : "text-[#1F1D1B]"}`} title={r.netPay < 0 ? "Advances taken exceed this month's pay — the balance is still owed to the company." : undefined}>{formatCurrency(r.netPay)}</td>
+                        <td className={`h-10 px-3 text-right font-bold whitespace-nowrap ${r.netPay < 0 ? "text-[#9A3A2D]" : "text-[#1F1D1B]"}`} title={r.netPay < 0 ? "Advances / penalties exceed this month's pay — the balance is still owed to the company." : undefined}>{formatCurrency(r.netPay)}</td>
                         <td className="h-10 px-3 text-right font-bold text-[#6B5C32] whitespace-nowrap" title="Gross + employer EPF / SOCSO / EIS — what this worker costs the company. An advance does NOT reduce it; it only reduces what is still handed over, which is Net Pay.">{formatCurrency(r.grossPay + r.epfEmployer + r.socsoEmployer + r.eisEmployer)}</td>
                         <td className="h-10 px-2 text-center">
                           <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${getStatusStyle(r.status)}`}>
@@ -7777,7 +7853,7 @@ function PayrollTab({ workers }: { workers: Worker[] }) {
                       {/* Expanded Detail Row */}
                       {expandedRow === r.id && (
                         <tr className="bg-[#FDFCFB]">
-                          <td colSpan={23} className="px-6 py-4">
+                          <td colSpan={24} className="px-6 py-4">
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                               {/* OT Calculation Breakdown */}
                               <div className="space-y-2">
@@ -7905,6 +7981,25 @@ function PayrollTab({ workers }: { workers: Worker[] }) {
                                       </div>
                                     </>
                                   )}
+                                  {(r.penaltyDeductionSen ?? 0) > 0 && (
+                                    <>
+                                      <div className="flex justify-between text-[#9A3A2D]">
+                                        <span>Less: Worker penalty</span>
+                                        <span className="font-semibold">({fmtSen(r.penaltyDeductionSen ?? 0)})</span>
+                                      </div>
+                                      <div className="flex flex-wrap gap-1 pl-2">
+                                        {(penaltyLinesByWorker.get(r.employeeId) ?? []).map((l) => (
+                                          <span
+                                            key={l.id}
+                                            className="rounded bg-[#F5E9E7] px-1.5 py-0.5 text-[10px] text-[#9A3A2D]"
+                                            title={l.reason}
+                                          >
+                                            {l.penaltyNo}{l.poNo ? ` · ${l.poNo}` : ""} · {fmtSen(l.amountSen)}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    </>
+                                  )}
                                   <hr className="border-[#E2DDD8]" />
                                   <div className="flex justify-between font-bold text-base text-[#1F1D1B]">
                                     <span>Net Pay</span>
@@ -8002,6 +8097,7 @@ function PayrollTab({ workers }: { workers: Worker[] }) {
                     <td className="h-10 px-2 text-right text-[#9A3A2D] text-xs">{formatCurrency(totals.eisEmployee)}</td>
                     <td className="h-10 px-2 text-right text-[#9A3A2D] text-xs" title={pcbTotalComplete ? undefined : "Not every employee's PCB could be computed, so this column is a floor, not the month's withholding."}>{!pcbTotalComplete ? "—" : totals.pcb > 0 ? formatCurrency(totals.pcb) : "-"}</td>
                     <td className="h-10 px-3 text-right text-[#9A3A2D]">{totals.advanceDeductionSen > 0 ? `−${formatCurrency(totals.advanceDeductionSen)}` : "-"}</td>
+                    <td className="h-10 px-3 text-right text-[#9A3A2D]">{totals.penaltyDeductionSen > 0 ? `−${formatCurrency(totals.penaltyDeductionSen)}` : "-"}</td>
                     <td className="h-10 px-3 text-right font-bold">{formatCurrency(totals.netPay)}</td>
                     <td className="h-10 px-3 text-right font-bold text-[#6B5C32]" title="Gross + employer EPF / SOCSO / EIS — what the workforce costs. Advances are not deducted here; they come off Net Pay.">{formatCurrency(totalPayrollCost)}</td>
                     <td className="h-10 px-2"></td>
@@ -11265,7 +11361,7 @@ function AdvancesTab({ workers }: { workers: Worker[] }) {
 
 // ========== MAIN PAGE ==========
 
-type TabKey = "working-hours" | "attendance" | "labor-cost" | "employee-master" | "efficiency" | "department-labor" | "detail" | "department-performance" | "payroll" | "advances" | "leave";
+type TabKey = "working-hours" | "attendance" | "labor-cost" | "employee-master" | "efficiency" | "department-labor" | "detail" | "department-performance" | "payroll" | "advances" | "penalties" | "leave";
 
 // Labor Cost tab is wedged between Working Hours and Payroll per spec — the
 // flow goes "what hours did people work" → "what did those hours cost vs the
@@ -11317,6 +11413,13 @@ const TABS: { key: TabKey; label: string; icon: React.ReactNode }[] = [
     key: "advances",
     label: "Advances",
     icon: <Download className="h-4 w-4" />,
+  },
+  // DEV-22. Beside Advances for the same reason: it is the other thing that
+  // comes off Net Pay after statutory.
+  {
+    key: "penalties",
+    label: "Worker Penalty",
+    icon: <AlertTriangle className="h-4 w-4" />,
   },
   // Wei Siang 2026-05-10: Leave Management hidden until rollout.
   // {
@@ -11960,6 +12063,10 @@ export default function EmployeesPage() {
 
       {activeTab === "advances" && (
         <AdvancesTab workers={workers} />
+      )}
+
+      {activeTab === "penalties" && (
+        <WorkerPenaltyTab workers={workers} />
       )}
 
       {activeTab === "leave" && (

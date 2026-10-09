@@ -120,11 +120,9 @@ export const ALL_RESOURCES = [
   // or the daily report. Anyone holding dashboard:read also gets it: see
   // withDashboardAccess below. Office gets it through allExcept().
   "dashboard-experimental",
-  // KPI module. Deliberately granted to NOBODY by name — Super Admin reaches
-  // it through the "*" short-circuit, and the owner asked for it to land there
-  // first ("给superadmin先"). Opening it to Office is one line here, once the
-  // per-person attribution problem is solved.
-  "kpi",
+  // No "kpi": the page is every login's own card (DEV-37), so there is nothing
+  // to grant. Listing it would put a box in the per-user editor that does
+  // nothing; the cross-user KPI routes are requireSuperAdmin, not a resource.
   "product-pricing",   // selling price, margin, surcharge amounts
   "revenue-figures",   // revenue / remain on the labour report
   "agent-console",     // read the Agent Console (which agents, see AGENTS_BY_ROLE)
@@ -132,6 +130,9 @@ export const ALL_RESOURCES = [
   "organisations",
   // People
   "workers", "attendance", "leaves", "payroll", "payslips",
+  // DEV-22 worker penalties. `approve` is its own action (SPECIAL_ACTIONS in
+  // routes/user-permissions.ts) so raising and approving can be split.
+  "worker-penalties",
   // Comms & system
   "announcements", "mail-center", "notifications", "settings", "users",
   // Attachments. Registered 2026-08-21, and its ABSENCE is the whole story of
@@ -261,12 +262,7 @@ const SALES: RolePolicy = {
  * that IS held is the one the owner drew: money.
  */
 const OFFICE: RolePolicy = {
-  // "kpi" excluded on purpose. allExcept() hands Office every new resource by
-  // default, and the owner asked for the KPI module to land on Super Admin
-  // first ("给superadmin先") — the per-person figures are not trustworthy until
-  // the shared Office login is split and sales_orders carries an author.
-  // Deleting this one string is how Office gets it.
-  ...allExcept([...FINANCE_RESOURCES, ...FORECAST_RESOURCES, "kpi"]),
+  ...allExcept([...FINANCE_RESOURCES, ...FORECAST_RESOURCES]),
   // Sees the directory; opening or promoting an account stays SUPER_ADMIN.
   users: R,
 };
@@ -369,6 +365,7 @@ const HR: RolePolicy = {
   leaves: OPEN,
   payroll: OPEN,
   payslips: OPEN,
+  "worker-penalties": OPEN,
   departments: OPEN,
   // Sees who has an account; opening or disabling one is requireSuperAdmin, and
   // `role-change` is never granted to anyone — see NEVER_WILDCARD.

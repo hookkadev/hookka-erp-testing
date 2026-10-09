@@ -5,7 +5,8 @@
 //
 //   1. Idempotency guard — return existing POs if the order already
 //      cascaded.
-//   2. BOM lookup → WIP breakdown via breakBomIntoWips().
+//   2. BOM lookup → WIP breakdown via breakBomIntoJobCardWips(); L1 steps
+//      a WIP card already covers are dropped.
 //   3. Reverse-schedule per-dept dueDates from the delivery anchor.
 //   4. INSERT one production_orders row per piece (BF/ACC) or per SO line
 //      (SOFA stays as one PO with the full set quantity).
@@ -36,8 +37,9 @@ import {
   loadLeadTimeSettings,
 } from "../../lib/lead-times";
 import {
-  breakBomIntoWips,
+  breakBomIntoJobCardWips,
   deriveJobCardId,
+  l1ProcessesWithoutWipDupes,
   type BomVariantContext,
 } from "../../lib/bom-wip-breakdown";
 import { isHeadboardOnlySpecial } from "../fg-units";
@@ -575,8 +577,12 @@ export async function createProductionOrdersForOrder(
         legHeightInches: item.legHeightInches ?? null,
         gapInches: item.gapInches ?? null,
       };
-      let wips = breakBomIntoWips(
+      // An L1-only BOM (empty tree, steps on the L1 tab) gets an
+      // auto-generated chain of just its L1 steps (BUG-2026-10-01-244).
+      const l1ProcsAll = parseL1Processes(bomRow?.l1Processes ?? null);
+      let wips = breakBomIntoJobCardWips(
         bomRow?.wipComponents ?? null,
+        l1ProcsAll,
         productCode,
         variants,
       );
@@ -587,6 +593,9 @@ export async function createProductionOrdersForOrder(
       // pick that merely narrows to nothing via the HB-only or dept filters
       // is legal narrowing, caught by the existing zero-step guard.
       const allBomWipKeys = wips.map((w) => w.wipKey);
+      // Which L1 steps are duplicates is a BOM-shape question, decided on the
+      // full breakdown (jobcard-sync has no per-line filters to apply).
+      const l1NotInWips = l1ProcessesWithoutWipDupes(l1ProcsAll, wips);
 
       // ---- Headboard-only filter ----
       // When the SO/CO line carries specialOrder "Headboard Only", the
@@ -740,11 +749,13 @@ export async function createProductionOrdersForOrder(
           startDate,
         );
 
-      // PO.currentDepartment = first-in-DEPT_ORDER dept across all WIP chains.
+      // PO.currentDepartment = first-in-DEPT_ORDER dept across all WIP chains
+      // (the L1 steps, for an L1-only BOM).
       let currentDept = "FAB_CUT";
-      if (planned.length > 0) {
+      const firstDeptFrom = planned.length > 0 ? planned : l1ProcsAll;
+      if (firstDeptFrom.length > 0) {
         let minIdx = 999;
-        for (const p of planned) {
+        for (const p of firstDeptFrom) {
           const idx = DEPT_ORDER.indexOf(
             p.deptCode as (typeof DEPT_ORDER)[number],
           );
@@ -899,15 +910,16 @@ export async function createProductionOrdersForOrder(
       }
 
       // ---- job_cards — FG-level (one per l1Process) ----
-      // Repair Scope also filters FG-level processes: a PACKING L1 card
-      // survives only when PACKING is in scope (it is, in every owner
-      // preset — only a CUSTOM scope can drop it).
-      const l1ProcsAll = parseL1Processes(bomRow?.l1Processes ?? null);
+      // An L1 step whose dept already has a WIP card is skipped: the
+      // auto-generated card wins (BUG-2026-10-01-244). Repair Scope also
+      // filters FG-level processes: a PACKING L1 card survives only when
+      // PACKING is in scope (it is, in every owner preset — only a CUSTOM
+      // scope can drop it).
       const l1Procs = repairScope
-        ? l1ProcsAll.filter((p) =>
+        ? l1NotInWips.filter((p) =>
             (repairScope.depts as readonly string[]).includes(p.deptCode),
           )
-        : l1ProcsAll;
+        : l1NotInWips;
 
       // A non-FULL scope that matches NOTHING in this product's BOM would
       // emit a PO with zero job cards — an unfinishable husk (the status

@@ -1,5 +1,10 @@
 # RBAC Remediation — current state and the way through
 
+> **Last verified: 2026-09-30** (branch `feat/account-permissions-tab`) — added the per-account layer above the role lookup ("Where a role's permissions actually come from"). Nothing else re-checked.
+> **Last verified: 2026-10-05** (branch `feat/permissions-tab-main`, ported from staging): added the per-account layer above the role lookup ("Where a role's permissions actually come from"). Nothing else re-checked.
+>
+> **Last verified: 2026-09-29** — project refs replaced by their `.env` names (`SUPABASE_*_REF`); the old Tokyo staging project is retired. Nothing else re-checked.
+>
 > **Last verified: 2026-09-24** — rebased onto `main` (215 commits of drift, cherry-picked clean) and
 > re-measured: scanner against this branch, plus the PRODUCTION grant counts quoted below. Previously against `src/api/lib/rbac.ts` (fail-opens closed) and `src/api/routes/{attendance,leaves,files,working-hour-entries,cash-flow,stock-value,forecasts,sessions}.ts`,
 > `src/api/lib/{rbac,nav-permissions}.ts`, `src/dashboard-routes.tsx`. Every claim below was
@@ -164,6 +169,16 @@ migration.
 
 ## Where a role's permissions actually come from — check this before editing any grant
 
+**First, per account (2026-09-30, branch `feat/account-permissions-tab`).** Before any of the
+role logic below, the gate (`rbac.ts` `getEffectivePermissions`) and the menu
+(`/me/permissions`) both ask `lib/user-permissions.ts` whether *this account* has its own list
+in `user_permissions`. If it does, that list is the whole answer and the role is not consulted.
+The list is written only by a Super Admin from Settings → User Management → **Permissions**
+(`/api/user-permissions`). An account never edited has no row and falls through to the role
+exactly as described below. SUPER_ADMIN / ADMIN short-circuit before either and cannot be edited.
+So "what can this person do" = their row if one exists, otherwise their role — check the row
+first (`SELECT permissions FROM user_permissions WHERE user_id = ?`).
+
 `rbac.ts:86` short-circuits **before** the `role_permissions` query:
 
 ```ts
@@ -192,7 +207,7 @@ word for it.
 
 ## Sandbox seed — done 2026-09-15
 
-`scripts/seed-sandbox-rbac.sql`, applied to `cjnewpxxmiucwirlcqpj` (hookka-sandbox):
+`scripts/seed-sandbox-rbac.sql`, applied to hookka-sandbox (`SUPABASE_SANDBOX_REF`):
 
 | Table | Rows |
 |---|---|
@@ -265,9 +280,10 @@ the queue above. Also unread: session and token handling, `public-do-qr.ts`, and
 
 ## Environment rules — these are not negotiable
 
-- **Sandbox for development.** Supabase `cjnewpxxmiucwirlcqpj`. Staging
-  (`zaxygxwadidiqcphibma`) is a production clone and is for read-only confirmation only,
-  never the surface a fix is developed against. Production (`vpwdqtsxexpiqxzweivd`) is never
+- **Sandbox for development.** Supabase `SUPABASE_SANDBOX_REF`. Staging
+  (`SUPABASE_STAGING_REF`; the old Tokyo project is retired — see CLAUDE.md) is a
+  production clone and is for read-only confirmation only,
+  never the surface a fix is developed against. Production (`SUPABASE_PROJECT_REF`) is never
   written to from this work.
 - **Say which environment** any command or query touches, every time, before running it.
 - **Fixes are finished and verified locally first.** Pushing is never a way to get something

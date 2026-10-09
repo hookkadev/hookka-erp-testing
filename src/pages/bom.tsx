@@ -4,8 +4,12 @@ import { useNavigate } from "react-router-dom";
 import { cachedFetchJson, invalidateCachePrefix } from "@/lib/cached-fetch";
 import { useToast } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/confirm-dialog";
-import { getVariantsConfigSync } from "@/lib/kv-config";
 import { resolveWipTokens, type BomVariantContext } from "@/api/lib/bom-wip-breakdown";
+import { withProductCategory } from "./bom-category";
+import { removeWipLevel, moveWipNode, canMoveWipNode } from "@/lib/wip-tree-ops";
+import { BUILT_IN_WIP_TYPES, buildWipTypes, wipTypeAllowed, type WipTypeStyle } from "@/lib/wip-types";
+import { fetchVariantsConfig, getVariantsConfigSync } from "@/lib/kv-config";
+import { variantFieldsFor } from "@/lib/bom-variant-fields";
 import type {
   MaterialScaling,
   MaterialScalingDimension,
@@ -66,7 +70,8 @@ type WIPComponent = {
   id: string;
   wipCode: string;
   codeSegments?: CodeSegment[];
-  wipType: "HEADBOARD" | "DIVAN" | "SOFA_BASE" | "SOFA_CUSHION" | "SOFA_ARMREST" | "SOFA_HEADREST";
+  // A built-in type or an extra one from Maintenance (see wip-types.ts).
+  wipType: string;
   quantity: number;
   processes: BOMProcess[];
   materials?: WIPMaterial[];
@@ -114,11 +119,12 @@ const DEPT_COLORS: Record<string, string> = {
   FOAM: "#8B5CF6",
   FRAMING: "#F97316",
   WEBBING: "#10B981",
+  FIBRE: "#84CC16",
   UPHOLSTERY: "#F43F5E",
   PACKING: "#06B6D4",
 };
 
-const DEPT_ORDER = ["FAB_CUT", "FAB_SEW", "WOOD_CUT", "FOAM_CUTTING", "FOAM", "FRAMING", "WEBBING", "UPHOLSTERY", "PACKING"];
+const DEPT_ORDER = ["FAB_CUT", "FAB_SEW", "WOOD_CUT", "FOAM_CUTTING", "FOAM", "FIBRE", "FRAMING", "WEBBING", "UPHOLSTERY", "PACKING"];
 
 // Labels MUST cover every code in DEPT_ORDER — the process-dept <select> renders
 // DEPT_ORDER and looks each code up here, so a missing entry shipped a BLANK
@@ -133,17 +139,11 @@ const DEPT_LABELS: Record<string, string> = {
   FOAM: "Foam Bonding",
   FRAMING: "Framing",
   WEBBING: "Webbing",
+  FIBRE: "Fibre",
   UPHOLSTERY: "Upholstery",
   PACKING: "Packing",
 };
 
-// ---------- Production Time lookup ----------
-// Reads the dept × category minutes matrix the user configures in
-// /settings/variants → Production Times. BOM process rows use this to
-// auto-fill minutes when a category is picked.
-// Data lives in D1 under kv_config('variants-config'); the in-memory cache is
-// primed at dashboard mount (see DashboardLayout.tsx) so this sync API stays
-// ergonomic for the dozens of call sites here.
 // A BOM material is a FILLER (sponge / sheet) when the raw material it points
 // to belongs to a FILLER item group — then its consumption is area-based
 // (cut size ÷ sheet size). autoDetect (fabric / leg) lines are never filler.
@@ -170,31 +170,39 @@ function materialHasKit(m: WIPMaterial): boolean {
   return !!code && KIT_PARENT_CODES.has(code);
 }
 
-function getProductionMinutes(deptCode: string, category: string): number {
-  if (typeof window === "undefined") return 0;
-  const cfg = getVariantsConfigSync();
-  return cfg?.productionTimes?.[deptCode]?.[category] ?? 0;
+// Minutes of a BOM process row, typed in by hand: whole minutes, 0 to 1440
+// (the WIP Times cap). Owner 2026-10-05: the CAT 1-14 categories that used
+// to fill this in from the Production Times matrix are gone from the BOM.
+// A text box, not type="number": a number input keeps the typed "052" on
+// screen because React leaves it alone when its numeric value already
+// equals the prop (BUG-2026-10-05-254). Here the shown text is always
+// String(value), so leading zeros and non-digits never stay.
+function parseMinutes(text: string): number {
+  return Math.min(1440, Number(text.replace(/\D/g, "")) || 0);
+}
+function MinutesInput({ value, onChange, className }: { value: number; onChange: (minutes: number) => void; className: string }) {
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      value={String(value)}
+      onFocus={(e) => e.target.select()}
+      onChange={(e) => onChange(parseMinutes(e.target.value))}
+      aria-label="Minutes"
+      className={className}
+    />
+  );
 }
 
-// Category options come from the user-configured fabricGroups list
-// (Variants & Options → Fabric Groups). These double as the
-// production-time categories used by BOM process rows.
-function getCategoryOptions(): string[] {
-  const DEFAULTS = ["CAT 1", "CAT 2", "CAT 3", "CAT 4", "CAT 5", "CAT 6", "CAT 7"];
-  if (typeof window === "undefined") return DEFAULTS;
-  const cfg = getVariantsConfigSync();
-  const groups = cfg?.fabricGroups;
-  return Array.isArray(groups) && groups.length > 0 ? groups : DEFAULTS;
-}
+// Module-level like KIT_PARENT_CODES: the page load below refills it with the
+// built-ins plus the extra types saved in Maintenance, then re-renders.
+const WIP_TYPE_LABELS: Record<string, WipTypeStyle> = { ...BUILT_IN_WIP_TYPES };
 
-const WIP_TYPE_LABELS: Record<string, { label: string; color: string }> = {
-  HEADBOARD: { label: "Headboard", color: "#7C3AED" },
-  DIVAN: { label: "Divan", color: "#0891B2" },
-  SOFA_BASE: { label: "Sofa Base", color: "#059669" },
-  SOFA_CUSHION: { label: "Back Cushion", color: "#D97706" },
-  SOFA_ARMREST: { label: "Sofa Armrest", color: "#DC2626" },
-  SOFA_HEADREST: { label: "Sofa Headrest", color: "#7C3AED" },
-};
+// A new WIP row starts on the usual type, unless Maintenance unticked it for
+// this product type; then on the first type that is allowed.
+function allowedWipType(preferred: string, category: string | undefined): string {
+  return [preferred, ...Object.keys(WIP_TYPE_LABELS)].find((k) => wipTypeAllowed(k, category, getVariantsConfigSync()?.wipTypeProducts)) ?? preferred;
+}
 
 type VariantCategoryInfo = { category: string; label: string };
 
@@ -437,9 +445,9 @@ function buildFallbackMasterTemplate(cat: BOMCategory): MasterTemplate {
       isDefault: true,
       category: "ACCESSORY",
       l1Processes: [
-        { dept: "Fab Cut", deptCode: "FAB_CUT", category: "CAT 1", minutes: 10 },
-        { dept: "Fab Sew", deptCode: "FAB_SEW", category: "CAT 1", minutes: 20 },
-        { dept: "Packing", deptCode: "PACKING", category: "CAT 1", minutes: 5 },
+        { dept: "Fab Cut", deptCode: "FAB_CUT", category: "", minutes: 10 },
+        { dept: "Fab Sew", deptCode: "FAB_SEW", category: "", minutes: 20 },
+        { dept: "Packing", deptCode: "PACKING", category: "", minutes: 5 },
       ],
       l1Materials: [
         { code: "", name: "Fabric (from order)", qty: 1, unit: "MTR", autoDetect: "FABRIC" },
@@ -455,9 +463,9 @@ function buildFallbackMasterTemplate(cat: BOMCategory): MasterTemplate {
       isDefault: true,
       category: "BEDFRAME",
       l1Processes: [
-        { dept: "Fab Cut", deptCode: "FAB_CUT", category: "CAT 3", minutes: 50 },
-        { dept: "Fab Sew", deptCode: "FAB_SEW", category: "CAT 3", minutes: 120 },
-        { dept: "Foam Bonding", deptCode: "FOAM", category: "CAT 3", minutes: 25 },
+        { dept: "Fab Cut", deptCode: "FAB_CUT", category: "", minutes: 50 },
+        { dept: "Fab Sew", deptCode: "FAB_SEW", category: "", minutes: 120 },
+        { dept: "Foam Bonding", deptCode: "FOAM", category: "", minutes: 25 },
       ],
       l1Materials: [
         { code: "", name: "Fabric (from order)", qty: 1, unit: "MTR", autoDetect: "FABRIC" },
@@ -475,11 +483,11 @@ function buildFallbackMasterTemplate(cat: BOMCategory): MasterTemplate {
           wipType: "DIVAN",
           quantity: 1,
           processes: [
-            { dept: "Wood Cut", deptCode: "WOOD_CUT", category: "CAT 1", minutes: 20 },
-            { dept: "Framing", deptCode: "FRAMING", category: "CAT 6", minutes: 20 },
-            { dept: "Webbing", deptCode: "WEBBING", category: "CAT 1", minutes: 4 },
-            { dept: "Upholstery", deptCode: "UPHOLSTERY", category: "CAT 6", minutes: 15 },
-            { dept: "Packing", deptCode: "PACKING", category: "CAT 3", minutes: 20 },
+            { dept: "Wood Cut", deptCode: "WOOD_CUT", category: "", minutes: 20 },
+            { dept: "Framing", deptCode: "FRAMING", category: "", minutes: 20 },
+            { dept: "Webbing", deptCode: "WEBBING", category: "", minutes: 4 },
+            { dept: "Upholstery", deptCode: "UPHOLSTERY", category: "", minutes: 15 },
+            { dept: "Packing", deptCode: "PACKING", category: "", minutes: 20 },
           ],
           materials: [
             { code: "", name: "Fabric (from order)", qty: 1, unit: "MTR", autoDetect: "FABRIC" },
@@ -497,11 +505,11 @@ function buildFallbackMasterTemplate(cat: BOMCategory): MasterTemplate {
           wipType: "HEADBOARD",
           quantity: 1,
           processes: [
-            { dept: "Wood Cut", deptCode: "WOOD_CUT", category: "CAT 5", minutes: 10 },
-            { dept: "Framing", deptCode: "FRAMING", category: "CAT 4", minutes: 40 },
-            { dept: "Webbing", deptCode: "WEBBING", category: "CAT 7", minutes: 20 },
-            { dept: "Upholstery", deptCode: "UPHOLSTERY", category: "CAT 4", minutes: 40 },
-            { dept: "Packing", deptCode: "PACKING", category: "CAT 2", minutes: 30 },
+            { dept: "Wood Cut", deptCode: "WOOD_CUT", category: "", minutes: 10 },
+            { dept: "Framing", deptCode: "FRAMING", category: "", minutes: 40 },
+            { dept: "Webbing", deptCode: "WEBBING", category: "", minutes: 20 },
+            { dept: "Upholstery", deptCode: "UPHOLSTERY", category: "", minutes: 40 },
+            { dept: "Packing", deptCode: "PACKING", category: "", minutes: 30 },
           ],
           materials: [
             { code: "", name: "Fabric (from order)", qty: 1, unit: "MTR", autoDetect: "FABRIC" },
@@ -519,9 +527,9 @@ function buildFallbackMasterTemplate(cat: BOMCategory): MasterTemplate {
     isDefault: true,
     category: "SOFA",
     l1Processes: [
-      { dept: "Fab Cut", deptCode: "FAB_CUT", category: "CAT 6", minutes: 50 },
-      { dept: "Packing", deptCode: "PACKING", category: "CAT 1", minutes: 40 },
-      { dept: "Upholstery", deptCode: "UPHOLSTERY", category: "CAT 6", minutes: 20 },
+      { dept: "Fab Cut", deptCode: "FAB_CUT", category: "", minutes: 50 },
+      { dept: "Packing", deptCode: "PACKING", category: "", minutes: 40 },
+      { dept: "Upholstery", deptCode: "UPHOLSTERY", category: "", minutes: 20 },
     ],
     l1Materials: [
       { code: "", name: "Fabric (from order)", qty: 1, unit: "MTR", autoDetect: "FABRIC" },
@@ -537,11 +545,11 @@ function buildFallbackMasterTemplate(cat: BOMCategory): MasterTemplate {
         wipType: "SOFA_BASE",
         quantity: 1,
         processes: [
-          { dept: "Fab Sew", deptCode: "FAB_SEW", category: "CAT 4", minutes: 150 },
-          { dept: "Foam Bonding", deptCode: "FOAM", category: "CAT 4", minutes: 30 },
-          { dept: "Wood Cut", deptCode: "WOOD_CUT", category: "CAT 4", minutes: 30 },
-          { dept: "Framing", deptCode: "FRAMING", category: "CAT 4", minutes: 40 },
-          { dept: "Webbing", deptCode: "WEBBING", category: "CAT 4", minutes: 20 },
+          { dept: "Fab Sew", deptCode: "FAB_SEW", category: "", minutes: 150 },
+          { dept: "Foam Bonding", deptCode: "FOAM", category: "", minutes: 30 },
+          { dept: "Wood Cut", deptCode: "WOOD_CUT", category: "", minutes: 30 },
+          { dept: "Framing", deptCode: "FRAMING", category: "", minutes: 40 },
+          { dept: "Webbing", deptCode: "WEBBING", category: "", minutes: 20 },
         ],
         materials: [
           { code: "", name: "Fabric (from order)", qty: 1, unit: "MTR", autoDetect: "FABRIC" },
@@ -557,11 +565,11 @@ function buildFallbackMasterTemplate(cat: BOMCategory): MasterTemplate {
         wipType: "SOFA_CUSHION",
         quantity: 1,
         processes: [
-          { dept: "Fab Sew", deptCode: "FAB_SEW", category: "CAT 1", minutes: 40 },
-          { dept: "Foam Bonding", deptCode: "FOAM", category: "CAT 1", minutes: 15 },
-          { dept: "Wood Cut", deptCode: "WOOD_CUT", category: "CAT 1", minutes: 15 },
-          { dept: "Framing", deptCode: "FRAMING", category: "CAT 1", minutes: 15 },
-          { dept: "Webbing", deptCode: "WEBBING", category: "CAT 1", minutes: 15 },
+          { dept: "Fab Sew", deptCode: "FAB_SEW", category: "", minutes: 40 },
+          { dept: "Foam Bonding", deptCode: "FOAM", category: "", minutes: 15 },
+          { dept: "Wood Cut", deptCode: "WOOD_CUT", category: "", minutes: 15 },
+          { dept: "Framing", deptCode: "FRAMING", category: "", minutes: 15 },
+          { dept: "Webbing", deptCode: "WEBBING", category: "", minutes: 15 },
         ],
         materials: [
           { code: "", name: "Fabric (from order)", qty: 1, unit: "MTR", autoDetect: "FABRIC" },
@@ -609,7 +617,6 @@ function RoutingPill({ process }: { process: BOMProcess }) {
     >
       <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: color }} />
       {DEPT_LABELS[process.deptCode] || process.dept}
-      <span className="opacity-70">{process.category}</span>
       <span className="font-semibold">{process.minutes}m</span>
     </span>
   );
@@ -1337,7 +1344,7 @@ function wipToPrintHtml(wip: WIPComponent, level: number, product: Product): str
     wip.processes.reduce((s, p) => s + p.minutes, 0) * (wip.quantity || 1);
   const wipCodeText = buildWipCodeDisplay(wip.codeSegments, product) || wip.wipCode || "";
   const procs = wip.processes
-    .map((p) => `<span class="pill">${p.dept} · ${p.category} · ${p.minutes}m</span>`)
+    .map((p) => `<span class="pill">${p.dept} · ${p.minutes}m</span>`)
     .join(" ");
   const mats = (wip.materials || [])
     .map((m) => {
@@ -1405,7 +1412,7 @@ function buildBOMPrintDoc(template: BOMTemplate, product: Product): string {
   const wipMin = sumWipTreeMinutes(template.wipComponents);
   const totalMin = l1Min + wipMin;
   const l1Procs = template.l1Processes
-    .map((p) => `<span class="pill">${p.dept} · ${p.category} · ${p.minutes}m</span>`)
+    .map((p) => `<span class="pill">${p.dept} · ${p.minutes}m</span>`)
     .join(" ");
   const l1Mats = (template.l1Materials || [])
     .map((m) => {
@@ -1874,7 +1881,7 @@ function CreateBOMDialog({
   const [selectedCode, setSelectedCode] = useState("");
   const [prodSearch, setProdSearch] = useState("");
   const [l1Processes, setL1Processes] = useState<BOMProcess[]>([
-    { dept: "Fab Cut", deptCode: "FAB_CUT", category: "CAT 3", minutes: 30 },
+    { dept: "Fab Cut", deptCode: "FAB_CUT", category: "", minutes: 30 },
   ]);
   const [l1Materials, setL1Materials] = useState<WIPMaterial[]>([]);
   const [wipComponents, setWipComponents] = useState<WIPComponent[]>([]);
@@ -1896,20 +1903,7 @@ function CreateBOMDialog({
     const sel = products.find((p) => p.code === selectedCode);
     if (!sel) return [{ category: "SIZE", label: "Size" }, { category: "FABRIC", label: "Fabric" }];
     const cat = (sel as Product & { category?: string }).category;
-    if (cat === "BEDFRAME") return [
-      { category: "PRODUCT_CODE", label: "Product Code" }, { category: "SIZE", label: "Size" },
-      { category: "DIVAN_HEIGHT", label: "Divan Height" }, { category: "LEG_HEIGHT", label: "Leg Height" },
-      { category: "TOTAL_HEIGHT", label: "Total Height" },
-      { category: "FABRIC", label: "Fabric" }, { category: "SPECIAL", label: "Special" },
-    ];
-    if (cat === "SOFA") return [
-      { category: "PRODUCT_CODE", label: "Product Code" },
-      { category: "MODEL", label: "Model" },
-      { category: "SEAT_SIZE", label: "Seat Size" },
-      { category: "MODULE", label: "Module" }, { category: "FABRIC", label: "Fabric" },
-      { category: "SPECIAL", label: "Special" },
-    ];
-    return [{ category: "PRODUCT_CODE", label: "Product Code" }, { category: "SIZE", label: "Size" }, { category: "FABRIC", label: "Fabric" }];
+    return variantFieldsFor(cat, getVariantsConfigSync()?.bomVariantFields);
   }, [products, selectedCode]);
 
   const selected = products.find((p) => p.code === selectedCode);
@@ -1929,7 +1923,7 @@ function CreateBOMDialog({
   function addL1Process() {
     setL1Processes((prev) => [
       ...prev,
-      { dept: "Fab Sew", deptCode: "FAB_SEW", category: "CAT 3", minutes: 30 },
+      { dept: "Fab Sew", deptCode: "FAB_SEW", category: "", minutes: 30 },
     ]);
   }
 
@@ -1943,12 +1937,7 @@ function CreateBOMDialog({
         if (idx !== i) return p;
         if (field === "deptCode") {
           const code = value as string;
-          const minutes = getProductionMinutes(code, p.category) || p.minutes;
-          return { ...p, deptCode: code, dept: DEPT_LABELS[code] || code, minutes };
-        }
-        if (field === "category") {
-          const minutes = getProductionMinutes(p.deptCode, value as string);
-          return { ...p, category: value as string, minutes };
+          return { ...p, deptCode: code, dept: DEPT_LABELS[code] || code };
         }
         return { ...p, [field]: value };
       })
@@ -1956,7 +1945,7 @@ function CreateBOMDialog({
   }
 
   function addWIPComponent() {
-    const wipType = selected?.category === "SOFA" ? "SOFA_BASE" : "DIVAN";
+    const wipType = allowedWipType(selected?.category === "SOFA" ? "SOFA_BASE" : "DIVAN", selected?.category);
     const isBedframe = selected?.category === "BEDFRAME";
     // Auto-populate code segments from product data
     const autoSegments: CodeSegment[] = [];
@@ -1987,8 +1976,8 @@ function CreateBOMDialog({
         wipType: wipType as WIPComponent["wipType"],
         quantity: 1,
         processes: [
-          { dept: "Wood Cut", deptCode: "WOOD_CUT", category: "CAT 1", minutes: 20 },
-          { dept: "Framing", deptCode: "FRAMING", category: "CAT 4", minutes: 20 },
+          { dept: "Wood Cut", deptCode: "WOOD_CUT", category: "", minutes: 20 },
+          { dept: "Framing", deptCode: "FRAMING", category: "", minutes: 20 },
         ],
         materials: (() => {
           const mats: WIPMaterial[] = [];
@@ -2019,7 +2008,7 @@ function CreateBOMDialog({
               ...w,
               processes: [
                 ...w.processes,
-                { dept: "Packing", deptCode: "PACKING", category: "CAT 3", minutes: 20 },
+                { dept: "Packing", deptCode: "PACKING", category: "", minutes: 20 },
               ],
             }
           : w
@@ -2045,12 +2034,7 @@ function CreateBOMDialog({
                 if (pidx !== pi) return p;
                 if (field === "deptCode") {
                   const code = value as string;
-                  const minutes = getProductionMinutes(code, p.category) || p.minutes;
-                  return { ...p, deptCode: code, dept: DEPT_LABELS[code] || code, minutes };
-                }
-                if (field === "category") {
-                  const minutes = getProductionMinutes(p.deptCode, value as string);
-                  return { ...p, category: value as string, minutes };
+                  return { ...p, deptCode: code, dept: DEPT_LABELS[code] || code };
                 }
                 return { ...p, [field]: value };
               }),
@@ -2131,7 +2115,7 @@ function CreateBOMDialog({
     // Reset
     setSelectedCode("");
     setProdSearch("");
-    setL1Processes([{ dept: "Fab Cut", deptCode: "FAB_CUT", category: "CAT 3", minutes: 30 }]);
+    setL1Processes([{ dept: "Fab Cut", deptCode: "FAB_CUT", category: "", minutes: 30 }]);
     setL1Materials([]);
     setWipComponents([]);
     setStep(1);
@@ -2235,17 +2219,7 @@ function CreateBOMDialog({
                         <option key={d} value={d}>{DEPT_LABELS[d]}</option>
                       ))}
                     </select>
-                    <select
-                      value={p.category}
-                      onChange={(e) => updateL1Process(i, "category", e.target.value)}
-                      className="text-sm border border-[#E2DDD8] rounded px-2 py-1 w-20 bg-white"
-                    >
-                      <option value="">CAT</option>
-                      {getCategoryOptions().map((c) => (
-                        <option key={c} value={c}>{c}</option>
-                      ))}
-                    </select>
-                    <span className="text-sm text-gray-700 bg-[#FAF9F7] border border-[#E2DDD8] rounded px-2 py-1 w-20 text-center tabular-nums">{p.minutes}</span>
+                    <MinutesInput value={p.minutes} onChange={(m) => updateL1Process(i, "minutes", m)} className="text-sm text-gray-700 bg-white border border-[#E2DDD8] rounded px-2 py-1 w-20 text-center tabular-nums" />
                     <span className="text-xs text-gray-400">min</span>
                     <button onClick={() => removeL1Process(i)} className="ml-auto p-1 hover:bg-[#F9E1DA] rounded text-[#9A3A2D]">
                       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -2287,7 +2261,7 @@ function CreateBOMDialog({
                         onChange={(e) => updateWIP(wi, "wipType", e.target.value)}
                         className="text-sm border border-[#A8CAD2] rounded px-2 py-1 bg-white"
                       >
-                        {Object.entries(WIP_TYPE_LABELS).map(([k, v]) => (
+                        {Object.entries(WIP_TYPE_LABELS).filter(([k]) => k === w.wipType || wipTypeAllowed(k, selected?.category, getVariantsConfigSync()?.wipTypeProducts)).map(([k, v]) => (
                           <option key={k} value={k}>{v.label}</option>
                         ))}
                       </select>
@@ -2338,17 +2312,7 @@ function CreateBOMDialog({
                             <option key={d} value={d}>{DEPT_LABELS[d]}</option>
                           ))}
                         </select>
-                        <select
-                          value={p.category}
-                          onChange={(e) => updateWIPProcess(wi, pi, "category", e.target.value)}
-                          className="text-xs border border-gray-200 rounded px-1.5 py-1 w-16 bg-white"
-                        >
-                          <option value="">CAT</option>
-                          {getCategoryOptions().map((c) => (
-                            <option key={c} value={c}>{c}</option>
-                          ))}
-                        </select>
-                        <span className="text-xs text-gray-700 bg-gray-50 border border-gray-200 rounded px-1.5 py-1 w-14 text-center tabular-nums">{p.minutes}</span>
+                        <MinutesInput value={p.minutes} onChange={(m) => updateWIPProcess(wi, pi, "minutes", m)} className="text-xs text-gray-700 bg-white border border-gray-200 rounded px-1.5 py-1 w-14 text-center tabular-nums" />
                         <span className="text-[10px] text-gray-400">min</span>
                         <button onClick={() => removeWIPProcess(wi, pi)} className="ml-auto text-[#9A3A2D] hover:text-[#7A2E24]">
                           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -2531,250 +2495,6 @@ function CollapsibleGroup({
   );
 }
 
-// ---------- Recursive Sub-WIP Tree ----------
-function SubWIPTree({
-  children,
-  wi,
-  path,
-  onAdd,
-  onRemove,
-  onUpdate,
-  onUpdateSegments,
-  onAddProcess,
-  onRemoveProcess,
-  onUpdateProcess,
-  onAddMaterial,
-  onRemoveMaterial,
-  onSelectMaterial,
-  onSelectMaterialAutoDetect,
-  onUpdateMaterial,
-  onWrap,
-  onMoveUp,
-  onMoveDown,
-  onMoveProcessUp,
-  onMoveProcessDown,
-  fabricOptions,
-  variantCategories,
-  rawMaterials,
-  depth = 0,
-}: {
-  children: WIPComponent[];
-  wi: number;
-  path: number[];
-  onAdd: (path: number[]) => void;
-  onRemove: (path: number[], si: number) => void;
-  onUpdate: (path: number[], field: string, value: string | number | MaterialScaling[] | undefined) => void;
-  onUpdateSegments: (path: number[], segs: CodeSegment[]) => void;
-  onAddProcess: (path: number[]) => void;
-  onRemoveProcess: (path: number[], pi: number) => void;
-  onUpdateProcess: (path: number[], pi: number, field: string, value: string | number | MaterialScaling[] | undefined) => void;
-  onAddMaterial: (path: number[]) => void;
-  onRemoveMaterial: (path: number[], mi: number) => void;
-  onSelectMaterial: (path: number[], mi: number, rm: RawMaterialOption) => void;
-  onSelectMaterialAutoDetect: (path: number[], mi: number, kind: "FABRIC" | "LEG") => void;
-  onUpdateMaterial: (path: number[], mi: number, field: string, value: string | number | MaterialScaling[] | undefined) => void;
-  onWrap?: (path: number[], si: number) => void;
-  onMoveUp?: (path: number[], si: number) => void;
-  onMoveDown?: (path: number[], si: number) => void;
-  onMoveProcessUp?: (path: number[], pi: number) => void;
-  onMoveProcessDown?: (path: number[], pi: number) => void;
-  fabricOptions: string[];
-  variantCategories: VariantCategoryInfo[];
-  rawMaterials: RawMaterialOption[];
-  depth?: number;
-}) {
-  const colors = [
-    { border: "border-[#D1B7D0]", bg: "bg-[#F1E6F0]", label: "text-[#6B4A6D]", btn: "bg-[#D1B7D0] text-[#6B4A6D] hover:bg-[#D1B7D0]" },
-    { border: "border-[#E8B786]", bg: "bg-[#FBE4CE]", label: "text-[#B8601A]", btn: "bg-[#E8B786] text-[#B8601A] hover:bg-[#E8B786]" },
-    { border: "border-emerald-300", bg: "bg-emerald-100", label: "text-emerald-800", btn: "bg-emerald-300 text-emerald-900 hover:bg-emerald-400" },
-    { border: "border-[#E8B2A1]", bg: "bg-[#F9E1DA]", label: "text-[#9A3A2D]", btn: "bg-[#E8B2A1] text-[#9A3A2D] hover:bg-[#E8B2A1]" },
-  ];
-  const c = colors[depth % colors.length];
-
-  return (
-    <>
-      <div className="flex items-center justify-between mt-2">
-        <span className={`text-xs font-medium ${c.label}`}>
-          {depth === 0 ? "Sub-WIP Components" : `Sub-WIP (Level ${depth + 1})`}
-        </span>
-        <button onClick={() => onAdd(path)} className={`text-[10px] px-1.5 py-0.5 rounded ${c.btn}`}>+ Sub-WIP</button>
-      </div>
-      {children.map((sub, si) => {
-        const childPath = [...path, si];
-        return (
-          <div key={sub.id} className={`ml-3 ${c.border} border rounded-lg ${c.bg} p-2 space-y-1.5`}>
-            <div className="flex items-center gap-2">
-              <select value={sub.wipType} onChange={(e) => onUpdate(childPath, "wipType", e.target.value)} className={`text-xs ${c.border} border rounded px-1.5 py-1 bg-white`}>
-                {Object.entries(WIP_TYPE_LABELS).map(([k, v]) => (<option key={k} value={k}>{v.label}</option>))}
-              </select>
-              <input type="number" onFocus={(e) => e.currentTarget.select()} value={sub.quantity} onChange={(e) => onUpdate(childPath, "quantity", parseInt(e.target.value) || 1)} className={`text-xs ${c.border} border rounded px-1.5 py-1 w-12 bg-white`} min={1} />
-              <span className="text-[10px] text-gray-500">PCS</span>
-              {onWrap && (
-                <button
-                  onClick={() => onWrap(path, si)}
-                  className={`ml-auto text-[10px] px-1.5 py-0.5 rounded ${c.btn}`}
-                  title="Wrap this sub-WIP inside a new parent (upstream)"
-                >
-                  + Above
-                </button>
-              )}
-              {onMoveUp && (
-                <button
-                  onClick={() => onMoveUp(path, si)}
-                  disabled={si === 0}
-                  className={`text-[10px] px-1.5 py-0.5 rounded ${c.btn} disabled:opacity-30 disabled:cursor-not-allowed ${onWrap ? "" : "ml-auto"}`}
-                  title="Move up"
-                >
-                  ↑
-                </button>
-              )}
-              {onMoveDown && (
-                <button
-                  onClick={() => onMoveDown(path, si)}
-                  disabled={si === children.length - 1}
-                  className={`text-[10px] px-1.5 py-0.5 rounded ${c.btn} disabled:opacity-30 disabled:cursor-not-allowed`}
-                  title="Move down"
-                >
-                  ↓
-                </button>
-              )}
-              <button onClick={() => onRemove(path, si)} className={`text-[#9A3A2D] hover:text-[#7A2E24] ${onWrap || onMoveUp || onMoveDown ? "" : "ml-auto"}`}>
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-              </button>
-            </div>
-            <div className="ml-1">
-              <WIPCodeBuilder
-                segments={sub.codeSegments || (sub.wipCode ? [{ type: "word" as const, value: sub.wipCode }] : [{ type: "word" as const, value: "" }])}
-                onChange={(segs) => onUpdateSegments(childPath, segs)}
-                fabricOptions={fabricOptions}
-                variantCategories={variantCategories}
-              />
-            </div>
-
-            {/* Processes */}
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-[#3E6570]">Processes</span>
-              <button onClick={() => onAddProcess(childPath)} className="text-[10px] px-1.5 py-0.5 bg-[#E0EDF0] text-[#3E6570] rounded hover:bg-[#A8CAD2]">+ Process</button>
-            </div>
-            {sub.processes.map((p, pi) => (
-              <div key={pi} className="flex items-center gap-2 bg-white rounded px-2 py-1.5">
-                <select value={p.deptCode} onChange={(e) => onUpdateProcess(childPath, pi, "deptCode", e.target.value)} className="text-xs border border-gray-200 rounded px-1.5 py-1 bg-white">
-                  {DEPT_ORDER.map((d) => (<option key={d} value={d}>{DEPT_LABELS[d]}</option>))}
-                </select>
-                <select value={p.category} onChange={(e) => onUpdateProcess(childPath, pi, "category", e.target.value)} className="text-xs border border-gray-200 rounded px-1.5 py-1 w-16 bg-white">
-                  <option value="">CAT</option>
-                  {getCategoryOptions().map((c) => (<option key={c} value={c}>{c}</option>))}
-                </select>
-                <span className="text-xs text-gray-700 bg-gray-50 border border-gray-200 rounded px-1.5 py-1 w-14 text-center tabular-nums">{p.minutes}</span>
-                <span className="text-[10px] text-gray-400">min</span>
-                {onMoveProcessUp && (
-                  <button onClick={() => onMoveProcessUp(childPath, pi)} disabled={pi === 0} className="ml-auto text-[10px] px-1.5 py-0.5 bg-[#E0EDF0] text-[#3E6570] rounded hover:bg-[#A8CAD2] disabled:opacity-30 disabled:cursor-not-allowed" title="Move process up">↑</button>
-                )}
-                {onMoveProcessDown && (
-                  <button onClick={() => onMoveProcessDown(childPath, pi)} disabled={pi === sub.processes.length - 1} className={`text-[10px] px-1.5 py-0.5 bg-[#E0EDF0] text-[#3E6570] rounded hover:bg-[#A8CAD2] disabled:opacity-30 disabled:cursor-not-allowed ${onMoveProcessUp ? "" : "ml-auto"}`} title="Move process down">↓</button>
-                )}
-                <button onClick={() => onRemoveProcess(childPath, pi)} className={`text-[#9A3A2D] hover:text-[#7A2E24] ${onMoveProcessUp || onMoveProcessDown ? "" : "ml-auto"}`}>
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                </button>
-              </div>
-            ))}
-
-            {/* Raw Materials */}
-            <div className="flex items-center justify-between mt-1">
-              <span className="text-xs font-medium text-[#4F7C3A]">Raw Materials</span>
-              <button onClick={() => onAddMaterial(childPath)} className="text-[10px] px-1.5 py-0.5 bg-[#EEF3E4] text-[#4F7C3A] rounded hover:bg-[#C6DBA8]">+ Material</button>
-            </div>
-            {(sub.materials || []).map((m, mi) => (
-              <div key={mi} className="bg-white rounded">
-                <div className="flex items-center gap-2 px-2 py-1.5">
-                  {m.autoDetect ? (
-                    <div className="flex items-center gap-1.5 flex-1">
-                      <span className="text-[10px] px-1.5 py-0.5 bg-[#E0EDF0] text-[#3E6570] rounded font-medium border border-[#A8CAD2] whitespace-nowrap">
-                        {m.autoDetect === "FABRIC" ? "Fabric from order" : "Leg from order"}
-                      </span>
-                      <span className="text-[10px] text-gray-400 italic">
-                        {m.autoDetect === "FABRIC" ? "SO item fabricCode" : "SO item legHeightInches"}
-                      </span>
-                    </div>
-                  ) : (
-                    <RawMaterialSelect
-                      value={m.code ? `${m.code}` : ""}
-                      materials={rawMaterials}
-                      onSelect={(rm) => onSelectMaterial(childPath, mi, rm)}
-                      onSelectAutoDetect={(kind) => onSelectMaterialAutoDetect(childPath, mi, kind)}
-                    />
-                  )}
-                  <input type="number" onFocus={(e) => e.currentTarget.select()} value={m.qty} onChange={(e) => onUpdateMaterial(childPath, mi, "qty", parseFloat(e.target.value) || 0)} className="text-xs border border-gray-200 rounded px-1.5 py-1 w-14" />
-                  <input type="number" onFocus={(e) => e.currentTarget.select()} value={m.wastePct ?? ""} onChange={(e) => onUpdateMaterial(childPath, mi, "wastePct", parseFloat(e.target.value) || 0)} placeholder="0" title="Wastage % — cut / bulk materials (fabric / foam / wood) have offcut + defect waste; leave 0 for discrete parts (screws / legs / mechanism)" className="text-xs border border-gray-200 rounded px-1.5 py-1 w-12" />
-                  <span className="text-[10px] text-gray-400 whitespace-nowrap" title="Wastage % — cut / bulk materials (fabric / foam / wood) have offcut + defect waste; leave 0 for discrete parts (screws / legs / mechanism)">% waste</span>
-                  <span className="text-[10px] text-gray-400 w-8">{m.unit || "PCS"}</span>
-                  {materialHasKit(m) && (
-                    <span className="text-[10px] text-[#1D4ED8] whitespace-nowrap" title="This SKU has a Component Kit — its bound screws/parts are auto-added to consumption. Manage them on the Component Kits page.">+ kit</span>
-                  )}
-                  {isFillerMaterial(m, rawMaterials) && (
-                    <span className="flex items-center gap-0.5 text-[10px] text-[#B8601A] whitespace-nowrap" title="Cut size in INCHES (length × width) — consumes cutArea ÷ sheetArea of a sheet">
-                      cut
-                      <input type="number" placeholder="L" onFocus={(e) => e.currentTarget.select()} value={m.cutLengthIn ?? ""} onChange={(e) => onUpdateMaterial(childPath, mi, "cutLengthIn", parseFloat(e.target.value) || 0)} className="w-11 border border-[#E8B786] rounded px-1 py-0.5" />
-                      ×
-                      <input type="number" placeholder="W" onFocus={(e) => e.currentTarget.select()} value={m.cutWidthIn ?? ""} onChange={(e) => onUpdateMaterial(childPath, mi, "cutWidthIn", parseFloat(e.target.value) || 0)} className="w-11 border border-[#E8B786] rounded px-1 py-0.5" />
-                      in
-                    </span>
-                  )}
-                  <button onClick={() => onRemoveMaterial(childPath, mi)} className="text-[#9A3A2D] hover:text-[#7A2E24]">
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                  </button>
-                </div>
-                <MaterialScalingEditor
-                  scaling={m.scaling}
-                  unit={m.unit || "PCS"}
-                  isCut={isFillerMaterial(m, rawMaterials)}
-                  onChange={(s) => onUpdateMaterial(childPath, mi, "scaling", s)}
-                />
-              </div>
-            ))}
-            {(sub.materials || []).length === 0 && (
-              <p className="text-[10px] text-gray-400 pl-2">No materials added</p>
-            )}
-
-            {/* Recursive children */}
-            <SubWIPTree
-              children={sub.children || []}
-              wi={wi}
-              path={childPath}
-              onAdd={onAdd}
-              onRemove={onRemove}
-              onUpdate={onUpdate}
-              onUpdateSegments={onUpdateSegments}
-              onAddProcess={onAddProcess}
-              onRemoveProcess={onRemoveProcess}
-              onUpdateProcess={onUpdateProcess}
-              onAddMaterial={onAddMaterial}
-              onRemoveMaterial={onRemoveMaterial}
-              onSelectMaterial={onSelectMaterial}
-              onSelectMaterialAutoDetect={onSelectMaterialAutoDetect}
-              onUpdateMaterial={onUpdateMaterial}
-              onWrap={onWrap}
-              onMoveUp={onMoveUp}
-              onMoveDown={onMoveDown}
-              onMoveProcessUp={onMoveProcessUp}
-              onMoveProcessDown={onMoveProcessDown}
-              fabricOptions={fabricOptions}
-              variantCategories={variantCategories}
-              rawMaterials={rawMaterials}
-              depth={depth + 1}
-            />
-          </div>
-        );
-      })}
-      {children.length === 0 && (
-        <p className="text-[10px] text-gray-400 pl-2">
-          {depth === 0 ? "No sub-WIP components" : "No nested sub-WIP"}
-        </p>
-      )}
-    </>
-  );
-}
-
 // ---------- WIP tree flattening (two-pane editor) ----------
 //
 // The WIP editor used to render the whole tree INLINE and recursively, so each
@@ -2833,11 +2553,159 @@ function flattenWipTree(
   return out;
 }
 
-/** Depth → the 3px accent bar. Replaces the old stacked background colours:
- *  the hierarchy still reads, but the eye isn't fighting four fills at once. */
-const WIP_DEPTH_BAR = ["#3E6570", "#6B4A6D", "#B8601A", "#4F7C3A", "#9A3A2D"];
-function depthBar(depth: number): string {
-  return WIP_DEPTH_BAR[depth % WIP_DEPTH_BAR.length];
+/** Depth → the same level palette the BOM Structure view uses (L2 blue, L3
+ *  purple, L4 orange, L5 green, L6 rose), as hex so it can drive gradients. */
+const WIP_LEVEL_HEX = [
+  { bg: "#E0EDF0", border: "#A8CAD2", text: "#3E6570" },
+  { bg: "#F1E6F0", border: "#D1B7D0", text: "#6B4A6D" },
+  { bg: "#FBE4CE", border: "#E8B786", text: "#B8601A" },
+  { bg: "#D1FAE5", border: "#6EE7B7", text: "#047857" },
+  { bg: "#F9E1DA", border: "#E8B2A1", text: "#9A3A2D" },
+];
+function wipLevelHex(depth: number) {
+  return WIP_LEVEL_HEX[Math.min(depth, WIP_LEVEL_HEX.length - 1)];
+}
+function wipLevelGradient(depth: number): string {
+  const c = wipLevelHex(depth);
+  return `linear-gradient(135deg, ${c.bg} 0%, ${c.bg}B3 60%, #FFFFFF 100%)`;
+}
+
+/** Display name for a WIP node: the code resolved against the product
+ *  ("8\" Divan- 6FT Foam"), not the raw "{DIVAN_HEIGHT} Divan- {SIZE}" template. */
+function wipDisplayName(node: WIPComponent, product?: Product): string {
+  return (
+    buildWipCodeDisplay(node.codeSegments, product) ||
+    node.wipCode ||
+    WIP_TYPE_LABELS[node.wipType]?.label ||
+    "(unnamed)"
+  );
+}
+
+/**
+ * The LEFT pane of the Edit BOM WIP tab, drawn as nested colour cards — the
+ * same layered look as the BOM Structure view — so the editor reads like the
+ * BOM it produces. Owner 2026-10-01: the flat 3px-bar list (two-pane redesign
+ * of 2026-08-03) showed every row as "{DIVAN_HEIGHT} Divan- {SI…" and lost the
+ * hierarchy. Editing still happens in the right pane at full width, so deep
+ * nodes keep their wide inputs; only the structure got its colour back.
+ */
+function WipTreeCard({
+  node,
+  wi,
+  path,
+  depth,
+  product,
+  selectedKey,
+  collapsed,
+  onSelect,
+  onToggle,
+}: {
+  node: WIPComponent;
+  wi: number;
+  path: number[];
+  depth: number;
+  product?: Product;
+  selectedKey: string | null;
+  collapsed: Set<string>;
+  onSelect: (key: string) => void;
+  onToggle: (key: string) => void;
+}) {
+  const key = wipRowKey(wi, path);
+  const active = selectedKey === key;
+  const c = wipLevelHex(depth);
+  const children = node.children ?? [];
+  const isCollapsed = collapsed.has(key);
+  const processes = node.processes ?? [];
+  const mats = (node.materials ?? []).length;
+  const totalMin = processes.reduce((s, p) => s + (p.minutes || 0), 0) * (node.quantity || 1);
+  const name = wipDisplayName(node, product);
+  return (
+    <div
+      className={`rounded-lg border transition-shadow ${active ? "shadow-md" : "hover:shadow-sm"}`}
+      style={{
+        background: wipLevelGradient(depth),
+        borderColor: active ? "#6B5C32" : c.border,
+        boxShadow: active ? "0 0 0 2px #6B5C32" : undefined,
+      }}
+    >
+      <div
+        className="cursor-pointer px-2.5 py-2"
+        onClick={() => onSelect(key)}
+      >
+        <div className="flex items-center gap-1.5">
+          {children.length > 0 ? (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggle(key);
+              }}
+              className="w-3 shrink-0 text-gray-500 hover:text-gray-800 leading-none"
+              aria-label={isCollapsed ? "Expand" : "Collapse"}
+            >
+              {isCollapsed ? "▸" : "▾"}
+            </button>
+          ) : (
+            <span className="w-3 shrink-0" />
+          )}
+          <span
+            className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold bg-white/80"
+            style={{ color: c.text, border: `1px solid ${c.border}` }}
+          >
+            L{depth + 2}
+          </span>
+          <span
+            className={`min-w-0 flex-1 truncate text-[13px] ${active ? "font-semibold text-[#111827]" : "font-medium text-[#1F2937]"}`}
+            title={node.wipCode ? `${name}\n${node.wipCode}` : name}
+          >
+            {name}
+          </span>
+          <span className="shrink-0 text-[11px] text-gray-500">× {node.quantity}</span>
+          <span className="shrink-0 text-[12px] font-semibold text-[#111827]">{totalMin}m</span>
+        </div>
+        {(processes.length > 0 || mats > 0) && (
+          <div className="mt-1.5 flex flex-wrap gap-1 pl-[18px]">
+            {processes.map((p, i) => {
+              const color = DEPT_COLORS[p.deptCode] || "#6B7280";
+              return (
+                <span
+                  key={i}
+                  className="inline-flex items-center gap-1 rounded-full bg-white/70 px-1.5 py-px text-[10px] font-medium whitespace-nowrap"
+                  style={{ color, border: `1px solid ${color}55` }}
+                >
+                  <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: color }} />
+                  {DEPT_LABELS[p.deptCode] || p.dept}
+                  <span className="font-semibold">{p.minutes}m</span>
+                </span>
+              );
+            })}
+            {mats > 0 && (
+              <span className="inline-flex items-center rounded-full border border-[#C6DBA8] bg-white/70 px-1.5 py-px text-[10px] text-[#4F7C3A]">
+                {mats} mat
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+      {children.length > 0 && !isCollapsed && (
+        <div className="space-y-1.5 pb-2 pl-3 pr-1.5">
+          {children.map((child, i) => (
+            <WipTreeCard
+              key={child.id ?? i}
+              node={child}
+              wi={wi}
+              path={[...path, i]}
+              depth={depth + 1}
+              product={product}
+              selectedKey={selectedKey}
+              collapsed={collapsed}
+              onSelect={onSelect}
+              onToggle={onToggle}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 /** Resolve a node by (wi, path) — null when the path no longer exists. */
@@ -2878,12 +2746,17 @@ function WipNodeDetail({
   onAddChild,
   onRemove,
   onMove,
+  canMoveUp = true,
+  canMoveDown = true,
   onWrap,
+  product,
 }: {
   node: WIPComponent;
   wi: number;
   path: number[];
   depth: number;
+  /** Resolves the display name ("8\" Divan- 6FT Foam") in the header. */
+  product?: Product;
   fabricOptions: string[];
   variantCategories: VariantCategoryInfo[];
   rawMaterials: RawMaterialOption[];
@@ -2901,29 +2774,41 @@ function WipNodeDetail({
   onAddChild: (wi: number, path: number[]) => void;
   onRemove: (wi: number, path: number[]) => void;
   onMove: (wi: number, path: number[], dir: -1 | 1) => void;
-  /** Wrap this sub-WIP inside a new parent. Absent for top-level nodes. */
+  canMoveUp?: boolean;
+  canMoveDown?: boolean;
+  /** Wrap this node inside a new parent. Absent when the node cannot be wrapped. */
   onWrap?: (wi: number, path: number[]) => void;
 }) {
   // One grid template shared by the header row and every process row, so the
   // columns line up instead of drifting the way the old inline flex rows did.
-  const procGrid = "grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_84px_28px_28px_28px] gap-2 items-center";
+  const procGrid = "grid grid-cols-[minmax(0,1fr)_84px_28px_28px_28px] gap-2 items-center";
   return (
     <div className="space-y-5">
-      {/* Header */}
-      <div className="flex items-center gap-2">
-        <span className="h-5 w-[3px] shrink-0" style={{ backgroundColor: depthBar(depth) }} />
-        <span className="text-[15px] font-medium text-[#111827] truncate">
-          {node.wipCode || WIP_TYPE_LABELS[node.wipType]?.label || "(unnamed)"}
+      {/* Header — same level colour as its card in the left tree */}
+      <div
+        className="flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2.5"
+        style={{ background: wipLevelGradient(depth), borderColor: wipLevelHex(depth).border }}
+      >
+        <span
+          className="shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold bg-white/80"
+          style={{ color: wipLevelHex(depth).text, border: `1px solid ${wipLevelHex(depth).border}` }}
+        >
+          L{depth + 2}
         </span>
-        <span className="text-[11px] text-gray-400 shrink-0">
-          {depth === 0 ? "level 1" : `level ${depth + 1}`}
-        </span>
+        <div className="min-w-0 flex-1">
+          <div className="text-[15px] font-semibold text-[#111827] truncate">
+            {wipDisplayName(node, product)}
+          </div>
+          {node.wipCode && node.wipCode !== wipDisplayName(node, product) && (
+            <div className="text-[11px] text-gray-500 truncate">{node.wipCode}</div>
+          )}
+        </div>
         <div className="ml-auto flex shrink-0 items-center gap-1">
-          <button onClick={() => onMove(wi, path, -1)} className="px-1.5 py-1 text-xs text-gray-500 hover:bg-gray-100 rounded" title="Move up">↑</button>
-          <button onClick={() => onMove(wi, path, 1)} className="px-1.5 py-1 text-xs text-gray-500 hover:bg-gray-100 rounded" title="Move down">↓</button>
-          {/* Insert a NEW parent above this node — only meaningful for a
-              sub-WIP, since a top-level component has no parent to wrap into. */}
-          {onWrap && path.length > 0 && (
+          <button onClick={() => onMove(wi, path, -1)} disabled={!canMoveUp} className="px-1.5 py-1 text-xs text-gray-500 hover:bg-gray-100 rounded disabled:opacity-30 disabled:cursor-not-allowed" title="Move up (swaps with the level above when there is no sibling)">↑</button>
+          <button onClick={() => onMove(wi, path, 1)} disabled={!canMoveDown} className="px-1.5 py-1 text-xs text-gray-500 hover:bg-gray-100 rounded disabled:opacity-30 disabled:cursor-not-allowed" title="Move down (swaps with the level below when there is no sibling)">↓</button>
+          {/* Insert a NEW parent above this node. The caller leaves onWrap
+              out where it cannot wrap (Edit BOM's top-level components). */}
+          {onWrap && (
             <button
               onClick={() => onWrap(wi, path)}
               className="px-2 py-1 text-xs rounded bg-[#F1E6F0] text-[#6B4A6D] hover:bg-[#D1B7D0]"
@@ -2933,7 +2818,7 @@ function WipNodeDetail({
             </button>
           )}
           <button onClick={() => onAddChild(wi, path)} className="px-2 py-1 text-xs rounded bg-[#E0EDF0] text-[#3E6570] hover:bg-[#A8CAD2]">+ Sub-WIP</button>
-          <button onClick={() => onRemove(wi, path)} className="px-1.5 py-1 text-[#9A3A2D] hover:bg-[#F9E1DA] rounded" title="Delete">
+          <button onClick={() => onRemove(wi, path)} className="px-1.5 py-1 text-[#9A3A2D] hover:bg-[#F9E1DA] rounded" title="Delete this level only (the levels below move up)">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
           </button>
         </div>
@@ -2946,7 +2831,7 @@ function WipNodeDetail({
           onChange={(e) => onUpdate(wi, path, "wipType", e.target.value)}
           className="text-sm border border-[#E2DDD8] rounded px-2.5 py-1.5 bg-white"
         >
-          {Object.entries(WIP_TYPE_LABELS).map(([k, v]) => (<option key={k} value={k}>{v.label}</option>))}
+          {Object.entries(WIP_TYPE_LABELS).filter(([k]) => k === node.wipType || wipTypeAllowed(k, product?.category, getVariantsConfigSync()?.wipTypeProducts)).map(([k, v]) => (<option key={k} value={k}>{v.label}</option>))}
         </select>
         <input
           type="number"
@@ -2981,7 +2866,7 @@ function WipNodeDetail({
         ) : (
           <>
             <div className={`${procGrid} px-1 pb-1 text-[11px] text-gray-400`}>
-              <span>Department</span><span>Category</span><span className="text-right">Minutes</span><span /><span /><span />
+              <span>Department</span><span className="text-right">Minutes</span><span /><span /><span />
             </div>
             <div className="space-y-1.5">
               {node.processes.map((p, pi) => (
@@ -2989,11 +2874,7 @@ function WipNodeDetail({
                   <select value={p.deptCode} onChange={(e) => onUpdateProcess(wi, path, pi, "deptCode", e.target.value)} className="text-sm border border-[#E2DDD8] rounded px-2 py-1.5 bg-white">
                     {DEPT_ORDER.map((d) => (<option key={d} value={d}>{DEPT_LABELS[d]}</option>))}
                   </select>
-                  <select value={p.category} onChange={(e) => onUpdateProcess(wi, path, pi, "category", e.target.value)} className="text-sm border border-[#E2DDD8] rounded px-2 py-1.5 bg-white">
-                    <option value="">CAT</option>
-                    {getCategoryOptions().map((c) => (<option key={c} value={c}>{c}</option>))}
-                  </select>
-                  <span className="text-sm text-gray-700 bg-[#FAF9F7] border border-[#E2DDD8] rounded px-2 py-1.5 text-right tabular-nums">{p.minutes}</span>
+                  <MinutesInput value={p.minutes} onChange={(m) => onUpdateProcess(wi, path, pi, "minutes", m)} className="text-sm text-gray-700 bg-white border border-[#E2DDD8] rounded px-2 py-1.5 text-right tabular-nums" />
                   <button onClick={() => onMoveProcess(wi, path, pi, -1)} disabled={pi === 0} className="text-xs text-gray-500 hover:bg-gray-100 rounded py-1 disabled:opacity-30" title="Move up">↑</button>
                   <button onClick={() => onMoveProcess(wi, path, pi, 1)} disabled={pi === node.processes.length - 1} className="text-xs text-gray-500 hover:bg-gray-100 rounded py-1 disabled:opacity-30" title="Move down">↓</button>
                   <button onClick={() => onRemoveProcess(wi, path, pi)} className="text-[#9A3A2D] hover:bg-[#F9E1DA] rounded py-1" title="Remove">
@@ -3107,9 +2988,10 @@ function EditBOMDialog({
   /* eslint-disable react-hooks/set-state-in-effect -- mirror master-template cache into local state when dialog opens */
   useEffect(() => {
     if (!open) return;
-    const cat = (product.category === "SOFA" ? "SOFA" : "BEDFRAME") as
-      | "BEDFRAME"
-      | "SOFA";
+    const cat: BOMCategory =
+      product.category === "SOFA" ? "SOFA"
+      : product.category === "ACCESSORY" ? "ACCESSORY"
+      : "BEDFRAME";
     setMasterTemplates(loadAllMasterTemplates(cat));
     // When D1 hydration finishes after the dialog is already open, re-pull
     // from the (now-populated) cache so the Load Default picker isn't stuck
@@ -3215,7 +3097,7 @@ function EditBOMDialog({
   function addL1Process() {
     setL1Processes((prev) => [
       ...prev,
-      { dept: "Fab Sew", deptCode: "FAB_SEW", category: "CAT 3", minutes: 30 },
+      { dept: "Fab Sew", deptCode: "FAB_SEW", category: "", minutes: 30 },
     ]);
   }
   function removeL1Process(i: number) {
@@ -3227,12 +3109,7 @@ function EditBOMDialog({
         if (idx !== i) return p;
         if (field === "deptCode") {
           const code = value as string;
-          const minutes = getProductionMinutes(code, p.category) || p.minutes;
-          return { ...p, deptCode: code, dept: DEPT_LABELS[code] || code, minutes };
-        }
-        if (field === "category") {
-          const minutes = getProductionMinutes(p.deptCode, value as string);
-          return { ...p, category: value as string, minutes };
+          return { ...p, deptCode: code, dept: DEPT_LABELS[code] || code };
         }
         return { ...p, [field]: value };
       })
@@ -3240,7 +3117,7 @@ function EditBOMDialog({
   }
 
   function addWIPComponent() {
-    const wipType = product.category === "SOFA" ? "SOFA_BASE" : "DIVAN";
+    const wipType = allowedWipType(product.category === "SOFA" ? "SOFA_BASE" : "DIVAN", product.category);
     const isBedframe = product.category === "BEDFRAME";
     // Auto-populate code segments from product data
     const autoSegments: CodeSegment[] = [];
@@ -3266,16 +3143,13 @@ function EditBOMDialog({
         wipType: wipType as WIPComponent["wipType"],
         quantity: 1,
         processes: [
-          { dept: "Wood Cut", deptCode: "WOOD_CUT", category: "CAT 1", minutes: 20 },
-          { dept: "Framing", deptCode: "FRAMING", category: "CAT 4", minutes: 20 },
+          { dept: "Wood Cut", deptCode: "WOOD_CUT", category: "", minutes: 20 },
+          { dept: "Framing", deptCode: "FRAMING", category: "", minutes: 20 },
         ],
         materials: makeAutoMaterials(),
         children: [],
       },
     ]);
-  }
-  function removeWIP(i: number) {
-    setWipComponents((prev) => prev.filter((_, idx) => idx !== i));
   }
   function updateWIP(i: number, field: string, value: string | number | MaterialScaling[] | undefined) {
     setWipComponents((prev) =>
@@ -3286,7 +3160,7 @@ function EditBOMDialog({
     setWipComponents((prev) =>
       prev.map((w, idx) =>
         idx === wi
-          ? { ...w, processes: [...w.processes, { dept: "Packing", deptCode: "PACKING", category: "CAT 3", minutes: 20 }] }
+          ? { ...w, processes: [...w.processes, { dept: "Packing", deptCode: "PACKING", category: "", minutes: 20 }] }
           : w
       )
     );
@@ -3308,12 +3182,7 @@ function EditBOMDialog({
                 if (pidx !== pi) return p;
                 if (field === "deptCode") {
                   const code = value as string;
-                  const minutes = getProductionMinutes(code, p.category) || p.minutes;
-                  return { ...p, deptCode: code, dept: DEPT_LABELS[code] || code, minutes };
-                }
-                if (field === "category") {
-                  const minutes = getProductionMinutes(p.deptCode, value as string);
-                  return { ...p, category: value as string, minutes };
+                  return { ...p, deptCode: code, dept: DEPT_LABELS[code] || code };
                 }
                 return { ...p, [field]: value };
               }),
@@ -3349,7 +3218,7 @@ function EditBOMDialog({
   }
   // --- Recursive Sub-WIP helpers using path-based updates ---
   function makeAutoSegments(): CodeSegment[] {
-    const wipType = product.category === "SOFA" ? "SOFA_BASE" : "DIVAN";
+    const wipType = allowedWipType(product.category === "SOFA" ? "SOFA_BASE" : "DIVAN", product.category);
     const isBedframe = product.category === "BEDFRAME";
     const segs: CodeSegment[] = [];
     if (product.code) segs.push({ type: "variant", variantCategory: "PRODUCT_CODE", value: product.code });
@@ -3383,7 +3252,7 @@ function EditBOMDialog({
   function addSubWIPAtPath(wi: number, path: number[]) {
     const autoSegs = makeAutoSegments();
     const autoMats = makeAutoMaterials();
-    const wipType = product.category === "SOFA" ? "SOFA_BASE" : "DIVAN";
+    const wipType = allowedWipType(product.category === "SOFA" ? "SOFA_BASE" : "DIVAN", product.category);
     setWipComponents((prev) =>
       prev.map((w, idx) => idx !== wi ? w : updateAtPath(w, path, (node) => ({
         ...node,
@@ -3393,19 +3262,10 @@ function EditBOMDialog({
           codeSegments: autoSegs,
           wipType: wipType as WIPComponent["wipType"],
           quantity: 1,
-          processes: [{ dept: "Wood Cut", deptCode: "WOOD_CUT", category: "CAT 1", minutes: 15 }],
+          processes: [{ dept: "Wood Cut", deptCode: "WOOD_CUT", category: "", minutes: 15 }],
           materials: autoMats,
           children: [],
         }],
-      })))
-    );
-  }
-
-  function removeSubWIPAtPath(wi: number, path: number[], si: number) {
-    setWipComponents((prev) =>
-      prev.map((w, idx) => idx !== wi ? w : updateAtPath(w, path, (node) => ({
-        ...node,
-        children: (node.children || []).filter((_, i) => i !== si),
       })))
     );
   }
@@ -3440,18 +3300,6 @@ function EditBOMDialog({
       }))
     );
   }
-  // Move a sub-WIP among its siblings (the children[] of the node at path).
-  function moveSubWIPAtPath(wi: number, path: number[], si: number, dir: -1 | 1) {
-    setWipComponents((prev) =>
-      prev.map((w, idx) => idx !== wi ? w : updateAtPath(w, path, (node) => {
-        const list = [...(node.children || [])];
-        const j = si + dir;
-        if (si < 0 || si >= list.length || j < 0 || j >= list.length) return node;
-        [list[si], list[j]] = [list[j], list[si]];
-        return { ...node, children: list };
-      }))
-    );
-  }
   // Wrap sibling si inside a new empty parent WIP (an upstream grouping level),
   // so a new stage can be inserted ABOVE an existing one in the hierarchy.
   function wrapSubWIPAtPath(wi: number, path: number[], si: number) {
@@ -3475,16 +3323,6 @@ function EditBOMDialog({
         return { ...node, children: next };
       }))
     );
-  }
-  // Move a top-level (L1) WIP component among the roots.
-  function moveWIP(wi: number, dir: -1 | 1) {
-    setWipComponents((prev) => {
-      const j = wi + dir;
-      if (wi < 0 || wi >= prev.length || j < 0 || j >= prev.length) return prev;
-      const next = [...prev];
-      [next[wi], next[j]] = [next[j], next[wi]];
-      return next;
-    });
   }
   // Move a process within a top-level (L1) WIP component's processes[].
   function moveWIPProcess(wi: number, pi: number, dir: -1 | 1) {
@@ -3548,7 +3386,7 @@ function EditBOMDialog({
     setWipComponents((prev) =>
       prev.map((w, idx) => idx !== wi ? w : updateAtPath(w, path, (node) => ({
         ...node,
-        processes: [...node.processes, { dept: "Packing", deptCode: "PACKING", category: "CAT 3", minutes: 20 }],
+        processes: [...node.processes, { dept: "Packing", deptCode: "PACKING", category: "", minutes: 20 }],
       })))
     );
   }
@@ -3566,20 +3404,10 @@ function EditBOMDialog({
         ...node,
         processes: node.processes.map((p, i) => {
           if (i !== pi) return p;
-          // Mirror updateWIPProcess (top-level) behavior so nested Sub-WIP
-          // process edits auto-derive minutes from Production Times the same
-          // way the L1 row does. Without the dept/category cases below, the
-          // user changes "Category: CAT 5 -> CAT 6" inside a Sub-WIP row and
-          // ONLY category mutates - minutes still display the old value, so
-          // the edit looks like a no-op.
+          // Mirror updateWIPProcess (top-level): a department change keeps the typed minutes.
           if (field === "deptCode") {
             const code = value as string;
-            const minutes = getProductionMinutes(code, p.category) || p.minutes;
-            return { ...p, deptCode: code, dept: DEPT_LABELS[code] || code, minutes };
-          }
-          if (field === "category") {
-            const minutes = getProductionMinutes(p.deptCode, value as string);
-            return { ...p, category: value as string, minutes };
+            return { ...p, deptCode: code, dept: DEPT_LABELS[code] || code };
           }
           return { ...p, [field]: value };
         }),
@@ -3626,17 +3454,24 @@ function EditBOMDialog({
   const nSelectMaterialAuto = (wi: number, path: number[], mi: number, kind: "FABRIC" | "LEG") =>
     isRoot(path) ? setMaterialAutoDetect(wi, mi, kind) : setMaterialAutoDetectAtPath(wi, path, mi, kind);
 
-  /** Remove a node wherever it sits; clears selection so the pane can't point
-   *  at something that no longer exists. */
+  /** Delete ONLY this level — its children move up into its slot (owner
+   *  2026-10-06: deleting a middle level used to wipe everything below it).
+   *  Clears selection so the pane can't point at something that moved. */
   const nRemove = (wi: number, path: number[]) => {
-    if (isRoot(path)) removeWIP(wi);
-    else removeSubWIPAtPath(wi, path.slice(0, -1), path[path.length - 1]);
+    setWipComponents((prev) => removeWipLevel(prev, wi, path));
     setSelectedWipKey(null);
   };
+  /** ↑/↓: sibling swap, or — when there is no sibling that way, as in a
+   *  linear L2→L3→L4 chain — swap levels with the parent / child. The right
+   *  pane follows the node to its new slot. */
   const nMove = (wi: number, path: number[], dir: -1 | 1) => {
-    if (isRoot(path)) moveWIP(wi, dir);
-    else moveSubWIPAtPath(wi, path.slice(0, -1), path[path.length - 1], dir);
+    const moved = moveWipNode(wipComponents, wi, path, dir);
+    if (!moved) return;
+    setWipComponents(moved.roots);
+    setSelectedWipKey(wipRowKey(moved.at.wi, moved.at.path));
   };
+  const nCanMove = (wi: number, path: number[], dir: -1 | 1) =>
+    canMoveWipNode(wipComponents, wi, path, dir);
 
   function selectMaterial(wi: number, mi: number, rm: RawMaterialOption) {
     setWipComponents((prev) =>
@@ -3675,7 +3510,10 @@ function EditBOMDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-white rounded-xl shadow-xl w-[min(1160px,95vw)] max-h-[85vh] flex flex-col">
+      {/* The WIP tab needs a DEFINITE height: with only max-h the body grew to
+          its content and overflow-hidden clipped both panes, so neither could
+          scroll (owner 2026-10-01「这里不能scroll」). */}
+      <div className={`bg-white rounded-xl shadow-xl w-[min(1360px,96vw)] flex flex-col ${tab === "wip" ? "h-[90vh]" : "max-h-[90vh]"}`}>
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[#E2DDD8]">
           <div>
@@ -3799,11 +3637,7 @@ function EditBOMDialog({
                     <select value={p.deptCode} onChange={(e) => updateL1Process(i, "deptCode", e.target.value)} className="text-sm border border-[#E2DDD8] rounded px-2 py-1 bg-white">
                       {DEPT_ORDER.map((d) => (<option key={d} value={d}>{DEPT_LABELS[d]}</option>))}
                     </select>
-                    <select value={p.category} onChange={(e) => updateL1Process(i, "category", e.target.value)} className="text-sm border border-[#E2DDD8] rounded px-2 py-1 w-20 bg-white">
-                      <option value="">CAT</option>
-                      {getCategoryOptions().map((c) => (<option key={c} value={c}>{c}</option>))}
-                    </select>
-                    <span className="text-sm text-gray-700 bg-[#FAF9F7] border border-[#E2DDD8] rounded px-2 py-1 w-20 text-center tabular-nums">{p.minutes}</span>
+                    <MinutesInput value={p.minutes} onChange={(m) => updateL1Process(i, "minutes", m)} className="text-sm text-gray-700 bg-white border border-[#E2DDD8] rounded px-2 py-1 w-20 text-center tabular-nums" />
                     <span className="text-xs text-gray-400">min</span>
                     <button onClick={() => removeL1Process(i)} className="ml-auto p-1 hover:bg-[#F9E1DA] rounded text-[#9A3A2D]">
                       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
@@ -3872,7 +3706,9 @@ function EditBOMDialog({
             // the inputs — by level 3 the category select was clipped to
             // "CAT 3". Structure now lives on the LEFT and editing on the
             // RIGHT, so a level-5 node is exactly as editable as a level-1 one.
-            const rows = flattenWipTree(wipComponents, collapsedWip);
+            // Selection resolves against the FULL tree, so collapsing a parent
+            // never silently moves the right pane to another node.
+            const rows = flattenWipTree(wipComponents, new Set());
             const sel = rows.find((r) => r.key === selectedWipKey) ?? rows[0] ?? null;
             const node = sel ? wipNodeAt(wipComponents, sel.wi, sel.path) : null;
             const toggle = (key: string) =>
@@ -3883,9 +3719,9 @@ function EditBOMDialog({
                 return next;
               });
             return (
-              <div className="grid h-full grid-cols-[240px_minmax(0,1fr)]">
-                {/* ── Structure ─────────────────────────────────────────── */}
-                <div className="flex min-h-0 flex-col border-r border-[#E2DDD8] bg-[#FAF9F7]">
+              <div className="grid h-full grid-cols-1 grid-rows-[auto_minmax(0,1fr)] md:grid-rows-[minmax(0,1fr)] md:grid-cols-[minmax(320px,400px)_minmax(0,1fr)]">
+                {/* ── Structure (nested colour cards, like BOM Structure) ── */}
+                <div className="flex min-h-0 max-h-[40vh] md:max-h-none flex-col border-b md:border-b-0 md:border-r border-[#E2DDD8] bg-gradient-to-b from-[#FAF9F7] to-[#F3EFE8]">
                   <div className="flex items-center justify-between px-3 py-2.5 border-b border-[#E2DDD8]">
                     <span className="text-xs font-medium text-[#6B7280]">
                       WIP Components ({wipComponents.length})
@@ -3897,53 +3733,26 @@ function EditBOMDialog({
                       + Add
                     </button>
                   </div>
-                  <div className="flex-1 overflow-y-auto p-2 space-y-1">
-                    {rows.length === 0 && (
+                  <div className="min-h-0 flex-1 overflow-y-auto p-2.5 space-y-2">
+                    {wipComponents.length === 0 && (
                       <p className="px-2 py-6 text-center text-xs text-gray-400">
                         No WIP components yet.
                       </p>
                     )}
-                    {rows.map((r) => {
-                      const active = sel?.key === r.key;
-                      const procs = r.node.processes?.length ?? 0;
-                      const mats = (r.node.materials ?? []).length;
-                      return (
-                        <div
-                          key={r.key}
-                          style={{ marginLeft: r.depth * 12, borderLeftColor: depthBar(r.depth) }}
-                          className={`border-l-[3px] cursor-pointer px-2 py-1.5 ${
-                            active ? "bg-white shadow-sm" : "bg-transparent hover:bg-white/60"
-                          }`}
-                          onClick={() => setSelectedWipKey(r.key)}
-                        >
-                          <div className="flex items-center gap-1.5">
-                            {r.hasChildren ? (
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  toggle(r.key);
-                                }}
-                                className="text-gray-400 hover:text-gray-700 leading-none"
-                                aria-label={collapsedWip.has(r.key) ? "Expand" : "Collapse"}
-                              >
-                                {collapsedWip.has(r.key) ? "\u25B8" : "\u25BE"}
-                              </button>
-                            ) : (
-                              <span className="w-[9px]" />
-                            )}
-                            <span
-                              className={`truncate text-[13px] ${active ? "font-medium text-[#111827]" : "text-[#374151]"}`}
-                              title={r.node.wipCode || WIP_TYPE_LABELS[r.node.wipType]?.label}
-                            >
-                              {r.node.wipCode || WIP_TYPE_LABELS[r.node.wipType]?.label || "(unnamed)"}
-                            </span>
-                          </div>
-                          <div className="ml-[15px] text-[11px] text-gray-400">
-                            {r.node.quantity} pcs · {procs} proc{mats > 0 ? ` · ${mats} mat` : ""}
-                          </div>
-                        </div>
-                      );
-                    })}
+                    {wipComponents.map((root, wi) => (
+                      <WipTreeCard
+                        key={root.id ?? wi}
+                        node={root}
+                        wi={wi}
+                        path={[]}
+                        depth={0}
+                        product={product}
+                        selectedKey={sel?.key ?? null}
+                        collapsed={collapsedWip}
+                        onSelect={setSelectedWipKey}
+                        onToggle={toggle}
+                      />
+                    ))}
                   </div>
                 </div>
 
@@ -3959,6 +3768,7 @@ function EditBOMDialog({
                       wi={sel.wi}
                       path={sel.path}
                       depth={sel.depth}
+                      product={product}
                       fabricOptions={fabricOptions}
                       variantCategories={productVariantCategories}
                       rawMaterials={rawMaterials}
@@ -3976,9 +3786,11 @@ function EditBOMDialog({
                       onAddChild={(wi, path) => addSubWIPAtPath(wi, path)}
                       onRemove={nRemove}
                       onMove={nMove}
-                      onWrap={(wi, path) =>
+                      canMoveUp={nCanMove(sel.wi, sel.path, -1)}
+                      canMoveDown={nCanMove(sel.wi, sel.path, 1)}
+                      onWrap={sel.path.length > 0 ? (wi, path) =>
                         wrapSubWIPAtPath(wi, path.slice(0, -1), path[path.length - 1])
-                      }
+                      : undefined}
                     />
                   )}
                 </div>
@@ -4029,34 +3841,16 @@ function MasterTemplatesDialog({
   const [editMode, setEditMode] = useState(true);
   // Copy-from picker popover state.
   const [showCopyPicker, setShowCopyPicker] = useState(false);
+  // Same L1 / WIP split and two-pane WIP editor as Edit BOM, so switching
+  // between L1 and a deep sub-WIP is a click instead of a long scroll.
+  const [section, setSection] = useState<"l1" | "wip">("l1");
+  const [selectedWipKey, setSelectedWipKey] = useState<string | null>(null);
+  const [collapsedWip, setCollapsedWip] = useState<Set<string>>(new Set());
 
   // Variant categories depend on tab — used by WIPCodeBuilder for master-level
   // placeholders that get resolved to actual product variants at apply time.
-  const variantCategories: VariantCategoryInfo[] = tab === "BEDFRAME"
-    ? [
-        { category: "PRODUCT_CODE", label: "Product Code" },
-        { category: "SIZE", label: "Size" },
-        { category: "DIVAN_HEIGHT", label: "Divan Height" },
-        { category: "LEG_HEIGHT", label: "Leg Height" },
-        { category: "TOTAL_HEIGHT", label: "Total Height" },
-        { category: "FABRIC", label: "Fabric" },
-        { category: "SPECIAL", label: "Special" },
-      ]
-    : tab === "SOFA"
-    ? [
-        { category: "PRODUCT_CODE", label: "Product Code" },
-        { category: "MODEL", label: "Model" },
-        { category: "SEAT_SIZE", label: "Seat Size" },
-        { category: "MODULE", label: "Module" },
-        { category: "FABRIC", label: "Fabric" },
-        { category: "SPECIAL", label: "Special" },
-      ]
-    : [
-        // ACCESSORY — pillows etc.; minimal variant set.
-        { category: "PRODUCT_CODE", label: "Product Code" },
-        { category: "SIZE", label: "Size" },
-        { category: "FABRIC", label: "Fabric" },
-      ];
+  // Ticked per product type in Products > Maintenance (bom-variant-fields.ts).
+  const variantCategories: VariantCategoryInfo[] = variantFieldsFor(tab, getVariantsConfigSync()?.bomVariantFields);
 
   /* eslint-disable react-hooks/set-state-in-effect -- mirror master-template cache + seed default selection when edit dialog opens */
   useEffect(() => {
@@ -4081,6 +3875,8 @@ function MasterTemplatesDialog({
     load();
     setDeletedIds([]);
     setTab("BEDFRAME");
+    setSection("l1");
+    setSelectedWipKey(null);
     setEditMode(true);
     // Re-sync when D1 hydration lands after the dialog is already open so
     // the edit lists reflect authoritative D1 data, not fallback defaults.
@@ -4178,7 +3974,7 @@ function MasterTemplatesDialog({
   function addL1Process() {
     setCurrent((prev) => ({
       ...prev,
-      l1Processes: [...prev.l1Processes, { dept: DEPT_LABELS["FAB_CUT"], deptCode: "FAB_CUT", category: "CAT 1", minutes: 0 }],
+      l1Processes: [...prev.l1Processes, { dept: DEPT_LABELS["FAB_CUT"], deptCode: "FAB_CUT", category: "", minutes: 0 }],
     }));
   }
   function removeL1Process(i: number) {
@@ -4200,12 +3996,7 @@ function MasterTemplatesDialog({
         if (idx !== i) return p;
         if (field === "deptCode") {
           const code = value as string;
-          const minutes = getProductionMinutes(code, p.category) || p.minutes;
-          return { ...p, deptCode: code, dept: DEPT_LABELS[code] || code, minutes };
-        }
-        if (field === "category") {
-          const minutes = getProductionMinutes(p.deptCode, value as string);
-          return { ...p, category: value as string, minutes };
+          return { ...p, deptCode: code, dept: DEPT_LABELS[code] || code };
         }
         return { ...p, [field]: value };
       }),
@@ -4263,11 +4054,12 @@ function MasterTemplatesDialog({
   function makeEmptyWIP(category: BOMCategory): WIPComponent {
     // Accessory has no canonical WIP type — fall back to SOFA_BASE just as a
     // neutral placeholder if a user adds a WIP to an accessory master template.
-    const wipType = (
+    const wipType = allowedWipType(
       category === "BEDFRAME" ? "DIVAN"
       : category === "SOFA" ? "SOFA_BASE"
-      : "SOFA_BASE"
-    ) as WIPComponent["wipType"];
+      : "SOFA_BASE",
+      category,
+    );
     // Seed default code segments: {PRODUCT_CODE from order} + WIP-type word
     // (e.g. "DIVAN", "HEADBOARD"). The user can then add size / heights /
     // fabric segments as needed.
@@ -4292,16 +4084,6 @@ function MasterTemplatesDialog({
   function addWIP() {
     setCurrent((prev) => ({ ...prev, wipItems: [...prev.wipItems, makeEmptyWIP(prev.category)] }));
   }
-  // 删除 WIP — 把它的 children 提升到它原本的位置（不级联删除下游）
-  function removeWIP(wi: number) {
-    setCurrent((prev) => {
-      const target = prev.wipItems[wi];
-      if (!target) return prev;
-      const next = [...prev.wipItems];
-      next.splice(wi, 1, ...(target.children || []));
-      return { ...prev, wipItems: next };
-    });
-  }
   // 把 wi 这个 WIP 包进一个新的空 WIP（成为它的上游 / 父节点）
   function wrapWIPAt(idx: number) {
     setCurrent((prev) => {
@@ -4310,22 +4092,6 @@ function MasterTemplatesDialog({
       const wrapper: WIPComponent = { ...makeEmptyWIP(prev.category), children: [target] };
       const next = [...prev.wipItems];
       next.splice(idx, 1, wrapper);
-      return { ...prev, wipItems: next };
-    });
-  }
-  function moveWIPUp(wi: number) {
-    if (wi <= 0) return;
-    setCurrent((prev) => {
-      const next = [...prev.wipItems];
-      [next[wi - 1], next[wi]] = [next[wi], next[wi - 1]];
-      return { ...prev, wipItems: next };
-    });
-  }
-  function moveWIPDown(wi: number) {
-    setCurrent((prev) => {
-      if (wi < 0 || wi >= prev.wipItems.length - 1) return prev;
-      const next = [...prev.wipItems];
-      [next[wi], next[wi + 1]] = [next[wi + 1], next[wi]];
       return { ...prev, wipItems: next };
     });
   }
@@ -4350,17 +4116,6 @@ function MasterTemplatesDialog({
       children: [...(node.children || []), makeEmptyWIP(current.category)],
     }));
   }
-  // 删除 sub-WIP — 把被删节点的 children 提升到它原本的位置（不级联删除下游）
-  function removeSubWIPAtPath(wi: number, path: number[], si: number) {
-    mutateWIP(wi, path, (node) => {
-      const list = node.children || [];
-      const target = list[si];
-      if (!target) return node;
-      const next = [...list];
-      next.splice(si, 1, ...(target.children || []));
-      return { ...node, children: next };
-    });
-  }
   // 把 si 这个 sub-WIP 包进一个新的空 WIP（成为它的上游 / 父节点）
   function wrapSubWIPAtPath(wi: number, path: number[], si: number) {
     mutateWIP(wi, path, (node) => {
@@ -4373,30 +4128,11 @@ function MasterTemplatesDialog({
       return { ...node, children: next };
     });
   }
-  function moveSubWIPUpAtPath(wi: number, path: number[], si: number) {
-    if (si <= 0) return;
-    mutateWIP(wi, path, (node) => {
-      const next = [...(node.children || [])];
-      if (si >= next.length) return node;
-      [next[si - 1], next[si]] = [next[si], next[si - 1]];
-      return { ...node, children: next };
-    });
-  }
-  function moveSubWIPDownAtPath(wi: number, path: number[], si: number) {
-    mutateWIP(wi, path, (node) => {
-      const list = node.children || [];
-      if (si < 0 || si >= list.length - 1) return node;
-      const next = [...list];
-      [next[si], next[si + 1]] = [next[si + 1], next[si]];
-      return { ...node, children: next };
-    });
-  }
-
   // Processes at path
   function addProcessAtPath(wi: number, path: number[]) {
     mutateWIP(wi, path, (node) => ({
       ...node,
-      processes: [...node.processes, { dept: DEPT_LABELS["WOOD_CUT"], deptCode: "WOOD_CUT", category: "CAT 1", minutes: 0 }],
+      processes: [...node.processes, { dept: DEPT_LABELS["WOOD_CUT"], deptCode: "WOOD_CUT", category: "", minutes: 0 }],
     }));
   }
   function removeProcessAtPath(wi: number, path: number[], pi: number) {
@@ -4419,12 +4155,7 @@ function MasterTemplatesDialog({
         if (i !== pi) return p;
         if (field === "deptCode") {
           const code = value as string;
-          const minutes = getProductionMinutes(code, p.category) || p.minutes;
-          return { ...p, deptCode: code, dept: DEPT_LABELS[code] || code, minutes };
-        }
-        if (field === "category") {
-          const minutes = getProductionMinutes(p.deptCode, value as string);
-          return { ...p, category: value as string, minutes };
+          return { ...p, deptCode: code, dept: DEPT_LABELS[code] || code };
         }
         return { ...p, [field]: value };
       }),
@@ -4472,6 +4203,25 @@ function MasterTemplatesDialog({
     }));
   }
 
+  // Depth-agnostic adapters for WipNodeDetail: path=[] is a top-level WIP.
+  // Delete and move go through the same tree helpers as Edit BOM: delete
+  // removes one level (children move up), ↑/↓ swap siblings or, with no
+  // sibling that way, swap levels with the parent / child.
+  function nRemove(wi: number, path: number[]) {
+    setCurrent((prev) => ({ ...prev, wipItems: removeWipLevel(prev.wipItems, wi, path) }));
+    setSelectedWipKey(null);
+  }
+  function nMove(wi: number, path: number[], dir: -1 | 1) {
+    const moved = moveWipNode(current.wipItems, wi, path, dir);
+    if (!moved) return;
+    setCurrent((prev) => ({ ...prev, wipItems: moved.roots }));
+    setSelectedWipKey(wipRowKey(moved.at.wi, moved.at.path));
+  }
+  function nWrap(wi: number, path: number[]) {
+    if (path.length === 0) wrapWIPAt(wi);
+    else wrapSubWIPAtPath(wi, path.slice(0, -1), path[path.length - 1]);
+  }
+
   async function handleSave() {
     const now = new Date().toISOString();
     // Persist every template in all lists, plus pending deletions. We await
@@ -4516,7 +4266,8 @@ function MasterTemplatesDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-white rounded-xl shadow-xl w-[760px] max-h-[88vh] flex flex-col">
+      {/* Definite height on the WIP section so both panes scroll (see EditBOMDialog). */}
+      <div className={`bg-white rounded-xl shadow-xl w-[min(1360px,96vw)] flex flex-col ${section === "wip" ? "h-[90vh]" : "max-h-[90vh]"}`}>
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[#E2DDD8]">
           <div>
@@ -4531,7 +4282,7 @@ function MasterTemplatesDialog({
         </div>
 
         {/* Tab selector */}
-        <div className="px-6 py-3 border-b border-[#E2DDD8] flex items-center justify-between">
+        <div className="px-6 py-3 border-b border-[#E2DDD8] flex flex-wrap items-center justify-between gap-2">
           <div className="flex gap-2">
             <button
               onClick={() => setTab("BEDFRAME")}
@@ -4658,7 +4409,7 @@ function MasterTemplatesDialog({
           </div>
 
           {/* Inline label + moduleKey editor for the selected template. */}
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <label className="text-[10px] text-gray-500 uppercase tracking-wide">Label</label>
             <input
               value={current?.label || ""}
@@ -4673,7 +4424,7 @@ function MasterTemplatesDialog({
               onChange={(e) => updateTemplateMeta("moduleKey", e.target.value)}
               disabled={!editMode}
               placeholder={tab === "SOFA" ? "matches Product.sizeCode (e.g. 1A(LHF))" : tab === "ACCESSORY" ? "(optional — accessory sub-type)" : "(leave blank — used as fallback)"}
-              className="text-xs border border-[#E2DDD8] rounded px-2 py-1 bg-white flex-1 disabled:bg-gray-50"
+              className="text-xs border border-[#E2DDD8] rounded px-2 py-1 bg-white flex-1 min-w-[12rem] disabled:bg-gray-50"
             />
             {current?.isDefault && (
               <span className="text-[10px] text-[#9C6F1E] bg-[#FAEFCB] border border-[#E8D597] rounded px-2 py-1">
@@ -4683,9 +4434,26 @@ function MasterTemplatesDialog({
           </div>
         </div>
 
+        {/* L1 / WIP selector, same as Edit BOM */}
+        <div className="px-6 py-3 border-b border-[#E2DDD8] flex gap-2">
+          <button
+            onClick={() => setSection("l1")}
+            className={`px-3 py-1.5 text-xs font-medium rounded-md ${section === "l1" ? "bg-[#6B5C32] text-white" : "bg-[#FAF9F7] text-gray-600 hover:bg-[#E2DDD8]"}`}
+          >
+            L1 Processes (FG)
+          </button>
+          <button
+            onClick={() => setSection("wip")}
+            className={`px-3 py-1.5 text-xs font-medium rounded-md ${section === "wip" ? "bg-[#6B5C32] text-white" : "bg-[#FAF9F7] text-gray-600 hover:bg-[#E2DDD8]"}`}
+          >
+            WIP Components ({current.wipItems.length})
+          </button>
+        </div>
+
         {/* Body */}
-        <div className="flex-1 overflow-y-auto px-6 py-4">
-          <div className={`space-y-5 ${!editMode ? "[&_input]:pointer-events-none [&_select]:pointer-events-none [&_button]:pointer-events-none opacity-70" : ""}`}>
+        <div className={`flex-1 min-h-0 ${section === "wip" ? "overflow-hidden" : "overflow-y-auto px-6 py-4"} ${!editMode ? "[&_input]:pointer-events-none [&_select]:pointer-events-none [&_button]:pointer-events-none opacity-70" : ""}`}>
+          {section === "l1" && (
+          <div className="space-y-5">
           {/* L1 Processes */}
           <div>
             <div className="flex items-center justify-between">
@@ -4698,11 +4466,7 @@ function MasterTemplatesDialog({
                   <select value={p.deptCode} onChange={(e) => updateL1Process(i, "deptCode", e.target.value)} className="text-sm border border-[#E8D597] rounded px-2 py-1 bg-white">
                     {DEPT_ORDER.map((d) => (<option key={d} value={d}>{DEPT_LABELS[d]}</option>))}
                   </select>
-                  <select value={p.category} onChange={(e) => updateL1Process(i, "category", e.target.value)} className="text-sm border border-[#E8D597] rounded px-2 py-1 w-20 bg-white">
-                    <option value="">CAT</option>
-                    {getCategoryOptions().map((c) => (<option key={c} value={c}>{c}</option>))}
-                  </select>
-                  <span className="text-sm text-gray-700 bg-[#FAEFCB] border border-[#E8D597] rounded px-2 py-1 w-20 text-center tabular-nums">{p.minutes}</span>
+                  <MinutesInput value={p.minutes} onChange={(m) => updateL1Process(i, "minutes", m)} className="text-sm text-gray-700 bg-white border border-[#E8D597] rounded px-2 py-1 w-20 text-center tabular-nums" />
                   <span className="text-xs text-gray-400">min</span>
                   <button onClick={() => moveL1Process(i, -1)} disabled={i === 0} className="ml-auto text-xs px-1.5 py-0.5 bg-white border border-[#E8D597] text-[#9C6F1E] rounded hover:bg-[#FAEFCB] disabled:opacity-30 disabled:cursor-not-allowed" title="Move process up">↑</button>
                   <button onClick={() => moveL1Process(i, 1)} disabled={i === current.l1Processes.length - 1} className="text-xs px-1.5 py-0.5 bg-white border border-[#E8D597] text-[#9C6F1E] rounded hover:bg-[#FAEFCB] disabled:opacity-30 disabled:cursor-not-allowed" title="Move process down">↓</button>
@@ -4770,179 +4534,100 @@ function MasterTemplatesDialog({
             </div>
           </div>
 
-          {/* WIP items */}
-          <div className="pt-4 border-t border-[#E2DDD8]">
-            <div className="flex items-center justify-between">
-              <label className="text-sm font-medium text-[#111827]">WIP Items</label>
-              <button onClick={addWIP} className="text-xs px-2 py-1 bg-[#6B5C32] text-white rounded hover:bg-[#5A4D2A]">+ Add WIP</button>
-            </div>
-            <div className="space-y-4 mt-2">
-              {current.wipItems.map((w, wi) => (
-                <div key={w.id || wi} className="border border-[#A8CAD2] rounded-lg bg-[#E0EDF0] p-3 space-y-2">
-                  {/* WIP header */}
-                  <div className="flex items-center gap-2">
-                    <select value={w.wipType} onChange={(e) => updateWIPAtPath(wi, [], "wipType", e.target.value)} className="text-sm border border-[#A8CAD2] rounded px-2 py-1 bg-white">
-                      {Object.entries(WIP_TYPE_LABELS).map(([k, v]) => (<option key={k} value={k}>{v.label}</option>))}
-                    </select>
-                    <input type="number" onFocus={(e) => e.currentTarget.select()} value={w.quantity} onChange={(e) => updateWIPAtPath(wi, [], "quantity", parseInt(e.target.value) || 1)} className="text-sm border border-[#A8CAD2] rounded px-2 py-1 w-16 bg-white" min={1} />
-                    <span className="text-xs text-gray-500">PCS</span>
+          </div>
+          )}
+
+          {section === "wip" && (() => {
+            const rows = flattenWipTree(current.wipItems, new Set());
+            const sel = rows.find((r) => r.key === selectedWipKey) ?? rows[0] ?? null;
+            const node = sel ? wipNodeAt(current.wipItems, sel.wi, sel.path) : null;
+            const toggle = (key: string) =>
+              setCollapsedWip((prev) => {
+                const next = new Set(prev);
+                if (next.has(key)) next.delete(key);
+                else next.add(key);
+                return next;
+              });
+            // Master templates have no product; a category-only stand-in makes
+            // the tree show sofa or bedframe sample values instead of raw tokens.
+            const sampleProduct = { category: tab } as Product;
+            return (
+              <div className="grid h-full grid-cols-1 grid-rows-[auto_minmax(0,1fr)] md:grid-rows-[minmax(0,1fr)] md:grid-cols-[minmax(320px,400px)_minmax(0,1fr)]">
+                {/* ── Structure ── */}
+                <div className="flex min-h-0 max-h-[40vh] md:max-h-none flex-col border-b md:border-b-0 md:border-r border-[#E2DDD8] bg-gradient-to-b from-[#FAF9F7] to-[#F3EFE8]">
+                  <div className="flex items-center justify-between px-3 py-2.5 border-b border-[#E2DDD8]">
+                    <span className="text-xs font-medium text-[#6B7280]">
+                      WIP Components ({current.wipItems.length})
+                    </span>
                     <button
-                      onClick={() => wrapWIPAt(wi)}
-                      className="ml-auto text-[10px] px-1.5 py-0.5 bg-[#A8CAD2] text-[#3E6570] rounded hover:bg-[#8FB4BD]"
-                      title="Wrap this WIP inside a new parent (upstream)"
+                      onClick={addWIP}
+                      className="text-xs px-2 py-1 bg-[#6B5C32] text-white rounded hover:bg-[#5A4D2A]"
                     >
-                      + Above
-                    </button>
-                    <button
-                      onClick={() => moveWIPUp(wi)}
-                      disabled={wi === 0}
-                      className="text-[10px] px-1.5 py-0.5 bg-[#A8CAD2] text-[#3E6570] rounded hover:bg-[#8FB4BD] disabled:opacity-30 disabled:cursor-not-allowed"
-                      title="Move up"
-                    >
-                      ↑
-                    </button>
-                    <button
-                      onClick={() => moveWIPDown(wi)}
-                      disabled={wi === current.wipItems.length - 1}
-                      className="text-[10px] px-1.5 py-0.5 bg-[#A8CAD2] text-[#3E6570] rounded hover:bg-[#8FB4BD] disabled:opacity-30 disabled:cursor-not-allowed"
-                      title="Move down"
-                    >
-                      ↓
-                    </button>
-                    <button onClick={() => removeWIP(wi)} className="p-1 hover:bg-[#F9E1DA] rounded text-[#9A3A2D]">
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                      + Add
                     </button>
                   </div>
+                  <div className="min-h-0 flex-1 overflow-y-auto p-2.5 space-y-2">
+                    {current.wipItems.length === 0 && (
+                      <p className="px-2 py-6 text-center text-xs text-gray-400">
+                        No WIP items yet.
+                      </p>
+                    )}
+                    {current.wipItems.map((root, wi) => (
+                      <WipTreeCard
+                        key={root.id ?? wi}
+                        node={root}
+                        wi={wi}
+                        path={[]}
+                        depth={0}
+                        product={sampleProduct}
+                        selectedKey={sel?.key ?? null}
+                        collapsed={collapsedWip}
+                        onSelect={setSelectedWipKey}
+                        onToggle={toggle}
+                      />
+                    ))}
+                  </div>
+                </div>
 
-                  {/* WIP Code builder */}
-                  <div className="bg-white border border-[#A8CAD2] rounded-md p-2">
-                    <p className="text-[10px] font-semibold text-[#3E6570] uppercase tracking-wide mb-1">WIP Code (Word + Variant combination)</p>
-                    <WIPCodeBuilder
-                      segments={w.codeSegments || [{ type: "word" as const, value: "" }]}
-                      onChange={(segs) => updateWIPSegmentsAtPath(wi, [], segs)}
+                {/* ── Detail ── */}
+                <div className="min-h-0 overflow-y-auto px-5 py-4">
+                  {!node || !sel ? (
+                    <p className="py-16 text-center text-sm text-gray-400">
+                      Select a component on the left to edit it.
+                    </p>
+                  ) : (
+                    <WipNodeDetail
+                      node={node}
+                      wi={sel.wi}
+                      path={sel.path}
+                      depth={sel.depth}
+                      product={sampleProduct}
                       fabricOptions={fabricOptions}
                       variantCategories={variantCategories}
+                      rawMaterials={rawMaterials}
+                      onUpdate={updateWIPAtPath}
+                      onUpdateSegments={updateWIPSegmentsAtPath}
+                      onAddProcess={addProcessAtPath}
+                      onRemoveProcess={removeProcessAtPath}
+                      onUpdateProcess={updateProcessAtPath}
+                      onMoveProcess={moveProcessAtPath}
+                      onAddMaterial={addMaterialAtPath}
+                      onRemoveMaterial={removeMaterialAtPath}
+                      onUpdateMaterial={updateMaterialAtPath}
+                      onSelectMaterial={selectMaterialAtPath}
+                      onSelectMaterialAuto={setMaterialAutoDetectAtPath}
+                      onAddChild={addSubWIPAtPath}
+                      onRemove={nRemove}
+                      onMove={nMove}
+                      canMoveUp={canMoveWipNode(current.wipItems, sel.wi, sel.path, -1)}
+                      canMoveDown={canMoveWipNode(current.wipItems, sel.wi, sel.path, 1)}
+                      onWrap={nWrap}
                     />
-                    <div className="text-[10px] text-gray-400 mt-1">
-                      Code preview: <span className="font-mono text-gray-600">{buildWipCode(w.codeSegments || []) || "(empty — fills from variant at apply time)"}</span>
-                    </div>
-                  </div>
-
-                  {/* Processes */}
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-medium text-[#3E6570]">Processes</span>
-                    <button onClick={() => addProcessAtPath(wi, [])} className="text-[10px] px-1.5 py-0.5 bg-[#E0EDF0] text-[#3E6570] rounded hover:bg-[#A8CAD2]">+ Process</button>
-                  </div>
-                  {w.processes.map((p, pi) => (
-                    <div key={pi} className="flex items-center gap-2 bg-white rounded px-2 py-1.5">
-                      <select value={p.deptCode} onChange={(e) => updateProcessAtPath(wi, [], pi, "deptCode", e.target.value)} className="text-xs border border-gray-200 rounded px-1.5 py-1 bg-white">
-                        {DEPT_ORDER.map((d) => (<option key={d} value={d}>{DEPT_LABELS[d]}</option>))}
-                      </select>
-                      <select value={p.category} onChange={(e) => updateProcessAtPath(wi, [], pi, "category", e.target.value)} className="text-xs border border-gray-200 rounded px-1.5 py-1 w-16 bg-white">
-                        <option value="">CAT</option>
-                        {getCategoryOptions().map((c) => (<option key={c} value={c}>{c}</option>))}
-                      </select>
-                      <span className="text-xs text-gray-700 bg-gray-50 border border-gray-200 rounded px-1.5 py-1 w-14 text-center tabular-nums">{p.minutes}</span>
-                      <span className="text-[10px] text-gray-400">min</span>
-                      <button onClick={() => removeProcessAtPath(wi, [], pi)} className="ml-auto text-[#9A3A2D] hover:text-[#7A2E24]">
-                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                      </button>
-                    </div>
-                  ))}
-                  {w.processes.length === 0 && (
-                    <p className="text-[10px] text-gray-400 pl-2">No processes added</p>
                   )}
-
-                  {/* Materials */}
-                  <div className="flex items-center justify-between mt-2">
-                    <span className="text-xs font-medium text-[#4F7C3A]">Raw Materials</span>
-                    <button onClick={() => addMaterialAtPath(wi, [])} className="text-[10px] px-1.5 py-0.5 bg-[#EEF3E4] text-[#4F7C3A] rounded hover:bg-[#C6DBA8]">+ Material</button>
-                  </div>
-                  {(w.materials || []).map((m, mi) => (
-                    <div key={mi} className="bg-white rounded">
-                      <div className="flex items-center gap-2 px-2 py-1.5">
-                        {m.autoDetect ? (
-                          <div className="flex items-center gap-1.5 flex-1">
-                            <span className="text-[10px] px-1.5 py-0.5 bg-[#E0EDF0] text-[#3E6570] rounded font-medium border border-[#A8CAD2] whitespace-nowrap">
-                              {m.autoDetect === "FABRIC" ? "Fabric from order" : "Leg from order"}
-                            </span>
-                            <span className="text-[10px] text-gray-400 italic">
-                              {m.autoDetect === "FABRIC" ? "SO item fabricCode" : "SO item legHeightInches"}
-                            </span>
-                          </div>
-                        ) : (
-                          <RawMaterialSelect
-                            value={m.code ? `${m.code}` : ""}
-                            materials={rawMaterials}
-                            onSelect={(rm) => selectMaterialAtPath(wi, [], mi, rm)}
-                          />
-                        )}
-                        <select
-                          value={m.autoDetect || "NONE"}
-                          onChange={(e) => setMaterialAutoDetectAtPath(wi, [], mi, e.target.value as "FABRIC" | "LEG" | "NONE")}
-                          className="text-[10px] border border-gray-200 rounded px-1 py-1 bg-white"
-                          title="Auto-detect mode"
-                        >
-                          <option value="NONE">Manual</option>
-                          <option value="FABRIC">Auto: Fabric</option>
-                          <option value="LEG">Auto: Leg</option>
-                        </select>
-                        <input type="number" onFocus={(e) => e.currentTarget.select()} value={m.qty} onChange={(e) => updateMaterialAtPath(wi, [], mi, "qty", parseFloat(e.target.value) || 0)} className="text-xs border border-gray-200 rounded px-1.5 py-1 w-14" />
-                        <input type="number" onFocus={(e) => e.currentTarget.select()} value={m.wastePct ?? ""} onChange={(e) => updateMaterialAtPath(wi, [], mi, "wastePct", parseFloat(e.target.value) || 0)} placeholder="0" title="Wastage % — cut / bulk materials (fabric / foam / wood) have offcut + defect waste; leave 0 for discrete parts (screws / legs / mechanism)" className="text-xs border border-gray-200 rounded px-1.5 py-1 w-12" />
-                        <span className="text-[10px] text-gray-400 whitespace-nowrap" title="Wastage % — cut / bulk materials (fabric / foam / wood) have offcut + defect waste; leave 0 for discrete parts (screws / legs / mechanism)">% waste</span>
-                        <span className="text-[10px] text-gray-400 w-8">{m.unit || "PCS"}</span>
-                        <button onClick={() => removeMaterialAtPath(wi, [], mi)} className="text-[#9A3A2D] hover:text-[#7A2E24]">
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                        </button>
-                      </div>
-                      <MaterialScalingEditor
-                        scaling={m.scaling}
-                        unit={m.unit || "PCS"}
-                        isCut={isFillerMaterial(m, rawMaterials)}
-                        onChange={(s) => updateMaterialAtPath(wi, [], mi, "scaling", s)}
-                      />
-                    </div>
-                  ))}
-                  {(w.materials || []).length === 0 && (
-                    <p className="text-[10px] text-gray-400 pl-2">No materials added</p>
-                  )}
-
-                  {/* Sub-WIP Components (unlimited nesting) */}
-                  <SubWIPTree
-                    children={w.children || []}
-                    wi={wi}
-                    path={[]}
-                    onAdd={(path) => addSubWIPAtPath(wi, path)}
-                    onRemove={(path, si) => removeSubWIPAtPath(wi, path, si)}
-                    onUpdate={(path, field, value) => updateWIPAtPath(wi, path, field, value)}
-                    onUpdateSegments={(path, segs) => updateWIPSegmentsAtPath(wi, path, segs)}
-                    onAddProcess={(path) => addProcessAtPath(wi, path)}
-                    onRemoveProcess={(path, pi) => removeProcessAtPath(wi, path, pi)}
-                    onUpdateProcess={(path, pi, field, value) => updateProcessAtPath(wi, path, pi, field, value)}
-                    onAddMaterial={(path) => addMaterialAtPath(wi, path)}
-                    onRemoveMaterial={(path, mi) => removeMaterialAtPath(wi, path, mi)}
-                    onSelectMaterial={(path, mi, rm) => selectMaterialAtPath(wi, path, mi, rm)}
-                    onSelectMaterialAutoDetect={(path, mi, kind) => setMaterialAutoDetectAtPath(wi, path, mi, kind)}
-                    onUpdateMaterial={(path, mi, field, value) => updateMaterialAtPath(wi, path, mi, field, value)}
-                    onWrap={(path, si) => wrapSubWIPAtPath(wi, path, si)}
-                    onMoveUp={(path, si) => moveSubWIPUpAtPath(wi, path, si)}
-                    onMoveDown={(path, si) => moveSubWIPDownAtPath(wi, path, si)}
-                    onMoveProcessUp={(path, pi) => moveProcessAtPath(wi, path, pi, -1)}
-                    onMoveProcessDown={(path, pi) => moveProcessAtPath(wi, path, pi, 1)}
-                    fabricOptions={fabricOptions}
-                    variantCategories={variantCategories}
-                    rawMaterials={rawMaterials}
-                  />
                 </div>
-              ))}
-              {current.wipItems.length === 0 && (
-                <div className="text-center py-8 text-sm text-gray-400 bg-[#FAF9F7] rounded-lg border border-dashed border-[#E2DDD8]">
-                  No WIP items. Click &ldquo;+ Add WIP&rdquo; to add one.
-                </div>
-              )}
-            </div>
-          </div>
-          </div>
+              </div>
+            );
+          })()}
         </div>
 
         {/* Footer */}
@@ -4963,9 +4648,8 @@ function MasterTemplatesDialog({
 // ---------- Production Times ----------
 // The inline Production Times matrix DIALOG was removed 2026-08-01 per owner —
 // the dedicated WIP Times module is the single place those minutes are edited
-// now. The read-side lookup (getProductionMinutes, near the top of this file)
-// is untouched: BOM process rows still auto-fill minutes from the same
-// variants-config matrix when a category is picked.
+// now. The CAT dropdown and its matrix lookup went too (owner 2026-10-05):
+// BOM process minutes are typed in by hand.
 
 // Sample variant context for token resolution in catalog-level views. There is
 // no SO line driving variant values here, so we fall back to the same defaults
@@ -6245,7 +5929,10 @@ function BatchEditMaterialsDialog({
 export default function BOMManagementPage() {
   const { toast } = useToast();
   const [products, setProducts] = useState<Product[]>([]);
-  const [templates, setTemplates] = useState<BOMTemplate[]>([]);
+  const [rawTemplates, setTemplates] = useState<BOMTemplate[]>([]);
+  // Every setTemplates path (load, save rollback, batch edit, create) lands
+  // here, so ACCESSORY is fixed in one place. See bom-category.ts.
+  const templates = useMemo(() => withProductCategory(rawTemplates, products), [rawTemplates, products]);
   const [rawMaterials, setRawMaterials] = useState<RawMaterialOption[]>([]);
   const [fabricOptions, setFabricOptions] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -6264,7 +5951,7 @@ export default function BOMManagementPage() {
   useEffect(() => {
     async function load() {
       try {
-        const [pData, tData, invData, kitData] = await Promise.all([
+        const [pData, tData, invData, kitData, variantsCfg] = await Promise.all([
           cachedFetchJson<{ success?: boolean; data?: unknown }>("/api/products"),
           cachedFetchJson<{ success?: boolean; data?: unknown }>("/api/bom/templates"),
           // perf 2026-08-13 (BUG-2026-08-13-021): `?buckets=rawMaterials` — only
@@ -6272,7 +5959,12 @@ export default function BOMManagementPage() {
           // fetched separately on the line above.
           cachedFetchJson<{ success?: boolean; data?: { rawMaterials?: unknown[] } }>("/api/inventory?buckets=rawMaterials"),
           cachedFetchJson<{ success?: boolean; data?: { parentCode?: string }[] }>("/api/component-boms"),
+          fetchVariantsConfig(),
         ]);
+
+        // Refill the WIP type dropdown list before setTemplates re-renders.
+        for (const k of Object.keys(WIP_TYPE_LABELS)) delete WIP_TYPE_LABELS[k];
+        Object.assign(WIP_TYPE_LABELS, buildWipTypes(variantsCfg?.wipTypes));
 
         // Populate the reusable-kit hint set (module-level; see materialHasKit).
         if (kitData && kitData.success && Array.isArray(kitData.data)) {
@@ -6439,32 +6131,7 @@ export default function BOMManagementPage() {
       { category: "FABRIC", label: "Fabric" },
     ];
     const cat = (selectedProduct as Product & { category?: string }).category;
-    if (cat === "BEDFRAME") {
-      return [
-        { category: "PRODUCT_CODE", label: "Product Code" },
-        { category: "SIZE", label: "Size" },
-        { category: "DIVAN_HEIGHT", label: "Divan Height" },
-        { category: "LEG_HEIGHT", label: "Leg Height" },
-        { category: "TOTAL_HEIGHT", label: "Total Height" },
-        { category: "FABRIC", label: "Fabric" },
-        { category: "SPECIAL", label: "Special" },
-      ];
-    }
-    if (cat === "SOFA") {
-      return [
-        { category: "PRODUCT_CODE", label: "Product Code" },
-        { category: "MODEL", label: "Model" },
-        { category: "SEAT_SIZE", label: "Seat Size" },
-        { category: "MODULE", label: "Module" },
-        { category: "FABRIC", label: "Fabric" },
-        { category: "SPECIAL", label: "Special" },
-      ];
-    }
-    return [
-      { category: "PRODUCT_CODE", label: "Product Code" },
-      { category: "SIZE", label: "Size" },
-      { category: "FABRIC", label: "Fabric" },
-    ];
+    return variantFieldsFor(cat, getVariantsConfigSync()?.bomVariantFields);
   }, [selectedProduct]);
 
   if (loading) {

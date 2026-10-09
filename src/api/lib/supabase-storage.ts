@@ -216,9 +216,9 @@ export async function getFile(
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${serviceKey}` },
   });
-  if (res.status === 404) return null;
   if (!res.ok) {
     const text = await safeReadText(res);
+    if (isObjectNotFound(res.status, text)) return null;
     throw new Error(
       `[supabase-storage] getFile ${bucket}/${key} failed: ${res.status} ${text}`,
     );
@@ -317,9 +317,9 @@ export async function deleteFile(
     method: "DELETE",
     headers: { Authorization: `Bearer ${serviceKey}` },
   });
-  // 200 OK on delete, 404 = already gone (idempotent).
-  if (!res.ok && res.status !== 404) {
+  if (!res.ok) {
     const text = await safeReadText(res);
+    if (isObjectNotFound(res.status, text)) return; // already gone — idempotent
     throw new Error(
       `[supabase-storage] deleteFile ${bucket}/${key} failed: ${res.status} ${text}`,
     );
@@ -396,6 +396,21 @@ export async function listFiles(
       uploaded: new Date(ts),
     };
   });
+}
+
+// Supabase Storage reports a missing object as HTTP 400 with a JSON body whose
+// statusCode is "404" / error "not_found" — not as an HTTP 404 (measured
+// 2026-09-29: DELETE of a missing object → 400). Only that shape counts; any
+// other 400 (e.g. "InvalidSignature") is a real failure.
+export function isObjectNotFound(status: number, body: string): boolean {
+  if (status === 404) return true;
+  if (status !== 400) return false;
+  try {
+    const j = JSON.parse(body) as { statusCode?: unknown; error?: unknown };
+    return String(j.statusCode) === "404" || /^(not_found|NoSuchKey)$/i.test(String(j.error ?? ""));
+  } catch {
+    return false;
+  }
 }
 
 async function safeReadText(res: Response): Promise<string> {

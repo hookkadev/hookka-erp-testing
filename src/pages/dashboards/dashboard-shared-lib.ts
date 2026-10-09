@@ -4,6 +4,11 @@
 // export-components).
 import { formatCurrency } from "../../lib/utils";
 
+// A row of number tiles: fills the width the row actually has (not the screen
+// width, which ignores the sidebar). No tile is narrower than 10rem; a short
+// last row stretches to fill, so there is never a cramped or empty slot.
+export const KPI_ROW = "flex flex-wrap gap-3 [&>*]:min-w-0 [&>*]:flex-[1_1_10rem]";
+
 export const TAUPE = "#6B5C32";
 export const TEAL = "#3E6570";
 export const MUTED = "#6B7280";

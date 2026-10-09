@@ -64,6 +64,7 @@ export default defineConfig([
       // as toast.tsx. Splitting them would hurt DX without improving HMR.
       'src/components/ui/confirm-dialog.tsx',
       'src/components/ui/status-badge.tsx',
+      'src/pages/m/lib/responsive-layout.tsx',
     ],
     rules: {
       'react-refresh/only-export-components': 'off',

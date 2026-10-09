@@ -15,3 +15,5 @@ export { ScanSheet } from "./ScanSheet";
 export { ScanPOSheet } from "./ScanPOSheet";
 export type { ScanPOExtracted } from "./ScanPOSheet";
 export { LeftRail } from "./LeftRail";
+export { InstallAppCard } from "./InstallAppCard";
+export { ResponsiveActionDock } from "./ResponsiveActionDock";

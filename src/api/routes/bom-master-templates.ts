@@ -13,12 +13,38 @@ import { Hono } from "hono";
 import type { Env } from "../worker";
 import { emitAudit } from "../lib/audit";
 import { requirePermission } from "../lib/rbac";
+import { memoizeSelfApply, runSelfApply } from "../lib/self-apply";
 
 const app = new Hono<Env>();
 
+// ACCESSORY was added to the BOM page later; this route and migration 0006's
+// CHECK still only allowed BEDFRAME/SOFA, so every Accessory master template
+// save was rejected with a 400.
+type Category = "BEDFRAME" | "SOFA" | "ACCESSORY";
+const CATEGORIES: readonly string[] = ["BEDFRAME", "SOFA", "ACCESSORY"];
+export const isCategory = (v: unknown): v is Category =>
+  typeof v === "string" && CATEGORIES.includes(v);
+
+// Widen the category CHECK at runtime (migrations do not replay on deploy;
+// migration 0239 is the record). Postgres has no ADD CONSTRAINT IF NOT EXISTS,
+// so drop + re-add, same as outbox_emails_status_check in lib/email-outbox.ts.
+// The new set is a superset of every category already stored.
+let categoryCheckEnsured: Promise<void> | null = null;
+function ensureCategoryCheck(db: D1Database): Promise<void> {
+  return memoizeSelfApply(
+    () => categoryCheckEnsured,
+    (p) => (categoryCheckEnsured = p),
+    () =>
+      runSelfApply(db, "bom-master-templates", [
+        "ALTER TABLE bom_master_templates DROP CONSTRAINT IF EXISTS bom_master_templates_category_check",
+        "ALTER TABLE bom_master_templates ADD CONSTRAINT bom_master_templates_category_check CHECK (category IN ('BEDFRAME','SOFA','ACCESSORY'))",
+      ]),
+  );
+}
+
 type Row = {
   id: string;
-  category: "BEDFRAME" | "SOFA";
+  category: Category;
   label: string;
   moduleKey: string | null;
   isDefault: number;
@@ -28,7 +54,7 @@ type Row = {
 
 type TemplateBody = {
   id?: string;
-  category: "BEDFRAME" | "SOFA";
+  category: Category;
   label?: string;
   moduleKey?: string | null;
   isDefault?: boolean;
@@ -108,12 +134,13 @@ app.put("/:id", async (c) => {
   } catch {
     return c.json({ success: false, error: "Invalid JSON" }, 400);
   }
-  if (body.category !== "BEDFRAME" && body.category !== "SOFA") {
+  if (!isCategory(body.category)) {
     return c.json(
-      { success: false, error: "category must be BEDFRAME or SOFA" },
+      { success: false, error: "category must be BEDFRAME, SOFA or ACCESSORY" },
       400,
     );
   }
+  await ensureCategoryCheck(c.var.DB);
 
   // Snapshot the prior state to detect the publish transition (isDefault
   // flipping 0 → 1). The schema has no draft/published flag — `isDefault`
@@ -201,12 +228,13 @@ app.put("/", async (c) => {
     return c.json({ success: true, data: [], total: 0 });
   }
 
+  await ensureCategoryCheck(c.var.DB);
   const statements = [];
   if (body.replaceAll) {
     statements.push(c.var.DB.prepare("DELETE FROM bom_master_templates"));
   }
   for (const t of templates) {
-    if (t.category !== "BEDFRAME" && t.category !== "SOFA") continue;
+    if (!isCategory(t.category)) continue;
     const id = t.id || `tpl-${crypto.randomUUID().slice(0, 8)}`;
     const row = templateToRow(t, id);
     statements.push(

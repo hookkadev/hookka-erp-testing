@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // report-emails-mobile.test.mjs: the Schedule, Efficiency and Morning Brief
-// emails must read on a phone (BUG-2026-09-29-222, BUG-36 follow-up; the
+// emails must read on a phone (BUG-2026-09-29-232, BUG-36 follow-up; the
 // Overdue email is covered by overdue-email-mobile.test.mjs).
 //
 // Each was a desktop / A4 page with no viewport tag, so phones shrank it to
@@ -36,8 +36,10 @@ test("schedule email: viewport, screen-only card layout, no print button", () =>
   const html = renderScheduleHtml(schedule, { email: true });
   assert.match(html, viewport);
   assert.match(html, /@media screen and \(max-width: 900px\)/);
-  assert.match(html, /class="m-lbl">Qty <\/span>2/);
-  assert.match(html, />IN PROGRESS</);
+  // Job rows (and their phone card labels) are on the in-app page; the email is the summary.
+  const page = renderScheduleHtml(schedule);
+  assert.match(page, /class="m-lbl">Qty <\/span>2/);
+  assert.match(page, />IN PROGRESS</);
   assert.doesNotMatch(html, /window\.print\(\)/);
   assert.match(renderScheduleHtml(schedule), /window\.print\(\)/);
 });
@@ -47,6 +49,8 @@ test("efficiency email: viewport, employee cards, no print button", () => {
   assert.match(html, viewport);
   assert.match(html, /@media screen and \(max-width: 640px\)/);
   assert.match(html, /<table class="data emp">/);
+  // BUG-2026-10-02-248: the department table must let its name wrap, or the Efficiency column is pushed off a 375px screen
+  assert.match(html, /table\.data:not\(\.emp\) td:first-child \{ white-space: normal/);
   assert.match(html, /class="m-lbl">Efficiency <\/span>75%/);
   assert.doesNotMatch(html, /window\.print\(\)/);
   assert.match(renderEfficiencyHtml(efficiency), /window\.print\(\)/);

@@ -47,8 +47,8 @@ test("createDeliveryReturnRecord returns ok:false on cap violation instead of nu
   assert.doesNotMatch(fn, /return null;/);
 });
 
-test("the office route surfaces a cap rejection as 409 with the real error", () => {
-  assert.match(RETURNS_SRC, /if \(!created\.ok\) \{\s*\n\s*return c\.json\(\{ success: false, error: created\.error \}, 409\);/);
+test("the office route surfaces a cap rejection as 409 (a bad request as 400) with the real error", () => {
+  assert.match(RETURNS_SRC, /if \(!created\.ok\) \{\s*\n\s*return c\.json\(\{ success: false, error: created\.error \}, created\.status \?\? 409\);/);
 });
 
 // ===========================================================================
@@ -187,4 +187,107 @@ test("cancel refuses a RETURNED_TO_STOCK return — no reversal exists, so it mu
   const routeBody = RETURNS_SRC.slice(idx);
   assert.match(routeBody, /h\.status === "RETURNED_TO_STOCK"/);
   assert.match(routeBody, /Cannot cancel a \$\{h\.status\} return/);
+});
+
+// ===========================================================================
+// 4. The cap and the insert read ONE quantity (BUG-2026-09-30-224).
+//    Drives the real createDeliveryReturnRecord on a stateful fake DB. On the
+//    old code `quantity: -1` was stored as -1 (and lowered the returned sum),
+//    and an omitted quantity passed the cap as 0 then was stored as 1.
+// ===========================================================================
+
+const { createDeliveryReturnRecord } = await import(
+  pathToFileURL(resolve(process.cwd(), "src/api/lib/delivery-return-create.ts")).href
+);
+
+// DO do-1: po-1 delivered 2. `returned` holds the stored delivery_return_items.
+function returnsDb({ returned = [] } = {}) {
+  const doLines = [{ poId: "po-1", quantity: 2 }];
+  const stmt = (sql, args = []) => ({
+    sql,
+    args,
+    bind: (...a) => stmt(sql, a),
+    async run() { return { success: true }; },
+    async first() {
+      if (/SELECT COUNT\(\*\) AS n FROM delivery_order_items/.test(sql)) return { n: doLines.length };
+      return null; // DO / SO snapshot, last return number
+    },
+    async all() {
+      if (/FROM delivery_order_items WHERE deliveryOrderId = \? AND productionOrderId IN/.test(sql)) {
+        return { results: doLines.filter((l) => args.slice(1).includes(l.poId)) };
+      }
+      if (/FROM delivery_return_items dri/.test(sql)) {
+        const by = new Map();
+        for (const r of returned) by.set(r.poId, (by.get(r.poId) ?? 0) + r.quantity);
+        return { results: [...by].map(([poId, qty]) => ({ poId, qty })) };
+      }
+      return { results: [] }; // production_orders enrichment
+    },
+  });
+  return {
+    returned,
+    prepare: (sql) => stmt(sql.replace(/\s+/g, " ").trim()),
+    async batch(stmts) {
+      for (const s of stmts) {
+        if (/INSERT INTO delivery_return_items/.test(s.sql)) {
+          returned.push({ poId: s.args[2], quantity: s.args[7] });
+        }
+      }
+      return stmts.map(() => ({ success: true }));
+    },
+  };
+}
+
+const line = (extra) => ({ productionOrderId: "po-1", productCode: "CHAIR", ...extra });
+
+test("a negative quantity is refused with 400 and nothing is written", async () => {
+  const db = returnsDb();
+  const out = await createDeliveryReturnRecord(db, "org-1", { doId: "do-1", items: [line({ quantity: -1 })] });
+  assert.equal(out.ok, false);
+  assert.equal(out.status, 400);
+  assert.match(out.error, /quantity greater than 0/);
+  assert.deepEqual(db.returned, []);
+});
+
+test("an omitted quantity is refused with 400, even when the line is fully returned", async () => {
+  const db = returnsDb({ returned: [{ poId: "po-1", quantity: 2 }] });
+  const out = await createDeliveryReturnRecord(db, "org-1", { doId: "do-1", items: [line({})] });
+  assert.equal(out.ok, false);
+  assert.equal(out.status, 400);
+  assert.equal(db.returned.length, 1, "no second return row may be written");
+});
+
+test("zero, null, non-numeric and infinite quantities are refused with 400", async () => {
+  for (const quantity of [0, null, "abc", Infinity]) {
+    const db = returnsDb();
+    const out = await createDeliveryReturnRecord(db, "org-1", { doId: "do-1", items: [line({ quantity })] });
+    assert.equal(out.status, 400, `quantity ${String(quantity)}`);
+    assert.deepEqual(db.returned, []);
+  }
+});
+
+test("an explicit over-return is still a cap refusal (no status, so the route sends 409)", async () => {
+  const db = returnsDb({ returned: [{ poId: "po-1", quantity: 2 }] });
+  const out = await createDeliveryReturnRecord(db, "org-1", { doId: "do-1", items: [line({ quantity: 1 })] });
+  assert.equal(out.ok, false);
+  assert.equal(out.status, undefined);
+  assert.match(out.error, /Return exceeds/);
+});
+
+test("a valid partial return stores exactly the quantity the cap measured", async () => {
+  const db = returnsDb();
+  const out = await createDeliveryReturnRecord(db, "org-1", { doId: "do-1", items: [line({ quantity: "1" })] });
+  assert.equal(out.ok, true);
+  assert.deepEqual(db.returned, [{ poId: "po-1", quantity: 1 }]);
+});
+
+test("a line with no production order is refused when the DO's lines carry one", async () => {
+  const db = returnsDb({ returned: [{ poId: "po-1", quantity: 2 }] });
+  const out = await createDeliveryReturnRecord(db, "org-1", {
+    doId: "do-1",
+    items: [{ productCode: "CHAIR", quantity: 1 }],
+  });
+  assert.equal(out.ok, false);
+  assert.equal(out.status, 400);
+  assert.equal(db.returned.length, 1);
 });

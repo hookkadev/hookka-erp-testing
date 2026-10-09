@@ -29,14 +29,19 @@ import {
   DEFAULT_PAYOUT_BANDS,
   bandFor,
   attainment,
+  editableRules,
+  withRules,
   kpiByKey,
   kpisForRole,
   payoutSen,
   type KpiDef,
+  type KpiRules,
   type PayoutSettings,
 } from "../lib/kpi-catalog";
 import {
   computeMetric,
+  parseEfficiencyScope,
+  formatEfficiencyScope,
   checklistProgress,
   surveyMean,
   manualRating,
@@ -63,6 +68,8 @@ interface AssignmentRow {
   target: number;
   weight: number;
   isActive: boolean;
+  /** production_efficiency only: the department it is scored on. Empty = Overall. */
+  scope: string | null;
 }
 
 async function loadAssignments(
@@ -70,13 +77,32 @@ async function loadAssignments(
   userId: string,
 ): Promise<Map<string, AssignmentRow>> {
   const res = await c.var.DB.prepare(
-    `SELECT kpiKey, target, weight, isActive FROM kpi_assignments
+    `SELECT kpiKey, target, weight, isActive, scope FROM kpi_assignments
       WHERE userId = ? AND orgId = ?`,
   )
     .bind(userId, getOrgId(c))
     .all<AssignmentRow>();
   const m = new Map<string, AssignmentRow>();
   for (const r of res.results ?? []) m.set(String(r.kpiKey), r);
+  return m;
+}
+
+/** The company's saved scoring numbers, per KPI. Missing or broken = defaults. */
+async function loadRules(c: Context<Env>): Promise<Map<string, KpiRules>> {
+  const res = await c.var.DB.prepare(
+    `SELECT kpiKey, rules FROM kpi_rule_settings WHERE orgId = ?`,
+  )
+    .bind(getOrgId(c))
+    .all<{ kpiKey: string; rules: string | null }>();
+  const m = new Map<string, KpiRules>();
+  for (const r of res.results ?? []) {
+    try {
+      const parsed = r.rules ? JSON.parse(r.rules) : null;
+      if (parsed && typeof parsed === "object") m.set(String(r.kpiKey), parsed as KpiRules);
+    } catch {
+      /* keep the default */
+    }
+  }
   return m;
 }
 
@@ -87,6 +113,10 @@ interface CardLine {
   scoring: KpiDef["scoring"];
   /** Plain-English derivation, shown to the person being measured. */
   formula: string;
+  /** Why, what is counted, and the steps: the card's "View calculation" block. */
+  purpose: string;
+  definition: string;
+  measurement: string[];
   checklistItems?: string[];
   surveyQuestions?: string[];
   /** MANUAL only — what earns a high mark, so the score is not a surprise. */
@@ -96,6 +126,8 @@ interface CardLine {
   available: boolean;
   blockedBy?: string;
   drillPath?: string;
+  /** Delivery KPI only — so the order list can tag urgent orders. */
+  urgentDays?: number;
   target: number;
   weight: number;
   actual: number | null;
@@ -103,6 +135,8 @@ interface CardLine {
   points: number | null;
   evidence: string;
   sampleSize: number;
+  /** department_efficiency only: efficiency per day, drawn on the card. */
+  daily?: Array<{ date: string; pct: number }>;
 }
 
 /**
@@ -156,6 +190,7 @@ async function buildCard(c: Context<Env>, userId: string, role: string, period: 
   const isLocked = lockedRows.length > 0;
 
   const assigned = await loadAssignments(c, userId);
+  const rules = await loadRules(c);
   // A person is measured on exactly what they were ASSIGNED — driven off the
   // assignment rows, NOT off their role's slice of the catalogue.
   //
@@ -169,19 +204,23 @@ async function buildCard(c: Context<Env>, userId: string, role: string, period: 
   // Assigning nothing still shows an empty card rather than every default.
   const offered = [...assigned.keys()]
     .map((k) => kpiByKey(k))
-    .filter((d): d is KpiDef => Boolean(d));
+    .filter((d): d is KpiDef => Boolean(d))
+    .map((d) => withRules(d, rules.get(d.key)));
   const lines: CardLine[] = [];
 
   for (const def of offered) {
     const a = assigned.get(def.key);
-    if (!a || a.isActive === false) continue;
+    if (!a) continue;
 
+    // A settled month keeps what it was settled on: taking someone off a KPI
+    // later must not change a score that was already agreed.
     if (isLocked) {
       const row = lockedRows.find((r) => r.kpiKey === def.key);
       if (!row) continue;
       lines.push({
         key: def.key, label: def.label, detail: def.detail,
         scoring: def.scoring, formula: def.formula, checklistItems: def.checklistItems,
+        purpose: def.purpose, definition: def.definition, measurement: def.measurement,
         shape: def.shape, unit: def.unit, available: def.available,
         blockedBy: def.blockedBy, drillPath: def.drillPath,
         target: Number(row.target), weight: Number(row.weight),
@@ -192,11 +231,13 @@ async function buildCard(c: Context<Env>, userId: string, role: string, period: 
       });
       continue;
     }
+    if (a.isActive === false) continue;
 
     if (!def.available) {
       lines.push({
         key: def.key, label: def.label, detail: def.detail,
         scoring: def.scoring, formula: def.formula, checklistItems: def.checklistItems,
+        purpose: def.purpose, definition: def.definition, measurement: def.measurement,
         shape: def.shape, unit: def.unit, available: false,
         blockedBy: def.blockedBy, drillPath: def.drillPath,
         target: Number(a.target), weight: Number(a.weight),
@@ -213,20 +254,21 @@ async function buildCard(c: Context<Env>, userId: string, role: string, period: 
           ? await surveyMean(c, userId, def.key, period)
           : def.scoring === "MANUAL"
             ? await manualRating(c, period, userId, def.key)
-            : await computeMetric(c, def.key, period);
+            : await computeMetric(c, def.key, period, a.scope, def);
     const att =
-      m.actual === null ? null : attainment(def, Number(a.target), m.actual);
+      m.actual === null ? null : attainment(def, Number(a.target), m.actual, m.earlyPct);
     lines.push({
       key: def.key, label: def.label, detail: def.detail,
       scoring: def.scoring, formula: def.formula, checklistItems: def.checklistItems,
+      purpose: def.purpose, definition: def.definition, measurement: def.measurement,
       surveyQuestions: def.surveyQuestions, ratingGuide: def.ratingGuide,
       shape: def.shape, unit: def.unit, available: true,
-      drillPath: def.drillPath,
+      drillPath: def.drillPath, urgentDays: def.urgentDays,
       target: Number(a.target), weight: Number(a.weight),
       actual: m.actual,
       attainment: att,
       points: att === null ? null : Math.round((att / 100) * Number(a.weight) * 10) / 10,
-      evidence: m.detail, sampleSize: m.sampleSize,
+      evidence: m.detail, sampleSize: m.sampleSize, daily: m.daily,
     });
   }
 
@@ -373,11 +415,12 @@ app.put("/payout/:id", async (c) => {
 
 // ---- Checklist ticks -------------------------------------------------------
 //
-// A person ticks their OWN items; Super Admin may tick anyone's and is the one
-// who verifies. Both go through here, and the id comes from the context for a
-// self-tick — never from the body — so "my checklist" cannot be pointed at
-// someone else's month.
+// Super Admin only (DEV-37, Violet 2026-10-06: "super admin only can tick.
+// staff can view only"). A self-tick counted towards the score with nobody
+// checking it, so the person being measured could raise their own number.
 app.put("/checklist/:kpiKey", async (c) => {
+  const denied = requireSuperAdmin(c);
+  if (denied) return denied;
   await ensureKpiTables(c.var.DB);
   const kpiKey = c.req.param("kpiKey");
   const def = kpiByKey(kpiKey);
@@ -393,13 +436,8 @@ app.put("/checklist/:kpiKey", async (c) => {
   }
 
   const self = ctxGet(c, "userId");
-  const isAdmin = requireSuperAdmin(c) === null;
-  // Only a Super Admin may tick on someone else's behalf.
-  const userId = body.userId && isAdmin ? String(body.userId) : self;
+  const userId = body.userId ? String(body.userId) : self;
   if (!userId) return c.json({ success: false, error: "Unauthorized" }, 401);
-  if (body.userId && !isAdmin && String(body.userId) !== self) {
-    return c.json({ success: false, error: "Forbidden" }, 403);
-  }
 
   const period = /^\d{4}-\d{2}$/.test(String(body.period ?? "")) ? String(body.period) : periodOf(c);
   const idx = Number(body.itemIndex);
@@ -431,8 +469,8 @@ app.put("/checklist/:kpiKey", async (c) => {
     .bind(
       `kct_${userId}_${period}_${kpiKey}_${idx}`,
       userId, period, kpiKey, idx, done,
-      isAdmin ? self : null,
-      isAdmin ? new Date().toISOString() : null,
+      self,
+      new Date().toISOString(),
       body.note ?? null,
       getOrgId(c),
     )
@@ -669,41 +707,93 @@ app.get("/library", async (c) => {
   const orgId = getOrgId(c);
 
   const holders = await c.var.DB.prepare(
-    `SELECT a.kpiKey, u.id AS "userId", u.email, u.displayName, u.role
+    `SELECT a.kpiKey, a.scope, u.id AS "userId", u.email, u.displayName, u.role
        FROM kpi_assignments a
        JOIN users u ON u.id = a.userId
       WHERE a.orgId = ? AND a.isActive = TRUE`,
   )
     .bind(orgId)
-    .all<{ kpiKey: string; userId: string; email: string; displayName: string | null; role: string }>();
+    .all<{
+      kpiKey: string; scope: string | null; userId: string;
+      email: string; displayName: string | null; role: string;
+    }>();
 
-  const byKpi = new Map<string, Array<{ userId: string; name: string; role: string }>>();
+  const byKpi = new Map<string, Array<{ userId: string; name: string; role: string; scope: string }>>();
   for (const h of holders.results ?? []) {
     const list = byKpi.get(String(h.kpiKey)) ?? [];
     list.push({
       userId: String(h.userId),
       name: h.displayName || String(h.email).split("@")[0],
       role: String(h.role ?? ""),
+      scope: h.scope ?? "",
     });
     byKpi.set(String(h.kpiKey), list);
   }
 
+  const rules = await loadRules(c);
   const data = [];
-  for (const def of KPI_CATALOG) {
+  for (const base of KPI_CATALOG) {
+    const def = withRules(base, rules.get(base.key));
     // The company-level current value, so a target can be set against reality
     // rather than against a guess.
     const m = def.available
-      ? await computeMetric(c, def.key, period)
+      ? await computeMetric(c, def.key, period, null, def)
       : { actual: null, sampleSize: 0, detail: def.blockedBy ?? "" };
     data.push({
       ...def,
       current: m.actual,
       evidence: m.detail,
       sampleSize: m.sampleSize,
+      editableRules: editableRules(def.key),
       assignedTo: byKpi.get(def.key) ?? [],
     });
   }
   return c.json({ success: true, period, data, gateCap: GATE_FAIL_CAP });
+});
+
+// ---- Scoring rules, one set for the company -------------------------------
+//
+// Owner 2026-10-05: the numbers behind a KPI (points per 1% late, the early
+// bonus) are set from the Library tab instead of in code. Only the fields in
+// EDITABLE_RULES are accepted. A settled month keeps the score it was settled
+// with; every month not yet settled is recomputed with the new numbers.
+app.put("/rules/:kpiKey", async (c) => {
+  const denied = requireSuperAdmin(c);
+  if (denied) return denied;
+  await ensureKpiTables(c.var.DB);
+  const kpiKey = c.req.param("kpiKey");
+  const fields = editableRules(kpiKey);
+  if (!fields.length) {
+    return c.json({ success: false, error: `${kpiKey} has no editable rules` }, 400);
+  }
+
+  let body: Record<string, unknown>;
+  try {
+    body = (await c.req.json()) as Record<string, unknown>;
+  } catch {
+    return c.json({ success: false, error: "Invalid JSON body" }, 400);
+  }
+  const rules: KpiRules = {};
+  for (const f of fields) {
+    const v = Number(body[f]);
+    if (body[f] == null || !Number.isFinite(v) || v < 0 || v > 100) {
+      return c.json({ success: false, error: `${f} must be a number from 0 to 100` }, 400);
+    }
+    rules[f] = v;
+  }
+  if (rules.earlyStepPct !== undefined && rules.earlyStepPct <= 0) {
+    return c.json({ success: false, error: "earlyStepPct must be more than 0" }, 400);
+  }
+
+  await c.var.DB.prepare(
+    `INSERT INTO kpi_rule_settings (kpiKey, orgId, rules, updatedBy, updatedAt)
+     VALUES (?, ?, ?, ?, NOW())
+     ON CONFLICT (orgId, kpiKey) DO UPDATE
+       SET rules = EXCLUDED.rules, updatedBy = EXCLUDED.updatedBy, updatedAt = NOW()`,
+  )
+    .bind(kpiKey, getOrgId(c), JSON.stringify(rules), ctxGet(c, "userId"))
+    .run();
+  return c.json({ success: true, data: rules });
 });
 
 // ---- People: everyone's score for a period, without clicking in -----------
@@ -759,10 +849,12 @@ app.get("/people", async (c) => {
 app.get("/catalog", async (c) => {
   const denied = requireSuperAdmin(c);
   if (denied) return denied;
+  await ensureKpiTables(c.var.DB);
   const role = (c.req.query("role") ?? "").toUpperCase();
+  const rules = await loadRules(c);
   return c.json({
     success: true,
-    data: role ? kpisForRole(role) : KPI_CATALOG,
+    data: (role ? kpisForRole(role) : KPI_CATALOG).map((d) => withRules(d, rules.get(d.key))),
     gateCap: GATE_FAIL_CAP,
   });
 });
@@ -852,7 +944,9 @@ app.put("/kpi/:kpiKey/assignees", async (c) => {
   const def = kpiByKey(kpiKey);
   if (!def) return c.json({ success: false, error: `Unknown KPI: ${kpiKey}` }, 400);
 
-  let body: { assignees?: Array<{ userId: string; target: number; weight?: number; isActive?: boolean }> };
+  let body: {
+    assignees?: Array<{ userId: string; target: number; weight?: number; isActive?: boolean; scope?: string }>;
+  };
   try {
     body = (await c.req.json()) as typeof body;
   } catch {
@@ -861,6 +955,44 @@ app.put("/kpi/:kpiKey/assignees", async (c) => {
   const rows = Array.isArray(body.assignees) ? body.assignees : [];
   const orgId = getOrgId(c);
   const actor = ctxGet(c, "userId");
+
+  // DEV-36: a department scope, one or more departments stored as
+  // "FAB_CUT,FAB_SEW:SOFA". production_efficiency takes production departments,
+  // each optionally Sofa / Bedframe; department_efficiency takes any department
+  // (an R&D lead is scored on R&D's workers) and no type, because the dashboard
+  // it mirrors has none. Anything else is refused here; stored, it would only
+  // ever score "no hours logged" and look like a bad month.
+  const scopes = new Map<string, string | null>();
+  let allDepts: Array<{ code: string; isProduction: number | boolean | null }> | null = null;
+  for (const r of rows) {
+    const raw = String(r.scope ?? "").trim();
+    if (!raw) {
+      scopes.set(String(r.userId), null);
+      continue;
+    }
+    if (kpiKey !== "production_efficiency" && kpiKey !== "department_efficiency") {
+      return c.json({ success: false, error: `${def.label} has no department option` }, 400);
+    }
+    const sc = parseEfficiencyScope(raw);
+    if (!allDepts) {
+      const res = await c.var.DB.prepare(`SELECT code, isProduction FROM departments`)
+        .bind()
+        .all<{ code: string; isProduction: number | boolean | null }>();
+      allDepts = res.results ?? [];
+    }
+    const allowed = new Set(
+      allDepts
+        .filter((d) => kpiKey === "department_efficiency" || d.isProduction)
+        .map((d) => String(d.code)),
+    );
+    if (!sc || !sc.length || sc.some((p) => !allowed.has(p.dept))) {
+      return c.json({ success: false, error: `Unknown department: ${raw}` }, 400);
+    }
+    if (kpiKey === "department_efficiency" && sc.some((p) => p.category)) {
+      return c.json({ success: false, error: `${def.label} has no Sofa / Bedframe split` }, 400);
+    }
+    scopes.set(String(r.userId), formatEfficiencyScope(sc));
+  }
 
   for (const r of rows) {
     const target = Number(r.target);
@@ -873,17 +1005,18 @@ app.put("/kpi/:kpiKey/assignees", async (c) => {
       return c.json({ success: false, error: `${r.userId}: weight must be 0–100` }, 400);
     }
     await c.var.DB.prepare(
-      `INSERT INTO kpi_assignments (id, userId, kpiKey, target, weight, isActive, assignedBy, orgId)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO kpi_assignments (id, userId, kpiKey, target, weight, isActive, assignedBy, orgId, scope)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (userId, kpiKey) DO UPDATE
          SET target = EXCLUDED.target, weight = EXCLUDED.weight,
              isActive = EXCLUDED.isActive, assignedBy = EXCLUDED.assignedBy,
-             updatedAt = NOW()`,
+             scope = EXCLUDED.scope, updatedAt = NOW()`,
     )
       .bind(
         `kpia_${r.userId}_${kpiKey}`,
         String(r.userId), kpiKey, target, weight,
         r.isActive !== false, actor, orgId,
+        scopes.get(String(r.userId)) ?? null,
       )
       .run();
   }

@@ -95,7 +95,7 @@ test("an AP voucher posts through the settlement builders, never through pvPosti
 
 test("create: AP kind writes allocs (no lines); Post now adds the settlement in the same batch", () => {
   const body = handler(acc, 'app.post("/payment-vouchers", async (c) => {');
-  const ap = body.slice(body.indexOf("if (body.kind === PV_KIND_AP) {"), body.indexOf("const v = validateDocLines(coa, body.lines);"));
+  const ap = body.slice(body.indexOf("if (body.kind === PV_KIND_AP) {"), body.indexOf("const isTransfer = body.kind === PV_KIND_TRANSFER;"));
   assert.ok(ap.length > 0, "AP branch missing");
   assert.match(ap, /await validatePvAp\(c\.var\.DB, orgId, coa, body as Record<string, unknown>, null\)/);
   assert.match(ap, /\.\.\.pvAllocStatements\(c\.var\.DB, id, ap\.v\.allocs\)/);
@@ -161,7 +161,9 @@ test("UI: two doors (New AP Payment / New Payment Voucher) and the Houzs status 
   }
   // Foreign invoices cannot be ticked; a posted AP voucher has no in-place edit.
   assert.match(ui, /disabled=\{b\.foreign \|\| b\.availableSen <= 0\}/);
-  assert.match(ui, /\{isPosted\(r\) && r\.pvKind !== "AP" && \(/);
+  // (2026-10-02: the row's actions moved to its right-click menu; the popup keeps the button.)
+  assert.match(ui, /\.\.\.\(isPosted\(r\) && r\.pvKind !== "AP" \? \[\{ label: "Edit", action: \(\) => startEdit\(r\) \}\] : \[\]\),/);
+  assert.match(ui, /\{isPosted\(r\) && r\.pvKind !== "AP" && <Button variant="outline" size="sm" onClick=\{\(\) => \{ close\(\); startEdit\(r\); \}\}>Edit<\/Button>\}/);
   // The AP form posts kind: "AP" with allocations, never expense lines.
   const apStart = ui.indexOf("const handleSaveAp = async");
   const save = ui.slice(apStart, ui.indexOf("const handleSave = async", apStart));

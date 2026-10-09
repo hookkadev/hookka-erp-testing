@@ -461,6 +461,15 @@ const PAGE_CSS = `
   .print-bar { position: sticky; top: 0; background: #F4EFE3; padding: 8px 12px; border-bottom: 1px solid #E5E1DC; text-align: right; z-index: 10; }
   .print-bar button { padding: 6px 14px; font-size: 10pt; border: 1px solid #1F1D1B; background: #1F1D1B; color: #fff; cursor: pointer; border-radius: 4px; }
   .secondary { color: #6B7280; font-size: 8pt; }
+  .full-link { margin: 8px 0 0; font-size: 10pt; color: #6B5C32; }
+  .dept-filter { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0; }
+  .dept-filter .chip { font-size: 9pt; padding: 3px 10px; border: 1px solid #E5E1DC; border-radius: 999px; color: #1F1D1B; background: #fff; text-decoration: none; }
+  .dept-filter .chip.on { background: #1F1D1B; border-color: #1F1D1B; color: #fff; }
+  table.share { width: 100%; border-collapse: collapse; margin: 0 0 6px; }
+  table.share thead th { background: #F4EFE3; color: #1F1D1B; font-size: 8pt; font-weight: 700; padding: 5px 8px; text-align: right; letter-spacing: 0.3px; border-bottom: 1px solid #E5E1DC; }
+  table.share tbody td { font-size: 9pt; padding: 5px 8px; border-bottom: 1px solid #F0ECE9; text-align: right; }
+  table.share th:first-child, table.share td:first-child { text-align: left; }
+  table.share tbody td:first-child { font-weight: 600; }
   .num { font-variant-numeric: tabular-nums; }
 `;
 
@@ -486,17 +495,53 @@ const PHONE_CSS = `
     table.data tbody td:empty { display: none; }
     .m-lbl { display: inline; color: #6B7280; font-weight: 400; font-size: 9pt; }
     .secondary { font-size: 9pt; }
+    table.share th, table.share td { padding: 5px 4px; font-size: 9pt; }
+    table.share thead th { white-space: normal; vertical-align: bottom; }
     .dept-card { border: 0; }
     .dept-head { flex-wrap: wrap; gap: 2px 10px; border-radius: 4px; margin-bottom: 8px; }
   }
 `;
 
+// The EMAIL is the summary only: the four top boxes, the department table and
+// one "Show full list" link. Job rows live on the in-app page (the link), which
+// adds a department filter above them. A full day's rows were ~199 KB and Gmail
+// clips past ~102 KB, so the email no longer carries rows at all.
 export function renderScheduleHtml(
   data: ScheduleReport,
-  opts: { email?: boolean } = {},
+  opts: { email?: boolean; fullListUrl?: string; dept?: string } = {},
 ): string {
   const { date, totals, byDepartment } = data;
   const longDate = formatDateLong(date);
+
+  // Department summary: planned time and job cards per department, with each
+  // department's share of the day. Heaviest first. Display only: every figure
+  // is the one already on the department header.
+  const pct = (n: number, of: number) => (of > 0 ? `${(Math.round((n / of) * 1000) / 10).toFixed(1)}%` : "—");
+  const shareRows = [...byDepartment]
+    .sort((a, b) => b.prodMinutes - a.prodMinutes)
+    .map(
+      (d) =>
+        `<tr><td>${escapeHtml(d.name)}</td><td class="num">${d.count}</td><td class="num">${formatMinutes(d.prodMinutes)}</td><td class="num">${pct(d.prodMinutes, totals.prodMinutes)}</td><td class="num">${pct(d.count, totals.jobCards)}</td></tr>`,
+    )
+    .join("");
+  const shareTable =
+    byDepartment.length > 0
+      ? `<h2>Departments</h2>
+  <table class="share"><thead><tr><th>Department</th><th>Job cards</th><th>Planned time</th><th>% of planned time</th><th>% of job cards</th></tr></thead><tbody>${shareRows}</tbody></table>`
+      : "";
+  const showFull = opts.fullListUrl ? `<a href="${escapeHtml(opts.fullListUrl)}">Show full list</a>` : "Full list in Reports";
+
+  // In-app page: department filter as plain links (works without script and
+  // in print preview); ?dept= picks one department's section, All shows every one.
+  const picked = byDepartment.some((d) => d.code === opts.dept) ? opts.dept : undefined;
+  const chip = (label: string, dept?: string) => {
+    const href = `?date=${encodeURIComponent(date)}${dept ? `&dept=${encodeURIComponent(dept)}` : ""}`;
+    return `<a class="chip${dept === picked ? " on" : ""}" href="${escapeHtml(href)}">${escapeHtml(label)}</a>`;
+  };
+  const filter =
+    byDepartment.length > 1
+      ? `<div class="dept-filter no-print">${chip("All")}${byDepartment.map((d) => chip(d.name, d.code)).join("")}</div>`
+      : "";
 
   const colWidths = `
     <colgroup>
@@ -512,6 +557,7 @@ export function renderScheduleHtml(
     </colgroup>`;
 
   const deptSections = byDepartment
+    .filter((d) => !picked || d.code === picked)
     .map((d) => {
       const rows = d.rows
         .map((r) => {
@@ -527,7 +573,7 @@ export function renderScheduleHtml(
             <td class="num m-inline" style="text-align:right;"><span class="m-lbl">Mins </span>${formatMinutes(r.prodMinutes)}</td>
             <td class="m-inline">${status}</td>
             <td class="m-inline"><span class="m-lbl">PIC </span>${escapeHtml(pic || "—")}</td>
-          </tr>`;
+          </tr>`.replace(/>\s+</g, "><");
         })
         .join("");
       return `<div class="dept-card">
@@ -554,6 +600,14 @@ export function renderScheduleHtml(
     })
     .join("\n");
 
+  const below =
+    byDepartment.length === 0
+      ? `<p style="text-align:center;padding:30px;color:#9CA3AF;">No job cards scheduled for this date.</p>`
+      : opts.email
+        ? `<p class="full-link">${showFull}</p>`
+        : `${filter}
+  ${deptSections}`;
+
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -573,7 +627,8 @@ ${opts.email ? "" : `<div class="print-bar no-print"><button onclick="window.pri
     <div class="cell"><div class="lbl">Planned Time</div><div class="val num">${formatMinutes(totals.prodMinutes)}</div><div class="sub">sum of estimates</div></div>
     <div class="cell"><div class="lbl">Departments</div><div class="val num">${totals.departments}</div><div class="sub">with work scheduled</div></div>
   </div>
-  ${deptSections || `<p style="text-align:center;padding:30px;color:#9CA3AF;">No job cards scheduled for this date.</p>`}
+  ${shareTable}
+  ${below}
   <div class="footer">Generated ${escapeHtml(new Date(data.generatedAtIso).toLocaleString("en-GB", { timeZone: "Asia/Singapore" }))} SGT</div>
 </div>
 </body>

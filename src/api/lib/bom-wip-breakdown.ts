@@ -98,13 +98,15 @@ export type WipBreakdownItem = {
 // FOAM_CUTTING is inserted immediately before FOAM in every chain that has a
 // FOAM step — it is a tracking/scheduling/labor stage that precedes foam
 // bonding (raw material is still consumed at FAB_CUT; this step touches no RM).
+// FIBRE (owner 2026-10-07) sits immediately after FOAM in every chain that has a
+// FOAM step, the mirror of FOAM_CUTTING sitting immediately before it.
 const DEFAULT_WIP_DEPT_CHAINS: Record<string, string[]> = {
-  DIVAN:         ["WOOD_CUT", "FOAM_CUTTING", "FOAM", "FRAMING", "WEBBING", "UPHOLSTERY", "PACKING"],
-  HEADBOARD:     ["FAB_CUT", "FAB_SEW", "FOAM_CUTTING", "FOAM", "FRAMING", "UPHOLSTERY", "PACKING"],
-  SOFA_BASE:     ["WOOD_CUT", "FOAM_CUTTING", "FOAM", "FRAMING", "WEBBING", "UPHOLSTERY", "PACKING"],
-  SOFA_CUSHION:  ["FAB_CUT", "FAB_SEW", "FOAM_CUTTING", "FOAM", "UPHOLSTERY", "PACKING"],
-  SOFA_ARMREST:  ["WOOD_CUT", "FOAM_CUTTING", "FOAM", "UPHOLSTERY", "PACKING"],
-  SOFA_HEADREST: ["FAB_CUT", "FAB_SEW", "FOAM_CUTTING", "FOAM", "UPHOLSTERY", "PACKING"],
+  DIVAN:         ["WOOD_CUT", "FOAM_CUTTING", "FOAM", "FIBRE", "FRAMING", "WEBBING", "UPHOLSTERY", "PACKING"],
+  HEADBOARD:     ["FAB_CUT", "FAB_SEW", "FOAM_CUTTING", "FOAM", "FIBRE", "FRAMING", "UPHOLSTERY", "PACKING"],
+  SOFA_BASE:     ["WOOD_CUT", "FOAM_CUTTING", "FOAM", "FIBRE", "FRAMING", "WEBBING", "UPHOLSTERY", "PACKING"],
+  SOFA_CUSHION:  ["FAB_CUT", "FAB_SEW", "FOAM_CUTTING", "FOAM", "FIBRE", "UPHOLSTERY", "PACKING"],
+  SOFA_ARMREST:  ["WOOD_CUT", "FOAM_CUTTING", "FOAM", "FIBRE", "UPHOLSTERY", "PACKING"],
+  SOFA_HEADREST: ["FAB_CUT", "FAB_SEW", "FOAM_CUTTING", "FOAM", "FIBRE", "UPHOLSTERY", "PACKING"],
 };
 
 // ---------------------------------------------------------------------------
@@ -272,14 +274,14 @@ const PRODUCTION_ORDER_BY_WIP_TYPE: Record<string, readonly string[]> = {
   // No FOAM in Divan (the "Foam"-named WIP node's actual dept is WEBBING).
   DIVAN:         ["FAB_CUT", "FAB_SEW", "WOOD_CUT", "FRAMING", "WEBBING", "UPHOLSTERY", "PACKING"],
   // BF Headboard BOM: FAB_CUT->FAB_SEW->FOAM (foam branch) || WOOD_CUT->FRAMING->WEBBING (webbing branch) -> UPH -> PACK.
-  HEADBOARD:     ["FAB_CUT", "FAB_SEW", "FOAM_CUTTING", "FOAM", "WOOD_CUT", "FRAMING", "WEBBING", "UPHOLSTERY", "PACKING"],
+  HEADBOARD:     ["FAB_CUT", "FAB_SEW", "FOAM_CUTTING", "FOAM", "FIBRE", "WOOD_CUT", "FRAMING", "WEBBING", "UPHOLSTERY", "PACKING"],
   // Sofa BOM: FAB_CUT->FAB_SEW (fabric branch) || WOOD_CUT->FRAMING->WEBBING->FOAM (foam branch) -> UPH -> PACK.
   // FOAM is downstream of WEBBING in sofa, opposite of BF Headboard.
   // FOAM_CUTTING rides immediately in front of FOAM in every chain (tracking step).
-  SOFA_BASE:     ["FAB_CUT", "FAB_SEW", "WOOD_CUT", "FRAMING", "WEBBING", "FOAM_CUTTING", "FOAM", "UPHOLSTERY", "PACKING"],
-  SOFA_CUSHION:  ["FAB_CUT", "FAB_SEW", "WOOD_CUT", "FRAMING", "WEBBING", "FOAM_CUTTING", "FOAM", "UPHOLSTERY", "PACKING"],
-  SOFA_ARMREST:  ["FAB_CUT", "FAB_SEW", "WOOD_CUT", "FRAMING", "WEBBING", "FOAM_CUTTING", "FOAM", "UPHOLSTERY", "PACKING"],
-  SOFA_HEADREST: ["FAB_CUT", "FAB_SEW", "WOOD_CUT", "FRAMING", "WEBBING", "FOAM_CUTTING", "FOAM", "UPHOLSTERY", "PACKING"],
+  SOFA_BASE:     ["FAB_CUT", "FAB_SEW", "WOOD_CUT", "FRAMING", "WEBBING", "FOAM_CUTTING", "FOAM", "FIBRE", "UPHOLSTERY", "PACKING"],
+  SOFA_CUSHION:  ["FAB_CUT", "FAB_SEW", "WOOD_CUT", "FRAMING", "WEBBING", "FOAM_CUTTING", "FOAM", "FIBRE", "UPHOLSTERY", "PACKING"],
+  SOFA_ARMREST:  ["FAB_CUT", "FAB_SEW", "WOOD_CUT", "FRAMING", "WEBBING", "FOAM_CUTTING", "FOAM", "FIBRE", "UPHOLSTERY", "PACKING"],
+  SOFA_HEADREST: ["FAB_CUT", "FAB_SEW", "WOOD_CUT", "FRAMING", "WEBBING", "FOAM_CUTTING", "FOAM", "FIBRE", "UPHOLSTERY", "PACKING"],
 };
 
 // Sort a set of process entries by per-wipType chain when known, falling
@@ -418,4 +420,71 @@ export function breakBomIntoWips(
     return [makeFallbackFgWip(productCode)];
   }
   return wips;
+}
+
+// The WIPs that get job cards. Same as breakBomIntoWips, except for an
+// L1-only BOM.
+//
+// An empty tree with steps on the L1 tab is how the accessory BOMs are set up
+// today (cushions, bolsters, SB02). breakBomIntoWips answers that empty tree
+// with the FG_MAIN fallback over all 9 depts, which is right only for a BOM
+// with no steps at all. For an L1-only BOM the fallback walks just the L1
+// steps instead, so its Fab Cut goes through the (FC) merge like any WIP Fab
+// Cut, and no dept outside the BOM gets a card. The L1 cards themselves are
+// then dropped as duplicates (l1ProcessesWithoutWipDupes). BUG-2026-10-01-244:
+// the fallback plus the L1 cards gave every such PO a second Fab Cut / Fab Sew
+// / Packing card plus one in every other dept.
+//
+// The production builder and jobcard-sync both create cards through this, so
+// they cannot disagree.
+export type L1Step = { deptCode: string; category: string; minutes: number };
+
+export function breakBomIntoJobCardWips(
+  rawWipComponents: string | null | undefined,
+  l1Steps: readonly L1Step[],
+  productCode: string,
+  variants?: BomVariantContext | null,
+): WipBreakdownItem[] {
+  const wips = breakBomIntoWips(rawWipComponents, productCode, variants);
+  const fallbackOnly =
+    wips.length === 1 && wips[0].wipKey === `${productCode}::FG_MAIN`;
+  if (!fallbackOnly || l1Steps.length === 0) return wips;
+
+  // One entry per dept (minutes summed, first category kept), in DEPT_ORDER.
+  const fallback = wips[0];
+  const byDept = new Map<string, WipProcessEntry>();
+  for (const step of l1Steps) {
+    const seen = byDept.get(step.deptCode);
+    if (seen) {
+      seen.minutes += step.minutes;
+      continue;
+    }
+    byDept.set(step.deptCode, {
+      deptCode: step.deptCode,
+      category: step.category,
+      minutes: step.minutes,
+      wipCode: fallback.wipCode,
+      wipLabel: fallback.wipLabel,
+      nodeQuantity: 1,
+      branchKey: "FG_MAIN",
+    });
+  }
+  return [
+    {
+      ...fallback,
+      processes: orderProcesses([...byDept.values()], fallback.wipType),
+    },
+  ];
+}
+
+// The L1 (FG-level) steps that still get their own card: those whose dept no
+// WIP card covers. The auto-generated card wins a duplicate, so a BOM with
+// Fab Cut both in its tree and on the L1 tab gets the (FC) card only.
+export function l1ProcessesWithoutWipDupes<T extends { deptCode: string }>(
+  l1Steps: readonly T[],
+  wips: readonly WipBreakdownItem[],
+): T[] {
+  const wipDepts = new Set<string>();
+  for (const w of wips) for (const p of w.processes) wipDepts.add(p.deptCode);
+  return l1Steps.filter((s) => !wipDepts.has(s.deptCode));
 }

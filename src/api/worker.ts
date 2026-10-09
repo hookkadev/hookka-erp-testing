@@ -989,6 +989,7 @@ import globalSearch from "./routes/search";
 import productConfigs from "./routes/product-configs";
 import workers from "./routes/workers";
 import orgChart from "./routes/org-chart";
+import userPermissions from "./routes/user-permissions";
 import workerAuth from "./routes/worker-auth";
 import workerPortal from "./routes/worker";
 import departments from "./routes/departments";
@@ -1114,6 +1115,7 @@ import attendance from "./routes/attendance";
 import workingHourEntries from "./routes/working-hour-entries";
 import payrollHourDeductions from "./routes/payroll-hour-deductions";
 import employeeAdvances from "./routes/employee-advances";
+import workerPenalties from "./routes/worker-penalties";
 import cashFlow from "./routes/cash-flow";
 import consignments from "./routes/consignments";
 import consignmentNotes from "./routes/consignment-notes";
@@ -1358,6 +1360,9 @@ app.route("/api/payroll-hour-deductions", payrollHourDeductions);
 // Salary advances (cash handed to a worker mid-month). Recovered from that
 // month's net pay — see src/api/lib/employee-advances.ts.
 app.route("/api/employee-advances", employeeAdvances);
+// DEV-22 worker penalties — approved ones come off net pay in their payroll
+// month; see src/api/lib/worker-penalties.ts.
+app.route("/api/worker-penalties", workerPenalties);
 app.route("/api/cash-flow", cashFlow);
 app.route("/api/consignments", consignments);
 app.route("/api/consignment-notes", consignmentNotes);
@@ -1476,6 +1481,13 @@ app.route("/api/assistant", assistant);
 import agentConsole from "./routes/agent-console";
 app.route("/api/agents", agentConsole);
 app.route("/api/org-chart", orgChart);
+app.route("/api/user-permissions", userPermissions);
+// STAGING ONLY (never PR'd into main): sent-mail viewer, 404s off staging.
+import stagingMail from "./routes/staging-mail";
+app.route("/api/staging-mail", stagingMail);
+// STAGING ONLY, never PR into main: read-only schema check, see routes/staging-schema.ts.
+import stagingSchema from "./routes/staging-schema";
+app.route("/api/staging-schema", stagingSchema);
 
 // Catch-all error handler (Sprint 5). Hono's default behaviour is to surface
 // a 500 with the error message — fine for dev, but in prod we want every

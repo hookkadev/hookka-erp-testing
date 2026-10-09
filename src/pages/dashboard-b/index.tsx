@@ -15,6 +15,7 @@ import { formatCurrency } from "@/lib/utils";
 import { Skeleton, SkeletonDashboard } from "@/components/ui/skeleton";
 import { useCachedJson, isUnknownOutcome } from "@/lib/cached-fetch";
 import { OcrAccuracyCard } from "./OcrAccuracyCard";
+import { stateKpiTile, type StateKpis } from "@/pages/dashboards/dashboard-widgets-lib";
 // recharts (~357 KB) is loaded lazily so the KPI numbers paint first; the
 // chart code streams in behind a placeholder. See ./charts.tsx.
 const RevenueChart = lazy(() =>
@@ -215,6 +216,9 @@ type Overview = {
     isHistorical: boolean; // true → past-month value (snapshot-less): live or reconstructed
     asOf: string | null; // snap_date (snapshot) or month-end (reconstructed)
   };
+  // A finished month's saved Pending Delivery / Outstanding (null for the
+  // current month and All-time, which stay live).
+  stateKpis?: StateKpis | null;
 };
 // Σ valueSen of every PO that is made-but-not-yet-on-a-DO, computed server-side
 // by GET /api/delivery-orders/pending-value off the SAME buildReadyPlanning rows
@@ -1016,6 +1020,17 @@ export default function DashboardBPage() {
   // (Outstanding / Pending Delivery) are point-in-time and carry a "live" tag.
   const isAllTime = period === "all";
   const isCurrentMonth = period === CUR_YM;
+  // A finished month keeps its saved month-end figure, or "no record"; never
+  // today's live one (owner 2026-10-09). Same rule on the mobile home and the
+  // experimental dashboard (stateKpiTile).
+  const pdTile = stateKpiTile(
+    period,
+    ov.stateKpis?.pendingDeliverySen,
+    ov.stateKpis?.asOf,
+    pendingDeliveryValueSen + dispatchChain.pendingDispatchSen + dispatchChain.inTransitSen,
+    CUR_YM,
+  );
+  const outTile = stateKpiTile(period, ov.stateKpis?.outstandingSen, ov.stateKpis?.asOf, outstanding, CUR_YM);
   // This Month Sales — confirmed-SO value for the selected month (all-time =
   // cumulative). Owner 2026-06-12 kept this card alongside Invoices.
   const salesLabel = isAllTime
@@ -1047,9 +1062,12 @@ export default function DashboardBPage() {
   // Completed, Worker Efficiency). All-time keeps each widget's original
   // rolling phrase; a selected month shows the month string.
   const revTitle = isAllTime ? "Revenue — last 12 weeks" : `Revenue — ${period}`;
-  const capacityWindowLabel = isAllTime ? "7-day avg" : `${period} avg`;
-  const capacityDrillTitle = isAllTime
-    ? "Daily Capacity — Past 7 Working Days"
+  // All-time and the current month average the last 14 working days; a past
+  // month averages its own working days (owner 2026-10-08).
+  const capacityRolling = isAllTime || isCurrentMonth;
+  const capacityWindowLabel = capacityRolling ? "14-day avg" : `${period} avg`;
+  const capacityDrillTitle = capacityRolling
+    ? "Daily Capacity — Past 14 Working Days"
     : `Daily Capacity — ${period}`;
   const completedDrillTitle = isAllTime
     ? "Completed — last 7 days"
@@ -1151,25 +1169,21 @@ export default function DashboardBPage() {
             Owner 2026-06-12. */}
         <KTile
           label="Pending Delivery"
-          value={rm(
-            pendingDeliveryValueSen +
-              dispatchChain.pendingDispatchSen +
-              dispatchChain.inTransitSen,
-          )}
-          sub="made / on DO, not yet delivered"
+          value={pdTile.sen == null ? "—" : rm(pdTile.sen)}
+          sub={pdTile.past && pdTile.sen == null ? "nothing saved for that month" : "made / on DO, not yet delivered"}
           icon={Package}
           accent={C_GREEN}
-          loading={pendingL}
-          tag="live"
+          loading={pdTile.past ? overviewLoading : pendingL}
+          tag={pdTile.tag}
         />
         <KTile
           label="Outstanding"
-          value={rm(outstanding)}
-          sub="confirmed · not yet delivered"
+          value={outTile.sen == null ? "—" : rm(outTile.sen)}
+          sub={outTile.past && outTile.sen == null ? "nothing saved for that month" : "confirmed · not yet delivered"}
           icon={Clock}
           accent={C_INV}
-          loading={soL}
-          tag="live"
+          loading={outTile.past ? overviewLoading : soL}
+          tag={outTile.tag}
         />
       </div>
 
@@ -1419,7 +1433,7 @@ export default function DashboardBPage() {
                 onClick={() => {
                   if (!prod?.capacityDays) return;
                   const days = prod.capacityDays;
-                  // 7-day average capacity per worker — avg daily capacity
+                  // Average capacity per worker — avg daily capacity
                   // ÷ avg workers/day. Days with zero credited workers are
                   // left out so they don't distort the average.
                   const wDays = days.filter((d) => (d.workers ?? 0) > 0);
@@ -2553,7 +2567,7 @@ export default function DashboardBPage() {
                       />
                     )}
                   </div>
-                  <span className="w-12 text-right text-xs font-semibold text-[#DC2626] tabular-nums" title={showDays == null ? "No completions in the last 7 working days — queue can't be sized in days" : undefined}>
+                  <span className="w-12 text-right text-xs font-semibold text-[#DC2626] tabular-nums" title={showDays == null ? "No completions in the last 14 working days — queue can't be sized in days" : undefined}>
                     {showDays == null ? "stalled" : `${showDays.toFixed(1)}d`}
                   </span>
                 </div>
