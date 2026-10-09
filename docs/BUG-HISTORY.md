@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-09**: newest entry BUG-2026-10-09-274 (branch `fix/do-accessory-uom`, to main); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-09**: BUG-2026-10-09-272 follow-up (branch `fix/worker-i18n-single-words`, to staging then main): single-word worker labels translated; a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-09**: newest entry BUG-2026-10-09-272 (branch `fix/worker-i18n-popups-and-date`, to staging then main); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-09**: newest entry BUG-2026-10-09-273 (branch `fix/stock-take-price-list-sen`; 272 is on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
@@ -90,6 +91,19 @@ Entries themselves stay newest-first.
 
 ---
 
+## BUG-2026-10-09-274 — Delivery order quantity column printed accessory code tails ("1 MF", "1 SB02") `delivery` `do-cn-parity` 🟢
+
+🟢 **Fixed** (branch `fix/do-accessory-uom` → `main`; not yet deployed) · DEV-67, from the floor (DO-2610-036).
+
+**Cause.** `piecesFor` (`src/api/lib/print-extras-shared.ts`) gives a non-sofa, non-bedframe line the part of its product code after the dash, else its size label, else the code. Accessory BOMs are empty, so a back cushion `BC05-MF` printed "1 MF", a sandbag `SB02` printed "1 SB02", an armrest `A01` printed "1 A01". The same string feeds the DO and CN PDFs and the DO total row.
+
+**Fix.** Accessory codes starting `BC<digit>`, `SB<digit>` and `A<digit>` now print "Back Cushion", "Sandbag" and "Armrest". Pillows and `5543-HDRST` are unchanged (not in the request). The catalog names spell the sandbag "SANDBACK"; the DO uses the requested "Sandbag". Partial-repair lines still print "BC" via `normalizePartLabel`, so a repair of a back cushion and a back cushion accessory read differently on the same DO.
+
+**Regression.** `tests/print-extras-shared.test.mjs`: BC05-MF, BC01, SB02 (qty 3), A01, and a pillow keeping its size fallback.
+
+**Verify.** Unit test only. Not yet seen on a printed DO: print one with accessory lines on staging after deploy.
+
+---
 ## BUG-2026-10-09-272 — Worker portal: scan pop-ups and ~45 strings were English-only; non-prod date pre-filled yesterday `worker-portal` `ui-frontend` 🟢
 
 🟢 **Fixed** (branch `fix/worker-i18n-popups-and-date` → `staging`, then `main`; not yet deployed) · Found scanning the worker pages before the Play Store work.
