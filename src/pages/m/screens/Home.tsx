@@ -61,6 +61,7 @@ import type { LucideIcon } from "lucide-react";
 import { useCachedJson } from "@/lib/cached-fetch";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { formatCurrency } from "@/lib/utils";
+import { stateKpiTile, type StateKpis } from "@/pages/dashboards/dashboard-widgets-lib";
 import { getCurrentUser } from "@/lib/auth";
 import {
   SO_STATUS_COLOR,
@@ -90,6 +91,7 @@ type StatsResp = {
 type JobsBreakdown = { bedframeUnits: number; sofaSets: number };
 type OverviewResp = {
   success?: boolean;
+  stateKpis?: StateKpis | null;
   salesThisMonthSen?: number;
   invoicesThisMonthSen?: number;
   monthlyRevenue?: {
@@ -465,6 +467,21 @@ export default function MobileHome() {
   // true while deferred (pdEnabled false) and while either dataset is still in
   // flight. Once both land, the real value renders (same computation).
   const pendingDeliveryLoading = !pdEnabled || !pendingRaw || !doStatsRaw;
+
+  // A finished month shows its saved month-end figure (or "no record"), not
+  // today's live one. Same rule as /dashboard (stateKpiTile).
+  const pdTile = stateKpiTile(period, overview?.stateKpis?.pendingDeliverySen, overview?.stateKpis?.asOf, pendingDeliverySen);
+  const outTile = stateKpiTile(period, overview?.stateKpis?.outstandingSen, overview?.stateKpis?.asOf, outstandingSen);
+  const tileValue = (t: typeof pdTile, liveLoading: boolean) =>
+    t.past
+      ? !overview
+        ? "…"
+        : t.sen == null
+          ? "—"
+          : formatCurrency(t.sen)
+      : liveLoading
+        ? "…"
+        : formatCurrency(t.sen ?? 0);
 
   // ---- Sales month-over-month delta (This Month Sales card) ----
   const salesDeltaPct = useMemo(() => {
@@ -1009,9 +1026,10 @@ export default function MobileHome() {
             icon={Package}
             accent="moss"
             label="Pending Delivery"
+            note={pdTile.past ? pdTile.tag : undefined}
             // Lazy-loaded after first paint — show a placeholder until its two
             // deferred fetches resolve, then the real (dashboard-identical) value.
-            value={pendingDeliveryLoading ? "…" : formatCurrency(pendingDeliverySen)}
+            value={tileValue(pdTile, pendingDeliveryLoading)}
             // Live point-in-time figure — no prior-period delta (as on desktop).
             delta={null}
           />
@@ -1020,7 +1038,8 @@ export default function MobileHome() {
             icon={Clock}
             accent="danger"
             label="Outstanding"
-            value={formatCurrency(outstandingSen)}
+            note={outTile.past ? outTile.tag : undefined}
+            value={tileValue(outTile, false)}
             // Live point-in-time figure — no prior-period delta (as on desktop).
             delta={null}
           />
@@ -2100,12 +2119,15 @@ function KpiCard({
   label,
   value,
   delta,
+  note,
 }: {
   icon: LucideIcon;
   accent: AccentKey;
   label: string;
   value: string;
   delta: { text: string; good: boolean } | null;
+  /** Small muted line under the label, e.g. "as of 2026-09-30". */
+  note?: string;
 }) {
   // dc13 mobile tightening: 13×14 padding · 18px value · 11.5px label ·
   // delta on its own line under the label. Was 15×16 / 25px / 12px / delta
@@ -2166,6 +2188,9 @@ function KpiCard({
         >
           {delta.text}
         </div>
+      ) : null}
+      {note ? (
+        <div style={{ fontSize: 10.5, fontWeight: 600, color: M.muted, marginTop: 1 }}>{note}</div>
       ) : null}
     </MobileCard>
   );

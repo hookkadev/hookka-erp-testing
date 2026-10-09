@@ -14,6 +14,7 @@ import { Hono } from "hono";
 import type { Env } from "../worker";
 import { requirePermission } from "../lib/rbac";
 import { customerScopeSql, isCustomerScoped } from "../lib/customer-scope";
+import { saveStateKpisLater } from "../lib/dashboard-state-snapshot";
 import { lateToCustomerOrders } from "../lib/kpi-metrics";
 import { assertCustomerBillable } from "../lib/customer-stage";
 import { emitAudit, buildAuditStatement } from "../lib/audit";
@@ -1125,6 +1126,11 @@ app.get("/stats", async (c) => {
     "",
     c,
   );
+  // Daily save for a finished month's Outstanding tile: the whole-company,
+  // default-filter figure only (scoped and Service Order calls returned above).
+  if (c.req.query("isStock") !== "all") {
+    saveStateKpisLater(c, orgId, { outstandingItemsSen: Number(data.outstandingItemsSen) || 0 });
+  }
   return c.json({ success: true, ...data });
 });
 

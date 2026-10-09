@@ -185,6 +185,7 @@ export type Overview = {
   // historical snapshot, the current live value, or a live value shown for
   // a past month with NO stored history (→ show a muted "live" tag).
   stateSnapshot?: StateSnapshot;
+  stateKpis?: StateKpis | null;
 };
 // Σ valueSen of every PO that is made-but-not-yet-on-a-DO, computed server-side
 // by GET /api/delivery-orders/pending-value off the SAME buildReadyPlanning rows
@@ -267,6 +268,33 @@ export function dispatchChain(doStats: DoStatsResp | null | undefined) {
  * dispatched / in transit. A live as-of-now figure (not period-scoped).
  * Owner 2026-06-12.
  */
+/** A finished month's saved Pending Delivery / Outstanding (overview.stateKpis). */
+export type StateKpis = {
+  pendingDeliverySen: number | null;
+  outstandingSen: number | null;
+  asOf: string | null;
+};
+
+/**
+ * Pending Delivery / Outstanding tile for the picked period (owner 2026-10-09:
+ * a finished month keeps that month's figure). A finished month shows its last
+ * saved day, or "no record" when nothing was saved; never today's live figure.
+ * All-time and the current month stay live. Used by /dashboard, the
+ * experimental dashboard and the mobile home so all three agree.
+ */
+export function stateKpiTile(
+  period: string,
+  saved: number | null | undefined,
+  asOf: string | null | undefined,
+  liveSen: number,
+  curYm = new Date().toISOString().slice(0, 7),
+): { sen: number | null; tag: string; past: boolean } {
+  if (period === "all" || period >= curYm) return { sen: liveSen, tag: "live", past: false };
+  return saved == null
+    ? { sen: null, tag: "no record", past: true }
+    : { sen: saved, tag: `as of ${asOf}`, past: true };
+}
+
 export function pendingDeliveryTotalSen(
   pending: PendingValueResp | null | undefined,
   doStats: DoStatsResp | null | undefined,

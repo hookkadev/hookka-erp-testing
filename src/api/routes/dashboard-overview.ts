@@ -25,6 +25,7 @@ import {
 import {
   writeStateSnapshot,
   readStateSnapshotForMonth,
+  readStateKpisForMonth,
   readFrozenMonth,
   freezeMonth,
   type DashboardStateMetrics,
@@ -172,11 +173,12 @@ app.get("/", async (c) => {
     }
   }
 
+  // v25 (2026-10-09): payload gained `stateKpis` (past-month Pending Delivery / Outstanding).
   // v24 (2026-10-08): capacity window 7 → 14 working days, Foam Cutting row.
   // v23 (2026-08-14, BUG-2026-08-13-142): payload gained `customerConcentration`.
   // A pre-fix body has no such key, and the card would render "—" until the 60s
   // TTL rolled; bumping the version makes that window zero.
-  const data = await cached(c, `dashboard:overview:${orgId}:v24:${period}${windowOverride ? `:cmp${windowOverride}` : ""}`, 60, async () => {
+  const data = await cached(c, `dashboard:overview:${orgId}:v25:${period}${windowOverride ? `:cmp${windowOverride}` : ""}`, 60, async () => {
     const db = c.var.DB;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -2031,6 +2033,11 @@ app.get("/", async (c) => {
       isHistorical: boolean;
       asOf: string | null;
     } = { source: "live", isHistorical: false, asOf: null };
+    // A finished month's Pending Delivery and Outstanding tiles: the last
+    // saved day of that month (saved daily since 2026-10-09). null = nothing
+    // saved for that month; the tiles say so instead of showing today's
+    // live figure. All-time and the current month stay live.
+    const stateKpis = isPastMonth ? await readStateKpisForMonth(db, orgId, period) : null;
     if (isPastMonth) {
       const snapRow = await readStateSnapshotForMonth(db, orgId, period);
       if (snapRow) {
@@ -2289,6 +2296,7 @@ app.get("/", async (c) => {
       deliveredOfMonthOrdersSen,
       production: stateProduction,
       stateSnapshot,
+      stateKpis,
       purchasing: {
         openPOCount: Number(poOpenRes?.n) || 0,
         spendThisMonthSen: Number(poSpendRes?.v) || 0,

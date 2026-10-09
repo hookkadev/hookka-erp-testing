@@ -7,7 +7,7 @@ import { agingBucketTotals } from "@/lib/aging-export";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   completedHeadline, customerRevenue, capacityPerWorkerMin, deptBacklogRows, fabricView,
-  financeRatios, orderPipeline, pendingDeliveryTotalSen, plantLoad, stateTags,
+  financeRatios, orderPipeline, pendingDeliveryTotalSen, plantLoad, stateKpiTile, stateTags,
   type CustCat, type DoStatsResp, type FinanceDashRow, type Overview, type PendingValueResp,
   type SoStats, type StateSnapshot,
 } from "./dashboard-widgets-lib";
@@ -197,6 +197,11 @@ export function OrderPipelineCard({ period }: { period: Period }) {
   const doStats = ok(doR);
   const monthScoped = wp !== "all";
   const pipe = so && ov ? orderPipeline(wp, so, ov) : null;
+  // A finished month: its saved month-end figure or "no record" (stateKpiTile).
+  const pdTile = stateKpiTile(wp, ov?.stateKpis?.pendingDeliverySen, ov?.stateKpis?.asOf, pend && doStats ? pendingDeliveryTotalSen(pend, doStats) : 0);
+  const outTile = stateKpiTile(wp, ov?.stateKpis?.outstandingSen, ov?.stateKpis?.asOf, so?.outstandingItemsSen ?? 0);
+  const pastValue = (t: typeof pdTile) => (!ov ? "…" : t.sen == null ? "—" : fmtRM2(t.sen));
+  const pastSub = (t: typeof pdTile, live: string) => (t.sen == null && ov ? "nothing saved for that month" : live);
   return (
     <CardShell
       title={`Order Pipeline — ${label}`}
@@ -209,16 +214,24 @@ export function OrderPipelineCard({ period }: { period: Period }) {
       }
     >
       <div className="mb-3 grid grid-cols-2 gap-3">
-        <Stat
-          label="Pending Delivery · live"
-          value={pend && doStats ? fmtRM2(pendingDeliveryTotalSen(pend, doStats)) : pendR.loading || doR.loading ? "…" : "—"}
-          sub={pend && doStats ? "made / on DO, not yet delivered" : pendR.loading || doR.loading ? "loading" : "couldn't load — not shown as zero"}
-        />
-        <Stat
-          label="Outstanding · live"
-          value={so ? fmtRM2(so.outstandingItemsSen ?? 0) : soR.loading ? "…" : "—"}
-          sub={so ? "confirmed · not yet delivered" : soR.loading ? "loading" : "couldn't load — not shown as zero"}
-        />
+        {pdTile.past ? (
+          <Stat label={`Pending Delivery · ${pdTile.tag}`} value={pastValue(pdTile)} sub={pastSub(pdTile, "made / on DO, not yet delivered")} />
+        ) : (
+          <Stat
+            label="Pending Delivery · live"
+            value={pend && doStats ? fmtRM2(pendingDeliveryTotalSen(pend, doStats)) : pendR.loading || doR.loading ? "…" : "—"}
+            sub={pend && doStats ? "made / on DO, not yet delivered" : pendR.loading || doR.loading ? "loading" : "couldn't load — not shown as zero"}
+          />
+        )}
+        {outTile.past ? (
+          <Stat label={`Outstanding · ${outTile.tag}`} value={pastValue(outTile)} sub={pastSub(outTile, "confirmed · not yet delivered")} />
+        ) : (
+          <Stat
+            label="Outstanding · live"
+            value={so ? fmtRM2(so.outstandingItemsSen ?? 0) : soR.loading ? "…" : "—"}
+            sub={so ? "confirmed · not yet delivered" : soR.loading ? "loading" : "couldn't load — not shown as zero"}
+          />
+        )}
       </div>
       {!pipe ? (
         <Gate loading={soR.loading || ovR.loading} what="the order pipeline" />
