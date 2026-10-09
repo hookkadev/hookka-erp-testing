@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-09**: branch `docs/outsourced-ot-box-next-time` (to `main`) added item 7 (outsourced staff OT box, next time) to the hourly-rate entry below.
 > **Last verified: 2026-10-08**: branch `fix/ot-hourly-rate-display` (to `main`, second commit of #759) closed item 5 of the hourly-rate entry below (the ÷9 rule is seeded from 2026-10-01).
 > **Last verified: 2026-10-08**: branch `fix/ot-hourly-rate-display` (to `main`, BUG-2026-10-08-269) added below (its entry is the newest).
 > **Last verified: 2026-10-08**: branch `feat/kpi-dept-efficiency-daily-chart-main` (to `main`, DEV-36) added below (its entry is the newest).
@@ -120,6 +121,7 @@ Owner ask: the expanded payroll row showed "2 hrs x RM 8.76 x 1.5 = RM 23.65" fo
 4. 🔵 Tests: the owner's two figures under hours-only (5664 and 5256 sen), and the existing engine test updated to the rounded rate.
 5. 🔵 The ÷9 rule (owner confirmed salary ÷ 26 ÷ 9): the saved 2026-07-01 rule says "hours + lunch" and beats the code default, so a dated rule is needed. Owner chose to have the deploy add it rather than schedule it by hand: `seedHoursOnlyRule` (`src/api/lib/pay-rules-store.ts`) writes one row "from 2026-10-01, hours only", copying every other field in force on that date, once. September and earlier keep ÷10. Second commit of #759. Test: `tests/pay-rule-hours-only-seed.test.mjs`. Fallback if the owner asks for it: drop the lunch from `payrollHourDivisor` (`pay-rules.ts`, one line) so every month, past ones included, prices at ÷hours.
 6. ⬜ Check on production after deploy (this goes to `main` directly; staging gets it through the usual staging<-main sync).
+7. ⬜ Next time (owner ask 2026-10-09): the OUTSOURCED (daily-paid) worker's OT box shows the rate the same way as full-time staff, "Hourly Rate: RM {day rate x days} / ({days} x 9) = RM 9.44/hr", where days = Mon-Sat days with clock in/out that month (the engine's `daysWorked`). Display only: the days cancel, so the rate stays day rate / hours. Needs `daysWorked` on the payslip row (projected and stored); the row only carries `workingDays` (26) today.
 
 ## 2026-10-08 — 🟡 DEV-36 follow-up to `main`: daily efficiency chart on the Department efficiency KPI card (branch `feat/kpi-dept-efficiency-daily-chart-main` → `main`)
 
