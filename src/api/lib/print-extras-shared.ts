@@ -204,6 +204,15 @@ export function piecesFor(args: {
     // A complete SOFA set (any variant — 1A / 2A / 1L1A / 2L / …) counts as one
     // "Sofa" piece (Wei Siang 2026-06-16); the variant rides the product name.
     if (C === "SOFA") return `${qty || 1} Sofa`;
+    // Accessories print what they are, not a code tail ("MF", "SB02") (DEV-67).
+    const kind = /^BC\d/.test(cu)
+      ? "Back Cushion"
+      : /^SB\d/.test(cu)
+        ? "Sandbag"
+        : /^A\d/.test(cu)
+          ? "Armrest"
+          : null;
+    if (kind) return `${qty || 1} ${kind}`;
     const dash = code.indexOf("-");
     const variant =
       (dash >= 0 ? code.slice(dash + 1).trim() : "") ||

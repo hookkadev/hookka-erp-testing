@@ -116,6 +116,29 @@ test("piecesFor: a complete sofa set counts as 'Sofa', not its variant pieces", 
   assert.equal(out, "2 Sofa");
 });
 
+test("piecesFor: accessories print their kind, not a code tail (DEV-67)", () => {
+  const acc = (code, qty = 1, sizeLabel = "") =>
+    piecesFor({
+      code,
+      baseModel: null,
+      wipComponents: "[]",
+      cat: "ACCESSORY",
+      special: null,
+      sizeLabel,
+      fabricCode: "COVE-03",
+      gapInches: null,
+      divanHeightInches: null,
+      legHeightInches: null,
+      qty,
+    });
+  assert.equal(acc("BC05-MF"), "1 Back Cushion");
+  assert.equal(acc("BC01"), "1 Back Cushion");
+  assert.equal(acc("SB02", 3), "3 Sandbag");
+  assert.equal(acc("A01"), "1 Armrest");
+  // Anything else keeps the old variant / size fallback.
+  assert.equal(acc("LONG PILLOW", 1, '12" X 28"'), '1 12" X 28"');
+});
+
 // --- Partial-repair component listing (DO compartment-aware print) ---------
 // A partial repair lists ONLY the repaired components, by their own picker
 // labels (Headboard / Divan / Base / Back Cushion / Armrest / Headrest), so the
