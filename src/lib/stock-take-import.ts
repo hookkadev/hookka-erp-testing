@@ -108,3 +108,82 @@ export function parseRawStockTakeRows(aoa: unknown[][], shape: RawShape): Parsed
   }
   return [...byKey.values()];
 }
+
+// ---------------------------------------------------------------------------
+// Quantity-only count (owner 2026-10-09 「这个是 9 月的 closing stock … 只是价钱
+// 没有，你看可以从 purchase 那边 capture 吗？」→「用最近一次进货价」). The file is
+// the raw-material master export (ID / Item Code / Description / Base UOM /
+// Item Group / Balance Qty / Active) with the counted quantity per item and no
+// money; each item is priced at its latest purchase on or before month-end
+// (GET /api/accounting/stock-take/purchase-prices) and the owner reviews the
+// priced sheet before it fills the month's group totals.
+// ---------------------------------------------------------------------------
+
+/** A header cell without the master export's required-field star ("Item Code *"). */
+const headerName = (v: unknown) => normalizeText(v).replace(/\s*\*$/, "");
+
+/** True for the raw-material master export with a Balance Qty column. */
+export function isRmCountShape(headerRow: unknown[]): boolean {
+  const h = headerRow.map(headerName);
+  return h.includes("item code") && h.includes("item group") && h.includes("balance qty");
+}
+
+export type RmCountRow = { id: string; code: string; description: string; uom: string; group: string; qty: number };
+
+/** Every counted item (Balance Qty > 0) of a master-export sheet, in file order. */
+export function parseRmCountRows(aoa: unknown[][]): RmCountRow[] {
+  const h = (aoa[0] ?? []).map(headerName);
+  const at = (name: string) => h.indexOf(name);
+  const cId = at("id"), cCode = at("item code"), cDesc = at("description"), cUom = at("base uom"), cGroup = at("item group"), cQty = at("balance qty");
+  const cell = (row: unknown[], c: number) => (c >= 0 ? String(row[c] ?? "").trim() : "");
+  const out: RmCountRow[] = [];
+  for (let i = 1; i < aoa.length; i++) {
+    const row = aoa[i];
+    if (!row) continue;
+    const raw = row[cQty];
+    const qty = typeof raw === "number" ? raw : Number(String(raw ?? "").replace(/,/g, "").trim());
+    const code = cell(row, cCode);
+    if (!code || !Number.isFinite(qty) || qty <= 0) continue;
+    // Excel keeps float noise from the count sheet (4.39999999999999).
+    out.push({ id: cell(row, cId), code, description: cell(row, cDesc), uom: cell(row, cUom), group: cell(row, cGroup), qty: Math.round(qty * 10000) / 10000 });
+  }
+  return out;
+}
+
+/** The key an item code and a purchase line's material code are matched on. */
+export function itemCodeKey(v: unknown): string {
+  return String(v ?? "").trim().replace(/\s+/g, " ").toUpperCase();
+}
+
+/**
+ * Why a purchase price needs a look before it values a count: the code was
+ * bought at prices more than 3× apart (a roll on one invoice, a metre on
+ * another — the count's unit is unknown to the invoice), or its latest buy was
+ * one or two units against a count of 20+ (a pack price).
+ */
+export function priceCheckReasons(p: { countQty: number; lastQty: number; minUnitSen: number; maxUnitSen: number }): ("units" | "pack")[] {
+  const out: ("units" | "pack")[] = [];
+  if (p.minUnitSen > 0 && p.maxUnitSen / p.minUnitSen > 3) out.push("units");
+  if (p.lastQty <= 2 && p.countQty >= 20) out.push("pack");
+  return out;
+}
+
+/**
+ * A unit price typed in RM — up to 4 decimals (a screw costs 0.0198) — to sen,
+ * which may be fractional. Commas only as thousands separators ("1,234.50");
+ * anything else is unreadable → null, never a guess (BUG-2026-08-13-095).
+ */
+export function unitPriceToSen(v: string): number | null {
+  const t = v.trim();
+  if (t.includes(",") && !/^\d{1,3}(,\d{3})+(\.\d+)?$/.test(t)) return null;
+  const s = t.replace(/,/g, "");
+  if (!/^\d+(\.\d{1,4})?$/.test(s)) return null;
+  return Math.round(Number(s) * 1000000) / 10000;
+}
+
+/** "YYYY-MM" → its last day "YYYY-MM-DD". */
+export function lastDayOfYm(ym: string): string {
+  const [y, m] = ym.split("-").map(Number);
+  const d = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return `${ym}-${String(d).padStart(2, "0")}`;
+}

@@ -24,7 +24,7 @@ import { guessAccount, findDuplicate, linesWithTax, normPayee, normDocNo, type L
 import { moneyFieldToSen, firstMoneyFieldError, isUnreadableMoney } from "@/lib/money-field";
 import { exportReportCsv, exportReportXlsx, exportReportPdf, type Aoa, type PdfExportOpts } from "@/lib/export-report";
 import { buildAgingExportAoa, agingRowKind } from "@/lib/aging-export";
-import { isCleanImportShape, detectRawShape, parseRawStockTakeRows, impliedYmFromFilename, type ParsedRawItem } from "@/lib/stock-take-import";
+import { isCleanImportShape, detectRawShape, parseRawStockTakeRows, impliedYmFromFilename, type ParsedRawItem, isRmCountShape, parseRmCountRows, itemCodeKey, priceCheckReasons, unitPriceToSen, lastDayOfYm, type RmCountRow } from "@/lib/stock-take-import";
 import { printVoucher, printVouchers, type VoucherSpec, type VoucherLine } from "@/lib/print-voucher";
 import { useRowSelection } from "@/lib/use-row-selection";
 import { useResizableTables } from "@/lib/use-resizable-tables";
@@ -1464,6 +1464,74 @@ const WIP_FG_LABELS: Record<string, string> = { WIP: "Work-in-Progress (WIP)", F
 // stock_take_item_alias) needs a sentinel string in the "needs mapping" picker.
 const STOCK_TAKE_IGNORE_VALUE = "__IGNORE__";
 
+// Quantity-only count (owner 2026-10-09 「用最近一次进货价」): each counted item
+// priced at its latest purchase on or before month-end, reviewed before it fills
+// the month's group totals. Shapes of GET /stock-take/purchase-prices and of
+// one reviewed row.
+type PurchasePrices = {
+  asOf: string;
+  prices: Record<string, { unitSen: number; piNo: string; date: string; supplier: string; qty: number; minUnitSen: number; maxUnitSen: number; lines: number }>;
+  priceList: Record<string, { unitSen: number; supplier: string }>;
+  batchCost: Record<string, { unitSen: number; date: string }>;
+};
+type PricedCountItem = RmCountRow & {
+  unitStr: string; // RM per counted unit, editable ("" = none yet)
+  piUnitStr: string; // the purchase's own price, to tell a typed-over one ("" = none)
+  source: string; // the purchase it came from ("" = no purchase on file)
+  reasons: ("units" | "pack")[];
+  range: [number, number] | null; // every price the code was bought at (sen)
+  hint: string; // no purchase: price list / last batch cost, as text only
+  counted: boolean;
+};
+type PricedCount = { file: string; asOf: string; items: PricedCountItem[]; groupsOn: Record<string, boolean>; applied: boolean };
+// 1400 sen → "14.00"; 1.98 sen → "0.0198".
+const unitSenToRm = (sen: number) => (sen / 100).toFixed(4).replace(/0{1,2}$/, "");
+function pricedCountItem(r: RmCountRow, pp: PurchasePrices): PricedCountItem {
+  const p = pp.prices[itemCodeKey(r.code)];
+  if (p) {
+    return {
+      ...r,
+      unitStr: unitSenToRm(p.unitSen),
+      piUnitStr: unitSenToRm(p.unitSen),
+      source: `${p.piNo} · ${formatDateDMY(p.date)} · ${p.supplier} · bought ${p.qty}`,
+      reasons: priceCheckReasons({ countQty: r.qty, lastQty: p.qty, minUnitSen: p.minUnitSen, maxUnitSen: p.maxUnitSen }),
+      range: p.lines > 1 ? [p.minUnitSen, p.maxUnitSen] : null,
+      hint: "",
+      counted: true,
+    };
+  }
+  const pl = pp.priceList[itemCodeKey(r.code)];
+  const bc = r.id ? pp.batchCost[r.id] : undefined;
+  const hint = [
+    pl ? `price list RM ${unitSenToRm(pl.unitSen)}${pl.supplier ? ` (${pl.supplier})` : ""}` : "",
+    bc ? `last cost RM ${unitSenToRm(bc.unitSen)} (${formatDateDMY(bc.date)})` : "",
+  ].filter(Boolean).join(" · ");
+  return { ...r, unitStr: "", piUnitStr: "", source: "", reasons: [], range: null, hint, counted: true };
+}
+const pricedValueSen = (i: PricedCountItem): number | null => {
+  const u = unitPriceToSen(i.unitStr);
+  return u == null ? null : Math.round(i.qty * u);
+};
+// Where the price in use came from: the purchase, or typed in (over it).
+const pricedSource = (i: PricedCountItem): string => {
+  const typed = unitPriceToSen(i.unitStr) != null;
+  if (!i.source) return typed ? "typed in" : "";
+  return i.unitStr.trim() === i.piUnitStr ? i.source : `typed in (purchase RM ${i.piUnitStr}: ${i.source})`;
+};
+const pricedNote = (i: PricedCountItem): string => {
+  if (!i.source) return `No purchase on file${i.hint ? ` — ${i.hint}` : ""} — type a price (per ${i.uom || "unit"})`;
+  const notes: string[] = [];
+  if (i.reasons.includes("units") && i.range) notes.push(`bought at RM ${unitSenToRm(i.range[0])}–${unitSenToRm(i.range[1])}: units differ (roll / metre?)`);
+  if (i.reasons.includes("pack")) notes.push("last bought only 1–2 — a pack price?");
+  return notes.join(" · ");
+};
+const downloadPricedSheet = async (fileName: string, rows: { code: string; description: string; group: string; qty: number; uom: string; unitSen: number | null; valueSen: number; source: string; counted: boolean }[]) => {
+  await exportReportXlsx(fileName, "Priced count", [
+    ["Item Code", "Description", "Item Group", "Count", "UOM", "Unit Price (RM)", "Value (RM)", "Price from", "Counted in"],
+    ...rows.map((r) => [r.code, r.description, r.group, r.qty, r.uom, r.unitSen == null ? "" : unitSenToRm(r.unitSen), (r.valueSen / 100).toFixed(2), r.source, r.counted ? "Yes" : "No"]),
+  ]);
+};
+
 // Month-end stock-take entry (owner periodic-inventory option). Per material-group
 // closing value at a month-end → the P&L uses it as that month's closing (and the
 // next month's opening) instead of the FIFO/BOM value. Reuses /material-opening-stock
@@ -1579,6 +1647,51 @@ function StockTakeTab() {
   const [rawImportResolutions, setRawImportResolutions] = useState<Record<string, string | null>>({});
   const rawNeedsMapping = rawImportItems ? rawImportItems.filter((it) => !(it.key in rawImportResolutions)) : [];
 
+  // Quantity-only count (owner 2026-10-09 「用最近一次进货价」): the reviewed,
+  // priced items of the last such import. "Put into the month" fills the group
+  // totals above; from then on every edit here refills them, and Save keeps
+  // the priced lines with the month (GET /stock-take/lines reads them back).
+  const [priced, setPriced] = useState<PricedCount | null>(null);
+  const [pricedView, setPricedView] = useState<"check" | "none" | "all">("check");
+  const pricedStale = !!priced && priced.asOf !== lastDayOfYm(ym);
+  const pricedMissing = (p: PricedCount) => p.items.filter((i) => p.groupsOn[i.group] && i.counted && pricedValueSen(i) == null);
+  const clearEditFor = (g: string) => setEdits((prev) => { const n = { ...prev }; delete n[key(g)]; return n; });
+  const fillFromPriced = (p: PricedCount) => {
+    for (const g of new Set(p.items.map((i) => i.group))) {
+      if (!allRowGroups?.includes(g)) continue;
+      if (!p.groupsOn[g]) { clearEditFor(g); continue; }
+      const sen = p.items.filter((i) => i.group === g && i.counted).reduce((s, i) => s + (pricedValueSen(i) ?? 0), 0);
+      setValueFor(g, (sen / 100).toFixed(2));
+    }
+  };
+  const updatePriced = (next: PricedCount) => {
+    setPriced(next);
+    if (next.applied) fillFromPriced(next);
+  };
+  const putPricedIntoMonth = () => {
+    if (!priced || pricedStale) return;
+    const missing = pricedMissing(priced);
+    if (missing.length) {
+      toast.error(`${missing.length} counted item${missing.length === 1 ? "" : "s"} in the ticked groups ${missing.length === 1 ? "has" : "have"} no price — type one or untick ${missing.length === 1 ? "it" : "them"}.`);
+      setPricedView("none");
+      return;
+    }
+    updatePriced({ ...priced, applied: true });
+    toast.success(`Group totals for ${ym} filled from the priced count — check them, then Save.`);
+  };
+  // The priced count already saved with this month, if any (keyed by month so
+  // a stale answer for another month never shows).
+  const [linesOnFile, setLinesOnFile] = useState<{ ym: string; file: string; asOf: string; savedAt: string; lines: { code: string; description: string; group: string; qty: number; uom: string; unitSen: number | null; valueSen: number; source: string; counted: boolean }[] } | null>(null);
+  const [linesVer, setLinesVer] = useState(0);
+  useEffect(() => {
+    let dead = false;
+    fetch(`/api/accounting/stock-take/lines?ym=${encodeURIComponent(ym)}`, { cache: "no-store" })
+      .then((r) => r.json() as Promise<{ data?: { file: string; asOf: string; savedAt: string; lines: NonNullable<typeof linesOnFile>["lines"] } | null }>)
+      .then((j) => { if (!dead) setLinesOnFile(j?.data ? { ym, ...j.data } : null); })
+      .catch(() => {});
+    return () => { dead = true; };
+  }, [ym, linesVer]);
+
   // Re-derives each touched group's grid value from scratch (SUM of every
   // resolved-non-ignored item mapping to it) — never additive — so re-resolving
   // one item, or re-importing, can never double-count. Returns how many distinct
@@ -1691,6 +1804,7 @@ function StockTakeTab() {
       if (isCleanImportShape(headerRow)) {
         setRawImportItems(null);
         setRawImportResolutions({});
+        setPriced(null);
         const headers = headerRow.map((h) => (typeof h === "string" ? h.trim().toLowerCase() : ""));
         const findCol = (...names: string[]) => {
           for (const n of names) { const i = headers.indexOf(n.toLowerCase()); if (i >= 0) return i; }
@@ -1724,6 +1838,31 @@ function StockTakeTab() {
         return;
       }
 
+      // Shape 3 (owner 2026-10-09): the raw-material master export with a
+      // Balance Qty per item — quantities only. Each item is priced at its
+      // latest purchase on or before this month-end and reviewed in the
+      // "Priced count" panel; nothing fills the grid until "Put into the month".
+      if (isRmCountShape(headerRow)) {
+        setRawImportItems(null);
+        setRawImportResolutions({});
+        const counted = parseRmCountRows(aoa);
+        if (counted.length === 0) { toast.error("No counted items (Balance Qty above 0) in this file."); return; }
+        const asOf = lastDayOfYm(ym);
+        const pj = (await (await fetch(`/api/accounting/stock-take/purchase-prices?asOf=${asOf}`, { cache: "no-store" })).json()) as { success?: boolean; error?: string; data?: PurchasePrices };
+        if (!pj?.success || !pj.data) { toast.error(pj?.error || "Could not load the purchase prices"); return; }
+        const items = counted.map((r) => pricedCountItem(r, pj.data!));
+        // A group counted in an earlier month counts again; a group never in a
+        // stock take (tools, spare parts…) starts unticked — the owner decides.
+        const before = new Set(entries.filter((e) => e.valueSen > 0 && !(WIP_FG_KEYS as readonly string[]).includes(e.itemGroup)).map((e) => e.itemGroup));
+        const groupsOn = Object.fromEntries([...new Set(items.map((i) => i.group))].map((g) => [g, before.has(g) && !!allRowGroups.includes(g)]));
+        setPriced({ file: file.name, asOf, items, groupsOn, applied: false });
+        setPricedView("check");
+        const fromPi = items.filter((i) => i.source).length;
+        const toCheck = items.filter((i) => i.reasons.length > 0).length;
+        toast.success(`${items.length} counted items in ${file.name}: ${fromPi} priced from purchases (${toCheck} to check), ${items.length - fromPi} without a purchase — review below.`);
+        return;
+      }
+
       // Shape 2: the owner's raw monthly stock-count file (no category column,
       // layout varies) — resolve each physical line against the remembered
       // item-alias table; anything unrecognised goes to the "needs mapping" panel
@@ -1732,7 +1871,8 @@ function StockTakeTab() {
       if (!shape) {
         toast.error(
           `Missing required columns. Need either "Material Group" + "Closing Stock (RM)", ` +
-            `or a "Total" column (your raw monthly stock-count file). Found: ${headerRow.filter(Boolean).join(", ") || "no headers"}.`,
+            `a "Total" column (your raw monthly stock-count file), or the raw-material list with "Item Code", "Item Group" and "Balance Qty". ` +
+            `Found: ${headerRow.filter(Boolean).join(", ") || "no headers"}.`,
         );
         return;
       }
@@ -1747,6 +1887,7 @@ function StockTakeTab() {
       for (const it of items) if (aliasMap.has(it.key)) resolutions[it.key] = aliasMap.get(it.key) ?? null;
 
       const touchedGroups = applyRawResolutions(items, resolutions);
+      setPriced(null);
       setRawImportItems(items);
       setRawImportResolutions(resolutions);
 
@@ -1769,6 +1910,18 @@ function StockTakeTab() {
     if (!/^\d{4}-\d{2}$/.test(ym)) { toast.error("Pick a month first"); return; }
     if (rawNeedsMapping.length > 0) {
       toast.error(`${rawNeedsMapping.length} imported item${rawNeedsMapping.length === 1 ? "" : "s"} still need${rawNeedsMapping.length === 1 ? "s" : ""} a group below before you can Save.`);
+      return;
+    }
+    // A priced count put into the month saves with it — never with another
+    // month's figures, never with a counted item left unpriced.
+    const pricedToSave = priced?.applied ? priced : null;
+    if (pricedToSave && pricedStale) {
+      toast.error(`The priced count below is for ${pricedToSave.asOf.slice(0, 7)} — switch Month back to it, or import the file again for ${ym}.`);
+      return;
+    }
+    if (pricedToSave && pricedMissing(pricedToSave).length) {
+      toast.error(`${pricedMissing(pricedToSave).length} counted item(s) in the ticked groups have no price — type one or untick them below.`);
+      setPricedView("none");
       return;
     }
     // BUG-2026-08-13-095 — a closing-stock value typed "1,234,567" used to be
@@ -1795,17 +1948,37 @@ function StockTakeTab() {
       const res = await fetch("/api/accounting/stock-take", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ym, rows, ...(newAliases ? { newAliases } : {}) }),
+        body: JSON.stringify({
+          ym,
+          rows,
+          ...(newAliases ? { newAliases } : {}),
+          ...(pricedToSave
+            ? {
+                linesFile: pricedToSave.file,
+                linesAsOf: pricedToSave.asOf,
+                lines: pricedToSave.items.map((i) => ({
+                  id: i.id, code: i.code, description: i.description, group: i.group, qty: i.qty, uom: i.uom,
+                  unitSen: unitPriceToSen(i.unitStr), valueSen: pricedValueSen(i) ?? 0, source: pricedSource(i),
+                  counted: i.counted && !!pricedToSave.groupsOn[i.group],
+                })),
+              }
+            : {}),
+        }),
       });
-      const j = (await res.json()) as { success?: boolean; error?: string; saved?: number; cleared?: number; aliasesSaved?: number };
+      const j = (await res.json()) as { success?: boolean; error?: string; saved?: number; cleared?: number; aliasesSaved?: number; linesSaved?: number };
       if (j?.success) {
         const saved = j.saved ?? rows.filter((r) => r.valueSen > 0).length;
         const cleared = j.cleared ?? 0;
         toast.success(
           `Stock-take saved for ${ym}: ${saved} group${saved === 1 ? "" : "s"} set` +
             (cleared ? `, ${cleared} reverted to automatic` : "") +
-            (j.aliasesSaved ? `, ${j.aliasesSaved} item mapping${j.aliasesSaved === 1 ? "" : "s"} remembered` : ""),
+            (j.aliasesSaved ? `, ${j.aliasesSaved} item mapping${j.aliasesSaved === 1 ? "" : "s"} remembered` : "") +
+            (j.linesSaved ? `, priced count of ${j.linesSaved} items kept` : ""),
         );
+        if (pricedToSave) {
+          setPriced(null);
+          setLinesVer((v) => v + 1);
+        }
         // Zero-valued rows were DELETED server-side (= automatic) — drop them from
         // the local cache too so a re-render shows blank, not a stale "0.00".
         setEntries((prev) => [
@@ -1870,6 +2043,208 @@ function StockTakeTab() {
           </Button>
         </div>
       </div>
+
+      {/* Priced count (owner 2026-10-09 「用最近一次进货价」): a quantity-only count
+          priced at each item's latest purchase on or before month-end. A group
+          counted in an earlier month is ticked; one never in a stock take starts
+          unticked. Marked rows: prices that differ by unit between purchases, a
+          last buy of 1–2 (a pack price), and items with no purchase on file. */}
+      {priced && (() => {
+        const groupsInFile = [...new Set(priced.items.map((i) => i.group))].sort();
+        const [py, pm] = ym.split("-").map(Number);
+        const prevYm = pm === 1 ? `${py - 1}-12` : `${py}-${String(pm - 1).padStart(2, "0")}`;
+        const saved = (y: string, g: string) => entries.find((e) => e.ym === y && e.itemGroup === g)?.valueSen;
+        const groupSen = (g: string) => priced.items.filter((i) => i.group === g && i.counted).reduce((s, i) => s + (pricedValueSen(i) ?? 0), 0);
+        const toCheck = priced.items.filter((i) => i.source && i.reasons.length > 0);
+        const noPrice = priced.items.filter((i) => !i.source);
+        const shown = pricedView === "all" ? priced.items : pricedView === "none" ? noPrice : [...toCheck, ...noPrice];
+        const totalOn = groupsInFile.filter((g) => priced.groupsOn[g]).reduce((s, g) => s + groupSen(g), 0);
+        const setItem = (it: PricedCountItem, patch: Partial<PricedCountItem>) =>
+          updatePriced({ ...priced, items: priced.items.map((x) => (x === it ? { ...x, ...patch } : x)) });
+        const sheetRows = () => priced.items.map((i) => ({
+          code: i.code, description: i.description, group: i.group, qty: i.qty, uom: i.uom,
+          unitSen: unitPriceToSen(i.unitStr), valueSen: pricedValueSen(i) ?? 0,
+          source: pricedSource(i) || pricedNote(i), counted: i.counted && !!priced.groupsOn[i.group],
+        }));
+        const th = "px-2 py-2 font-medium text-gray-600";
+        return (
+          <Card>
+            <CardContent className="p-4 space-y-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-[16rem] flex-1">
+                  <h3 className="text-sm font-semibold text-[#1F1D1B]">Priced count — {priced.file}</h3>
+                  <p className="text-xs text-[#6B7280] max-w-3xl">
+                    {priced.items.length} counted items, each priced at its latest purchase on or before {formatDateDMY(priced.asOf)} — the
+                    invoice line&apos;s own price (after discount, before SST). Check the marked rows, type a price where there is none,
+                    untick a group or an item to leave it out; then <b>Put into {ym}</b> fills the group totals below. Nothing is saved until Save.
+                  </p>
+                  {pricedStale && (
+                    <p className="text-xs text-[#9A3A2D] mt-1">These prices are as of {formatDateDMY(priced.asOf)} but Month is {ym} — switch Month back, or import the file again.</p>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Button variant="outline" size="sm" onClick={() => void downloadPricedSheet(`stock-take-priced-${priced.asOf.slice(0, 7)}.xlsx`, sheetRows())}>
+                    <Download className="h-4 w-4 mr-1.5" /> Download
+                  </Button>
+                  <Button variant="primary" size="sm" disabled={pricedStale} onClick={putPricedIntoMonth}>
+                    {priced.applied ? `In ${ym} ✓` : `Put into ${ym}`}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      // Closing takes back what it filled — totals never save without their priced count.
+                      if (priced.applied) for (const g of groupsInFile) clearEditFor(g);
+                      setPriced(null);
+                    }}
+                  >
+                    Close
+                  </Button>
+                </div>
+              </div>
+
+              <div className="border rounded-md overflow-x-auto">
+                <table className="w-full text-sm" data-col-resize="off">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className={`${th} text-left w-20`}>Count in</th>
+                      <th className={`${th} text-left`}>Group</th>
+                      <th className={`${th} text-right`}>Items</th>
+                      <th className={`${th} text-right`}>Value (RM)</th>
+                      <th className={`${th} text-right`}>{prevYm} saved</th>
+                      <th className={`${th} text-right`}>{ym} saved</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {groupsInFile.map((g) => {
+                      const known = !!allRowGroups?.includes(g);
+                      const n = priced.items.filter((i) => i.group === g).length;
+                      const missing = priced.items.filter((i) => i.group === g && i.counted && pricedValueSen(i) == null).length;
+                      const prev = saved(prevYm, g);
+                      const cur = saved(ym, g);
+                      return (
+                        <tr key={g} className={`border-t ${priced.groupsOn[g] ? "" : "text-[#9CA3AF]"}`}>
+                          <td className="px-2 py-1.5">
+                            <input
+                              type="checkbox"
+                              disabled={!known}
+                              checked={!!priced.groupsOn[g]}
+                              onChange={(e) => updatePriced({ ...priced, groupsOn: { ...priced.groupsOn, [g]: e.target.checked } })}
+                              className="h-3.5 w-3.5 accent-[#6B5C32]"
+                            />
+                          </td>
+                          <td className="px-2 py-1.5">
+                            {g}
+                            {!known && <span className="ml-2 text-[10px] text-[#9A3A2D]">not a stock-take group</span>}
+                          </td>
+                          <td className="px-2 py-1.5 text-right tabular-nums">
+                            {n}
+                            {missing > 0 && <span className="ml-1 text-[10px] text-[#9A3A2D]">({missing} no price)</span>}
+                          </td>
+                          <td className="px-2 py-1.5 text-right tabular-nums">{formatCurrency(groupSen(g))}</td>
+                          <td className="px-2 py-1.5 text-right tabular-nums text-[#6B7280]">{prev != null ? formatCurrency(prev) : "—"}</td>
+                          <td className="px-2 py-1.5 text-right tabular-nums text-[#6B7280]">{cur != null ? formatCurrency(cur) : "—"}</td>
+                        </tr>
+                      );
+                    })}
+                    <tr className="border-t-2 border-[#1F1D1B] font-semibold">
+                      <td />
+                      <td className="px-2 py-1.5">Ticked groups</td>
+                      <td />
+                      <td className="px-2 py-1.5 text-right tabular-nums">{formatCurrency(totalOn)}</td>
+                      <td />
+                      <td />
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="flex flex-wrap gap-1.5 text-xs">
+                {([
+                  ["check", `To check (${toCheck.length + noPrice.length})`],
+                  ["none", `No price (${noPrice.length})`],
+                  ["all", `All (${priced.items.length})`],
+                ] as const).map(([k, label]) => (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => setPricedView(k)}
+                    className={`rounded-full px-3 py-1 border ${pricedView === k ? "bg-[#6B5C32] text-white border-[#6B5C32]" : "bg-white text-[#1F1D1B] border-[#E2DDD8] hover:bg-[#F0ECE9]"}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="border rounded-md overflow-auto max-h-[36rem]">
+                <table className="w-full text-sm" data-col-resize="off">
+                  <thead className="bg-gray-50 sticky top-0 z-10">
+                    <tr>
+                      <th className={`${th} w-8`} />
+                      <th className={`${th} text-left`}>Item</th>
+                      <th className={`${th} text-left`}>Group</th>
+                      <th className={`${th} text-right`}>Count</th>
+                      <th className={`${th} text-right`}>Unit price (RM)</th>
+                      <th className={`${th} text-right`}>Value (RM)</th>
+                      <th className={`${th} text-left`}>Price from</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {shown.map((i) => {
+                      const v = pricedValueSen(i);
+                      const bad = i.unitStr.trim() !== "" && unitPriceToSen(i.unitStr) == null;
+                      const note = pricedNote(i);
+                      const off = !priced.groupsOn[i.group] || !i.counted;
+                      return (
+                        <tr
+                          key={`${i.id}|${i.code}`}
+                          className={`border-t ${!i.source ? "bg-[#FBEFEC]" : i.reasons.length ? "bg-[#FBF3E4]" : ""} ${off ? "opacity-50" : ""}`}
+                        >
+                          <td className="px-2 py-1">
+                            <input
+                              type="checkbox"
+                              checked={i.counted}
+                              onChange={(e) => setItem(i, { counted: e.target.checked })}
+                              className="h-3.5 w-3.5 accent-[#6B5C32]"
+                              title="Count this item in"
+                            />
+                          </td>
+                          <td className="px-2 py-1">
+                            <div className="font-mono text-xs">{i.code}</div>
+                            <div className="text-[11px] text-[#6B7280]">{i.description}</div>
+                          </td>
+                          <td className="px-2 py-1 text-xs">{i.group}</td>
+                          <td className="px-2 py-1 text-right tabular-nums">
+                            {i.qty} <span className="text-[11px] text-[#9CA3AF]">{i.uom}</span>
+                          </td>
+                          <td className="px-2 py-1 text-right">
+                            <input
+                              value={i.unitStr}
+                              inputMode="decimal"
+                              placeholder="0.00"
+                              onChange={(e) => setItem(i, { unitStr: e.target.value })}
+                              className={`w-28 rounded border px-2 py-0.5 text-sm text-right tabular-nums ${bad ? "border-[#9A3A2D]" : "border-[#E2DDD8]"}`}
+                            />
+                          </td>
+                          <td className="px-2 py-1 text-right tabular-nums">{v == null ? "—" : formatCurrency(v)}</td>
+                          <td className="px-2 py-1 text-xs">
+                            <div className="text-[#6B7280]">{pricedSource(i) || "—"}</div>
+                            {note && <div className={!i.source ? "text-[#9A3A2D]" : "text-[#7A5B12]"}>{note}</div>}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {shown.length === 0 && (
+                      <tr><td colSpan={7} className="px-3 py-6 text-center text-xs text-[#9CA3AF]">Nothing here.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })()}
+
       <Card>
         <CardContent className="p-4 flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-[16rem] flex-1">
@@ -1942,6 +2317,19 @@ function StockTakeTab() {
                 onChange={(e) => setYm(e.target.value)}
               />
             </div>
+            {linesOnFile && linesOnFile.ym === ym && (
+              <div className="text-xs text-[#6B7280] pb-2">
+                Priced count on file: {linesOnFile.lines.filter((l) => l.counted).length} of {linesOnFile.lines.length} items counted in, from{" "}
+                {linesOnFile.file || "a file"} (prices as of {formatDateDMY(linesOnFile.asOf)}), saved {formatDateDMY(linesOnFile.savedAt.slice(0, 10))} ·{" "}
+                <button
+                  type="button"
+                  className="underline decoration-dotted text-[#6B5C32] hover:text-[#1F1D1B]"
+                  onClick={() => void downloadPricedSheet(`stock-take-priced-${ym}.xlsx`, linesOnFile.lines)}
+                >
+                  download
+                </button>
+              </div>
+            )}
           </div>
           {!groups ? (
             <p className="text-sm text-gray-400 italic">Loading…</p>
