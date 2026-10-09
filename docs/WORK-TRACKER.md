@@ -116,20 +116,26 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
-## 2026-10-09 — 🔵 Labour posting: EPF / SOCSO / EIS accrue on their own; system postings on Journal Entries (owner「这个post to GL 我在journal 看没有，然后epf, socso 那些也要accrual」→「EIS 单独记 0040，journal 也要显示，做」)(branch `feat/labour-statutory-accruals-system-journals` → `main`)
+## 2026-10-09 — ✅ Labour posting: EPF / SOCSO / EIS accrue on their own; system postings on Journal Entries (owner「这个post to GL 我在journal 看没有，然后epf, socso 那些也要accrual」→「EIS 单独记 0040，journal 也要显示，做」)(#785 1d7f7dce, prod-verified)
 
-1. 🔵 Labour month-end posting, credit side: each fund's share — the employer's plus the employee's (from the payslips) —
+1. ✅ Labour month-end posting, credit side: each fund's share — the employer's plus the employee's (from the payslips) —
    credits its own accrual (EPF 410-0020, SOCSO 410-0030, EIS 410-0040; editable under "Statutory accruals (credit)" in the
    account map); the rest of the month's cost (net pay, PCB, deductions) stays on 410-0010. Preview and post use one function
    (`src/lib/labour-credit.ts`); the credits still sum to the debit side. A month already posted keeps its one-line credit
    until the owner presses Unpost, then Post — the tab says so. Measured on prod before merge (read-only): the three accrual
    accounts exist, are liabilities and are postable; the saved labour map carries no accrual keys yet (defaults apply).
-2. 🔵 Journal Entries now lists the system's own postings — labour (and its undo), closing stock (and reversal), depreciation,
+2. ✅ Journal Entries now lists the system's own postings — labour (and its undo), closing stock (and reversal), depreciation,
    the year-end close, the opening balance (and reversal) — beside the manual journals: one entry per posting, dated as the
    reports date it, SYSTEM badge, read-only (View / Print / Open the tab that made it; no Edit / Void / Delete / Duplicate).
    `GET /api/accounting/system-journals`, grouping in `src/lib/system-journals.ts`.
-3. ⬜ Prod check after deploy (read-only, nothing posted): the October preview shows four credit lines summing to the cost;
-   the system postings endpoint and the Journal list show the labour postings on file; a month posted the old way shows the note.
+3. ✅ Prod (2026-10-09, read-only, nothing posted or saved): the July–October previews each show four credit lines
+   (410-0010 / 0020 / 0030 / 0040) summing to the debit side; the labour map reads the three accrual defaults;
+   `/system-journals` returned every labour and opening-balance posting on file, each balanced (no closing-stock,
+   depreciation or year-end-close postings exist yet); the Journal list shows them between the manual journals by date
+   with the SYSTEM badge; the July detail popup and its row menu offer only View / Print / Open Labour, and Open Labour
+   lands on the tab; a manual journal's menu is unchanged; July (posted the old way) shows the Unpost-then-Post note;
+   the map editor shows the three accrual pickers (closed with Cancel). July still carries its one-line credit until the
+   owner re-posts it; August stays unposted.
 
 ## 2026-10-09 — 🔵 DEV-64: customer price list shows every Maintenance sofa size, DEFAULT included, to main (branch `feat/dev64-price-list-default-column-to-main` → `main`)
 
