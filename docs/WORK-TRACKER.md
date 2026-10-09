@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-09**: branch `fix/co-scan-po-creates-co` (to `main`, BUG-2026-10-09-271) added below (its entry is the newest).
 > **Last verified: 2026-10-09**: branch `docs/outsourced-ot-box-next-time` (to `main`) added item 7 (outsourced staff OT box, next time) to the hourly-rate entry below.
 > **Last verified: 2026-10-08**: branch `feat/bom-variant-fields-list-main` (to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-08**: branch `fix/ot-hourly-rate-display` (to `main`, second commit of #759) closed item 5 of the hourly-rate entry below (the ÷9 rule is seeded from 2026-10-01).
@@ -111,6 +112,18 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-09 — 🔵 Scan PO on the Consignment Orders page made Sales Orders (branch `fix/co-scan-po-creates-co` → `main`)
+
+Reported as BUG-95 (Siti): a consignment order scanned and saved landed as a draft on the Sales Order side. BUG-2026-10-09-271.
+
+1. 🔵 Scan PO opened from the Consignment Orders page creates real Consignment Orders. Owner picked the small fix: header fields mapped to the CO names, no new CO columns.
+2. 🔵 A line with a "+ Custom" special (description + own surcharge) is refused on the CO path, because the CO save has no custom specials and would drop the surcharge.
+3. 🔵 The customer's S/O No. and the original scanned PO are not kept on a CO (no column, no files section); the done step says so.
+4. ⬜ Staging check after deploy.
+5. 🟡 Not touched (owner did not ask): Sales Order drafts already created this way on prod stay where they are.
+6. 🟡 Known limit: the scan queue is shared, so a batch uploaded on the Sales page and resumed on the Consignment page creates Consignment Orders. The create button names the document type.
+7. 🟡 Known limit: no duplicate warning on the CO side (the CO save has no duplicate-PO check), so scanning the same PO twice on the Consignment page creates two COs.
 
 ## 2026-10-08 — 🔵 BOM Variant Fields and WIP Types as lists with product-type ticks, to main (branch `feat/bom-variant-fields-list-main` → `main`)
 

@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-09**: newest entry BUG-2026-10-09-271 (branch `fix/co-scan-po-creates-co`, to main); a log, so "verified" means the entry matches the code on its branch.
 > **Last verified: 2026-10-09**: newest entry BUG-2026-10-09-270 (branch `fix/staging-merge-copy-hang`, to main); a log, so "verified" means the entry matches the code on its branch.
 > **Last verified: 2026-10-08**: BUG-2026-10-08-269 got a follow-up, the ÷9 rule seeded from 2026-10-01 (branch `fix/ot-hourly-rate-display`, to `main`, second commit of #759).
 > **Last verified: 2026-10-08**: newest entry BUG-2026-10-08-269 (branch `fix/ot-hourly-rate-display`, to `main`); a log, so "verified" means the entry matches the code on its branch.
@@ -82,6 +83,20 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-10-09-271 — Scan PO on the Consignment Orders page created Sales Orders `consignment` `sales` `ocr` 🟡
+
+🟡 Fix on `fix/co-scan-po-creates-co` (to `main`). Reported as BUG-95: a consignment order scanned and saved landed as a draft on the Sales Order side.
+
+**Cause (from the code; the mis-filed drafts on prod are UNMEASURED).** `src/pages/consignment/index.tsx` was built on 2026-04-28 (`10799e76`) by copying the Sales Orders list page. The copy kept the Scan PO button and the shared `ScanPOModal`, which always posted to `POST /api/sales-orders`. A later commit (`dbd6ce97`) changed the success toast to "Created N Consignment Order(s)", which hid the mismatch. Every scan from the Consignment page made a DRAFT Sales Order.
+
+**Fix.** `ScanPOModal` takes `target="CO"`; the Consignment page passes it. Both create loops then post to `POST /api/consignment-orders` with the body re-shaped by `toConsignmentOrderBody` (`src/lib/scan-po-target.ts`): customer PO number to `customerCOId`, hub to `hubId` + `hubName`, order date to `companyCODate`; a sofa line's empty `sizeCode` gets the seat height (the SO save does that server-side, the CO save does not). Success reads `companyCOId`. A Consignment Order has no custom specials, so a batch with a "+ Custom" special is refused before anything is created (the CO save would drop the surcharge). The original-PO file copy and the "already an SO" duplicate check are skipped on CO; the done step says the original PO and the customer's S/O No. are not kept. Labels read "Consignment Order".
+
+**Known limits.** The scan queue is shared: a batch uploaded on the Sales page and resumed on the Consignment page creates Consignment Orders. The create button names the document type. There is no duplicate warning on the CO side: the CO save has no `duplicateOf` check, so scanning the same PO twice on the Consignment page creates two COs.
+
+**Guard.** `tests/scan-po-consignment-target.test.mjs`: the field mapping, the custom-specials check, and source pins that the Consignment page passes `target="CO"` and that no create call in the modal posts to `/api/sales-orders` unconditionally. No matching class in `BUG-CLASSES.md`; the other Consignment pages were swept for leftover Sales Order calls and have none.
 
 ---
 
