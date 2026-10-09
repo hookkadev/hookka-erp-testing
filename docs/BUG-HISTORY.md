@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-09**: BUG-2026-10-09-272 follow-up (branch `fix/worker-i18n-single-words`, to staging then main): single-word worker labels translated; a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-09**: newest entry BUG-2026-10-09-272 (branch `fix/worker-i18n-popups-and-date`, to staging then main); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-08**: newest entry BUG-2026-10-08-269 (branch `feat/plant-load-14d`, to `staging`; 268 is taken on another branch).
 > **Last verified: 2026-10-08**: entry BUG-2026-10-08-267 (branch `fix/kpi-delivered-last-leg-myt`, to `staging`; 264 to 266 are taken on other branches); a log, so "verified" means the entry matches the code on its branch.
@@ -131,6 +132,8 @@ Entries themselves stay newest-first.
 **Regression.** `tests/worker-pages-translated.test.mjs`: every `t("key")` on a worker page exists; every entry has four non-empty languages; translations keep their English placeholders; the old literals are gone; the date default is the Malaysia date. 4 of 7 fail on the old pages.
 
 **Verify.** Not driven in a browser (worker pages need a PIN login). To check on staging: switch language on the worker app and trigger a wrong-department scan.
+
+**Follow-up 2026-10-09** (branch `fix/worker-i18n-single-words`). The first pass searched for phrases of two or more words, so single-word and conditional labels slipped through — found when the owner-facing staging check showed "Photo" in English on a Malay page. Eight more now use `t()`: Photo, Open, Exit, Save (3 places), the two Standard Times descriptions, "Opening… / Save payslip as PDF", and the login's "WORKER PORTAL" (existing `brand.title`). Also `scan.prodTime` replaces the reused `home.productionTime`, so `staging` and `main` carry the same entry. The test gained a block for these.
 
 ---
 

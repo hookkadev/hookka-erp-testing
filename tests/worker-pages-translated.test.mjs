@@ -84,7 +84,11 @@ test('the scan pop-ups that stop a worker are no longer hardcoded English', () =
   ]) {
     assert.ok(!scan.includes(gone), `still hardcoded: ${gone}`);
   }
-  for (const key of ['scan.wrongDeptTitle', 'scan.wrongDeptBody', 'scan.wrongDeptHowTo', 'scan.blockedTitle', 'scan.unlockConfirm']) {
+  // The sequence-lock pop-up ("Not this step yet") is not on every branch;
+  // where the scan page has it, it must be translated too.
+  const keys = ['scan.wrongDeptTitle', 'scan.wrongDeptBody', 'scan.wrongDeptHowTo'];
+  if (scan.includes('result.kind === "blocked"')) keys.push('scan.blockedTitle', 'scan.unlockConfirm');
+  for (const key of keys) {
     assert.ok(scan.includes(`t("${key}")`), `scan.tsx does not use ${key}`);
   }
 });
@@ -98,6 +102,28 @@ test('the other worker pages lost their hardcoded English too', () => {
     'src/pages/worker/pay.tsx': ['alert("Please allow pop-ups', 'alert("Could not reach the server', '>Net pay<'],
     'src/pages/worker/issue.tsx': ['>Tap to capture<', bare('Take photo')],
     'src/pages/worker/announcement-media.tsx': ['>This image could not be displayed.<', bare('Open original'), bare('Image unavailable'), '>Video<'],
+  };
+  for (const [file, literals] of Object.entries(checks)) {
+    const text = read(file);
+    for (const l of literals) {
+      const found = typeof l === 'string' ? text.includes(l) : l.test(text);
+      assert.ok(!found, `${file} still hardcodes: ${String(l)}`);
+    }
+  }
+});
+
+test('single-word and conditional labels are translated too (follow-up)', () => {
+  // The first pass looked for phrases of two or more words between tags, so
+  // "Photo", "Open", "Exit", "Save" and the labels picked by a condition
+  // (busy ? "Opening…" : "Save payslip as PDF") slipped through.
+  const bare = (s) => new RegExp(`^\\s*${s}\\s*$`, 'm');
+  const checks = {
+    'src/pages/worker/issue.tsx': [bare('Photo')],
+    'src/pages/worker/announcement-media.tsx': [bare('Open')],
+    'src/pages/worker/login.tsx': [bare('WORKER PORTAL')],
+    'src/pages/worker/scan.tsx': [bare('Exit'), ': "Save"}'],
+    'src/pages/worker/me.tsx': [': "Save"}', '"Standard minutes per WIP'],
+    'src/pages/worker/pay.tsx': ['"Opening…"', '"Save payslip as PDF"'],
   };
   for (const [file, literals] of Object.entries(checks)) {
     const text = read(file);

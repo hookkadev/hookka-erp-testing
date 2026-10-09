@@ -418,7 +418,7 @@ function VideoTile({ src }: { src: string }) {
         <Play className="h-4 w-4 shrink-0 fill-[#9A3A2D] text-[#9A3A2D]" />
         <span className="min-w-0 flex-1 truncate">{t("media.video")}</span>
         <span className="shrink-0 rounded bg-[#EDE7E0] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#8A6F3A]">
-          Open
+          {t("common.open")}
         </span>
         <Download className="h-4 w-4 shrink-0 text-[#8A8680]" />
       </a>
