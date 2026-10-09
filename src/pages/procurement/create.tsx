@@ -338,12 +338,13 @@ function CreatePurchaseOrderPage() {
   const swapItemRM = (idx: number, newRmCode: string) => {
     const trimmed = newRmCode.trim();
     if (!trimmed) return;
-    const rm = rawMaterials.find((r) => r.itemCode === trimmed);
+    // Once a supplier is picked, only that supplier's materials can be swapped in.
+    const rm = pickerRMs.find((r) => r.itemCode === trimmed);
     if (!rm) return;
     setItems((prev) => {
       const current = prev[idx];
       if (current.rmCode === trimmed) return prev;
-      const mainBinding = getMainBinding(trimmed);
+      const mainBinding = bindingForPick(trimmed);
       const next = [...prev];
       next[idx] = {
         rmCode: rm.itemCode,
@@ -809,7 +810,7 @@ function CreatePurchaseOrderPage() {
                               onBlur={(e) => {
                                 const v = e.currentTarget.value.trim();
                                 if (v && v !== item.rmCode) {
-                                  const found = rawMaterials.find((r) => r.itemCode === v);
+                                  const found = pickerRMs.find((r) => r.itemCode === v);
                                   if (found) {
                                     swapItemRM(idx, v);
                                   } else {
@@ -823,7 +824,7 @@ function CreatePurchaseOrderPage() {
                               className="h-8 w-full px-2 text-xs font-medium text-[#1F1D1B] bg-white rounded border border-[#E2DDD8] focus:outline-none focus:ring-1 focus:ring-[#6B5C32]"
                             />
                             <datalist id={`rm-options-${idx}`}>
-                              {activeRMs.map((rm) => (
+                              {pickerRMs.map((rm) => (
                                 <option key={rm.itemCode} value={rm.itemCode}>
                                   {rm.description}
                                 </option>
