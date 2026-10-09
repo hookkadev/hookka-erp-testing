@@ -114,3 +114,17 @@ test("compare windows stay inside the picked month", () => {
   assert.match(OVERVIEW, /Math\.round\(windowTotal \/ \(rollingDays\.length \|\| 1\)\)/);
   assert.doesNotMatch(OVERVIEW, /\/ ROLLING_DAYS\)/);
 });
+
+// Owner 2026-10-09: the compare page's Plant Load card behaves like the
+// dashboard's (four rows that open drill-throughs), the Fabric tab carries the
+// dashboard's Fabric Usage section, and the month picker shows on every tab.
+test("compare page: dashboard card copies, month picker on every tab", () => {
+  const cards = read("src/pages/dashboard-compare-cards.tsx");
+  assert.equal((cards.match(/onDrill\(\{/g) ?? []).length, 4);
+  assert.match(cards, /export function FabricUsageSection\(/);
+  const page = read("src/pages/dashboard-compare.tsx");
+  assert.match(page, /from "@\/pages\/dashboard-compare-cards"/);
+  assert.match(page, /<FabricUsageSection ov=\{ov\} period=\{period\} \/>/);
+  assert.doesNotMatch(page, /tab === "plant" && \(\s*<select/);
+  assert.match(page, /\{drill && \(\s*<Modal/);
+});

@@ -8,12 +8,15 @@
 // yesterday" is today's state; a month keeps both windows INSIDE that month
 // (owner 2026-10-09: nothing carried over from the month before), ending on
 // its last day, or yesterday for the current month.
-// Each column: the Plant Load card, the Department Backlog bars and the daily
-// production chart. Bars and charts of a kind share one scale across columns.
+// Each column: the /dashboard Plant Load card itself (its four rows open the
+// same drill-throughs), the Department Backlog bars and the daily production
+// chart. Bars and charts of a kind share one scale across columns.
 //
-// Second tab (?tab=fabric): fabric Avg cost /m per month as the dashboard shows
-// it vs at real purchase prices, from /api/dashboard/overview/fabric-cost-compare
-// (owner 2026-10-09, after the opening-stock placeholder price was found).
+// Second tab (?tab=fabric): the dashboard's Fabric Usage section for the picked
+// month, then fabric Avg cost /m per month as the dashboard shows it vs at real
+// purchase prices, from /api/dashboard/overview/fabric-cost-compare (owner
+// 2026-10-09, after the opening-stock placeholder price was found). The month
+// picker sits at the top right on every tab.
 // ============================================================
 import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -23,22 +26,16 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Tabs } from "@/components/ui/tabs";
 import { formatRM } from "@/lib/utils";
 import { useCachedJson } from "@/lib/cached-fetch";
-import { PlantLoadCard } from "@/pages/dashboards/DashboardWidgets";
+import { FabricUsageSection, Modal, PlantLoadCard, type Drill, type PlantLoadOverview } from "@/pages/dashboard-compare-cards";
 import { deptBacklogRows, type DeptBacklog } from "@/pages/dashboards/dashboard-widgets-lib";
 import { daysTone } from "@/pages/dashboards/ops-floor-lib";
-import { AMBER, GREEN, RED, type Period } from "@/pages/dashboards/dashboard-shared-lib";
+import { AMBER, GREEN, RED } from "@/pages/dashboards/dashboard-shared-lib";
 
-type Overview = {
+type Overview = PlantLoadOverview & {
   salesMonths?: string[];
   stateSnapshot?: { source: "live" | "snapshot" | "reconstructed"; asOf: string | null };
-  production?: {
-    dailyCapacityMin: number;
-    backlogDays: number;
-    capacityDays: { date: string; minutes: number; workers?: number }[];
-    backlogByDept: DeptBacklog[];
-  };
 };
-type Prod = NonNullable<Overview["production"]>;
+type Prod = NonNullable<Overview["production"]> & { backlogByDept: DeptBacklog[] };
 
 const CUR_YM = new Date().toISOString().slice(0, 7);
 const h = (min: number | null | undefined) => `${Math.round((min ?? 0) / 60).toLocaleString()}h`;
@@ -114,12 +111,14 @@ function Column({
   res,
   dayMax,
   deptMax,
+  onDrill,
 }: {
   win: 7 | 14;
-  period: Period;
+  period: string;
   res: { data: Overview | null; loading: boolean };
   dayMax: number;
   deptMax: number;
+  onDrill: (d: Drill) => void;
 }) {
   const prod = res.data?.production;
   const cd = prod?.capacityDays ?? [];
@@ -133,9 +132,16 @@ function Column({
           </span>
         )}
       </div>
-      <PlantLoadCard period={period} capacityWindow={win} />
       {prod ? (
         <>
+          <PlantLoadCard
+            ov={res.data ?? {}}
+            period={period}
+            curYm={CUR_YM}
+            onDrill={onDrill}
+            windowLabel={`${cd.length}-day avg`}
+            windowTitle={`Daily Capacity — ${win}-day window (${cd.length} working days)`}
+          />
           <DeptBacklog prod={prod} mx={deptMax} />
           <DailyChart prod={prod} dayMax={dayMax} />
         </>
@@ -197,11 +203,12 @@ function FabricCostCard({ cat, rows }: { cat: "SOFA" | "BEDFRAME"; rows: FabricR
   );
 }
 
-function FabricCostTab() {
+function FabricCostTab({ ov, period }: { ov: Overview | null; period: string }) {
   const res = useCachedJson<{ rows: FabricRow[] }>("/api/dashboard/overview/fabric-cost-compare", 60);
   const rows = res.data?.rows;
   return (
     <div className="space-y-4">
+      {ov ? <FabricUsageSection ov={ov} period={period} /> : <p className="text-sm text-[#6B7280]">Loading…</p>}
       <p className="text-sm text-[#5A5550]">
         Shown is the dashboard's Avg cost /m: what the fabric cut that month cost, oldest stock first. Opening stock was
         loaded on 2026-02-21 at a flat RM 25.00 or RM 35.00 per metre, above every real purchase price of those fabrics.
@@ -239,7 +246,7 @@ export default function DashboardCompare() {
   const state = r14.data?.stateSnapshot;
   const p7 = r7.data?.production;
   const p14 = r14.data?.production;
-  const widgetPeriod: Period = period === "all" ? { mode: "ytd", month: CUR_YM } : { mode: "monthly", month: period };
+  const [drill, setDrill] = useState<Drill | null>(null);
 
   const allDays = [...(p7?.capacityDays ?? []), ...(p14?.capacityDays ?? [])].map((d) => d.minutes / 60);
   const dayMax = Math.ceil(Math.max(50, ...allDays) / 50) * 50;
@@ -266,7 +273,7 @@ export default function DashboardCompare() {
             : "Plant Load with capacity averaged over the last 7 vs the last 14 working days. Staging only."
         }
         actions={
-          tab === "plant" && (
+          (
             <select
               id="compare-period"
               aria-label="Month"
@@ -286,7 +293,7 @@ export default function DashboardCompare() {
         }
       />
       <Tabs tabs={TABS} value={tab} onChange={(k) => setSearchParams(k === "plant" ? {} : { tab: k })} />
-      {tab === "fabric" ? <FabricCostTab /> : (
+      {tab === "fabric" ? <FabricCostTab ov={r14.data} period={period} /> : (
         <>
           {period !== "all" && (
             <p className="text-xs text-[#5A5550]">
@@ -304,8 +311,8 @@ export default function DashboardCompare() {
             </p>
           )}
           <div className="grid gap-4 lg:grid-cols-2">
-            <Column win={7} period={widgetPeriod} res={r7} dayMax={dayMax} deptMax={deptMax} />
-            <Column win={14} period={widgetPeriod} res={r14} dayMax={dayMax} deptMax={deptMax} />
+            <Column win={7} period={period} res={r7} dayMax={dayMax} deptMax={deptMax} onDrill={setDrill} />
+            <Column win={14} period={period} res={r14} dayMax={dayMax} deptMax={deptMax} onDrill={setDrill} />
           </div>
           {p7 && p14 && (
             <Card>
@@ -348,6 +355,11 @@ export default function DashboardCompare() {
             </Card>
           )}
         </>
+      )}
+      {drill && (
+        <Modal title={drill.title} subtitle={drill.subtitle} onClose={() => setDrill(null)}>
+          {drill.node}
+        </Modal>
       )}
     </div>
   );
