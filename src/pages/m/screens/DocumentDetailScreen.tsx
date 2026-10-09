@@ -39,8 +39,9 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useCachedJson } from "@/lib/cached-fetch";
-import { MobileHeader, MobileCard, StatusPill, Sheet, FormSheet, QrModal } from "../components";
+import { MobileHeader, MobileCard, StatusPill, Sheet, FormSheet, QrModal, ResponsiveActionDock } from "../components";
 import { M, M_ACCENT } from "../theme";
+import { useResponsiveLayout } from "../lib/responsive-layout";
 import {
   type ModuleConfig,
   type DetailConfig,
@@ -1583,26 +1584,18 @@ function ActionBar({
   onEdit: () => void;
   onCta: () => void;
 }) {
+  const { mode } = useResponsiveLayout();
   return (
-    <div
-      style={{
-        position: "fixed",
-        left: 0,
-        right: 0,
-        bottom: "calc(56px + env(safe-area-inset-bottom))",
-        display: "flex",
-        justifyContent: "center",
-        pointerEvents: "none",
-        zIndex: 30,
-      }}
-    >
+    <ResponsiveActionDock scope="detail">
       <div
         style={{
           width: "100%",
-          maxWidth: 414,
+          maxWidth: mode === "phone" ? 414 : "none",
           display: "flex",
           gap: 8,
-          padding: "10px 12px",
+          padding: mode === "phone"
+            ? "10px 12px"
+            : "10px 12px max(10px, env(safe-area-inset-bottom))",
           backgroundColor: M.paper,
           borderTop: `1px solid ${M.border}`,
           pointerEvents: "auto",
@@ -1652,7 +1645,7 @@ function ActionBar({
           </button>
         ) : null}
       </div>
-    </div>
+    </ResponsiveActionDock>
   );
 }
 

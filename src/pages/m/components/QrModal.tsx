@@ -18,6 +18,7 @@ import { useEffect, useState } from "react";
 import { X, Download } from "lucide-react";
 import { getQRCodeDataURL } from "@/lib/qr-utils";
 import { M, M_MAX_WIDTH } from "../theme";
+import { useResponsiveLayout } from "../lib/responsive-layout";
 
 /** One selectable QR target — a human label + the string to encode. */
 export type QrChoice = { label: string; code: string; value: string };
@@ -33,6 +34,7 @@ type Props = {
 };
 
 export function QrModal({ open, onClose, title, choices, downloadName }: Props) {
+  const { mode, railWidth } = useResponsiveLayout();
   const [selIdx, setSelIdx] = useState(0);
   // Map of encoded-value → generated data-url, so switching chips back to a
   // previously-rendered value is instant and we never setState synchronously in
@@ -78,6 +80,7 @@ export function QrModal({ open, onClose, title, choices, downloadName }: Props) 
   }, [open, onClose]);
 
   if (!open || !sel) return null;
+  const phone = mode === "phone";
 
   const onDownload = () => {
     if (!dataUrl) return;
@@ -100,7 +103,7 @@ export function QrModal({ open, onClose, title, choices, downloadName }: Props) 
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        padding: 26,
+        padding: phone ? 26 : `26px 26px 26px ${railWidth + 26}px`,
       }}
     >
       <div
@@ -109,7 +112,7 @@ export function QrModal({ open, onClose, title, choices, downloadName }: Props) 
         aria-modal="true"
         style={{
           width: "100%",
-          maxWidth: M_MAX_WIDTH - 52,
+          maxWidth: phone ? M_MAX_WIDTH - 52 : 460,
           backgroundColor: M.card,
           borderRadius: 24,
           padding: 22,

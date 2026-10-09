@@ -59,7 +59,6 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useCachedJson } from "@/lib/cached-fetch";
-import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { formatCurrency } from "@/lib/utils";
 import { stateKpiTile, type StateKpis } from "@/pages/dashboards/dashboard-widgets-lib";
 import { getCurrentUser } from "@/lib/auth";
@@ -73,6 +72,7 @@ import { GlobalSearchSheet } from "../components/GlobalSearchSheet";
 import { ORDERS_DUE_URL, STOCK_ALERTS_URL } from "../lib/preload";
 import { M, M_ACCENT, M_DELTA } from "../theme";
 import { type FormSpec } from "../config/form-types";
+import { useResponsiveLayout } from "../lib/responsive-layout";
 import {
   newSalesOrderSpec,
   newDeliveryOrderSpec,
@@ -304,7 +304,8 @@ export default function MobileHome() {
   // rail as 4 columns instead of 2×2. Other dashboard cards stay stacked
   // vertically (the design has a 2-col grid there too — bigger refactor,
   // deferred).
-  const fold = useMediaQuery("(min-width: 720px) and (orientation: landscape)");
+  const { mode } = useResponsiveLayout();
+  const expanded = mode === "tablet-landscape";
 
   // Quick-action create form: holds the active FormSpec, or null. "Staff" has
   // no in-scope create endpoint, so it routes to the Employees directory.
@@ -986,7 +987,7 @@ export default function MobileHome() {
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: fold ? "repeat(4, 1fr)" : "1fr 1fr",
+            gridTemplateColumns: expanded ? "repeat(4, minmax(0, 1fr))" : "1fr 1fr",
             gap: 9,
             marginTop: 11,
           }}

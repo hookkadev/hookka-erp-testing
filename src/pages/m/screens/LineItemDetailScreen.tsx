@@ -20,12 +20,14 @@ import { useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ChevronRight, FileText, Package } from "lucide-react";
 import { useCachedJson } from "@/lib/cached-fetch";
-import { MobileHeader, MobileCard, StatusPill } from "../components";
+import { MobileHeader, MobileCard, StatusPill, ResponsiveActionDock } from "../components";
 import { M, SEMANTIC } from "../theme";
+import { useResponsiveLayout } from "../lib/responsive-layout";
 import { type ModuleConfig, type LineItemVM } from "../config/types";
 import { refreshOne } from "../config/mutate";
 
 export function LineItemDetailScreen({ config }: { config: ModuleConfig }) {
+  const { mode } = useResponsiveLayout();
   const navigate = useNavigate();
   const { id = "", itemId = "" } = useParams();
   const detail = config.detail;
@@ -418,25 +420,16 @@ export function LineItemDetailScreen({ config }: { config: ModuleConfig }) {
 
       {/* Bottom action bar — design source: a single primary CTA. */}
       {item ? (
-        <div
-          style={{
-            position: "fixed",
-            left: 0,
-            right: 0,
-            bottom: "calc(56px + env(safe-area-inset-bottom))",
-            display: "flex",
-            justifyContent: "center",
-            pointerEvents: "none",
-            zIndex: 30,
-          }}
-        >
+        <ResponsiveActionDock scope="detail">
           <div
             style={{
               width: "100%",
-              maxWidth: 414,
+              maxWidth: mode === "phone" ? 414 : "none",
               display: "flex",
               gap: 8,
-              padding: "10px 12px",
+              padding: mode === "phone"
+                ? "10px 12px"
+                : "10px 12px max(10px, env(safe-area-inset-bottom))",
               backgroundColor: M.paper,
               borderTop: `1px solid ${M.border}`,
               pointerEvents: "auto",
@@ -465,7 +458,7 @@ export function LineItemDetailScreen({ config }: { config: ModuleConfig }) {
               View stock
             </button>
           </div>
-        </div>
+        </ResponsiveActionDock>
       ) : null}
     </>
   );

@@ -17,6 +17,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useCachedJson } from "@/lib/cached-fetch";
 import { StatusPill } from "../components";
 import { M } from "../theme";
+import { useResponsiveLayout } from "../lib/responsive-layout";
 import { resolveStatus, STATUS_MAPS, str, num, dateOnly } from "../config/helpers";
 
 type RawRow = Record<string, unknown>;
@@ -42,6 +43,7 @@ function arr(v: unknown): RawRow[] {
 }
 
 export function ProductionDetailScreen() {
+  const { mode, railWidth } = useResponsiveLayout();
   const navigate = useNavigate();
   const { id = "" } = useParams();
   const url = `/api/production-orders/${encodeURIComponent(id)}`;
@@ -293,9 +295,30 @@ export function ProductionDetailScreen() {
       {showDesk ? (
         <div
           onClick={() => setShowDesk(false)}
-          style={{ position: "fixed", inset: 0, background: "rgba(31,29,27,.4)", zIndex: 60, display: "flex", alignItems: "flex-end" }}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(31,29,27,.4)",
+            zIndex: 60,
+            display: "flex",
+            alignItems: mode === "phone" ? "flex-end" : "center",
+            justifyContent: "center",
+            padding: mode === "phone" ? 0 : `24px 24px 24px ${railWidth + 24}px`,
+          }}
         >
-          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", background: M.paper, borderRadius: "26px 26px 0 0", padding: "18px 18px 26px" }}>
+          <div
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Change production stage"
+            style={{
+              width: "100%",
+              maxWidth: mode === "phone" ? "none" : 560,
+              background: M.paper,
+              borderRadius: mode === "phone" ? "26px 26px 0 0" : 20,
+              padding: "18px 18px max(26px, env(safe-area-inset-bottom))",
+            }}
+          >
             <div style={{ width: 36, height: 4, borderRadius: 2, background: "#D8D0C2", margin: "0 auto 14px" }} />
             <div style={{ fontSize: 15, fontWeight: 800, color: M.ink }}>Change production stage</div>
             <div style={{ fontSize: 12.5, color: M.muted, marginTop: 8, lineHeight: 1.5 }}>
