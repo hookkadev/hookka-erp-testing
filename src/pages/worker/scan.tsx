@@ -2501,7 +2501,7 @@ export default function WorkerScanPage() {
               }}
               className="text-xs text-[#6B5C32] underline"
             >
-              Exit
+              {t("common.exit")}
             </button>
           </div>
           <p className="text-xs text-[#6B7280]">
@@ -2709,7 +2709,7 @@ export default function WorkerScanPage() {
                         onClick={() => saveRack(result.jobCard.id, rackChoice)}
                         className="h-10 px-4 rounded bg-[#3E6570] text-white font-semibold text-sm disabled:opacity-50"
                       >
-                        {savingRack ? "…" : "Save"}
+                        {savingRack ? "…" : t("common.save")}
                       </button>
                     </div>
                   )}
@@ -2799,7 +2799,7 @@ export default function WorkerScanPage() {
                     onClick={() => saveRack(result.jobCard.id, rackChoice)}
                     className="h-10 px-4 rounded bg-white text-[#1F1D1B] font-semibold text-sm disabled:opacity-50"
                   >
-                    {savingRack ? "…" : "Save"}
+                    {savingRack ? "…" : t("common.save")}
                   </button>
                 </div>
               )}

@@ -647,7 +647,7 @@ export default function WorkerMePage() {
                 disabled={phoneSaving}
                 className="h-10 px-3 rounded bg-[#6B5C32] text-white text-sm font-semibold disabled:opacity-60"
               >
-                {phoneSaving ? "…" : "Save"}
+                {phoneSaving ? "…" : t("common.save")}
               </button>
             )}
           </div>
@@ -1153,8 +1153,8 @@ export default function WorkerMePage() {
           <div className="px-4 pb-4">
             <p className="text-xs text-[#8A8680] mb-2">
               {stdDepts.length > 1
-                ? "Standard minutes per WIP. Pick a department to view."
-                : "Standard minutes per WIP for your department."}
+                ? t("me.stdDescPick")
+                : t("me.stdDescOwn")}
             </p>
             {/* Single-department label — when the worker belongs to exactly
                 one department the selector is hidden, so show that dept as a

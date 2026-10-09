@@ -516,7 +516,7 @@ function SavePayslipButton({ period }: { period: string }) {
       disabled={payslipBusy}
       className="mt-3 w-full rounded-lg bg-white/10 py-2.5 text-sm font-semibold text-white active:bg-white/20 disabled:opacity-50"
     >
-      {payslipBusy ? "Opening…" : "Save payslip as PDF"}
+      {payslipBusy ? t("pay.opening") : t("pay.savePdf")}
     </button>
   );
 }

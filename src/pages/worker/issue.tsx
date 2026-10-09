@@ -158,7 +158,7 @@ export default function WorkerIssuePage() {
         {/* Photo */}
         <label className="block">
           <span className="text-sm font-medium text-[#5A5550] mb-1.5 inline-block">
-            Photo
+            {t("issue.photo")}
           </span>
           {photo ? (
             <div className="relative">
