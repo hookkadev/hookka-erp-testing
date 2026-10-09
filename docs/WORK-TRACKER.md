@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-09**: branch `feat/po-picker-show-supplier` (BUG-98 follow-up to `staging`) added item 5 to the BUG-98 entry below.
 > **Last verified: 2026-10-09**: branch `fix/po-line-material-supplier-only` (BUG-98 follow-up to `staging`) added item 4 to the BUG-98 entry below.
 > **Last verified: 2026-10-09**: branch `feat/po-supplier-combobox-material-modal` (BUG-98 to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-09**: branch `feat/dashboard-compare-plant-card-drills` (to `staging`) added item 11 to the Plant Load entry below.
@@ -189,6 +190,7 @@ Ticket BUG-98 (reporter siti): the supplier picker on New Purchase Order shows e
 2. 🔵 The inline category + search list above Order Items moves into a Select Materials popup opened by `+ Add Materials from Supplier`. Each row shows code, description, unit, price and Add / Added; the footer counts the items added.
 3. ⚪ Check on the staging site after merge.
 4. 🔵 Owner follow-up: once a supplier is picked, only that supplier's materials can be chosen. The popup already did this; the RM code box on each line now does too (its suggestions and what it accepts), and a swapped line takes the picked supplier's price. Changing supplier keeps the ask-then-clear prompt (owner choice).
+5. 🔵 Owner follow-up: with no supplier picked, each row in the Select Materials popup shows the supplier Add will fill the line with (main supplier first, "+N more" when others sell it), or "No supplier linked".
 
 ## 2026-10-09 — 🔵 Batch exports brought over from the Houzs ERP comparison (branch `feat/batch-exports-from-houzs` → `staging`)
 

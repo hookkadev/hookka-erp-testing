@@ -969,7 +969,14 @@ function CreatePurchaseOrderPage() {
         <MaterialPickerModal
           materials={pickerRMs}
           supplierLabel={selectedSupplierId ? resolveSupplierName(selectedSupplierId) : ""}
-          priceSenFor={(code) => bindingForPick(code)?.unitPrice ?? 0}
+          pickFor={(code) => {
+            const b = bindingForPick(code);
+            return {
+              priceSen: b?.unitPrice ?? 0,
+              supplierName: b ? resolveSupplierName(b.supplierId) : "",
+              otherSuppliers: Math.max(0, getBindingsForRM(code).length - 1),
+            };
+          }}
           addedCodes={addedRmCodes}
           onAdd={addItemFromRM}
           onClose={() => setPickerOpen(false)}
@@ -984,14 +991,15 @@ function CreatePurchaseOrderPage() {
 function MaterialPickerModal({
   materials,
   supplierLabel,
-  priceSenFor,
+  pickFor,
   addedCodes,
   onAdd,
   onClose,
 }: {
   materials: RawMaterial[];
   supplierLabel: string;
-  priceSenFor: (rmCode: string) => number;
+  /** The binding Add will use: its price and supplier, plus how many other suppliers sell it. */
+  pickFor: (rmCode: string) => { priceSen: number; supplierName: string; otherSuppliers: number };
   addedCodes: Set<string>;
   onAdd: (rmCode: string) => void;
   onClose: () => void;
@@ -1114,7 +1122,7 @@ function MaterialPickerModal({
             <>
               {filtered.slice(0, 100).map((rm) => {
                 const added = addedCodes.has(rm.itemCode);
-                const priceSen = priceSenFor(rm.itemCode);
+                const { priceSen, supplierName, otherSuppliers } = pickFor(rm.itemCode);
                 return (
                   <div
                     key={rm.id}
@@ -1125,6 +1133,19 @@ function MaterialPickerModal({
                       <div className="truncate text-xs text-[#6B7280]" title={rm.description}>
                         {rm.description}
                       </div>
+                      {/* No supplier picked above: show who Add will fill the line with. */}
+                      {!supplierLabel && (
+                        supplierName ? (
+                          <div className="truncate text-xs text-[#6B5C32]" title={supplierName}>
+                            {supplierName}
+                            {otherSuppliers > 0 && (
+                              <span className="text-[#9CA3AF]"> +{otherSuppliers} more</span>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="text-xs text-[#9A3A2D]">No supplier linked</div>
+                        )
+                      )}
                     </div>
                     <div className="flex-shrink-0 text-right">
                       <div className="amount text-sm text-[#1F1D1B]">
