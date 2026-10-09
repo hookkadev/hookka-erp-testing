@@ -1233,6 +1233,7 @@ export default function SalesPage() {
       )}
       {/* Scan PO Modal */}
       <ScanPOModal
+        target="CO"
         open={scanPOOpen}
         onClose={() => setScanPOOpen(false)}
         onCreated={(soIds) => {
