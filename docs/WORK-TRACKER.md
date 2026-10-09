@@ -119,14 +119,16 @@ reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
 
-## 2026-10-09 — 🔵 P&L: a posted-then-unposted Labour month showed no direct labour (owner「做，8 月的 bug 修好，7 月我自己 Unpost」)(branch `fix/undone-labour-post-hides-payroll` → `main`, BUG-2026-10-09-275)
+## 2026-10-09 — ✅ P&L: a posted-then-unposted Labour month showed no direct labour (owner「做，8 月的 bug 修好，7 月我自己 Unpost」)(#795 29d33882, BUG-2026-10-09-275, prod-verified)
 
-1. 🔵 August's P&L direct labour read zero: the month was posted and unposted on the Labour tab, and the P&L's
+1. ✅ August's P&L direct labour read zero: the month was posted and unposted on the Labour tab, and the P&L's
    "already recorded" check still counted the undone posting, so the payslip labour was skipped. Fixed by netting
    each document's legs (`src/lib/recorded-salary.ts`), in the P&L and in the cost & expense classes report.
-2. 🟡 Owner: July's production wages are in the ledger twice (a manual July salary journal that includes the
-   production lines, and the Labour-tab posting). The owner will Unpost July on the Labour tab himself.
-3. ⬜ Prod check after deploy (read-only): August direct labour equals its payslip figures; other months unchanged.
+2. ✅ Owner: July's production wages were in the ledger twice (a manual July salary journal that includes the
+   production lines, and the Labour-tab posting). The owner unposted July on the Labour tab himself.
+3. ✅ Prod (2026-10-09, read-only): August's direct labour now equals its payslip figures (the 750-0010 drill ties: the
+   undone posting nets to zero plus the payroll line); July's equals its salary journal plus two vouchers after the
+   owner's Unpost; May, June and September unchanged.
 
 ## 2026-10-09 — 🔵 BUG-98: New Purchase Order supplier search box and material picker popup, to main (branch `feat/bug98-po-supplier-picker-main` → `main`)
 
