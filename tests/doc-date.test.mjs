@@ -71,7 +71,7 @@ test("every sourceType the API posts is dated by something other than postedAt",
     "opening_balance", "opening_balance_reversal",
   ]);
   // Types whose date lives in the sourceId rather than a source table.
-  const SELF_DATED = new Set(["closing_stock", "year_close", "depreciation", "labor_post", "tf_interest"]);
+  const SELF_DATED = new Set(["closing_stock", "year_close", "depreciation", "labor_post", "tf_interest", "tf_bank_charge"]);
 
   const orphans = [...found].filter(
     (t) => !EXEMPT.has(t) && !SELF_DATED.has(stripLegSuffix(t)) && !familyOf(t),
@@ -86,6 +86,11 @@ test("every sourceType the API posts is dated by something other than postedAt",
 test("tf_interest dates to the charge date encoded in its sourceId", () => {
   assert.equal(parseSourceIdDate("tf_interest", "tfint-2026-08-11-PV-2607-003"), "2026-08-11");
   assert.equal(parseSourceIdDate("tf_interest", "no-date-here"), null);
+});
+
+test("tf_bank_charge dates to the charge date encoded in its sourceId", () => {
+  assert.equal(parseSourceIdDate("tf_bank_charge", "tfbc-2026-10-09-PV-2607-003"), "2026-10-09");
+  assert.equal(parseSourceIdDate("tf_bank_charge", "tfint-2026-10-09-PV-2607-003"), null);
 });
 
 test("labor_post dates to the month it is FOR, not the day it was posted", () => {
