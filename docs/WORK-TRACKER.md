@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-09**: branch `feat/dev64-price-list-default-column` (DEV-64 to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-09**: branch `feat/dashboard-month-static-kpis` (to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-08**: branch `feat/plant-load-14d` (to `staging`, BUG-2026-10-08-269) added below (its entry is the newest).
 > **Last verified: 2026-10-08**: branch `fix/bom-module-guide-anchors` (to `staging`) added item 5b to the editable WIP types entry below.
@@ -174,6 +175,13 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-09 — 🔵 DEV-64: customer price list shows every Maintenance sofa size, DEFAULT included (branch `feat/dev64-price-list-default-column` → `staging`)
+
+Reporter ask (Siti, DEV-64 "price list"): "can add column default for the customer price".
+
+1. 🔵 Customer → Products → Sofa price grid (`CustomerProductsPanel` in `src/pages/customers.tsx`) hard-coded the seat columns `24 / 28 / 30 / 32 / 35`, so a named size like DEFAULT (and 26) from Maintenance → Sofa → Sizes had no customer-price column, though the SKU Master, quotation PDF and history dialog already showed it. The grid now reads `useSofaSeatHeights()`, header via `sofaSeatLabel`. No backend change: prices are stored by size string, so `DEFAULT` saves like `28`.
+2. ⬜ Staging check after deploy: Customers → a customer → Products → Sofa shows a DEFAULT column; edit + Save a DEFAULT price for one tier and reload.
 
 ## 2026-10-09 — 🔵 Pending Delivery and Outstanding fixed per month (branch `feat/dashboard-month-static-kpis` → `staging`)
 
