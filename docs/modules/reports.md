@@ -1,5 +1,7 @@
 # Reports & Analytics — Module Guide
 
+> **Last verified: 2026-10-09** (branch `feat/compare-fabric-purchasing-tab`): the dashboard-overview.ts line anchors re-derived after new imports moved the handler. Nothing else re-checked.
+
 > **Last verified: 2026-10-02** (branch `chore/sync-staging-from-main-1002`, staging<-main merge): every `reports.ts` anchor and its line count (1093) re-derived on the merged file (main added the first-run `seedLastSent`). Nothing else re-checked.
 
 > **Last verified: 2026-10-02** (branch `feat/schedule-dept-share-table`): `schedule-overdue-report.ts` line count (804) and anchor (509), the Schedule email department summary, summary-only email and full-list filter note only. Nothing else re-checked.
@@ -89,7 +91,7 @@ Two unrelated report worlds share the name **Reports**:
 | `collectOperationsReport` | `operations-report.ts:1112` | Ops report builder |
 | `collectBriefData` / `renderBriefHtml` | `production-brief.ts:386 / 467` | Morning production brief |
 | `GET /` (list) / `POST /` (create) | `src/api/routes/forecasts.ts:55 / 80` | `forecast_entries` CRUD |
-| `GET /` (overview) | `src/api/routes/dashboard-overview.ts:49` | Consolidated dashboard payload |
+| `GET /` (overview) | `src/api/routes/dashboard-overview.ts:66` | Consolidated dashboard payload |
 | `buildReportHTML` / `printReport` | `src/lib/print-report.ts:218 / 339` | Shared WYSIWYG print engine |
 | `exportReportCsv/Xlsx/Pdf` | `src/lib/export-report.ts:27 / 41 / 82` | Shared export helpers |
 

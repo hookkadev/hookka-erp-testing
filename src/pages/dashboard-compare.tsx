@@ -12,13 +12,15 @@
 // same drill-throughs), the Department Backlog bars and the daily production
 // chart. Bars and charts of a kind share one scale across columns.
 //
-// Second tab (?tab=fabric): the dashboard's Fabric Usage section for the picked
-// month, then fabric Avg cost /m per month as the dashboard shows it vs at real
-// purchase prices, from /api/dashboard/overview/fabric-cost-compare (owner
-// 2026-10-09, after the opening-stock placeholder price was found). The month
-// picker sits at the top right on every tab.
+// Second tab (?tab=fabric), "Fabric & purchasing" (owner 2026-10-09): the
+// dashboard's Fabric Usage section for the picked month, then the
+// dashboard/purchasing to-do items per calendar month (last 12 months) from
+// /api/dashboard/overview/fabric-cost-compare: fabric Avg cost /m as shown vs at
+// real purchase prices vs invoice price, each finished order's BOM plan vs what
+// it recorded, fabric invoiced vs received into stock, and an invoice price trend.
+// The month picker sits at the top right on every tab.
 // ============================================================
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Card, CardContent } from "@/components/ui/card";
@@ -152,48 +154,122 @@ function Column({
   );
 }
 
-type FabricRow = { cat: string; ym: string; meters: number; shownSen: number; realSen: number; openingMeters: number };
+type FabricCat = "BEDFRAME" | "SOFA";
+type CatMonth = {
+  cutMeters: number;
+  shownSen: number;
+  realSen: number;
+  openingMeters: number;
+  invoiceLines: number;
+  invoiceMeters: number;
+  invoiceSen: number;
+  receivedMeters: number;
+  grns: number;
+  grnMeters: number;
+  ordersDone: number;
+  ordersRecorded: number;
+  plannedMeters: number;
+  recordedMeters: number;
+  recordedSen: number;
+  fabricsUsed: number;
+  fabricsRecorded: number;
+};
+type FabricMonth = { ym: string; BEDFRAME: CatMonth; SOFA: CatMonth };
+type TrendRow = { cat: FabricCat; code: string; meters: number; byMonth: Record<string, { meters: number; sen: number }> };
+type FabricData = { months: FabricMonth[]; trend: TrendRow[] };
 
-function FabricCostCard({ cat, rows }: { cat: "SOFA" | "BEDFRAME"; rows: FabricRow[] }) {
-  const mine = rows.filter((r) => r.cat === cat && r.meters > 0);
+const CAT_LABEL: Record<FabricCat, string> = { SOFA: "Sofa", BEDFRAME: "Bedframe" };
+const m = (n: number) => `${Math.round(n).toLocaleString()} m`;
+const perM = (sen: number, meters: number) => (meters > 0 ? formatRM(Math.round(sen / meters)) : "—");
+const pct = (a: number, b: number) => (b > 0 ? `${Math.round((a / b) * 100)}%` : "—");
+
+type Col = { label: string; cell: (c: CatMonth) => ReactNode; strong?: boolean };
+
+function MonthTable({ cat, months, cols }: { cat: FabricCat; months: FabricMonth[]; cols: Col[] }) {
   return (
     <Card className="min-w-0">
       <CardContent className="p-4 sm:p-5">
-        <h2 className="text-base font-bold text-[#1F1D1B] mb-3">{cat === "SOFA" ? "Sofa" : "Bedframe"} fabric, Avg cost /m</h2>
-        {mine.length === 0 ? (
-          <p className="text-sm text-[#6B7280]">No fabric issued.</p>
+        <h3 className="text-sm font-bold text-[#1F1D1B] mb-2">{CAT_LABEL[cat]}</h3>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[440px] text-sm tabular-nums">
+            <thead>
+              <tr className="text-[10px] uppercase tracking-wider text-[#9CA3AF]">
+                <th className="text-left py-2 pr-2">Month</th>
+                {cols.map((col) => (
+                  <th key={col.label} className="text-right py-2 px-2 last:pr-0">{col.label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {months.map((row) => (
+                <tr key={row.ym} className="border-t border-[#F0ECE6]">
+                  <td className="py-2 pr-2 text-[#1F1D1B]">{row.ym}</td>
+                  {cols.map((col) => (
+                    <td
+                      key={col.label}
+                      className={`text-right py-2 px-2 last:pr-0 ${col.strong ? "font-semibold text-[#1F1D1B]" : "text-[#5A5550]"}`}
+                    >
+                      {col.cell(row[cat])}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function Section({ title, note, months, cols }: { title: string; note: string; months: FabricMonth[]; cols: Col[] }) {
+  return (
+    <section className="space-y-2">
+      <h2 className="text-base font-bold text-[#1F1D1B]">{title}</h2>
+      <p className="text-sm text-[#5A5550]">{note}</p>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <MonthTable cat="SOFA" months={months} cols={cols} />
+        <MonthTable cat="BEDFRAME" months={months} cols={cols} />
+      </div>
+    </section>
+  );
+}
+
+function PriceTrend({ cat, data }: { cat: FabricCat; data: FabricData }) {
+  const rows = data.trend.filter((t) => t.cat === cat);
+  // Oldest on the left so the row reads as a trend.
+  const cols = [...data.months].reverse().map((r) => r.ym);
+  return (
+    <Card className="min-w-0">
+      <CardContent className="p-4 sm:p-5">
+        <h3 className="text-sm font-bold text-[#1F1D1B] mb-2">{CAT_LABEL[cat]}</h3>
+        {rows.length === 0 ? (
+          <p className="text-sm text-[#6B7280]">No fabric invoiced in these months.</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[440px] text-sm tabular-nums">
+            <table className="w-full min-w-[760px] text-xs tabular-nums">
               <thead>
                 <tr className="text-[10px] uppercase tracking-wider text-[#9CA3AF]">
-                  <th className="text-left py-2 pr-2">Month</th>
-                  <th className="text-right py-2 px-2">Cut</th>
-                  <th className="text-right py-2 px-2">Shown</th>
-                  <th className="text-right py-2 px-2">Real price</th>
-                  <th className="text-right py-2 px-2">Gap</th>
-                  <th className="text-right py-2 pl-2">At placeholder</th>
+                  <th className="text-left py-2 pr-2">Fabric</th>
+                  {cols.map((ym) => (
+                    <th key={ym} className="text-right py-2 px-1.5">{ym.slice(2)}</th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {mine.map((r) => {
-                  const shown = r.shownSen / r.meters;
-                  const real = r.realSen / r.meters;
-                  return (
-                    <tr key={r.ym} className="border-t border-[#F0ECE6]">
-                      <td className="py-2 pr-2 text-[#1F1D1B]">{r.ym}</td>
-                      <td className="text-right py-2 px-2">{Math.round(r.meters).toLocaleString()} m</td>
-                      <td className="text-right py-2 px-2">{formatRM(Math.round(shown))}</td>
-                      <td className="text-right py-2 px-2 font-semibold text-[#1F1D1B]">{formatRM(Math.round(real))}</td>
-                      <td className="text-right py-2 px-2" style={{ color: shown - real >= 1 ? RED : undefined }}>
-                        {formatRM(Math.round(shown - real))}
-                      </td>
-                      <td className="text-right py-2 pl-2 text-[#5A5550]">
-                        {Math.round(r.openingMeters).toLocaleString()} m · {Math.round((r.openingMeters / r.meters) * 100)}%
-                      </td>
-                    </tr>
-                  );
-                })}
+                {rows.map((t) => (
+                  <tr key={t.code} className="border-t border-[#F0ECE6]">
+                    <td className="py-2 pr-2 text-[#1F1D1B] whitespace-nowrap">{t.code}</td>
+                    {cols.map((ym) => {
+                      const cell = t.byMonth[ym];
+                      return (
+                        <td key={ym} className="text-right py-2 px-1.5 text-[#5A5550]" title={cell ? m(cell.meters) : undefined}>
+                          {cell && cell.meters > 0 ? (cell.sen / cell.meters / 100).toFixed(2) : "—"}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -203,33 +279,83 @@ function FabricCostCard({ cat, rows }: { cat: "SOFA" | "BEDFRAME"; rows: FabricR
   );
 }
 
-function FabricCostTab({ ov, period }: { ov: Overview | null; period: string }) {
-  const res = useCachedJson<{ rows: FabricRow[] }>("/api/dashboard/overview/fabric-cost-compare", 60);
-  const rows = res.data?.rows;
+function FabricPurchasingTab({ ov, period }: { ov: Overview | null; period: string }) {
+  const res = useCachedJson<FabricData>("/api/dashboard/overview/fabric-cost-compare", 60);
+  const data = res.data?.months ? res.data : null;
+  const usage = ov ? <FabricUsageSection ov={ov} period={period} /> : <p className="text-sm text-[#6B7280]">Loading…</p>;
+  if (!data) {
+    return (
+      <div className="space-y-6">
+        {usage}
+        <p className="text-sm text-[#6B7280]">{res.loading ? "Loading…" : "Could not load the fabric data."}</p>
+      </div>
+    );
+  }
+  const months = data.months;
   return (
-    <div className="space-y-4">
-      {ov ? <FabricUsageSection ov={ov} period={period} /> : <p className="text-sm text-[#6B7280]">Loading…</p>}
+    <div className="space-y-6">
+      {usage}
       <p className="text-sm text-[#5A5550]">
-        Shown is the dashboard's Avg cost /m: what the fabric cut that month cost, oldest stock first. Opening stock was
-        loaded on 2026-02-21 at a flat RM 25.00 or RM 35.00 per metre, above every real purchase price of those fabrics.
-        Real price costs the same metres with each opening-stock slice at that fabric's average purchase price. At
-        placeholder is how much of the month was cut from opening stock.
+        The last 12 months. Every figure belongs to its calendar month; nothing here is a live or rolling figure.
       </p>
-      {rows ? (
-        <div className="grid gap-4 lg:grid-cols-2">
-          <FabricCostCard cat="SOFA" rows={rows} />
-          <FabricCostCard cat="BEDFRAME" rows={rows} />
+
+      <Section
+        title="Average fabric price"
+        note="Shown is the dashboard's Avg cost /m: what the fabric cut that month cost, oldest stock first. Opening stock was loaded on 2026-02-21 at a flat RM 25.00 or RM 35.00 per metre, above every real purchase price of those fabrics. Real price costs the same metres with each opening-stock slice at that fabric's average purchase price. Invoice price is what supplier invoices dated that month charged per metre."
+        months={months}
+        cols={[
+          { label: "Cut", cell: (c) => (c.cutMeters > 0 ? m(c.cutMeters) : "—") },
+          { label: "Shown", cell: (c) => perM(c.shownSen, c.cutMeters) },
+          { label: "Real price", cell: (c) => perM(c.realSen, c.cutMeters), strong: true },
+          { label: "Invoice price", cell: (c) => perM(c.invoiceSen, c.invoiceMeters) },
+          { label: "At placeholder", cell: (c) => (c.cutMeters > 0 ? pct(c.openingMeters, c.cutMeters) : "—") },
+        ]}
+      />
+
+      <Section
+        title="Planned (BOM) vs recorded"
+        note="Orders finished in the month. Planned is each order's own bill of materials (the fabric it should use). Recorded is the fabric the system actually booked for it. When a fabric has no stock on the books, cutting it records nothing, so the gap is fabric used but never costed."
+        months={months}
+        cols={[
+          { label: "Orders", cell: (c) => c.ordersDone.toLocaleString() },
+          { label: "Recorded", cell: (c) => `${c.ordersRecorded.toLocaleString()} · ${pct(c.ordersRecorded, c.ordersDone)}` },
+          { label: "Planned", cell: (c) => m(c.plannedMeters) },
+          { label: "Recorded m", cell: (c) => m(c.recordedMeters), strong: true },
+          { label: "Fabrics", cell: (c) => `${c.fabricsRecorded} of ${c.fabricsUsed}` },
+        ]}
+      />
+
+      <Section
+        title="Fabric purchasing"
+        note="By the fabric's own group (sofa fabric, bedframe fabric), so a bedframe fabric cut for a sofa still counts as bedframe here. Invoiced comes from supplier invoices by invoice date. Received is what reached stock in the system. Fabric that is invoiced but never received has no stock to be cut from."
+        months={months}
+        cols={[
+          { label: "Invoiced", cell: (c) => (c.invoiceMeters > 0 ? m(c.invoiceMeters) : "—") },
+          { label: "Invoiced RM", cell: (c) => (c.invoiceSen > 0 ? formatRM(c.invoiceSen) : "—"), strong: true },
+          { label: "Received", cell: (c) => (c.receivedMeters > 0 ? m(c.receivedMeters) : "—") },
+          { label: "GRNs", cell: (c) => (c.grns > 0 ? c.grns.toLocaleString() : "—") },
+        ]}
+      />
+
+      <section className="space-y-2">
+        <h2 className="text-base font-bold text-[#1F1D1B]">Price trend</h2>
+        <p className="text-sm text-[#5A5550]">
+          RM per metre on supplier invoices, by invoice month, for the 10 fabrics bought most in these months. Hover a
+          price for the metres behind it. A figure far from its neighbours is usually a unit mix-up on the invoice (a
+          roll or a yard keyed as a metre).
+        </p>
+        <div className="grid gap-4">
+          <PriceTrend cat="SOFA" data={data} />
+          <PriceTrend cat="BEDFRAME" data={data} />
         </div>
-      ) : (
-        <p className="text-sm text-[#6B7280]">{res.loading ? "Loading…" : "Could not load the fabric cost data."}</p>
-      )}
+      </section>
     </div>
   );
 }
 
 const TABS = [
   { key: "plant", label: "Plant Load 7d vs 14d" },
-  { key: "fabric", label: "Fabric cost" },
+  { key: "fabric", label: "Fabric & purchasing" },
 ] as const;
 type TabKey = (typeof TABS)[number]["key"];
 
@@ -269,7 +395,7 @@ export default function DashboardCompare() {
         title="Dashboard Compare"
         subtitle={
           tab === "fabric"
-            ? "Fabric Avg cost /m as shown vs at real purchase prices. Staging only."
+            ? "Fabric price, planned vs recorded fabric, fabric purchasing and price trend, month by month. Staging only."
             : "Plant Load with capacity averaged over the last 7 vs the last 14 working days. Staging only."
         }
         actions={
@@ -293,7 +419,7 @@ export default function DashboardCompare() {
         }
       />
       <Tabs tabs={TABS} value={tab} onChange={(k) => setSearchParams(k === "plant" ? {} : { tab: k })} />
-      {tab === "fabric" ? <FabricCostTab ov={r14.data} period={period} /> : (
+      {tab === "fabric" ? <FabricPurchasingTab ov={r14.data} period={period} /> : (
         <>
           {period !== "all" && (
             <p className="text-xs text-[#5A5550]">
