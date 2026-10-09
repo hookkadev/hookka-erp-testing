@@ -178,7 +178,7 @@ export default function WorkerIssuePage() {
           ) : (
             <div className="w-full h-28 rounded-lg border-2 border-dashed border-[#D8D2CC] bg-white flex items-center justify-center text-[#8A8680] text-sm gap-2">
               <Camera className="h-5 w-5" />
-              <span>Tap to capture</span>
+              <span>{t("issue.tapToCapture")}</span>
             </div>
           )}
           <input
@@ -195,7 +195,7 @@ export default function WorkerIssuePage() {
               className="block mt-2 h-11 rounded bg-white border border-[#D8D2CC] text-center leading-[44px] text-sm font-semibold text-[#1F1D1B] cursor-pointer"
             >
               <Camera className="inline h-4 w-4 mr-1.5 -mt-0.5" />
-              Take photo
+              {t("qc.photoTake")}
             </label>
           )}
         </label>

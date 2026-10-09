@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-09**: branch `fix/worker-i18n-popups-and-date` (to `staging`, then `main`) added below (in progress, its entry is the newest).
 > **Last verified: 2026-10-09**: branch `feat/dashboard-month-static-kpis` (to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-08**: branch `feat/plant-load-14d` (to `staging`, BUG-2026-10-08-269) added below (its entry is the newest).
 > **Last verified: 2026-10-08**: branch `fix/bom-module-guide-anchors` (to `staging`) added item 5b to the editable WIP types entry below.
@@ -174,6 +175,12 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-09 — 🔵 Worker pages: scan pop-ups translated + local-date default (branch `fix/worker-i18n-popups-and-date` → `staging`, then `main`)
+
+Ask (owner, preparing the worker app for the Play Store): "start on 1 and 2" from the worker-page scan.
+1. ✅ (BUG-2026-10-09-272) ~45 hardcoded English strings on the worker pages now go through `worker-i18n.ts` (en / ms / zh / my); Burmese drafted, not reviewed. Not driven in a browser.
+2. ✅ (BUG-2026-10-09-272) non-production request date uses `todayYmdMY()` instead of the UTC date.
 
 ## 2026-10-09 — 🔵 Pending Delivery and Outstanding fixed per month (branch `feat/dashboard-month-static-kpis` → `staging`)
 
