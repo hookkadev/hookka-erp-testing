@@ -498,10 +498,16 @@ export async function planAutoAllocation(
 
   // Candidates are fetched ONCE per product and spent down locally, so two
   // lines of the same product cannot both claim the same production orders.
+  const codes = [...new Set(wanted.map((l) => l.productCode))];
   const pool = new Map<string, AllocatablePO[]>();
-  for (const code of new Set(wanted.map((l) => l.productCode))) {
+  for (const code of codes) {
     pool.set(code, await loadAllocatablePOs(db, code));
   }
+  // Read for the NOTES only, never to decide what to take — the pool above is
+  // the authority on that. This is what lets a line that lost a race say so:
+  // an emptied pool and a product nobody stocks are identical from `pool`, and
+  // differ only in on-hand versus available.
+  const avail = await loadAvailability(db, orgId, codes);
 
   const statements: D1PreparedStatement[] = [];
   const notes: string[] = [];
@@ -512,6 +518,7 @@ export async function planAutoAllocation(
     if (heldCodes.has(line.productCode)) continue;
 
     const candidates = pool.get(line.productCode) ?? [];
+    const oversized = candidates[0]?.quantity ?? 0;
     const taken: AllocatablePO[] = [];
     let got = 0;
     while (candidates.length > 0 && got < line.quantity) {
@@ -524,7 +531,27 @@ export async function planAutoAllocation(
       taken.push(next);
       got += next.quantity;
     }
-    if (taken.length === 0) continue;
+    if (taken.length === 0) {
+      // A9: "the loser is told." Losing a race is INVISIBLE from here — once
+      // another order has taken the pieces they stop being offered, so an
+      // emptied pool looks exactly like a product that never had stock. The
+      // difference is only in availability: goods on hand with none available
+      // means somebody else holds them.
+      //
+      // Silence is right for the genuinely-no-stock case (an "0 available" line
+      // on every product nobody stocks is noise), so only these two speak.
+      const a = avail.get(line.productCode);
+      if (a && a.onHandQty > 0 && a.availableQty === 0) {
+        notes.push(
+          `No stock allocated for ${line.productCode} — all ${a.onHandQty} on hand are already committed to other orders.`,
+        );
+      } else if (oversized > line.quantity) {
+        notes.push(
+          `No stock allocated for ${line.productCode} — the only stock is a set of ${oversized}, larger than this line's ${line.quantity}.`,
+        );
+      }
+      continue;
+    }
 
     statements.push(
       ...buildOwnershipTransferStatements(

@@ -1,5 +1,13 @@
 # Sales — Module Guide
 
+> **Last verified: 2026-09-29** (branch `fix/dev-05-allocation-loser-note`) — DEV-05 A9:
+> a confirm that allocates NOTHING now explains itself when there is something to
+> explain. `planAutoAllocation` (`src/api/lib/stock-allocations.ts:510`, `:534`) reads
+> `loadAvailability` beside the pool **for the notes only** — on hand > 0 with
+> available = 0 means another order holds the goods and `autoActions` says so by
+> number; an oversized stock set gets its own sentence; a product nobody stocks
+> stays silent. The pool remains the only authority on what actually moves.
+> Nothing else on this page re-checked.
 > **Last verified: 2026-10-06** (branch `chore/sync-staging-from-main-1006`, staging<-main merge): the flow and symbol-table anchors re-measured on the merged files (`app.post("/")` :1765, `/:id/confirm` :2550, `app.put("/:id")` :3218, `runSofaComboPass` :2309, insert :2399, `createProductionOrdersForSO` calls :2788 / :4227, `CopyFromSourceModal` :2429, `SalesOrderDetailPage` :561). Nothing else re-checked.
 
 > **Last verified: 2026-10-05** (branch `feat/block-confirm-empty-wip`): confirm is now blocked for any product whose BOM WIP tab is empty (`findIncompleteBomProducts` wraps `findEmptyWipProducts`, `sales-orders/_helpers.ts:489`); the shorter guard moved the `_helpers.ts` anchors below to :591 / :788 / :1298 / :1497. Nothing else re-checked.

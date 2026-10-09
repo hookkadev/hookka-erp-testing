@@ -240,8 +240,23 @@ const stockPOs = (n, qtyEach = 1) =>
     stock_origin_so_id: "so-stock",
   }));
 
-const autoDb = ({ pool = [], held = [] }) =>
+const autoDb = ({ pool = [], held = [], avail = null }) =>
   fakeDb((q) => {
+    // The availability aggregate — matched FIRST because its CASE arms contain
+    // both of the shapes the two branches below key on.
+    if (/GROUP BY product_code/i.test(q)) {
+      return avail
+        ? [
+            {
+              productCode: "A100",
+              availableQty: avail.available ?? 0,
+              onHandQty: avail.onHand ?? 0,
+              inProductionQty: 0,
+              allocatedQty: avail.allocated ?? 0,
+            },
+          ]
+        : [];
+    }
     // already-held: the orders this SO has taken from stock
     if (/sales_order_id = \?/i.test(q) && /sales_order_id <> stock_origin_so_id/i.test(q)) {
       return held;
@@ -332,8 +347,44 @@ test("a set that overshoots the line is NOT taken", async () => {
     SYSTEM_ALLOCATION_ACTOR,
     AT,
   );
+  assert.equal(plan.statements.length, 0, "a 3-set cannot satisfy a line of 1");
+  // A9 — and it says WHY. Silence here reads exactly like having no stock.
+  assert.match(
+    plan.notes[0] || "",
+    /set of 3, larger than this line/,
+  );
+});
+
+test("A9: the loser is told — stock exists but another order already has it", async () => {
+  // Losing the race is invisible from the pool alone: once another order claims
+  // the pieces they stop being offered, so an emptied pool looks exactly like a
+  // product the factory never stocked. Availability tells the two apart.
+  const db = autoDb({ pool: [], avail: { onHand: 4, available: 0, allocated: 4 } });
+  const plan = await planAutoAllocation(
+    db,
+    "hookka",
+    ORDER,
+    [{ productCode: "A100", quantity: 4, soItemId: "i1", soLineNo: 1 }],
+    SYSTEM_ALLOCATION_ACTOR,
+    AT,
+  );
+  assert.equal(plan.statements.length, 0, "nothing left to take — no overselling");
+  assert.match(plan.notes[0] || "", /all 4 on hand/);
+  assert.match(plan.notes[0] || "", /already committed to other orders/);
+});
+
+test("a product nobody stocks stays silent — there is nothing to explain", async () => {
+  const db = autoDb({ pool: [], avail: { onHand: 0, available: 0, allocated: 0 } });
+  const plan = await planAutoAllocation(
+    db,
+    "hookka",
+    ORDER,
+    [{ productCode: "A100", quantity: 4, soItemId: "i1", soLineNo: 1 }],
+    SYSTEM_ALLOCATION_ACTOR,
+    AT,
+  );
   assert.equal(plan.statements.length, 0);
-  assert.equal(plan.notes.length, 0);
+  assert.equal(plan.notes.length, 0, "no stock is the normal case, not an event");
 });
 
 test("ownership moves and the reason moves with it — never bare", async () => {
@@ -650,4 +701,114 @@ test("a release cancels an allocation even when it omits the line fields", async
 
   const after = await loadOpenAllocationsForOrder(db, "so-1");
   assert.equal(after.length, 0, "a fully released holding must disappear, not linger at 4");
+});
+
+// ── A7: the invoice for an allocated piece bills the CUSTOMER ───────────────
+//
+// The placeholder stock SO carries a sales_order_items row at
+// `unitPriceSen: 0` (production-orders.ts:1337 — "insert minimal SO item so
+// downstream readers don't crash"). An invoice line's price is resolved by
+// `priceForItem` from `production_orders.salesOrderId`, which is EXACTLY the
+// column allocation rewrites — so these pin that the rewrite is what makes the
+// invoice bill RM 1,500 instead of that zero.
+
+const { priceForItem, loadSoLinePriceIndex } = await import(
+  pathToFileURL(resolve(process.cwd(), "src/api/lib/do-value.ts")).href
+);
+
+/** Two org-wide reads: the production orders, then every SO line. */
+const priceDb = ({ pos, soLines }) =>
+  fakeDb((q) => {
+    if (/FROM production_orders WHERE orgId/i.test(q)) return pos;
+    if (/FROM sales_order_items si/i.test(q)) return soLines;
+    return [];
+  });
+
+const STOCK_LINE = {
+  id: "si-stock",
+  salesOrderId: "so-stock",
+  productCode: "A100",
+  sizeCode: "S",
+  fabricCode: "F",
+  unitPriceSen: 0, // the placeholder — never a price anyone is billed
+};
+const CUSTOMER_LINE = {
+  id: "si-cust",
+  salesOrderId: "so-cust",
+  productCode: "A100",
+  sizeCode: "S",
+  fabricCode: "F",
+  unitPriceSen: 150000, // RM 1,500.00
+};
+
+test("A7: an allocated piece is invoiced at the CUSTOMER's price, not the placeholder zero", async () => {
+  // Post-allocation: the production order's salesOrderId now points at the
+  // customer. stock_origin_so_id still remembers home, but pricing never reads it.
+  const idx = await loadSoLinePriceIndex(
+    priceDb({
+      pos: [
+        {
+          id: "po-1",
+          salesOrderId: "so-cust",
+          productCode: "A100",
+          sizeCode: "S",
+          fabricCode: "F",
+        },
+      ],
+      soLines: [STOCK_LINE, CUSTOMER_LINE],
+    }),
+    "hookka",
+  );
+  assert.equal(
+    priceForItem(idx, "po-1", "so-cust", "A100"),
+    150000,
+    "the zero-priced stock line must not win over the customer's line",
+  );
+});
+
+test("A7: before allocation the same piece prices at zero — nobody is billed for stock", async () => {
+  const idx = await loadSoLinePriceIndex(
+    priceDb({
+      pos: [
+        {
+          id: "po-1",
+          salesOrderId: "so-stock",
+          productCode: "A100",
+          sizeCode: "S",
+          fabricCode: "F",
+        },
+      ],
+      soLines: [STOCK_LINE, CUSTOMER_LINE],
+    }),
+    "hookka",
+  );
+  assert.equal(
+    priceForItem(idx, "po-1", "so-stock", "A100"),
+    0,
+    "stock is not a sale; the placeholder's zero is the right answer here",
+  );
+});
+
+test("FACT: byAnyCode is first-wins and a zero-priced stock line can take that slot", async () => {
+  // NOT a pin of desired behaviour — a record of live exposure. `byAnyCode` is
+  // priceForItem's last resort (do-value.ts:77) for a DO line with no usable PO
+  // link, and it exists to STOP RM 0 invoices for real goods
+  // (BUG-2026-05-18-004). It is built first-wins over an ORDER BY-less org-wide
+  // SELECT, with no is_stock filter and no price > 0 preference. For a product
+  // only ever built for stock the placeholder's zero is the ONLY candidate, so
+  // the safety net returns 0 — the exact number it was added to prevent.
+  //
+  // Not reachable by an allocated piece (its DO line carries a PO whose
+  // salesOrderId is the customer's, so resolution stops at byFull/byCode above).
+  // If this assertion ever starts failing, someone fixed it — delete the test.
+  const idx = await loadSoLinePriceIndex(
+    priceDb({ pos: [], soLines: [STOCK_LINE] }),
+    "hookka",
+  );
+  assert.equal(idx.byAnyCode.get("A100"), 0);
+  assert.equal(
+    priceForItem(idx, null, "", "A100"),
+    0,
+    "an unlinked line for a stock-only product falls through to zero",
+  );
 });
