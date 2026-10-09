@@ -224,7 +224,7 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
               setQuery(e.target.value);
               setHighlight(0);
               setOpen(true);
-              if (allowClear && e.target.value === "" && value) onChange("");
+              if (allowClear && !open && e.target.value === "" && value) onChange("");
             }}
             onKeyDown={onKeyDown}
             className={cn(
@@ -236,7 +236,7 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
               className,
             )}
           />
-          <div className="absolute inset-y-0 right-2 flex items-center gap-1">
+          <div className="pointer-events-none absolute inset-y-0 right-2 flex items-center gap-1">
             {allowClear && selected && !disabled && (
               <button
                 type="button"
@@ -250,12 +250,12 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
                   setOpen(true);
                   inputRef.current?.focus();
                 }}
-                className="rounded p-0.5 text-[#9CA3AF] hover:bg-[#FAF9F7] hover:text-[#1F1D1B]"
+                className="pointer-events-auto rounded p-0.5 text-[#9CA3AF] hover:bg-[#FAF9F7] hover:text-[#1F1D1B]"
               >
                 <X className="h-3.5 w-3.5" />
               </button>
             )}
-            <ChevronDown className="pointer-events-none h-3.5 w-3.5 flex-shrink-0 text-[#9CA3AF]" />
+            <ChevronDown className="h-3.5 w-3.5 flex-shrink-0 text-[#9CA3AF]" />
           </div>
         </div>
       ) : (
