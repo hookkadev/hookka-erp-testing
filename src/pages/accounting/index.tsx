@@ -29,6 +29,7 @@ import { printVoucher, printVouchers, type VoucherSpec, type VoucherLine } from 
 import { useRowSelection } from "@/lib/use-row-selection";
 import { useResizableTables } from "@/lib/use-resizable-tables";
 import { useEscapeClose } from "@/lib/escape-stack";
+import type { SystemPosting } from "@/lib/system-journals";
 import { useRowMenu, lifecycleMenuItems, type RowMenuGroups } from "@/components/accounting/row-menu";
 import { BatchActionsBar } from "@/components/accounting/batch-actions-bar";
 import { amountInWords } from "@/lib/amount-in-words";
@@ -3573,6 +3574,12 @@ function COATab({ accounts, onRefresh }: { accounts: ChartOfAccount[]; onRefresh
 
 // =============== TAB 3: JOURNAL ENTRIES ===============
 
+// A posting the system made straight to the GL (labour, closing stock,
+// depreciation, year-end close, opening balance) — /system-journals. A manual
+// journal has no `system`.
+type JournalRow = JournalEntry & { system?: SystemPosting };
+const systemTabLabel = (sys: SystemPosting) => TABS.find((t) => t.key === sys.tab)?.label ?? sys.tab;
+
 function JournalsTab({
   journals,
   accounts,
@@ -3589,12 +3596,28 @@ function JournalsTab({
   // no way to change its date/description before posting — the old Edit item
   // was removed as a no-op in BUG-2026-08-13-090 and never rebuilt).
   const [editingJv, setEditingJv] = useState<JournalEntry | null>(null);
-  const [selectedJvs, setSelectedJvs] = useState<JournalEntry[]>([]);
+  const [selectedJvs, setSelectedJvs] = useState<JournalRow[]>([]);
   // Detail view (owner 2026-09-22 「JV 无法 view detail … 双击点开」): double-click
   // a row (or ⋮ › View) to see every line with the DR/CR totals; single click
   // keeps selecting for the batch bar. The actions inside mirror the ⋮ menu.
-  const [detailJv, setDetailJv] = useState<JournalEntry | null>(null);
+  const [detailJv, setDetailJv] = useState<JournalRow | null>(null);
   useEscapeClose(() => setDetailJv(null), !!detailJv);
+
+  // System postings (owner 2026-10-09 「post to GL 我在 journal 看没有」→「journal
+  // 也要显示」): the labour month-end posting, closing stock, depreciation, the
+  // year-end close and the opening balance go straight to the GL with no
+  // journal of their own, so this list never showed them. Listed beside the
+  // manual journals, read-only — each is redone or undone on the tab that made
+  // it (no Edit / Void / Delete / Duplicate here).
+  const navigate = useNavigate();
+  const { data: sysResp } = useCachedJson<{ success?: boolean; data?: JournalRow[] }>("/api/accounting/system-journals");
+  const rows: JournalRow[] = useMemo(() => {
+    const sys = sysResp?.success ? sysResp.data ?? [] : [];
+    if (!sys.length) return journals;
+    // Newest date first, as the journals come; on the same date the manual ones stay first.
+    return [...journals, ...sys].sort((a, b) => String(b.date ?? "").localeCompare(String(a.date ?? "")));
+  }, [journals, sysResp]);
+  const openSystemTab = (sys: SystemPosting) => navigate(`/accounting?tab=${sys.tab}`);
 
   // Owner 2026-07-28 (JE-2607-0001): this used to ignore the response entirely
   // — a rejected/aborted Post showed NOTHING and the entry silently stayed
@@ -3683,7 +3706,7 @@ function JournalsTab({
     onRefresh();
   };
 
-  const columns: Column<JournalEntry>[] = [
+  const columns: Column<JournalRow>[] = [
     {
       key: "entryNo",
       label: "Entry No.",
@@ -3725,7 +3748,16 @@ function JournalsTab({
           <Badge variant="status" status={row.status}>
             {row.status}
           </Badge>
-          <LifecycleBadge state={row.lifecycleState} />
+          {row.system ? (
+            <span
+              className="rounded px-1.5 py-0.5 text-[10px] font-semibold bg-[#EEF1F4] text-[#4B5563]"
+              title={`Posted by the system — redo or undo it on ${systemTabLabel(row.system)}`}
+            >
+              SYSTEM
+            </span>
+          ) : (
+            <LifecycleBadge state={row.lifecycleState} />
+          )}
         </span>
       ),
     },
@@ -3745,7 +3777,17 @@ function JournalsTab({
     },
   ];
 
-  const contextMenuItems = (row: JournalEntry): ContextMenuItem[] => {
+  const contextMenuItems = (row: JournalRow): ContextMenuItem[] => {
+    if (row.system) {
+      const sys = row.system;
+      return [
+        { label: "View detail", action: (r) => setDetailJv(r) },
+        { label: "Print voucher", action: (r) => printVoucher(buildJvVoucher(r)) },
+        { label: `Open ${systemTabLabel(sys)}`, action: () => openSystemTab(sys) },
+        { separator: true, label: "", action: () => {} },
+        { label: "Refresh", action: () => onRefresh() },
+      ];
+    }
     // BUG-2026-08-13-090: a "View" item whose action was `() => {}` used to sit
     // at the top of this menu. A control that does nothing is the same lie as a
     // fabricated figure — dropped rather than pointed at a page that does not
@@ -3823,7 +3865,7 @@ function JournalsTab({
         <CardContent className="p-4">
           <DataGrid
             columns={columns}
-            data={journals}
+            data={rows}
             keyField="id"
             virtualize
             gridId="accounting-journals"
@@ -3836,7 +3878,8 @@ function JournalsTab({
       </Card>
 
       {detailJv && (() => {
-        const je = journals.find((j) => j.id === detailJv.id) ?? detailJv;
+        const je = rows.find((j) => j.id === detailJv.id) ?? detailJv;
+        const sys = je.system;
         const dr = je.lines.reduce((s, l) => s + l.debitSen, 0);
         const cr = je.lines.reduce((s, l) => s + l.creditSen, 0);
         const state = je.lifecycleState ?? "ACTIVE";
@@ -3846,9 +3889,10 @@ function JournalsTab({
             <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between p-5 border-b border-[#E2DDD8]">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <h2 className="text-base font-semibold text-[#1F1D1B]">Journal {je.entryNo}</h2>
+                  <h2 className="text-base font-semibold text-[#1F1D1B]">{sys ? sys.label : "Journal"} {je.entryNo}</h2>
                   <Badge variant="status" status={je.status}>{je.status}</Badge>
-                  {state !== "ACTIVE" && <LifecycleBadge state={state} />}
+                  {sys && <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold bg-[#EEF1F4] text-[#4B5563]">SYSTEM</span>}
+                  {!sys && state !== "ACTIVE" && <LifecycleBadge state={state} />}
                 </div>
                 <button onClick={close} className="text-[#9CA3AF] hover:text-[#6B7280] text-lg leading-none">✕</button>
               </div>
@@ -3856,8 +3900,14 @@ function JournalsTab({
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   <div><p className="text-[#9CA3AF] text-xs">Date</p><p className="font-medium">{formatDateDMY(je.date)}</p></div>
                   <div className="col-span-2"><p className="text-[#9CA3AF] text-xs">Description</p><p className="font-medium">{je.description || "—"}</p></div>
-                  <div><p className="text-[#9CA3AF] text-xs">Created</p><p className="font-medium">{String(je.createdAt ?? "").slice(0, 10) || "—"}</p></div>
+                  <div><p className="text-[#9CA3AF] text-xs">{sys ? "Posted on" : "Created"}</p><p className="font-medium">{String(je.createdAt ?? "").slice(0, 10) || "—"}</p></div>
                 </div>
+                {sys && (
+                  <p className="text-xs text-[#6B7280] bg-[#FAF8F5] border border-[#E2DDD8] rounded-md px-3 py-2">
+                    Posted by the system from {systemTabLabel(sys)}, not a journal entry — it can't be edited or voided here.
+                    {sys.undo ? " This one undoes an earlier posting." : ` To redo or undo it, use ${systemTabLabel(sys)}.`}
+                  </p>
+                )}
                 <div className="border border-[#E2DDD8] rounded-md overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead className="bg-[#FAF8F5]">
@@ -3887,19 +3937,24 @@ function JournalsTab({
                 </div>
                 <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-[#F0ECE9]">
                   <Button variant="outline" size="sm" onClick={() => printVoucher(buildJvVoucher(je))}><Printer className="h-4 w-4" /> Print voucher</Button>
-                  {je.status === "DRAFT" && (
+                  {sys && (
+                    <Button variant="outline" size="sm" onClick={() => { close(); openSystemTab(sys); }}>Open {systemTabLabel(sys)}</Button>
+                  )}
+                  {!sys && je.status === "DRAFT" && (
                     <>
                       <Button variant="outline" size="sm" onClick={() => { close(); setShowForm(false); setEditingJv(je); }}>Edit</Button>
                       <Button variant="primary" size="sm" onClick={() => { close(); void handlePost(je.id); }}>Post</Button>
                     </>
                   )}
-                  {je.status !== "DRAFT" && state === "ACTIVE" && (
+                  {!sys && je.status !== "DRAFT" && state === "ACTIVE" && (
                     <Button variant="outline" size="sm" onClick={() => { close(); void handleLifecycle(je.id, je.entryNo, "void"); }}>Void</Button>
                   )}
-                  {je.status !== "DRAFT" && state === "VOID" && (
+                  {!sys && je.status !== "DRAFT" && state === "VOID" && (
                     <Button variant="outline" size="sm" onClick={() => { close(); void handleLifecycle(je.id, je.entryNo, "unvoid"); }}>Unvoid</Button>
                   )}
-                  <Button variant="outline" size="sm" onClick={() => { close(); void handleDuplicate(je); }}>Duplicate as draft</Button>
+                  {!sys && (
+                    <Button variant="outline" size="sm" onClick={() => { close(); void handleDuplicate(je); }}>Duplicate as draft</Button>
+                  )}
                 </div>
               </div>
             </div>
@@ -13014,14 +13069,20 @@ function LaborTab({ accounts }: { accounts: ChartOfAccount[] }) {
     accrualAccount: string;
     byDept: { departmentCode: string; account: string; accountName: string; workers: number; grossSen: number; employerSen: number; costSen: number }[];
     accounts: { code: string; name: string; costSen: number }[];
+    // The credit side (2026-10-09): salary accrual + each statutory fund's.
+    credits?: { code: string; name: string; sen: number }[];
+    postedCredits?: { code: string; name: string; sen: number }[];
   } | null>(null);
   const [posting, setPosting] = useState(false);
   const [showMap, setShowMap] = useState(false);
-  const [map, setMap] = useState<{ fallback: string; byDept: Record<string, string> }>({ fallback: "750-0010", byDept: {} });
+  const [map, setMap] = useState<{ fallback: string; byDept: Record<string, string>; epfAccrual?: string; socsoAccrual?: string; eisAccrual?: string }>({ fallback: "750-0010", byDept: {} });
 
   const costAccounts = accounts.filter(
     (a) => (a.type === "COST" || a.type === "EXPENSE") && a.isPostable !== false,
   );
+  // Where each fund's share accrues (owner 2026-10-09 「epf, socso 那些也要
+  // accrual」→「EIS 单独记 0040」).
+  const liabilityAccounts = accounts.filter((a) => a.type === "LIABILITY" && a.isPostable !== false);
 
   const load = useCallback(() => {
     fetch(`/api/accounting/labor/preview?month=${month}`)
@@ -13039,7 +13100,7 @@ function LaborTab({ accounts }: { accounts: ChartOfAccount[] }) {
   }, [month]);
   useEffect(() => {
     fetch("/api/accounting/labor/map")
-      .then((r) => r.json() as Promise<{ success?: boolean; data?: { fallback: string; byDept: Record<string, string> } }>)
+      .then((r) => r.json() as Promise<{ success?: boolean; data?: { fallback: string; byDept: Record<string, string>; epfAccrual?: string; socsoAccrual?: string; eisAccrual?: string } }>)
       .then((j) => { if (j?.success && j.data) setMap(j.data); })
       .catch(() => {});
   }, []);
@@ -13132,6 +13193,20 @@ function LaborTab({ accounts }: { accounts: ChartOfAccount[] }) {
               </div>
             ))}
             <AddDeptMapRow onAdd={(dept) => setMap({ ...map, byDept: { ...map.byDept, [dept]: map.fallback } })} />
+            <div className="pt-2 border-t border-[#F0ECE9]">
+              <p className="text-xs text-[#6B7280] mb-2">Statutory accruals (credit) — each fund&apos;s share, employer plus employee, is owed to the fund; the KWSP / PERKESO payments clear these. The rest of the month&apos;s cost credits 410-0010 ACCRUAL - SALARY.</p>
+              <div className="flex flex-wrap items-end gap-3">
+                {([["epfAccrual", "EPF owed"], ["socsoAccrual", "SOCSO owed"], ["eisAccrual", "EIS owed"]] as const).map(([k, label]) => (
+                  <div key={k}>
+                    <label className="text-xs font-medium text-[#6B7280] mb-1 block">{label}</label>
+                    <select value={map[k] ?? ""} onChange={(e) => setMap({ ...map, [k]: e.target.value })} className={`${selCls} w-64`}>
+                      {!map[k] && <option value="">—</option>}
+                      {liabilityAccounts.map((a) => <option key={a.code} value={a.code}>{a.code} {a.name}</option>)}
+                    </select>
+                  </div>
+                ))}
+              </div>
+            </div>
             <div className="flex gap-2">
               <Button variant="primary" size="sm" onClick={saveMap}>Save mapping</Button>
               <Button variant="outline" size="sm" onClick={() => setShowMap(false)}>Cancel</Button>
@@ -13151,7 +13226,12 @@ function LaborTab({ accounts }: { accounts: ChartOfAccount[] }) {
               <span className="text-sm text-[#6B7280] pb-1">Total labour cost <span className="font-semibold text-[#1F1D1B] tabular-nums">{formatCurrency(data.totalSen)}</span></span>
               {data.posted ? (
                 <>
-                  <span className="text-xs text-[#27500A] pb-2">Already posted ✓ (DR accounts · CR {data.accrualAccount})</span>
+                  <span className="text-xs text-[#27500A] pb-2">Already posted ✓ (CR {(data.postedCredits ?? []).map((c) => c.code).join(", ") || data.accrualAccount})</span>
+                  {/* Posted before the statutory accruals were split out (2026-10-09):
+                      the ledger has fewer credit accounts than the posting now makes. */}
+                  {(data.postedCredits?.length ?? 0) > 0 && (data.credits?.length ?? 0) > (data.postedCredits?.length ?? 0) && (
+                    <span className="text-xs text-[#7A5B12] pb-2">Posted before EPF / SOCSO / EIS had their own accruals — Unpost, then Post again to split it.</span>
+                  )}
                   {/* Without this the month is frozen in whatever shape it was
                       first posted — the only way back was a hand-written JE. */}
                   <Button variant="outline" size="sm" disabled={posting} onClick={handleUnpost}
@@ -13216,11 +13296,13 @@ function LaborTab({ accounts }: { accounts: ChartOfAccount[] }) {
                       <td className="px-3 py-1.5 text-right" />
                     </tr>
                   ))}
-                  <tr className="border-b border-[#F0ECE9]">
-                    <td className="px-3 py-1.5"><span className="tabular-nums text-xs text-[#6B7280] mr-1">{data.accrualAccount}</span>ACCRUAL - SALARY</td>
-                    <td className="px-3 py-1.5 text-right" />
-                    <td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(data.totalSen)}</td>
-                  </tr>
+                  {(data.credits ?? [{ code: data.accrualAccount, name: "ACCRUAL - SALARY", sen: data.totalSen }]).map((cr) => (
+                    <tr key={cr.code} className="border-b border-[#F0ECE9]">
+                      <td className="px-3 py-1.5"><span className="tabular-nums text-xs text-[#6B7280] mr-1">{cr.code}</span>{cr.name}</td>
+                      <td className="px-3 py-1.5 text-right" />
+                      <td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(cr.sen)}</td>
+                    </tr>
+                  ))}
                   <tr className="bg-[#F0ECE9]/60 font-semibold">
                     <td className="px-3 py-2">TOTAL</td>
                     <td className="px-3 py-2 text-right tabular-nums">{formatCurrency(data.totalSen)}</td>
@@ -13233,8 +13315,9 @@ function LaborTab({ accounts }: { accounts: ChartOfAccount[] }) {
         </div>
       )}
       <p className="text-[11px] text-[#9CA3AF]">
-        Cost basis = gross pay + employer EPF/SOCSO/EIS (the full company cost). Posting credits 410-0010 ACCRUAL - SALARY;
-        when you later pay salaries via Payments, debit 410-0010 to clear it. Net pay vs statutory split is handled at payment time.
+        Cost basis = gross pay + employer EPF/SOCSO/EIS (the full company cost). Posting credits each fund&apos;s share — employer plus
+        employee — to its own accrual (EPF / SOCSO / EIS, set in the map), and the rest (net pay, PCB, deductions) to 410-0010
+        ACCRUAL - SALARY. Pay the KWSP and PERKESO vouchers against their accruals, and the salary and LHDN vouchers against 410-0010.
       </p>
     </div>
   );

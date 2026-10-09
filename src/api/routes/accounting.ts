@@ -41,6 +41,8 @@ import { applyOpeningSlice, windowCoversMonth } from "../../lib/opening-slice";
 import { docNoFromDescription, drillVariant, otherSideCodes, ownDescription, tidyDescription } from "../../lib/ledger-drill";
 import { PV_KIND_TRANSFER, validatePvTransfer } from "../../lib/pv-transfer";
 import { labourInjectMonths } from "../../lib/labour-inject";
+import { labourCreditLines as splitLabourCredits } from "../../lib/labour-credit";
+import { SYSTEM_JOURNAL_FAMILIES, buildSystemJournals, type SystemLeg } from "../../lib/system-journals";
 import { projectedLabourByDept } from "../lib/labour-projection";
 import { groupPayslipsByMonthDept, forecastEntryKind, monthHasDeptForecast, labourMappedAccounts } from "../../lib/salary-dept";
 import { ensureTfTables, getTfSources, saveTfSources, loadTfDraws } from "../lib/trade-finance";
@@ -1238,6 +1240,32 @@ app.get("/journals", async (c) => {
     ...rowToJournal(e, lines.results ?? []),
     lifecycleState: e.lifecycleState ?? null,
   }));
+  return c.json({ success: true, data, total: data.length });
+});
+
+// System postings (owner 2026-10-09 「journal 也要显示」): what the system writes
+// straight to the GL with no journal document of its own — the labour
+// month-end posting and its undo, closing stock, depreciation, the year-end
+// close, the opening balance. Listed on Journal Entries beside the manual
+// journals, read-only: each is redone or undone on the tab that made it. The
+// families and the one-entry-per-posting grouping: src/lib/system-journals.ts.
+app.get("/system-journals", async (c) => {
+  const denied = await requirePermission(c, "accounting", "read");
+  if (denied) return denied;
+  const orgId = getOrgId(c);
+  const families = Object.keys(SYSTEM_JOURNAL_FAMILIES);
+  const [legRes, coaRes, dc] = await Promise.all([
+    c.var.DB.prepare(
+      `SELECT sourceType, sourceId, postedAt, legNo, accountCode, debitSen, creditSen, description
+         FROM ledger_journal_entries
+        WHERE orgId = ? AND hidden = 0 AND sourceType IN (${families.map(() => "?").join(",")})
+        ORDER BY postedAt, legNo`,
+    ).bind(orgId, ...families).all<SystemLeg>(),
+    c.var.DB.prepare("SELECT code, name FROM chart_of_accounts").all<{ code: string; name: string }>(),
+    loadDocDateResolver(c.var.DB),
+  ]);
+  const names = new Map((coaRes.results ?? []).map((a) => [a.code, a.name] as const));
+  const data = buildSystemJournals(legRes.results ?? [], (code) => names.get(code) ?? "", dc.docDate);
   return c.json({ success: true, data, total: data.length });
 });
 
@@ -6804,6 +6832,11 @@ async function labourInjectionLines(
         epfSen: d.epfSen,
         socsoSen: d.socsoSen,
         eisSen: d.eisSen,
+        // Only the debit side is used here (P&L cost); employee shares matter
+        // to the posting's credit side alone.
+        epfEmployeeSen: 0,
+        socsoEmployeeSen: 0,
+        eisEmployeeSen: 0,
       }));
     } catch { byDept = []; }
   }
@@ -12277,6 +12310,14 @@ const DEFAULT_LABOUR_MAP = {
   epf: "750-0020", // PRODUCTION - EPF
   socso: "750-0030", // PRODUCTION - SOCSO
   eis: "750-0040", // PRODUCTION - EIS
+  // What each fund is OWED — the employer's share plus what the payslip took
+  // from the employee — accrues to its own liability (owner 2026-10-09 「epf,
+  // socso 那些也要 accrual」→「EIS 单独记 0040」), so the KWSP / PERKESO
+  // payments clear their own accounts; the rest of the gross stays on
+  // 410-0010 for the salary and LHDN payments.
+  epfAccrual: "410-0020", // ACCRUAL - EPF
+  socsoAccrual: "410-0030", // ACCRUAL - SOCSO
+  eisAccrual: "410-0040", // ACCRUAL - EIS
 };
 
 type LabourMap = {
@@ -12285,6 +12326,9 @@ type LabourMap = {
   epf: string;
   socso: string;
   eis: string;
+  epfAccrual: string;
+  socsoAccrual: string;
+  eisAccrual: string;
 };
 
 async function getLabourMap(db: Env["Variables"]["DB"]): Promise<LabourMap> {
@@ -12300,6 +12344,9 @@ async function getLabourMap(db: Env["Variables"]["DB"]): Promise<LabourMap> {
         epf: parsed.epf || DEFAULT_LABOUR_MAP.epf,
         socso: parsed.socso || DEFAULT_LABOUR_MAP.socso,
         eis: parsed.eis || DEFAULT_LABOUR_MAP.eis,
+        epfAccrual: parsed.epfAccrual || DEFAULT_LABOUR_MAP.epfAccrual,
+        socsoAccrual: parsed.socsoAccrual || DEFAULT_LABOUR_MAP.socsoAccrual,
+        eisAccrual: parsed.eisAccrual || DEFAULT_LABOUR_MAP.eisAccrual,
       };
     }
   } catch {
@@ -12425,6 +12472,11 @@ type LabourDeptAgg = {
   epfSen: number;
   socsoSen: number;
   eisSen: number;
+  // The employee's own contributions (inside gross), owed to the same funds
+  // (owner 2026-10-09: they accrue with the employer's share).
+  epfEmployeeSen: number;
+  socsoEmployeeSen: number;
+  eisEmployeeSen: number;
 };
 
 async function aggregateLabour(
@@ -12435,11 +12487,12 @@ async function aggregateLabour(
   const map = await getLabourMap(db);
   const res = await db
     .prepare(
-      `SELECT departmentCode, grossPaySen, epfEmployerSen, socsoEmployerSen, eisEmployerSen
+      `SELECT departmentCode, grossPaySen, epfEmployerSen, socsoEmployerSen, eisEmployerSen,
+              epfEmployeeSen, socsoEmployeeSen, eisEmployeeSen
          FROM payslips WHERE orgId = ? AND period = ? AND status != 'CANCELLED'`,
     )
     .bind(orgId, month)
-    .all<{ departmentCode: string | null; grossPaySen: number; epfEmployerSen: number; socsoEmployerSen: number; eisEmployerSen: number }>();
+    .all<{ departmentCode: string | null; grossPaySen: number; epfEmployerSen: number; socsoEmployerSen: number; eisEmployerSen: number; epfEmployeeSen: number | null; socsoEmployeeSen: number | null; eisEmployeeSen: number | null }>();
   const agg = new Map<string, LabourDeptAgg>();
   for (const p of res.results ?? []) {
     const dept = String(p.departmentCode ?? "").trim() || "(unassigned)";
@@ -12452,6 +12505,7 @@ async function aggregateLabour(
     const cur = agg.get(dept) ?? {
       departmentCode: dept, account, workers: 0,
       grossSen: 0, employerSen: 0, costSen: 0, epfSen: 0, socsoSen: 0, eisSen: 0,
+      epfEmployeeSen: 0, socsoEmployeeSen: 0, eisEmployeeSen: 0,
     };
     cur.workers += 1;
     cur.grossSen += gross;
@@ -12459,6 +12513,9 @@ async function aggregateLabour(
     cur.epfSen += epf;
     cur.socsoSen += socso;
     cur.eisSen += eis;
+    cur.epfEmployeeSen += Number(p.epfEmployeeSen) || 0;
+    cur.socsoEmployeeSen += Number(p.socsoEmployeeSen) || 0;
+    cur.eisEmployeeSen += Number(p.eisEmployeeSen) || 0;
     cur.costSen += gross + employer;
     agg.set(dept, cur);
   }
@@ -12542,6 +12599,18 @@ function labourDebitLines(
     .sort((a, b) => a.account.localeCompare(b.account));
 }
 
+// The CREDIT side: each statutory fund's share — employer plus employee — to
+// its own accrual, the rest of the month's cost to 410-0010. The rule (and why)
+// lives in src/lib/labour-credit.ts.
+function labourCreditLines(byDept: LabourDeptAgg[], map: LabourMap) {
+  return splitLabourCredits(byDept, {
+    salary: LABOUR_ACCRUAL_ACCT,
+    epf: map.epfAccrual,
+    socso: map.socsoAccrual,
+    eis: map.eisAccrual,
+  });
+}
+
 app.get("/labor/preview", async (c) => {
   const denied = await requirePermission(c, "accounting", "read");
   if (denied) return denied;
@@ -12552,7 +12621,8 @@ app.get("/labor/preview", async (c) => {
   try {
     const orgId = getOrgId(c);
     const { byDept, totalSen, map: labourMap } = await aggregateLabour(c.var.DB, month, orgId);
-    const posted = labourIsPosted(await labourLedgerNet(c.var.DB, orgId, `labor-${month}`));
+    const postedNet = await labourLedgerNet(c.var.DB, orgId, `labor-${month}`);
+    const posted = labourIsPosted(postedNet);
     // Roll the per-dept rows up to the account level for the GL preview —
     // gross to the department's account, each statutory contribution to its own.
     const byAccount = new Map<string, number>();
@@ -12571,6 +12641,10 @@ app.get("/labor/preview", async (c) => {
           .map(([code, sen]) => ({ code, name: names.get(code) ?? "", costSen: sen }))
           .sort((a, b) => a.code.localeCompare(b.code)),
         accrualAccount: LABOUR_ACCRUAL_ACCT,
+        credits: labourCreditLines(byDept, labourMap).map((l) => ({ code: l.account, name: names.get(l.account) ?? "", sen: l.sen })),
+        // What the ledger holds for the month now, credit side — a month posted
+        // before the statutory accruals were split shows it all on 410-0010.
+        postedCredits: [...postedNet.entries()].filter(([, v]) => v < 0).map(([code, v]) => ({ code, name: names.get(code) ?? "", sen: -v })),
         totalSen,
       },
     });
@@ -12682,18 +12756,20 @@ app.post("/labor/post", async (c) => {
         orgId,
       });
     }
-    legs.push({
-      id: `lje-${crypto.randomUUID().slice(0, 12)}`,
-      sourceType: "labor_post",
-      sourceId,
-      legNo: legNo++,
-      accountCode: LABOUR_ACCRUAL_ACCT,
-      debitSen: 0,
-      creditSen: totalSen,
-      description: `Labour ${month} · accrued wages payable`,
-      actorUserId,
-      orgId,
-    });
+    for (const { account, sen, label } of labourCreditLines(byDept, labourMapPost)) {
+      legs.push({
+        id: `lje-${crypto.randomUUID().slice(0, 12)}`,
+        sourceType: "labor_post",
+        sourceId,
+        legNo: legNo++,
+        accountCode: account,
+        debitSen: 0,
+        creditSen: sen,
+        description: `Labour ${month} · ${label}`,
+        actorUserId,
+        orgId,
+      });
+    }
     const { statements } = await buildJournalEntryStatements(c.var.DB, orgId, legs);
     await c.var.DB.batch(statements);
     await emitAudit(c, {
@@ -12797,14 +12873,34 @@ app.put("/labor/map", async (c) => {
         if (typeof v === "string" && v.trim()) byDept[k] = v.trim();
       }
     }
+    // The statutory accounts (2026-10-09: the three accruals are editable too).
+    // Kept from the saved map when the body leaves them out — a save that only
+    // touched a department must never drop them back to the defaults.
+    const saved = await getLabourMap(c.var.DB);
+    const pick = (k: "epf" | "socso" | "eis" | "epfAccrual" | "socsoAccrual" | "eisAccrual") =>
+      typeof body[k] === "string" && body[k].trim() ? String(body[k]).trim() : saved[k];
+    const statutory = {
+      epf: pick("epf"), socso: pick("socso"), eis: pick("eis"),
+      epfAccrual: pick("epfAccrual"), socsoAccrual: pick("socsoAccrual"), eisAccrual: pick("eisAccrual"),
+    };
+    // Each must be a postable account on the chart — a typo would otherwise
+    // only surface as a failed month-end post.
+    const coaRes = await c.var.DB.prepare(
+      `SELECT code, ${EFFECTIVE_POSTABLE_SQL} FROM chart_of_accounts`,
+    ).all<{ code: string; isPostable: number | null }>();
+    const postable = new Map((coaRes.results ?? []).map((a) => [a.code, (a.isPostable ?? 1) === 1] as const));
+    const bad = Object.values(statutory).filter((code) => !postable.get(code));
+    if (bad.length) {
+      return c.json({ success: false, error: `Not a postable account on the chart: ${[...new Set(bad)].join(", ")}` }, 400);
+    }
     await c.var.DB.prepare(
       `INSERT INTO kv_config (key, value, updated_at)
        VALUES ('labor_account_map', ?, ?)
        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
     )
-      .bind(JSON.stringify({ fallback, byDept }), new Date().toISOString())
+      .bind(JSON.stringify({ fallback, byDept, ...statutory }), new Date().toISOString())
       .run();
-    return c.json({ success: true, data: { fallback, byDept } });
+    return c.json({ success: true, data: { fallback, byDept, ...statutory } });
   } catch {
     return c.json({ success: false, error: "Invalid request body" }, 400);
   }
