@@ -70,11 +70,13 @@ app.get("/", async (c) => {
   const todayISOTop = fmtISO(new Date());
   const currentMonthPrefix = todayISOTop.slice(0, 7);
   const isPastMonth = period !== "all" && period < currentMonthPrefix;
-  // Staging Dashboard Compare asks for the old 7-day capacity window to show
-  // beside the 14-day one. An override skips every stored copy (snapshot,
-  // daily state, frozen month) both ways, so it is never served to, or saved
-  // for, the normal dashboard.
-  const windowOverride = c.req.query("capacityWindow") === "7" ? 7 : null;
+  // Staging Dashboard Compare asks for a 7- or 14-day capacity window side by
+  // side. For a past month both windows END on that month's last day, so the
+  // two panels show the month-end state on each basis. An override skips
+  // every stored copy (snapshot, daily state, frozen month) both ways, so it
+  // is never served to, or saved for, the normal dashboard.
+  const cwRaw = c.req.query("capacityWindow");
+  const windowOverride = cwRaw === "7" ? 7 : cwRaw === "14" ? 14 : null;
 
   // Extract the live STATE metrics from a computed overview payload and
   // upsert today's daily snapshot (idempotent on (org_id, snap_date)).
@@ -174,7 +176,7 @@ app.get("/", async (c) => {
   // v23 (2026-08-14, BUG-2026-08-13-142): payload gained `customerConcentration`.
   // A pre-fix body has no such key, and the card would render "—" until the 60s
   // TTL rolled; bumping the version makes that window zero.
-  const data = await cached(c, `dashboard:overview:${orgId}:v24:${period}:w${windowOverride ?? 14}`, 60, async () => {
+  const data = await cached(c, `dashboard:overview:${orgId}:v24:${period}${windowOverride ? `:cmp${windowOverride}` : ""}`, 60, async () => {
     const db = c.var.DB;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -286,8 +288,11 @@ app.get("/", async (c) => {
     const ROLLING_DAYS = windowOverride ?? 14;
     const rollingDays: string[] = [];
     {
-      const cur = new Date(today);
-      cur.setDate(cur.getDate() - 1);
+      // Compare view on a past month: count back from the month's last day.
+      const cur =
+        windowOverride && isPastMonth && monthScope
+          ? new Date(`${monthScope.lastDay}T00:00:00`)
+          : new Date(new Date(today).getTime() - 24 * 60 * 60 * 1000);
       let guard = 0;
       while (rollingDays.length < ROLLING_DAYS && guard < 130) {
         guard++;
@@ -306,7 +311,7 @@ app.get("/", async (c) => {
     //   - A PAST month → every working day in that month. Divisor becomes
     //     that month's working-day COUNT.
     let windowDays: string[];
-    if (monthScope && isPastMonth) {
+    if (monthScope && isPastMonth && !windowOverride) {
       windowDays = [];
       const cur = new Date(`${monthScope.start}T00:00:00`);
       let guard = 0;
@@ -2250,6 +2255,26 @@ app.get("/", async (c) => {
           // the old honest fallback if month bounds are somehow unavailable.
           stateSnapshot = { source: "live", isHistorical: true, asOf: null };
         }
+      }
+      // Compare view: the month-end backlog was saved (or rebuilt) against
+      // another capacity basis, so divide it again by this window's figures.
+      if (windowOverride) {
+        const capByDept = new Map(backlogByDept.map((d) => [d.dept, d.dailyCapMin]));
+        stateProduction = {
+          ...stateProduction,
+          backlogDays:
+            dailyCapacityMin > 0
+              ? Math.round((stateProduction.backlogGrandMin / dailyCapacityMin) * 10) / 10
+              : 0,
+          backlogByDept: stateProduction.backlogByDept.map((d) => {
+            const cap = capByDept.get(d.dept) ?? 0;
+            return {
+              ...d,
+              dailyCapMin: cap,
+              backlogDays: cap > 0 ? Math.round((d.totalMin / cap) * 10) / 10 : null,
+            };
+          }),
+        };
       }
     }
 

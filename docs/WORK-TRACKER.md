@@ -186,6 +186,7 @@ Owner asks (one message, plus answers to three follow-up questions):
 6. 🟡 Not fixed (owner did not pick it): capacity counts Accessory work (about 6h/day) but the backlog does not, so backlog days read slightly low (about 18.4d vs 18.9d).
 7. ⬜ Staging check after deploy.
 8. 🔵 Follow-up ask (2026-10-09): a staging-only Dashboard Compare page under Dashboard in the side menu (`/dashboard/compare`, `src/pages/dashboard-compare.tsx`): the 7-day and 14-day Plant Load side by side, charts on one scale, plus a per-department difference table. The overview route takes `capacityWindow=7`, which reads and writes no stored copy.
+9. 🔵 Follow-up (2026-10-09, branch `feat/dashboard-compare-month`): month picker on Dashboard Compare. "Up to yesterday" or the end of a finished month; for a month both windows end on its last day and the saved month-end backlog is divided again by each. `capacityWindow` now takes 7 or 14, with its own cache key.
 
 ## 2026-10-08 — 🔵 BOM Variant Fields and WIP Types as lists with product-type ticks (branch `feat/bom-variant-fields-list` → `staging`)
 

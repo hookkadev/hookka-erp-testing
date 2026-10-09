@@ -3,10 +3,13 @@
 // side by side, to judge the 2026-10-08 switch to 14 days.
 //
 // STAGING ONLY: lives on the `staging` branch, never PR this into main.
-// Both panels read /api/dashboard/overview (All-time); the 7-day one adds
-// capacityWindow=7, which the route answers without touching any stored copy.
+// Both panels read /api/dashboard/overview with capacityWindow=7 / 14, which
+// the route answers without touching any stored copy. The month picker: "Up
+// to yesterday" is today's state; a finished month is its month-end state,
+// with both windows ending on that month's last day.
 // Both charts of a kind share one scale so the bars can be compared by eye.
 // ============================================================
+import { useState } from "react";
 import { Bar, BarChart, CartesianGrid, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Card, CardContent } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
@@ -14,6 +17,8 @@ import { useCachedJson } from "@/lib/cached-fetch";
 
 type DeptRow = { dept: string; totalMin: number; dailyCapMin: number; backlogDays: number | null };
 type Overview = {
+  salesMonths?: string[];
+  stateSnapshot?: { source: "live" | "snapshot" | "reconstructed"; asOf: string | null };
   production?: {
     dailyCapacityMin: number;
     backlogDays: number;
@@ -23,6 +28,7 @@ type Overview = {
   };
 };
 
+const CUR_YM = new Date().toISOString().slice(0, 7);
 const h = (min: number | null | undefined) => `${Math.round((min ?? 0) / 60).toLocaleString()}h`;
 const INK = "#6B5C32";
 const GOLD = "#C5A85C";
@@ -40,6 +46,9 @@ function Panel({
   dayMax: number;
   deptMax: number;
 }) {
+  const range = prod?.capacityDays.length
+    ? `${prod.capacityDays[0].date.slice(5)} to ${prod.capacityDays[prod.capacityDays.length - 1].date.slice(5)}`
+    : "";
   if (!prod) {
     return (
       <Card className="min-w-0">
@@ -54,7 +63,10 @@ function Panel({
   return (
     <Card className="min-w-0">
       <CardContent className="p-4 sm:p-5 space-y-5">
-        <h2 className="text-base font-bold text-[#1F1D1B]">{label}</h2>
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+          <h2 className="text-base font-bold text-[#1F1D1B]">{label}</h2>
+          {range && <span className="text-xs text-[#9CA3AF] tabular-nums">{range}</span>}
+        </div>
         <div className="grid grid-cols-3 gap-2 sm:gap-3 text-center">
           {[
             ["Daily capacity", h(prod.dailyCapacityMin)],
@@ -107,8 +119,14 @@ function Panel({
 }
 
 export default function DashboardCompare() {
-  const r7 = useCachedJson<Overview>("/api/dashboard/overview?period=all&capacityWindow=7", 60);
-  const r14 = useCachedJson<Overview>("/api/dashboard/overview?period=all", 60);
+  const [period, setPeriod] = useState("all");
+  const r7 = useCachedJson<Overview>(`/api/dashboard/overview?period=${period}&capacityWindow=7`, 60);
+  const r14 = useCachedJson<Overview>(`/api/dashboard/overview?period=${period}&capacityWindow=14`, 60);
+  const [months, setMonths] = useState<string[]>([]);
+  const fresh = r14.data?.salesMonths;
+  if (fresh && fresh.length > months.length) setMonths(fresh);
+  const pastMonths = months.filter((m) => m < CUR_YM);
+  const state = r14.data?.stateSnapshot;
   const p7 = r7.data?.production;
   const p14 = r14.data?.production;
 
@@ -129,8 +147,35 @@ export default function DashboardCompare() {
     <div className="space-y-4">
       <PageHeader
         title="Dashboard Compare"
-        subtitle="Plant Load with capacity averaged over the last 7 vs the last 14 working days (All-time view). Staging only."
+        subtitle="Plant Load with capacity averaged over the last 7 vs the last 14 working days. Staging only."
+        actions={
+          <select
+            id="compare-period"
+            aria-label="Month"
+            value={period}
+            onChange={(e) => setPeriod(e.target.value)}
+            className="h-9 rounded-md border border-[#E2DDD8] bg-white px-2 text-sm"
+          >
+            <option value="all">Up to yesterday</option>
+            {pastMonths.map((m) => (
+              <option key={m} value={m}>
+                End of {m}
+              </option>
+            ))}
+          </select>
+        }
       />
+      {period !== "all" && state && (
+        <p className="text-xs text-[#5A5550]">
+          Backlog at the end of {period}:{" "}
+          {state.source === "snapshot"
+            ? `saved snapshot of ${state.asOf}`
+            : state.source === "reconstructed"
+              ? "estimated from job cards (no snapshot was saved that month)"
+              : "today's live figure (no history for that month)"}
+          . Both panels divide the same backlog; only the capacity window differs.
+        </p>
+      )}
       <div className="grid gap-4 lg:grid-cols-2">
         <Panel label="Last 7 working days" prod={p7} loading={r7.loading} dayMax={dayMax} deptMax={deptMax} />
         <Panel label="Last 14 working days (live)" prod={p14} loading={r14.loading} dayMax={dayMax} deptMax={deptMax} />
