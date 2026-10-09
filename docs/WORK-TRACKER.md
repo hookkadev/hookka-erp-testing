@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-09**: branch `feat/dashboard-month-static-kpis` (to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-08**: branch `feat/plant-load-14d` (to `staging`, BUG-2026-10-08-269) added below (its entry is the newest).
 > **Last verified: 2026-10-08**: branch `fix/bom-module-guide-anchors` (to `staging`) added item 5b to the editable WIP types entry below.
 > **Last verified: 2026-10-08**: branch `feat/bom-variant-fields-list` (to `staging`) added below (its entry is the newest).
@@ -173,6 +174,15 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-09 — 🔵 Pending Delivery and Outstanding fixed per month (branch `feat/dashboard-month-static-kpis` → `staging`)
+
+Owner ask: a picked month must show that month's Pending Delivery and Outstanding, not today's live total. Owner chose saving daily over saving once at month end.
+
+1. 🔵 Daily save: the three endpoints the tiles read save their part of today's whole-company figure into today's `dashboard_state_snapshots` row, merged by key (`saveStateKpisLater` in `dashboard-state-snapshot.ts`). A scoped (salesperson) call never saves. The state capture now merges too, so neither writer wipes the other.
+2. 🔵 Read: a finished month's overview payload carries `stateKpis` (each part from the month's latest saved day). `stateKpiTile` in `dashboard-widgets-lib.ts` decides the tile on /dashboard, the experimental dashboard and the mobile home: saved figure "as of <date>", or "no record"; never live. This month and All-time stay live.
+3. 🟡 Part 2, not started: estimate Outstanding for September and older (confirmed by month end minus delivered by month end), tagged estimated. Pending Delivery for those months stays "no record": rebuilding "ready for delivery" at a past date would re-express `poReadyForDelivery`, which the code warns against. Months frozen before part 2 ships will need a refreeze.
+4. ⬜ Staging check after deploy (staging data stops at the 30 Sep clone; the save itself can still be seen).
 
 ## 2026-10-08 — 🔵 Plant Load: 14-day capacity, Foam Cutting, past months frozen (branch `feat/plant-load-14d` → `staging`)
 

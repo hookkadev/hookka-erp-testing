@@ -26,6 +26,16 @@ import {
 import { requirePermission, requireReadOrDashboardTab } from "../lib/rbac";
 import { readIdempotencyKey, withIdempotency } from "../lib/idempotency";
 import { customerScopeSql, salesOrderScopeSql, isCustomerScoped } from "../lib/customer-scope";
+import { saveStateKpisLater } from "../lib/dashboard-state-snapshot";
+
+// Today's dispatch-chain money for the dashboard's daily Pending Delivery save
+// (the same DRAFT / LOADED + IN_TRANSIT fold the tile does).
+function dispatchKpis(v: Record<string, number> | undefined) {
+  return {
+    pendingDispatchSen: v?.DRAFT ?? 0,
+    inTransitSen: (v?.LOADED ?? 0) + (v?.IN_TRANSIT ?? 0),
+  };
+}
 import { getOrgId } from "../lib/tenant";
 import { emitAudit } from "../lib/audit";
 import { checkDeliveryOrderLocked } from "../lib/lock-helpers";
@@ -401,6 +411,7 @@ app.get("/stats", async (c) => {
       getDeliveryStatsSignature(c.var.DB),
     ]);
     if (isSnapshotFresh(snap, sig.maxUpdatedAt, sig.rowCount) && snap) {
+      saveStateKpisLater(c, orgId, dispatchKpis(snap.data.valueByStatus as Record<string, number>));
       return c.json({ success: true, ...snap.data, deliveredMtd });
     }
   }
@@ -450,6 +461,7 @@ app.get("/stats", async (c) => {
   } catch (e) {
     console.warn("[delivery-stats-snapshot] write-back failed:", e);
   }
+  if (!statsScope.clause) saveStateKpisLater(c, orgId, dispatchKpis(valueByStatus));
 
   return c.json({ success: true, ...payload, deliveredMtd });
 });
@@ -780,6 +792,15 @@ app.get("/pending-value", async (c) => {
   const { ready } = await loadDeliveryReadyPlanning(c);
   let pendingDeliveryValueSen = 0;
   for (const r of ready) pendingDeliveryValueSen += r.valueSen || 0;
+  // Daily save for a finished month's Pending Delivery, whole-company only:
+  // loadDeliveryReadyPlanning narrows by both scopes for a scoped caller.
+  const [pvPoScope, pvSoScope] = await Promise.all([
+    salesOrderScopeSql(c, "salesOrderId"),
+    customerScopeSql(c, "customerId"),
+  ]);
+  if (!pvPoScope.clause && !pvSoScope.clause) {
+    saveStateKpisLater(c, getOrgId(c), { pendingDeliveryValueSen });
+  }
   return c.json({
     success: true,
     pendingDeliveryValueSen,
