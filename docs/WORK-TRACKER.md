@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-09**: branch `fix/worker-i18n-popups-and-date` (to `staging`, then `main`) added below (in progress, its entry is the newest).
 > **Last verified: 2026-10-09**: stock-take priced count (#775), price-list hint fix (#776) and price-list prefill (#778) all prod-verified.
 > **Last verified: 2026-10-09**: branch `fix/co-scan-po-creates-co` (to `main`, BUG-2026-10-09-271) added below (its entry is the newest).
 > **Last verified: 2026-10-09**: branch `docs/outsourced-ot-box-next-time` (to `main`) added item 7 (outsourced staff OT box, next time) to the hourly-rate entry below.
@@ -113,6 +114,12 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-09 — 🔵 Worker pages: scan pop-ups translated + local-date default (branch `fix/worker-i18n-popups-and-date` → `staging`, then `main`)
+
+Ask (owner, preparing the worker app for the Play Store): "start on 1 and 2" from the worker-page scan.
+1. ✅ (BUG-2026-10-09-272) ~45 hardcoded English strings on the worker pages now go through `worker-i18n.ts` (en / ms / zh / my); Burmese drafted, not reviewed. Not driven in a browser.
+2. ✅ (BUG-2026-10-09-272) non-production request date uses `todayYmdMY()` instead of the UTC date.
 
 ## 2026-10-09 — 🔵 DEV-63: Bank charges column on the Trade Finance aging block, to main (branch `feat/dev63-bank-charges-to-main` → `main`)
 
