@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-09**: branch `feat/po-supplier-combobox-material-modal` (BUG-98 to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-09**: branch `feat/dashboard-compare-plant-card-drills` (to `staging`) added item 11 to the Plant Load entry below.
 > **Last verified: 2026-10-09**: branch `feat/batch-exports-from-houzs` (to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-09**: branch `feat/dev64-price-list-default-column` (DEV-64 to `staging`) added below (its entry is the newest).
@@ -178,6 +179,14 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-09 — 🔵 BUG-98: New Purchase Order supplier search box and material picker popup (branch `feat/po-supplier-combobox-material-modal` → `staging`)
+
+Ticket BUG-98 (reporter siti): the supplier picker on New Purchase Order shows every supplier. Owner then asked for two changes to the page:
+
+1. 🔵 Order Details Supplier becomes a type-to-search box with an inline clear (✕). Typing or clicking opens the list; Esc or a click outside closes it; emptying the box clears the supplier. Picking a different supplier while items are in the table asks first, then clears the items.
+2. 🔵 The inline category + search list above Order Items moves into a Select Materials popup opened by `+ Add Materials from Supplier`. Each row shows code, description, unit, price and Add / Added; the footer counts the items added.
+3. ⚪ Check on the staging site after merge.
 
 ## 2026-10-09 — 🔵 Batch exports brought over from the Houzs ERP comparison (branch `feat/batch-exports-from-houzs` → `staging`)
 
