@@ -1478,9 +1478,13 @@ type PricedCountItem = RmCountRow & {
   unitStr: string; // RM per counted unit, editable ("" = none yet)
   piUnitStr: string; // the purchase's own price, to tell a typed-over one ("" = none)
   source: string; // the purchase it came from ("" = no purchase on file)
+  // No purchase on file: the supplier price list's price (what a purchase
+  // order would take) starts the row (owner 2026-10-09 「要，先带价目表价」).
+  listUnitStr: string; // "" = not on the price list either
+  listSupplier: string;
   reasons: ("units" | "pack")[];
   range: [number, number] | null; // every price the code was bought at (sen)
-  hint: string; // no purchase: price list / last batch cost, as text only
+  hint: string; // no purchase: the last batch cost, as text only
   counted: boolean;
 };
 type PricedCount = { file: string; asOf: string; items: PricedCountItem[]; groupsOn: Record<string, boolean>; applied: boolean };
@@ -1496,29 +1500,33 @@ function pricedCountItem(r: RmCountRow, pp: PurchasePrices): PricedCountItem {
       source: `${p.piNo} · ${formatDateDMY(p.date)} · ${p.supplier} · bought ${p.qty}`,
       reasons: priceCheckReasons({ countQty: r.qty, lastQty: p.qty, minUnitSen: p.minUnitSen, maxUnitSen: p.maxUnitSen }),
       range: p.lines > 1 ? [p.minUnitSen, p.maxUnitSen] : null,
+      listUnitStr: "",
+      listSupplier: "",
       hint: "",
       counted: true,
     };
   }
   const pl = pp.priceList[itemCodeKey(r.code)];
   const bc = r.id ? pp.batchCost[r.id] : undefined;
-  const hint = [
-    pl ? `price list RM ${unitSenToRm(pl.unitSen)}${pl.supplier ? ` (${pl.supplier})` : ""}` : "",
-    bc ? `last cost RM ${unitSenToRm(bc.unitSen)} (${formatDateDMY(bc.date)})` : "",
-  ].filter(Boolean).join(" · ");
-  return { ...r, unitStr: "", piUnitStr: "", source: "", reasons: [], range: null, hint, counted: true };
+  const listUnitStr = pl ? unitSenToRm(pl.unitSen) : "";
+  const hint = bc ? `last cost RM ${unitSenToRm(bc.unitSen)} (${formatDateDMY(bc.date)})` : "";
+  return { ...r, unitStr: listUnitStr, piUnitStr: "", source: "", listUnitStr, listSupplier: pl?.supplier ?? "", reasons: [], range: null, hint, counted: true };
 }
 const pricedValueSen = (i: PricedCountItem): number | null => {
   const u = unitPriceToSen(i.unitStr);
   return u == null ? null : Math.round(i.qty * u);
 };
-// Where the price in use came from: the purchase, or typed in (over it).
+// Where the price in use came from: the purchase, the price list, or typed
+// in (over either).
 const pricedSource = (i: PricedCountItem): string => {
   const typed = unitPriceToSen(i.unitStr) != null;
-  if (!i.source) return typed ? "typed in" : "";
-  return i.unitStr.trim() === i.piUnitStr ? i.source : `typed in (purchase RM ${i.piUnitStr}: ${i.source})`;
+  if (i.source) return i.unitStr.trim() === i.piUnitStr ? i.source : `typed in (purchase RM ${i.piUnitStr}: ${i.source})`;
+  if (i.listUnitStr && i.unitStr.trim() === i.listUnitStr) return `price list${i.listSupplier ? ` · ${i.listSupplier}` : ""}`;
+  if (!typed) return "";
+  return i.listUnitStr ? `typed in (price list RM ${i.listUnitStr})` : "typed in";
 };
 const pricedNote = (i: PricedCountItem): string => {
+  if (!i.source && i.listUnitStr) return `No purchase on file — price list price: check it is per ${i.uom || "unit"}${i.hint ? ` (${i.hint})` : ""}`;
   if (!i.source) return `No purchase on file${i.hint ? ` — ${i.hint}` : ""} — type a price (per ${i.uom || "unit"})`;
   const notes: string[] = [];
   if (i.reasons.includes("units") && i.range) notes.push(`bought at RM ${unitSenToRm(i.range[0])}–${unitSenToRm(i.range[1])}: units differ (roll / metre?)`);
@@ -1652,7 +1660,7 @@ function StockTakeTab() {
   // totals above; from then on every edit here refills them, and Save keeps
   // the priced lines with the month (GET /stock-take/lines reads them back).
   const [priced, setPriced] = useState<PricedCount | null>(null);
-  const [pricedView, setPricedView] = useState<"check" | "none" | "all">("check");
+  const [pricedView, setPricedView] = useState<"check" | "list" | "none" | "all">("check");
   const pricedStale = !!priced && priced.asOf !== lastDayOfYm(ym);
   const pricedMissing = (p: PricedCount) => p.items.filter((i) => p.groupsOn[i.group] && i.counted && pricedValueSen(i) == null);
   const clearEditFor = (g: string) => setEdits((prev) => { const n = { ...prev }; delete n[key(g)]; return n; });
@@ -1859,7 +1867,8 @@ function StockTakeTab() {
         setPricedView("check");
         const fromPi = items.filter((i) => i.source).length;
         const toCheck = items.filter((i) => i.reasons.length > 0).length;
-        toast.success(`${items.length} counted items in ${file.name}: ${fromPi} priced from purchases (${toCheck} to check), ${items.length - fromPi} without a purchase — review below.`);
+        const fromList = items.filter((i) => !i.source && i.listUnitStr).length;
+        toast.success(`${items.length} counted items in ${file.name}: ${fromPi} priced from purchases (${toCheck} to check), ${fromList} from the price list, ${items.length - fromPi - fromList} without a price — review below.`);
         return;
       }
 
@@ -2056,8 +2065,9 @@ function StockTakeTab() {
         const saved = (y: string, g: string) => entries.find((e) => e.ym === y && e.itemGroup === g)?.valueSen;
         const groupSen = (g: string) => priced.items.filter((i) => i.group === g && i.counted).reduce((s, i) => s + (pricedValueSen(i) ?? 0), 0);
         const toCheck = priced.items.filter((i) => i.source && i.reasons.length > 0);
-        const noPrice = priced.items.filter((i) => !i.source);
-        const shown = pricedView === "all" ? priced.items : pricedView === "none" ? noPrice : [...toCheck, ...noPrice];
+        const fromList = priced.items.filter((i) => !i.source && i.listUnitStr);
+        const noPrice = priced.items.filter((i) => !i.source && !i.listUnitStr);
+        const shown = pricedView === "all" ? priced.items : pricedView === "none" ? noPrice : pricedView === "list" ? fromList : [...toCheck, ...fromList, ...noPrice];
         const totalOn = groupsInFile.filter((g) => priced.groupsOn[g]).reduce((s, g) => s + groupSen(g), 0);
         const setItem = (it: PricedCountItem, patch: Partial<PricedCountItem>) =>
           updatePriced({ ...priced, items: priced.items.map((x) => (x === it ? { ...x, ...patch } : x)) });
@@ -2075,8 +2085,9 @@ function StockTakeTab() {
                   <h3 className="text-sm font-semibold text-[#1F1D1B]">Priced count — {priced.file}</h3>
                   <p className="text-xs text-[#6B7280] max-w-3xl">
                     {priced.items.length} counted items, each priced at its latest purchase on or before {formatDateDMY(priced.asOf)} — the
-                    invoice line&apos;s own price (after discount, before SST). Check the marked rows, type a price where there is none,
-                    untick a group or an item to leave it out; then <b>Put into {ym}</b> fills the group totals below. Nothing is saved until Save.
+                    invoice line&apos;s own price (after discount, before SST); an item with no purchase on file starts at its supplier
+                    price-list price (marked). Check the marked rows, type a price where there is none, untick a group or an item to leave
+                    it out; then <b>Put into {ym}</b> fills the group totals below. Nothing is saved until Save.
                   </p>
                   {pricedStale && (
                     <p className="text-xs text-[#9A3A2D] mt-1">These prices are as of {formatDateDMY(priced.asOf)} but Month is {ym} — switch Month back, or import the file again.</p>
@@ -2161,7 +2172,8 @@ function StockTakeTab() {
 
               <div className="flex flex-wrap gap-1.5 text-xs">
                 {([
-                  ["check", `To check (${toCheck.length + noPrice.length})`],
+                  ["check", `To check (${toCheck.length + fromList.length + noPrice.length})`],
+                  ["list", `Price list (${fromList.length})`],
                   ["none", `No price (${noPrice.length})`],
                   ["all", `All (${priced.items.length})`],
                 ] as const).map(([k, label]) => (
@@ -2198,7 +2210,7 @@ function StockTakeTab() {
                       return (
                         <tr
                           key={`${i.id}|${i.code}`}
-                          className={`border-t ${!i.source ? "bg-[#FBEFEC]" : i.reasons.length ? "bg-[#FBF3E4]" : ""} ${off ? "opacity-50" : ""}`}
+                          className={`border-t ${!i.source && !i.listUnitStr ? "bg-[#FBEFEC]" : !i.source || i.reasons.length ? "bg-[#FBF3E4]" : ""} ${off ? "opacity-50" : ""}`}
                         >
                           <td className="px-2 py-1">
                             <input
@@ -2229,7 +2241,7 @@ function StockTakeTab() {
                           <td className="px-2 py-1 text-right tabular-nums">{v == null ? "—" : formatCurrency(v)}</td>
                           <td className="px-2 py-1 text-xs">
                             <div className="text-[#6B7280]">{pricedSource(i) || "—"}</div>
-                            {note && <div className={!i.source ? "text-[#9A3A2D]" : "text-[#7A5B12]"}>{note}</div>}
+                            {note && <div className={!i.source && !i.listUnitStr ? "text-[#9A3A2D]" : "text-[#7A5B12]"}>{note}</div>}
                           </td>
                         </tr>
                       );

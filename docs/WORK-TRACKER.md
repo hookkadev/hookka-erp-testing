@@ -1,6 +1,6 @@
 # Hookka ERP — Work Tracker
 
-> **Last verified: 2026-10-09**: stock-take priced count (#775) prod-verified; price-list hint fix in progress (branch `fix/stock-take-price-list-sen`, BUG-2026-10-09-273).
+> **Last verified: 2026-10-09**: stock-take priced count (#775) prod-verified; price-list hint fix #776 merged; price-list prefill in progress (branch `feat/stock-take-price-list-prefill`).
 > **Last verified: 2026-10-09**: branch `fix/co-scan-po-creates-co` (to `main`, BUG-2026-10-09-271) added below (its entry is the newest).
 > **Last verified: 2026-10-09**: branch `docs/outsourced-ot-box-next-time` (to `main`) added item 7 (outsourced staff OT box, next time) to the hourly-rate entry below.
 > **Last verified: 2026-10-08**: branch `feat/bom-variant-fields-list-main` (to `main`) added below (its entry is the newest).
@@ -128,7 +128,10 @@ Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod �
    refused while ticked groups held unpriced items, filled only the ticked group when that was all, and Close took it back;
    the month still has no saved figure or priced record.
    🔵 BUG-2026-10-09-273: the supplier price list is kept in sen and the hints read it as RM (100× high) — hints only, no
-   value affected; fixed on `fix/stock-take-price-list-sen`.
+   value affected; fixed on `fix/stock-take-price-list-sen` (#776).
+   🔵 Owner「要，先带价目表价」: an item with no purchase on file now starts at its supplier price-list price (the price a
+   purchase order would take), marked "price list" and listed under To check / Price list; only an item on neither
+   stays empty (branch `feat/stock-take-price-list-prefill`).
 2. ✅ Cash Flow office salaries — answered, no code: every salary voucher debits the production salary accrual (410-0010)
    and the system payroll holds only the production departments, so whole payments were split over production departments.
    The chart already has the office twins (410-0011 / 0021 / 0031 / 0041) and the cash flow puts any 410-0000 child other
