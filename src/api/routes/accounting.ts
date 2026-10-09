@@ -45,7 +45,7 @@ import { projectedLabourByDept } from "../lib/labour-projection";
 import { groupPayslipsByMonthDept, forecastEntryKind, monthHasDeptForecast, labourMappedAccounts } from "../../lib/salary-dept";
 import { ensureTfTables, getTfSources, saveTfSources, loadTfDraws } from "../lib/trade-finance";
 import type { TfSource } from "../lib/trade-finance";
-import { tfInterestDrawId, tfTotals } from "../../lib/trade-finance";
+import { tfChargeKind, tfInterestDrawId, tfTotals } from "../../lib/trade-finance";
 import { buildDeliveredAsOf, fgClosingSen } from "../../lib/fg-closing";
 import { costAsOfByPo } from "../../lib/cost-attribution";
 import { STOCK_TAKE_ITEM_ALIAS_SEED_2026_05 } from "../lib/stock-take-item-alias-seed-2026-05";
@@ -8747,7 +8747,7 @@ async function buildDrillLines(
   // Trade-finance interest: charged by the lender whose facility account is
   // the entry's other leg; the hover says whom the draw paid.
   try {
-    const tfLegs = legs.filter((l) => l.sourceType.startsWith("tf_interest"));
+    const tfLegs = legs.filter((l) => tfChargeKind(l.sourceType));
     if (tfLegs.length) {
       const lenderByAcct = new Map((await getTfSources(db)).map((s) => [resolve(s.accountCode), s.lenderName] as const));
       const draws = [...new Set(tfLegs.map((l) => tfInterestDrawId(l.sourceId)))];
@@ -9269,17 +9269,20 @@ async function computeCashflowStatement(
           // The facility leg, as posted: CR = the lender lent (negative in the
           // outflow-signed block), DR = we repaid (positive, real cash out) —
           // or a void's reversal of either, which nets on the same row.
-          // Interest (tf_interest legs, adjustments included) is one row per
-          // facility. Never split as a raw-material payment (no paymentNos).
+          // Interest (tf_interest legs, adjustments included) and bank charges
+          // (tf_bank_charge) are one row each per facility. Never split as a
+          // raw-material payment (no paymentNos).
           const lender = tfAccounts.get(l.code)!.lenderName || "lender";
           classified.push({
             accountCode: l.code, debitSen: l.debitSen, creditSen: l.creditSen,
             ym: l.ym, sourceType: l.sourceType, sourceId: l.sourceId,
             lineLabel: l.sourceType.startsWith("tf_interest")
               ? `Interest charged by ${lender}`
-              : hasBank
-                ? `Repaid to ${lender}`
-                : `Drawdown — ${tfPayee(l.sourceType, l.sourceId, l.description) || "trade finance"}`,
+              : l.sourceType.startsWith("tf_bank_charge")
+                ? `Bank charges by ${lender}`
+                : hasBank
+                  ? `Repaid to ${lender}`
+                  : `Drawdown — ${tfPayee(l.sourceType, l.sourceId, l.description) || "trade finance"}`,
           });
           continue;
         }
@@ -9676,7 +9679,7 @@ async function computeCashflowStatement(
       }
     } catch { /* description stays the ledger text */ }
     try {
-      const tfEnts = ents.filter((e) => e.sourceType.startsWith("tf_interest"));
+      const tfEnts = ents.filter((e) => tfChargeKind(e.sourceType));
       const draws = [...new Set(tfEnts.map((e) => tfInterestDrawId(e.sourceId)))];
       const paidTo = new Map<string, string>();
       for (const r of await chunkIds(draws, (ph) => `SELECT payment_no, supplier_name FROM supplier_payments WHERE payment_no IN (${ph}) AND org_id = ?`, [orgId])) {
@@ -9698,7 +9701,7 @@ async function computeCashflowStatement(
           : sourceType.startsWith("payment_voucher") ? "pv"
             : sourceType === "payment" || sourceType.startsWith("payment_") ? "rc"
               : sourceType.startsWith("official_receipt") ? "or"
-                : sourceType.startsWith("tf_interest") ? "tf"
+                : tfChargeKind(sourceType) ? "tf"
                   : sourceType === "manual" || sourceType.startsWith("manual_") ? "jv" : "";
 
     const items: CfDrillItem[] = ents.map((e) => {
@@ -11379,7 +11382,7 @@ app.post("/payment-vouchers/:id/lifecycle", async (c) => {
       const msg = (e as Error).message;
       if (msg === "PAYMENT_NOT_FOUND") return c.json({ success: false, error: `No settlement found under ${pv.pvNo} — it was never posted` }, 400);
       if (msg === "TF_DRAW_HAS_REPAYMENTS") return c.json({ success: false, error: "This payment is a trade-finance draw with repayments — void the repayment first." }, 400);
-      if (msg === "TF_DRAW_HAS_INTEREST") return c.json({ success: false, error: "This draw has interest posted — zero it in the aging block first." }, 400);
+      if (msg === "TF_DRAW_HAS_INTEREST") return c.json({ success: false, error: "This draw has interest or bank charges posted — zero them in the aging block first." }, 400);
       return c.json({ success: false, error: msg || "Lifecycle failed" }, 400);
     }
   }
@@ -13118,6 +13121,26 @@ async function ensureTfInterestAccount(db: Env["Variables"]["DB"]): Promise<stri
   return null;
 }
 
+// The account trade-finance bank charges (DEV-63) are booked to: the chart's
+// existing 900-B001 BANK CHARGES, created only if missing and name-checked
+// the same way.
+const TF_BANK_CHARGE_ACCT = { code: "900-B001", name: "BANK CHARGES", parentCode: "900-0000" };
+
+async function ensureTfBankChargeAccount(db: Env["Variables"]["DB"]): Promise<string | null> {
+  await db.prepare(
+    `INSERT INTO chart_of_accounts (code, name, type, parentCode, balanceSen, isActive, cashFlowCategory, specialAccountType, pnlCategory, isPostable)
+     VALUES (?, ?, 'EXPENSE', ?, 0, 1, NULL, NULL, NULL, 1)
+     ON CONFLICT (code) DO NOTHING`,
+  ).bind(TF_BANK_CHARGE_ACCT.code, TF_BANK_CHARGE_ACCT.name, TF_BANK_CHARGE_ACCT.parentCode).run();
+  const row = await db.prepare("SELECT name FROM chart_of_accounts WHERE code = ?")
+    .bind(TF_BANK_CHARGE_ACCT.code).first<{ name: string | null }>();
+  const name = String(row?.name ?? "").trim().toUpperCase();
+  if (name && name !== TF_BANK_CHARGE_ACCT.name) {
+    return `${TF_BANK_CHARGE_ACCT.code} is "${row?.name}" in the chart of accounts, not ${TF_BANK_CHARGE_ACCT.name} — the bank charge cannot be posted there`;
+  }
+  return null;
+}
+
 // POST /trade-finance/interest-account-repoint?dry=1 — one-shot repair for
 // BUG-2026-09-29-196: every tf_interest leg still sitting on the legacy code
 // moves to the dedicated account (the legs keep their ids, dates, sources and
@@ -13217,6 +13240,74 @@ app.put("/trade-finance/draw-interest", async (c) => {
   } catch (err) {
     console.error("[PUT /trade-finance/draw-interest] failed:", err instanceof Error ? err.message : err);
     return c.json({ success: false, error: "Interest update failed" }, 400);
+  }
+});
+
+// Bank charges on a draw (DEV-63, Ain 2026-10-09: "include another column of
+// bank charges"): same mechanics as draw-interest — the lender recharges the
+// bank's fee on the draw, so it posts `tf_bank_charge` legs under
+// `tfbc-<date>-<draw>` (DR BANK CHARGES / CR the TF account), folds into the
+// draw's outstanding, and the endpoint delta-posts toward the keyed TOTAL.
+// Booked to the chart's existing 900-B001 BANK CHARGES; name-checked like the
+// interest account (BUG-2026-09-29-196) so a foreign account refuses the post.
+app.put("/trade-finance/draw-bank-charge", async (c) => {
+  const denied = requireFinance(c);
+  if (denied) return denied;
+  try {
+    const body = (await c.req.json().catch(() => ({}))) as { drawSourceId?: string; bankChargeSen?: number; date?: string };
+    const drawSourceId = String(body.drawSourceId ?? "").trim();
+    const targetSen = Math.round(Number(body.bankChargeSen) || 0);
+    const chargeDate = /^\d{4}-\d{2}-\d{2}$/.test(String(body.date ?? ""))
+      ? String(body.date)
+      : new Date().toISOString().slice(0, 10);
+    if (!drawSourceId || targetSen < 0) {
+      return c.json({ success: false, error: "drawSourceId and a non-negative bankChargeSen are required" }, 400);
+    }
+    await ensureTfTables(c.var.DB);
+    const drawRow = await c.var.DB.prepare(
+      "SELECT draw_source_id, account_code FROM trade_finance_draws WHERE draw_source_id = ?",
+    ).bind(drawSourceId).first<Record<string, unknown>>();
+    if (!drawRow) return c.json({ success: false, error: "Draw not found — open the aging block once to backfill it" }, 404);
+    const accountCode = String(drawRow.accountCode ?? drawRow.account_code ?? "");
+    const source = (await getTfSources(c.var.DB)).find((s) => s.accountCode === accountCode);
+    if (!source) return c.json({ success: false, error: "This draw's account is not a configured trade-finance source" }, 400);
+    const { draws } = await loadTfDraws(c.var.DB, source);
+    const draw = draws.find((d) => d.drawSourceId === drawSourceId);
+    if (!draw) return c.json({ success: false, error: "Draw is not open (voided or fully derived away)" }, 404);
+    const deltaSen = targetSen - draw.bankChargeSen;
+    if (deltaSen === 0) return c.json({ success: true, data: { drawSourceId, bankChargeSen: targetSen, unchanged: true } });
+    if (draw.amountSen + deltaSen < draw.repaidSen) {
+      return c.json({ success: false, error: "Lowering bank charges below what is already repaid would overdraw the draw — void the repayment first" }, 400);
+    }
+    const acctErr = await ensureTfBankChargeAccount(c.var.DB);
+    if (acctErr) return c.json({ success: false, error: acctErr }, 409);
+    const orgId = getOrgId(c);
+    const actorUserId = (c as unknown as { get: (k: string) => string | undefined }).get("userId") ?? null;
+    const chargeSourceId = `tfbc-${chargeDate}-${drawSourceId}`;
+    const legNoBase = await nextLegNo(c.var.DB, orgId, "tf_bank_charge", chargeSourceId);
+    const abs = Math.abs(deltaSen);
+    const legs: LedgerEntryInput[] = deltaSen > 0
+      ? [
+          { id: `lje-${crypto.randomUUID().slice(0, 12)}`, sourceType: "tf_bank_charge", sourceId: chargeSourceId, legNo: legNoBase, accountCode: TF_BANK_CHARGE_ACCT.code, debitSen: abs, creditSen: 0, description: `TF bank charges · ${drawSourceId}`, actorUserId, orgId },
+          { id: `lje-${crypto.randomUUID().slice(0, 12)}`, sourceType: "tf_bank_charge", sourceId: chargeSourceId, legNo: legNoBase + 1, accountCode: accountCode, debitSen: 0, creditSen: abs, description: `TF bank charges · ${drawSourceId}`, actorUserId, orgId },
+        ]
+      : [
+          { id: `lje-${crypto.randomUUID().slice(0, 12)}`, sourceType: "tf_bank_charge", sourceId: chargeSourceId, legNo: legNoBase, accountCode: accountCode, debitSen: abs, creditSen: 0, description: `TF bank charges adjust · ${drawSourceId}`, actorUserId, orgId },
+          { id: `lje-${crypto.randomUUID().slice(0, 12)}`, sourceType: "tf_bank_charge", sourceId: chargeSourceId, legNo: legNoBase + 1, accountCode: TF_BANK_CHARGE_ACCT.code, debitSen: 0, creditSen: abs, description: `TF bank charges adjust · ${drawSourceId}`, actorUserId, orgId },
+        ];
+    const { statements } = await buildJournalEntryStatements(c.var.DB, orgId, legs);
+    await c.var.DB.batch(statements);
+    await emitAudit(c, {
+      resource: "trade-finance",
+      resourceId: drawSourceId,
+      action: "draw-bank-charge",
+      before: { bankChargeSen: draw.bankChargeSen },
+      after: { bankChargeSen: targetSen, deltaSen, expenseAccount: TF_BANK_CHARGE_ACCT.code },
+    });
+    return c.json({ success: true, data: { drawSourceId, bankChargeSen: targetSen } });
+  } catch (err) {
+    console.error("[PUT /trade-finance/draw-bank-charge] failed:", err instanceof Error ? err.message : err);
+    return c.json({ success: false, error: "Bank charge update failed" }, 400);
   }
 });
 
