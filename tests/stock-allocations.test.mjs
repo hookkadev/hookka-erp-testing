@@ -702,3 +702,113 @@ test("a release cancels an allocation even when it omits the line fields", async
   const after = await loadOpenAllocationsForOrder(db, "so-1");
   assert.equal(after.length, 0, "a fully released holding must disappear, not linger at 4");
 });
+
+// ── A7: the invoice for an allocated piece bills the CUSTOMER ───────────────
+//
+// The placeholder stock SO carries a sales_order_items row at
+// `unitPriceSen: 0` (production-orders.ts:1335 — "insert minimal SO item so
+// downstream readers don't crash"). An invoice line's price is resolved by
+// `priceForItem` from `production_orders.salesOrderId`, which is EXACTLY the
+// column allocation rewrites — so these pin that the rewrite is what makes the
+// invoice bill RM 1,500 instead of that zero.
+
+const { priceForItem, loadSoLinePriceIndex } = await import(
+  pathToFileURL(resolve(process.cwd(), "src/api/lib/do-value.ts")).href
+);
+
+/** Two org-wide reads: the production orders, then every SO line. */
+const priceDb = ({ pos, soLines }) =>
+  fakeDb((q) => {
+    if (/FROM production_orders WHERE orgId/i.test(q)) return pos;
+    if (/FROM sales_order_items si/i.test(q)) return soLines;
+    return [];
+  });
+
+const STOCK_LINE = {
+  id: "si-stock",
+  salesOrderId: "so-stock",
+  productCode: "A100",
+  sizeCode: "S",
+  fabricCode: "F",
+  unitPriceSen: 0, // the placeholder — never a price anyone is billed
+};
+const CUSTOMER_LINE = {
+  id: "si-cust",
+  salesOrderId: "so-cust",
+  productCode: "A100",
+  sizeCode: "S",
+  fabricCode: "F",
+  unitPriceSen: 150000, // RM 1,500.00
+};
+
+test("A7: an allocated piece is invoiced at the CUSTOMER's price, not the placeholder zero", async () => {
+  // Post-allocation: the production order's salesOrderId now points at the
+  // customer. stock_origin_so_id still remembers home, but pricing never reads it.
+  const idx = await loadSoLinePriceIndex(
+    priceDb({
+      pos: [
+        {
+          id: "po-1",
+          salesOrderId: "so-cust",
+          productCode: "A100",
+          sizeCode: "S",
+          fabricCode: "F",
+        },
+      ],
+      soLines: [STOCK_LINE, CUSTOMER_LINE],
+    }),
+    "hookka",
+  );
+  assert.equal(
+    priceForItem(idx, "po-1", "so-cust", "A100"),
+    150000,
+    "the zero-priced stock line must not win over the customer's line",
+  );
+});
+
+test("A7: before allocation the same piece prices at zero — nobody is billed for stock", async () => {
+  const idx = await loadSoLinePriceIndex(
+    priceDb({
+      pos: [
+        {
+          id: "po-1",
+          salesOrderId: "so-stock",
+          productCode: "A100",
+          sizeCode: "S",
+          fabricCode: "F",
+        },
+      ],
+      soLines: [STOCK_LINE, CUSTOMER_LINE],
+    }),
+    "hookka",
+  );
+  assert.equal(
+    priceForItem(idx, "po-1", "so-stock", "A100"),
+    0,
+    "stock is not a sale; the placeholder's zero is the right answer here",
+  );
+});
+
+test("FACT: byAnyCode is first-wins and a zero-priced stock line can take that slot", async () => {
+  // NOT a pin of desired behaviour — a record of live exposure. `byAnyCode` is
+  // priceForItem's last resort (do-value.ts:77) for a DO line with no usable PO
+  // link, and it exists to STOP RM 0 invoices for real goods
+  // (BUG-2026-05-18-004). It is built first-wins over an ORDER BY-less org-wide
+  // SELECT, with no is_stock filter and no price > 0 preference. For a product
+  // only ever built for stock the placeholder's zero is the ONLY candidate, so
+  // the safety net returns 0 — the exact number it was added to prevent.
+  //
+  // Not reachable by an allocated piece (its DO line carries a PO whose
+  // salesOrderId is the customer's, so resolution stops at byFull/byCode above).
+  // If this assertion ever starts failing, someone fixed it — delete the test.
+  const idx = await loadSoLinePriceIndex(
+    priceDb({ pos: [], soLines: [STOCK_LINE] }),
+    "hookka",
+  );
+  assert.equal(idx.byAnyCode.get("A100"), 0);
+  assert.equal(
+    priceForItem(idx, null, "", "A100"),
+    0,
+    "an unlinked line for a stock-only product falls through to zero",
+  );
+});
