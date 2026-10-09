@@ -126,5 +126,9 @@ export function parseSourceIdDate(
   if (base === "tf_interest" && (m = sid.match(/^tfint-(\d{4}-\d{2}-\d{2})-/))) {
     return m[1];
   }
+  // Trade-finance bank charges: same shape, `tfbc-YYYY-MM-DD-<draw payment no>`.
+  if (base === "tf_bank_charge" && (m = sid.match(/^tfbc-(\d{4}-\d{2}-\d{2})-/))) {
+    return m[1];
+  }
   return null;
 }

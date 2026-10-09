@@ -1,6 +1,8 @@
 # Hookka ERP — Work Tracker
 
 > **Last verified: 2026-10-09**: branch `feat/batch-exports-from-houzs` (to `staging`) added below (its entry is the newest).
+> **Last verified: 2026-10-09**: branch `feat/dev64-price-list-default-column` (DEV-64 to `staging`) added below (its entry is the newest).
+> **Last verified: 2026-10-09**: branch `fix/worker-i18n-popups-and-date` (to `staging`, then `main`) added below (in progress, its entry is the newest).
 > **Last verified: 2026-10-09**: branch `feat/dashboard-month-static-kpis` (to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-08**: branch `feat/plant-load-14d` (to `staging`, BUG-2026-10-08-269) added below (its entry is the newest).
 > **Last verified: 2026-10-08**: branch `fix/bom-module-guide-anchors` (to `staging`) added item 5b to the editable WIP types entry below.
@@ -186,6 +188,30 @@ Owner asks: compare batch import/export with the Houzs ERP repo (finance tabs an
 4. ⚪ Per-line Excel (Detail Listing) for Delivery Return, Purchase Invoice and Purchase Return. Separate PR.
 5. 🟡 One merged PDF of ticked Delivery Orders, Delivery Returns and Purchase Returns. Needs owner: Purchase Returns has no PDF layout yet, and ticked DOs already print as one PDF behind a packing-list cover.
 6. ⚪ Imports (fabrics, supplier prices, PO line updates) parked by the owner until exports are done.
+
+## 2026-10-09 — 🔵 DEV-63: Bank charges column on the Trade Finance aging block (branch `feat/dev63-creditor-aging-trade-finance` → `staging`)
+
+Ticket DEV-63 (reporter Ain): "in creditor aging for supplier that we pay through trade finance, they have column for interest. so can help me include another column of bank charges".
+
+1. 🔵 `PUT /api/accounting/trade-finance/draw-bank-charge {drawSourceId, bankChargeSen, date?}` — the twin of draw-interest: delta-posts `tf_bank_charge` legs under `tfbc-<date>-<draw>` (DR 900-B001 BANK CHARGES / CR the TF account), so the charge joins the draw's outstanding and the identity line. `ensureTfBankChargeAccount` creates 900-B001 only if missing and refuses the post if the code is some other account (same guard as BUG-2026-09-29-196).
+2. 🔵 `deriveDraws` returns `bankChargeSen`; `tfChargeKind` classifies both charge families; `tfInterestDrawId` strips `tfint-` and `tfbc-`. Principal = amount − interest − bank charges. doc-date: `tf_bank_charge` self-dates from its sourceId.
+3. 🔵 GL drill / Cash Flow ("Bank charges by <lender>") / cash-flow drill treat `tf_bank_charge` like `tf_interest`; voiding a draw with bank charges refuses (TF_DRAW_HAS_INTEREST, copy now says "interest or bank charges").
+4. 🔵 UI: `TradeFinanceBlock.tsx` Bank charges input column beside Interest, with a total.
+5. ✅ Reporter ruling (Ain, 2026-10-09 WhatsApp): the bank charges are part of what we owe Houzs Century, and keying them by hand is fine — so they join the draw's outstanding, as built.
+6. ⬜ Staging check after deploy.
+
+## 2026-10-09 — 🔵 DEV-64: customer price list shows every Maintenance sofa size, DEFAULT included (branch `feat/dev64-price-list-default-column` → `staging`)
+
+Reporter ask (Siti, DEV-64 "price list"): "can add column default for the customer price".
+
+1. 🔵 Customer → Products → Sofa price grid (`CustomerProductsPanel` in `src/pages/customers.tsx`) hard-coded the seat columns `24 / 28 / 30 / 32 / 35`, so a named size like DEFAULT (and 26) from Maintenance → Sofa → Sizes had no customer-price column, though the SKU Master, quotation PDF and history dialog already showed it. The grid now reads `useSofaSeatHeights()`, header via `sofaSeatLabel`. No backend change: prices are stored by size string, so `DEFAULT` saves like `28`.
+2. ⬜ Staging check after deploy: Customers → a customer → Products → Sofa shows a DEFAULT column; edit + Save a DEFAULT price for one tier and reload.
+
+## 2026-10-09 — 🔵 Worker pages: scan pop-ups translated + local-date default (branch `fix/worker-i18n-popups-and-date` → `staging`, then `main`)
+
+Ask (owner, preparing the worker app for the Play Store): "start on 1 and 2" from the worker-page scan.
+1. ✅ (BUG-2026-10-09-272) ~45 hardcoded English strings on the worker pages now go through `worker-i18n.ts` (en / ms / zh / my); Burmese drafted, not reviewed. Not driven in a browser.
+2. ✅ (BUG-2026-10-09-272) non-production request date uses `todayYmdMY()` instead of the UTC date.
 
 ## 2026-10-09 — 🔵 Pending Delivery and Outstanding fixed per month (branch `feat/dashboard-month-static-kpis` → `staging`)
 
