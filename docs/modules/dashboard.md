@@ -1,5 +1,7 @@
 # Dashboard & Command Center — Module Guide
 
+> **Last verified: 2026-10-09** (branch `feat/compare-fabric-purchasing-tab`): the dashboard-overview.ts line anchors re-derived after new imports moved the handler. Nothing else re-checked.
+
 > **Last verified: 2026-10-09** (branch `feat/dashboard-month-static-kpis`): the month-awareness summary (daily Pending Delivery / Outstanding save) and the cache-key version re-checked against `dashboard-state-snapshot.ts` and `dashboard-overview.ts`. Nothing else re-checked.
 
 > **Last verified: 2026-10-08** (branch `feat/plant-load-14d`): the month-awareness summary (frozen past months, 14-day capacity) and the cache-key version re-checked against `dashboard-overview.ts`. Nothing else re-checked.
@@ -57,8 +59,8 @@ The homepage **Command Center** at `/dashboard`: a KPI rail (Sales · Invoices �
 | Revenue by Customer JSX | `src/pages/dashboard-b/index.tsx:1749` | Concentration exhibit (donut + category modes) |
 | Top sellers / Fabric usage / Backlog+Purchasing JSX | `src/pages/dashboard-b/index.tsx:2062 / 2059 / 2427` | |
 | `RevenueChart` / `CustomerPieChart` | `src/pages/dashboard-b/charts.tsx:60 / 149` | Lazy recharts wrappers (~357 KB chunk) |
-| `app.get("/")` (overview) | `src/api/routes/dashboard-overview.ts:51` | Single ~2000-line aggregate handler |
-| `captureTodayState` | `src/api/routes/dashboard-overview.ts:88` | Extract + upsert today's state snapshot |
+| `app.get("/")` (overview) | `src/api/routes/dashboard-overview.ts:66` | Single ~2000-line aggregate handler |
+| `captureTodayState` | `src/api/routes/dashboard-overview.ts:102` | Extract + upsert today's state snapshot |
 | `readSnapshot` / `writeSnapshot` / `isSnapshotFresh` | `src/api/lib/dashboard-snapshot.ts:100 / 211 / 187` | Read-through snapshot (Layer 1) |
 | `getMaxSourceUpdatedAt` | `src/api/lib/dashboard-snapshot.ts:155` | Data-change probe for freshness |
 | `writeStateSnapshot` / `readStateSnapshotForMonth` | `src/api/lib/dashboard-state-snapshot.ts:63 / 108` | Daily state UPSERT + past-month read |

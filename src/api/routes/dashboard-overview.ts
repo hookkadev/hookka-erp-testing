@@ -15,7 +15,21 @@ import type { Env } from "../worker";
 import { getOrgId } from "../lib/tenant";
 import { jcMinutesTotal } from "../../lib/job-card-minutes";
 import { loadSoLinePriceIndex, priceForItem } from "../lib/do-value";
-import { computeFabricNext30ByCategory } from "../lib/fabric-usage";
+import {
+  computeFabricNext30ByCategory,
+  computeFcFabricUsageMeters,
+  fetchBomWipComponentsByCode,
+} from "../lib/fabric-usage";
+import {
+  buildFabricPurchasingMonths,
+  monthsBack,
+  PURCHASE_GROUP_CAT,
+  type CutRow,
+  type GrnRow,
+  type InvoiceRow,
+  type PoRow,
+  type ReceiptRow,
+} from "../lib/fabric-purchasing-compare";
 import {
   readSnapshot,
   writeSnapshot,
@@ -2388,48 +2402,253 @@ app.get("/", async (c) => {
   return c.json({ success: true, ...data });
 });
 
-// Staging Dashboard Compare, Fabric cost tab. Each month's fabric Avg cost /m
-// as the dashboard shows it (cost of the fabric cut, oldest stock first) next
-// to the same metres at real purchase prices. The opening-stock batches of
-// 2026-02-21 carry a flat RM 25 / RM 35 per metre, above every real buy price
-// of those fabrics, so only slices cut from an OPENING batch are repriced, at
-// that fabric's average receipt price. Read-only and uncached.
+// Staging Dashboard Compare, "Fabric & purchasing" tab (owner 2026-10-09).
+// The last 12 calendar months, every figure bucketed by month (none rolling or
+// "as of today"). Per month and category:
+//   - fabric cut: the dashboard's Avg cost /m (RM_ISSUE cost) next to the same
+//     metres at real purchase prices. The opening stock of 2026-02-21 carries a
+//     flat RM 25 / RM 35 per metre, above every real buy price, so only slices
+//     cut from an OPENING batch are repriced, at the fabric's average receipt price;
+//   - purchasing: fabric invoiced (purchase invoice lines) vs received into stock
+//     (RM_RECEIPT) vs GRNs, by the fabric's item group;
+//   - orders finished: each order's own BOM fabric metres (the plan) vs the metres
+//     it recorded, and how many fabrics were used vs recorded;
+//   - price trend: invoice price per metre for the top fabrics by invoiced metres.
+// Invoices are the only current price source: receipts into stock stop in 2026-03.
 app.get("/fabric-cost-compare", async (c) => {
   const orgId = getOrgId(c);
-  const res = await c.var.DB.prepare(
-    `WITH buy AS (
-       SELECT itemId, SUM(totalCostSen) / NULLIF(SUM(qty), 0) AS "avgSen"
-         FROM cost_ledger WHERE type = 'RM_RECEIPT' GROUP BY itemId
-     )
-     SELECT po.itemCategory AS "cat", substr(cl.date::text, 1, 7) AS "ym",
-            COALESCE(SUM(cl.qty), 0) AS "meters",
-            COALESCE(SUM(cl.totalCostSen), 0) AS "shownSen",
-            COALESCE(SUM(CASE WHEN b.source = 'OPENING' AND buy."avgSen" IS NOT NULL
-                              THEN cl.qty * buy."avgSen" ELSE cl.totalCostSen END), 0) AS "realSen",
-            COALESCE(SUM(CASE WHEN b.source = 'OPENING' THEN cl.qty ELSE 0 END), 0) AS "openingMeters"
-       FROM cost_ledger cl
-       JOIN raw_materials rm ON rm.id = cl.itemId
-       JOIN production_orders po ON po.id = cl.refId
-       LEFT JOIN rm_batches b ON b.id = cl.batchId
-       LEFT JOIN buy ON buy.itemId = cl.itemId
-      WHERE po.orgId = ? AND cl.type = 'RM_ISSUE'
-        AND cl.refType = 'PRODUCTION_ORDER'
-        AND rm.itemGroup IN ('${FABRIC_ITEM_GROUPS.join("','")}')
-        AND po.itemCategory IN ('BEDFRAME','SOFA')
-      GROUP BY po.itemCategory, substr(cl.date::text, 1, 7)
-      ORDER BY substr(cl.date::text, 1, 7) DESC`,
-  )
-    .bind(orgId)
-    .all<{ cat: string; ym: string; meters: number; shownSen: number; realSen: number; openingMeters: number }>();
-  const rows = (res.results ?? []).map((r) => ({
-    cat: r.cat,
-    ym: r.ym,
-    meters: Number(r.meters) || 0,
-    shownSen: Math.round(Number(r.shownSen) || 0),
-    realSen: Math.round(Number(r.realSen) || 0),
-    openingMeters: Number(r.openingMeters) || 0,
-  }));
-  return c.json({ success: true, rows });
+  const { cached } = await import("../lib/kv-cache");
+  const data = await cached(c, `dashboard:fabric-compare:${orgId}:v2`, 60, async () => {
+    const db = c.var.DB;
+    // Business months are Malaysian (UTC+8).
+    const curYm = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 7);
+    const months = monthsBack(curYm, 12);
+    const fromYm = months[months.length - 1];
+    const groupsSql = `'${Object.keys(PURCHASE_GROUP_CAT).join("','")}'`;
+    const fabricSql = `'${FABRIC_ITEM_GROUPS.join("','")}'`;
+    // One row per item code: a handful of codes exist twice and would double a line.
+    const codeGroup = `(SELECT item_code, MIN(item_group) AS grp FROM raw_materials
+                         WHERE org_id = ? AND item_group IN (${groupsSql}) GROUP BY item_code)`;
+    const [cutRes, invRes, recvRes, grnRes, poRes, bomMap] = await Promise.all([
+      db
+        .prepare(
+          `WITH buy AS (
+             SELECT itemId, SUM(totalCostSen) / NULLIF(SUM(qty), 0) AS "avgSen"
+               FROM cost_ledger WHERE type = 'RM_RECEIPT' GROUP BY itemId
+           )
+           SELECT po.itemCategory AS "cat", substr(cl.date::text, 1, 7) AS "ym",
+                  COALESCE(SUM(cl.qty), 0) AS "meters",
+                  COALESCE(SUM(cl.totalCostSen), 0) AS "shownSen",
+                  COALESCE(SUM(CASE WHEN b.source = 'OPENING' AND buy."avgSen" IS NOT NULL
+                                    THEN cl.qty * buy."avgSen" ELSE cl.totalCostSen END), 0) AS "realSen",
+                  COALESCE(SUM(CASE WHEN b.source = 'OPENING' THEN cl.qty ELSE 0 END), 0) AS "openingMeters"
+             FROM cost_ledger cl
+             JOIN raw_materials rm ON rm.id = cl.itemId
+             JOIN production_orders po ON po.id = cl.refId
+             LEFT JOIN rm_batches b ON b.id = cl.batchId
+             LEFT JOIN buy ON buy.itemId = cl.itemId
+            WHERE po.orgId = ? AND cl.type = 'RM_ISSUE'
+              AND cl.refType = 'PRODUCTION_ORDER'
+              AND rm.itemGroup IN (${fabricSql})
+              AND po.itemCategory IN ('BEDFRAME','SOFA')
+              AND substr(cl.date::text, 1, 7) >= ?
+            GROUP BY po.itemCategory, substr(cl.date::text, 1, 7)`,
+        )
+        .bind(orgId, fromYm)
+        .all<CutRow>(),
+      db
+        .prepare(
+          `SELECT substr(pi.invoice_date, 1, 7) AS "ym", g.grp AS "grp", pii.material_code AS "code",
+                  COUNT(*) AS "lines", COALESCE(SUM(pii.qty), 0) AS "meters",
+                  COALESCE(SUM(pii.line_total_sen), 0) AS "sen"
+             FROM purchase_invoice_items pii
+             JOIN purchase_invoices pi ON pi.id = pii.pi_id
+             JOIN ${codeGroup} g ON g.item_code = pii.material_code
+            WHERE pi.org_id = ? AND pi.status <> 'CANCELLED' AND COALESCE(pi.is_opening, 0) = 0
+              AND pi.invoice_date IS NOT NULL AND substr(pi.invoice_date, 1, 7) >= ?
+            GROUP BY 1, 2, 3`,
+        )
+        .bind(orgId, orgId, fromYm)
+        .all<InvoiceRow>(),
+      db
+        .prepare(
+          `SELECT substr(cl.date::text, 1, 7) AS "ym", rm.item_group AS "grp",
+                  COALESCE(SUM(cl.qty), 0) AS "meters"
+             FROM cost_ledger cl
+             JOIN raw_materials rm ON rm.id = cl.item_id
+            WHERE rm.org_id = ? AND cl.type = 'RM_RECEIPT' AND rm.item_group IN (${groupsSql})
+              AND substr(cl.date::text, 1, 7) >= ?
+            GROUP BY 1, 2`,
+        )
+        .bind(orgId, fromYm)
+        .all<ReceiptRow>(),
+      db
+        .prepare(
+          `SELECT substr(g.receive_date, 1, 7) AS "ym", cg.grp AS "grp",
+                  COUNT(DISTINCT g.id) AS "grns", COALESCE(SUM(gi.received_qty), 0) AS "meters"
+             FROM grns g
+             JOIN grn_items gi ON gi.grn_id = g.id
+             JOIN ${codeGroup} cg ON cg.item_code = gi.material_code
+            WHERE g.org_id = ? AND g.status <> 'CANCELLED'
+              AND g.receive_date IS NOT NULL AND substr(g.receive_date, 1, 7) >= ?
+            GROUP BY 1, 2`,
+        )
+        .bind(orgId, orgId, fromYm)
+        .all<GrnRow>(),
+      db
+        .prepare(
+          `SELECT po.item_category AS "cat", substr(po.completed_date, 1, 7) AS "ym",
+                  po.fabric_code AS "fabricCode", po.product_code AS "productCode",
+                  po.quantity AS "quantity", po.gap_inches AS "gapInches",
+                  po.divan_height_inches AS "divanHeightInches", po.leg_height_inches AS "legHeightInches",
+                  po.size_code AS "sizeCode", po.size_label AS "sizeLabel",
+                  COALESCE(iss.m, 0) AS "recordedMeters", COALESCE(iss.sen, 0) AS "recordedSen"
+             FROM production_orders po
+             LEFT JOIN (SELECT cl.ref_id, SUM(cl.qty) AS m, SUM(cl.total_cost_sen) AS sen
+                          FROM cost_ledger cl
+                          JOIN raw_materials rm ON rm.id = cl.item_id
+                         WHERE cl.type = 'RM_ISSUE' AND cl.ref_type = 'PRODUCTION_ORDER'
+                           AND rm.item_group IN (${fabricSql})
+                         GROUP BY cl.ref_id) iss ON iss.ref_id = po.id
+            WHERE po.org_id = ? AND po.item_category IN ('BEDFRAME','SOFA')
+              AND po.status <> 'CANCELLED' AND po.completed_date IS NOT NULL
+              AND substr(po.completed_date, 1, 7) >= ?`,
+        )
+        .bind(orgId, fromYm)
+        .all<{
+          cat: string; ym: string; fabricCode: string | null; productCode: string | null;
+          quantity: number; gapInches: number | null; divanHeightInches: number | null;
+          legHeightInches: number | null; sizeCode: string | null; sizeLabel: string | null;
+          recordedMeters: number; recordedSen: number;
+        }>(),
+      fetchBomWipComponentsByCode(db),
+    ]);
+    const num = (v: unknown) => Number(v) || 0;
+    // The plan for each order is its own BOM's fabric (every fabric-cutting node),
+    // the same engine the Fab Cut page uses. Siblings are left out on purpose:
+    // both sides are per order, so nothing is counted twice.
+    const orders: PoRow[] = (poRes.results ?? []).map((r) => ({
+      cat: r.cat,
+      ym: r.ym,
+      fabricCode: r.fabricCode,
+      plannedMeters: r.productCode
+        ? computeFcFabricUsageMeters(
+            { ...r, quantity: num(r.quantity) },
+            { departmentCode: "FAB_CUT", wipType: null },
+            bomMap.get(r.productCode),
+          )
+        : 0,
+      recordedMeters: num(r.recordedMeters),
+      recordedSen: num(r.recordedSen),
+    }));
+    return buildFabricPurchasingMonths({
+      months,
+      cut: (cutRes.results ?? []).map((r) => ({
+        cat: r.cat, ym: r.ym, meters: num(r.meters), shownSen: num(r.shownSen),
+        realSen: num(r.realSen), openingMeters: num(r.openingMeters),
+      })),
+      invoices: (invRes.results ?? []).map((r) => ({
+        ym: r.ym, grp: r.grp, code: r.code, lines: num(r.lines), meters: num(r.meters), sen: num(r.sen),
+      })),
+      receipts: (recvRes.results ?? []).map((r) => ({ ym: r.ym, grp: r.grp, meters: num(r.meters) })),
+      grns: (grnRes.results ?? []).map((r) => ({ ym: r.ym, grp: r.grp, grns: num(r.grns), meters: num(r.meters) })),
+      orders,
+    });
+  });
+  return c.json({ success: true, ...data });
+});
+
+// Staging Dashboard Compare, "Purchasing" tab (owner 2026-10-09). Next to the
+// dashboard's Purchasing card (which the page draws from the overview payload):
+//   - invoiced spend per calendar month, last 12 months, same rule as the card
+//     (amount_sen by invoice date, cancelled left out);
+//   - every open PO (not RECEIVED / CLOSED / CANCELLED, the card's Open POs
+//     filter) with what has been received of it, by value;
+//   - every supplier invoice not cancelled and not fully paid.
+// The two lists are today's state by nature; the tab says so. Read-only.
+// Raw rows: text and numeric columns come back as strings or null.
+type PurchasingCompareRow = Record<string, string | null>;
+app.get("/purchasing-compare", async (c) => {
+  const orgId = getOrgId(c);
+  const { cached } = await import("../lib/kv-cache");
+  const data = await cached(c, `dashboard:purchasing-compare:${orgId}:v1`, 60, async () => {
+    const db = c.var.DB;
+    // Business days are Malaysian (UTC+8).
+    const today = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
+    const months = monthsBack(today.slice(0, 7), 12);
+    const [monthRes, poRes, piRes] = await Promise.all([
+      db
+        .prepare(
+          `SELECT substr(invoice_date, 1, 7) AS "ym", COUNT(*) AS "invoices",
+                  COALESCE(SUM(amount_sen), 0) AS "spendSen",
+                  COUNT(DISTINCT supplier_name) AS "suppliers"
+             FROM purchase_invoices
+            WHERE org_id = ? AND status <> 'CANCELLED'
+              AND invoice_date IS NOT NULL AND substr(invoice_date, 1, 7) >= ?
+            GROUP BY substr(invoice_date, 1, 7)`,
+        )
+        .bind(orgId, months[months.length - 1])
+        .all<{ ym: string; invoices: number; spendSen: number; suppliers: number }>(),
+      db
+        .prepare(
+          `SELECT p.po_no AS "poNo", p.supplier_name AS "supplier",
+                  p.order_date::text AS "orderDate", p.expected_date::text AS "expectedDate",
+                  p.status AS "status", COALESCE(p.total_sen, 0) AS "totalSen",
+                  COALESCE(SUM(LEAST(poi.received_qty, poi.quantity) * poi.unit_price_sen), 0) AS "receivedSen",
+                  COUNT(poi.id) AS "lines"
+             FROM purchase_orders p
+             LEFT JOIN purchase_order_items poi ON poi.purchase_order_id = p.id
+            WHERE p.org_id = ? AND p.status NOT IN ('RECEIVED','CLOSED','CANCELLED')
+            GROUP BY p.id, p.po_no, p.supplier_name, p.order_date, p.expected_date, p.status, p.total_sen
+            ORDER BY p.order_date, p.po_no`,
+        )
+        .bind(orgId)
+        .all<PurchasingCompareRow>(),
+      db
+        .prepare(
+          `SELECT pi_no AS "piNo", supplier_invoice_no AS "supplierInvoiceNo",
+                  supplier_name AS "supplier", invoice_date::text AS "invoiceDate",
+                  due_date::text AS "dueDate", status AS "status",
+                  amount_sen AS "amountSen", COALESCE(paid_amount_sen, 0) AS "paidSen"
+             FROM purchase_invoices
+            WHERE org_id = ? AND status NOT IN ('CANCELLED','PAID')
+              AND amount_sen - COALESCE(paid_amount_sen, 0) > 0
+            ORDER BY due_date NULLS LAST, pi_no`,
+        )
+        .bind(orgId)
+        .all<PurchasingCompareRow>(),
+    ]);
+    const num = (v: unknown) => Number(v) || 0;
+    const byYm = new Map((monthRes.results ?? []).map((r) => [r.ym, r]));
+    return {
+      today,
+      months: months.map((ym) => {
+        const r = byYm.get(ym);
+        return { ym, invoices: num(r?.invoices), spendSen: num(r?.spendSen), suppliers: num(r?.suppliers) };
+      }),
+      openPos: (poRes.results ?? []).map((r) => ({
+        poNo: r.poNo ?? "",
+        supplier: r.supplier ?? "",
+        orderDate: r.orderDate,
+        expectedDate: r.expectedDate,
+        status: r.status ?? "",
+        totalSen: num(r.totalSen),
+        receivedSen: Math.round(num(r.receivedSen)),
+        lines: num(r.lines),
+      })),
+      unpaid: (piRes.results ?? []).map((r) => ({
+        piNo: r.piNo ?? "",
+        supplierInvoiceNo: r.supplierInvoiceNo,
+        supplier: r.supplier ?? "",
+        invoiceDate: r.invoiceDate,
+        dueDate: r.dueDate,
+        status: r.status ?? "",
+        amountSen: num(r.amountSen),
+        paidSen: num(r.paidSen),
+      })),
+    };
+  });
+  return c.json({ success: true, ...data });
 });
 
 export default app;

@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-09**: branch `feat/dashboard-compare-plant-card-drills` (to `staging`) added item 11 to the Plant Load entry below.
 > **Last verified: 2026-10-09**: branch `feat/batch-exports-from-houzs` (to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-09**: branch `feat/dev64-price-list-default-column` (DEV-64 to `staging`) added below (its entry is the newest).
 > **Last verified: 2026-10-09**: branch `fix/worker-i18n-popups-and-date` (to `staging`, then `main`) added below (in progress, its entry is the newest).
@@ -236,6 +237,7 @@ Owner asks (one message, plus answers to three follow-up questions):
 8. 🔵 Follow-up ask (2026-10-09): a staging-only Dashboard Compare page under Dashboard in the side menu (`/dashboard/compare`, `src/pages/dashboard-compare.tsx`): the 7-day and 14-day Plant Load side by side, charts on one scale, plus a per-department difference table. The overview route takes `capacityWindow=7`, which reads and writes no stored copy.
 9. 🔵 Follow-up (2026-10-09, branch `feat/dashboard-compare-month`): month picker on Dashboard Compare. "Up to yesterday" or the end of a finished month; for a month both windows end on its last day and the saved month-end backlog is divided again by each. `capacityWindow` now takes 7 or 14, with its own cache key.
 10. 🔵 Follow-up (2026-10-09, branch `feat/dashboard-compare-plant-card`): each column of Dashboard Compare shows the Plant Load card (`PlantLoadCard` takes an optional `capacityWindow`) and Department Backlog bars (sofa / bedframe, shared scale) above the daily chart. A picked month keeps both windows inside that month (no days from the month before; divisor = days counted); the current month is in the picker too. Staging data stops at the 30 Sep clone, so October windows on staging hold empty days.
+11. 🔵 Follow-up (2026-10-09, branch `feat/dashboard-compare-plant-card-drills`): the compare page's Plant Load card is now a copy of the /dashboard card, so its four rows (Daily Capacity, Total Backlog, Active Jobs, Completed) open the same drill-throughs; the Fabric tab shows a copy of the /dashboard Fabric Usage section for the picked month above the shown-vs-real tables; the month picker stays at the top right on every tab. Copies (`src/pages/dashboard-compare-cards.tsx`), not shared code, because `dashboard-b/index.tsx` is frozen. The optional `capacityWindow` on the experimental `PlantLoadCard` is removed again.
 
 ## 2026-10-08 — 🔵 BOM Variant Fields and WIP Types as lists with product-type ticks (branch `feat/bom-variant-fields-list` → `staging`)
 

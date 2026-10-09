@@ -35,10 +35,8 @@ function ok<T extends { success?: boolean }>(r: Loaded<T>): T | null {
   return r.data && r.data.success !== false ? r.data : null;
 }
 
-// capacityWindow: staging Dashboard Compare only (7- vs 14-day capacity).
-function useOverview(period: Period, capacityWindow?: 7 | 14) {
-  const cw = capacityWindow ? `&capacityWindow=${capacityWindow}` : "";
-  return useCachedJson<Overview>(`/api/dashboard/overview?period=${widgetPeriod(period)}${cw}`);
+function useOverview(period: Period) {
+  return useCachedJson<Overview>(`/api/dashboard/overview?period=${widgetPeriod(period)}`);
 }
 
 function CardShell({ title, sub, right, children }: { title: string; sub?: string; right?: React.ReactNode; children: React.ReactNode }) {
@@ -500,17 +498,15 @@ const gaugePt = (days: number, r: number) => {
   return { x: 100 + r * Math.cos(a), y: 108 - r * Math.sin(a) };
 };
 
-export function PlantLoadCard({ period, capacityWindow }: { period: Period; capacityWindow?: 7 | 14 }) {
-  const ovR = useOverview(period, capacityWindow);
+export function PlantLoadCard({ period }: { period: Period }) {
+  const ovR = useOverview(period);
   const ov = ok(ovR);
   const prod = ov?.production;
   const pl = plantLoad(prod, true);
   const perWorker = prod ? capacityPerWorkerMin(prod.capacityDays ?? [], prod.dailyCapacityMin) : null;
   // All-time and the current month: last 14 working days. A past month: its own average.
   const wp = widgetPeriod(period);
-  const avgBasis = capacityWindow
-    ? `${prod?.capacityDays?.length ?? capacityWindow}-day avg`
-    : wp === "all" || wp === new Date().toISOString().slice(0, 7) ? "14-day avg" : "month avg";
+  const avgBasis = wp === "all" || wp === new Date().toISOString().slice(0, 7) ? "14-day avg" : "month avg";
   const capDays = [...(prod?.capacityDays ?? [])].sort((a, b) => a.date.localeCompare(b.date));
   const tone = TONE[pl.tone];
   return (
