@@ -266,9 +266,11 @@ function buildJvVoucher(je: JournalEntry): VoucherSpec {
   const jvTag =
     je.lifecycleState === "VOID" || je.lifecycleState === "DELETED"
       ? " — VOID"
-      : je.status === "DRAFT"
-        ? " — DRAFT"
-        : "";
+      : (je as JournalRow).system?.undoneAt
+        ? " — UNDONE"
+        : je.status === "DRAFT"
+          ? " — DRAFT"
+          : "";
   return {
     title: `JOURNAL VOUCHER${jvTag}`,
     company: VOUCHER_COMPANY,
@@ -3749,12 +3751,22 @@ function JournalsTab({
             {row.status}
           </Badge>
           {row.system ? (
-            <span
-              className="rounded px-1.5 py-0.5 text-[10px] font-semibold bg-[#EEF1F4] text-[#4B5563]"
-              title={`Posted by the system — redo or undo it on ${systemTabLabel(row.system)}`}
-            >
-              SYSTEM
-            </span>
+            <>
+              <span
+                className="rounded px-1.5 py-0.5 text-[10px] font-semibold bg-[#EEF1F4] text-[#4B5563]"
+                title={`Posted by the system — redo or undo it on ${systemTabLabel(row.system)}`}
+              >
+                SYSTEM
+              </span>
+              {row.system.undoneAt && (
+                <span
+                  className="rounded px-1.5 py-0.5 text-[10px] font-semibold bg-[#F3E8E5] text-[#9A3A2D]"
+                  title={`Undone on ${formatDateDMY(row.system.undoneAt.slice(0, 10))} — no longer counts`}
+                >
+                  UNDONE
+                </span>
+              )}
+            </>
           ) : (
             <LifecycleBadge state={row.lifecycleState} />
           )}
@@ -3892,6 +3904,7 @@ function JournalsTab({
                   <h2 className="text-base font-semibold text-[#1F1D1B]">{sys ? sys.label : "Journal"} {je.entryNo}</h2>
                   <Badge variant="status" status={je.status}>{je.status}</Badge>
                   {sys && <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold bg-[#EEF1F4] text-[#4B5563]">SYSTEM</span>}
+                  {sys?.undoneAt && <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold bg-[#F3E8E5] text-[#9A3A2D]">UNDONE</span>}
                   {!sys && state !== "ACTIVE" && <LifecycleBadge state={state} />}
                 </div>
                 <button onClick={close} className="text-[#9CA3AF] hover:text-[#6B7280] text-lg leading-none">✕</button>
@@ -3905,7 +3918,11 @@ function JournalsTab({
                 {sys && (
                   <p className="text-xs text-[#6B7280] bg-[#FAF8F5] border border-[#E2DDD8] rounded-md px-3 py-2">
                     Posted by the system from {systemTabLabel(sys)}, not a journal entry — it can't be edited or voided here.
-                    {sys.undo ? " This one undoes an earlier posting." : ` To redo or undo it, use ${systemTabLabel(sys)}.`}
+                    {sys.undoneAt
+                      ? ` Undone on ${formatDateDMY(sys.undoneAt.slice(0, 10))} on ${systemTabLabel(sys)} — it no longer counts.`
+                      : sys.undo
+                        ? " This one undoes an earlier posting."
+                        : ` To redo or undo it, use ${systemTabLabel(sys)}.`}
                   </p>
                 )}
                 <div className="border border-[#E2DDD8] rounded-md overflow-x-auto">

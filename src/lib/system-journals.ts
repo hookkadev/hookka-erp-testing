@@ -11,7 +11,11 @@
 // the legs one transaction wrote share sourceType, sourceId and postedAt.
 // ---------------------------------------------------------------------------
 
-export type SystemPosting = { family: string; label: string; tab: string; undo: boolean };
+// `undo`: this entry is itself an undo (a reversal) the list could not pair
+// with the posting it undid. `undoneAt`: when a later undo cancelled this
+// posting (owner 2026-10-09 「unposted 有显示 posted，很让人混乱」) — the pair
+// shows as ONE row, REVERSED · UNDONE, like a voided journal.
+export type SystemPosting = { family: string; label: string; tab: string; undo: boolean; undoneAt?: string };
 
 // sourceType → what the list calls it and the accounting tab that made it.
 export const SYSTEM_JOURNAL_FAMILIES: Record<string, { label: string; tab: string }> = {
@@ -40,7 +44,7 @@ export type SystemJournal = {
   entryNo: string;
   date: string;
   description: string;
-  status: "POSTED";
+  status: "POSTED" | "REVERSED";
   lifecycleState: null;
   createdBy: string;
   createdAt: string;
@@ -86,11 +90,52 @@ export function buildSystemJournals(
     });
   }
   // The posting's own words (its first leg's) say what it was, after the label.
-  const out = [...byKey.values()].map((e) => ({
+  const all = [...byKey.values()].map((e) => ({
     ...e,
     description: e.lines[0]?.description ? `${e.system.label} · ${e.lines[0].description}` : e.system.label,
   }));
+  const out = foldUndone(all);
   // Newest first, like the manual journals.
   out.sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
   return out;
+}
+
+// Net per account, as a comparable key.
+const netKey = (e: SystemJournal, sign: 1 | -1) => {
+  const net = new Map<string, number>();
+  for (const l of e.lines) net.set(l.accountCode, (net.get(l.accountCode) ?? 0) + sign * (l.debitSen - l.creditSen));
+  return [...net].filter(([, v]) => v !== 0).sort(([a], [b]) => a.localeCompare(b)).map(([a, v]) => `${a}:${v}`).join("|");
+};
+
+// Each undo (a *_reversal entry) cancels the latest earlier posting of the
+// same family whose legs it exactly reverses — matched on the legs, not the
+// sourceId, because the opening balance's undo carries its own id
+// (ob-rev-<ts>). The posting is marked undone and the undo leaves the list;
+// an undo that matches nothing stays as its own row.
+export function foldUndone(entries: SystemJournal[]): SystemJournal[] {
+  // Same instant (a re-post writes the undo and the new posting together): the
+  // undo goes first, so it can only cancel something that existed before it.
+  const byTime = [...entries].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || Number(b.system.undo) - Number(a.system.undo));
+  const live = new Map<string, SystemJournal[]>(); // base family → postings not yet undone, oldest first
+  const folded = new Set<string>();
+  for (const e of byTime) {
+    const base = e.system.family.replace(/_reversal$/, "");
+    if (!e.system.undo) {
+      let arr = live.get(base);
+      if (!arr) { arr = []; live.set(base, arr); }
+      arr.push(e);
+      continue;
+    }
+    const want = netKey(e, -1);
+    const arr = live.get(base) ?? [];
+    for (let i = arr.length - 1; i >= 0; i--) {
+      if (netKey(arr[i], 1) !== want) continue;
+      arr[i].system = { ...arr[i].system, undoneAt: e.createdAt };
+      arr[i].status = "REVERSED";
+      arr.splice(i, 1);
+      folded.add(e.id);
+      break;
+    }
+  }
+  return entries.filter((e) => !folded.has(e.id));
 }

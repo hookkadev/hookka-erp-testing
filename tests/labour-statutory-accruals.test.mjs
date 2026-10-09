@@ -84,7 +84,9 @@ const leg = (sourceType, sourceId, postedAt, accountCode, debitSen, creditSen, d
   ({ sourceType, sourceId, postedAt, accountCode, debitSen, creditSen, description });
 const monthEnd = (st, sid, at) => (sid.startsWith("labor-") ? `${sid.slice(6)}-31` : at.slice(0, 10));
 
-test("system postings: one entry per posting; a re-post and its undo are their own entries", () => {
+test("system postings: one entry per posting; an undo folds into the posting it cancelled", () => {
+  // Owner 2026-10-09 「unposted 有显示 posted，很让人混乱」: the undo used to be its
+  // own POSTED row beside the posting it cancelled.
   const legs = [
     leg("labor_post", "labor-2026-07", "2026-08-05T10:00:00Z", "750-0010", 1000, 0, "Labour 2026-07 · PRODUCTION"),
     leg("labor_post", "labor-2026-07", "2026-08-05T10:00:00Z", "410-0010", 0, 1000, "Labour 2026-07 · accrued wages payable"),
@@ -96,18 +98,52 @@ test("system postings: one entry per posting; a re-post and its undo are their o
     leg("manual", "je-1", "2026-10-09T09:02:00Z", "100-0000", 5, 0, "not a system posting"),
   ];
   const out = buildSystemJournals(legs, (c) => ({ "410-0020": "ACCRUAL - EPF" })[c] ?? "", monthEnd);
-  assert.equal(out.length, 3);
+  assert.equal(out.length, 2, "the undo is not a row of its own");
   for (const e of out) {
     assert.equal(e.date, "2026-07-31", "on the date the GL reports it under");
-    assert.equal(e.status, "POSTED");
     assert.equal(e.system.tab, "labor");
     assert.equal(e.lines.reduce((s, l) => s + l.debitSen, 0), e.lines.reduce((s, l) => s + l.creditSen, 0));
   }
-  assert.deepEqual(out.map((e) => [e.system.label, e.lines.length]), [["Labour posting", 3], ["Labour posting undone", 2], ["Labour posting", 2]], "newest posting first");
-  assert.equal(out[1].system.undo, true);
+  assert.deepEqual(out.map((e) => [e.system.label, e.lines.length, e.status, e.system.undoneAt ?? null]), [
+    ["Labour posting", 3, "POSTED", null],
+    ["Labour posting", 2, "REVERSED", "2026-10-09T09:00:00Z"],
+  ], "newest posting first; the first one shows as undone");
   assert.equal(out[0].description, "Labour posting · Labour 2026-07 · PRODUCTION");
   assert.equal(out[0].lines[2].accountName, "ACCRUAL - EPF");
-  assert.notEqual(out[0].id, out[2].id, "a re-post is not the first posting");
+});
+
+test("system postings: posted twice and undone twice (the owner's July) → two undone rows, no undo rows", () => {
+  const post = (at, a) => [leg("labor_post", "labor-2026-07", at, "750-0010", a, 0, "Labour 2026-07"), leg("labor_post", "labor-2026-07", at, "410-0010", 0, a, "Labour 2026-07")];
+  const undo = (at, a) => [leg("labor_post_reversal", "labor-2026-07", at, "750-0010", 0, a, "unposted"), leg("labor_post_reversal", "labor-2026-07", at, "410-0010", a, 0, "unposted")];
+  const out = buildSystemJournals([...post("2026-08-07T09:18:00Z", 6984745), ...undo("2026-08-07T10:21:00Z", 6984745), ...post("2026-08-07T10:37:00Z", 6984745), ...undo("2026-10-09T09:59:00Z", 6984745)], () => "", monthEnd);
+  assert.deepEqual(out.map((e) => [e.createdAt, e.status, e.system.undoneAt]), [
+    ["2026-08-07T10:37:00Z", "REVERSED", "2026-10-09T09:59:00Z"],
+    ["2026-08-07T09:18:00Z", "REVERSED", "2026-08-07T10:21:00Z"],
+  ]);
+});
+
+test("system postings: an undo with its own id (the opening balance's ob-rev-<ts>) still pairs by its legs; an unmatched undo stays", () => {
+  const ob = (id, type, at, a, s) => [leg(type, id, at, "310-0010", s > 0 ? a : 0, s > 0 ? 0 : a, "Opening"), leg(type, id, at, "406-0000", s > 0 ? 0 : a, s > 0 ? a : 0, "Opening")];
+  const legs = [
+    ...ob("ob-1", "opening_balance", "2026-09-02T08:06:00Z", 500, 1),
+    ...ob("ob-rev-2", "opening_balance_reversal", "2026-09-02T15:20:00Z", 500, -1),
+    ...ob("ob-2", "opening_balance", "2026-09-02T15:20:00Z", 700, 1),
+    ...ob("ob-rev-9", "opening_balance_reversal", "2026-09-30T09:34:00Z", 999, -1),
+  ];
+  const out = buildSystemJournals(legs, () => "", () => "2026-05-22");
+  const by = Object.fromEntries(out.map((e) => [e.entryNo, [e.status, e.system.undoneAt ?? null, e.system.undo]]));
+  assert.deepEqual(by["ob-1"], ["REVERSED", "2026-09-02T15:20:00Z", false]);
+  assert.deepEqual(by["ob-2"], ["POSTED", null, false], "a different amount is not its undo");
+  assert.deepEqual(by["ob-rev-9"], ["POSTED", null, true], "an undo that matches nothing is still listed");
+  assert.equal(by["ob-rev-2"], undefined, "a paired undo leaves the list");
+});
+
+test("system postings: a re-post with the same figures — the undo written with it cancels the OLD posting", () => {
+  const ob = (id, type, at, s) => [leg(type, id, at, "310-0010", s > 0 ? 500 : 0, s > 0 ? 0 : 500, "Opening"), leg(type, id, at, "406-0000", s > 0 ? 0 : 500, s > 0 ? 500 : 0, "Opening")];
+  // The new posting is listed BEFORE its undo, at the very same instant.
+  const legs = [...ob("ob-1", "opening_balance", "2026-09-02T08:06:00Z", 1), ...ob("ob-2", "opening_balance", "2026-09-02T15:20:00Z", 1), ...ob("ob-rev-2", "opening_balance_reversal", "2026-09-02T15:20:00Z", -1)];
+  const by = Object.fromEntries(buildSystemJournals(legs, () => "", () => "2026-05-22").map((e) => [e.entryNo, e.status]));
+  assert.deepEqual(by, { "ob-1": "REVERSED", "ob-2": "POSTED" });
 });
 
 test("system postings: the families and the tab that made each", () => {
@@ -138,6 +174,9 @@ test("Journal Entries lists them beside the manual journals, read-only", () => {
   assert.match(menu, /label: `Open \$\{systemTabLabel\(sys\)\}`, action: \(\) => openSystemTab\(sys\)/);
   // The detail popup hides every manual-journal action for them.
   assert.match(tab, /\{!sys && je\.status === "DRAFT" && \(/);
+  assert.match(tab, /\{row\.system\.undoneAt && \(/, "UNDONE chip in the list");
+  assert.match(tab, /\{sys\?\.undoneAt && <span[^>]*>UNDONE<\/span>\}/, "and in the popup");
+  assert.match(ui, /: \(je as JournalRow\)\.system\?\.undoneAt\n\s+\? " — UNDONE"/, "and on the printed voucher");
   assert.match(tab, /\{!sys && je\.status !== "DRAFT" && state === "ACTIVE" && \(/);
   assert.match(tab, /\{!sys && \(\n\s+<Button variant="outline" size="sm" onClick=\{\(\) => \{ close\(\); void handleDuplicate\(je\); \}\}>Duplicate as draft<\/Button>/);
 });
