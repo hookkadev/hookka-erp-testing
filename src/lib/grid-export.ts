@@ -73,7 +73,7 @@ export function cellExportValue<T>(col: ExportColumn<T>, row: T): string | numbe
  * the VISIBLE columns in display order — pass DataGrid's visibleColumns.
  */
 export function buildListingAoa<T>(columns: ExportColumn<T>[], rows: T[]): Aoa {
-  const cols = columns.filter((c) => c.key !== "__select__" && c.key !== "__actions__");
+  const cols = columns.filter((c) => !["__select__", "__actions__", "actions"].includes(c.key));
   const header = cols.map((c) => c.label);
   const body = rows.map((r) => cols.map((c) => cellExportValue(c, r)));
   return [header, ...body];
