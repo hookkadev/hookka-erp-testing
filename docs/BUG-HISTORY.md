@@ -1,5 +1,6 @@
 # Bug History
 
+> **Last verified: 2026-10-09**: newest entry BUG-2026-10-09-272 (branch `fix/worker-i18n-popups-and-date`, to staging then main); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-09**: newest entry BUG-2026-10-09-273 (branch `fix/stock-take-price-list-sen`; 272 is on `staging`); a log, so "verified" means the newest entry matches the code on its branch, not that every older entry is still true.
 > **Last verified: 2026-10-09**: newest entry BUG-2026-10-09-271 (branch `fix/co-scan-po-creates-co`, to main); a log, so "verified" means the entry matches the code on its branch.
 > **Last verified: 2026-10-09**: BUG-2026-10-09-270 got a follow-up, the sync job timeout raised to 45 minutes (branch `fix/staging-sync-timeout`, to main).
@@ -85,6 +86,20 @@ Entries themselves stay newest-first.
 - `auth-rbac` (3) — [BUG-2026-06-12-010](#bug-2026-06-12-010--any-admin-could-disable-or-delete-other-peoples-accounts-no-admin-tier-below-super-admin)
 - `scheduling` (2) — [BUG-2026-04-24-035](#bug-2026-04-24-035-fixschedule-lead-time-days-before-delivery-per-dept-parallel-not-serial)
 - `audit-logging` (2) — [BUG-2026-04-27-007](#bug-2026-04-27-007-audit-event-write-failures-swallowed-silently)
+
+---
+
+## BUG-2026-10-09-272 — Worker portal: scan pop-ups and ~45 strings were English-only; non-prod date pre-filled yesterday `worker-portal` `ui-frontend` 🟢
+
+🟢 **Fixed** (branch `fix/worker-i18n-popups-and-date` → `staging`, then `main`; not yet deployed) · Found scanning the worker pages before the Play Store work.
+
+**1. Hardcoded English.** The worker portal runs in four languages, but about 45 visible strings never went through `worker-i18n.ts`: the pop-up that STOPS a scan ("Wrong department"; the sequence-lock "Not this step yet" pop-up is translated too but that feature is on `staging` only), "Not found: …", the scan result card labels, leave types, "Standard Times", the payslip alerts, the announcement image fallbacks. A worker who does not read English got the most important instruction on the page in English. All now use `t()`; 35 new entries (en / ms / zh / my), existing keys reused where the wording matched. The wrong-department sentences keep their bold department names in every language through `fillBold()` in `scan.tsx`. **The Burmese lines were drafted, not reviewed by a native reader.** Screen-reader labels (`aria-label`) are still English.
+
+**2. Yesterday's date.** My page → non-production time request pre-filled its date with `new Date().toISOString().slice(0, 10)`, which is UTC: before 08:00 Malaysia time it is yesterday. Now `todayYmdMY()` (`src/lib/utils.ts`), the helper that exists for exactly this.
+
+**Regression.** `tests/worker-pages-translated.test.mjs`: every `t("key")` on a worker page exists; every entry has four non-empty languages; translations keep their English placeholders; the old literals are gone; the date default is the Malaysia date. 4 of 7 fail on the old pages.
+
+**Verify.** Not driven in a browser (worker pages need a PIN login). To check on staging: switch language on the worker app and trigger a wrong-department scan.
 
 ---
 

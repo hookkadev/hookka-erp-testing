@@ -201,6 +201,7 @@ function CustomerProductsPanel({ customerId, customerName, customer }: { custome
   const [quotationAsOf, setQuotationAsOf] = useState<string>(() =>
     new Date().toISOString().slice(0, 10),
   );
+  const seatHeights = useSofaSeatHeights();
   const { data: resp, refresh } = useCachedJson<{ success?: boolean; data?: CustomerProduct[] }>(
     customerId ? `/api/customer-products?customerId=${customerId}&asOf=${quotationAsOf}` : null
   );
@@ -810,11 +811,11 @@ function CustomerProductsPanel({ customerId, customerName, customer }: { custome
   const isAccessoryView = categoryTab === "ACCESSORY";
   // Column count (used as colSpan when rendering the table-level wrapper).
   // BEDFRAME / ALL: Code | Description | Category | Size | Price 2 | Price 1 | Actions = 7
-  // SOFA:           Code | Description | Model | 24 | 28 | 30 | 32 | 35 | Actions = 9
+  // SOFA:           Code | Description | Model | <one per Maintenance size> | Actions
   // ACCESSORY:      Code | Description | Base Price | Actions = 4
-  const colSpanN = isSofaView ? 9 : isAccessoryView ? 4 : 7;
+  const colSpanN = isSofaView ? 4 + seatHeights.length : isAccessoryView ? 4 : 7;
   const gridCols = isSofaView
-    ? "1.3fr 1.5fr 0.7fr 0.95fr 0.95fr 0.95fr 0.95fr 0.95fr 0.7fr"
+    ? `1.3fr 1.5fr 0.7fr ${seatHeights.map(() => "0.95fr").join(" ")} 0.7fr`
     : isAccessoryView
     ? "1.3fr 2.5fr 1fr 0.7fr"
     : "1.3fr 2fr 0.8fr 0.8fr 1fr 1fr 0.7fr";
@@ -1102,11 +1103,9 @@ function CustomerProductsPanel({ customerId, customerName, customer }: { custome
                         {isSofaView ? (
                           <>
                             <div className={`${thCls} text-left`}>Model</div>
-                            <div className={`${thCls} text-right`}>24</div>
-                            <div className={`${thCls} text-right`}>28</div>
-                            <div className={`${thCls} text-right`}>30</div>
-                            <div className={`${thCls} text-right`}>32</div>
-                            <div className={`${thCls} text-right`}>35</div>
+                            {seatHeights.map((h) => (
+                              <div key={h} className={`${thCls} text-right`}>{sofaSeatLabel(h)}</div>
+                            ))}
                             <div className={`${thCls} text-right`}>Actions</div>
                           </>
                         ) : isAccessoryView ? (
@@ -1185,17 +1184,16 @@ function CustomerProductsPanel({ customerId, customerName, customer }: { custome
                               <>
                                 {/* Model */}
                                 <div className="px-3 py-1.5 text-sm text-[#111827]">{baseModel || "—"}</div>
-                                {/* 5 seat-height columns, tier-aware */}
-                                {(['24"', '28"', '30"', '32"', '35"'] as const).map((h) => {
-                                  const hNum = h.replace('"', '');
-                                  const norm = (v: unknown) => String(v ?? "").replace('"', '').trim();
+                                {/* One column per Maintenance size (numeric or named, e.g. DEFAULT), tier-aware */}
+                                {seatHeights.map((hNum) => {
+                                  const norm = (v: unknown) => String(v ?? "").replace(/"/g, "").trim();
                                   const sh = (row.seatHeightPrices || []).find(
                                     (s) => norm(s.height) === hNum && custEntryTier(s.tier) === sofaTier,
                                   );
-                                  const editKey = `${row.id}__${h}__${sofaTier}`;
+                                  const editKey = `${row.id}__${hNum}__${sofaTier}`;
                                   const isEditingThisCell = editingSeatKey === editKey;
                                   return (
-                                    <div key={h} className="px-3 py-1.5 text-right">
+                                    <div key={hNum} className="px-3 py-1.5 text-right">
                                       {isEditingThisCell ? (
                                         <input
                                           autoFocus
