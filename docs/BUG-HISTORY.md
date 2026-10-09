@@ -1,6 +1,7 @@
 # Bug History
 
 > **Last verified: 2026-10-09**: newest entry BUG-2026-10-09-271 (branch `fix/co-scan-po-creates-co`, to main); a log, so "verified" means the entry matches the code on its branch.
+> **Last verified: 2026-10-09**: BUG-2026-10-09-270 got a follow-up, the sync job timeout raised to 45 minutes (branch `fix/staging-sync-timeout`, to main).
 > **Last verified: 2026-10-09**: newest entry BUG-2026-10-09-270 (branch `fix/staging-merge-copy-hang`, to main); a log, so "verified" means the entry matches the code on its branch.
 > **Last verified: 2026-10-08**: BUG-2026-10-08-269 got a follow-up, the ÷9 rule seeded from 2026-10-01 (branch `fix/ot-hourly-rate-display`, to `main`, second commit of #759).
 > **Last verified: 2026-10-08**: newest entry BUG-2026-10-08-269 (branch `fix/ot-hourly-rate-display`, to `main`); a log, so "verified" means the entry matches the code on its branch.
@@ -109,6 +110,8 @@ Entries themselves stay newest-first.
 **Root cause:** `scripts/merge-prod-into-staging.mjs` read every table through ONE prod connection (`max: 1`). With postgres.js 3.4.9, after a large `COPY ... TO STDOUT` stream ends (attendance_records is ~200 MB), that connection never answers another query. Measured locally, read-only against prod: copy attendance_records (198.5 MB in 5.6 s), then `SELECT 1` on the same connection: no reply after 60 s. `audit_dlq` (1 row, the next table) copies in 29 ms on its own. Table size is not the cause: audit_events (227 MB) copies in 12 s on a fresh connection.
 
 **Fix:** open a fresh read-only prod connection for each table's COPY and close it afterwards. Measured: attendance_records, audit_dlq, audit_events, balance_sheet_entries copied back to back in 22 s. The edited script ran clean in report mode against prod and staging (280 tables). `--apply` was NOT run locally (it would land unsanitised rows on staging); the next `mode=merge` run on GitHub is the live check.
+
+**Follow-up (same day, run #152):** the hang is gone (213 tables copied, no stall), but a fresh connection per table costs about 3 s extra, so the median table went from 2 s (run #151) to 5 s. 279 tables need about 25 minutes and the job limit was 20, so #152 was cancelled while still copying. `timeout-minutes` in `sync-staging.yml` raised to 45.
 
 ---
 ## BUG-2026-10-08-269 — Payroll row: "4 hrs x RM 9.44 x 1.5 = RM 51.00", the hourly rate shown was not the rate paid `payroll` `employees` 🟡
