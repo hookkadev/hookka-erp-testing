@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-09**: branch `feat/po-picker-row-per-supplier` (BUG-98 follow-up, to `main`) added item 6 to the BUG-98 to-main entry below.
 > **Last verified: 2026-10-09**: branch `feat/po-picker-show-supplier-main` (BUG-98 follow-up, staging #790 to `main`) added item 5 to the BUG-98 to-main entry below.
 > **Last verified: 2026-10-09**: branch `feat/bug98-po-supplier-picker-main` (BUG-98 staging to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-09**: branch `feat/dev64-price-list-default-column-to-main` (DEV-64 staging to `main`) added below (its entry is the newest).
@@ -127,6 +128,7 @@ Ticket BUG-98 (reporter siti). Shipped to staging in #784 and #786; this brings 
 3. 🔵 With a supplier picked, the popup and the per-line RM code box only offer that supplier's materials.
 4. ⚪ Check on prod after deploy.
 5. 🔵 Follow-up (staging #790): with no supplier picked, each Select Materials row names the supplier Add will use ("+N more" when others sell it), or "No supplier linked".
+6. 🔵 Follow-up: with no supplier picked, a material sold by several suppliers shows one Select Materials row per supplier, each with its own price and Add, instead of one row with "+N more".
 
 ## 2026-10-09 — ✅ Labour posting: EPF / SOCSO / EIS accrue on their own; system postings on Journal Entries (owner「这个post to GL 我在journal 看没有，然后epf, socso 那些也要accrual」→「EIS 单独记 0040，journal 也要显示，做」)(#785 1d7f7dce, prod-verified)
 
