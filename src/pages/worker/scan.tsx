@@ -27,7 +27,7 @@
 // retired when the rewrite shipped — every path goes through the one
 // endpoint now.)
 // ============================================================
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useSearchParams } from "react-router-dom";
 import {
@@ -300,6 +300,15 @@ type TodaySnapshot = {
     efficiencyPct: number;
   };
 };
+
+// A translated sentence with its {placeholders} filled in BOLD — the department
+// names in the wrong-department pop-up must stand out in every language.
+function fillBold(template: string, values: Record<string, string>): ReactNode[] {
+  return template.split(/(\{[a-zA-Z]+\})/).map((part, i) => {
+    const m = part.match(/^\{([a-zA-Z]+)\}$/);
+    return m ? <strong key={i}>{values[m[1]] ?? ""}</strong> : part;
+  });
+}
 
 function mins2hrs(mins: number): string {
   return (mins / 60).toFixed(1);
@@ -812,7 +821,7 @@ export default function WorkerScanPage() {
         } else if (matches.length > 1) {
           setResult({ kind: "choices", options: matches });
         } else {
-          setResult({ kind: "error", message: `Not found: ${term}` });
+          setResult({ kind: "error", message: t("scan.notFound").replace("{x}", term) });
         }
       } catch {
         setResult({ kind: "error", message: t("common.error") });
@@ -969,7 +978,7 @@ export default function WorkerScanPage() {
       if (manualOutside) {
         setResult({
           kind: "error",
-          message: `Manual item: ${manualOutside.name}. Scan a rack QR first to stock it in.`,
+          message: t("scan.manualNeedsRack").replace("{name}", manualOutside.name),
           decoded: raw,
         });
         return;
@@ -1063,7 +1072,7 @@ export default function WorkerScanPage() {
           } else {
             setResult({
               kind: "error",
-              message: `Not found: ${barcodeJcId}`,
+              message: t("scan.notFound").replace("{x}", barcodeJcId),
               decoded: raw,
             });
           }
@@ -1225,7 +1234,10 @@ export default function WorkerScanPage() {
           // PO number is in the current data set.
           setResult({
             kind: "error",
-            message: `Not found: ${primaryTerm}${parsed?.poNo && parsed.poNo !== primaryTerm ? ` / ${parsed.poNo}` : ""}`,
+            message: t("scan.notFound").replace(
+              "{x}",
+              `${primaryTerm}${parsed?.poNo && parsed.poNo !== primaryTerm ? ` / ${parsed.poNo}` : ""}`,
+            ),
             decoded: raw,
           });
         }
@@ -2541,7 +2553,7 @@ export default function WorkerScanPage() {
             when done.
           </p>
           {rackStockIn.items.length === 0 ? (
-            <p className="text-sm text-[#6B7280] py-2">Nothing scanned yet.</p>
+            <p className="text-sm text-[#6B7280] py-2">{t("scan.nothingScanned")}</p>
           ) : (
             <ul className="divide-y divide-[#EFEAE5]">
               {rackStockIn.items.map((it) => (
@@ -2658,11 +2670,11 @@ export default function WorkerScanPage() {
             </div>
             <div className="grid grid-cols-3 gap-2 text-sm">
               <div className="bg-[#F0ECE9] rounded px-3 py-2">
-                <p className="text-[11px] text-[#8A8680] uppercase">Department</p>
+                <p className="text-[11px] text-[#8A8680] uppercase">{t("me.dept")}</p>
                 <p className="font-semibold">{result.jobCard.departmentCode}</p>
               </div>
               <div className="bg-[#F0ECE9] rounded px-3 py-2">
-                <p className="text-[11px] text-[#8A8680] uppercase">Status</p>
+                <p className="text-[11px] text-[#8A8680] uppercase">{t("scan.status")}</p>
                 <p className="font-semibold">{result.jobCard.status}</p>
               </div>
               {/* Planned production time for this job card — lets the worker
@@ -2670,7 +2682,7 @@ export default function WorkerScanPage() {
                   back-end tracks actual vs. planned via the scan-complete
                   endpoint; estMinutes is what's credited on completion. */}
               <div className="bg-[#F0ECE9] rounded px-3 py-2">
-                <p className="text-[11px] text-[#8A8680] uppercase">Prod Time</p>
+                <p className="text-[11px] text-[#8A8680] uppercase">{t("home.productionTime")}</p>
                 <p className="font-semibold">
                   {result.jobCard.estMinutes > 0
                     ? `${result.jobCard.estMinutes} min`
@@ -2714,7 +2726,7 @@ export default function WorkerScanPage() {
                 result.jobCard.status === "TRANSFERRED") && (
                 <div className="bg-[#F0ECE9] rounded-lg p-3">
                   <p className="text-xs font-semibold text-[#5A5550] mb-1.5">
-                    Rack number
+                    {t("scan.rackNumber")}
                   </p>
                   {rackSaved ? (
                     <p className="text-sm font-semibold text-[#3E6570]">
@@ -2806,7 +2818,7 @@ export default function WorkerScanPage() {
           {result.jobCard.departmentCode === "PACKING" && (
             <div className="mt-4 bg-white/10 rounded-lg p-3 text-left">
               <p className="text-xs font-semibold opacity-90 mb-1.5">
-                Rack number
+                {t("scan.rackNumber")}
               </p>
               {rackSaved ? (
                 <p className="text-sm font-semibold">✓ Rack saved: {rackChoice}</p>
@@ -2898,8 +2910,8 @@ export default function WorkerScanPage() {
           <div className="flex items-start gap-2">
             <Lock className="h-6 w-6 mt-0.5 shrink-0" />
             <div className="min-w-0 flex-1">
-              <p className="text-lg font-bold leading-tight">Not this step yet</p>
-              <p className="mt-2 text-sm">Finish first:</p>
+              <p className="text-lg font-bold leading-tight">{t("scan.blockedTitle")}</p>
+              <p className="mt-2 text-sm">{t("scan.blockedFinishFirst")}</p>
               <ul className="mt-1 space-y-0.5">
                 {blockingDepartments(result.refusal).map((d) => (
                   <li key={d} className="text-xl font-bold leading-snug">
@@ -2917,20 +2929,18 @@ export default function WorkerScanPage() {
               // mis-tap waiting to happen, and every release is audited.
               onClick={() => {
                 if (
-                  window.confirm(
-                    "Unlock and complete this step anyway? This will be recorded.",
-                  )
+                  window.confirm(t("scan.unlockConfirm"))
                 ) {
                   result.retry();
                 }
               }}
               className="mt-4 w-full rounded-lg bg-[#7A5610] px-4 py-3 text-base font-semibold text-white active:bg-[#5E420C]"
             >
-              Unlock and complete
+              {t("scan.unlockAndComplete")}
             </button>
           )}
           <p className="mt-2 text-center text-[11px] text-[#7A5610]/70">
-            Later this will need a supervisor.
+            {t("scan.unlockLaterSupervisor")}
           </p>
         </div>
       )}
@@ -2943,14 +2953,15 @@ export default function WorkerScanPage() {
           <div className="flex items-start gap-2">
             <AlertTriangle className="h-5 w-5 mt-0.5 shrink-0" />
             <div className="min-w-0 flex-1">
-              <p className="font-semibold">Wrong department</p>
+              <p className="font-semibold">{t("scan.wrongDeptTitle")}</p>
               <p className="text-sm mt-1 break-words">
-                You are in <strong>{result.currentDept}</strong>. This sticker is
-                for <strong>{result.stickerDept}</strong>.
+                {fillBold(t("scan.wrongDeptBody"), {
+                  current: result.currentDept,
+                  sticker: result.stickerDept,
+                })}
               </p>
               <div className="mt-2 rounded-md bg-[#FAEEDA] p-2.5 text-xs leading-relaxed text-[#854F0B]">
-                Scan the <strong>{result.stickerDept}</strong> department QR first
-                to switch, then scan this sticker again.
+                {fillBold(t("scan.wrongDeptHowTo"), { sticker: result.stickerDept })}
               </div>
               <button
                 type="button"
@@ -3171,13 +3182,13 @@ export default function WorkerScanPage() {
         <>
           {/* Today KPI row */}
           <div className="grid grid-cols-3 gap-2">
-            <Kpi label="Work hrs" value={mins2hrs(today.totals.workedMinutes)} />
+            <Kpi label={t("home.colWorkingHrs")} value={mins2hrs(today.totals.workedMinutes)} />
             <Kpi
-              label="Prod hrs"
+              label={t("home.colProductionHrs")}
               value={mins2hrs(today.totals.productionMinutes)}
             />
             <Kpi
-              label="Efficiency"
+              label={t("team.colEfficiency")}
               value={`${today.totals.efficiencyPct}%`}
               tone={
                 today.totals.efficiencyPct >= 80
@@ -3243,9 +3254,9 @@ export default function WorkerScanPage() {
                 </div>
                 <div className="px-3 pb-2">
                   <div className="grid grid-cols-[auto_1fr_auto] gap-2 py-2 text-[10px] font-bold uppercase tracking-wide text-[#8A8680] bg-[#EAF3E5] -mx-3 px-3">
-                    <span>Dept</span>
-                    <span>Product</span>
-                    <span className="text-right">Mins</span>
+                    <span>{t("me.dept")}</span>
+                    <span>{t("scan.colProduct")}</span>
+                    <span className="text-right">{t("home.colMins")}</span>
                   </div>
                   {pieceRows.length === 0 ? (
                     <div className="py-4 text-center text-xs text-[#8A8680]">
