@@ -14,9 +14,10 @@
 //                     list sits on the shared Esc stack, so inside a popup
 //                     the first Esc closes the list, not the popup
 //   - Typing          filter (case-insensitive substring on label)
+//   - Backspace       (combobox + allowClear) on an empty box clears the value
 // ---------------------------------------------------------------------------
 import * as React from "react";
-import { ChevronDown, Check, Search as SearchIcon } from "lucide-react";
+import { ChevronDown, Check, Search as SearchIcon, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { nextIncrementalCount, optionSliceCount } from "@/lib/incremental-window";
 import { useEscapeClose } from "@/lib/escape-stack";
@@ -41,6 +42,9 @@ export interface SearchableSelectProps {
   allowClear?: boolean;
   /** Override for empty-state message. */
   emptyMessage?: string;
+  /** Type straight into the trigger instead of a search box inside the list.
+   *  With allowClear, an inline ✕ clears the value. */
+  combobox?: boolean;
 }
 
 // One page of options. The dropdown is 240px tall — about six rows — so a
@@ -62,6 +66,7 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
   className,
   allowClear = false,
   emptyMessage = "No matches",
+  combobox = false,
 }) => {
   const [open, setOpen] = React.useState(false);
   useEscapeClose(() => setOpen(false), open);
@@ -196,11 +201,64 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
     } else if (e.key === "Escape") {
       e.preventDefault();
       setOpen(false);
+    } else if (combobox && e.key === "Tab") {
+      setOpen(false);
+    } else if (combobox && allowClear && e.key === "Backspace" && open && query === "" && value) {
+      onChange("");
     }
   };
 
   return (
     <div ref={wrapperRef} className="relative">
+      {combobox ? (
+        <div className="relative">
+          <input
+            ref={inputRef}
+            type="text"
+            disabled={disabled}
+            value={open ? query : selected?.label ?? ""}
+            placeholder={open && selected ? selected.label : placeholder}
+            onFocus={() => setOpen(true)}
+            onClick={() => setOpen(true)}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setHighlight(0);
+              setOpen(true);
+              if (allowClear && !open && e.target.value === "" && value) onChange("");
+            }}
+            onKeyDown={onKeyDown}
+            className={cn(
+              "w-full rounded-md border border-[#E2DDD8] bg-white pl-3 py-2 text-sm text-[#1F1D1B] placeholder:text-[#9CA3AF] truncate",
+              "focus:outline-none focus:ring-2 focus:ring-[#6B5C32]/20 focus:border-[#6B5C32]",
+              "disabled:cursor-not-allowed disabled:bg-[#FAF9F7] disabled:opacity-60",
+              allowClear && selected ? "pr-14" : "pr-8",
+              open && "ring-2 ring-[#6B5C32]/20 border-[#6B5C32]",
+              className,
+            )}
+          />
+          <div className="pointer-events-none absolute inset-y-0 right-2 flex items-center gap-1">
+            {allowClear && selected && !disabled && (
+              <button
+                type="button"
+                aria-label="Clear selection"
+                title="Clear"
+                // Keep focus in the input so the list does not close and reopen.
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  onChange("");
+                  setQuery("");
+                  setOpen(true);
+                  inputRef.current?.focus();
+                }}
+                className="pointer-events-auto rounded p-0.5 text-[#9CA3AF] hover:bg-[#FAF9F7] hover:text-[#1F1D1B]"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+            <ChevronDown className="h-3.5 w-3.5 flex-shrink-0 text-[#9CA3AF]" />
+          </div>
+        </div>
+      ) : (
       <button
         type="button"
         disabled={disabled}
@@ -223,10 +281,12 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
         </span>
         <ChevronDown className="h-3.5 w-3.5 flex-shrink-0 text-[#9CA3AF]" />
       </button>
+      )}
 
       {open && (
         <div className="absolute z-50 mt-1 w-full min-w-[240px] rounded-md border border-[#E2DDD8] bg-white shadow-lg">
           {/* Search input */}
+          {!combobox && (
           <div className="border-b border-[#E2DDD8] p-2">
             <div className="relative">
               <SearchIcon className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[#9CA3AF]" />
@@ -244,6 +304,7 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
               />
             </div>
           </div>
+          )}
 
           {/* Options list */}
           <div
@@ -251,7 +312,7 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
             onScroll={onListScroll}
             className="max-h-60 overflow-y-auto py-1"
           >
-            {allowClear && (
+            {allowClear && !combobox && (
               <button
                 type="button"
                 onClick={() => commit("")}
