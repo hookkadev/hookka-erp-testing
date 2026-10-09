@@ -1,5 +1,6 @@
 # Hookka ERP — Work Tracker
 
+> **Last verified: 2026-10-09**: branch `feat/dev64-price-list-default-column-to-main` (DEV-64 staging to `main`) added below (its entry is the newest).
 > **Last verified: 2026-10-09**: branch `fix/worker-i18n-popups-and-date` (to `staging`, then `main`) added below (in progress, its entry is the newest).
 > **Last verified: 2026-10-09**: stock-take priced count (#775), price-list hint fix (#776) and price-list prefill (#778) all prod-verified.
 > **Last verified: 2026-10-09**: branch `fix/co-scan-po-creates-co` (to `main`, BUG-2026-10-09-271) added below (its entry is the newest).
@@ -114,6 +115,15 @@ shipped/parked). Re-read this + `MEMORY.md` at the start of each session and bef
 reporting "done". See `docs/DEV-OPERATING-FRAMEWORK.md` for the discipline.
 
 Status key: 🔵 in progress · 🟡 parked/needs owner · ✅ shipped to prod · ⚪ queued
+
+## 2026-10-09 — 🔵 DEV-64: customer price list shows every Maintenance sofa size, DEFAULT included, to main (branch `feat/dev64-price-list-default-column-to-main` → `main`)
+
+Reporter ask (Siti, DEV-64 "price list"): "can add column default for the customer price". Cherry-pick of the staging commit e8f1a578 (#777).
+
+1. 🔵 Customer → Products → Sofa price grid (`CustomerProductsPanel` in `src/pages/customers.tsx`) hard-coded the seat columns `24 / 28 / 30 / 32 / 35`, so a named size like DEFAULT (and 20, 26) from Maintenance → Sofa → Sizes had no customer-price column. The grid now reads `useSofaSeatHeights()`, header via `sofaSeatLabel`. No backend change: prices are stored by size string.
+2. ✅ Seen on the `claude/dev64` preview (2026-10-09): header `20" 24" 26" 28" 30" 32" 35" DEFAULT`, existing 26" customer prices now visible. Save of a DEFAULT price not exercised.
+3. ✅ canary-782 (prod data, view-only, 2026-10-09): same header on 2990 HOME SDN BHD; its existing DEFAULT prices (8210-4FT RM 720.00, 6FT RM 1,080.00, 7FT RM 1,260.00) were invisible before and now show.
+4. ⬜ Reporter OK, then merge.
 
 ## 2026-10-09 — 🔵 Worker pages: scan pop-ups translated + local-date default (branch `fix/worker-i18n-popups-and-date` → `staging`, then `main`)
 
