@@ -18,6 +18,9 @@
 // /api/dashboard/overview/fabric-cost-compare: fabric Avg cost /m as shown vs at
 // real purchase prices vs invoice price, each finished order's BOM plan vs what
 // it recorded, fabric invoiced vs received into stock, and an invoice price trend.
+// Third tab (?tab=purchasing): the dashboard's Purchasing card for the picked
+// month, invoiced spend for the last 12 months, and today's open POs and unpaid
+// supplier invoices, from /api/dashboard/overview/purchasing-compare.
 // The month picker sits at the top right on every tab.
 // ============================================================
 import { useState, type ReactNode } from "react";
@@ -28,7 +31,14 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Tabs } from "@/components/ui/tabs";
 import { formatRM } from "@/lib/utils";
 import { useCachedJson } from "@/lib/cached-fetch";
-import { FabricUsageSection, Modal, PlantLoadCard, type Drill, type PlantLoadOverview } from "@/pages/dashboard-compare-cards";
+import {
+  FabricUsageSection,
+  Modal,
+  PlantLoadCard,
+  PurchasingCard,
+  type Drill,
+  type PlantLoadOverview,
+} from "@/pages/dashboard-compare-cards";
 import { deptBacklogRows, type DeptBacklog } from "@/pages/dashboards/dashboard-widgets-lib";
 import { daysTone } from "@/pages/dashboards/ops-floor-lib";
 import { AMBER, GREEN, RED } from "@/pages/dashboards/dashboard-shared-lib";
@@ -353,15 +363,209 @@ function FabricPurchasingTab({ ov, period }: { ov: Overview | null; period: stri
   );
 }
 
+type PurchasingData = {
+  today: string;
+  months: { ym: string; invoices: number; spendSen: number; suppliers: number }[];
+  openPos: {
+    poNo: string;
+    supplier: string;
+    orderDate: string | null;
+    expectedDate: string | null;
+    status: string;
+    totalSen: number;
+    receivedSen: number;
+    lines: number;
+  }[];
+  unpaid: {
+    piNo: string;
+    supplierInvoiceNo: string | null;
+    supplier: string;
+    invoiceDate: string | null;
+    dueDate: string | null;
+    status: string;
+    amountSen: number;
+    paidSen: number;
+  }[];
+};
+
+/** Whole days from `from` to `to` (both YYYY-MM-DD); null when either is missing. */
+const daysBetween = (from: string | null, to: string) =>
+  from ? Math.round((Date.parse(to.slice(0, 10)) - Date.parse(from.slice(0, 10))) / 86_400_000) : null;
+
+function PurchasingTab({ ov }: { ov: Overview | null }) {
+  const res = useCachedJson<PurchasingData>("/api/dashboard/overview/purchasing-compare", 60);
+  const data = res.data?.months ? res.data : null;
+  const spendMax = Math.max(1, ...(data?.months ?? []).map((r) => r.spendSen));
+  const openTotal = (data?.openPos ?? []).reduce((s, p) => s + p.totalSen, 0);
+  const openReceived = (data?.openPos ?? []).reduce((s, p) => s + p.receivedSen, 0);
+  const unpaidRows = (data?.unpaid ?? []).map((u) => ({
+    ...u,
+    balanceSen: u.amountSen - u.paidSen,
+    late: data ? daysBetween(u.dueDate, data.today) : null,
+  }));
+  const unpaidTotal = unpaidRows.reduce((s, u) => s + u.balanceSen, 0);
+  const pastDue = unpaidRows.filter((u) => (u.late ?? 0) > 0);
+  const pastDueTotal = pastDue.reduce((s, u) => s + u.balanceSen, 0);
+
+  return (
+    <div className="space-y-6">
+      <div className="grid gap-4 lg:grid-cols-2">
+        {ov ? <PurchasingCard ov={ov} /> : <p className="text-sm text-[#6B7280]">Loading…</p>}
+        <Card className="min-w-0">
+          <CardContent className="p-4 sm:p-5">
+            <h3 className="text-sm font-bold text-[#1F1D1B]">Invoiced spend, last 12 months</h3>
+            <p className="text-xs text-[#6B7280] mb-2">Supplier invoices by invoice date, cancelled ones left out (same rule as the card).</p>
+            {!data ? (
+              <p className="text-sm text-[#6B7280]">{res.loading ? "Loading…" : "Could not load the purchasing data."}</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[420px] text-sm tabular-nums">
+                  <thead>
+                    <tr className="text-[10px] uppercase tracking-wider text-[#9CA3AF]">
+                      <th className="text-left py-2 pr-2">Month</th>
+                      <th className="text-right py-2 px-2">Invoices</th>
+                      <th className="text-right py-2 px-2">Suppliers</th>
+                      <th className="py-2 px-2" aria-hidden />
+                      <th className="text-right py-2 pl-2">Spend</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.months.map((r) => (
+                      <tr key={r.ym} className="border-t border-[#F0ECE6]">
+                        <td className="py-1.5 pr-2 text-[#1F1D1B]">{r.ym}</td>
+                        <td className="text-right py-1.5 px-2 text-[#5A5550]">{r.invoices || "—"}</td>
+                        <td className="text-right py-1.5 px-2 text-[#5A5550]">{r.suppliers || "—"}</td>
+                        <td className="py-1.5 px-2 w-1/3">
+                          <span className="block h-2 rounded-full bg-[#F5F2ED] overflow-hidden">
+                            <span className="block h-full rounded-full" style={{ width: `${(r.spendSen / spendMax) * 100}%`, background: INK }} />
+                          </span>
+                        </td>
+                        <td className="text-right py-1.5 pl-2 font-semibold text-[#1F1D1B]">{r.spendSen ? formatRM(r.spendSen) : "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {data && (
+        <>
+          <section className="space-y-2">
+            <h2 className="text-base font-bold text-[#1F1D1B]">Open purchase orders</h2>
+            <p className="text-sm text-[#5A5550]">
+              As of today, whatever month is picked: every PO not yet received, closed or cancelled, oldest first.{" "}
+              {data.openPos.length.toLocaleString()} POs, {formatRM(openTotal)} ordered, {formatRM(openReceived)} of it
+              received.
+            </p>
+            <Card className="min-w-0">
+              <CardContent className="p-0">
+                <div className="overflow-auto max-h-[28rem]">
+                  <table className="w-full min-w-[720px] text-sm tabular-nums">
+                    <thead className="sticky top-0 bg-white">
+                      <tr className="text-[10px] uppercase tracking-wider text-[#9CA3AF]">
+                        <th className="text-left py-2 px-3">PO</th>
+                        <th className="text-left py-2 px-2">Supplier</th>
+                        <th className="text-left py-2 px-2">Ordered</th>
+                        <th className="text-left py-2 px-2">Expected</th>
+                        <th className="text-right py-2 px-2">Lines</th>
+                        <th className="text-right py-2 px-2">Value</th>
+                        <th className="text-right py-2 px-3">Received</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.openPos.map((p) => {
+                        const overdue = (daysBetween(p.expectedDate, data.today) ?? 0) > 0;
+                        return (
+                          <tr key={p.poNo} className="border-t border-[#F0ECE6]">
+                            <td className="py-1.5 px-3 text-[#1F1D1B] whitespace-nowrap">{p.poNo}</td>
+                            <td className="py-1.5 px-2 text-[#5A5550] max-w-[16rem] truncate" title={p.supplier}>{p.supplier}</td>
+                            <td className="py-1.5 px-2 text-[#5A5550] whitespace-nowrap">{p.orderDate?.slice(0, 10) ?? "—"}</td>
+                            <td className="py-1.5 px-2 whitespace-nowrap" style={{ color: overdue ? RED : "#5A5550" }}>
+                              {p.expectedDate?.slice(0, 10) ?? "—"}
+                            </td>
+                            <td className="text-right py-1.5 px-2 text-[#5A5550]">{p.lines}</td>
+                            <td className="text-right py-1.5 px-2 font-semibold text-[#1F1D1B]">{formatRM(p.totalSen)}</td>
+                            <td className="text-right py-1.5 px-3 text-[#5A5550]">
+                              {p.totalSen > 0 ? `${Math.round((p.receivedSen / p.totalSen) * 100)}%` : "—"}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          </section>
+
+          <section className="space-y-2">
+            <h2 className="text-base font-bold text-[#1F1D1B]">Unpaid supplier invoices</h2>
+            <p className="text-sm text-[#5A5550]">
+              As of today: every invoice not cancelled and not fully paid, oldest due date first.{" "}
+              {unpaidRows.length.toLocaleString()} invoices, {formatRM(unpaidTotal)} unpaid;{" "}
+              <span style={{ color: pastDue.length ? RED : undefined }}>
+                {pastDue.length.toLocaleString()} past due, {formatRM(pastDueTotal)}
+              </span>
+              .
+            </p>
+            <Card className="min-w-0">
+              <CardContent className="p-0">
+                <div className="overflow-auto max-h-[28rem]">
+                  <table className="w-full min-w-[760px] text-sm tabular-nums">
+                    <thead className="sticky top-0 bg-white">
+                      <tr className="text-[10px] uppercase tracking-wider text-[#9CA3AF]">
+                        <th className="text-left py-2 px-3">PI</th>
+                        <th className="text-left py-2 px-2">Supplier</th>
+                        <th className="text-left py-2 px-2">Invoice date</th>
+                        <th className="text-left py-2 px-2">Due</th>
+                        <th className="text-right py-2 px-2">Amount</th>
+                        <th className="text-right py-2 px-2">Paid</th>
+                        <th className="text-right py-2 px-2">Balance</th>
+                        <th className="text-right py-2 px-3">Days late</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {unpaidRows.map((u) => (
+                        <tr key={u.piNo} className="border-t border-[#F0ECE6]">
+                          <td className="py-1.5 px-3 text-[#1F1D1B] whitespace-nowrap" title={u.supplierInvoiceNo ? `Supplier invoice ${u.supplierInvoiceNo}` : undefined}>
+                            {u.piNo}
+                          </td>
+                          <td className="py-1.5 px-2 text-[#5A5550] max-w-[16rem] truncate" title={u.supplier}>{u.supplier}</td>
+                          <td className="py-1.5 px-2 text-[#5A5550] whitespace-nowrap">{u.invoiceDate?.slice(0, 10) ?? "—"}</td>
+                          <td className="py-1.5 px-2 text-[#5A5550] whitespace-nowrap">{u.dueDate?.slice(0, 10) ?? "—"}</td>
+                          <td className="text-right py-1.5 px-2 text-[#5A5550]">{formatRM(u.amountSen)}</td>
+                          <td className="text-right py-1.5 px-2 text-[#5A5550]">{u.paidSen ? formatRM(u.paidSen) : "—"}</td>
+                          <td className="text-right py-1.5 px-2 font-semibold text-[#1F1D1B]">{formatRM(u.balanceSen)}</td>
+                          <td className="text-right py-1.5 px-3" style={{ color: (u.late ?? 0) > 0 ? RED : "#5A5550" }}>
+                            {(u.late ?? 0) > 0 ? u.late : "—"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          </section>
+        </>
+      )}
+    </div>
+  );
+}
+
 const TABS = [
   { key: "plant", label: "Plant Load 7d vs 14d" },
   { key: "fabric", label: "Fabric & purchasing" },
+  { key: "purchasing", label: "Purchasing" },
 ] as const;
 type TabKey = (typeof TABS)[number]["key"];
 
 export default function DashboardCompare() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const tab: TabKey = searchParams.get("tab") === "fabric" ? "fabric" : "plant";
+  const tab: TabKey = TABS.find((t) => t.key === searchParams.get("tab"))?.key ?? "plant";
   const [period, setPeriod] = useState("all");
   const r7 = useCachedJson<Overview>(`/api/dashboard/overview?period=${period}&capacityWindow=7`, 60);
   const r14 = useCachedJson<Overview>(`/api/dashboard/overview?period=${period}&capacityWindow=14`, 60);
@@ -394,7 +598,9 @@ export default function DashboardCompare() {
       <PageHeader
         title="Dashboard Compare"
         subtitle={
-          tab === "fabric"
+          tab === "purchasing"
+            ? "Purchasing card, 12 months of invoiced spend, open POs and unpaid supplier invoices. Staging only."
+            : tab === "fabric"
             ? "Fabric price, planned vs recorded fabric, fabric purchasing and price trend, month by month. Staging only."
             : "Plant Load with capacity averaged over the last 7 vs the last 14 working days. Staging only."
         }
@@ -419,7 +625,7 @@ export default function DashboardCompare() {
         }
       />
       <Tabs tabs={TABS} value={tab} onChange={(k) => setSearchParams(k === "plant" ? {} : { tab: k })} />
-      {tab === "fabric" ? <FabricPurchasingTab ov={r14.data} period={period} /> : (
+      {tab === "purchasing" ? <PurchasingTab ov={r14.data} /> : tab === "fabric" ? <FabricPurchasingTab ov={r14.data} period={period} /> : (
         <>
           {period !== "all" && (
             <p className="text-xs text-[#5A5550]">

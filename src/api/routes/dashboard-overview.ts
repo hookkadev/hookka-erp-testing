@@ -2558,4 +2558,97 @@ app.get("/fabric-cost-compare", async (c) => {
   return c.json({ success: true, ...data });
 });
 
+// Staging Dashboard Compare, "Purchasing" tab (owner 2026-10-09). Next to the
+// dashboard's Purchasing card (which the page draws from the overview payload):
+//   - invoiced spend per calendar month, last 12 months, same rule as the card
+//     (amount_sen by invoice date, cancelled left out);
+//   - every open PO (not RECEIVED / CLOSED / CANCELLED, the card's Open POs
+//     filter) with what has been received of it, by value;
+//   - every supplier invoice not cancelled and not fully paid.
+// The two lists are today's state by nature; the tab says so. Read-only.
+// Raw rows: text and numeric columns come back as strings or null.
+type PurchasingCompareRow = Record<string, string | null>;
+app.get("/purchasing-compare", async (c) => {
+  const orgId = getOrgId(c);
+  const { cached } = await import("../lib/kv-cache");
+  const data = await cached(c, `dashboard:purchasing-compare:${orgId}:v1`, 60, async () => {
+    const db = c.var.DB;
+    // Business days are Malaysian (UTC+8).
+    const today = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
+    const months = monthsBack(today.slice(0, 7), 12);
+    const [monthRes, poRes, piRes] = await Promise.all([
+      db
+        .prepare(
+          `SELECT substr(invoice_date, 1, 7) AS "ym", COUNT(*) AS "invoices",
+                  COALESCE(SUM(amount_sen), 0) AS "spendSen",
+                  COUNT(DISTINCT supplier_name) AS "suppliers"
+             FROM purchase_invoices
+            WHERE org_id = ? AND status <> 'CANCELLED'
+              AND invoice_date IS NOT NULL AND substr(invoice_date, 1, 7) >= ?
+            GROUP BY substr(invoice_date, 1, 7)`,
+        )
+        .bind(orgId, months[months.length - 1])
+        .all<{ ym: string; invoices: number; spendSen: number; suppliers: number }>(),
+      db
+        .prepare(
+          `SELECT p.po_no AS "poNo", p.supplier_name AS "supplier",
+                  p.order_date::text AS "orderDate", p.expected_date::text AS "expectedDate",
+                  p.status AS "status", COALESCE(p.total_sen, 0) AS "totalSen",
+                  COALESCE(SUM(LEAST(poi.received_qty, poi.quantity) * poi.unit_price_sen), 0) AS "receivedSen",
+                  COUNT(poi.id) AS "lines"
+             FROM purchase_orders p
+             LEFT JOIN purchase_order_items poi ON poi.purchase_order_id = p.id
+            WHERE p.org_id = ? AND p.status NOT IN ('RECEIVED','CLOSED','CANCELLED')
+            GROUP BY p.id, p.po_no, p.supplier_name, p.order_date, p.expected_date, p.status, p.total_sen
+            ORDER BY p.order_date, p.po_no`,
+        )
+        .bind(orgId)
+        .all<PurchasingCompareRow>(),
+      db
+        .prepare(
+          `SELECT pi_no AS "piNo", supplier_invoice_no AS "supplierInvoiceNo",
+                  supplier_name AS "supplier", invoice_date::text AS "invoiceDate",
+                  due_date::text AS "dueDate", status AS "status",
+                  amount_sen AS "amountSen", COALESCE(paid_amount_sen, 0) AS "paidSen"
+             FROM purchase_invoices
+            WHERE org_id = ? AND status NOT IN ('CANCELLED','PAID')
+              AND amount_sen - COALESCE(paid_amount_sen, 0) > 0
+            ORDER BY due_date NULLS LAST, pi_no`,
+        )
+        .bind(orgId)
+        .all<PurchasingCompareRow>(),
+    ]);
+    const num = (v: unknown) => Number(v) || 0;
+    const byYm = new Map((monthRes.results ?? []).map((r) => [r.ym, r]));
+    return {
+      today,
+      months: months.map((ym) => {
+        const r = byYm.get(ym);
+        return { ym, invoices: num(r?.invoices), spendSen: num(r?.spendSen), suppliers: num(r?.suppliers) };
+      }),
+      openPos: (poRes.results ?? []).map((r) => ({
+        poNo: r.poNo ?? "",
+        supplier: r.supplier ?? "",
+        orderDate: r.orderDate,
+        expectedDate: r.expectedDate,
+        status: r.status ?? "",
+        totalSen: num(r.totalSen),
+        receivedSen: Math.round(num(r.receivedSen)),
+        lines: num(r.lines),
+      })),
+      unpaid: (piRes.results ?? []).map((r) => ({
+        piNo: r.piNo ?? "",
+        supplierInvoiceNo: r.supplierInvoiceNo,
+        supplier: r.supplier ?? "",
+        invoiceDate: r.invoiceDate,
+        dueDate: r.dueDate,
+        status: r.status ?? "",
+        amountSen: num(r.amountSen),
+        paidSen: num(r.paidSen),
+      })),
+    };
+  });
+  return c.json({ success: true, ...data });
+});
+
 export default app;

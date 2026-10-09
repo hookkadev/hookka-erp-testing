@@ -31,7 +31,7 @@ as a Cloudflare Pages Function via `functions/api/[[route]].ts`. There is no
   route module) and is exempt from the rate limiter.
 
 **Counts at generation time:** 146 mounts, 144 route files in
-`src/api/routes/`, 1022 top-level handler registrations discovered.
+`src/api/routes/`, 1023 top-level handler registrations discovered.
 
 ## Scope and limits of this file
 
@@ -133,7 +133,7 @@ offsets pointing past the end of their own file.
 | `/api/fe-rum` | `src/api/routes/fe-rum.ts` | `POST /event` <sub>:126</sub> | gated (some paths public) |
 | `/api/job-cards` | `src/api/routes/job-cards.ts` | `GET /` <sub>:100</sub><br>`GET /summary` <sub>:261</sub><br>`GET /:id/events` <sub>:430</sub><br>`GET /duedate-original-backup` <sub>:536</sub><br>`GET /completion-pic-original-backup` <sub>:688</sub> | gated |
 | `/api/audit-events` | `src/api/routes/audit-events.ts` | `GET /` <sub>:49</sub> | gated |
-| `/api/dashboard/overview` | `src/api/routes/dashboard-overview.ts` | `GET /` <sub>:66</sub><br>`GET /fabric-cost-compare` <sub>:2418</sub> | gated |
+| `/api/dashboard/overview` | `src/api/routes/dashboard-overview.ts` | `GET /` <sub>:66</sub><br>`GET /fabric-cost-compare` <sub>:2418</sub><br>`GET /purchasing-compare` <sub>:2571</sub> | gated |
 | `/api/dashboard/prototype` | `src/api/routes/dashboard-prototype.ts` | `GET /` <sub>:285</sub> | gated |
 | `/api/dashboard/finance` | `src/api/routes/dashboard-finance.ts` | `GET /` <sub>:42</sub><br>`PUT /valuation` <sub>:110</sub> | gated |
 | `/api/kpi` | `src/api/routes/kpi.ts` | `GET /me` <sub>:319</sub><br>`GET /users/:id` <sub>:328</sub><br>`GET /payout/:id` <sub>:343</sub><br>`PUT /payout/:id` <sub>:350</sub><br>`PUT /checklist/:kpiKey` <sub>:421</sub><br>`GET /checklist/:kpiKey` <sub>:482</sub><br>`POST /survey/:kpiKey` <sub>:504</sub><br>`POST /survey/:kpiKey/link` <sub>:561</sub><br>`PUT /rating/:kpiKey` <sub>:628</sub><br>`GET /survey/:kpiKey` <sub>:681</sub><br>`GET /library` <sub>:702</sub><br>`PUT /rules/:kpiKey` <sub>:760</sub><br>`GET /people` <sub>:800</sub><br>`GET /catalog` <sub>:849</sub><br>`GET /assignments/:id` <sub>:863</sub><br>`PUT /assignments/:id` <sub>:876</sub><br>`PUT /kpi/:kpiKey/assignees` <sub>:939</sub> | gated |

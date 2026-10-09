@@ -1,10 +1,14 @@
 // ---------------------------------------------------------------------------
 // fabric-purchasing-compare.test.mjs: month buckets behind the staging
-// Dashboard Compare "Fabric & purchasing" tab (owner 2026-10-09).
+// Dashboard Compare "Fabric & purchasing" tab, and the "Purchasing" tab's
+// rules (owner 2026-10-09).
 // ---------------------------------------------------------------------------
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { buildFabricPurchasingMonths, monthsBack } from "../src/api/lib/fabric-purchasing-compare.ts";
+
+const read = (rel) => readFileSync(rel, "utf8").replace(/\r\n/g, "\n");
 
 test("monthsBack counts back across a year end, newest first", () => {
   assert.deepEqual(monthsBack("2026-02", 4), ["2026-02", "2026-01", "2025-12", "2025-11"]);
@@ -51,4 +55,20 @@ test("rows land in their own month and category; outside the window is dropped",
   const kn = trend.find((t) => t.code === "KN390-1");
   assert.equal(kn.meters, 150);
   assert.deepEqual(kn.byMonth["2026-09"], { meters: 50, sen: 90000 });
+});
+
+test("Purchasing tab: same open-PO and spend rules as the dashboard card", () => {
+  const route = read("src/api/routes/dashboard-overview.ts");
+  const at = route.indexOf('app.get("/purchasing-compare"');
+  assert.ok(at > 0);
+  const handler = route.slice(at, route.indexOf("\n});", at));
+  assert.match(handler, /p\.status NOT IN \('RECEIVED','CLOSED','CANCELLED'\)/);
+  assert.match(handler, /SUM\(amount_sen\)[\s\S]*status <> 'CANCELLED'/);
+  const page = read("src/pages/dashboard-compare.tsx");
+  assert.match(page, /\{ key: "purchasing", label: "Purchasing" \}/);
+  assert.match(page, /<PurchasingCard ov=\{ov\} \/>/);
+  // The card's money figures may wrap instead of running out of their column.
+  const cards = read("src/pages/dashboard-compare-cards.tsx");
+  assert.match(cards, /export function PurchasingCard\(/);
+  assert.match(cards, /grid grid-cols-1 sm:grid-cols-3/);
 });

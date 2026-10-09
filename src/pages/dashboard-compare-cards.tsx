@@ -2,7 +2,7 @@
 // STAGING ONLY: never PR this into main. Used by /dashboard/compare.
 //
 // COPIES of /dashboard's Plant Load card (its four rows open the same
-// drill-throughs) and Fabric Usage section, so the compare page looks and
+// drill-throughs), Fabric Usage section and Purchasing card, so the compare page looks and
 // behaves like the dashboard (owner 2026-10-09). They are copies, not shared
 // code, because src/pages/dashboard-b/index.tsx is frozen by the owner (see
 // docs/CODEBASE-MAP.md, "Widgets from /dashboard"). A change to either block
@@ -66,6 +66,14 @@ export type PlantLoadOverview = {
     backlogGrandMin: number;
   };
   employee?: { activeHeadcount: number };
+  purchasing?: {
+    openPOCount: number;
+    period: string;
+    prevPeriod: string;
+    piSpendThisMonthSen: number;
+    piSpendPrevMonthSen: number;
+    topSuppliersByPi: { name: string; spendSen: number; invoices: number }[];
+  };
   fabricCostPerMeterSen?: { total: number; exclBedframeSofa: number; bedframe: number; sofa: number };
   fabric?: Record<
     "BEDFRAME" | "SOFA",
@@ -792,5 +800,60 @@ export function FabricUsageSection({ ov, period }: { ov: PlantLoadOverview; peri
         })}
       </div>
     </div>
+  );
+}
+
+// /dashboard's Purchasing card. One change from the original: the three
+// figures stack on a phone and may wrap, so a seven-figure month no longer
+// runs out of its column (it did on /dashboard, 2026-10-09).
+export function PurchasingCard({ ov }: { ov: PlantLoadOverview }) {
+  const pur = ov.purchasing;
+  return (
+    <Card className="bg-white rounded-xl shadow-[0_1px_3px_rgba(0,0,0,0.08)] min-w-0">
+      <CardContent className="p-5">
+        <SectionTitle title="Purchasing" sub="open POs · invoiced spend (by supplier invoice date)" />
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+          <div className="min-w-0">
+            <p className="text-[10px] uppercase tracking-wider text-[#9CA3AF]">Open POs</p>
+            <p className="text-lg font-bold text-[#1F1D1B]">{pur?.openPOCount ?? 0}</p>
+            <p className="text-[10px] text-[#9CA3AF]">all open</p>
+          </div>
+          <div className="min-w-0">
+            <p className="text-[10px] uppercase tracking-wider text-[#9CA3AF]">PI spend</p>
+            <p className="text-lg font-bold text-[#1F1D1B] tabular-nums [overflow-wrap:anywhere]">
+              {rm(pur?.piSpendThisMonthSen)}
+            </p>
+            <p className="text-[10px] text-[#9CA3AF]">
+              {pur?.period && pur.period !== "all" ? pur.period : "all time"}
+              <span className="block">by invoice date</span>
+            </p>
+          </div>
+          <div className="min-w-0">
+            <p className="text-[10px] uppercase tracking-wider text-[#9CA3AF]">Prev month</p>
+            <p className="text-lg font-bold text-[#5A5550] tabular-nums [overflow-wrap:anywhere]">
+              {pur?.prevPeriod ? rm(pur?.piSpendPrevMonthSen) : "—"}
+            </p>
+            <p className="text-[10px] text-[#9CA3AF]">{pur?.prevPeriod || "—"}</p>
+          </div>
+        </div>
+        <p className="text-[11px] font-semibold text-[#5A5550] mb-1">
+          Top suppliers by PI amount
+          {pur?.period && pur.period !== "all" ? ` · ${pur.period}` : ""}
+        </p>
+        {(pur?.topSuppliersByPi ?? []).length === 0 ? (
+          <p className="text-xs text-[#9CA3AF]">No purchase invoices in this period.</p>
+        ) : (
+          (pur?.topSuppliersByPi ?? []).slice(0, 5).map((s) => (
+            <div key={s.name} className="flex items-center justify-between gap-2 text-xs py-0.5">
+              <span className="text-[#5A5550] truncate min-w-0">
+                {s.name}
+                <span className="text-[#9CA3AF]"> · {s.invoices} PI</span>
+              </span>
+              <span className="font-semibold text-[#1F1D1B] tabular-nums shrink-0">{rm(s.spendSen)}</span>
+            </div>
+          ))
+        )}
+      </CardContent>
+    </Card>
   );
 }
